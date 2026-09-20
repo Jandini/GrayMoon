@@ -1,4 +1,4 @@
-using GrayMoon.App.Models;
+﻿using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Services;
 using GrayMoon.App.Services.Orchestration;
@@ -10,7 +10,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace GrayMoon.App.Tests;
 
 /// <summary>
-/// Shared Return-to-Default analyze/execute/unattended behaviour (MCP readiness pre-start supplement §8).
+/// Shared Return-to-Default analyze/execute/unattended behaviour (MCP readiness pre-start supplement Â§8).
 /// </summary>
 public sealed class ReturnToDefaultAnalyzeTests
 {
@@ -154,7 +154,7 @@ public sealed class ReturnToDefaultAnalyzeTests
 
         var handler = CreateHandler(ctx);
         var plan = await handler.AnalyzeReturnToDefaultAsync(
-            ctx.WorkspaceId, [ctx.RepositoryId], progress: null, CancellationToken.None);
+            ctx.WorkspaceId, await ctx.GetSpecialContextIdAsync(), [ctx.RepositoryId], null, CancellationToken.None);
 
         Assert.False(plan.AnalysisFailed);
         var repo = Assert.Single(plan.Repositories);
@@ -171,7 +171,7 @@ public sealed class ReturnToDefaultAnalyzeTests
         // Seed leaves ahead=4; PR refresh without a token clears any PR row, so analysis must not treat cleanup as automatic.
         var handler = CreateHandler(ctx);
         var plan = await handler.AnalyzeReturnToDefaultAsync(
-            ctx.WorkspaceId, [ctx.RepositoryId], progress: null, CancellationToken.None);
+            ctx.WorkspaceId, await ctx.GetSpecialContextIdAsync(), [ctx.RepositoryId], null, CancellationToken.None);
 
         Assert.False(plan.AnalysisFailed);
         Assert.False(plan.CanProceedAutomatically);
@@ -204,7 +204,7 @@ public sealed class ReturnToDefaultAnalyzeTests
 
         var handler = CreateHandler(ctx);
         var plan = await handler.AnalyzeReturnToDefaultAsync(
-            ctx.WorkspaceId, [ctx.RepositoryId], progress: null, CancellationToken.None);
+            ctx.WorkspaceId, await ctx.GetSpecialContextIdAsync(), [ctx.RepositoryId], null, CancellationToken.None);
 
         Assert.False(plan.CanProceedAutomatically);
         var repo = Assert.Single(plan.Repositories);
@@ -215,10 +215,10 @@ public sealed class ReturnToDefaultAnalyzeTests
     public async Task Analyze_fetch_failure_fails_safely()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        // No RefreshBranches canned response → agent reports failure → analysis fails.
+        // No RefreshBranches canned response â†’ agent reports failure â†’ analysis fails.
         var handler = CreateHandler(ctx);
         var plan = await handler.AnalyzeReturnToDefaultAsync(
-            ctx.WorkspaceId, [ctx.RepositoryId], progress: null, CancellationToken.None);
+            ctx.WorkspaceId, await ctx.GetSpecialContextIdAsync(), [ctx.RepositoryId], null, CancellationToken.None);
 
         Assert.True(plan.AnalysisFailed);
         Assert.False(plan.CanProceedAutomatically);
@@ -233,7 +233,7 @@ public sealed class ReturnToDefaultAnalyzeTests
 
         var handler = CreateHandler(ctx);
         var result = await handler.ReturnToDefaultUnattendedAsync(
-            ctx.WorkspaceId, [ctx.RepositoryId], progress: null, CancellationToken.None);
+            ctx.WorkspaceId, await ctx.GetSpecialContextIdAsync(), [ctx.RepositoryId], null, CancellationToken.None);
 
         Assert.False(result.Completed);
         Assert.Contains("not safe", result.AbortReason, StringComparison.OrdinalIgnoreCase);
@@ -263,7 +263,7 @@ public sealed class ReturnToDefaultAnalyzeTests
 
         var handler = CreateHandler(ctx);
         var result = await handler.ReturnToDefaultUnattendedAsync(
-            ctx.WorkspaceId, [ctx.RepositoryId], progress: null, CancellationToken.None);
+            ctx.WorkspaceId, await ctx.GetSpecialContextIdAsync(), [ctx.RepositoryId], null, CancellationToken.None);
 
         Assert.False(result.Completed);
         Assert.Contains("tag", result.AbortReason, StringComparison.OrdinalIgnoreCase);
@@ -294,7 +294,7 @@ public sealed class ReturnToDefaultAnalyzeTests
 
         var handler = CreateHandler(ctx);
         var result = await handler.ReturnToDefaultUnattendedAsync(
-            ctx.WorkspaceId, [ctx.RepositoryId], progress: null, CancellationToken.None);
+            ctx.WorkspaceId, await ctx.GetSpecialContextIdAsync(), [ctx.RepositoryId], null, CancellationToken.None);
 
         Assert.True(result.Completed);
         Assert.Null(result.AbortReason);
@@ -333,9 +333,10 @@ public sealed class ReturnToDefaultAnalyzeTests
 
         await handler.ExecuteReturnToDefaultAsync(
             ctx.WorkspaceId,
+            await ctx.GetSpecialContextIdAsync(),
             [ctx.RepositoryId],
             new ReturnToDefaultOptions(DeleteRemoteBranch: false, AllowForceDeleteLocalBranch: true, CloseOpenPullRequest: false),
-            progress: null,
+            null,
             CancellationToken.None);
 
         var args = ctx.AgentBridge.Calls.Single(c => c.Command == "ReturnToDefaultBranch").Args;
@@ -353,9 +354,10 @@ public sealed class ReturnToDefaultAnalyzeTests
 
         await handler.ExecuteReturnToDefaultAsync(
             ctx.WorkspaceId,
+            await ctx.GetSpecialContextIdAsync(),
             [ctx.RepositoryId],
             new ReturnToDefaultOptions(DeleteRemoteBranch: true, AllowForceDeleteLocalBranch: true, CloseOpenPullRequest: false),
-            progress: null,
+            null,
             CancellationToken.None);
 
         var args2 = ctx.AgentBridge.Calls.Single(c => c.Command == "ReturnToDefaultBranch").Args;
@@ -394,9 +396,10 @@ public sealed class ReturnToDefaultAnalyzeTests
         var handler = CreateHandler(ctx);
         await handler.ExecuteReturnToDefaultAsync(
             ctx.WorkspaceId,
+            await ctx.GetSpecialContextIdAsync(),
             [ctx.RepositoryId],
             new ReturnToDefaultOptions(DeleteRemoteBranch: true, AllowForceDeleteLocalBranch: true, CloseOpenPullRequest: false),
-            progress: null,
+            null,
             CancellationToken.None);
 
         var args = ctx.AgentBridge.Calls.Single(c => c.Command == "ReturnToDefaultBranch").Args;
@@ -435,7 +438,7 @@ public sealed class ReturnToDefaultAnalyzeTests
 
         var handler = CreateHandler(ctx);
         var result = await handler.ReturnToDefaultUnattendedAsync(
-            ctx.WorkspaceId, [ctx.RepositoryId], progress: null, CancellationToken.None);
+            ctx.WorkspaceId, await ctx.GetSpecialContextIdAsync(), [ctx.RepositoryId], null, CancellationToken.None);
 
         Assert.True(result.Completed);
         var args = ctx.AgentBridge.Calls.Single(c => c.Command == "ReturnToDefaultBranch").Args;
@@ -486,7 +489,7 @@ public sealed class ReturnToDefaultAnalyzeTests
 
         var handler = CreateHandler(ctx);
         var plan = await handler.AnalyzeReturnToDefaultAsync(
-            ctx.WorkspaceId, [ctx.RepositoryId, secondRepoId], progress: null, CancellationToken.None);
+            ctx.WorkspaceId, await ctx.GetSpecialContextIdAsync(), [ctx.RepositoryId, secondRepoId], null, CancellationToken.None);
 
         Assert.False(plan.CanProceedAutomatically);
         Assert.Equal(2, plan.Repositories.Count);

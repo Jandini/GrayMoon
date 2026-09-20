@@ -1,3 +1,5 @@
+using GrayMoon.Application.Features;
+
 namespace GrayMoon.App.Services.Orchestration;
 
 /// <summary>
@@ -12,6 +14,7 @@ public sealed class PrepareWorkspaceOrchestrator(
 {
     public async Task<DependencyUpdateRunResult> RunAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         string newBranchName,
         string baseBranch,
         IReadOnlySet<int>? repositoryIds,
@@ -29,6 +32,7 @@ public sealed class PrepareWorkspaceOrchestrator(
         progress.Report("Creating branches...");
         var branchErrors = await branchHandler.CreateBranchesAsync(
             workspaceId,
+            contextId,
             newBranchName,
             baseBranch,
             repositoryIds,
@@ -43,6 +47,7 @@ public sealed class PrepareWorkspaceOrchestrator(
             progress.Report("Updating dependencies...");
             var updateResult = await dependencyUpdateOrchestrator.RunAsync(
                 workspaceId,
+                contextId,
                 cancellationToken,
                 progress,
                 setRepositoryError,

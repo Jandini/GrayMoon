@@ -179,7 +179,7 @@ public sealed partial class WorkspaceGitChanges
                         mode, repo.RepositoryName, stageAllFirst);
 
                     var result = await GitChangesOperations.CommitAsync(
-                        WorkspaceId, resolved.Value.RepositoryId, message, stageAllFirst, ct);
+                        WorkspaceId, RequireSelectedContextId(), resolved.Value.RepositoryId, message, stageAllFirst, ct);
 
                     await PersistMutationResultAsync(repo.WorkspaceRepositoryId, resolved.Value.RepositoryId, result.Success, result.Snapshot, result.ErrorMessage, reload: false);
 
@@ -255,7 +255,7 @@ public sealed partial class WorkspaceGitChanges
 
                 var result = await ScopedExecutor.ExecuteAsync<IWorkspacePushOperations, OperationResult>(svc =>
                     svc.PushAsync(
-                        WorkspaceId,
+                        WorkspaceId, RequireSelectedContextId(),
                         pushRepoIds,
                         synchronizedPush: false,
                         requiredPackageIds: EmptyPushPackageIds,
@@ -312,8 +312,8 @@ public sealed partial class WorkspaceGitChanges
                     }
 
                     var result = unstageStagedSection
-                        ? await GitChangesOperations.UnstageAsync(WorkspaceId, resolved.Value.RepositoryId, GitChangeOperationScope.Repository, [], ct)
-                        : await GitChangesOperations.StageAsync(WorkspaceId, resolved.Value.RepositoryId, GitChangeOperationScope.Repository, [], ct);
+                        ? await GitChangesOperations.UnstageAsync(WorkspaceId, RequireSelectedContextId(), resolved.Value.RepositoryId, GitChangeOperationScope.Repository, [], ct)
+                        : await GitChangesOperations.StageAsync(WorkspaceId, RequireSelectedContextId(), resolved.Value.RepositoryId, GitChangeOperationScope.Repository, [], ct);
 
                     await PersistMutationResultAsync(repo.WorkspaceRepositoryId, resolved.Value.RepositoryId, result.Success, result.Snapshot, result.ErrorMessage, reload: false);
                 }

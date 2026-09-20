@@ -17,6 +17,7 @@ public sealed class WorkspaceUndoPushHandler(
 {
     public async Task<IReadOnlyList<(int RepositoryId, bool Success, string? Error)>> RunUndoPushAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlyList<WorkspaceRepositoryLink> repos,
         bool keepChanges,
         IProgress<OperationProgress>? progress,
@@ -33,8 +34,7 @@ public sealed class WorkspaceUndoPushHandler(
         if (workspace == null)
             return Array.Empty<(int, bool, string?)>();
 
-        var specialContextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspace.WorkspaceId, ct);
-        var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(specialContextId, ct);
+        var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, ct);
 
         var total = targets.Count;
         var completedCount = 0;

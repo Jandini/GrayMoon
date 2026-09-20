@@ -51,7 +51,7 @@ public sealed partial class WorkspaceRepositories
         {
             var result = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, OperationResult>(
                 svc => svc.QuickFetchAsync(
-                    WorkspaceId,
+                    WorkspaceId, RequireSelectedContextId(),
                     repoIds,
                     job.ToOperationProgress(),
                     ct),
@@ -77,7 +77,7 @@ public sealed partial class WorkspaceRepositories
             {
                 var result = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, OperationResult>(
                     svc => svc.QuickFetchAsync(
-                        WorkspaceId,
+                        WorkspaceId, RequireSelectedContextId(),
                         repositoryIds: null,
                         job.ToOperationProgress(),
                         ct),
@@ -137,7 +137,7 @@ public sealed partial class WorkspaceRepositories
             {
                 var repoGitInfos = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, IReadOnlyDictionary<int, RepoGitVersionInfo>>(
                     svc => svc.SyncAsync(
-                        WorkspaceId,
+                        WorkspaceId, RequireSelectedContextId(),
                         repositoryIds,
                         skipDependencyLevelPersistence,
                         cancellationToken: ct,

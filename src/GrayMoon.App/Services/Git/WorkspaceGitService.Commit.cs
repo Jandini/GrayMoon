@@ -9,6 +9,7 @@ using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Services.Git;
 
@@ -17,6 +18,7 @@ public sealed partial class WorkspaceGitService
     /// <summary>Stages updated .csproj paths and commits with message "chore(deps): update package versions" plus the full list of packages (one line per package: "- {packageId} to {version}"). Runs up to 8 commits in parallel.</summary>
     public async Task<IReadOnlyList<(int RepoId, bool Committed, string? ErrorMessage)>> CommitDependencyUpdatesAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlyList<SyncDependenciesRepoPayload> reposToCommit,
         Action<int, int, int>? onProgress = null,
         CancellationToken cancellationToken = default,
@@ -41,7 +43,7 @@ public sealed partial class WorkspaceGitService
             return reposToCommit.Select(r => (r.RepoId, false, (string?)"Workspace not found.")).ToList();
 
         var total = reposToCommit.Count;
-        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
         var completed = 0;
         var semaphore = new SemaphoreSlim(_maxConcurrent);
 
@@ -113,6 +115,7 @@ public sealed partial class WorkspaceGitService
     /// <summary>Stages the given file paths per repo and commits with message "chore(deps): update versions (N)" where N is the path count for that repo. Uses the same agent StageAndCommit command.</summary>
     public async Task<IReadOnlyList<(int RepoId, bool Committed, string? ErrorMessage)>> CommitFilePathsAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlyList<(int RepoId, string RepoName, IReadOnlyList<string> FilePaths)> reposAndPaths,
         Action<int, int, int>? onProgress = null,
         CancellationToken cancellationToken = default,
@@ -135,7 +138,7 @@ public sealed partial class WorkspaceGitService
         if (workspace == null)
             return reposAndPaths.Select(r => (r.RepoId, false, (string?)"Workspace not found.")).ToList();
 
-        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
         var total = reposAndPaths.Count;
         var completed = 0;
         var semaphore = new SemaphoreSlim(_maxConcurrent);

@@ -1,4 +1,5 @@
 using GrayMoon.App.Models.Api;
+using GrayMoon.Application.Features;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
@@ -46,9 +47,11 @@ public static class WorkspaceEndpoints
         string? pattern,
         string? repositoryName,
         IWorkspaceFileOperations operations,
+        IWorkspaceFeatureContextResolver contextResolver,
         CancellationToken cancellationToken)
     {
-        var (found, agentConnected, data, error) = await operations.SearchAsync(workspaceId, pattern, repositoryName, cancellationToken);
+        var contextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+        var (found, agentConnected, data, error) = await operations.SearchAsync(workspaceId, contextId, pattern, repositoryName, cancellationToken);
         if (!found)
             return TypedResults.NotFound();
         if (!agentConnected || data == null)

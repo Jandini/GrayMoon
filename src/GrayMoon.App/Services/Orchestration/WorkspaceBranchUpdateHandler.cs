@@ -32,6 +32,7 @@ public sealed class WorkspaceBranchUpdateHandler(
 {
     public async Task<UpdateBranchFromDefaultResult> UpdateBranchFromDefaultAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         CancellationToken cancellationToken)
     {
@@ -55,8 +56,7 @@ public sealed class WorkspaceBranchUpdateHandler(
         {
             await connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepositoryId, cancellationToken);
 
-            var specialContextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspace.WorkspaceId, cancellationToken);
-            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(specialContextId, cancellationToken);
+            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
             var defaultBranchName = await dbContext.RepositoryBranches
                 .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && rb.IsDefault && !rb.IsTag)
                 .Select(rb => rb.BranchName)
@@ -90,7 +90,7 @@ public sealed class WorkspaceBranchUpdateHandler(
             {
                 // A merge from default only moves commit counts; branch identity, version and projects are
                 // untouched, so no other group is marked probed and none of those columns is rewritten.
-                await stateWriter.ApplyAsync(workspaceId, repositoryId, new RepositoryStateSnapshot
+                await stateWriter.ApplyAsync(contextId, workspaceId, repositoryId, new RepositoryStateSnapshot
                 {
                     OutgoingCommits = updateResponse.OutgoingCommits,
                     IncomingCommits = updateResponse.IncomingCommits,

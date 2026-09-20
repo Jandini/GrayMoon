@@ -144,7 +144,7 @@ public sealed partial class WorkspaceRepositories
         {
             await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations>(svc =>
                 svc.UpdateAsync(
-                    WorkspaceId,
+                    WorkspaceId, RequireSelectedContextId(),
                     ct,
                     job.ToOperationProgress(),
                     (repoId, msg) => SafeInvoke(() => SetRepositoryError(repoId, msg)),
@@ -180,7 +180,7 @@ public sealed partial class WorkspaceRepositories
         {
             await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations>(svc =>
                 svc.UpdateSingleRepositoryAsync(
-                    WorkspaceId,
+                    WorkspaceId, RequireSelectedContextId(),
                     repositoryId,
                     onProgressMessage: job.ReportProgress,
                     onRepoError: (repoId, msg) => SafeInvoke(() => SetRepositoryError(repoId, msg)),
@@ -291,7 +291,7 @@ public sealed partial class WorkspaceRepositories
             var updateOperations = scope.ServiceProvider.GetRequiredService<IWorkspaceUpdateOperations>();
 
             await customDepRepo.ReplaceCustomDependenciesForDependentAsync(WorkspaceId, dependentRepoId, selected);
-            await updateOperations.RecomputeAndBroadcastWorkspaceSyncedAsync(WorkspaceId);
+            await updateOperations.RecomputeAndBroadcastWorkspaceSyncedAsync(WorkspaceId, RequireSelectedContextId());
             await ReloadWorkspaceDataFromFreshScopeAsync();
 
             CloseCustomDependenciesModal();

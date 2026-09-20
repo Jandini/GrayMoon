@@ -1,3 +1,5 @@
+using GrayMoon.Application.Features;
+
 namespace GrayMoon.App.Services.Orchestration;
 
 /// <summary>
@@ -14,6 +16,7 @@ public sealed class WorkspaceUpdateHandler(
     /// <param name="maxLevel">Optional. When set, only repositories at or below this dependency level are processed.</param>
     public async Task<DependencyUpdateRunResult> RunUpdateAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken,
         IProgress<OperationProgress>? progress,
         Action<int, string> setRepositoryError,
@@ -29,6 +32,7 @@ public sealed class WorkspaceUpdateHandler(
         {
             return await dependencyUpdateOrchestrator.RunAsync(
                 workspaceId,
+                contextId,
                 cancellationToken,
                 progress,
                 setRepositoryError,
@@ -47,4 +51,3 @@ public sealed class WorkspaceUpdateHandler(
         }
     }
 }
-

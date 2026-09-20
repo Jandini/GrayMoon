@@ -18,6 +18,7 @@
 @inject IWorkspaceFileOperations FileOperations
 @inject IServiceScopeFactory ServiceScopeFactory
 @inject WorkspaceService WorkspaceService
+@inject IWorkspaceContextPathResolver PathResolver
 @inject WorkspaceContextNavigationService ContextNavigation
 @inject IToastService ToastService
 @inject ILogger<WorkspaceFiles> Logger
@@ -158,12 +159,14 @@
 
 <AddFilesModal IsVisible="@showFileModal"
                 WorkspaceId="WorkspaceId"
+                ContextId="_selectedContextId!.Value"
                 WorkspaceRepos="@workspaceRepos"
                 OnAdd="OnFilesAdded"
                 OnCancel="CloseAddFilesModal" />
 
 <VersionConfigModal IsVisible="@showVersionConfigModal"
                     WorkspaceId="WorkspaceId"
+                    ContextId="_selectedContextId!.Value"
                     File="@configuringFile"
                     WorkspaceRepos="@workspaceRepos"
                     CurrentPattern="@currentConfigPattern"
@@ -172,7 +175,7 @@
 
 <ViewFileModal IsVisible="@showViewFileModal"
                File="@(viewingFile!)"
-               WorkspaceName="@(workspace?.Name)"
+               WorkspaceName="@contextFolderName"
                WorkspaceRoot="@workspaceRoot"
                IsConfigured="@(viewingFile != null && fileVersionConfigs.ContainsKey(viewingFile.FileId))"
                OnClose="CloseViewFileModal"
@@ -200,6 +203,7 @@
     private bool showViewFileModal;
     private WorkspaceFileDto? viewingFile;
     private string? workspaceRoot;
+    private string? contextFolderName;
     private bool isUpdating;
     private string updateMessage = "";
     private CancellationTokenSource? _updateCts;
@@ -265,9 +269,17 @@
                 files = new List<WorkspaceFileDto>();
                 workspaceRepos = new List<WorkspaceRepoItem>();
                 workspaceRoot = null;
+                contextFolderName = null;
                 return;
             }
-            workspaceRoot = await WorkspaceService.GetRootPathForWorkspaceAsync(workspace, default);
+            if (_selectedContextId is null)
+            {
+                errorMessage = "No Feature context selected.";
+                return;
+            }
+            var (agentRoot, folderName) = await PathResolver.GetAgentWorkspaceArgsAsync(_selectedContextId.Value);
+            workspaceRoot = agentRoot;
+            contextFolderName = folderName;
             workspaceRepos = workspace.Repositories
                 .Where(r => r.Repository != null)
                 .Select(r => new WorkspaceRepoItem { RepositoryId = r.RepositoryId, RepositoryName = r.Repository!.RepositoryName })
@@ -374,7 +386,7 @@
         await using var scope = ServiceScopeFactory.CreateAsyncScope();
         var fileVersionService = scope.ServiceProvider.GetRequiredService<WorkspaceFileVersionService>();
         var projectRepo = scope.ServiceProvider.GetRequiredService<WorkspaceProjectRepository>();
-        await fileVersionService.CheckAndPersistFileVersionStatusAsync(WorkspaceId, forceFresh: true);
+        await fileVersionService.CheckAndPersistFileVersionStatusAsync(WorkspaceId, _selectedContextId!.Value, forceFresh: true);
         await projectRepo.RecomputeAndPersistRepositoryDependencyStatsAsync(WorkspaceId);
         await LoadAsync();
     }
@@ -390,7 +402,7 @@
         StateHasChanged();
         try
         {
-            var result = await FileOperations.UpdateVersionsAsync(WorkspaceId, _updateCts.Token, checkAfter: true);
+            var result = await FileOperations.UpdateVersionsAsync(WorkspaceId, _selectedContextId!.Value, _updateCts.Token, checkAfter: true);
             if (result.Error == null)
                 await LoadAsync();
             if (result.Error != null)

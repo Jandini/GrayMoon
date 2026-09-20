@@ -3,6 +3,7 @@ using GrayMoon.App.Services.Agent;
 using GrayMoon.App.Services.GitChanges;
 using GrayMoon.App.Services.Jobs;
 using GrayMoon.App.Services.Ui;
+using GrayMoon.Application.Features;
 using GrayMoon.Common.Git;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -116,6 +117,7 @@ public sealed class WorkspaceGitChangesActivationTests
             new FakeAgentBridge(agentConnected),
             jobs,
             new NoopToastService(),
+            new FakeFeatureContextScopeFactory(new WorkspaceFeatureContextId(1)),
             NullLogger<WorkspaceGitChangesActivation>.Instance);
         return (activation, tracker, scanner, jobs);
     }
@@ -142,6 +144,7 @@ public sealed class WorkspaceGitChangesActivationTests
 
         public Task ScanWorkspaceAsync(
             int workspaceId,
+            WorkspaceFeatureContextId contextId,
             CancellationToken cancellationToken,
             Action<GitChangesWorkspaceScanProgress>? onProgress = null,
             bool includeLineStats = false,

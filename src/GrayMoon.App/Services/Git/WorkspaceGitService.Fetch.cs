@@ -9,6 +9,7 @@ using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Services.Git;
 
@@ -22,6 +23,7 @@ public sealed partial class WorkspaceGitService
     /// </summary>
     public async Task<IReadOnlyDictionary<int, string>> QuickFetchAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlyCollection<int>? repositoryIds = null,
         Action<int, int>? onProgress = null,
         CancellationToken cancellationToken = default)
@@ -33,7 +35,7 @@ public sealed partial class WorkspaceGitService
         if (workspace == null)
             throw new InvalidOperationException($"Workspace {workspaceId} not found.");
 
-        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
 
         var links = workspace.Repositories
             .Where(l => l.Repository != null && (repositoryIds == null || repositoryIds.Contains(l.RepositoryId)))

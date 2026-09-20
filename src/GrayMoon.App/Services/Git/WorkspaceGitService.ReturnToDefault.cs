@@ -9,6 +9,7 @@ using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Services.Git;
 
@@ -17,6 +18,7 @@ public sealed partial class WorkspaceGitService
     /// <summary>Runs GetCommitCounts (agent) for each repo and returns DefaultBranchAhead and HasUpstream per repo. Used to check if return-to-default is safe (no commits ahead of default). Respects MaxParallelOperations.</summary>
     public async Task<IReadOnlyList<(int RepoId, int? DefaultAhead, bool? HasUpstream)>> GetCommitCountsForReposAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlyList<(int RepoId, string RepoName)> repos,
         CancellationToken cancellationToken = default)
     {
@@ -27,7 +29,7 @@ public sealed partial class WorkspaceGitService
         if (workspace == null)
             return Array.Empty<(int, int?, bool?)>();
 
-        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
         var maxParallel = _maxConcurrent;
 
         using var semaphore = new SemaphoreSlim(maxParallel, maxParallel);
@@ -73,6 +75,7 @@ public sealed partial class WorkspaceGitService
     /// </summary>
     public async Task<(bool Success, string? ErrorMessage)> ReturnToDefaultDirectAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         string currentBranchName,
         bool deleteRemoteBranch,
@@ -111,7 +114,7 @@ public sealed partial class WorkspaceGitService
         // A merged or closed pull request stays an independent reason the branch is safe to drop.
         var forceDeleteLocalBranch = allowForceDeleteLocalBranch || prInfo?.IsMerged == true || prInfo?.IsClosed == true;
 
-        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
         var args = new
         {
             workspaceName = workspaceFolderName,
@@ -148,7 +151,7 @@ public sealed partial class WorkspaceGitService
         // One authoritative write of branch, version, counts, upstream, branch rows, projects and the PR
         // row, so no field of the previous branch survives the switch to the default branch.
         var snapshot = BuildReturnToDefaultSnapshot(syncResponse);
-        await _stateWriter.ApplyAsync(workspaceId, repositoryId, snapshot, new RepositoryStateWriteOptions
+        await _stateWriter.ApplyAsync(contextId, workspaceId, repositoryId, snapshot, new RepositoryStateWriteOptions
         {
             SyncStatus = SyncStatusWrite.Derive,
             ReconcilePullRequest = true,

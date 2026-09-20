@@ -206,7 +206,7 @@ public sealed partial class WorkspaceRepositories
         {
             var result = await ScopedExecutor.ExecuteAsync<IWorkspacePushOperations, OperationResult>(svc =>
                 svc.PushAsync(
-                    WorkspaceId,
+                    WorkspaceId, RequireSelectedContextId(),
                     repoIds,
                     synchronizedPush,
                     requiredPackageIds,
@@ -275,7 +275,7 @@ public sealed partial class WorkspaceRepositories
         StartPageJob("Setting upstream...", async (job, ct) =>
         {
             var result = await ScopedExecutor.ExecuteAsync<IWorkspacePushOperations, OperationResult>(
-                svc => svc.PushSingleAsync(WorkspaceId, repositoryId, branchName, job.ToOperationProgress(), ct));
+                svc => svc.PushSingleAsync(WorkspaceId, RequireSelectedContextId(), repositoryId, branchName, job.ToOperationProgress(), ct));
 
             if (result.Success)
             {
@@ -315,7 +315,7 @@ public sealed partial class WorkspaceRepositories
         try
         {
             var count = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, int>(
-                svc => svc.RestorePackagesAsync(WorkspaceId, job.ToOperationProgress(), ct));
+                svc => svc.RestorePackagesAsync(WorkspaceId, RequireSelectedContextId(), job.ToOperationProgress(), ct));
 
             SafeInvoke(() =>
             {
@@ -354,7 +354,7 @@ public sealed partial class WorkspaceRepositories
         {
             job.ReportProgress("Restoring packages...");
             var count = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, int>(
-                svc => svc.RestoreSyncedPackagesAsync(WorkspaceId, repoIds, job.ToOperationProgress(), ct));
+                svc => svc.RestoreSyncedPackagesAsync(WorkspaceId, RequireSelectedContextId(), repoIds, job.ToOperationProgress(), ct));
 
             SafeInvoke(() =>
             {
@@ -381,7 +381,7 @@ public sealed partial class WorkspaceRepositories
         try
         {
             var count = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, int>(
-                svc => svc.RestoreSyncedPackagesAsync(WorkspaceId, syncedRepoIds, job.ToOperationProgress(), ct));
+                svc => svc.RestoreSyncedPackagesAsync(WorkspaceId, RequireSelectedContextId(), syncedRepoIds, job.ToOperationProgress(), ct));
 
             SafeInvoke(() =>
             {

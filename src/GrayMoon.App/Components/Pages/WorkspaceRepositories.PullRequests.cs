@@ -167,7 +167,7 @@ public sealed partial class WorkspaceRepositories
 
                 var pushResult = await ScopedExecutor.ExecuteAsync<IWorkspacePushOperations, OperationResult>(svc =>
                     svc.PushAsync(
-                        WorkspaceId,
+                        WorkspaceId, RequireSelectedContextId(),
                         repoIdsToPush,
                         synchronizedPush: false,
                         requiredPackageIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase),

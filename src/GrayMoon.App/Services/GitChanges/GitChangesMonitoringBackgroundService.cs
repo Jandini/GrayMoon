@@ -1,4 +1,5 @@
 using GrayMoon.Common.Git;
+using GrayMoon.Application.Features;
 using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services.GitChanges;
@@ -104,6 +105,7 @@ public sealed class GitChangesMonitoringBackgroundService(
             return;
         }
 
+        var contextResolver = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureContextResolver>();
         var activeWorkspaceIds = activityTracker.GetActiveWorkspaceIds();
         if (activeWorkspaceIds.Count == 0)
         {
@@ -119,7 +121,12 @@ public sealed class GitChangesMonitoringBackgroundService(
 
             try
             {
-                await scanner.ScanWorkspaceAsync(workspaceId, cancellationToken);
+                var contexts = await contextResolver.ListForWorkspaceAsync(workspaceId, cancellationToken);
+                foreach (var ctx in contexts)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await scanner.ScanWorkspaceAsync(workspaceId, ctx.ContextId, cancellationToken);
+                }
             }
             catch (OperationCanceledException)
             {

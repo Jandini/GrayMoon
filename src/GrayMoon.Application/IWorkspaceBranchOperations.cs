@@ -1,3 +1,5 @@
+using GrayMoon.Application.Features;
+
 namespace GrayMoon.Application;
 
 /// <summary>
@@ -7,12 +9,13 @@ public interface IWorkspaceBranchOperations
 {
     Task<BranchHttpOutcome> GetBranchesAsync(int workspaceId, int repositoryId, CancellationToken cancellationToken = default);
 
-    Task<BranchHttpOutcome> RefreshBranchesAsync(int workspaceId, int repositoryId, CancellationToken cancellationToken = default);
+    Task<BranchHttpOutcome> RefreshBranchesAsync(int workspaceId, WorkspaceFeatureContextId contextId, int repositoryId, CancellationToken cancellationToken = default);
 
-    Task<BranchHttpOutcome> CheckoutAsync(int workspaceId, int repositoryId, string? branchName, bool isTag, CancellationToken cancellationToken = default);
+    Task<BranchHttpOutcome> CheckoutAsync(int workspaceId, WorkspaceFeatureContextId contextId, int repositoryId, string? branchName, bool isTag, CancellationToken cancellationToken = default);
 
     Task<BranchHttpOutcome> ReturnToDefaultAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         string? currentBranchName,
         bool deleteRemoteBranch,
@@ -25,6 +28,7 @@ public interface IWorkspaceBranchOperations
 
     Task<BranchHttpOutcome> CreateBranchAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         string? newBranchName,
         string? baseBranch,
@@ -32,17 +36,19 @@ public interface IWorkspaceBranchOperations
 
     Task<BranchHttpOutcome> SetUpstreamAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         string? branchName,
         CancellationToken cancellationToken = default);
 
     Task<BranchHttpOutcome> DeleteBranchAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         string? branchName,
         bool isRemote,
         bool force,
         CancellationToken cancellationToken = default);
 
-    Task<BranchHttpOutcome> UpdateBranchFromDefaultAsync(int workspaceId, int repositoryId, CancellationToken cancellationToken = default);
+    Task<BranchHttpOutcome> UpdateBranchFromDefaultAsync(int workspaceId, WorkspaceFeatureContextId contextId, int repositoryId, CancellationToken cancellationToken = default);
 }

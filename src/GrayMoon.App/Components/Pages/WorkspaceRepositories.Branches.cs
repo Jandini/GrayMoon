@@ -141,7 +141,7 @@ public sealed partial class WorkspaceRepositories
         StartPageJob("Fetching branches...", async (job, ct) =>
         {
             var outcome = await ScopedExecutor.ExecuteAsync<IWorkspaceBranchOperations, BranchHttpOutcome>(
-                svc => svc.RefreshBranchesAsync(WorkspaceId, repositoryId, ct));
+                svc => svc.RefreshBranchesAsync(WorkspaceId, RequireSelectedContextId(), repositoryId, ct));
 
             if (!outcome.IsSuccessStatus)
             {
@@ -183,7 +183,7 @@ public sealed partial class WorkspaceRepositories
         {
             var result = await ScopedExecutor.ExecuteAsync<WorkspaceBranchHandler, WorkspaceBranchBulkResult>(
                 svc => svc.FetchBranchesForWorkspaceAsync(
-                    WorkspaceId,
+                    WorkspaceId, RequireSelectedContextId(),
                     repoIds,
                     (done, total) => job.ReportProgress($"Fetched branches in {done} of {total} repositories..."),
                     ct));
@@ -235,6 +235,7 @@ public sealed partial class WorkspaceRepositories
             var result = await ScopedExecutor.ExecuteAsync<WorkspaceBranchHandler, WorkspaceBranchBulkResult>(
                 svc => svc.CheckoutBranchForWorkspaceAsync(
                     WorkspaceId,
+                    RequireSelectedContextId(),
                     repoIds,
                     branchName,
                     (completed, total) =>
@@ -286,7 +287,7 @@ public sealed partial class WorkspaceRepositories
         {
             var errors = await ScopedExecutor.ExecuteAsync<WorkspaceBranchHandler, IReadOnlyDictionary<int, string>>(svc =>
                 svc.CreateBranchesAsync(
-                    WorkspaceId,
+                    WorkspaceId, RequireSelectedContextId(),
                     newBranchName,
                     baseBranch,
                     tagFilteredRepoIds,
@@ -327,7 +328,7 @@ public sealed partial class WorkspaceRepositories
         StartPageJob("Creating branch...", async (job, ct) =>
         {
             var (success, err) = await ScopedExecutor.ExecuteAsync<WorkspaceBranchHandler, (bool Success, string? Error)>(
-                svc => svc.CreateSingleBranchAsync(WorkspaceId, repositoryId, newBranchName, baseBranch, setUpstream, ct));
+                svc => svc.CreateSingleBranchAsync(WorkspaceId, RequireSelectedContextId(), repositoryId, newBranchName, baseBranch, setUpstream, ct));
 
             if (!success)
             {
@@ -368,7 +369,7 @@ public sealed partial class WorkspaceRepositories
         StartPageJob(isTag ? "Checking out tag..." : "Checking out branch...", async (job, ct) =>
         {
             var (success, errMsg) = await ScopedExecutor.ExecuteAsync<WorkspaceBranchHandler, (bool Success, string? ErrorMessage)>(
-                svc => svc.CheckoutBranchAsync(WorkspaceId, repositoryId, branchName, isTag, ct));
+                svc => svc.CheckoutBranchAsync(WorkspaceId, RequireSelectedContextId(), repositoryId, branchName, isTag, ct));
 
             SafeInvoke(() =>
             {
@@ -490,7 +491,7 @@ public sealed partial class WorkspaceRepositories
         StartPageJob($"Updating branch in {repoName}...", async (job, ct) =>
         {
             var result = await ScopedExecutor.ExecuteAsync<WorkspaceBranchUpdateHandler, UpdateBranchFromDefaultResult>(
-                svc => svc.UpdateBranchFromDefaultAsync(WorkspaceId, repositoryId, ct));
+                svc => svc.UpdateBranchFromDefaultAsync(WorkspaceId, RequireSelectedContextId(), repositoryId, ct));
 
             if (result.HasConflicts)
             {

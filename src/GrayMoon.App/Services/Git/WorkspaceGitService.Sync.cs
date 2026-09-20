@@ -9,6 +9,7 @@ using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Services.Git;
 
@@ -16,6 +17,7 @@ public sealed partial class WorkspaceGitService
 {
     public async Task<IReadOnlyDictionary<int, RepoGitVersionInfo>> SyncAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         Action<int, int, int, RepoGitVersionInfo>? onProgress = null,
         Action? onAppSideComplete = null,
         IReadOnlyList<int>? repositoryIds = null,
@@ -31,7 +33,7 @@ public sealed partial class WorkspaceGitService
 
         var configuredRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
         await _workspaceService.CreateDirectoryAsync(workspace.Name, configuredRoot, cancellationToken);
-        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
 
         var repos = workspace.Repositories
             .Select(link => link.Repository)
@@ -89,7 +91,7 @@ public sealed partial class WorkspaceGitService
 
         var results = await Task.WhenAll(syncTasks);
 
-        await PersistVersionsAsync(workspaceId, results, persistDependencyLevel: !skipDependencyLevelPersistence, cancellationToken);
+        await PersistVersionsAsync(workspaceId, contextId, results, persistDependencyLevel: !skipDependencyLevelPersistence, cancellationToken);
 
         bool isInSync;
         if (repositoryIds != null && repositoryIds.Count > 0)
@@ -107,14 +109,14 @@ public sealed partial class WorkspaceGitService
         await _workspaceRepository.UpdateSyncMetadataAsync(workspaceId, DateTime.UtcNow, isInSync);
 
         if (_fileVersionService != null)
-            await _fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, cancellationToken);
+            await _fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, contextId, cancellationToken);
 
         _logger.LogDebug("Sync completed for workspace {WorkspaceName}", workspace.Name);
         return results.ToDictionary(r => r.RepositoryId, r => r.info);
     }
 
     /// <summary>Refreshes version for a single repo and persists. Returns (success, errorMessage) for caller to report and optionally stop workflow.</summary>
-    public async Task<(bool Success, string? ErrorMessage)> SyncSingleRepositoryAsync(int repositoryId, int workspaceId, CancellationToken cancellationToken = default)
+    public async Task<(bool Success, string? ErrorMessage)> SyncSingleRepositoryAsync(int repositoryId, int workspaceId, WorkspaceFeatureContextId contextId, CancellationToken cancellationToken = default)
     {
         var repo = await _repositoryRepository.GetByIdAsync(repositoryId, cancellationToken);
         if (repo == null)
@@ -135,7 +137,7 @@ public sealed partial class WorkspaceGitService
         if (workspace == null)
             return (false, "Workspace not found.");
 
-        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
         var response = await _agentBridge.SendCommandAsync("RefreshRepositoryVersion", new { workspaceName = workspaceFolderName, repositoryName = repo.RepositoryName, repositoryId = repo.RepositoryId, workspaceRoot }, cancellationToken);
         if (!response.Success)
         {
@@ -146,7 +148,7 @@ public sealed partial class WorkspaceGitService
 
         var info = ParseRefreshRepositoryVersionResponse(response);
 
-        await PersistVersionsAsync(workspaceId, [(repo.RepositoryId, info)], true, cancellationToken);
+        await PersistVersionsAsync(workspaceId, contextId, [(repo.RepositoryId, info)], true, cancellationToken);
 
         var allLinks = await _dbContext.WorkspaceRepositories
             .Where(wr => wr.WorkspaceId == workspaceId)
@@ -156,7 +158,7 @@ public sealed partial class WorkspaceGitService
         await _workspaceRepository.UpdateSyncMetadataAsync(workspaceId, DateTime.UtcNow, isInSync);
 
         if (_fileVersionService != null)
-            await _fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, cancellationToken);
+            await _fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, contextId, cancellationToken);
 
         await _workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, cancellationToken);
 
@@ -167,6 +169,7 @@ public sealed partial class WorkspaceGitService
 
     public async Task<IReadOnlyDictionary<int, RepoSyncStatus>> GetRepoSyncStatusAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         Action<int, RepoSyncStatus>? onProgress = null,
         CancellationToken cancellationToken = default)
     {
@@ -179,7 +182,7 @@ public sealed partial class WorkspaceGitService
         if (workspaceRepos.Count == 0)
             return result;
 
-        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
         foreach (var wr in workspaceRepos)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -203,15 +206,19 @@ public sealed partial class WorkspaceGitService
     }
 
     /// <summary>
-    /// Closes out a user action: recomputes workspace-wide file-version and dependency stats, then
-    /// broadcasts WorkspaceSynced once so the grid refreshes. Call exactly once per action, after every
+    /// Closes out a user action: recomputes file-version and dependency stats for the given context, then
+    /// broadcasts sync once so the grid refreshes. Call exactly once per action, after every
     /// repository in the batch has been written.
     /// </summary>
-    public Task RecomputeAndBroadcastWorkspaceSyncedAsync(int workspaceId, CancellationToken cancellationToken = default)
-        => _recomputeScope.CompleteAsync(workspaceId, cancellationToken);
+    public Task RecomputeAndBroadcastWorkspaceSyncedAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        CancellationToken cancellationToken = default)
+        => _recomputeScope.CompleteAsync(workspaceId, contextId, cancellationToken);
 
     private async Task PersistVersionsAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IEnumerable<(int RepoId, RepoGitVersionInfo info)> results,
         bool persistDependencyLevel = true,
         CancellationToken cancellationToken = default)
@@ -224,7 +231,7 @@ public sealed partial class WorkspaceGitService
         foreach (var (repoId, info) in resultList)
         {
             var snapshot = info.Snapshot ?? SnapshotFromFlatInfo(info);
-            await _stateWriter.ApplyAsync(workspaceId, repoId, snapshot, new RepositoryStateWriteOptions
+            await _stateWriter.ApplyAsync(contextId, workspaceId, repoId, snapshot, new RepositoryStateWriteOptions
             {
                 SyncStatus = SyncStatusWrite.Derive,
                 ReconcilePullRequest = true,
@@ -234,13 +241,13 @@ public sealed partial class WorkspaceGitService
         // The writer already merged each repository's projects; the dependency edges still have to be
         // merged as one batch so the level computation sees the whole graph at once.
         var syncResults = resultList.Select(r => (r.RepoId, r.info.ProjectsDetail)).ToList();
-        await _workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(workspaceId, syncResults, persistDependencyLevel, cancellationToken);
+        await _workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(workspaceId, syncResults, contextId.Value, persistDependencyLevel, cancellationToken);
 
         // Partial sync (single repo or whole level): merge uses persistDependencyLevel false so Persist is not
         // called with a partial uniqueEdges graph. Recompute from full ProjectDependencies in DB so every
         // WorkspaceRepositoryLink gets correct DependencyLevel/Dependencies/UnmatchedDeps without syncing other repos.
         if (!persistDependencyLevel)
-            await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
+            await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, contextId, cancellationToken);
 
         _logger.LogInformation("Persistence: saved WorkspaceRepository link versions. WorkspaceId={WorkspaceId}, RepoCount={RepoCount}",
             workspaceId, resultList.Count);

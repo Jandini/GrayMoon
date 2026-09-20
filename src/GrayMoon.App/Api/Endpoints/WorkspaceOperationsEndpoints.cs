@@ -1,12 +1,19 @@
 using GrayMoon.App.Models;
 using GrayMoon.App.Services.GitChanges;
 using GrayMoon.App.Services.Queries;
+using GrayMoon.Application.Features;
 using GrayMoon.Common.Git;
 
 namespace GrayMoon.App.Api.Endpoints;
 
 public static class WorkspaceOperationsEndpoints
 {
+    private static async Task<WorkspaceFeatureContextId> SpecialContextAsync(
+        int workspaceId,
+        IWorkspaceFeatureContextResolver contextResolver,
+        CancellationToken cancellationToken)
+        => await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+
     public static IEndpointRouteBuilder MapWorkspaceOperationsEndpoints(this IEndpointRouteBuilder routes)
     {
         routes.MapGet("/api/workspaces", ListWorkspaces);
@@ -74,12 +81,15 @@ public static class WorkspaceOperationsEndpoints
         int workspaceId,
         UpdateWorkspaceApiRequest? body,
         IWorkspaceUpdateOperations operations,
+        IWorkspaceFeatureContextResolver contextResolver,
         IWorkspaceOperationRunner runner,
         CancellationToken cancellationToken)
         => WorkspaceCommandHttp.RunExclusiveAsync(runner, workspaceId, "Updating dependencies...", async (progress, ct) =>
         {
+            var contextId = await SpecialContextAsync(workspaceId, contextResolver, ct);
             var result = await operations.UpdateAsync(
                 workspaceId,
+                contextId,
                 ct,
                 progress,
                 (_, _) => { },
@@ -97,20 +107,23 @@ public static class WorkspaceOperationsEndpoints
         int workspaceId,
         PushWorkspaceApiRequest? body,
         IWorkspacePushOperations operations,
+        IWorkspaceFeatureContextResolver contextResolver,
         IWorkspaceOperationRunner runner,
         CancellationToken cancellationToken)
         => WorkspaceCommandHttp.RunExclusiveAsync(runner, workspaceId, "Preparing push...", async (progress, ct) =>
         {
+            var contextId = await SpecialContextAsync(workspaceId, contextResolver, ct);
             var result = body?.RepositoryIds is { Count: > 0 } ids
                 ? await operations.PushAsync(
                     workspaceId,
+                    contextId,
                     ids.ToHashSet(),
                     body.SynchronizedPush,
                     body.RequiredPackageIds?.ToHashSet(StringComparer.OrdinalIgnoreCase)
                         ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase),
                     progress,
                     cancellationToken: ct)
-                : await operations.PushPendingAsync(workspaceId, body?.SynchronizedPush ?? true, progress, ct);
+                : await operations.PushPendingAsync(workspaceId, contextId, body?.SynchronizedPush ?? true, progress, ct);
 
             return result.Success ? Results.Ok(result) : Results.BadRequest(result);
         }, cancellationToken);
@@ -120,6 +133,7 @@ public static class WorkspaceOperationsEndpoints
         PrepareWorkspaceApiRequest? body,
         IWorkspacePreparationOperations operations,
         IWorkspacePushOperations pushOperations,
+        IWorkspaceFeatureContextResolver contextResolver,
         IWorkspaceOperationRunner runner,
         CancellationToken cancellationToken)
     {
@@ -128,8 +142,10 @@ public static class WorkspaceOperationsEndpoints
 
         return WorkspaceCommandHttp.RunExclusiveAsync(runner, workspaceId, "Creating branches...", async (progress, ct) =>
         {
+            var contextId = await SpecialContextAsync(workspaceId, contextResolver, ct);
             var created = await operations.PrepareAsync(
                 workspaceId,
+                contextId,
                 body.NewBranchName.Trim(),
                 body.BaseBranch ?? "__default__",
                 body.RepositoryIds?.ToHashSet(),
@@ -147,7 +163,7 @@ public static class WorkspaceOperationsEndpoints
                     : Results.BadRequest(new { success = false, error = "Update failed." });
             }
 
-            var push = await pushOperations.PushPendingAsync(workspaceId, synchronizedPush: true, progress, ct);
+            var push = await pushOperations.PushPendingAsync(workspaceId, contextId, synchronizedPush: true, progress, ct);
             return push.Success
                 ? Results.Ok(new { success = true, pushed = true })
                 : Results.BadRequest(push);
@@ -158,12 +174,15 @@ public static class WorkspaceOperationsEndpoints
         int workspaceId,
         SyncWorkspaceApiRequest? body,
         IWorkspaceSyncOperations operations,
+        IWorkspaceFeatureContextResolver contextResolver,
         IWorkspaceOperationRunner runner,
         CancellationToken cancellationToken)
         => WorkspaceCommandHttp.RunExclusiveAsync(runner, workspaceId, "Synchronizing...", async (progress, ct) =>
         {
+            var contextId = await SpecialContextAsync(workspaceId, contextResolver, ct);
             await operations.SyncAsync(
                 workspaceId,
+                contextId,
                 body?.RepositoryIds,
                 skipDependencyLevelPersistence: false,
                 ct,
@@ -177,6 +196,7 @@ public static class WorkspaceOperationsEndpoints
         int workspaceId,
         ReturnToDefaultApiRequest? body,
         IWorkspaceSyncOperations operations,
+        IWorkspaceFeatureContextResolver contextResolver,
         IWorkspaceOperationRunner runner,
         CancellationToken cancellationToken)
     {
@@ -185,7 +205,8 @@ public static class WorkspaceOperationsEndpoints
 
         return WorkspaceCommandHttp.RunExclusiveAsync(runner, workspaceId, "Returning to default branch...", async (progress, ct) =>
         {
-            var result = await operations.ReturnToDefaultAsync(workspaceId, body.RepositoryIds, progress, ct);
+            var contextId = await SpecialContextAsync(workspaceId, contextResolver, ct);
+            var result = await operations.ReturnToDefaultAsync(workspaceId, contextId, body.RepositoryIds, progress, ct);
             return result.Completed ? Results.Ok(result) : Results.BadRequest(result);
         }, cancellationToken);
     }
@@ -194,13 +215,15 @@ public static class WorkspaceOperationsEndpoints
         int workspaceId,
         PullWorkspaceApiRequest? body,
         IWorkspaceSyncOperations operations,
+        IWorkspaceFeatureContextResolver contextResolver,
         IWorkspaceOperationRunner runner,
         CancellationToken cancellationToken)
         => WorkspaceCommandHttp.RunExclusiveAsync(runner, workspaceId, "Synchronizing commits...", async (progress, ct) =>
         {
+            var contextId = await SpecialContextAsync(workspaceId, contextResolver, ct);
             var result = body?.RepositoryIds is { Count: > 1 } ids
-                ? await operations.PullLevelAsync(workspaceId, ids, progress, ct)
-                : await operations.PullAsync(workspaceId, body?.RepositoryId ?? body?.RepositoryIds?.FirstOrDefault() ?? 0, progress, ct);
+                ? await operations.PullLevelAsync(workspaceId, contextId, ids, progress, ct)
+                : await operations.PullAsync(workspaceId, contextId, body?.RepositoryId ?? body?.RepositoryIds?.FirstOrDefault() ?? 0, progress, ct);
 
             return result.Success ? Results.Ok(result) : Results.BadRequest(result);
         }, cancellationToken);
@@ -209,22 +232,26 @@ public static class WorkspaceOperationsEndpoints
         int workspaceId,
         UndoPushApiRequest? body,
         IWorkspaceSyncOperations operations,
+        IWorkspaceFeatureContextResolver contextResolver,
         IWorkspaceOperationRunner runner,
         CancellationToken cancellationToken)
         => WorkspaceCommandHttp.RunExclusiveAsync(runner, workspaceId, "Reverting outgoing commits...", async (progress, ct) =>
         {
-            var result = await operations.UndoPushAsync(workspaceId, body?.KeepChanges ?? true, progress, ct);
+            var contextId = await SpecialContextAsync(workspaceId, contextResolver, ct);
+            var result = await operations.UndoPushAsync(workspaceId, contextId, body?.KeepChanges ?? true, progress, ct);
             return result.Success ? Results.Ok(result) : Results.BadRequest(result);
         }, cancellationToken);
 
     private static Task<IResult> RestorePackages(
         int workspaceId,
         IWorkspaceUpdateOperations operations,
+        IWorkspaceFeatureContextResolver contextResolver,
         IWorkspaceOperationRunner runner,
         CancellationToken cancellationToken)
         => WorkspaceCommandHttp.RunExclusiveAsync(runner, workspaceId, "Restoring packages...", async (progress, ct) =>
         {
-            var count = await operations.RestorePackagesAsync(workspaceId, progress, ct);
+            var contextId = await SpecialContextAsync(workspaceId, contextResolver, ct);
+            var count = await operations.RestorePackagesAsync(workspaceId, contextId, progress, ct);
             return Results.Ok(new { success = true, restored = count });
         }, cancellationToken);
 
@@ -271,9 +298,11 @@ public static class WorkspaceOperationsEndpoints
     private static async Task<IResult> GetGitChanges(
         int workspaceId,
         IWorkspaceGitChangesOperations operations,
+        IWorkspaceFeatureContextResolver contextResolver,
         CancellationToken cancellationToken)
     {
-        var view = await operations.GetAsync(workspaceId, cancellationToken);
+        var contextId = await SpecialContextAsync(workspaceId, contextResolver, cancellationToken);
+        var view = await operations.GetAsync(workspaceId, contextId, cancellationToken);
         return view == null ? Results.NotFound("Workspace not found.") : Results.Ok(view);
     }
 
@@ -281,6 +310,7 @@ public static class WorkspaceOperationsEndpoints
         int workspaceId,
         GitChangesCommitApiRequest? body,
         IWorkspaceGitChangesOperations operations,
+        IWorkspaceFeatureContextResolver contextResolver,
         IWorkspaceOperationRunner runner,
         CancellationToken cancellationToken)
     {
@@ -289,7 +319,8 @@ public static class WorkspaceOperationsEndpoints
 
         return WorkspaceCommandHttp.RunExclusiveAsync(runner, workspaceId, "Committing...", async (_, ct) =>
         {
-            var result = await operations.CommitAsync(workspaceId, body.RepositoryId, body.Message, body.StageAllFirst, ct);
+            var contextId = await SpecialContextAsync(workspaceId, contextResolver, ct);
+            var result = await operations.CommitAsync(workspaceId, contextId, body.RepositoryId, body.Message, body.StageAllFirst, ct);
             return result.Success ? Results.Ok(result) : Results.BadRequest(result);
         }, cancellationToken);
     }
@@ -298,6 +329,7 @@ public static class WorkspaceOperationsEndpoints
         int workspaceId,
         GitChangesPathsApiRequest? body,
         IWorkspaceGitChangesOperations operations,
+        IWorkspaceFeatureContextResolver contextResolver,
         IWorkspaceOperationRunner runner,
         CancellationToken cancellationToken)
     {
@@ -306,7 +338,8 @@ public static class WorkspaceOperationsEndpoints
 
         return WorkspaceCommandHttp.RunExclusiveAsync(runner, workspaceId, "Staging...", async (_, ct) =>
         {
-            var result = await operations.StageAsync(workspaceId, body.RepositoryId, body.Scope, body.Paths ?? [], ct);
+            var contextId = await SpecialContextAsync(workspaceId, contextResolver, ct);
+            var result = await operations.StageAsync(workspaceId, contextId, body.RepositoryId, body.Scope, body.Paths ?? [], ct);
             return result.Success ? Results.Ok(result) : Results.BadRequest(result);
         }, cancellationToken);
     }
@@ -315,6 +348,7 @@ public static class WorkspaceOperationsEndpoints
         int workspaceId,
         GitChangesPathsApiRequest? body,
         IWorkspaceGitChangesOperations operations,
+        IWorkspaceFeatureContextResolver contextResolver,
         IWorkspaceOperationRunner runner,
         CancellationToken cancellationToken)
     {
@@ -323,7 +357,8 @@ public static class WorkspaceOperationsEndpoints
 
         return WorkspaceCommandHttp.RunExclusiveAsync(runner, workspaceId, "Unstaging...", async (_, ct) =>
         {
-            var result = await operations.UnstageAsync(workspaceId, body.RepositoryId, body.Scope, body.Paths ?? [], ct);
+            var contextId = await SpecialContextAsync(workspaceId, contextResolver, ct);
+            var result = await operations.UnstageAsync(workspaceId, contextId, body.RepositoryId, body.Scope, body.Paths ?? [], ct);
             return result.Success ? Results.Ok(result) : Results.BadRequest(result);
         }, cancellationToken);
     }
@@ -331,11 +366,13 @@ public static class WorkspaceOperationsEndpoints
     private static Task<IResult> UpdateFileVersions(
         int workspaceId,
         IWorkspaceFileOperations operations,
+        IWorkspaceFeatureContextResolver contextResolver,
         IWorkspaceOperationRunner runner,
         CancellationToken cancellationToken)
         => WorkspaceCommandHttp.RunExclusiveAsync(runner, workspaceId, "Updating file versions...", async (_, ct) =>
         {
-            var result = await operations.UpdateVersionsAsync(workspaceId, ct);
+            var contextId = await SpecialContextAsync(workspaceId, contextResolver, ct);
+            var result = await operations.UpdateVersionsAsync(workspaceId, contextId, ct);
             return string.IsNullOrWhiteSpace(result.Error)
                 ? Results.Ok(new { success = true, updated = result.Updated, failed = result.Failed })
                 : Results.BadRequest(new { success = false, updated = result.Updated, failed = result.Failed, error = result.Error });

@@ -98,7 +98,7 @@ public sealed class WorkspaceBranchOperations(
         }
     }
 
-    public async Task<BranchHttpOutcome> RefreshBranchesAsync(int workspaceId, int repositoryId, CancellationToken cancellationToken = default)
+    public async Task<BranchHttpOutcome> RefreshBranchesAsync(int workspaceId, WorkspaceFeatureContextId contextId, int repositoryId, CancellationToken cancellationToken = default)
     {
         var resolved = await TryResolveLinkedRepoAsync(workspaceId, repositoryId, requireAgent: true, cancellationToken);
         if (resolved.Error != null)
@@ -110,8 +110,7 @@ public sealed class WorkspaceBranchOperations(
 
         try
         {
-            var specialContextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspace.WorkspaceId, cancellationToken);
-            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(specialContextId, cancellationToken);
+            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
             var args = new
             {
                 workspaceName = workspaceFolderName,
@@ -163,6 +162,7 @@ public sealed class WorkspaceBranchOperations(
 
     public async Task<BranchHttpOutcome> CheckoutAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         string? branchName,
         bool isTag,
@@ -185,8 +185,7 @@ public sealed class WorkspaceBranchOperations(
 
         try
         {
-            var specialContextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspace.WorkspaceId, cancellationToken);
-            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(specialContextId, cancellationToken);
+            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
 
             if (isTag)
             {
@@ -206,7 +205,7 @@ public sealed class WorkspaceBranchOperations(
                 if (!tagSuccess)
                     return BranchHttpOutcome.Ok(new CheckoutBranchApiResult(false, tagError));
 
-                await stateWriter.ApplyAsync(workspaceId, repositoryId, new RepositoryStateSnapshot
+                await stateWriter.ApplyAsync(contextId, workspaceId, repositoryId, new RepositoryStateSnapshot
                 {
                     CheckedOutTag = tagCheckout?.CurrentTag ?? branchName.Trim(),
                     IdentityProbed = true,
@@ -242,7 +241,7 @@ public sealed class WorkspaceBranchOperations(
             if (!string.IsNullOrWhiteSpace(localBranchName))
             {
                 await workspaceGitService.EnsureLocalBranchPersistedAsync(wr.WorkspaceRepositoryId, localBranchName, cancellationToken);
-                await stateWriter.ApplyAsync(workspaceId, repositoryId, new RepositoryStateSnapshot
+                await stateWriter.ApplyAsync(contextId, workspaceId, repositoryId, new RepositoryStateSnapshot
                 {
                     BranchName = localBranchName,
                     IdentityProbed = true,
@@ -262,6 +261,7 @@ public sealed class WorkspaceBranchOperations(
 
     public async Task<BranchHttpOutcome> ReturnToDefaultAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         string? currentBranchName,
         bool deleteRemoteBranch,
@@ -283,6 +283,7 @@ public sealed class WorkspaceBranchOperations(
 
             var (success, errorMessage) = await workspaceGitService.ReturnToDefaultDirectAsync(
                 workspaceId,
+                contextId,
                 repositoryId,
                 currentBranchName,
                 deleteRemoteBranch,
@@ -292,7 +293,7 @@ public sealed class WorkspaceBranchOperations(
             if (!success)
                 return BranchHttpOutcome.Problem(errorMessage ?? "Failed to return to default branch", 500);
 
-            await workspaceGitService.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
+            await workspaceGitService.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, contextId, cancellationToken);
 
             return BranchHttpOutcome.Ok(new { success = true });
         }
@@ -415,6 +416,7 @@ public sealed class WorkspaceBranchOperations(
 
     public async Task<BranchHttpOutcome> CreateBranchAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         string? newBranchName,
         string? baseBranch,
@@ -448,8 +450,7 @@ public sealed class WorkspaceBranchOperations(
                 baseBranchName = baseBranch;
             }
 
-            var specialContextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspace.WorkspaceId, cancellationToken);
-            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(specialContextId, cancellationToken);
+            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
             var args = new
             {
                 workspaceName = workspaceFolderName,
@@ -495,6 +496,7 @@ public sealed class WorkspaceBranchOperations(
 
     public async Task<BranchHttpOutcome> SetUpstreamAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         string? branchName,
         CancellationToken cancellationToken = default)
@@ -513,8 +515,7 @@ public sealed class WorkspaceBranchOperations(
 
         try
         {
-            var specialContextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspace.WorkspaceId, cancellationToken);
-            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(specialContextId, cancellationToken);
+            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
             var args = new
             {
                 workspaceName = workspaceFolderName,
@@ -561,6 +562,7 @@ public sealed class WorkspaceBranchOperations(
 
     public async Task<BranchHttpOutcome> DeleteBranchAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         string? branchName,
         bool isRemote,
@@ -591,8 +593,7 @@ public sealed class WorkspaceBranchOperations(
 
         try
         {
-            var specialContextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspace.WorkspaceId, cancellationToken);
-            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(specialContextId, cancellationToken);
+            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
             var args = new
             {
                 workspaceName = workspaceFolderName,
@@ -637,12 +638,12 @@ public sealed class WorkspaceBranchOperations(
         }
     }
 
-    public async Task<BranchHttpOutcome> UpdateBranchFromDefaultAsync(int workspaceId, int repositoryId, CancellationToken cancellationToken = default)
+    public async Task<BranchHttpOutcome> UpdateBranchFromDefaultAsync(int workspaceId, WorkspaceFeatureContextId contextId, int repositoryId, CancellationToken cancellationToken = default)
     {
         if (workspaceId <= 0 || repositoryId <= 0)
             return BranchHttpOutcome.BadRequest("workspaceId and repositoryId are required.");
 
-        var result = await updateHandler.UpdateBranchFromDefaultAsync(workspaceId, repositoryId, cancellationToken);
+        var result = await updateHandler.UpdateBranchFromDefaultAsync(workspaceId, contextId, repositoryId, cancellationToken);
 
         if (result.Success || result.HasConflicts)
         {

@@ -2,6 +2,7 @@
 @using GrayMoon.App.Models.Api
 @using GrayMoon.App.Services
 @using GrayMoon.App.Api.Endpoints
+@using GrayMoon.Application.Features
 @using GrayMoon.Common.FileVersions
 @inject IJSRuntime JS
 @inject WorkspaceFileVersionService VersionService
@@ -151,6 +152,7 @@
 @code {
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public int WorkspaceId { get; set; }
+    [Parameter] public WorkspaceFeatureContextId ContextId { get; set; }
     [Parameter] public WorkspaceFileDto? File { get; set; }
     [Parameter] public List<WorkspaceRepoItem> WorkspaceRepos { get; set; } = new();
     [Parameter] public string? CurrentPattern { get; set; }
@@ -419,7 +421,7 @@
         try
         {
             _notFoundInFileTokens = await VersionService.ValidatePatternAgainstFileAsync(
-                WorkspaceId, File.RepositoryName, File.FilePath, patternText, cancellationToken);
+                WorkspaceId, ContextId, File.RepositoryName, File.FilePath, patternText, cancellationToken);
         }
         catch (OperationCanceledException) { return; }
         catch { _notFoundInFileTokens = []; }

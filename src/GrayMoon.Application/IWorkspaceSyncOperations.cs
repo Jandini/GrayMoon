@@ -1,4 +1,5 @@
 using GrayMoon.App.Models;
+using GrayMoon.Application.Features;
 
 namespace GrayMoon.Application;
 
@@ -55,6 +56,7 @@ public interface IWorkspaceSyncOperations
 {
     Task<IReadOnlyDictionary<int, RepoGitVersionInfo>> SyncAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlyList<int>? repositoryIds,
         bool skipDependencyLevelPersistence,
         CancellationToken cancellationToken,
@@ -69,6 +71,7 @@ public interface IWorkspaceSyncOperations
     /// </summary>
     Task<ReturnToDefaultPlan> AnalyzeReturnToDefaultAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlyList<int> repositoryIds,
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken);
@@ -79,6 +82,7 @@ public interface IWorkspaceSyncOperations
     /// </summary>
     Task<OperationResult> ExecuteReturnToDefaultAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlyList<int> repositoryIds,
         ReturnToDefaultOptions options,
         IProgress<OperationProgress>? progress,
@@ -91,30 +95,35 @@ public interface IWorkspaceSyncOperations
     /// </summary>
     Task<UnattendedReturnToDefaultResult> ReturnToDefaultAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlyList<int> repositoryIds,
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken);
 
     Task<OperationResult> PullAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken);
 
     Task<OperationResult> PullLevelAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlyList<int> repositoryIds,
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken);
 
     Task<OperationResult> UndoPushAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         bool keepChanges,
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken);
 
     Task<OperationResult> QuickFetchAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlyCollection<int>? repositoryIds,
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken);

@@ -96,7 +96,7 @@ public sealed partial class WorkspaceGitChanges
         {
             try
             {
-                await Scanner.ScanWorkspaceAsync(WorkspaceId, ct, progress =>
+                await Scanner.ScanWorkspaceAsync(WorkspaceId, RequireSelectedContextId(), ct, progress =>
                     job.ReportProgress($"Refreshing {progress.Completed} of {progress.Total} repositories..."), includeLineStats: true);
 
                 await InvokeAsync(async () =>

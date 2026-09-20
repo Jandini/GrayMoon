@@ -20,6 +20,7 @@ public interface IGitChangesWorkspaceScanner
 {
     Task ScanWorkspaceAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken,
         Action<GitChangesWorkspaceScanProgress>? onProgress = null,
         bool includeLineStats = false,
@@ -33,6 +34,7 @@ public sealed class GitChangesWorkspaceScanner(
 {
     public async Task ScanWorkspaceAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken,
         Action<GitChangesWorkspaceScanProgress>? onProgress = null,
         bool includeLineStats = false,
@@ -46,7 +48,6 @@ public sealed class GitChangesWorkspaceScanner(
         }
 
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var contextResolver = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureContextResolver>();
         var pathResolver = scope.ServiceProvider.GetRequiredService<IWorkspaceContextPathResolver>();
         var agentClient = scope.ServiceProvider.GetRequiredService<IGitChangesAgentClient>();
         var writeQueue = scope.ServiceProvider.GetRequiredService<WorkspaceGitChangesWriteQueue>();
@@ -65,8 +66,7 @@ public sealed class GitChangesWorkspaceScanner(
             .AsNoTracking()
             .ToListAsync(cancellationToken);
 
-        var special = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
-        var (root, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(special, cancellationToken);
+        var (root, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
 
         var targets = new List<MonitorTarget>();
         foreach (var link in links)

@@ -1,4 +1,5 @@
 using GrayMoon.App.Models;
+using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Services.Application;
 
@@ -14,6 +15,7 @@ public sealed class WorkspaceUpdateOperations(
 
     public Task<DependencyUpdateRunResult> UpdateAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken,
         IProgress<OperationProgress>? progress,
         Action<int, string> setRepositoryError,
@@ -25,6 +27,7 @@ public sealed class WorkspaceUpdateOperations(
         string? runId = null)
         => updateHandler.RunUpdateAsync(
             workspaceId,
+            contextId,
             cancellationToken,
             progress,
             setRepositoryError,
@@ -37,29 +40,34 @@ public sealed class WorkspaceUpdateOperations(
 
     public Task<int> RestorePackagesAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken)
-        => workspaceGitService.RestoreAllWorkspacePackagesAsync(workspaceId, progress.ToMessageAction(), cancellationToken);
+        => workspaceGitService.RestoreAllWorkspacePackagesAsync(workspaceId, contextId, progress.ToMessageAction(), cancellationToken);
 
     public Task<int> RestoreSyncedPackagesAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlySet<int> syncedRepoIds,
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken)
         => workspaceGitService.RestoreSyncedWorkspacePackagesAsync(
             workspaceId,
+            contextId,
             syncedRepoIds,
             progress.ToMessageAction(),
             cancellationToken);
 
     public Task UpdateSingleRepositoryAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         Action<string>? onProgressMessage = null,
         Action<int, string>? onRepoError = null,
         CancellationToken cancellationToken = default)
         => workspaceGitService.RunUpdateSingleRepositoryAsync(
             workspaceId,
+            contextId,
             repositoryId,
             onProgressMessage: onProgressMessage,
             onRepoError: onRepoError,
@@ -67,6 +75,7 @@ public sealed class WorkspaceUpdateOperations(
 
     public Task RecomputeAndBroadcastWorkspaceSyncedAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken = default)
-        => workspaceGitService.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
+        => workspaceGitService.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, contextId, cancellationToken);
 }

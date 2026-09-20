@@ -9,13 +9,14 @@ using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Services.Git;
 
 public sealed partial class WorkspaceGitService
 {
     /// <summary>Refreshes branches for a single repository by calling the agent directly. Routes CommandOutput to TerminalSinkContext when called within a background job.</summary>
-    public async Task<bool> RefreshBranchesForRepositoryAsync(int repositoryId, int workspaceId, CancellationToken cancellationToken = default)
+    public async Task<bool> RefreshBranchesForRepositoryAsync(int repositoryId, int workspaceId, WorkspaceFeatureContextId contextId, CancellationToken cancellationToken = default)
     {
         var repo = await _repositoryRepository.GetByIdAsync(repositoryId, cancellationToken);
         if (repo == null) return false;
@@ -27,7 +28,7 @@ public sealed partial class WorkspaceGitService
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null) return false;
 
-        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
         var response = await _agentBridge.SendCommandAsync("RefreshBranches", new
         {
             workspaceName = workspaceFolderName,
@@ -60,9 +61,9 @@ public sealed partial class WorkspaceGitService
         return true;
     }
 
-    public async Task RefreshBranchesAndBroadcastAsync(int repositoryId, int workspaceId, CancellationToken cancellationToken = default)
+    public async Task RefreshBranchesAndBroadcastAsync(int repositoryId, int workspaceId, WorkspaceFeatureContextId contextId, CancellationToken cancellationToken = default)
     {
-        await RefreshBranchesForRepositoryAsync(repositoryId, workspaceId, cancellationToken);
+        await RefreshBranchesForRepositoryAsync(repositoryId, workspaceId, contextId, cancellationToken);
         if (_hubContext != null)
             await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken: cancellationToken);
     }
@@ -90,6 +91,7 @@ public sealed partial class WorkspaceGitService
     /// <summary>Creates a new branch in all workspace repos (in parallel), then checks it out. baseBranch is "__default__" to use each repo's default, or a branch name. When <paramref name="repositoryIds"/> is set, only those repos are included. When <paramref name="syncState"/> is true, hooks are suppressed and the agent returns full state inline so the app can persist it without waiting for async hook syncs.</summary>
     public async Task<IReadOnlyDictionary<int, string>> CreateBranchesAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         string newBranchName,
         string baseBranch,
         Action<int, int>? onProgress = null,
@@ -120,7 +122,7 @@ public sealed partial class WorkspaceGitService
         var completedCount = 0;
         var totalCount = links.Count;
         using var semaphore = new SemaphoreSlim(_maxConcurrent);
-        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
 
         // Prefetch all default branches before the parallel section to avoid concurrent DbContext reads
         Dictionary<int, string>? defaultBranchByWrId = null;

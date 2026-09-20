@@ -1,4 +1,5 @@
 using GrayMoon.App.Models;
+using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Services.Orchestration;
 
@@ -30,6 +31,7 @@ public sealed class WorkspacePushHandler(
 
     public async Task<OperationResult> RunPushWithDependenciesAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlySet<int> repoIds,
         bool synchronizedPush,
         IReadOnlySet<string> requiredPackageIds,
@@ -44,6 +46,7 @@ public sealed class WorkspacePushHandler(
         {
             return await pushOrchestrator.RunAsync(
                 workspaceId,
+                contextId,
                 repoIds,
                 synchronizedPush,
                 requiredPackageIds,
@@ -65,6 +68,7 @@ public sealed class WorkspacePushHandler(
 
     public Task<OperationResult> PushSingleRepositoryWithUpstreamAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         string? branchName,
         IProgress<OperationProgress>? progress,
@@ -72,6 +76,7 @@ public sealed class WorkspacePushHandler(
     {
         return pushOrchestrator.PushSingleAsync(
             workspaceId,
+            contextId,
             repositoryId,
             branchName,
             progress,

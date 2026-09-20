@@ -18,7 +18,7 @@ public sealed partial class WorkspaceRepositories
         {
             var result = await ScopedExecutor.ExecuteAsync<IWorkspaceFileOperations, WorkspaceFileVersionUpdateResult>(
                 svc => svc.UpdateVersionsAsync(
-                    WorkspaceId,
+                WorkspaceId, RequireSelectedContextId(),
                     ct,
                     checkAfter: true,
                     progress: job.ToOperationProgress()));
@@ -69,7 +69,7 @@ public sealed partial class WorkspaceRepositories
             var repoIds = new HashSet<int> { repositoryId };
             var result = await ScopedExecutor.ExecuteAsync<IWorkspaceFileOperations, WorkspaceFileVersionUpdateResult>(
                 svc => svc.UpdateVersionsAsync(
-                    WorkspaceId,
+                WorkspaceId, RequireSelectedContextId(),
                     ct,
                     selectedRepositoryIds: repoIds,
                     filterPatternTokensToSelectedRepositories: false,
@@ -201,7 +201,7 @@ public sealed partial class WorkspaceRepositories
             var repoIds = new HashSet<int> { repositoryId };
             var result = await ScopedExecutor.ExecuteAsync<IWorkspaceFileOperations, WorkspaceFileVersionUpdateResult>(
                 svc => svc.UpdateVersionsAsync(
-                    WorkspaceId,
+                WorkspaceId, RequireSelectedContextId(),
                     ct,
                     selectedRepositoryIds: repoIds,
                     filterPatternTokensToSelectedRepositories: false,

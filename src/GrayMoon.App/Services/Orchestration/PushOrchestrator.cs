@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Services.Orchestration;
 
@@ -14,6 +15,7 @@ public sealed class PushOrchestrator(
 {
     public async Task<OperationResult> RunAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlySet<int> repoIds,
         bool synchronizedPush,
         IReadOnlySet<string> requiredPackageIds,
@@ -48,6 +50,7 @@ public sealed class PushOrchestrator(
                 setProgress("Pushing synchronized...");
                 await workspacePushService.RunPushAsync(
                     workspaceId,
+                    contextId,
                     repoIds,
                     setProgress,
                     sink.Repository,
@@ -64,6 +67,7 @@ public sealed class PushOrchestrator(
                 setProgress("Pushing...");
                 await workspacePushService.RunPushReposParallelAsync(
                     workspaceId,
+                    contextId,
                     repoIds,
                     setProgress,
                     sink.Repository,
@@ -91,6 +95,7 @@ public sealed class PushOrchestrator(
 
     public async Task<OperationResult> PushSingleAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         string? branchName,
         IProgress<OperationProgress>? progress,
@@ -98,6 +103,7 @@ public sealed class PushOrchestrator(
     {
         var (success, errorMessage) = await workspacePushService.PushSingleRepositoryWithUpstreamAsync(
             workspaceId,
+            contextId,
             repositoryId,
             branchName,
             progress.ToMessageAction(),
@@ -107,4 +113,3 @@ public sealed class PushOrchestrator(
             : OperationResult.Fail(errorMessage ?? "Push failed.");
     }
 }
-

@@ -32,6 +32,7 @@ public sealed class WorkspaceCommitSyncHandler(
 {
     public async Task CommitSyncAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         CancellationToken cancellationToken,
         IProgress<OperationProgress>? progress,
@@ -63,8 +64,7 @@ public sealed class WorkspaceCommitSyncHandler(
         try
         {
             await connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepositoryId, cancellationToken);
-            var specialContextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspace.WorkspaceId, cancellationToken);
-            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(specialContextId, cancellationToken);
+            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
             var args = new
             {
                 workspaceName = workspaceFolderName,
@@ -88,7 +88,7 @@ public sealed class WorkspaceCommitSyncHandler(
             }
 
             var result = AgentResponseJson.DeserializeAgentResponse<CommitSyncResponse>(response.Data);
-            await ApplyResultToDbAsync(dbContext, stateWriter, workspaceId, repositoryId, result, cancellationToken);
+            await ApplyResultToDbAsync(dbContext, stateWriter, contextId, workspaceId, repositoryId, result, cancellationToken);
             await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
 
             if (result != null && !string.IsNullOrWhiteSpace(result.ErrorMessage))
@@ -113,6 +113,7 @@ public sealed class WorkspaceCommitSyncHandler(
 
     public async Task CommitSyncLevelAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlyList<int> repositoryIds,
         CancellationToken cancellationToken,
         Func<int, int, Task> reportProgress,
@@ -135,8 +136,7 @@ public sealed class WorkspaceCommitSyncHandler(
             return;
         }
 
-        var specialContextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspace.WorkspaceId, cancellationToken);
-            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(specialContextId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
         var total = repositoryIds.Count;
         var completedCount = 0;
 
@@ -183,7 +183,7 @@ public sealed class WorkspaceCommitSyncHandler(
                 }
 
                 var result = AgentResponseJson.DeserializeAgentResponse<CommitSyncResponse>(response.Data);
-                await ApplyResultToDbAsync(scopedDbContext, scopedStateWriter, workspaceId, repositoryId, result, cancellationToken);
+                await ApplyResultToDbAsync(scopedDbContext, scopedStateWriter, contextId, workspaceId, repositoryId, result, cancellationToken);
                 await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
 
                 if (result != null && !string.IsNullOrWhiteSpace(result.ErrorMessage))
@@ -218,6 +218,7 @@ public sealed class WorkspaceCommitSyncHandler(
     private static async Task ApplyResultToDbAsync(
         AppDbContext db,
         WorkspaceRepositoryStateWriter stateWriter,
+        WorkspaceFeatureContextId contextId,
         int workspaceId,
         int repositoryId,
         CommitSyncResponse? result,
@@ -230,7 +231,7 @@ public sealed class WorkspaceCommitSyncHandler(
         }
 
         var statusWrite = result.Success && !result.MergeConflict ? SyncStatusWrite.InSync : SyncStatusWrite.Error;
-        await stateWriter.ApplyAsync(workspaceId, repositoryId, BuildSnapshot(result), new RepositoryStateWriteOptions
+        await stateWriter.ApplyAsync(contextId, workspaceId, repositoryId, BuildSnapshot(result), new RepositoryStateWriteOptions
         {
             SyncStatus = statusWrite
         }, ct);

@@ -1,5 +1,6 @@
 using GrayMoon.App.Models;
 using GrayMoon.App.Services.Queries;
+using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Services.Orchestration;
 
@@ -11,6 +12,7 @@ public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, I
 {
     public async Task<IReadOnlyDictionary<int, RepoGitVersionInfo>> RunSyncAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlyList<int>? repositoryIds,
         bool skipDependencyLevelPersistence,
         CancellationToken cancellationToken,
@@ -26,6 +28,7 @@ public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, I
         {
             var results = await workspaceGitService.SyncAsync(
                 workspaceId,
+                contextId,
                 onProgress: (completed, total, repoId, info) =>
                 {
                     progress.Report($"Synchronized {completed} of {total}", completed, total);
@@ -54,6 +57,7 @@ public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, I
     /// </summary>
     public async Task<ReturnToDefaultPlan> AnalyzeReturnToDefaultAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlyList<int> repositoryIds,
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken)
@@ -91,7 +95,7 @@ public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, I
             bool fetched;
             try
             {
-                fetched = await git.RefreshBranchesForRepositoryAsync(repoId, workspaceId, cancellationToken);
+                fetched = await git.RefreshBranchesForRepositoryAsync(repoId, workspaceId, contextId, cancellationToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -137,6 +141,7 @@ public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, I
     /// </summary>
     public async Task<OperationResult> ExecuteReturnToDefaultAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlyList<int> repositoryIds,
         ReturnToDefaultOptions options,
         IProgress<OperationProgress>? progress,
@@ -203,6 +208,7 @@ public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, I
             var deleteRemote = options.DeleteRemoteBranch && dto.BranchHasUpstream == true;
             var (success, errMsg) = await git.ReturnToDefaultDirectAsync(
                 workspaceId,
+                contextId,
                 repoId,
                 dto.BranchName!,
                 deleteRemoteBranch: deleteRemote,
@@ -218,7 +224,7 @@ public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, I
                 progress.Report($"Returned {synced + repoErrors.Count} of {ids.Count} to default branch", synced + repoErrors.Count, ids.Count);
         }
 
-        await git.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
+        await git.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, contextId, cancellationToken);
 
         return repoErrors.Count == 0
             ? OperationResult.Ok()
@@ -231,6 +237,7 @@ public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, I
     /// </summary>
     public async Task<UnattendedReturnToDefaultResult> ReturnToDefaultUnattendedAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlyList<int> repositoryIds,
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken)
@@ -243,7 +250,7 @@ public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, I
 
         try
         {
-            var plan = await AnalyzeReturnToDefaultAsync(workspaceId, ids, progress, cancellationToken);
+            var plan = await AnalyzeReturnToDefaultAsync(workspaceId, contextId, ids, progress, cancellationToken);
 
             if (plan.AnalysisFailed)
                 return new UnattendedReturnToDefaultResult(false, plan.AnalysisError ?? "Return to default was aborted.");
@@ -280,6 +287,7 @@ public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, I
                 // Unattended policy: delete remote when upstream exists; always allow force-delete local; never close PRs.
                 var (success, errMsg) = await git.ReturnToDefaultDirectAsync(
                     workspaceId,
+                    contextId,
                     repo.RepositoryId,
                     repo.CurrentBranch!,
                     deleteRemoteBranch: repo.HasUpstream,
@@ -288,7 +296,7 @@ public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, I
 
                 if (!success)
                 {
-                    await git.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
+                    await git.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, contextId, cancellationToken);
                     return new UnattendedReturnToDefaultResult(false, errMsg ?? "Return to default failed. Return to default was aborted.");
                 }
 
@@ -297,7 +305,7 @@ public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, I
                     progress.Report($"Returned {synced} of {actionable.Count} to default branch", synced, actionable.Count);
             }
 
-            await git.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
+            await git.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, contextId, cancellationToken);
             return new UnattendedReturnToDefaultResult(true, null);
         }
         catch (OperationCanceledException)

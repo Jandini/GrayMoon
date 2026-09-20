@@ -1101,7 +1101,7 @@
 
         try
         {
-            var outcome = await BranchOperations.DeleteBranchAsync(WorkspaceId, RepositoryId, branchToDelete, deleteIsRemote, force);
+            var outcome = await BranchOperations.DeleteBranchAsync(WorkspaceId, ViewingContextId!.Value, RepositoryId, branchToDelete, deleteIsRemote, force);
             if (outcome.IsSuccessStatus)
             {
                 var data = outcome.Body as DeleteBranchApiResult;
@@ -1243,7 +1243,7 @@
 
         try
         {
-            var outcome = await BranchOperations.RefreshBranchesAsync(WorkspaceId, RepositoryId);
+            var outcome = await BranchOperations.RefreshBranchesAsync(WorkspaceId, ViewingContextId!.Value, RepositoryId);
             if (outcome.IsSuccessStatus)
             {
                 ApplyBranchLists(outcome.Body);

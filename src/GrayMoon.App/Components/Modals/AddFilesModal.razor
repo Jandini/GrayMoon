@@ -2,6 +2,7 @@
 @using GrayMoon.App.Models
 @using GrayMoon.App.Models.Api
 @using GrayMoon.App.Services
+@using GrayMoon.Application.Features
 @inject IWorkspaceFileSearchService FileSearchService
 @inject ILogger<AddFilesModal> Logger
 
@@ -168,6 +169,7 @@
 
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public int WorkspaceId { get; set; }
+    [Parameter] public WorkspaceFeatureContextId ContextId { get; set; }
     [Parameter] public List<WorkspaceRepoItem> WorkspaceRepos { get; set; } = new();
     [Parameter] public EventCallback<List<WorkspaceFileAddItem>> OnAdd { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
@@ -259,7 +261,7 @@
         try
         {
             var effectivePattern = EffectiveSearchPattern(trimmed);
-            var data = await FileSearchService.SearchAsync(WorkspaceId, effectivePattern, selectedRepositoryName);
+            var data = await FileSearchService.SearchAsync(WorkspaceId, ContextId, effectivePattern, selectedRepositoryName);
             if (data != null)
             {
                 searchResults = data;

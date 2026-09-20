@@ -48,13 +48,13 @@ public sealed partial class WorkspaceGitChanges
                 return;
             }
 
-            if (link?.Workspace == null || link.Repository == null)
+            if (link?.Workspace == null || link.Repository == null || _selectedContextId is null)
             {
                 _diffError = "Repository not found.";
                 return;
             }
 
-            var root = await WorkspaceService.GetRootPathForWorkspaceAsync(link.Workspace);
+            var (root, folderName) = await PathResolver.GetAgentWorkspaceArgsAsync(_selectedContextId.Value);
             if (requestVersion != _diffRequestVersion)
             {
                 return;
@@ -74,7 +74,7 @@ public sealed partial class WorkspaceGitChanges
                 // LoadingOverlay terminal, even when LoadDiffAsync runs inside one (e.g. restoring a
                 // remembered selection right after a Refresh job's reload).
                 result = await AgentClient.GetDiffAsync(
-                    root, link.Workspace.Name, link.Repository.RepositoryName, row.FilePath!, comparison, CancellationToken.None);
+                    root, folderName, link.Repository.RepositoryName, row.FilePath!, comparison, CancellationToken.None);
             }
 
             if (requestVersion != _diffRequestVersion)

@@ -81,8 +81,6 @@ public sealed class WorkspaceFacadeOperationsTests
             null!,
             null!,
             null!,
-            null!,
-            null!,
             null!);
 
         Assert.Null(await operations.ListAsync(999, CancellationToken.None));

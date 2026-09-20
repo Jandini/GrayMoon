@@ -2,6 +2,7 @@ using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services.Jobs;
+using GrayMoon.App.Services.Workspaces;
 using GrayMoon.Application.Features;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -90,6 +91,77 @@ public sealed class FeatureContextIsolationTests
 
         Assert.Equal(1, specialRows);
         Assert.Equal(1, featureRows);
+    }
+
+    [Fact]
+    public async Task Path_resolver_feature_root_differs_from_special_workspace()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await using var scope = ctx.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var resolver = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureContextResolver>();
+        var pathResolver = scope.ServiceProvider.GetRequiredService<IWorkspaceContextPathResolver>();
+        var workspaceService = scope.ServiceProvider.GetRequiredService<WorkspaceService>();
+
+        var special = await resolver.GetOrCreateSpecialWorkspaceContextIdAsync(ctx.WorkspaceId);
+        var feature = await CreateFeatureContextAsync(db, ctx.WorkspaceId, "feat-path");
+
+        await using var seedDb = await scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>()
+            .CreateDbContextAsync();
+        var workspace = await seedDb.Workspaces.FirstAsync(w => w.WorkspaceId == ctx.WorkspaceId);
+        workspace.RootPath = @"C:\Workspace";
+        workspace.ManagedFeatureStorageRoot = @"C:\Workspace\.graymoon\test-ws\features";
+        await seedDb.SaveChangesAsync();
+
+        var (specialRoot, specialFolder) = await pathResolver.GetAgentWorkspaceArgsAsync(special);
+        var (featureRoot, featureFolder) = await pathResolver.GetAgentWorkspaceArgsAsync(feature);
+
+        Assert.Equal("test-ws", specialFolder);
+        Assert.Equal("feat-path", featureFolder);
+        Assert.False(string.Equals(specialRoot, featureRoot, StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(".graymoon", featureRoot, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("feat-path", specialRoot, StringComparison.OrdinalIgnoreCase);
+
+        var structuralRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace);
+        Assert.Equal(@"C:\Workspace", structuralRoot);
+    }
+
+    [Fact]
+    public async Task Path_resolver_repository_path_uses_feature_worktree_when_present()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await using var scope = ctx.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var resolver = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureContextResolver>();
+        var pathResolver = scope.ServiceProvider.GetRequiredService<IWorkspaceContextPathResolver>();
+
+        var feature = await CreateFeatureContextAsync(db, ctx.WorkspaceId, "feat-wt");
+        const string worktreePath = @"C:\Workspace\.graymoon\test-ws\features\feat-wt\graymoon-api";
+
+        db.WorkspaceFeatureRepositories.Add(new WorkspaceFeatureRepository
+        {
+            WorkspaceFeatureContextId = feature.Value,
+            WorkspaceRepositoryId = ctx.WorkspaceRepositoryId,
+            WorktreePath = worktreePath,
+            State = WorkspaceFeatureRepositoryState.Ready,
+            BaseCommitSha = "abc123",
+            CreatedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var resolved = await pathResolver.GetRepositoryPathAsync(feature, ctx.WorkspaceRepositoryId);
+        Assert.Equal(worktreePath, resolved);
+
+        var special = await resolver.GetOrCreateSpecialWorkspaceContextIdAsync(ctx.WorkspaceId);
+        await using var seedDb = await scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>()
+            .CreateDbContextAsync();
+        var workspace = await seedDb.Workspaces.FirstAsync(w => w.WorkspaceId == ctx.WorkspaceId);
+        workspace.RootPath = @"C:\Workspace";
+        await seedDb.SaveChangesAsync();
+
+        var specialRepoPath = await pathResolver.GetRepositoryPathAsync(special, ctx.WorkspaceRepositoryId);
+        Assert.DoesNotContain("feat-wt", specialRepoPath, StringComparison.OrdinalIgnoreCase);
+        Assert.False(string.Equals(worktreePath, specialRepoPath, StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

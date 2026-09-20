@@ -1,5 +1,6 @@
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
+using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Services.Application;
 
@@ -62,6 +63,7 @@ public sealed class WorkspacePushOperations(
 
     public Task<OperationResult> PushAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlySet<int> repositoryIds,
         bool synchronizedPush,
         IReadOnlySet<string> requiredPackageIds,
@@ -72,6 +74,7 @@ public sealed class WorkspacePushOperations(
         bool restorePackages = true)
         => pushHandler.RunPushWithDependenciesAsync(
             workspaceId,
+            contextId,
             repositoryIds,
             synchronizedPush,
             requiredPackageIds,
@@ -83,6 +86,7 @@ public sealed class WorkspacePushOperations(
 
     public async Task<OperationResult> PushPendingAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         bool synchronizedPush,
         IProgress<OperationProgress>? progress = null,
         CancellationToken cancellationToken = default)
@@ -93,6 +97,7 @@ public sealed class WorkspacePushOperations(
 
         return await PushAsync(
             workspaceId,
+            contextId,
             plan.RepositoryIds,
             synchronizedPush,
             plan.RequiredPackageIds,
@@ -102,12 +107,14 @@ public sealed class WorkspacePushOperations(
 
     public Task<OperationResult> PushSingleAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         string? branchName,
         IProgress<OperationProgress>? progress = null,
         CancellationToken cancellationToken = default)
         => pushHandler.PushSingleRepositoryWithUpstreamAsync(
             workspaceId,
+            contextId,
             repositoryId,
             branchName,
             progress,

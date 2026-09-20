@@ -437,7 +437,7 @@ public sealed partial class WorkspaceRepositories
             try
             {
                 syncResult = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, UnattendedReturnToDefaultResult>(
-                    svc => svc.ReturnToDefaultAsync(WorkspaceId, [row.RepositoryId], progress, ct));
+                    svc => svc.ReturnToDefaultAsync(WorkspaceId, RequireSelectedContextId(), [row.RepositoryId], progress, ct));
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

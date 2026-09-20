@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using GrayMoon.Application.Features;
 using GrayMoon.Common.Git;
 using Microsoft.Extensions.Options;
 
@@ -26,6 +27,7 @@ public interface IGitChangesLineStatsRefresh
 
 public sealed class GitChangesLineStatsRefresh(
     IGitChangesWorkspaceScanner scanner,
+    IServiceScopeFactory scopeFactory,
     IOptions<GitChangesOptions> options,
     ILogger<GitChangesLineStatsRefresh> logger) : IGitChangesLineStatsRefresh
 {
@@ -102,7 +104,11 @@ public sealed class GitChangesLineStatsRefresh(
     {
         try
         {
-            await scanner.ScanWorkspaceAsync(workspaceId, CancellationToken.None, includeLineStats: true);
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var contextResolver = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureContextResolver>();
+            var contexts = await contextResolver.ListForWorkspaceAsync(workspaceId);
+            foreach (var ctx in contexts)
+                await scanner.ScanWorkspaceAsync(workspaceId, ctx.ContextId, CancellationToken.None, includeLineStats: true);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -132,11 +138,18 @@ public sealed class GitChangesLineStatsRefresh(
                 return;
             }
 
-            await scanner.ScanWorkspaceAsync(
-                key.WorkspaceId,
-                cts.Token,
-                includeLineStats: true,
-                repositoryId: key.RepositoryId);
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var contextResolver = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureContextResolver>();
+            var contexts = await contextResolver.ListForWorkspaceAsync(key.WorkspaceId, cts.Token);
+            foreach (var ctx in contexts)
+            {
+                await scanner.ScanWorkspaceAsync(
+                    key.WorkspaceId,
+                    ctx.ContextId,
+                    cts.Token,
+                    includeLineStats: true,
+                    repositoryId: key.RepositoryId);
+            }
         }
         catch (OperationCanceledException)
         {

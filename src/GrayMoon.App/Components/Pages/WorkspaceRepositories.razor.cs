@@ -95,6 +95,10 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         }
     }
 
+    private WorkspaceFeatureContextId RequireSelectedContextId()
+        => _selectedContextId
+           ?? throw new InvalidOperationException("Workspace Feature context is not resolved for this page.");
+
     private async Task OnSelectedContextChangedAsync(WorkspaceFeatureContextId contextId)
     {
         var info = await FeatureContextResolver.GetRequiredAsync(contextId, WorkspaceId);

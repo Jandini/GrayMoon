@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using GrayMoon.App.Api.Endpoints;
 using GrayMoon.App.Models.Api;
+using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Services.Orchestration;
 
@@ -29,6 +30,7 @@ public sealed class WorkspaceBranchHandler(
 
     public async Task<IReadOnlyDictionary<int, string>> CreateBranchesAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         string newBranchName,
         string baseBranch,
         IReadOnlySet<int>? repositoryIds,
@@ -41,6 +43,7 @@ public sealed class WorkspaceBranchHandler(
 
         return await workspaceGitService.CreateBranchesAsync(
             workspaceId,
+            contextId,
             newBranchName,
             baseBranch,
             onProgress: (completed, total) =>
@@ -52,13 +55,14 @@ public sealed class WorkspaceBranchHandler(
 
     public async Task<(bool Success, string? Error)> CreateSingleBranchAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         string newBranchName,
         string baseBranch,
         bool setUpstream,
         CancellationToken cancellationToken)
     {
-        var create = await branchOperations.CreateBranchAsync(workspaceId, repositoryId, newBranchName, baseBranch, cancellationToken);
+        var create = await branchOperations.CreateBranchAsync(workspaceId, contextId, repositoryId, newBranchName, baseBranch, cancellationToken);
         if (!create.IsSuccessStatus)
         {
             logger.LogError("Create branch failed: {StatusCode}, {Error}", create.StatusCode, create.ErrorText);
@@ -71,7 +75,7 @@ public sealed class WorkspaceBranchHandler(
 
         if (setUpstream)
         {
-            var upstream = await branchOperations.SetUpstreamAsync(workspaceId, repositoryId, newBranchName, cancellationToken);
+            var upstream = await branchOperations.SetUpstreamAsync(workspaceId, contextId, repositoryId, newBranchName, cancellationToken);
             if (!upstream.IsSuccessStatus)
             {
                 logger.LogWarning("Set upstream failed: {StatusCode}, {Error}", upstream.StatusCode, upstream.ErrorText);
@@ -88,20 +92,22 @@ public sealed class WorkspaceBranchHandler(
 
     public Task<(bool Success, string? ErrorMessage)> CheckoutBranchAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         string branchName,
         CancellationToken cancellationToken)
-        => CheckoutBranchAsync(workspaceId, repositoryId, branchName, isTag: false, cancellationToken);
+        => CheckoutBranchAsync(workspaceId, contextId, repositoryId, branchName, isTag: false, cancellationToken);
 
     public async Task<(bool Success, string? ErrorMessage)> CheckoutBranchAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         string branchName,
         bool isTag,
         CancellationToken cancellationToken)
     {
         var failureLabel = isTag ? "Failed to checkout tag." : "Failed to checkout branch.";
-        var outcome = await branchOperations.CheckoutAsync(workspaceId, repositoryId, branchName, isTag, cancellationToken);
+        var outcome = await branchOperations.CheckoutAsync(workspaceId, contextId, repositoryId, branchName, isTag, cancellationToken);
 
         if (outcome.IsSuccessStatus)
         {
@@ -119,6 +125,7 @@ public sealed class WorkspaceBranchHandler(
 
     public async Task<(bool Success, string? ErrorMessage)> ReturnToDefaultSingleAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         string? currentBranchName,
         bool deleteRemoteBranch,
@@ -127,6 +134,7 @@ public sealed class WorkspaceBranchHandler(
     {
         var outcome = await branchOperations.ReturnToDefaultAsync(
             workspaceId,
+            contextId,
             repositoryId,
             currentBranchName,
             deleteRemoteBranch,
@@ -143,6 +151,7 @@ public sealed class WorkspaceBranchHandler(
 
     public async Task<WorkspaceBranchBulkResult> FetchBranchesForWorkspaceAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlyCollection<int> repositoryIds,
         Action<int, int>? reportProgress,
         CancellationToken cancellationToken)
@@ -162,7 +171,7 @@ public sealed class WorkspaceBranchHandler(
             {
                 await using var scope = serviceScopeFactory.CreateAsyncScope();
                 var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceBranchOperations>();
-                var outcome = await ops.RefreshBranchesAsync(workspaceId, repositoryId, cancellationToken);
+                var outcome = await ops.RefreshBranchesAsync(workspaceId, contextId, repositoryId, cancellationToken);
                 if (!outcome.IsSuccessStatus)
                 {
                     errors[repositoryId] = outcome.ErrorText ?? $"Failed to fetch branches: {outcome.StatusCode}";
@@ -197,6 +206,7 @@ public sealed class WorkspaceBranchHandler(
 
     public async Task<WorkspaceBranchBulkResult> CheckoutBranchForWorkspaceAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlyCollection<int> repositoryIds,
         string branchName,
         Action<int, int>? reportProgress,
@@ -217,7 +227,7 @@ public sealed class WorkspaceBranchHandler(
             {
                 await using var scope = serviceScopeFactory.CreateAsyncScope();
                 var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceBranchOperations>();
-                var outcome = await ops.CheckoutAsync(workspaceId, repositoryId, branchName, isTag: false, cancellationToken);
+                var outcome = await ops.CheckoutAsync(workspaceId, contextId, repositoryId, branchName, isTag: false, cancellationToken);
                 if (!outcome.IsSuccessStatus)
                 {
                     errors[repositoryId] = outcome.ErrorText ?? $"Failed to checkout branch: {outcome.StatusCode}";

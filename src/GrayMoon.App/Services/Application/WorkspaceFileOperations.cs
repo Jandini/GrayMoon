@@ -1,6 +1,5 @@
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
-
 using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Services.Application;
@@ -8,11 +7,9 @@ namespace GrayMoon.App.Services.Application;
 public sealed class WorkspaceFileOperations(
     WorkspaceRepository workspaceRepository,
     WorkspaceFileRepository fileRepository,
-    WorkspaceService workspaceService,
     IAgentBridge agentBridge,
     WorkspaceFileVersionService fileVersionService,
     WorkspaceGitService workspaceGitService,
-    IWorkspaceFeatureContextResolver contextResolver,
     IWorkspaceContextPathResolver pathResolver) : IWorkspaceFileOperations
 {
     public async Task<List<WorkspaceFileDto>?> ListAsync(int workspaceId, CancellationToken cancellationToken)
@@ -62,6 +59,7 @@ public sealed class WorkspaceFileOperations(
 
     public async Task<(bool Found, bool AgentConnected, AgentSearchFilesResponse? Data, string? Error)> SearchAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         string? pattern,
         string? repositoryName,
         CancellationToken cancellationToken)
@@ -73,8 +71,7 @@ public sealed class WorkspaceFileOperations(
         if (!agentBridge.IsAgentConnected)
             return (true, false, null, "Agent not connected. Start GrayMoon.Agent to search files.");
 
-        var specialContextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspace.WorkspaceId, cancellationToken);
-            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(specialContextId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
         var searchPattern = string.IsNullOrWhiteSpace(pattern) ? "*" : pattern.Trim();
         var response = await agentBridge.SendCommandAsync("SearchFiles", new
         {
@@ -94,6 +91,7 @@ public sealed class WorkspaceFileOperations(
 
     public async Task<WorkspaceFileVersionUpdateResult> UpdateVersionsAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken,
         IReadOnlySet<int>? selectedRepositoryIds = null,
         bool filterPatternTokensToSelectedRepositories = true,
@@ -104,6 +102,7 @@ public sealed class WorkspaceFileOperations(
         progress.Report("Updating file versions...");
         var (updated, failed, error, updatedFiles) = await fileVersionService.UpdateAllVersionsAsync(
             workspaceId,
+            contextId,
             selectedRepositoryIds: selectedRepositoryIds,
             filterPatternTokensToSelectedRepositories: filterPatternTokensToSelectedRepositories,
             cancellationToken: cancellationToken);
@@ -124,6 +123,7 @@ public sealed class WorkspaceFileOperations(
                 .ToList();
             var commitResults = await workspaceGitService.CommitFilePathsAsync(
                 workspaceId,
+                contextId,
                 byRepo,
                 onProgress: (c, t, _) => progress.Report($"Committed version files {c} of {t}", c, t),
                 cancellationToken: cancellationToken);
@@ -137,7 +137,7 @@ public sealed class WorkspaceFileOperations(
         if (checkAfter)
         {
             progress.Report("Checking file versions...");
-            await fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, cancellationToken, forceFresh: true);
+            await fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, contextId, cancellationToken, forceFresh: true);
         }
 
         return new WorkspaceFileVersionUpdateResult(updated, failed, null, mappedFiles);

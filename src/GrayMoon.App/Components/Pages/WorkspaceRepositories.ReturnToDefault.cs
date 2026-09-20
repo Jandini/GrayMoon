@@ -37,7 +37,7 @@ public sealed partial class WorkspaceRepositories
                 try
                 {
                     var plan = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, ReturnToDefaultPlan>(
-                        svc => svc.AnalyzeReturnToDefaultAsync(WorkspaceId, repositoryIds, job.ToOperationProgress(), ct));
+                        svc => svc.AnalyzeReturnToDefaultAsync(WorkspaceId, RequireSelectedContextId(), repositoryIds, job.ToOperationProgress(), ct));
 
                     if (plan.AnalysisFailed)
                     {
@@ -121,7 +121,7 @@ public sealed partial class WorkspaceRepositories
         try
         {
             var plan = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, ReturnToDefaultPlan>(
-                svc => svc.AnalyzeReturnToDefaultAsync(WorkspaceId, [repositoryId], progress: null, CancellationToken.None));
+                svc => svc.AnalyzeReturnToDefaultAsync(WorkspaceId, RequireSelectedContextId(), [repositoryId], progress: null, CancellationToken.None));
 
             if (plan.AnalysisFailed)
             {
@@ -204,7 +204,7 @@ public sealed partial class WorkspaceRepositories
                 CloseOpenPullRequest: false);
 
             var result = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, OperationResult>(
-                svc => svc.ExecuteReturnToDefaultAsync(WorkspaceId, [repositoryId], options, job.ToOperationProgress(), ct));
+                svc => svc.ExecuteReturnToDefaultAsync(WorkspaceId, RequireSelectedContextId(), [repositoryId], options, job.ToOperationProgress(), ct));
 
             if (result.Success)
             {
@@ -252,7 +252,7 @@ public sealed partial class WorkspaceRepositories
                 CloseOpenPullRequest: false);
 
             var result = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, OperationResult>(
-                svc => svc.ExecuteReturnToDefaultAsync(WorkspaceId, repositoryIds, options, job.ToOperationProgress(), ct));
+                svc => svc.ExecuteReturnToDefaultAsync(WorkspaceId, RequireSelectedContextId(), repositoryIds, options, job.ToOperationProgress(), ct));
 
             SafeInvoke(() =>
             {
@@ -314,7 +314,7 @@ public sealed partial class WorkspaceRepositories
                 try
                 {
                     var plan = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, ReturnToDefaultPlan>(
-                        svc => svc.AnalyzeReturnToDefaultAsync(WorkspaceId, eligibleIds, job.ToOperationProgress(), ct));
+                        svc => svc.AnalyzeReturnToDefaultAsync(WorkspaceId, RequireSelectedContextId(), eligibleIds, job.ToOperationProgress(), ct));
 
                     if (plan.AnalysisFailed)
                     {
@@ -382,7 +382,7 @@ public sealed partial class WorkspaceRepositories
                 CloseOpenPullRequest: true);
 
             var result = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, OperationResult>(
-                svc => svc.ExecuteReturnToDefaultAsync(WorkspaceId, repositoryIds, options, job.ToOperationProgress(), ct));
+                svc => svc.ExecuteReturnToDefaultAsync(WorkspaceId, RequireSelectedContextId(), repositoryIds, options, job.ToOperationProgress(), ct));
 
             var failureCount = result.RepoErrors?.Count ?? 0;
             var successCount = total - failureCount;

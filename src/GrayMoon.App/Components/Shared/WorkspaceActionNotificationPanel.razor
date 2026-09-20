@@ -2,6 +2,7 @@
 @implements IDisposable
 @using GrayMoon.App.Models
 @using GrayMoon.App.Repositories
+@using GrayMoon.Application.Features
 @using Microsoft.AspNetCore.SignalR.Client
 @inject WorkspacePendingActionsService PendingActionsService
 @inject IServiceScopeFactory ServiceScopeFactory
@@ -450,7 +451,8 @@
             {
                 await using var scope = ServiceScopeFactory.CreateAsyncScope();
                 var syncOps = scope.ServiceProvider.GetRequiredService<IWorkspaceSyncOperations>();
-                var result = await syncOps.UndoPushAsync(workspaceId, keepChanges, job.ToOperationProgress(), ct);
+                var contextId = await ResolveOperationContextAsync(scope.ServiceProvider, workspaceId, ct);
+                var result = await syncOps.UndoPushAsync(workspaceId, contextId, keepChanges, job.ToOperationProgress(), ct);
                 result.ShowRepoErrors(msg => { if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError(msg)); });
             }
             catch (OperationCanceledException) { throw; }
@@ -573,8 +575,10 @@
 
                 await using var scope = ServiceScopeFactory.CreateAsyncScope();
                 var updateOps = scope.ServiceProvider.GetRequiredService<IWorkspaceUpdateOperations>();
+                var contextId = await ResolveOperationContextAsync(scope.ServiceProvider, workspaceId, ct);
                 await updateOps.UpdateAsync(
                     workspaceId,
+                    contextId,
                     ct,
                     job.ToOperationProgress(),
                     (_, _) => { },
@@ -636,8 +640,10 @@
 
                 await using var updateScope = ServiceScopeFactory.CreateAsyncScope();
                 var updateOps = updateScope.ServiceProvider.GetRequiredService<IWorkspaceUpdateOperations>();
+                var contextId = await ResolveOperationContextAsync(updateScope.ServiceProvider, workspaceId, ct);
                 await updateOps.UpdateAsync(
                     workspaceId,
+                    contextId,
                     ct,
                     job.ToOperationProgress(),
                     (_, _) => { },
@@ -719,8 +725,10 @@
 
                 await using var updateScope = ServiceScopeFactory.CreateAsyncScope();
                 var updateOps = updateScope.ServiceProvider.GetRequiredService<IWorkspaceUpdateOperations>();
+                var contextId = await ResolveOperationContextAsync(updateScope.ServiceProvider, workspaceId, ct);
                 await updateOps.UpdateAsync(
                     workspaceId,
+                    contextId,
                     ct,
                     job.ToOperationProgress(),
                     (_, _) => { },
@@ -769,8 +777,10 @@
             {
                 await using var scope = ServiceScopeFactory.CreateAsyncScope();
                 var fileOps = scope.ServiceProvider.GetRequiredService<IWorkspaceFileOperations>();
+                var contextId = await ResolveOperationContextAsync(scope.ServiceProvider, workspaceId, ct);
                 var result = await fileOps.UpdateVersionsAsync(
                     workspaceId,
+                    contextId,
                     ct,
                     checkAfter: true,
                     progress: job.ToOperationProgress());
@@ -849,6 +859,7 @@
     {
         await using var scope = ServiceScopeFactory.CreateAsyncScope();
         var pushOps = scope.ServiceProvider.GetRequiredService<IWorkspacePushOperations>();
+                var contextId = await ResolveOperationContextAsync(scope.ServiceProvider, workspaceId, ct);
         var depService = scope.ServiceProvider.GetRequiredService<WorkspaceDependencyService>();
 
         var plan = await pushOps.GetPlanAsync(workspaceId, maxLevel, ct);
@@ -875,6 +886,7 @@
 
         var pushResult = await pushOps.PushAsync(
             workspaceId,
+            contextId,
             pushRepoIds,
             synchronizedPush,
             requiredPackageIds,
@@ -991,8 +1003,10 @@
             {
                 await using var scope = ServiceScopeFactory.CreateAsyncScope();
                 var pushOps = scope.ServiceProvider.GetRequiredService<IWorkspacePushOperations>();
+                var contextId = await ResolveOperationContextAsync(scope.ServiceProvider, workspaceId, ct);
                 var result = await pushOps.PushAsync(
                     workspaceId,
+                    contextId,
                     repoIds,
                     synchronizedPush,
                     requiredPackageIds,
@@ -1021,8 +1035,10 @@
             {
                 await using var scope = ServiceScopeFactory.CreateAsyncScope();
                 var pushOps = scope.ServiceProvider.GetRequiredService<IWorkspacePushOperations>();
+                var contextId = await ResolveOperationContextAsync(scope.ServiceProvider, workspaceId, ct);
                 var result = await pushOps.PushSingleAsync(
                     workspaceId,
+                    contextId,
                     repositoryId,
                     branchName,
                     job.ToOperationProgress(),
@@ -1051,7 +1067,8 @@
             {
                 await using var scope = ServiceScopeFactory.CreateAsyncScope();
                 var syncOps = scope.ServiceProvider.GetRequiredService<IWorkspaceSyncOperations>();
-                var result = await syncOps.PullAsync(workspaceId, repositoryId, job.ToOperationProgress(), ct);
+                var contextId = await ResolveOperationContextAsync(scope.ServiceProvider, workspaceId, ct);
+                var result = await syncOps.PullAsync(workspaceId, contextId, repositoryId, job.ToOperationProgress(), ct);
                 result.ShowRepoErrors(msg => { if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError(msg)); });
             }
             catch (OperationCanceledException) { throw; }
@@ -1088,9 +1105,10 @@
                 if (repoIds.Count == 0) return;
 
                 var syncOps = scope.ServiceProvider.GetRequiredService<IWorkspaceSyncOperations>();
+                var contextId = await ResolveOperationContextAsync(scope.ServiceProvider, workspaceId, ct);
                 var result = repoIds.Count == 1
-                    ? await syncOps.PullAsync(workspaceId, repoIds[0], job.ToOperationProgress(), ct)
-                    : await syncOps.PullLevelAsync(workspaceId, repoIds, job.ToOperationProgress(), ct);
+                    ? await syncOps.PullAsync(workspaceId, contextId, repoIds[0], job.ToOperationProgress(), ct)
+                    : await syncOps.PullLevelAsync(workspaceId, contextId, repoIds, job.ToOperationProgress(), ct);
                 result.ShowRepoErrors(msg => { if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError(msg)); });
             }
             catch (OperationCanceledException) { throw; }
@@ -1102,5 +1120,16 @@
             }
         });
         return Task.CompletedTask;
+    }
+
+    private static async Task<WorkspaceFeatureContextId> ResolveOperationContextAsync(
+        IServiceProvider sp, int workspaceId, CancellationToken ct)
+    {
+        var preferred = await sp.GetRequiredService<IWorkspaceSelectedFeatureContextService>()
+            .GetSelectedAsync(workspaceId, ct);
+        if (preferred is WorkspaceFeatureContextId id)
+            return id;
+        return await sp.GetRequiredService<IWorkspaceFeatureContextResolver>()
+            .GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, ct);
     }
 }

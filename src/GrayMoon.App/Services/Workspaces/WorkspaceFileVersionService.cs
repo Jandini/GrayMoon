@@ -453,7 +453,7 @@ public sealed class WorkspaceFileVersionService(
 
         var contextInfo = await contextResolver.GetRequiredAsync(contextId, workspaceId, cancellationToken);
 
-        if (await SyncGeneratedPackageDependenciesAsync(workspaceId, cancellationToken))
+        if (await SyncGeneratedPackageDependenciesAsync(workspaceId, contextId, cancellationToken))
             await workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, cancellationToken);
 
         var configs = await versionConfigRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
@@ -646,7 +646,10 @@ public sealed class WorkspaceFileVersionService(
     /// the resulting generated <see cref="WorkspaceProject"/>/<see cref="ProjectDependency"/> rows.
     /// Returns true if the agent call succeeded (regardless of whether any generated dependency changed).
     /// </summary>
-    public async Task<bool> SyncGeneratedPackageDependenciesAsync(int workspaceId, CancellationToken cancellationToken = default)
+    public async Task<bool> SyncGeneratedPackageDependenciesAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        CancellationToken cancellationToken = default)
     {
         if (!agentBridge.IsAgentConnected) return false;
 
@@ -678,8 +681,7 @@ public sealed class WorkspaceFileVersionService(
             }
         }
 
-        var specialContextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
-        var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(specialContextId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
 
         var requestItems = csprojConfigs
             .Select(cfg => new
@@ -996,6 +998,7 @@ public sealed class WorkspaceFileVersionService(
     /// </summary>
     public async Task<IReadOnlyList<string>> ValidatePatternAgainstFileAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         string? repositoryName,
         string? filePath,
         string? pattern,
@@ -1010,8 +1013,7 @@ public sealed class WorkspaceFileVersionService(
 
         try
         {
-            var specialContextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
-            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(specialContextId, cancellationToken);
+            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
             var resp = await agentBridge.SendCommandAsync("CheckFileVersions", new
             {
                 workspaceName = workspaceFolderName,

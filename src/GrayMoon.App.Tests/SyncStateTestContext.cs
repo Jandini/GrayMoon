@@ -230,6 +230,13 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         await db.SaveChangesAsync();
     }
 
+    public async Task<WorkspaceFeatureContextId> GetSpecialContextIdAsync()
+    {
+        await using var scope = CreateScope();
+        var resolver = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureContextResolver>();
+        return await resolver.GetOrCreateSpecialWorkspaceContextIdAsync(WorkspaceId);
+    }
+
     public IReadOnlyList<(string Method, object?[] Args)> Broadcasts => HubContext.ClientsImpl.AllProxy.Sent;
 
     public async ValueTask DisposeAsync()

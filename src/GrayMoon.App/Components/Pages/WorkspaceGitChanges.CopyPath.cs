@@ -11,12 +11,23 @@ public sealed partial class WorkspaceGitChanges
     /// folder or an active text filter never changes what gets copied.</summary>
     private async Task CopyPathAsync(GitChangesTreeRow row)
     {
-        if (_workspace == null)
+        if (_workspace == null || _selectedContextId is null)
         {
             return;
         }
 
-        var root = await WorkspaceService.GetRootPathForWorkspaceAsync(_workspace);
+        string root;
+        string folderName;
+        try
+        {
+            (root, folderName) = await PathResolver.GetAgentWorkspaceArgsAsync(_selectedContextId.Value);
+        }
+        catch (Exception)
+        {
+            ToastService.ShowError("Workspace root is not configured.");
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(root))
         {
             ToastService.ShowError("Workspace root is not configured.");
@@ -25,7 +36,7 @@ public sealed partial class WorkspaceGitChanges
 
         if (row.Kind == GitChangesTreeRowKind.File)
         {
-            var path = BuildAbsoluteFilePath(root, _workspace.Name, row.RepositoryName!, row.FilePath!);
+            var path = BuildAbsoluteFilePath(root, folderName, row.RepositoryName!, row.FilePath!);
             await CopyToClipboardAsync(path, "Path copied to the clipboard");
             return;
         }
@@ -37,7 +48,7 @@ public sealed partial class WorkspaceGitChanges
             return;
         }
 
-        var text = string.Join('\n', entries.Select(e => BuildAbsoluteFilePath(root, _workspace.Name, e.RepositoryName, e.Path)));
+        var text = string.Join('\n', entries.Select(e => BuildAbsoluteFilePath(root, folderName, e.RepositoryName, e.Path)));
         await CopyToClipboardAsync(text, $"{entries.Count} path{(entries.Count == 1 ? string.Empty : "s")} copied to the clipboard");
     }
 

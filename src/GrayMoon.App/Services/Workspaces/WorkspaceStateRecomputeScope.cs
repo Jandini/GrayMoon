@@ -1,5 +1,6 @@
 using GrayMoon.App.Hubs;
 using GrayMoon.App.Repositories;
+using GrayMoon.Application.Features;
 using Microsoft.AspNetCore.SignalR;
 
 namespace GrayMoon.App.Services.Workspaces;
@@ -26,26 +27,33 @@ public sealed class WorkspaceStateRecomputeScope(
     ILogger<WorkspaceStateRecomputeScope> logger,
     WorkspaceFileVersionService? fileVersionService = null)
 {
-    /// <summary>Recomputes file-version and dependency stats for the whole workspace, then broadcasts <c>WorkspaceSynced</c> once.</summary>
-    public async Task CompleteAsync(int workspaceId, CancellationToken cancellationToken = default)
+    /// <summary>Recomputes file-version and dependency stats for the given Feature context, then broadcasts sync once.</summary>
+    public async Task CompleteAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        CancellationToken cancellationToken = default)
     {
-        await RecomputeAsync(workspaceId, cancellationToken);
+        await RecomputeAsync(workspaceId, contextId, cancellationToken);
+        await hubContext.Clients.All.SendAsync("ContextSynced", workspaceId, contextId.Value, cancellationToken);
         await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
     }
 
     /// <summary>Recomputes without broadcasting, for callers that send their own follow-up notification.</summary>
-    public async Task RecomputeAsync(int workspaceId, CancellationToken cancellationToken = default)
+    public async Task RecomputeAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        CancellationToken cancellationToken = default)
     {
         if (fileVersionService != null)
         {
             try
             {
-                await fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, cancellationToken);
+                await fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, contextId, cancellationToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 // A file-version check needs the agent; losing it must not also lose the dependency recompute.
-                logger.LogError(ex, "File version check failed for workspace {WorkspaceId}", workspaceId);
+                logger.LogError(ex, "File version check failed for workspace {WorkspaceId} context {ContextId}", workspaceId, contextId.Value);
             }
         }
 

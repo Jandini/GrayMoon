@@ -87,7 +87,7 @@ public sealed class SyncCommandHandler(
 
         var depsSw = Stopwatch.StartNew();
         var recomputeScope = scope.ServiceProvider.GetRequiredService<WorkspaceStateRecomputeScope>();
-        await recomputeScope.RecomputeAsync(n.WorkspaceId);
+        await recomputeScope.RecomputeAsync(n.WorkspaceId, contextId.Value);
         logger.LogDebug(
             "SyncCommand dependency stats persisted in {ElapsedMs}ms for workspace={WorkspaceId}, repo={RepositoryId}",
             depsSw.ElapsedMilliseconds, n.WorkspaceId, n.RepositoryId);

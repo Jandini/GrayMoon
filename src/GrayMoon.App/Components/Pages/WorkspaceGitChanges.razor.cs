@@ -32,6 +32,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     [Inject] private WorkspaceGitChangesWriteQueue WriteQueue { get; set; } = default!;
     [Inject] private IDbContextFactory<AppDbContext> DbContextFactory { get; set; } = default!;
     [Inject] private WorkspaceService WorkspaceService { get; set; } = default!;
+    [Inject] private IWorkspaceContextPathResolver PathResolver { get; set; } = default!;
     [Inject] private IAgentBridge AgentBridge { get; set; } = default!;
     [Inject] private IToastService ToastService { get; set; } = default!;
     [Inject] private NavigationManager NavigationManager { get; set; } = default!;
@@ -557,7 +558,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             ? RunRepositoryScopedMutationJobAsync(workspaceRepositoryId, isStage: true)
             : RunMutationAsync(workspaceRepositoryId, rowKey, isDiscard: false, async (_, _, _, repositoryId) =>
             {
-                var result = await GitChangesOperations.StageAsync(WorkspaceId, repositoryId, scope, paths, CancellationToken.None);
+                var result = await GitChangesOperations.StageAsync(WorkspaceId, RequireSelectedContextId(), repositoryId, scope, paths, CancellationToken.None);
                 await PersistMutationResultAsync(workspaceRepositoryId, repositoryId, result.Success, result.Snapshot, result.ErrorMessage);
             });
 
@@ -566,7 +567,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             ? RunRepositoryScopedMutationJobAsync(workspaceRepositoryId, isStage: false)
             : RunMutationAsync(workspaceRepositoryId, rowKey, isDiscard: false, async (_, _, _, repositoryId) =>
             {
-                var result = await GitChangesOperations.UnstageAsync(WorkspaceId, repositoryId, scope, paths, CancellationToken.None);
+                var result = await GitChangesOperations.UnstageAsync(WorkspaceId, RequireSelectedContextId(), repositoryId, scope, paths, CancellationToken.None);
                 await PersistMutationResultAsync(workspaceRepositoryId, repositoryId, result.Success, result.Snapshot, result.ErrorMessage);
             });
 
@@ -595,8 +596,8 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
                 }
 
                 var result = isStage
-                    ? await GitChangesOperations.StageAsync(WorkspaceId, resolved.Value.RepositoryId, GitChangeOperationScope.Repository, [], ct)
-                    : await GitChangesOperations.UnstageAsync(WorkspaceId, resolved.Value.RepositoryId, GitChangeOperationScope.Repository, [], ct);
+                    ? await GitChangesOperations.StageAsync(WorkspaceId, RequireSelectedContextId(), resolved.Value.RepositoryId, GitChangeOperationScope.Repository, [], ct)
+                    : await GitChangesOperations.UnstageAsync(WorkspaceId, RequireSelectedContextId(), resolved.Value.RepositoryId, GitChangeOperationScope.Repository, [], ct);
 
                 // reload:false - StartPageJob's own ReloadOnSuccess (properly dispatcher-marshalled via
                 // InvokeAsync) does the final LoadAsync() once this job body returns; calling LoadAsync's
@@ -697,13 +698,13 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             .Include(l => l.Repository)
             .FirstOrDefaultAsync(l => l.WorkspaceRepositoryId == workspaceRepositoryId);
 
-        if (link?.Workspace == null || link.Repository == null)
+        if (link?.Workspace == null || link.Repository == null || _selectedContextId is null)
         {
             return null;
         }
 
-        var root = await WorkspaceService.GetRootPathForWorkspaceAsync(link.Workspace);
-        return string.IsNullOrWhiteSpace(root) ? null : (root, link.Workspace.Name, link.Repository.RepositoryName, link.RepositoryId);
+        var (root, folderName) = await PathResolver.GetAgentWorkspaceArgsAsync(_selectedContextId.Value);
+        return string.IsNullOrWhiteSpace(root) ? null : (root, folderName, link.Repository.RepositoryName, link.RepositoryId);
     }
 
     public async ValueTask DisposeAsync()
@@ -728,6 +729,10 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         _selectedContextId = info.ContextId;
         StartInitialLoadJob();
     }
+
+    private WorkspaceFeatureContextId RequireSelectedContextId()
+        => _selectedContextId
+           ?? throw new InvalidOperationException("Workspace Feature context is not resolved for this page.");
 
     private async Task OnSelectedContextChangedAsync(WorkspaceFeatureContextId contextId)
     {

@@ -1,4 +1,5 @@
 using GrayMoon.App.Models;
+using GrayMoon.Application.Features;
 
 namespace GrayMoon.Application;
 
@@ -11,6 +12,7 @@ public interface IWorkspaceUpdateOperations
 
     Task<DependencyUpdateRunResult> UpdateAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken,
         IProgress<OperationProgress>? progress,
         Action<int, string> setRepositoryError,
@@ -23,11 +25,13 @@ public interface IWorkspaceUpdateOperations
 
     Task<int> RestorePackagesAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken);
 
     Task<int> RestoreSyncedPackagesAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlySet<int> syncedRepoIds,
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken);
@@ -35,6 +39,7 @@ public interface IWorkspaceUpdateOperations
     /// <summary>Update dependencies for a single repository only (refresh projects, sync deps, no commit).</summary>
     Task UpdateSingleRepositoryAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         Action<string>? onProgressMessage = null,
         Action<int, string>? onRepoError = null,
@@ -47,5 +52,6 @@ public interface IWorkspaceUpdateOperations
     /// </summary>
     Task RecomputeAndBroadcastWorkspaceSyncedAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken = default);
 }

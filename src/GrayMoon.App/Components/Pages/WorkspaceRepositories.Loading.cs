@@ -329,7 +329,7 @@ public sealed partial class WorkspaceRepositories
         try
         {
             await ScopedExecutor.ExecuteAsync<IWorkspaceBranchOperations>(
-                svc => svc.RefreshBranchesAsync(WorkspaceId, repositoryId, CancellationToken.None));
+                svc => svc.RefreshBranchesAsync(WorkspaceId, RequireSelectedContextId(), repositoryId, CancellationToken.None));
         }
         catch (Exception ex)
         {

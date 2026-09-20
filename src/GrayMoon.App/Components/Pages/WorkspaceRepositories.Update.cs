@@ -94,7 +94,7 @@ public sealed partial class WorkspaceRepositories
         {
             var updateResult = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, DependencyUpdateRunResult>(svc =>
                 svc.UpdateAsync(
-                    WorkspaceId,
+                    WorkspaceId, RequireSelectedContextId(),
                     ct,
                     job.ToOperationProgress(),
                     (repoId, msg) => SafeInvoke(() => SetRepositoryError(repoId, msg)),
@@ -270,7 +270,7 @@ public sealed partial class WorkspaceRepositories
             {
                 var updateResult = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, DependencyUpdateRunResult>(
                     svc => svc.UpdateAsync(
-                        WorkspaceId,
+                        WorkspaceId, RequireSelectedContextId(),
                         ct,
                         job.ToOperationProgress(),
                         (repoId, msg) => SafeInvoke(() => SetRepositoryError(repoId, msg)),
@@ -374,7 +374,7 @@ public sealed partial class WorkspaceRepositories
             {
                 var updateResult = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, DependencyUpdateRunResult>(
                     svc => svc.UpdateAsync(
-                        WorkspaceId,
+                        WorkspaceId, RequireSelectedContextId(),
                         ct,
                         job.ToOperationProgress(),
                         (repoId, msg) => SafeInvoke(() => SetRepositoryError(repoId, msg)),
