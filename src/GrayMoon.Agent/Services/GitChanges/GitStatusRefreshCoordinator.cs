@@ -58,7 +58,7 @@ public sealed class GitStatusRefreshCoordinator : IDisposable
         }
 
         var tracker = GetOrAddTracker(repoPath);
-        tracker.ScheduleDebouncedRefresh(_options.WatcherDebounceMilliseconds, () => _ = RunScanAsync(repoPath, tracker, CancellationToken.None));
+        tracker.ScheduleDebouncedRefresh(_options.WatcherDebounceMilliseconds, () => _ = RunWatcherScanAsync(repoPath, tracker));
     }
 
     /// <summary>Immediate scan for manual refresh / on-demand status requests. Bypasses any pending debounce
@@ -115,13 +115,31 @@ public sealed class GitStatusRefreshCoordinator : IDisposable
     private RepositoryRefreshTracker GetOrAddTracker(string repoPath) =>
         _trackers.GetOrAdd(GitChangesSnapshotCache.NormalizeKey(repoPath), _ => new RepositoryRefreshTracker());
 
+    private async Task RunWatcherScanAsync(string repoPath, RepositoryRefreshTracker tracker)
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(Math.Max(1, _options.WatcherScanTimeoutSeconds)));
+        try
+        {
+            await RunScanAsync(repoPath, tracker, cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogDebug("Watcher-driven git status scan cancelled or timed out for {RepoPath}", repoPath);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Watcher-driven git status scan failed for {RepoPath}", repoPath);
+        }
+    }
+
     private async Task<GitChangeStatusResult> RunScanAsync(string repoPath, RepositoryRefreshTracker tracker, CancellationToken cancellationToken, bool includeLineStats = false)
     {
         if (!tracker.TryBeginRefresh(out var coalescedTask))
         {
             if (coalescedTask != null)
             {
-                return await coalescedTask;
+                // Observe the caller's token so CancelCommand frees this worker without aborting the owning scan.
+                return await coalescedTask.WaitAsync(cancellationToken);
             }
 
             return new GitChangeStatusResult { Success = false, ErrorCode = "RepositoryDisposed", ErrorMessage = "Repository is no longer being monitored." };
@@ -138,39 +156,57 @@ public sealed class GitStatusRefreshCoordinator : IDisposable
     /// </summary>
     private async Task<GitChangeStatusResult> ExecuteScanLoopAsync(string repoPath, RepositoryRefreshTracker tracker, CancellationToken cancellationToken, bool includeLineStats)
     {
-        GitChangeStatusResult result;
-        while (true)
+        try
         {
-            await _statusScanGate.WaitAsync(cancellationToken);
-            try
+            GitChangeStatusResult result;
+            while (true)
             {
-                var version = _snapshotCache.NextVersion(repoPath);
-                result = await _gitChangesService.GetStatusAsync(repoPath, version, cancellationToken, includeLineStats);
-                if (result.Success && result.Snapshot != null)
+                await _statusScanGate.WaitAsync(cancellationToken);
+                try
                 {
-                    _snapshotCache.SetLatest(repoPath, result.Snapshot);
-                    SnapshotReady?.Invoke(repoPath, result.Snapshot);
+                    var version = _snapshotCache.NextVersion(repoPath);
+                    result = await _gitChangesService.GetStatusAsync(repoPath, version, cancellationToken, includeLineStats);
+                    if (result.Success && result.Snapshot != null)
+                    {
+                        _snapshotCache.SetLatest(repoPath, result.Snapshot);
+                        SnapshotReady?.Invoke(repoPath, result.Snapshot);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Git status scan failed for {RepoPath}: {ErrorCode} {ErrorMessage}", repoPath, result.ErrorCode, result.ErrorMessage);
+                    }
                 }
-                else
+                finally
                 {
-                    _logger.LogWarning("Git status scan failed for {RepoPath}: {ErrorCode} {ErrorMessage}", repoPath, result.ErrorCode, result.ErrorMessage);
+                    _statusScanGate.Release();
                 }
-            }
-            finally
-            {
-                _statusScanGate.Release();
+
+                var runFollowUp = tracker.EndRefresh(result, out var completionToSignal);
+                completionToSignal?.TrySetResult(result);
+
+                if (!runFollowUp)
+                {
+                    break;
+                }
             }
 
-            var runFollowUp = tracker.EndRefresh(result, out var completionToSignal);
-            completionToSignal?.TrySetResult(result);
-
-            if (!runFollowUp)
-            {
-                break;
-            }
+            return result;
         }
+        catch (Exception)
+        {
+            // Cancel/exception before EndRefresh used to leave the tracker stuck in Refreshing forever;
+            // coalesced waiters then hung until process restart. Always reset and unblock them.
+            var scheduleFollowUp = tracker.AbortRefresh(out var completionToSignal);
+            completionToSignal?.TrySetCanceled();
+            if (scheduleFollowUp && !_disposed)
+            {
+                tracker.ScheduleDebouncedRefresh(
+                    _options.WatcherDebounceMilliseconds,
+                    () => _ = RunWatcherScanAsync(repoPath, tracker));
+            }
 
-        return result;
+            throw;
+        }
     }
 }
 
@@ -262,6 +298,28 @@ internal sealed class RepositoryRefreshTracker : IDisposable
             }
 
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Resets after cancel/exception mid-scan. Completes any coalesced waiters so they do not hang, and
+    /// returns true when a dirty event arrived during the aborted scan (caller should schedule one
+    /// debounced follow-up rather than leaving changes unseen).
+    /// </summary>
+    public bool AbortRefresh(out TaskCompletionSource<GitChangeStatusResult>? completionToSignal)
+    {
+        lock (_gate)
+        {
+            var wasDirty = _state == RepositoryRefreshState.RefreshingAndDirty;
+            completionToSignal = _pendingCompletion;
+            _pendingCompletion = null;
+
+            if (_state != RepositoryRefreshState.Disposed)
+            {
+                _state = RepositoryRefreshState.Clean;
+            }
+
+            return wasDirty;
         }
     }
 

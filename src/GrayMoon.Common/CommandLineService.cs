@@ -68,12 +68,8 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
             return new CommandLineResult(-1, null, "Failed to start process");
         }
 
-        if (stdin != null)
-        {
-            await process.StandardInput.WriteAsync(stdin.AsMemory(), cancellationToken);
-            process.StandardInput.Close();
-        }
-
+        // Timeout and stream consumers must start before any stdin write: a child that emits stdout while
+        // still reading stdin can fill the OS pipe and deadlock the parent if we write-all-first.
         using var timeoutCts = new CancellationTokenSource(effectiveTimeout);
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
         var runToken = linkedCts.Token;
@@ -89,6 +85,12 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
 
         try
         {
+            if (stdin != null)
+            {
+                await process.StandardInput.WriteAsync(stdin.AsMemory(), runToken);
+                process.StandardInput.Close();
+            }
+
             await process.WaitForExitAsync(runToken);
         }
         catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
@@ -168,15 +170,8 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
             return new CommandLineResult(-1, null, "Failed to start process");
         }
 
-        if (stdinBytes != null)
-        {
-            // Write raw bytes directly to the stream so the exact NUL-delimited UTF-8 payload is
-            // transmitted, bypassing any console-encoding assumptions StandardInput's StreamWriter would apply.
-            await process.StandardInput.BaseStream.WriteAsync(stdinBytes, cancellationToken);
-            await process.StandardInput.BaseStream.FlushAsync(cancellationToken);
-            process.StandardInput.Close();
-        }
-
+        // See the string-stdin overload: consumers + timeout before stdin write avoid pipe deadlocks
+        // (e.g. git check-ignore -z --stdin with a large path list that also emits ignored paths).
         using var timeoutCts = new CancellationTokenSource(effectiveTimeout);
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
         var runToken = linkedCts.Token;
@@ -192,6 +187,15 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
 
         try
         {
+            if (stdinBytes != null)
+            {
+                // Write raw bytes directly to the stream so the exact NUL-delimited UTF-8 payload is
+                // transmitted, bypassing any console-encoding assumptions StandardInput's StreamWriter would apply.
+                await process.StandardInput.BaseStream.WriteAsync(stdinBytes, runToken);
+                await process.StandardInput.BaseStream.FlushAsync(runToken);
+                process.StandardInput.Close();
+            }
+
             await process.WaitForExitAsync(runToken);
         }
         catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)

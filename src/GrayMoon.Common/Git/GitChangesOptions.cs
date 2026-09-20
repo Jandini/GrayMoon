@@ -14,6 +14,14 @@ public sealed class GitChangesOptions
     /// <summary>Debounce window after a watcher event before running an authoritative status scan.</summary>
     public int WatcherDebounceMilliseconds { get; init; } = 400;
 
+    /// <summary>
+    /// Bound for one watcher-driven status scan (the fire-and-forget path from <c>MarkDirty</c>). Keeps a
+    /// hung owning scan from pinning the per-repository refresh tracker forever even when App CancelCommand
+    /// never reaches it. Individual git processes still have their own <c>GitProcessOptions</c> timeouts;
+    /// this is the outer budget for the whole scan loop. Default 120.
+    /// </summary>
+    public int WatcherScanTimeoutSeconds { get; init; } = 120;
+
     /// <summary>Idle time with no renewing operation before a repository's watcher lease is disposed.</summary>
     public int WatcherIdleGraceMinutes { get; init; } = 10;
 
