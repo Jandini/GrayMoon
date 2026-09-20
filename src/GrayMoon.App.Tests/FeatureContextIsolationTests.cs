@@ -50,6 +50,31 @@ public sealed class FeatureContextIsolationTests
     }
 
     [Fact]
+    public async Task Same_project_name_can_exist_in_workspace_and_feature()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await using var scope = ctx.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var projects = scope.ServiceProvider.GetRequiredService<WorkspaceProjectRepository>();
+        var resolver = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureContextResolver>();
+
+        var special = await resolver.GetOrCreateSpecialWorkspaceContextIdAsync(ctx.WorkspaceId);
+        var feature = await CreateFeatureContextAsync(db, ctx.WorkspaceId, "feat-shared");
+        var incoming = new SyncProjectInfo("Shared", ProjectType.Library, "Shared.csproj", "net10.0", null, []);
+
+        await projects.MergeWorkspaceProjectsAsync(ctx.WorkspaceId, ctx.RepositoryId, [incoming], special.Value);
+        await projects.MergeWorkspaceProjectsAsync(ctx.WorkspaceId, ctx.RepositoryId, [incoming], feature.Value);
+
+        var names = await db.WorkspaceProjects
+            .Where(p => p.WorkspaceId == ctx.WorkspaceId && p.ProjectName == "Shared")
+            .Select(p => p.WorkspaceFeatureContextId)
+            .ToListAsync();
+        Assert.Equal(2, names.Count);
+        Assert.Contains(special.Value, names);
+        Assert.Contains(feature.Value, names);
+    }
+
+    [Fact]
     public async Task File_line_statuses_are_scoped_per_context()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();

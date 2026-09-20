@@ -20,8 +20,8 @@
     border: none;
     border-right: 1px solid var(--border-input);
     border-radius: var(--bs-border-radius, 0.375rem) 0 0 var(--bs-border-radius, 0.375rem);
-    background: transparent;
-    color: var(--text-muted);
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
     font-size: inherit;
     line-height: 1.5;
     text-align: left;
@@ -30,7 +30,7 @@
 
 .workspace-feature-selector__trigger:hover:not(:disabled),
 .workspace-feature-selector__trigger.is-open:not(:disabled) {
-    background-color: rgba(255, 255, 255, 0.07);
+    background-color: var(--bg-tertiary);
 }
 
 .workspace-feature-selector__trigger:focus,
@@ -59,7 +59,7 @@
     margin-left: 0.4rem;
     border-left: 0.28em solid transparent;
     border-right: 0.28em solid transparent;
-    border-top: 0.32em solid var(--text-muted);
+    border-top: 0.32em solid var(--text-primary);
 }
 
 .workspace-feature-selector__menu {

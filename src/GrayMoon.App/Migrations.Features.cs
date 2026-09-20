@@ -269,7 +269,15 @@ public static partial class Migrations
         await AddNullableIntegerColumnIfMissingAsync(conn, "WorkspaceProjects", "WorkspaceFeatureContextId");
         await AddNullableIntegerColumnIfMissingAsync(conn, "WorkspaceFileLineStatuses", "WorkspaceFeatureContextId");
 
-        // Prefer context-scoped uniqueness when the column exists; drop legacy unique index if present.
+        // Prefer context-scoped uniqueness when the column exists; drop leftover workspace-wide unique indexes.
+        await DropUniqueIndexesMatchingColumnsAsync(conn, "WorkspaceProjects", "WorkspaceId", "RepositoryId", "ProjectName");
+        await DropUniqueIndexesMatchingColumnsAsync(conn, "WorkspaceFileLineStatuses", "WorkspaceId", "RepositoryId", "FilePath", "TokenName");
+
+        await ExecuteNonQueryAsync(conn, """
+            CREATE INDEX IF NOT EXISTS "IX_WorkspaceProjects_Workspace_Repo_Name"
+            ON "WorkspaceProjects" ("WorkspaceId", "RepositoryId", "ProjectName");
+            """);
+
         await ExecuteNonQueryAsync(conn, """
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_WorkspaceProjects_Context_Repo_Name"
             ON "WorkspaceProjects" ("WorkspaceFeatureContextId", "RepositoryId", "ProjectName")
@@ -565,5 +573,51 @@ public static partial class Migrations
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         await cmd.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>
+    /// Drops leftover unique indexes whose columns match exactly. Feature contexts reuse the same
+    /// WorkspaceId/RepositoryId/ProjectName (or file-line token) as Workspace, so uniqueness must be
+    /// context-scoped. Table UNIQUE constraints (sqlite_autoindex_*) cannot be dropped this way.
+    /// </summary>
+    private static async Task DropUniqueIndexesMatchingColumnsAsync(
+        DbConnection conn,
+        string tableName,
+        params string[] exactColumns)
+    {
+        var names = new List<string>();
+        await using (var listCmd = conn.CreateCommand())
+        {
+            listCmd.CommandText = $"PRAGMA index_list('{tableName}')";
+            await using var reader = await listCmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                var unique = reader.GetInt32(reader.GetOrdinal("unique")) != 0;
+                var origin = reader.GetString(reader.GetOrdinal("origin"));
+                var name = reader.GetString(reader.GetOrdinal("name"));
+                if (!unique || origin != "c" || string.IsNullOrEmpty(name))
+                    continue;
+                names.Add(name);
+            }
+        }
+
+        foreach (var name in names)
+        {
+            var columns = new List<string>();
+            await using (var infoCmd = conn.CreateCommand())
+            {
+                infoCmd.CommandText = $"PRAGMA index_info('{name.Replace("'", "''")}')";
+                await using var reader = await infoCmd.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                    columns.Add(reader.GetString(reader.GetOrdinal("name")));
+            }
+
+            if (columns.Count != exactColumns.Length)
+                continue;
+            if (!exactColumns.All(col => columns.Contains(col, StringComparer.OrdinalIgnoreCase)))
+                continue;
+
+            await ExecuteNonQueryAsync(conn, $"""DROP INDEX IF EXISTS "{name.Replace("\"", "\"\"")}" """);
+        }
     }
 }

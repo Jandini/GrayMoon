@@ -65,7 +65,7 @@
                                     OnSearchKeyDown="OnSearchKeyDown" />
         <CreateFeatureModal IsVisible="_createFeatureModalVisible"
                             WorkspaceId="WorkspaceId"
-                            InitialName="_createFeatureInitialName"
+                            InitialName="@_createFeatureInitialName"
                             OnCancel="() => _createFeatureModalVisible = false"
                             OnCreated="OnFeatureCreatedAsync" />
         <RemoveFeatureModal IsVisible="_removeFeatureModalVisible"

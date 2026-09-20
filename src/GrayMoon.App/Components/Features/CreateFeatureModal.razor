@@ -64,14 +64,17 @@
     private string _name = "";
     private string? _error;
     private bool _busy;
+    private bool _wasVisible;
 
     protected override void OnParametersSet()
     {
-        if (IsVisible && !_busy)
+        if (IsVisible && !_wasVisible)
         {
-            _name = InitialName?.Trim() ?? _name;
+            _name = InitialName?.Trim() ?? "";
             _error = null;
         }
+
+        _wasVisible = IsVisible;
     }
 
     private async Task CreateAsync()
