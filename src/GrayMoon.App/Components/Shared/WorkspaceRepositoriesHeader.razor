@@ -45,11 +45,11 @@
                                OnClear="OnClearSearch" />
         </div>
         <div class="btn-group position-relative">
-            <button class="btn btn-outline-secondary"
+            <button class="btn @(HasCreatablePr ? "btn-warning" : "btn-outline-secondary")"
                     @onclick="HandleBranchPrimaryClick"
                     @onclick:stopPropagation
                     disabled="@BranchActionsDisabled">
-                Branch
+                @(HasCreatablePr ? "Create PR" : "Branch")
             </button>
             <button type="button"
                     class="btn btn-outline-secondary dropdown-toggle dropdown-toggle-split"
@@ -96,7 +96,7 @@
                                 role="menuitem"
                                 @onclick="HandleNewPullRequestClick"
                                 disabled="@BranchActionsDisabled">
-                            Create PRs
+                            Create PR
                         </button>
                     </li>
                     <li><hr class="dropdown-divider branch-menu-divider" /></li>
@@ -361,6 +361,8 @@
     [Parameter] public int FilteredCount { get; set; }
     [Parameter] public string? SearchTerm { get; set; }
     [Parameter] public bool HasUnmatchedDependencies { get; set; }
+    /// <summary>True when at least one repository would show the yellow "create" PR badge — primary Branch control becomes yellow "Create PR".</summary>
+    [Parameter] public bool HasCreatablePr { get; set; }
     [Parameter] public bool IsPushRecommended { get; set; }
     [Parameter] public bool HasIncomingCommits { get; set; }
     [Parameter] public bool? IsOutOfSync { get; set; }
@@ -526,7 +528,10 @@
     private async Task HandleBranchPrimaryClick()
     {
         CloseBranchMenu();
-        await OnShowBranch.InvokeAsync();
+        if (HasCreatablePr)
+            await OnNewPullRequest.InvokeAsync();
+        else
+            await OnShowBranch.InvokeAsync();
     }
 
     private async Task HandlePrepareWorkspaceClick()
