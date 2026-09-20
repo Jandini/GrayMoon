@@ -44,7 +44,7 @@ public sealed class WorkspaceGitChangesActivation(
             try
             {
                 await scanner.ScanWorkspaceAsync(workspaceId, ct, progress =>
-                    job.ReportProgress($"Refreshing {progress.Completed} of {progress.Total} repositories..."));
+                    job.ReportProgress($"Refreshing {progress.Completed} of {progress.Total} repositories..."), includeLineStats: true);
             }
             catch (OperationCanceledException)
             {

@@ -26,14 +26,14 @@ public sealed class GitCliRepositoryGitChangesService(GitProcessRunner runner, I
     // being watched simply stops being queried, so this cache's cardinality tracks watched-repo cardinality.
     private static readonly ConcurrentDictionary<string, string> GitDirCache = new(StringComparer.OrdinalIgnoreCase);
 
-    public async Task<GitChangeStatusResult> GetStatusAsync(string repoPath, long snapshotVersion, CancellationToken cancellationToken)
+    public async Task<GitChangeStatusResult> GetStatusAsync(string repoPath, long snapshotVersion, CancellationToken cancellationToken, bool includeLineStats = false)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
         {
             return new GitChangeStatusResult { Success = false, ErrorCode = "RepositoryNotFound", ErrorMessage = "Repository not found." };
         }
 
-        var (exitCode, stdout, stderr) = await runner.RunAsync(
+        var statusTask = runner.RunAsync(
             "git",
             ["--no-optional-locks", "status", "--porcelain=v2", "-z", "--branch", "--untracked-files=all"],
             repoPath,
@@ -41,6 +41,26 @@ public sealed class GitCliRepositoryGitChangesService(GitProcessRunner runner, I
             cancellationToken,
             GitLockIntent.Read);
 
+        var unstagedNumstatTask = includeLineStats
+            ? runner.RunAsync(
+                "git",
+                ["--no-optional-locks", "diff", "--numstat"],
+                repoPath,
+                null,
+                cancellationToken,
+                GitLockIntent.Read)
+            : null;
+        var stagedNumstatTask = includeLineStats
+            ? runner.RunAsync(
+                "git",
+                ["--no-optional-locks", "diff", "--cached", "--numstat"],
+                repoPath,
+                null,
+                cancellationToken,
+                GitLockIntent.Read)
+            : null;
+
+        var (exitCode, stdout, stderr) = await statusTask;
         if (exitCode != 0)
         {
             var error = (stderr ?? stdout ?? "git status failed").Trim();
@@ -50,6 +70,8 @@ public sealed class GitCliRepositoryGitChangesService(GitProcessRunner runner, I
 
         var parsed = GitPorcelainV2Parser.Parse(stdout);
         var (isMerging, isRebasing, isCherryPicking) = await GetOperationStateAsync(repoPath, cancellationToken);
+        var (insertions, deletions) = await ResolveLineStatsAsync(unstagedNumstatTask);
+        var (stagedInsertions, stagedDeletions) = await ResolveLineStatsAsync(stagedNumstatTask);
 
         var snapshot = new GitChangeSnapshot
         {
@@ -63,9 +85,31 @@ public sealed class GitCliRepositoryGitChangesService(GitProcessRunner runner, I
             IsCherryPicking = isCherryPicking,
             Changes = parsed.Changes,
             ScannedAt = DateTimeOffset.UtcNow,
+            Insertions = insertions,
+            Deletions = deletions,
+            StagedInsertions = stagedInsertions,
+            StagedDeletions = stagedDeletions,
         };
 
         return new GitChangeStatusResult { Success = true, Snapshot = snapshot };
+    }
+
+    private static async Task<(int? Insertions, int? Deletions)> ResolveLineStatsAsync(
+        Task<(int ExitCode, string? Stdout, string? Stderr)>? numstatTask)
+    {
+        if (numstatTask == null)
+        {
+            return (null, null);
+        }
+
+        var (exitCode, stdout, _) = await numstatTask;
+        if (exitCode != 0)
+        {
+            return (0, 0);
+        }
+
+        var totals = GitNumstatParser.Parse(stdout);
+        return (totals.Insertions, totals.Deletions);
     }
 
     public async Task<GitDiffDocument> GetDiffAsync(string repoPath, GitDiffRequest request, CancellationToken cancellationToken)
@@ -473,7 +517,7 @@ public sealed class GitCliRepositoryGitChangesService(GitProcessRunner runner, I
 
     private async Task<GitChangeSnapshot?> TryGetSnapshotAsync(string repoPath, long snapshotVersion, CancellationToken cancellationToken)
     {
-        var result = await GetStatusAsync(repoPath, snapshotVersion, cancellationToken);
+        var result = await GetStatusAsync(repoPath, snapshotVersion, cancellationToken, includeLineStats: true);
         return result.Success ? result.Snapshot : null;
     }
 

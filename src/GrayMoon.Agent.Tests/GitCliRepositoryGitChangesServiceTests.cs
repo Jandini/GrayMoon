@@ -135,6 +135,75 @@ public sealed class GitCliRepositoryGitChangesServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Line_stats_are_omitted_unless_requested()
+    {
+        _repo.CommitInitial("file.txt", "a\n");
+        _repo.WriteFile("file.txt", "a\nb\n");
+
+        var result = await _service.GetStatusAsync(_repo.RepositoryPath, 1, CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Null(result.Snapshot!.Insertions);
+        Assert.Null(result.Snapshot.Deletions);
+        Assert.Null(result.Snapshot.StagedInsertions);
+        Assert.Null(result.Snapshot.StagedDeletions);
+    }
+
+    [Fact]
+    public async Task Line_stats_count_tracked_additions_and_deletions()
+    {
+        _repo.CommitInitial("file.txt", "a\nb\nc\n");
+        _repo.WriteFile("file.txt", "a\nx\n");
+
+        var result = await _service.GetStatusAsync(_repo.RepositoryPath, 1, CancellationToken.None, includeLineStats: true);
+
+        Assert.True(result.Success);
+        Assert.Equal(1, result.Snapshot!.Insertions);
+        Assert.Equal(2, result.Snapshot.Deletions);
+        Assert.Equal(0, result.Snapshot.StagedInsertions);
+        Assert.Equal(0, result.Snapshot.StagedDeletions);
+    }
+
+    [Fact]
+    public async Task Line_stats_count_staged_additions_and_deletions()
+    {
+        _repo.CommitInitial("file.txt", "a\nb\nc\n");
+        _repo.WriteFile("file.txt", "a\nx\n");
+        _repo.RunGit("add", "file.txt");
+
+        var result = await _service.GetStatusAsync(_repo.RepositoryPath, 1, CancellationToken.None, includeLineStats: true);
+
+        Assert.True(result.Success);
+        Assert.Equal(0, result.Snapshot!.Insertions);
+        Assert.Equal(0, result.Snapshot.Deletions);
+        Assert.Equal(1, result.Snapshot.StagedInsertions);
+        Assert.Equal(2, result.Snapshot.StagedDeletions);
+    }
+
+    [Fact]
+    public async Task Line_stats_ignore_untracked_files()
+    {
+        _repo.CommitInitial("file.txt", "a\n");
+        _repo.WriteFile("new.txt", "lots\nof\nlines\n");
+
+        var result = await _service.GetStatusAsync(_repo.RepositoryPath, 1, CancellationToken.None, includeLineStats: true);
+
+        Assert.True(result.Success);
+        Assert.Equal(0, result.Snapshot!.Insertions);
+        Assert.Equal(0, result.Snapshot.Deletions);
+    }
+
+    [Fact]
+    public async Task Line_stats_on_unborn_repo_are_zero()
+    {
+        var result = await _service.GetStatusAsync(_repo.RepositoryPath, 1, CancellationToken.None, includeLineStats: true);
+
+        Assert.True(result.Success);
+        Assert.Equal(0, result.Snapshot!.Insertions);
+        Assert.Equal(0, result.Snapshot.Deletions);
+    }
+
+    [Fact]
     public async Task Stage_explicit_path_moves_file_from_changed_to_staged()
     {
         _repo.CommitInitial("file.txt", "original\n");

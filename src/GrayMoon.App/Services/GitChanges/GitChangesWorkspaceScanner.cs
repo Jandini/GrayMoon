@@ -16,7 +16,7 @@ public sealed record GitChangesWorkspaceScanProgress(string RepositoryName, bool
 /// </summary>
 public interface IGitChangesWorkspaceScanner
 {
-    Task ScanWorkspaceAsync(int workspaceId, CancellationToken cancellationToken, Action<GitChangesWorkspaceScanProgress>? onProgress = null);
+    Task ScanWorkspaceAsync(int workspaceId, CancellationToken cancellationToken, Action<GitChangesWorkspaceScanProgress>? onProgress = null, bool includeLineStats = false);
 }
 
 public sealed class GitChangesWorkspaceScanner(
@@ -24,7 +24,7 @@ public sealed class GitChangesWorkspaceScanner(
     IOptions<GitChangesOptions> gitChangesOptions,
     ILogger<GitChangesWorkspaceScanner> logger) : IGitChangesWorkspaceScanner
 {
-    public async Task ScanWorkspaceAsync(int workspaceId, CancellationToken cancellationToken, Action<GitChangesWorkspaceScanProgress>? onProgress = null)
+    public async Task ScanWorkspaceAsync(int workspaceId, CancellationToken cancellationToken, Action<GitChangesWorkspaceScanProgress>? onProgress = null, bool includeLineStats = false)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var agentBridge = scope.ServiceProvider.GetRequiredService<IAgentBridge>();
@@ -37,6 +37,7 @@ public sealed class GitChangesWorkspaceScanner(
         var workspaceService = scope.ServiceProvider.GetRequiredService<WorkspaceService>();
         var agentClient = scope.ServiceProvider.GetRequiredService<IGitChangesAgentClient>();
         var writeQueue = scope.ServiceProvider.GetRequiredService<WorkspaceGitChangesWriteQueue>();
+        var pushHandler = scope.ServiceProvider.GetRequiredService<GitChangesSnapshotPushHandler>();
 
         var links = await dbContext.WorkspaceRepositories
             .Where(l => l.WorkspaceId == workspaceId)
@@ -79,17 +80,29 @@ public sealed class GitChangesWorkspaceScanner(
             {
                 var result = await agentClient.GetStatusAsync(
                     target.Root, target.WorkspaceName, target.RepositoryName,
-                    target.WorkspaceId, target.RepositoryId, cancellationToken);
+                    target.WorkspaceId, target.RepositoryId, cancellationToken,
+                    includeLineStats);
 
                 if (result.Success && result.Snapshot != null)
                 {
                     success = true;
-                    writeQueue.Enqueue(new GitChangesSnapshotNotification
+                    var notification = new GitChangesSnapshotNotification
                     {
                         WorkspaceId = target.WorkspaceId,
                         RepositoryId = target.RepositoryId,
                         Snapshot = result.Snapshot,
-                    });
+                    };
+
+                    // Refresh / warm-up persist immediately so LoadAsync after the scan sees +/-.
+                    // Watcher and background sweeps stay on the write queue.
+                    if (includeLineStats)
+                    {
+                        await pushHandler.HandleAsync(notification, cancellationToken);
+                    }
+                    else
+                    {
+                        writeQueue.Enqueue(notification);
+                    }
                 }
                 else if (!result.Success)
                 {

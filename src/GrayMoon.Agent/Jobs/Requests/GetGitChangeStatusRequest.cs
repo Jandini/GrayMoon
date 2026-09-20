@@ -18,4 +18,9 @@ public sealed class GetGitChangeStatusRequest : WorkspaceCommandRequest
     /// <summary>Database repository ID, echoed back on watcher-driven push notifications.</summary>
     [JsonPropertyName("repositoryId")]
     public int RepositoryId { get; set; }
+
+    /// <summary>When true, the scan also runs <c>git diff --numstat HEAD</c> for header +/- totals.
+    /// Watcher and background sweeps leave this false.</summary>
+    [JsonPropertyName("includeLineStats")]
+    public bool IncludeLineStats { get; set; }
 }

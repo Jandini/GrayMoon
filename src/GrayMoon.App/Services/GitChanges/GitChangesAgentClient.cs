@@ -27,7 +27,8 @@ public interface IGitChangesAgentClient
 {
     Task<GitChangesStatusResult> GetStatusAsync(
         string workspaceRoot, string workspaceName, string repositoryName,
-        int workspaceId, int repositoryId, CancellationToken cancellationToken);
+        int workspaceId, int repositoryId, CancellationToken cancellationToken,
+        bool includeLineStats = false);
 
     Task<GitChangesDiffResult> GetDiffAsync(
         string workspaceRoot, string workspaceName, string repositoryName,
@@ -56,9 +57,10 @@ public sealed class GitChangesAgentClient(IAgentBridge agentBridge) : IGitChange
 {
     public async Task<GitChangesStatusResult> GetStatusAsync(
         string workspaceRoot, string workspaceName, string repositoryName,
-        int workspaceId, int repositoryId, CancellationToken cancellationToken)
+        int workspaceId, int repositoryId, CancellationToken cancellationToken,
+        bool includeLineStats = false)
     {
-        var args = new { workspaceRoot, workspaceName, repositoryName, workspaceId, repositoryId };
+        var args = new { workspaceRoot, workspaceName, repositoryName, workspaceId, repositoryId, includeLineStats };
         var response = await agentBridge.SendCommandAsync("GetGitChangeStatus", args, cancellationToken);
         return AgentResponseJson.DeserializeAgentResponse<GitChangesStatusResult>(response.Data)
             ?? new GitChangesStatusResult { Success = false, ErrorMessage = response.Error ?? "No response from agent." };

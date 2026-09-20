@@ -28,6 +28,18 @@ public sealed record WorkspaceGitChangesRepositoryView
     public int ChangedCount { get; init; }
     public int ConflictCount { get; init; }
 
+    /// <summary>Persisted unstaged insertions. Null until a user-visible scan computed them.</summary>
+    public int? Insertions { get; init; }
+
+    /// <summary>Persisted unstaged deletions. Null until a user-visible scan computed them.</summary>
+    public int? Deletions { get; init; }
+
+    /// <summary>Persisted staged insertions. Null until a user-visible scan computed them.</summary>
+    public int? StagedInsertions { get; init; }
+
+    /// <summary>Persisted staged deletions. Null until a user-visible scan computed them.</summary>
+    public int? StagedDeletions { get; init; }
+
     public DateTimeOffset? AgentScannedAt { get; init; }
     public DateTimeOffset? PersistedAt { get; init; }
 

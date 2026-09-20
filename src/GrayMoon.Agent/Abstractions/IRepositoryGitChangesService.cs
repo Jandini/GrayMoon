@@ -9,7 +9,7 @@ namespace GrayMoon.Agent.Abstractions;
 /// </summary>
 public interface IRepositoryGitChangesService
 {
-    Task<GitChangeStatusResult> GetStatusAsync(string repoPath, long snapshotVersion, CancellationToken cancellationToken);
+    Task<GitChangeStatusResult> GetStatusAsync(string repoPath, long snapshotVersion, CancellationToken cancellationToken, bool includeLineStats = false);
 
     Task<GitDiffDocument> GetDiffAsync(string repoPath, GitDiffRequest request, CancellationToken cancellationToken);
 

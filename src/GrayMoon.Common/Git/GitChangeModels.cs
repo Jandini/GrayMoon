@@ -47,6 +47,20 @@ public sealed record GitChangeSnapshot
 
     public required IReadOnlyList<GitChangeEntry> Changes { get; init; }
     public required DateTimeOffset ScannedAt { get; init; }
+
+    /// <summary>Unstaged line additions from <c>git diff --numstat</c>. Null when this scan
+    /// did not compute line stats (watcher / background sweep).</summary>
+    public int? Insertions { get; init; }
+
+    /// <summary>Unstaged line deletions from <c>git diff --numstat</c>. Null when this scan
+    /// did not compute line stats.</summary>
+    public int? Deletions { get; init; }
+
+    /// <summary>Staged line additions from <c>git diff --cached --numstat</c>. Null when not computed.</summary>
+    public int? StagedInsertions { get; init; }
+
+    /// <summary>Staged line deletions from <c>git diff --cached --numstat</c>. Null when not computed.</summary>
+    public int? StagedDeletions { get; init; }
 }
 
 /// <summary>Explicit scope for a stage/unstage mutation - never inferred from currently rendered UI state.</summary>

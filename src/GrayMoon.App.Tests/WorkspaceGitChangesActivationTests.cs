@@ -21,6 +21,7 @@ public sealed class WorkspaceGitChangesActivationTests
         Assert.True(tracker.IsActive(8));
         await WaitUntilAsync(() => scanner.Calls == 1);
         Assert.Equal(8, scanner.LastWorkspaceId);
+        Assert.True(scanner.LastIncludeLineStats);
 
         jobs.Dispose();
     }
@@ -137,13 +138,16 @@ public sealed class WorkspaceGitChangesActivationTests
     {
         public int Calls;
         public int? LastWorkspaceId;
+        public bool LastIncludeLineStats;
 
         public Task ScanWorkspaceAsync(
             int workspaceId,
             CancellationToken cancellationToken,
-            Action<GitChangesWorkspaceScanProgress>? onProgress = null)
+            Action<GitChangesWorkspaceScanProgress>? onProgress = null,
+            bool includeLineStats = false)
         {
             LastWorkspaceId = workspaceId;
+            LastIncludeLineStats = includeLineStats;
             Interlocked.Increment(ref Calls);
             return Task.CompletedTask;
         }

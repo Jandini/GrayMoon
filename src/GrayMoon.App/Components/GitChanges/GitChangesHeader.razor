@@ -29,6 +29,20 @@
                     <i class="bi bi-git git-changes-header__summary-icon" aria-hidden="true"></i>
                     @BranchLabel
                 </span>
+                @foreach (var kind in Stats.Kinds)
+                {
+                    <span class="git-changes-header__summary-item git-changes-header__summary-item--active" title="@kind.Label">
+                        <span class="git-changes-tree__status git-changes-tree__status--@kind.StatusClass">@kind.Letter</span>
+                        @kind.Count
+                    </span>
+                }
+                @if (Stats.HasLineStats)
+                {
+                    <span class="git-changes-header__summary-item git-changes-header__summary-item--active" title="Lines added and deleted">
+                        <span class="git-changes-tree__status git-changes-tree__status--added">+@Stats.Insertions</span>
+                        <span class="git-changes-tree__status git-changes-tree__status--deleted">-@Stats.Deletions</span>
+                    </span>
+                }
             }
         </div>
         <span class="workspace-repos-title-spacer"></span>
@@ -120,6 +134,8 @@
     private int StagedCount => View?.Repositories.Sum(r => r.StagedCount) ?? 0;
 
     private int ChangedCount => View?.Repositories.Sum(r => r.ChangedCount) ?? 0;
+
+    private GitChangesSummaryStats Stats => GitChangesSummaryStats.From(View);
 
     private string BranchLabel
     {

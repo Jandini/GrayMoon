@@ -30,6 +30,11 @@ public sealed class WorkspaceGitRepositoryStatus
     public int ChangedCount { get; set; }
     public int ConflictCount { get; set; }
 
+    public int? Insertions { get; set; }
+    public int? Deletions { get; set; }
+    public int? StagedInsertions { get; set; }
+    public int? StagedDeletions { get; set; }
+
     public DateTimeOffset AgentScannedAt { get; set; }
     public DateTimeOffset PersistedAt { get; set; }
 

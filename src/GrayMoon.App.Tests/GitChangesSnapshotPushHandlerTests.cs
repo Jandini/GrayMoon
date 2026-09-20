@@ -197,4 +197,89 @@ public class GitChangesSnapshotPushHandlerTests
         Assert.Equal(3, status.ChangedCount); // changed.txt, both.txt, conflict.txt
         Assert.Equal(1, status.ConflictCount); // conflict.txt
     }
+
+    [Fact]
+    public async Task Line_stats_are_persisted_when_present()
+    {
+        await using var ctx = await GitChangesTestDbContext.CreateAsync();
+        var factory = new GitChangesTestDbContext.TestDbContextFactory(ctx.Options);
+        var hubContext = new FakeHubContext<WorkspaceSyncHub>();
+        var handler = new GitChangesSnapshotPushHandler(factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance);
+
+        var snapshot = MakeSnapshot(1, MakeEntry("file.txt")) with
+        {
+            Insertions = 10,
+            Deletions = 2,
+            StagedInsertions = 4,
+            StagedDeletions = 1,
+        };
+        await handler.HandleAsync(new GitChangesSnapshotNotification
+        {
+            WorkspaceId = ctx.WorkspaceId,
+            RepositoryId = ctx.RepositoryId,
+            Snapshot = snapshot,
+        }, CancellationToken.None);
+
+        var status = Assert.Single(ctx.DbContext.WorkspaceGitRepositoryStatuses);
+        Assert.Equal(10, status.Insertions);
+        Assert.Equal(2, status.Deletions);
+        Assert.Equal(4, status.StagedInsertions);
+        Assert.Equal(1, status.StagedDeletions);
+    }
+
+    [Fact]
+    public async Task Watcher_snapshot_without_line_stats_does_not_clear_persisted_totals()
+    {
+        await using var ctx = await GitChangesTestDbContext.CreateAsync();
+        var factory = new GitChangesTestDbContext.TestDbContextFactory(ctx.Options);
+        var hubContext = new FakeHubContext<WorkspaceSyncHub>();
+        var handler = new GitChangesSnapshotPushHandler(factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance);
+
+        await handler.HandleAsync(new GitChangesSnapshotNotification
+        {
+            WorkspaceId = ctx.WorkspaceId,
+            RepositoryId = ctx.RepositoryId,
+            Snapshot = MakeSnapshot(1, MakeEntry("file.txt")) with { Insertions = 10, Deletions = 2 },
+        }, CancellationToken.None);
+
+        await handler.HandleAsync(new GitChangesSnapshotNotification
+        {
+            WorkspaceId = ctx.WorkspaceId,
+            RepositoryId = ctx.RepositoryId,
+            Snapshot = MakeSnapshot(2, MakeEntry("file.txt"), MakeEntry("other.txt")),
+        }, CancellationToken.None);
+
+        var status = Assert.Single(ctx.DbContext.WorkspaceGitRepositoryStatuses);
+        Assert.Equal(2, status.SnapshotVersion);
+        Assert.Equal(2, status.ChangedCount);
+        Assert.Equal(10, status.Insertions);
+        Assert.Equal(2, status.Deletions);
+    }
+
+    [Fact]
+    public async Task Computed_zero_line_stats_overwrite_previous_totals()
+    {
+        await using var ctx = await GitChangesTestDbContext.CreateAsync();
+        var factory = new GitChangesTestDbContext.TestDbContextFactory(ctx.Options);
+        var hubContext = new FakeHubContext<WorkspaceSyncHub>();
+        var handler = new GitChangesSnapshotPushHandler(factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance);
+
+        await handler.HandleAsync(new GitChangesSnapshotNotification
+        {
+            WorkspaceId = ctx.WorkspaceId,
+            RepositoryId = ctx.RepositoryId,
+            Snapshot = MakeSnapshot(1, MakeEntry("file.txt")) with { Insertions = 10, Deletions = 2 },
+        }, CancellationToken.None);
+
+        await handler.HandleAsync(new GitChangesSnapshotNotification
+        {
+            WorkspaceId = ctx.WorkspaceId,
+            RepositoryId = ctx.RepositoryId,
+            Snapshot = MakeSnapshot(2) with { Insertions = 0, Deletions = 0 },
+        }, CancellationToken.None);
+
+        var status = Assert.Single(ctx.DbContext.WorkspaceGitRepositoryStatuses);
+        Assert.Equal(0, status.Insertions);
+        Assert.Equal(0, status.Deletions);
+    }
 }
