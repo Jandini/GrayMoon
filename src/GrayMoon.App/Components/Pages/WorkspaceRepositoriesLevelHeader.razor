@@ -39,8 +39,8 @@
                         <div class="gm-menu-item" role="button" tabindex="0" title="Restore NuGet packages" @onclick="HandleRestorePackagesLevel" @onclick:stopPropagation>
                             <i class="bi bi-box-seam" aria-hidden="true"></i><span>Restore Packages</span>
                         </div>
-                        <div class="gm-menu-item @(HasCreatablePr ? "gm-menu-item--highlight" : "")" role="button" tabindex="0" title="Create pull requests" @onclick="HandleOpenPr" @onclick:stopPropagation>
-                            <PullRequestIcon AdditionalClass="pull-request-icon--menu" /><span>Create PRs...</span>
+                        <div class="gm-menu-item @(HasCreatablePr ? "gm-menu-item--highlight" : "")" role="button" tabindex="0" title="Create pull request" @onclick="HandleOpenPr" @onclick:stopPropagation>
+                            <PullRequestIcon AdditionalClass="pull-request-icon--menu" /><span>Create PR</span>
                         </div>
                         <div class="gm-menu-item @(HasMergeablePr ? "gm-menu-item--highlight" : "")" role="button" tabindex="0" title="Merge pull requests" @onclick="HandleOpenMergePrs" @onclick:stopPropagation>
                             <MergePullRequestIcon AdditionalClass="merge-pull-request-icon--menu" /><span>Merge PRs...</span>
@@ -100,7 +100,7 @@
     [Parameter] public EventCallback OnRestorePackagesLevel { get; set; }
     [Parameter] public IReadOnlyList<string>? OpenPrUrls { get; set; }
     [Parameter] public IReadOnlyDictionary<string, string>? OpenPrPullMap { get; set; }
-    /// <summary>True when at least one repository in this level would show the yellow "create" PR badge - "Create PRs..." is highlighted.</summary>
+    /// <summary>True when at least one repository in this level would show the yellow "create" PR badge - "Create PR" is highlighted.</summary>
     [Parameter] public bool HasCreatablePr { get; set; }
     /// <summary>True when at least one repository in this level has an open, non-conflicted pull request - "Merge PRs..." is highlighted.</summary>
     [Parameter] public bool HasMergeablePr { get; set; }

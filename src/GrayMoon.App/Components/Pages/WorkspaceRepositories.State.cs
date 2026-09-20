@@ -43,6 +43,7 @@ public sealed partial class WorkspaceRepositories
     private string ScrollStorageKey => $"graymoon:ws-repos-scroll:{WorkspaceId}";
     private bool HasRepositories => (_headerState?.TotalCount ?? 0) > 0;
     private bool hasUnmatchedDependencies => _headerState?.HasUnmatchedDependencies ?? false;
+    private bool hasCreatablePr => _headerState?.HasCreatablePr ?? false;
     private bool isPushRecommended => _headerState?.IsPushRecommended ?? false;
     private int? lowestLevelNeedingWork => _headerState?.LowestLevelNeedingWork;
     private bool hasTaggedRepos => _headerState?.HasTaggedRepos ?? false;

@@ -323,7 +323,7 @@
     color: #aaa;
 }
 
-/* Same yellow as the PR "create" badge / actionable divergence count: highlights "Create PRs..." when
+/* Same yellow as the PR "create" badge / actionable divergence count: highlights "Create PR" when
    this level has a repository with commits ahead of default and no open PR, "Return to Default" when
    a pull request in this level has been merged (the default branch has moved on), and "Sync Commits"
    when a repository has incoming or outgoing commits. */

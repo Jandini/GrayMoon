@@ -93,6 +93,17 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
             .ToListAsync(cancellationToken);
         int? lowestLevelNeedingWork = lowestLevels.Count > 0 ? lowestLevels[0] : null;
 
+        // Same eligibility as PRBadge.ShowsCreateBadge once PR state is persisted: ahead of default,
+        // not on a tag, and no open/merged/closed pull request.
+        var hasCreatablePr = await baseQuery.AnyAsync(
+            wr => (wr.CheckedOutTag == null || wr.CheckedOutTag == string.Empty)
+                && (wr.DefaultBranchAheadCommits ?? 0) > 0
+                && (wr.PullRequest == null
+                    || (wr.PullRequest.MergedAt == null
+                        && wr.PullRequest.State != "open"
+                        && wr.PullRequest.State != "closed")),
+            cancellationToken);
+
         return new WorkspaceRepositoryHeaderStateDto(
             totalCount,
             hasUnmatchedDependencies,
@@ -100,7 +111,8 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
             hasIncomingCommits,
             hasTaggedRepos,
             isOutOfSync,
-            lowestLevelNeedingWork);
+            lowestLevelNeedingWork,
+            hasCreatablePr);
     }
 
     public async Task<IReadOnlyList<WorkspaceRepositoryLinkIndexEntry>> GetIndexAsync(
