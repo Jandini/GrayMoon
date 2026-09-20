@@ -77,12 +77,115 @@ public sealed partial class WorkspaceActions
 
     private void StartBackgroundRefresh()
     {
-        var token = _cts.Token;
-        var semaphore = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
-        foreach (var row in rows.Where(r => !string.IsNullOrWhiteSpace(r.Link.BranchName)))
+        if (workspace == null || rows.Count == 0) return;
+        _ = RunFullRefreshAsync(replaceToken: false);
+    }
+
+    /// <summary>
+    /// Full-grid refresh used by the on-open warm-up and the header Refresh button. Tracks
+    /// completed/total so the Git Changes-style header indicator can show progress, and uses
+    /// <see cref="_refreshGeneration"/> so a superseded or aborted run cannot clear a newer one.
+    /// </summary>
+    private async Task RunFullRefreshAsync(bool replaceToken)
+    {
+        var targets = rows
+            .Where(r => !string.IsNullOrWhiteSpace(r.Link.BranchName))
+            .ToList();
+        if (targets.Count == 0) return;
+
+        var generation = Interlocked.Increment(ref _refreshGeneration);
+        isRefreshing = true;
+        _refreshTotal = targets.Count;
+        _refreshCompleted = 0;
+        await InvokeAsync(StateHasChanged);
+
+        try
         {
-            _ = RefreshRowThrottledAsync(row, semaphore, token);
+            if (replaceToken)
+            {
+                _cts.Cancel();
+                _cts.Dispose();
+                _cts = new CancellationTokenSource();
+            }
+
+            var token = _cts.Token;
+            using var semaphore = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
+            await Task.WhenAll(targets.Select(row => RefreshScanRowAsync(row, semaphore, token, generation)));
         }
+        catch (OperationCanceledException)
+        {
+            // Abort or a newer full-grid refresh superseded this run.
+        }
+        finally
+        {
+            if (!_disposed && generation == _refreshGeneration)
+            {
+                isRefreshing = false;
+                try
+                {
+                    await InvokeAsync(StateHasChanged);
+                }
+                catch (ObjectDisposedException)
+                {
+                }
+                catch (InvalidOperationException)
+                {
+                }
+            }
+        }
+    }
+
+    private async Task RefreshScanRowAsync(
+        WorkspaceActionRow row,
+        SemaphoreSlim semaphore,
+        CancellationToken cancellationToken,
+        int generation)
+    {
+        try
+        {
+            await RefreshRowThrottledAsync(row, semaphore, cancellationToken);
+        }
+        finally
+        {
+            if (generation == _refreshGeneration)
+            {
+                Interlocked.Increment(ref _refreshCompleted);
+                if (!_disposed)
+                {
+                    try
+                    {
+                        await InvokeAsync(StateHasChanged);
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                    }
+                    catch (InvalidOperationException)
+                    {
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>Cancels the in-flight full-grid refresh (background warm-up or manual Refresh), matching Git Changes' header abort.</summary>
+    internal void AbortRefresh()
+    {
+        if (!isRefreshing) return;
+
+        Interlocked.Increment(ref _refreshGeneration);
+        _cts.Cancel();
+        _cts.Dispose();
+        _cts = new CancellationTokenSource();
+        isRefreshing = false;
+        _refreshTotal = 0;
+        _refreshCompleted = 0;
+        foreach (var row in rows)
+            row.IsRefreshing = false;
+
+        if (rows.Any(r => r.WorkflowLines.Any(line => IsLineRunningForBranch(r, line))))
+            EnsureAutoPollRunning();
+
+        StateHasChanged();
     }
 
     /// <summary>Bounds full-grid refresh fan-out to <see cref="MaxConcurrency"/> concurrent GitHub calls, avoiding secondary rate-limit ("abuse") bursts on large workspaces.</summary>
@@ -256,32 +359,9 @@ public sealed partial class WorkspaceActions
         }
     }
 
-    internal async Task RefreshAllAsync()
+    internal Task RefreshAllAsync()
     {
-        if (workspace == null || rows.Count == 0) return;
-
-        isRefreshing = true;
-        await InvokeAsync(StateHasChanged);
-
-        try
-        {
-            _cts.Cancel();
-            _cts.Dispose();
-            _cts = new CancellationTokenSource();
-
-            var token = _cts.Token;
-            using var semaphore = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
-            var tasks = rows
-                .Where(r => !string.IsNullOrWhiteSpace(r.Link.BranchName))
-                .Select(row => RefreshRowThrottledAsync(row, semaphore, token))
-                .ToList();
-
-            await Task.WhenAll(tasks);
-        }
-        finally
-        {
-            isRefreshing = false;
-            await InvokeAsync(StateHasChanged);
-        }
+        if (workspace == null || rows.Count == 0) return Task.CompletedTask;
+        return RunFullRefreshAsync(replaceToken: true);
     }
 }
