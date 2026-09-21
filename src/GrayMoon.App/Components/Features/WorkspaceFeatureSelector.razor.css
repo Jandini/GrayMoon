@@ -3,14 +3,14 @@
     align-items: stretch;
     flex: 0 0 auto;
     align-self: stretch;
-    /* Fixed, not just clamped: with only min/max-width, this control's rendered width tracked its
-       own label text (shrink-to-fit), so it visibly resized whenever the label changed - on first
-       paint while the Feature/Workspace list was still loading (label briefly falling back to
-       "Context"/WorkspaceName), on every page navigation, and whenever the selected context's name
-       length differed from the previous one. A fixed width removes that variable entirely; the
-       label already has overflow:hidden + text-overflow:ellipsis so longer names still degrade
-       gracefully instead of growing the control. */
-    width: 14rem;
+    /* Shrink-to-fit the current label's width (e.g. the Workspace/Feature name) instead of always
+       reserving the full max width - short names no longer leave a lot of empty space in the
+       control. min-width keeps very short names from making the trigger feel cramped, and
+       max-width caps it (the label already has overflow:hidden + text-overflow:ellipsis so longer
+       names still degrade gracefully instead of growing the control past the cap). */
+    width: fit-content;
+    min-width: 8.5rem;
+    max-width: 14rem;
 }
 
 .workspace-feature-selector.btn-group {
@@ -20,7 +20,7 @@
 .workspace-feature-selector__trigger {
     display: flex;
     align-items: center;
-    width: 100%;
+    flex: 1 1 auto;
     min-width: 0;
     padding-inline: 0.75rem 0;
     border: none;
