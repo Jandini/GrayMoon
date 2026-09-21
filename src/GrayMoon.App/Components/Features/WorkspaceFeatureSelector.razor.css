@@ -81,6 +81,16 @@
     color: var(--text-primary);
 }
 
+.workspace-feature-selector__section-title {
+    padding: 0.25rem 1rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
 .workspace-feature-selector__menu .branch-menu-divider {
     border-top-color: var(--border-color, #6c757d);
     opacity: 0.9;

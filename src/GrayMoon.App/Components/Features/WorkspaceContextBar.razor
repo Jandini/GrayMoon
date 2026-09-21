@@ -5,6 +5,7 @@
     @if (WorkspaceId > 0)
     {
         <WorkspaceFeatureSelector WorkspaceId="WorkspaceId"
+                                 WorkspaceName="@WorkspaceName"
                                  SelectedContextId="SelectedContextId"
                                  SelectedContextIdChanged="SelectedContextIdChanged"
                                  OnRequestCreateFeature="OnRequestCreateFeature"
@@ -20,6 +21,7 @@
 
 @code {
     [Parameter] public int WorkspaceId { get; set; }
+    [Parameter] public string? WorkspaceName { get; set; }
     [Parameter] public WorkspaceFeatureContextId? SelectedContextId { get; set; }
     [Parameter] public EventCallback<WorkspaceFeatureContextId> SelectedContextIdChanged { get; set; }
     [Parameter] public EventCallback<string> OnRequestCreateFeature { get; set; }

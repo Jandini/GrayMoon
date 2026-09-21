@@ -47,7 +47,7 @@ public sealed class WorkspaceFeatureOperations(
             workspaceId,
             "create-feature",
             overlayKey,
-            $"Creating Feature '{name}'...",
+            "Creating Feature...",
             async (op, ct) =>
             {
                 try

@@ -5,52 +5,53 @@
 
 @if (IsVisible)
 {
-    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: 1085;"
-         @onkeydown="HandleKeyDown"
-         @ref="_modalElement">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Create Feature</h5>
-                    <button type="button" class="btn-close" aria-label="Close" @onclick="Cancel" disabled="@_busy"></button>
-                </div>
-                <div class="modal-body">
-                    @if (!string.IsNullOrEmpty(_error))
-                    {
-                        <div class="gm-callout gm-callout--error mb-3" role="alert">@_error</div>
-                    }
-                    <div class="mb-3">
-                        <label class="form-label" for="create-feature-name">Feature name</label>
-                        <input id="create-feature-name"
-                               class="form-control"
-                               @bind="_name"
-                               @bind:event="oninput"
-                               disabled="@_busy"
-                               autocomplete="off" />
+    @if (!_busy)
+    {
+        <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: 1085;"
+             @onkeydown="HandleKeyDown"
+             @ref="_modalElement">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">New Feature</h5>
+                        <button type="button" class="btn-close" aria-label="Close" @onclick="Cancel"></button>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label" for="create-feature-base">Based on</label>
-                        <select id="create-feature-base" class="form-select" disabled>
-                            <option selected>Current Workspace</option>
-                        </select>
-                    </div>
-                    <div class="gm-callout gm-callout--info mb-0" role="note">
-                        The Feature starts from the current committed state. Uncommitted changes in Workspace are not copied and remain in Workspace.
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-outline-secondary" @onclick="Cancel" disabled="@_busy">Cancel</button>
-                    <button type="button" class="btn btn-primary" @onclick="CreateAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(_name))">
-                        @if (_busy)
+                    <div class="modal-body">
+                        @if (!string.IsNullOrEmpty(_error))
                         {
-                            <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+                            <div class="gm-callout gm-callout--error mb-3" role="alert">@_error</div>
                         }
-                        Create Feature
-                    </button>
+                        <div class="mb-3">
+                            <label class="form-label" for="create-feature-name">Feature name</label>
+                            <input id="create-feature-name"
+                                   class="form-control"
+                                   @bind="_name"
+                                   @bind:event="oninput"
+                                   autocomplete="off"
+                                   @ref="_nameInput" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label" for="create-feature-base">Based on</label>
+                            <select id="create-feature-base" class="form-select" disabled>
+                                <option selected>Current Workspace</option>
+                            </select>
+                        </div>
+                        <div class="gm-callout gm-callout--info mb-0" role="note">
+                            The Feature starts from the current committed state. Uncommitted changes in Workspace are not copied and remain in Workspace.
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline-secondary" @onclick="Cancel">Cancel</button>
+                        <button type="button" class="btn btn-primary" data-default-action @onclick="CreateAsync" disabled="@(string.IsNullOrWhiteSpace(_name))">
+                            New Feature
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
-    </div>
+    }
+    @* While _busy, the dialog is hidden and the page-level BackgroundJobOverlay (driven by the
+       "create-feature" structural operation) covers the page with its own "Creating Feature..." message. *@
 }
 
 @code {
@@ -61,10 +62,12 @@
     [Parameter] public EventCallback<CreateFeatureResult> OnCreated { get; set; }
 
     private ElementReference _modalElement;
+    private ElementReference _nameInput;
     private string _name = "";
     private string? _error;
     private bool _busy;
     private bool _wasVisible;
+    private bool _focusPending;
 
     protected override void OnParametersSet()
     {
@@ -72,9 +75,26 @@
         {
             _name = InitialName?.Trim() ?? "";
             _error = null;
+            _focusPending = true;
         }
 
         _wasVisible = IsVisible;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_focusPending)
+            return;
+
+        _focusPending = false;
+        try
+        {
+            await _nameInput.FocusAsync();
+        }
+        catch
+        {
+            // circuit / JS unavailable
+        }
     }
 
     private async Task CreateAsync()
@@ -111,6 +131,13 @@
     private async Task HandleKeyDown(KeyboardEventArgs e)
     {
         if (e.Key == "Escape" && !_busy)
+        {
             await Cancel();
+        }
+        else if (ModalKeyboard.IsPlainEnter(e) && !_busy && !string.IsNullOrWhiteSpace(_name))
+        {
+            // Ctrl/Cmd+Enter is handled globally by modal-default-action.js via data-default-action.
+            await CreateAsync();
+        }
     }
 }

@@ -23,7 +23,8 @@
         <div class="workspace-feature-selector__backdrop" @onclick="CloseDropdown"></div>
         <ul class="dropdown-menu show shadow branch-menu-list workspace-repository-actions-menu workspace-feature-selector__menu"
             role="menu">
-            @foreach (var option in _options)
+            <li class="dropdown-header workspace-feature-selector__section-title">Workspace</li>
+            @foreach (var option in _options.Where(o => o.IsSpecialWorkspace))
             {
                 <li>
                     <button type="button"
@@ -32,7 +33,21 @@
                             disabled="@(!CanSelect(option))"
                             @onclick="() => SelectAsync(option)">
                         @DisplayName(option)
-                        @if (!option.IsSpecialWorkspace && !string.IsNullOrEmpty(option.LifecycleState) && option.LifecycleState != "Ready")
+                    </button>
+                </li>
+            }
+            <li><hr class="dropdown-divider branch-menu-divider" /></li>
+            <li class="dropdown-header workspace-feature-selector__section-title">Features</li>
+            @foreach (var option in _options.Where(o => !o.IsSpecialWorkspace))
+            {
+                <li>
+                    <button type="button"
+                            class="dropdown-item @(IsSelected(option) ? "active" : "")"
+                            role="menuitem"
+                            disabled="@(!CanSelect(option))"
+                            @onclick="() => SelectAsync(option)">
+                        @DisplayName(option)
+                        @if (!string.IsNullOrEmpty(option.LifecycleState) && option.LifecycleState != "Ready")
                         {
                             <span class="text-muted small"> (@option.LifecycleState)</span>
                         }
@@ -44,7 +59,7 @@
                 <li><hr class="dropdown-divider branch-menu-divider" /></li>
                 <li>
                     <button type="button" class="dropdown-item" role="menuitem" @onclick="RequestCreate">
-                        Create Feature
+                        New Feature
                     </button>
                 </li>
             }
@@ -75,6 +90,7 @@
     [Parameter] public EventCallback<string> OnRequestCreateFeature { get; set; }
     [Parameter] public bool Disabled { get; set; }
     [Parameter] public string InputId { get; set; } = "workspace-feature-selector";
+    [Parameter] public string? WorkspaceName { get; set; }
 
     private readonly List<WorkspaceFeatureContextInfo> _options = [];
     private bool _open;
@@ -88,7 +104,7 @@
         {
             var selected = _options.FirstOrDefault(o => IsSelected(o));
             if (selected is null)
-                return "Context";
+                return string.IsNullOrWhiteSpace(WorkspaceName) ? "Context" : WorkspaceName!;
             return DisplayName(selected);
         }
     }
@@ -145,8 +161,10 @@
     private bool IsSelected(WorkspaceFeatureContextInfo option) =>
         SelectedContextId is not null && option.ContextId.Value == SelectedContextId.Value.Value;
 
-    private static string DisplayName(WorkspaceFeatureContextInfo option) =>
-        option.IsSpecialWorkspace ? "Workspace" : (option.FeatureName ?? "Feature");
+    private string DisplayName(WorkspaceFeatureContextInfo option) =>
+        option.IsSpecialWorkspace
+            ? (string.IsNullOrWhiteSpace(WorkspaceName) ? "Workspace" : WorkspaceName!)
+            : (option.FeatureName ?? "Feature");
 
     private static bool CanSelect(WorkspaceFeatureContextInfo option) =>
         option.IsSpecialWorkspace

@@ -48,6 +48,7 @@
             </div>
             <div class="d-flex gap-2 align-items-center workspace-repos-header-actions deps-header-actions flex-wrap">
                 <WorkspaceContextBar WorkspaceId="WorkspaceId"
+                                     WorkspaceName="@(workspace?.Name)"
                                      SelectedContextId="_selectedContextId"
                                      SelectedContextIdChanged="OnSelectedContextChangedAsync">
                     <FilterSearchInput Value="@searchTerm"
