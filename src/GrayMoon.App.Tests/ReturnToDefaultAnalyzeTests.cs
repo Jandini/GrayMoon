@@ -6,6 +6,7 @@ using GrayMoon.App.Services.Queries;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Tests;
 
@@ -500,5 +501,5 @@ public sealed class ReturnToDefaultAnalyzeTests
     }
 
     private static WorkspaceSyncHandler CreateHandler(SyncStateTestContext ctx)
-        => new(NullLogger<WorkspaceSyncHandler>.Instance, ctx.Resolve<IServiceScopeFactory>());
+        => new(NullLogger<WorkspaceSyncHandler>.Instance, ctx.Resolve<IServiceScopeFactory>(), ctx.Resolve<IOptions<WorkspaceOptions>>());
 }

@@ -5,8 +5,8 @@ namespace GrayMoon.App.Repositories;
 
 public sealed partial class WorkspaceProjectRepository
 {
-    /// <summary>Loads per-repo GitVersion and DependencyLevel scoped to a Feature context: read from <see cref="WorkspaceRepositoryContextState"/> when a row exists for that context, falling back to the shared <see cref="WorkspaceRepositoryLink"/> only for the special Workspace context (or when no context-state row has been persisted for that repo yet).</summary>
-    private async Task<(Dictionary<int, string?> VersionByRepo, Dictionary<int, int?> LevelByRepo)> GetContextVersionAndLevelByRepoAsync(
+    /// <summary>Loads per-repo GitVersion and DependencyLevel scoped to a Feature context: read from <see cref="WorkspaceRepositoryContextState"/> when a row exists for that context, falling back to the shared <see cref="WorkspaceRepositoryLink"/> only for the special Workspace context (or when no context-state row has been persisted for that repo yet). Internal (not private) so other context-aware callers in the same assembly - e.g. <c>DependencyUpdateOrchestrator</c>'s per-level repo grouping - can reuse the same fallback rule instead of reading the shared link directly.</summary>
+    internal async Task<(Dictionary<int, string?> VersionByRepo, Dictionary<int, int?> LevelByRepo)> GetContextVersionAndLevelByRepoAsync(
         int workspaceId,
         int workspaceFeatureContextId,
         CancellationToken cancellationToken)

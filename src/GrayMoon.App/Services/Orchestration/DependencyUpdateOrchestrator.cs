@@ -14,6 +14,7 @@ public sealed class DependencyUpdateOrchestrator(
     WorkspaceGitService workspaceGitService,
     WorkspaceFileVersionService fileVersionService,
     WorkspaceRepository workspaceRepository,
+    WorkspaceProjectRepository workspaceProjectRepository,
     IOptions<WorkspaceOptions> workspaceOptions,
     IServiceScopeFactory scopeFactory,
     ILogger<DependencyUpdateOrchestrator> logger)
@@ -93,7 +94,7 @@ public sealed class DependencyUpdateOrchestrator(
         // Step 2+: Walk every dependency level (up to maxLevel). Do not limit the level walk to the
         // initial reposNeedingWork set - a lower-level csproj commit refreshes GitVersion and can mark
         // higher-level version files out of date; those repos must still be visited for file updates.
-        var levelRepoIds = await GetRepositoryIdsByDependencyLevelAsync(workspaceId, selectedRepositoryIds: null, OnLevelError);
+        var levelRepoIds = await GetRepositoryIdsByDependencyLevelAsync(workspaceId, contextId, selectedRepositoryIds: null, OnLevelError, cancellationToken);
         if (maxLevel.HasValue)
             levelRepoIds = levelRepoIds.Where(x => x.Level <= maxLevel.Value).ToList();
         if (levelRepoIds.Count == 0)
@@ -280,8 +281,10 @@ public sealed class DependencyUpdateOrchestrator(
 
     private async Task<IReadOnlyList<(int Level, IReadOnlySet<int> RepoIds)>> GetRepositoryIdsByDependencyLevelAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlySet<int>? selectedRepositoryIds,
-        Action<int, string> onLevelError)
+        Action<int, string> onLevelError,
+        CancellationToken cancellationToken)
     {
         var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)
@@ -294,11 +297,17 @@ public sealed class DependencyUpdateOrchestrator(
         bool IsPinnedToTag(WorkspaceRepositoryLink link) =>
             !string.IsNullOrWhiteSpace(link.CheckedOutTag);
 
+        // Dependency level is per-context (a Feature's own graph can differ from the Workspace's), so read
+        // it via WorkspaceRepositoryContextState when a row exists for that context, falling back to the
+        // shared WorkspaceRepositoryLink.DependencyLevel only for the special Workspace - same rule as
+        // WorkspaceProjectRepository.GetSyncDependenciesPayloadAsync/GetPushPlanPayloadAsync use for GitVersion.
+        var (_, levelByRepo) = await workspaceProjectRepository.GetContextVersionAndLevelByRepoAsync(workspaceId, contextId.Value, cancellationToken);
+
         var levelRepoIds = workspace.Repositories
             .Where(link => link.Repository != null)
             .Where(link => !IsPinnedToTag(link))
             .Where(link => selectedRepositoryIds == null || selectedRepositoryIds.Contains(link.RepositoryId))
-            .GroupBy(link => link.DependencyLevel ?? 0)
+            .GroupBy(link => levelByRepo.TryGetValue(link.RepositoryId, out var level) ? level ?? 0 : 0)
             .OrderBy(g => g.Key)
             .Select(g => (Level: g.Key, RepoIds: (IReadOnlySet<int>)g.Select(x => x.RepositoryId).ToHashSet()))
             .ToList();
