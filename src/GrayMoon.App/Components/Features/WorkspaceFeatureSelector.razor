@@ -48,8 +48,11 @@
                     </button>
                 </li>
             }
-            <li><hr class="dropdown-divider branch-menu-divider" /></li>
-            <li class="dropdown-header workspace-feature-selector__section-title">Features</li>
+            @if (_options.Any(o => !o.IsSpecialWorkspace))
+            {
+                <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                <li class="dropdown-header workspace-feature-selector__section-title">Features</li>
+            }
             @foreach (var option in _options.Where(o => !o.IsSpecialWorkspace))
             {
                 <li class="workspace-feature-selector__feature-row">
