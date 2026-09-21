@@ -154,12 +154,16 @@ section in the same turn (that file lives in the Desktop repo, not this one).
 - Do not create a Desktop commit unless the user asks. If that README changed,
   give a second short commit message labeled for GrayMoon.Desktop.
 
-## Commit message after each task
+## Never commit or push - always give a commit message instead
+
+**Never run `git commit` or `git push` (or any equivalent staging/committing/
+pushing action) yourself, even if the user's request could be read as asking
+for one.** Leave the working tree's changes uncommitted; committing and
+pushing are the user's call to make, not the agent's.
 
 After you finish a piece of work, always give a short commit message in a
-fenced code block so the user can copy it. Do this at the end of the reply,
-even if they did not ask for a commit. Do not create the commit unless they
-ask.
+fenced code block so the user can copy it. Do this at the end of every reply
+that changed files, whether or not the user asked for a commit message.
 
 Write one imperative sentence that says why the change exists, matching the
 repo's recent style (`Fix …`, `Add …`, `Keep …`).
