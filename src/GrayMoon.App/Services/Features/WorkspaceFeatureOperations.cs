@@ -340,7 +340,7 @@ public sealed class WorkspaceFeatureOperations(
             info.WorkspaceId,
             "remove-feature",
             overlayKey,
-            $"Removing Feature '{info.FeatureName}'...",
+            "Removing Feature...",
             async (op, ct) =>
             {
                 try

@@ -29,6 +29,14 @@
     margin: 0.25rem 0;
 }
 
+.workspace-repos-header-actions .btn-group {
+    flex-shrink: 0;
+}
+
+.workspace-repos-header-actions .btn {
+    white-space: nowrap;
+}
+
 .dropdown-toggle-split {
     display: inline-flex;
     align-items: center;
