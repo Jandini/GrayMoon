@@ -3,8 +3,14 @@
     align-items: stretch;
     flex: 0 0 auto;
     align-self: stretch;
-    min-width: 8.5rem;
-    max-width: 14rem;
+    /* Fixed, not just clamped: with only min/max-width, this control's rendered width tracked its
+       own label text (shrink-to-fit), so it visibly resized whenever the label changed - on first
+       paint while the Feature/Workspace list was still loading (label briefly falling back to
+       "Context"/WorkspaceName), on every page navigation, and whenever the selected context's name
+       length differed from the previous one. A fixed width removes that variable entirely; the
+       label already has overflow:hidden + text-overflow:ellipsis so longer names still degrade
+       gracefully instead of growing the control. */
+    width: 14rem;
 }
 
 .workspace-feature-selector.btn-group {
@@ -105,18 +111,12 @@
 .workspace-feature-selector__trigger--no-add {
     /* The "+" button sits flush against the trigger's border with zero padding of its own - drop
        this trigger's own right padding too, so the centered caret-zone below lines up with exactly
-       the same spot instead of sitting an extra 0.55rem to the left of it. */
+       the same spot instead of sitting an extra 0.55rem to the left of it. The control's overall
+       width is fixed above, so unlike the caret-zone's width this needs no further compensation. */
     padding-right: 0;
 }
 
 .workspace-feature-selector__trigger--no-add .workspace-feature-selector__caret-zone {
-    /* Moving the caret into a flush-right, "+"-sized zone (below) drops the space this trigger
-       would otherwise spend on the caret's own margin-left (1rem), its triangle's rendered width
-       (2 x 0.28em), and the trigger's own trailing padding (0.55rem, zeroed above) - all of which
-       still exist on pages that DO have the "+" button. Restoring that same amount of space here,
-       just moved in front of the zone instead of after it, keeps the *total* control width equal
-       on both kinds of pages while still leaving the caret exactly where "+" would be. */
-    margin-left: calc(1rem + 0.56em + 0.55rem);
     width: 2.25rem;
     justify-content: center;
 }
