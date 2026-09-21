@@ -171,7 +171,8 @@ public sealed partial class WorkspaceRepositories
             && !string.Equals(Link.BranchName, Link.DefaultBranchName, StringComparison.Ordinal);
     }
     private Task<IReadOnlyList<int>> GetRepositoryIdsAtLevelAsync(int? levelKey) =>
-        LinkListQueryService.GetRepositoryIdsAtLevelAsync(WorkspaceId, levelKey, _effectiveSearch);
+        LinkListQueryService.GetRepositoryIdsAtLevelAsync(
+            WorkspaceId, levelKey, _effectiveSearch, _selectedContextId, !_isFeatureContext);
     private WorkspaceRepositoryLink? FindLink(IReadOnlyList<WorkspaceRepositoryLink> links, int repositoryId) =>
         links.FirstOrDefault(w => w.RepositoryId == repositoryId);
     private void ClearGridState()

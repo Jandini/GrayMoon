@@ -25,9 +25,15 @@ public interface IWorkspaceRepositoryLinkListQueryService
         bool isSpecialWorkspace = true,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Ordered lightweight index for virtual scroll (same sort as the grid).</summary>
+    /// <summary>
+    /// Ordered lightweight index for virtual scroll (same sort as the grid).
+    /// <paramref name="contextId"/>/<paramref name="isSpecialWorkspace"/> select which context's dependency
+    /// level drives the sort/level-grouping, matching <see cref="GetPageAsync"/>.
+    /// </summary>
     Task<IReadOnlyList<WorkspaceRepositoryLinkIndexEntry>> GetIndexAsync(
         WorkspaceRepositoryLinkListFilter filter,
+        WorkspaceFeatureContextId? contextId = null,
+        bool isSpecialWorkspace = true,
         CancellationToken cancellationToken = default);
 
     /// <summary>Hydrates full list DTOs for the given workspace-repository link PKs.</summary>
@@ -38,10 +44,16 @@ public interface IWorkspaceRepositoryLinkListQueryService
         bool isSpecialWorkspace = true,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// <paramref name="contextId"/>/<paramref name="isSpecialWorkspace"/> select which context's dependency
+    /// level is matched against <paramref name="levelKey"/>, matching <see cref="GetPageAsync"/>.
+    /// </summary>
     Task<IReadOnlyList<int>> GetRepositoryIdsAtLevelAsync(
         int workspaceId,
         int? levelKey,
         string? search,
+        WorkspaceFeatureContextId? contextId = null,
+        bool isSpecialWorkspace = true,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<WorkspaceRepositoryLinkListItemDto>> GetAllSnapshotsAsync(
@@ -50,8 +62,14 @@ public interface IWorkspaceRepositoryLinkListQueryService
         bool isSpecialWorkspace = true,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// <paramref name="contextId"/>/<paramref name="isSpecialWorkspace"/> select whose checked-out
+    /// <c>GitVersion</c> is used, matching <see cref="GetPageAsync"/>.
+    /// </summary>
     Task<IReadOnlyDictionary<string, string>> GetGitVersionNameMapAsync(
         int workspaceId,
+        WorkspaceFeatureContextId? contextId = null,
+        bool isSpecialWorkspace = true,
         CancellationToken cancellationToken = default);
 
     Task<WorkspaceRepositoryLinkListItemDto?> GetSnapshotAsync(

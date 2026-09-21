@@ -1,5 +1,7 @@
+using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services.Queries;
+using GrayMoon.Application.Features;
 using GrayMoon.Common.Git;
 using Microsoft.EntityFrameworkCore;
 
@@ -232,6 +234,121 @@ public class WorkspaceRepositoryLinkListQueryServiceTests
             Assert.NotNull(cleanSnapshot);
             Assert.Equal(0, cleanSnapshot.UncommittedChangedFileCount);
         }
+    }
+
+    [Fact]
+    public async Task Feature_context_sort_keyset_and_level_grouping_use_context_state_not_shared_link()
+    {
+        var (ctx, workspaceId) = await ListQueryTestContext.CreateWithWorkspaceLinksAsync(12);
+        await using (ctx)
+        {
+            var contextId = await CreateFeatureContextAsync(ctx.DbContext, workspaceId, "feature-a");
+
+            // Give every link a context state whose DependencyLevel/RepositoryType/Dependencies/GitVersion are
+            // deliberately the *inverse* of the shared link's, so any code path that accidentally reads the
+            // link instead of the context state produces different sort order / grouping / results.
+            var links = await ctx.DbContext.WorkspaceRepositories.AsNoTracking()
+                .Where(wr => wr.WorkspaceId == workspaceId)
+                .ToListAsync();
+            foreach (var link in links)
+            {
+                ctx.DbContext.WorkspaceRepositoryContextStates.Add(new WorkspaceRepositoryContextState
+                {
+                    WorkspaceFeatureContextId = contextId.Value,
+                    WorkspaceRepositoryId = link.WorkspaceRepositoryId,
+                    DependencyLevel = 99 - (link.DependencyLevel ?? 0),
+                    Dependencies = 99 - (link.Dependencies ?? 0),
+                    RepositoryType = link.RepositoryType == ProjectType.Service ? ProjectType.Library : ProjectType.Service,
+                    GitVersion = $"context-{link.WorkspaceRepositoryId}",
+                });
+            }
+            await ctx.DbContext.SaveChangesAsync();
+
+            var filter = new WorkspaceRepositoryLinkListFilter(workspaceId, null);
+
+            // GetIndexAsync/BuildSlots grouping must key off the context's level, not the link's.
+            var index = await ctx.WorkspaceRepoLinkQuery.GetIndexAsync(
+                filter, contextId, isSpecialWorkspace: false);
+            Assert.Equal(links.Count, index.Count);
+            foreach (var entry in index)
+            {
+                var link = links.Single(l => l.WorkspaceRepositoryId == entry.WorkspaceRepositoryId);
+                Assert.Equal(99 - (link.DependencyLevel ?? 0), entry.DependencyLevel);
+            }
+            var expectedOrder = index.OrderByDescending(e => e.DependencyLevel ?? int.MinValue).Select(e => e.WorkspaceRepositoryId).ToList();
+            Assert.Equal(expectedOrder, index.Select(e => e.WorkspaceRepositoryId).ToList());
+
+            // GetPageAsync's sort/keyset must reach the same order using the context state.
+            var page = await ctx.WorkspaceRepoLinkQuery.GetPageAsync(
+                new WorkspaceRepositoryLinkListRequest(workspaceId, null, 50, null), contextId, isSpecialWorkspace: false);
+            Assert.Equal(index.Select(e => e.WorkspaceRepositoryId), page.Items.Select(i => i.WorkspaceRepositoryId));
+
+            // GetRepositoryIdsAtLevelAsync ("jump to level" / bulk level actions) must match against the
+            // context's level, not the link's.
+            var someLink = links[0];
+            var contextLevel = 99 - (someLink.DependencyLevel ?? 0);
+            var idsAtLevel = await ctx.WorkspaceRepoLinkQuery.GetRepositoryIdsAtLevelAsync(
+                workspaceId, contextLevel, null, contextId, isSpecialWorkspace: false);
+            Assert.Contains(someLink.RepositoryId, idsAtLevel);
+            Assert.DoesNotContain(someLink.RepositoryId, await ctx.WorkspaceRepoLinkQuery.GetRepositoryIdsAtLevelAsync(
+                workspaceId, someLink.DependencyLevel, null, contextId, isSpecialWorkspace: false));
+
+            // GetGitVersionNameMapAsync must read the context's GitVersion, not the link's. The test fixture
+            // reuses repository names ("graymoon-api" for every even RepositoryId), so restrict this check to
+            // repos with a unique name - the map is keyed by name and can't distinguish same-named repos
+            // either way, which is a pre-existing limitation unrelated to context-scoping.
+            var versionMap = await ctx.WorkspaceRepoLinkQuery.GetGitVersionNameMapAsync(
+                workspaceId, contextId, isSpecialWorkspace: false);
+            var repoNamesById = await ctx.DbContext.Repositories.AsNoTracking()
+                .ToDictionaryAsync(r => r.RepositoryId, r => r.RepositoryName);
+            var namesWithSingleRepo = repoNamesById.Values
+                .GroupBy(n => n, StringComparer.OrdinalIgnoreCase)
+                .Where(g => g.Count() == 1)
+                .Select(g => g.Key)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            Assert.All(links.Where(l => namesWithSingleRepo.Contains(repoNamesById[l.RepositoryId])), link =>
+            {
+                var repoName = repoNamesById[link.RepositoryId];
+                Assert.True(versionMap.TryGetValue(repoName, out var version));
+                Assert.Equal($"context-{link.WorkspaceRepositoryId}", version);
+            });
+
+            // The special Workspace's own read of the same rows must still use the shared link, unaffected.
+            var workspaceIndex = await ctx.WorkspaceRepoLinkQuery.GetIndexAsync(filter);
+            foreach (var entry in workspaceIndex)
+            {
+                var link = links.Single(l => l.WorkspaceRepositoryId == entry.WorkspaceRepositoryId);
+                Assert.Equal(link.DependencyLevel, entry.DependencyLevel);
+            }
+        }
+    }
+
+    private static async Task<WorkspaceFeatureContextId> CreateFeatureContextAsync(
+        AppDbContext db, int workspaceId, string name)
+    {
+        var feature = new WorkspaceFeature
+        {
+            WorkspaceId = workspaceId,
+            Name = name,
+            LifecycleState = WorkspaceFeatureLifecycleState.Ready,
+            BaseKind = WorkspaceFeatureBaseKind.CurrentWorkspace,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        db.WorkspaceFeatures.Add(feature);
+        await db.SaveChangesAsync();
+
+        var context = new WorkspaceFeatureContext
+        {
+            WorkspaceId = workspaceId,
+            Kind = WorkspaceFeatureContextKind.Feature,
+            WorkspaceFeatureId = feature.WorkspaceFeatureId,
+            CreatedAt = DateTime.UtcNow,
+            IsInSync = true,
+        };
+        db.WorkspaceFeatureContexts.Add(context);
+        await db.SaveChangesAsync();
+        return new WorkspaceFeatureContextId(context.WorkspaceFeatureContextId);
     }
 
     private static WorkspaceGitChangeEntry Entry(int workspaceRepositoryId, string path, GitChangeKind index, GitChangeKind worktree) =>

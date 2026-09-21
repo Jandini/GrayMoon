@@ -23,6 +23,66 @@ the most severe of these and was not previously documented).
 
 ---
 
+## 0. Status update (2026-09-21, later same day)
+
+Fix-sequence items **1–4 are done**, plus item **5** (grid sort/keyset/level-grouping). Commit `c24f892`
+(items 1–4) plus an uncommitted follow-up (item 5) on top of the `be4347f` HEAD this document was audited
+against. Full solution build is clean; the full test suite passes (320 tests, up from 319 — one new test added
+for item 5).
+
+- **Item 1 (stop the corruption):** `RecomputeAndPersistRepositoryDependencyStatsAsync` now takes a
+  `WorkspaceFeatureContextId`, computes `WorkspaceProjects`/levels/unmatched-deps scoped to that context, and
+  persists onto `WorkspaceRepositoryContextState` (get-or-create per repo). It mirrors onto the shared
+  `WorkspaceRepositoryLink` only when the context is the special Workspace. §2.1/§2.2's cross-contamination is
+  closed: a Feature's dependency sync can no longer overwrite the Workspace's own Dependencies grid, and a
+  Feature now gets its own `DependencyLevel`/`Dependencies`/`UnmatchedDeps`.
+- **Item 2 (context-scope the payload builders) — done for the data layer, not yet for the UI/interface
+  threading above it:** `GetSyncDependenciesPayloadAsync`/`GetPushPlanPayloadAsync`/
+  `GetPushDependencyInfoForRepo*` have context-aware overloads that read `GitVersion`/`DependencyLevel` from
+  `WorkspaceRepositoryContextState` (falling back to the link only for the special Workspace) and filter
+  `WorkspaceProjects` by context. All internal call sites in `WorkspaceGitService`/`WorkspacePushService` that
+  already had a `contextId` in scope were switched to the new overloads. **Not yet done:** threading a
+  `contextId` up through `IWorkspacePushOperations` and the Razor push pages/dialogs that call it — see the
+  "not yet done" list below.
+- **Item 3 (thread `contextId` through `GetUpdatePlanAsync`):** done. `IWorkspaceUpdateOperations.GetUpdatePlanAsync`
+  now takes a `contextId`, threaded through `WorkspaceUpdateOperations`, `WorkspaceGitService.GetUpdatePlanAsync`,
+  `DependencyUpdateOrchestrator`, and the three call sites in `WorkspaceRepositories.Update.cs`/
+  `WorkspaceRepositories.Dependencies.cs`.
+- **Item 4 (`UpdateProjectDependencyVersionsAsync` key collision):** done. Now keyed on
+  `(ContextId, RepositoryId, ProjectFilePath)` instead of `(RepositoryId, ProjectFilePath)` alone.
+- **Also fixed along the way (the §2.5 asymmetry):** `MergeWorkspaceProjectDependenciesAsync`'s calls from
+  `WorkspaceGitService.RefreshWorkspaceProjectsAsync`/`RefreshSingleRepositoryProjectsAsync` were dropping the
+  `contextId` they already had in scope; both now pass it through.
+- **Item 5 (migrate grid sort/keyset/level-grouping) — done.** `ApplySort`/`ApplyKeyset` in
+  `WorkspaceRepositoryLinkListQueryService` now take `contextId`/`isSpecialWorkspace` and, for a Feature
+  context, order/paginate by a correlated lookup into that repo's `WorkspaceRepositoryContextState` row instead
+  of the shared link's `DependencyLevel`/`RepositoryType`/`Dependencies` (falling back to the link only for the
+  special Workspace, same rule as `Project(...)`). `GetIndexAsync` (virtual-scroll ordering + level-header
+  grouping), `GetRepositoryIdsAtLevelAsync` ("jump to level" / bulk level actions), and
+  `GetGitVersionNameMapAsync` (version-token tooltip lookups) all gained the same `contextId`/`isSpecialWorkspace`
+  parameters and now branch the same way; all call sites in `WorkspaceRepositories.Loading.cs`/`.State.cs`
+  that already had `_selectedContextId`/`_isFeatureContext` in scope were updated to pass them through. This
+  closes the §3.1 gap: the grid can no longer display one dependency level (via `Project`) while
+  sorting/grouping by a different one (via the unmigrated `ApplySort`/`ApplyKeyset`).
+  - Fixed a related, pre-existing latent bug surfaced by the new test:
+    `GetGitVersionNameMapAsync`'s `RepositoryName → GitVersion` map used a plain `ToDictionary`, which throws
+    if two repositories in the same workspace share a display name (a realistic case, not exercised by any
+    prior test). Extracted a shared `ToNameVersionMap` helper that keeps the first match per name instead of
+    throwing, used by both the special-Workspace and context-scoped branches.
+- **Verification:** full solution builds cleanly; full test suite (320 tests) passes, including a new test
+  (`Feature_context_sort_keyset_and_level_grouping_use_context_state_not_shared_link`) that seeds a Feature
+  context whose `WorkspaceRepositoryContextState` rows are the deliberate inverse of the shared link's fields,
+  to catch any code path that silently falls back to reading the link.
+
+**Not yet done:** items 6–9, plus the remainder of item 2 (`IWorkspacePushOperations`/Razor push pages), and
+generated-package context-scoping (`SyncGeneratedPackageDependenciesAsync` still isn't context-scoped; the
+`WorkspaceProjectRepositoryGeneratedPackageTests` seed data and the new-context filter both currently carve out
+generated/virtual package rows rather than scoping them). See the table in §1 and the fix sequence in §5 below
+for what's left; the summary and evidence in §§1–4 otherwise still describe the code as it stood *before* this
+update and should be read with the corrections above in mind.
+
+---
+
 ## 1. Executive summary — what is done vs. not done
 
 | Layer | Status | Evidence |
@@ -32,13 +92,13 @@ the most severe of these and was not previously documented).
 | Context/path resolvers, hook attribution (worktree-safe) | **Done** | `WorkspaceFeatureContextResolver.cs`, `WorkspaceContextPathResolver.cs`, `WorkspaceHookContextAttributor.cs`, `GitService.WriteSyncHooksAsync` |
 | Hierarchical operation locking (Workspace-structural vs. per-context) | **Done** (§21) | `WorkspaceOperationRunner.cs` (`TryStartContext`, `_contextByContextId`) |
 | Repositories grid **display** overlay for Feature context | **Done** (recently) | `WorkspaceRepositoryLinkListQueryService.Project(...)` overlays `WorkspaceRepositoryContextState` / `WorkspaceRepositoryContextPullRequest` when `isSpecialWorkspace == false` |
-| Repositories grid **sort / keyset paging / "group by level"** | **Not done** | Still keyed off `WorkspaceRepositoryLink.DependencyLevel`/`.Dependencies` (see §3.1) |
+| Repositories grid **sort / keyset paging / "group by level"** | **Done** (§0, item 5) | `ApplySort`/`ApplyKeyset`/`GetIndexAsync`/`GetRepositoryIdsAtLevelAsync`/`GetGitVersionNameMapAsync` in `WorkspaceRepositoryLinkListQueryService` now join `WorkspaceRepositoryContextState` for a Feature context (see §3.1, superseded) |
 | Git Changes persistence | **Done** (context-scoped tables + mirror-on-special-only pattern) | `GitChangesSnapshotPushHandler.cs` |
 | GitHub Actions read/write | **Done at the service layer**, wired into the Actions page | `WorkspaceActionService.FetchAndPersistContextAsync/GetPersistedActionsForWorkspaceContextAsync`, called from `WorkspaceActions.Loading.cs` / `WorkspaceActions.AutoRefresh.cs` |
 | PR **persistence infrastructure** (`WorkspaceRepositoryContextPullRequest`, `UpsertContextAsync`, `RefreshContextPullRequestsAsync`) | **Built, but not called from any page** | See §4 |
 | PR **polling / Create-PR flow** | **Not wired to context at all** | `WorkspaceRepositories.PrPolling.cs`, `WorkspaceRepositories.PullRequests.cs` |
-| **Dependency graph / dependency level / dependency stats** | **Not context-aware; actively cross-contaminates contexts** | See §2 — the core finding of this document |
-| **Update / SyncDependencies / Push planning** | **Not context-aware for level/version logic** (only physical file I/O is context-aware) | See §2 |
+| **Dependency graph / dependency level / dependency stats** | **Done** (§0, items 1 & 4) — no longer cross-contaminates contexts | See §2 — the core finding of this document (superseded by §0) |
+| **Update / SyncDependencies / Push planning** | **Context-aware for the data layer** (§0, items 2 & 3); **UI/interface threading above `WorkspaceGitService`/`WorkspacePushService` still not done** for push planning specifically | See §2 (superseded by §0) |
 | File-version missing-state / line-status mismatch | **Partially done.** `WorkspaceFileLineStatus` rows now carry `WorkspaceFeatureContextId` and are filtered by it. But `WorkspaceFile.IsMissingOnDisk` (the shared file row) is still mutated directly — no `WorkspaceFileContextState` table is used despite existing in the design (§6.11/§16.2) | See §5 |
 | Branch dialog worktree awareness (§28A) | **Not implemented** | No `GitWorktreeInfo`/`LocalBranchView.WorktreeKind` found in `BranchModal.razor`/`SwitchBranchModal.razor` |
 | External worktree cleanup (§28B) | **Not implemented** | `IWorkspaceExternalWorktreeOperations` interface exists but no corresponding UI/analysis service found wired |
@@ -232,7 +292,7 @@ row.
 
 ## 3. Other confirmed wiring gaps for Features/worktrees
 
-### 3.1 Repositories grid sort, keyset paging, and "group by level" still read the shared link
+### 3.1 Repositories grid sort, keyset paging, and "group by level" still read the shared link — **fixed, see §0 item 5**
 
 `WorkspaceRepositoryLinkListQueryService.Project(...)` (the row **projection**) is context-aware (see §1), but:
 
@@ -345,31 +405,35 @@ subsystem, and it was not caught by that pass.
 
 ## 5. Recommended fix sequence (maps onto design §36 waves 5/9)
 
-1. **Stop the corruption first (small, high-value fix):** thread `WorkspaceFeatureContextId` through
-   `RecomputeAndPersistRepositoryDependencyStatsAsync`, `GetByWorkspaceIdAsync` (or an overload), and
+1. ✅ **Done (§0).** ~~Stop the corruption first (small, high-value fix):~~ thread `WorkspaceFeatureContextId`
+   through `RecomputeAndPersistRepositoryDependencyStatsAsync`, `GetByWorkspaceIdAsync` (or an overload), and
    `MergeWorkspaceProjectDependenciesAsync`'s call into it, so a Feature's recompute never reads/writes the
    Workspace's rows. Persist the result onto `WorkspaceRepositoryContextState.DependencyLevel/Dependencies/UnmatchedDeps`
    for that context, and keep the existing `WorkspaceRepositoryLink` write path only for `isSpecialWorkspace`.
-2. **Context-scope `GetSyncDependenciesPayloadAsync` / `GetPushPlanPayloadAsync` / `GetPushDependencyInfoForRepo*`:**
+2. ✅ **Data layer done (§0); UI/interface threading for push planning still open.**
+   ~~Context-scope~~ `GetSyncDependenciesPayloadAsync` / `GetPushPlanPayloadAsync` / `GetPushDependencyInfoForRepo*`:
    filter `WorkspaceProjects` by context, and read `GitVersion` from `WorkspaceRepositoryContextState` (falling
-   back to the link only for the special Workspace).
-3. **Add the missing `contextId` parameter to `IWorkspaceUpdateOperations.GetUpdatePlanAsync`** and thread it all
-   the way to `WorkspaceGitService.GetUpdatePlanAsync`, mirroring the pattern already used by the sibling methods
-   on the same interface.
-4. **Fix `UpdateProjectDependencyVersionsAsync`'s dependent-project lookup** to key on
+   back to the link only for the special Workspace). **Remaining:** thread `contextId` up through
+   `IWorkspacePushOperations` and the Razor push pages/dialogs that currently call the legacy overloads.
+3. ✅ **Done (§0).** ~~Add the missing~~ `contextId` parameter to `IWorkspaceUpdateOperations.GetUpdatePlanAsync`,
+   threaded all the way to `WorkspaceGitService.GetUpdatePlanAsync`, mirroring the pattern already used by the
+   sibling methods on the same interface.
+4. ✅ **Done (§0).** ~~Fix~~ `UpdateProjectDependencyVersionsAsync`'s dependent-project lookup, now keyed on
    `(WorkspaceFeatureContextId, RepositoryId, ProjectFilePath)`, not `(RepositoryId, ProjectFilePath)` alone.
-5. **Migrate grid sort/keyset/level-grouping** (`ApplySort`, `ApplyKeyset`, `GetRepositoryIdsAtLevelAsync`,
-   `GetGitVersionNameMapAsync`) to the same context-state join pattern already used by `Project(...)`.
-6. **Wire `RefreshContextPullRequestsAsync`/`ClearContextPullRequestAsync` into the Repositories page's PR
-   polling loop and Create-PR-success refresh**, branching on selected context the same way
+5. ✅ **Done (§0).** ~~Migrate~~ grid sort/keyset/level-grouping (`ApplySort`, `ApplyKeyset`,
+   `GetRepositoryIdsAtLevelAsync`, `GetGitVersionNameMapAsync`) now use the same context-state join pattern
+   already used by `Project(...)`.
+6. **Not yet done.** Wire `RefreshContextPullRequestsAsync`/`ClearContextPullRequestAsync` into the Repositories
+   page's PR polling loop and Create-PR-success refresh, branching on selected context the same way
    `WorkspaceActions.Loading.cs`/`.AutoRefresh.cs` already branch on `ctxForActions`.
-7. **Add `WorkspaceFileContextState`** (or equivalent) and move `IsMissingOnDisk` off the shared `WorkspaceFile`
-   row, following the same "context table + special-Workspace-only legacy mirror" pattern already used correctly
-   for Git Changes (`GitChangesSnapshotPushHandler`) and now for Actions.
-8. **Implement §28A (Branch dialog worktree awareness)** using the already-existing
-   `WorkspaceBranchOccupancyService`, then **§28B (external worktree cleanup)** using the already-declared
+7. **Not yet done.** Add `WorkspaceFileContextState` (or equivalent) and move `IsMissingOnDisk` off the shared
+   `WorkspaceFile` row, following the same "context table + special-Workspace-only legacy mirror" pattern already
+   used correctly for Git Changes (`GitChangesSnapshotPushHandler`) and now for Actions.
+8. **Not yet done.** Implement §28A (Branch dialog worktree awareness) using the already-existing
+   `WorkspaceBranchOccupancyService`, then §28B (external worktree cleanup) using the already-declared
    `IWorkspaceExternalWorktreeOperations` interface.
-9. **Verify/implement the §31 repository-membership guard** while any Feature exists.
+9. **Not yet done / not verified.** Verify/implement the §31 repository-membership guard while any Feature
+   exists.
 
 Each of these should be its own reviewable change per design §36, gated by re-running the full baseline sweep in
 `GrayMoon-Workspace-Current-Features-Baseline-Appendix.md` for the special Workspace before and after, since item

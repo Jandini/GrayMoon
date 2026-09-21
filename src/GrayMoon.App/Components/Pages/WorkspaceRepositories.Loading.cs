@@ -73,7 +73,8 @@ public sealed partial class WorkspaceRepositories
                 var filter = new WorkspaceRepositoryLinkListFilter(WorkspaceId, _effectiveSearch);
                 await LoadHeaderStateAsync(token);
                 totalCount = await LinkListQueryService.CountAsync(filter, token);
-                var index = await LinkListQueryService.GetIndexAsync(filter, token);
+                var index = await LinkListQueryService.GetIndexAsync(
+                    filter, _selectedContextId, !_isFeatureContext, token);
                 if (generation != _queryLoader.Generation || _disposed)
                 {
                     return;
@@ -417,7 +418,8 @@ public sealed partial class WorkspaceRepositories
                 // from the live scroll pixel position rather than reusing old slot indices, since a level
                 // split/merge shifts slot positions in the rebuilt list.
                 var filter = new WorkspaceRepositoryLinkListFilter(WorkspaceId, _effectiveSearch);
-                var index = await LinkListQueryService.GetIndexAsync(filter, token);
+                var index = await LinkListQueryService.GetIndexAsync(
+                    filter, _selectedContextId, !_isFeatureContext, token);
                 if (_disposed) return;
                 BuildSlots(index);
                 totalCount = index.Count;
@@ -488,7 +490,8 @@ public sealed partial class WorkspaceRepositories
             var mismatchedFiles = await fileVersionService.GetMismatchedFileVersionLinesForRepoAsync(WorkspaceId, repositoryId);
             var fileStatuses = await fileVersionService.GetFileLineStatusForRepoAsync(WorkspaceId, repositoryId);
             var linkListQuery = scope.ServiceProvider.GetRequiredService<IWorkspaceRepositoryLinkListQueryService>();
-            var repoVersionMap = await linkListQuery.GetGitVersionNameMapAsync(WorkspaceId);
+            var repoVersionMap = await linkListQuery.GetGitVersionNameMapAsync(
+                WorkspaceId, _selectedContextId, !_isFeatureContext);
             var allFileLines = await fileVersionService.GetAllFileVersionLinesForRepoAsync(WorkspaceId, repositoryId, repoVersionMap);
             var custom = await customDepRepo.GetCustomDependencyNamesForRepoAsync(WorkspaceId, repositoryId);
             var mismatchDict = _mismatchedDependencyLinesByRepo as Dictionary<int, IReadOnlyList<DependencyMismatchLine>>

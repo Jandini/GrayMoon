@@ -31,8 +31,8 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
         var filter = new WorkspaceRepositoryLinkListFilter(request.WorkspaceId, request.Search);
         var query = ApplyFilters(db.WorkspaceRepositories.AsNoTracking(), filter);
-        query = ApplySort(query);
-        query = ApplyKeyset(query, request.Cursor);
+        query = ApplySort(query, db, contextId, isSpecialWorkspace);
+        query = ApplyKeyset(query, request.Cursor, db, contextId, isSpecialWorkspace);
 
         var take = Math.Max(1, request.PageSize) + 1;
         var rows = await Project(query, db, contextId, isSpecialWorkspace).Take(take).ToListAsync(cancellationToken);
@@ -195,16 +195,33 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
 
     public async Task<IReadOnlyList<WorkspaceRepositoryLinkIndexEntry>> GetIndexAsync(
         WorkspaceRepositoryLinkListFilter filter,
+        WorkspaceFeatureContextId? contextId = null,
+        bool isSpecialWorkspace = true,
         CancellationToken cancellationToken = default)
     {
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
         var query = ApplyFilters(db.WorkspaceRepositories.AsNoTracking(), filter);
-        query = ApplySort(query);
+        query = ApplySort(query, db, contextId, isSpecialWorkspace);
+
+        if (isSpecialWorkspace || contextId is null)
+        {
+            return await query
+                .Select(wr => new WorkspaceRepositoryLinkIndexEntry(
+                    wr.WorkspaceRepositoryId,
+                    wr.RepositoryId,
+                    wr.DependencyLevel))
+                .ToListAsync(cancellationToken);
+        }
+
+        var cid = contextId.Value.Value;
         return await query
             .Select(wr => new WorkspaceRepositoryLinkIndexEntry(
                 wr.WorkspaceRepositoryId,
                 wr.RepositoryId,
-                wr.DependencyLevel))
+                db.WorkspaceRepositoryContextStates
+                    .Where(s => s.WorkspaceFeatureContextId == cid && s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId)
+                    .Select(s => s.DependencyLevel)
+                    .FirstOrDefault()))
             .ToListAsync(cancellationToken);
     }
 
@@ -242,14 +259,29 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
         int workspaceId,
         int? levelKey,
         string? search,
+        WorkspaceFeatureContextId? contextId = null,
+        bool isSpecialWorkspace = true,
         CancellationToken cancellationToken = default)
     {
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
         var filter = new WorkspaceRepositoryLinkListFilter(workspaceId, search);
-        var query = ApplyFilters(db.WorkspaceRepositories.AsNoTracking(), filter)
-            .Where(wr => wr.DependencyLevel == levelKey);
+        var query = ApplyFilters(db.WorkspaceRepositories.AsNoTracking(), filter);
 
+        if (isSpecialWorkspace || contextId is null)
+        {
+            return await query
+                .Where(wr => wr.DependencyLevel == levelKey)
+                .OrderBy(wr => wr.WorkspaceRepositoryId)
+                .Select(wr => wr.RepositoryId)
+                .ToListAsync(cancellationToken);
+        }
+
+        var cid = contextId.Value.Value;
         return await query
+            .Where(wr => db.WorkspaceRepositoryContextStates
+                .Where(s => s.WorkspaceFeatureContextId == cid && s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId)
+                .Select(s => s.DependencyLevel)
+                .FirstOrDefault() == levelKey)
             .OrderBy(wr => wr.WorkspaceRepositoryId)
             .Select(wr => wr.RepositoryId)
             .ToListAsync(cancellationToken);
@@ -264,27 +296,58 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
         var query = db.WorkspaceRepositories.AsNoTracking()
             .Where(wr => wr.WorkspaceId == workspaceId);
-        query = ApplySort(query);
+        query = ApplySort(query, db, contextId, isSpecialWorkspace);
         return await Project(query, db, contextId, isSpecialWorkspace).ToListAsync(cancellationToken);
     }
 
     public async Task<IReadOnlyDictionary<string, string>> GetGitVersionNameMapAsync(
         int workspaceId,
+        WorkspaceFeatureContextId? contextId = null,
+        bool isSpecialWorkspace = true,
         CancellationToken cancellationToken = default)
     {
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var rows = await db.WorkspaceRepositories.AsNoTracking()
-            .Where(wr => wr.WorkspaceId == workspaceId
-                && wr.Repository != null
-                && wr.GitVersion != null
-                && wr.GitVersion != string.Empty)
-            .Select(wr => new { wr.Repository!.RepositoryName, wr.GitVersion })
+
+        if (isSpecialWorkspace || contextId is null)
+        {
+            var rows = await db.WorkspaceRepositories.AsNoTracking()
+                .Where(wr => wr.WorkspaceId == workspaceId
+                    && wr.Repository != null
+                    && wr.GitVersion != null
+                    && wr.GitVersion != string.Empty)
+                .Select(wr => new { wr.Repository!.RepositoryName, wr.GitVersion })
+                .ToListAsync(cancellationToken);
+
+            return ToNameVersionMap(rows.Select(r => (r.RepositoryName, r.GitVersion)));
+        }
+
+        var cid = contextId.Value.Value;
+        var contextRows = await db.WorkspaceRepositories.AsNoTracking()
+            .Where(wr => wr.WorkspaceId == workspaceId && wr.Repository != null)
+            .Select(wr => new
+            {
+                wr.Repository!.RepositoryName,
+                GitVersion = db.WorkspaceRepositoryContextStates
+                    .Where(s => s.WorkspaceFeatureContextId == cid && s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId)
+                    .Select(s => s.GitVersion)
+                    .FirstOrDefault(),
+            })
             .ToListAsync(cancellationToken);
 
-        return rows
-            .Where(r => !string.IsNullOrWhiteSpace(r.RepositoryName) && !string.IsNullOrEmpty(r.GitVersion))
-            .ToDictionary(r => r.RepositoryName!, r => r.GitVersion!, StringComparer.OrdinalIgnoreCase);
+        return ToNameVersionMap(contextRows.Select(r => (r.RepositoryName, r.GitVersion)));
     }
+
+    /// <summary>
+    /// Builds the name-to-version lookup used for version-token tooltips. Repository names are not unique in
+    /// this workspace's data (two different repos can share a display name), so a plain
+    /// <c>ToDictionary</c> would throw on a duplicate key - keep the first match instead, same as before this
+    /// was factored out.
+    /// </summary>
+    private static IReadOnlyDictionary<string, string> ToNameVersionMap(IEnumerable<(string? RepositoryName, string? GitVersion)> rows) =>
+        rows
+            .Where(r => !string.IsNullOrWhiteSpace(r.RepositoryName) && !string.IsNullOrEmpty(r.GitVersion))
+            .GroupBy(r => r.RepositoryName!, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().GitVersion!, StringComparer.OrdinalIgnoreCase);
 
     public async Task<WorkspaceRepositoryLinkListItemDto?> GetSnapshotAsync(
         int workspaceId,
@@ -311,52 +374,128 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
         return query.ApplySearch(filter.Search, WorkspaceRepositoryLinkSearchExpressions.BuildTermPredicate);
     }
 
-    private static IQueryable<WorkspaceRepositoryLink> ApplySort(IQueryable<WorkspaceRepositoryLink> query) =>
-        query
-            .OrderByDescending(wr => wr.DependencyLevel ?? int.MinValue)
-            .ThenBy(wr => wr.RepositoryType == ProjectType.Service ? 0
-                : wr.RepositoryType == ProjectType.Package ? 1
-                : wr.RepositoryType == ProjectType.Executable ? 2
-                : wr.RepositoryType == ProjectType.Library ? 3
-                : wr.RepositoryType == ProjectType.Test ? 4
+    /// <summary>
+    /// Sort/keyset/level-grouping must read the same source as <see cref="Project"/>: the shared link's
+    /// <c>DependencyLevel</c>/<c>RepositoryType</c>/<c>Dependencies</c> for the special Workspace, or a
+    /// correlated lookup into that context's <see cref="WorkspaceRepositoryContextState"/> row for a Feature
+    /// (null when that context has no state row yet - never the Workspace's own value). See design doc §6.4.
+    /// </summary>
+    private static IQueryable<WorkspaceRepositoryLink> ApplySort(
+        IQueryable<WorkspaceRepositoryLink> query,
+        AppDbContext db,
+        WorkspaceFeatureContextId? contextId,
+        bool isSpecialWorkspace)
+    {
+        if (isSpecialWorkspace || contextId is null)
+        {
+            return query
+                .OrderByDescending(wr => wr.DependencyLevel ?? int.MinValue)
+                .ThenBy(wr => wr.RepositoryType == ProjectType.Service ? 0
+                    : wr.RepositoryType == ProjectType.Package ? 1
+                    : wr.RepositoryType == ProjectType.Executable ? 2
+                    : wr.RepositoryType == ProjectType.Library ? 3
+                    : wr.RepositoryType == ProjectType.Test ? 4
+                    : 5)
+                .ThenByDescending(wr => wr.Dependencies ?? int.MinValue)
+                .ThenBy(wr => wr.WorkspaceRepositoryId);
+        }
+
+        var cid = contextId.Value.Value;
+        var states = db.WorkspaceRepositoryContextStates.AsNoTracking()
+            .Where(s => s.WorkspaceFeatureContextId == cid);
+
+        return query
+            .OrderByDescending(wr => (states
+                .Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId)
+                .Select(s => s.DependencyLevel)
+                .FirstOrDefault()) ?? int.MinValue)
+            .ThenBy(wr => states
+                .Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId)
+                .Select(s => s.RepositoryType)
+                .FirstOrDefault() == ProjectType.Service ? 0
+                : states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Package ? 1
+                : states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Executable ? 2
+                : states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Library ? 3
+                : states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Test ? 4
                 : 5)
-            .ThenByDescending(wr => wr.Dependencies ?? int.MinValue)
+            .ThenByDescending(wr => (states
+                .Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId)
+                .Select(s => s.Dependencies)
+                .FirstOrDefault()) ?? int.MinValue)
             .ThenBy(wr => wr.WorkspaceRepositoryId);
+    }
 
     private static IQueryable<WorkspaceRepositoryLink> ApplyKeyset(
         IQueryable<WorkspaceRepositoryLink> query,
-        WorkspaceRepositoryLinkListCursor? cursor)
+        WorkspaceRepositoryLinkListCursor? cursor,
+        AppDbContext db,
+        WorkspaceFeatureContextId? contextId,
+        bool isSpecialWorkspace)
     {
         if (cursor is null)
         {
             return query;
         }
 
+        if (isSpecialWorkspace || contextId is null)
+        {
+            return query.Where(wr =>
+                (wr.DependencyLevel ?? int.MinValue) < cursor.DependencyLevelSortKey
+                || ((wr.DependencyLevel ?? int.MinValue) == cursor.DependencyLevelSortKey
+                    && (wr.RepositoryType == ProjectType.Service ? 0
+                        : wr.RepositoryType == ProjectType.Package ? 1
+                        : wr.RepositoryType == ProjectType.Executable ? 2
+                        : wr.RepositoryType == ProjectType.Library ? 3
+                        : wr.RepositoryType == ProjectType.Test ? 4
+                        : 5) > cursor.RepositoryTypeSortKey)
+                || ((wr.DependencyLevel ?? int.MinValue) == cursor.DependencyLevelSortKey
+                    && (wr.RepositoryType == ProjectType.Service ? 0
+                        : wr.RepositoryType == ProjectType.Package ? 1
+                        : wr.RepositoryType == ProjectType.Executable ? 2
+                        : wr.RepositoryType == ProjectType.Library ? 3
+                        : wr.RepositoryType == ProjectType.Test ? 4
+                        : 5) == cursor.RepositoryTypeSortKey
+                    && (wr.Dependencies ?? int.MinValue) < cursor.DependenciesSortKey)
+                || ((wr.DependencyLevel ?? int.MinValue) == cursor.DependencyLevelSortKey
+                    && (wr.RepositoryType == ProjectType.Service ? 0
+                        : wr.RepositoryType == ProjectType.Package ? 1
+                        : wr.RepositoryType == ProjectType.Executable ? 2
+                        : wr.RepositoryType == ProjectType.Library ? 3
+                        : wr.RepositoryType == ProjectType.Test ? 4
+                        : 5) == cursor.RepositoryTypeSortKey
+                    && (wr.Dependencies ?? int.MinValue) == cursor.DependenciesSortKey
+                    && wr.WorkspaceRepositoryId > cursor.WorkspaceRepositoryId));
+        }
+
+        var cid = contextId.Value.Value;
+        var states = db.WorkspaceRepositoryContextStates.AsNoTracking()
+            .Where(s => s.WorkspaceFeatureContextId == cid);
+
         return query.Where(wr =>
-            (wr.DependencyLevel ?? int.MinValue) < cursor.DependencyLevelSortKey
-            || ((wr.DependencyLevel ?? int.MinValue) == cursor.DependencyLevelSortKey
-                && (wr.RepositoryType == ProjectType.Service ? 0
-                    : wr.RepositoryType == ProjectType.Package ? 1
-                    : wr.RepositoryType == ProjectType.Executable ? 2
-                    : wr.RepositoryType == ProjectType.Library ? 3
-                    : wr.RepositoryType == ProjectType.Test ? 4
+            ((states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.DependencyLevel).FirstOrDefault()) ?? int.MinValue) < cursor.DependencyLevelSortKey
+            || (((states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.DependencyLevel).FirstOrDefault()) ?? int.MinValue) == cursor.DependencyLevelSortKey
+                && (states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Service ? 0
+                    : states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Package ? 1
+                    : states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Executable ? 2
+                    : states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Library ? 3
+                    : states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Test ? 4
                     : 5) > cursor.RepositoryTypeSortKey)
-            || ((wr.DependencyLevel ?? int.MinValue) == cursor.DependencyLevelSortKey
-                && (wr.RepositoryType == ProjectType.Service ? 0
-                    : wr.RepositoryType == ProjectType.Package ? 1
-                    : wr.RepositoryType == ProjectType.Executable ? 2
-                    : wr.RepositoryType == ProjectType.Library ? 3
-                    : wr.RepositoryType == ProjectType.Test ? 4
+            || (((states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.DependencyLevel).FirstOrDefault()) ?? int.MinValue) == cursor.DependencyLevelSortKey
+                && (states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Service ? 0
+                    : states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Package ? 1
+                    : states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Executable ? 2
+                    : states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Library ? 3
+                    : states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Test ? 4
                     : 5) == cursor.RepositoryTypeSortKey
-                && (wr.Dependencies ?? int.MinValue) < cursor.DependenciesSortKey)
-            || ((wr.DependencyLevel ?? int.MinValue) == cursor.DependencyLevelSortKey
-                && (wr.RepositoryType == ProjectType.Service ? 0
-                    : wr.RepositoryType == ProjectType.Package ? 1
-                    : wr.RepositoryType == ProjectType.Executable ? 2
-                    : wr.RepositoryType == ProjectType.Library ? 3
-                    : wr.RepositoryType == ProjectType.Test ? 4
+                && ((states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.Dependencies).FirstOrDefault()) ?? int.MinValue) < cursor.DependenciesSortKey)
+            || (((states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.DependencyLevel).FirstOrDefault()) ?? int.MinValue) == cursor.DependencyLevelSortKey
+                && (states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Service ? 0
+                    : states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Package ? 1
+                    : states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Executable ? 2
+                    : states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Library ? 3
+                    : states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Test ? 4
                     : 5) == cursor.RepositoryTypeSortKey
-                && (wr.Dependencies ?? int.MinValue) == cursor.DependenciesSortKey
+                && ((states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.Dependencies).FirstOrDefault()) ?? int.MinValue) == cursor.DependenciesSortKey
                 && wr.WorkspaceRepositoryId > cursor.WorkspaceRepositoryId));
     }
 
