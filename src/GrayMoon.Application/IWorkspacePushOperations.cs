@@ -11,12 +11,14 @@ public interface IWorkspacePushOperations
 {
     Task<WorkspacePushPlan> GetPlanAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int? maxLevel = null,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Lightweight check (no dependency-package lookup) for which of the given repositories have unpushed commits or a branch never pushed upstream.</summary>
+    /// <summary>Lightweight check (no dependency-package lookup) for which of the given repositories have unpushed commits or a branch never pushed upstream, scoped to <paramref name="contextId"/>.</summary>
     Task<IReadOnlySet<int>> GetRepositoryIdsNeedingPushAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlySet<int> repositoryIds,
         CancellationToken cancellationToken = default);
 

@@ -862,7 +862,7 @@
                 var contextId = await ResolveOperationContextAsync(scope.ServiceProvider, workspaceId, ct);
         var depService = scope.ServiceProvider.GetRequiredService<WorkspaceDependencyService>();
 
-        var plan = await pushOps.GetPlanAsync(workspaceId, maxLevel, ct);
+        var plan = await pushOps.GetPlanAsync(workspaceId, contextId, maxLevel, ct);
         if (!plan.HasUnpushed || plan.RepositoryIds.Count == 0)
         {
             if (!_disposed) _ = InvokeAsync(() => ToastService.Show("Nothing to push."));
@@ -875,7 +875,7 @@
             .Select(wr => wr.RepositoryId)
             .ToHashSet();
         var pushRepoIds = plan.RepositoryIds;
-        var depInfo = await depService.GetPushDependencyInfoForRepoSetAsync(workspaceId, pushRepoIds, ct);
+        var depInfo = await depService.GetPushDependencyInfoForRepoSetAsync(workspaceId, contextId.Value, pushRepoIds, ct);
         bool synchronizedPush = WorkspaceDependencyService.ShouldShowSynchronizedPushModal(depInfo, repoIdsThatNeedPush);
 
         var requiredPackageIds = depInfo?.PayloadForRepo?.RequiredPackages
@@ -929,6 +929,7 @@
         {
             await using var scope = ServiceScopeFactory.CreateAsyncScope();
             var depService = scope.ServiceProvider.GetRequiredService<WorkspaceDependencyService>();
+            var contextId = await ResolveOperationContextAsync(scope.ServiceProvider, workspaceId, CancellationToken.None);
             HashSet<int> repoIdsThatNeedPush;
             if (n.TotalActionRepoCount > n.Repos.Count)
             {
@@ -948,6 +949,7 @@
             }
             var depInfo = await depService.GetPushDependencyInfoForRepoAsync(
                 workspaceId,
+                contextId.Value,
                 repo.RepositoryId,
                 CancellationToken.None);
 

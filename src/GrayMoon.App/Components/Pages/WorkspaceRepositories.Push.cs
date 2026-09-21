@@ -16,9 +16,11 @@ public sealed partial class WorkspaceRepositories
 
         try
         {
+            var contextId = RequireSelectedContextId();
             var allLinks = await GetAllLinksForOperationAsync();
             var plan = await PushOperations.GetPlanAsync(
                 WorkspaceId,
+                contextId,
                 cancellationToken: CancellationToken.None);
             if (!plan.HasUnpushed || plan.RepositoryIds.Count == 0)
             {
@@ -33,6 +35,7 @@ public sealed partial class WorkspaceRepositories
                 .ToHashSet();
             var depInfo = await WorkspaceDependencyService.GetPushDependencyInfoForRepoSetAsync(
                 WorkspaceId,
+                contextId.Value,
                 repoIdsWithUnpushed,
                 CancellationToken.None);
             if (depInfo == null)
@@ -105,6 +108,7 @@ public sealed partial class WorkspaceRepositories
                 .ToHashSet();
             var depInfo = await WorkspaceDependencyService.GetPushDependencyInfoForRepoAsync(
                 WorkspaceId,
+                RequireSelectedContextId().Value,
                 repositoryId,
                 CancellationToken.None);
 
@@ -183,7 +187,7 @@ public sealed partial class WorkspaceRepositories
     {
         await using var planScope = ServiceScopeFactory.CreateAsyncScope();
         var planOps = planScope.ServiceProvider.GetRequiredService<IWorkspacePushOperations>();
-        var plan = await planOps.GetPlanAsync(WorkspaceId, maxLevel, ct);
+        var plan = await planOps.GetPlanAsync(WorkspaceId, RequireSelectedContextId(), maxLevel, ct);
         if (!plan.HasUnpushed || plan.RepositoryIds.Count == 0)
         {
             SafeInvoke(() => ToastService.Show(emptyMessage));

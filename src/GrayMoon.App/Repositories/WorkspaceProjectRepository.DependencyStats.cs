@@ -91,7 +91,8 @@ public sealed partial class WorkspaceProjectRepository
             nameToRepoId,
             uniqueEdges,
             byProject,
-            cancellationToken);
+            cancellationToken,
+            workspaceFeatureContextId);
         var allRepoEdges = edgeSets.All;
 
         var inDegree = repoIdsInWorkspace.ToDictionary(id => id, _ => 0);

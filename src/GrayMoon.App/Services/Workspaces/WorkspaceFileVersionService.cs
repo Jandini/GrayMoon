@@ -32,6 +32,68 @@ public sealed class WorkspaceFileVersionService(
     private static string CheckKey(int workspaceId, int contextId) => $"{workspaceId}:{contextId}";
 
     /// <summary>
+    /// Returns per-file "missing on disk" flags scoped to <paramref name="contextId"/>: reads
+    /// <see cref="WorkspaceFileContextState.IsMissingOnDisk"/> when a row exists for that context, falling back
+    /// to the shared <see cref="WorkspaceFile.IsMissingOnDisk"/> only for the special Workspace context (or when
+    /// no context-state row has been persisted for that file yet) - same rule as
+    /// <c>WorkspaceProjectRepository.GetContextVersionAndLevelByRepoAsync</c>. Used to overlay an in-memory,
+    /// detached (AsNoTracking) <see cref="WorkspaceFile"/>/<see cref="WorkspaceFileVersionConfig"/> graph so a
+    /// Feature's decisions (skip missing file, counters, generated-package sync) never read the Workspace's own
+    /// flag, and vice versa - see AGENTS.md "Feature-context scoping".
+    /// </summary>
+    public async Task<Dictionary<int, bool?>> GetMissingFlagsByFileIdAsync(
+        int workspaceId, WorkspaceFeatureContextId contextId, CancellationToken cancellationToken = default)
+    {
+        var isSpecialWorkspace = await dbContext.WorkspaceFeatureContexts
+            .AsNoTracking()
+            .Where(c => c.WorkspaceFeatureContextId == contextId.Value)
+            .Select(c => c.Kind == WorkspaceFeatureContextKind.Workspace)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var files = await dbContext.WorkspaceFiles
+            .AsNoTracking()
+            .Where(f => f.WorkspaceId == workspaceId)
+            .Select(f => new { f.FileId, f.IsMissingOnDisk })
+            .ToListAsync(cancellationToken);
+        var result = new Dictionary<int, bool?>();
+        if (files.Count == 0)
+            return result;
+
+        var fileIds = files.Select(f => f.FileId).ToList();
+        var states = await dbContext.WorkspaceFileContextStates
+            .AsNoTracking()
+            .Where(s => s.WorkspaceFeatureContextId == contextId.Value && fileIds.Contains(s.FileId))
+            .ToDictionaryAsync(s => s.FileId, cancellationToken);
+
+        foreach (var f in files)
+        {
+            if (states.TryGetValue(f.FileId, out var state))
+                result[f.FileId] = state.IsMissingOnDisk;
+            else if (isSpecialWorkspace)
+                result[f.FileId] = f.IsMissingOnDisk;
+            else
+                result[f.FileId] = null;
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Overlays <paramref name="missingFlagsByFileId"/> onto each config's <c>File.IsMissingOnDisk</c> in place.
+    /// Safe because <see cref="WorkspaceFileVersionConfigRepository.GetByWorkspaceIdAsync"/> returns AsNoTracking
+    /// (detached) entities - mutating them here never risks a later <c>SaveChangesAsync</c> persisting the
+    /// overlay back onto the shared row.
+    /// </summary>
+    private static void ApplyMissingFlagOverlay(IEnumerable<WorkspaceFileVersionConfig> configs, IReadOnlyDictionary<int, bool?> missingFlagsByFileId)
+    {
+        foreach (var cfg in configs)
+        {
+            if (cfg.File == null) continue;
+            if (missingFlagsByFileId.TryGetValue(cfg.File.FileId, out var flag))
+                cfg.File.IsMissingOnDisk = flag;
+        }
+    }
+
+    /// <summary>
     /// Removes coalescing gates for every context of <paramref name="workspaceId"/>.
     /// Call when a workspace is deleted.
     /// </summary>
@@ -80,6 +142,9 @@ public sealed class WorkspaceFileVersionService(
 
         var configs = await versionConfigRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
         if (configs.Count == 0) return (0, 0, "No version configurations found. Use Configure on a file first.", []);
+
+        var missingFlags = await GetMissingFlagsByFileIdAsync(workspaceId, contextId, cancellationToken);
+        ApplyMissingFlagOverlay(configs, missingFlags);
 
         HashSet<string>? selectedRepoNames = null;
         if (selectedRepositoryIds != null && selectedRepositoryIds.Count > 0)
@@ -457,6 +522,7 @@ public sealed class WorkspaceFileVersionService(
             await workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, contextId.Value, cancellationToken);
 
         var configs = await versionConfigRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
+        ApplyMissingFlagOverlay(configs, await GetMissingFlagsByFileIdAsync(workspaceId, contextId, cancellationToken));
         var trackedFiles = await dbContext.WorkspaceFiles
             .Where(f => f.WorkspaceId == workspaceId)
             .ToListAsync(cancellationToken);
@@ -562,13 +628,40 @@ public sealed class WorkspaceFileVersionService(
 
                 if (fileByRepoAndPath.TryGetValue((repoId, fileResult.FilePath ?? ""), out var trackedFile))
                 {
-                    var wasMissing = trackedFile.IsMissingOnDisk == true;
                     var isMissing = fileResult.FileMissing;
-                    if (wasMissing != isMissing)
+
+                    // Context-scoped write (§7/AGENTS.md "Feature-context scoping"): persist onto this
+                    // context's own WorkspaceFileContextState row, get-or-create. Only mirror onto the shared
+                    // WorkspaceFile.IsMissingOnDisk when this context is the special Workspace - a Feature's
+                    // file-missing check must never overwrite the Workspace's own flag (or another Feature's).
+                    var state = await dbContext.WorkspaceFileContextStates
+                        .FirstOrDefaultAsync(
+                            s => s.WorkspaceFeatureContextId == contextId.Value && s.FileId == trackedFile.FileId,
+                            cancellationToken);
+                    if (state is null)
                     {
-                        trackedFile.IsMissingOnDisk = isMissing ? true : null;
-                        missingFlagChanged = true;
+                        state = new WorkspaceFileContextState
+                        {
+                            WorkspaceFeatureContextId = contextId.Value,
+                            FileId = trackedFile.FileId
+                        };
+                        dbContext.WorkspaceFileContextStates.Add(state);
                     }
+                    var wasMissingForContext = state.IsMissingOnDisk == true;
+                    state.IsMissingOnDisk = isMissing ? true : null;
+                    state.LastCheckedAt = DateTime.UtcNow;
+                    if (wasMissingForContext != isMissing)
+                        missingFlagChanged = true;
+
+                    if (contextInfo.IsSpecialWorkspace)
+                        trackedFile.IsMissingOnDisk = isMissing ? true : null;
+
+                    // Keep the in-memory (detached) config's overlay consistent with what was just persisted,
+                    // so the counters computed below from `configs` reflect this context's own answer rather
+                    // than the shared row - mirrors the same overlay applied at the top of every other method
+                    // in this file via ApplyMissingFlagOverlay/GetMissingFlagsByFileIdAsync.
+                    foreach (var relatedCfg in configs.Where(c => c.File?.FileId == trackedFile.FileId))
+                        relatedCfg.File!.IsMissingOnDisk = state.IsMissingOnDisk;
                 }
 
                 if (fileResult.FileMissing)
@@ -601,14 +694,6 @@ public sealed class WorkspaceFileVersionService(
                         ExpectedValue = line.ExpectedValue
                     });
                 }
-            }
-
-            foreach (var cfg in configs)
-            {
-                if (cfg.File == null) continue;
-                var tracked = trackedFiles.FirstOrDefault(f => f.FileId == cfg.File.FileId);
-                if (tracked != null)
-                    cfg.File.IsMissingOnDisk = tracked.IsMissingOnDisk;
             }
 
             await dbContext.WorkspaceFileLineStatuses
@@ -657,6 +742,8 @@ public sealed class WorkspaceFileVersionService(
         if (workspace == null) return false;
 
         var configs = await versionConfigRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
+        var missingFlags = await GetMissingFlagsByFileIdAsync(workspaceId, contextId, cancellationToken);
+        ApplyMissingFlagOverlay(configs, missingFlags);
         var csprojConfigs = configs
             .Where(c => c.File?.Repository != null
                 && c.File.IsMissingOnDisk != true
@@ -868,13 +955,13 @@ public sealed class WorkspaceFileVersionService(
         return result;
     }
 
-    /// <summary>Returns out-of-date file-config token rows for the workspace, grouped by dependent RepositoryId.</summary>
+    /// <summary>Returns out-of-date file-config token rows for the workspace scoped to <paramref name="contextId"/>, grouped by dependent RepositoryId. <see cref="WorkspaceFileLineStatus"/> rows carry their own <c>WorkspaceFeatureContextId</c> (unlike <see cref="WorkspaceFile.IsMissingOnDisk"/>), so this is a plain filter rather than a context-state overlay.</summary>
     public async Task<IReadOnlyDictionary<int, IReadOnlyList<(string FileName, string TokenName, string CurrentValue, string ExpectedValue)>>> GetMismatchedFileVersionLinesByRepoAsync(
-        int workspaceId, CancellationToken cancellationToken = default)
+        int workspaceId, WorkspaceFeatureContextId contextId, CancellationToken cancellationToken = default)
     {
         var rows = await dbContext.WorkspaceFileLineStatuses
             .AsNoTracking()
-            .Where(s => s.WorkspaceId == workspaceId && s.TokenName != "")
+            .Where(s => s.WorkspaceId == workspaceId && s.WorkspaceFeatureContextId == contextId.Value && s.TokenName != "")
             .ToListAsync(cancellationToken);
         return rows
             .GroupBy(s => s.RepositoryId)
@@ -885,43 +972,45 @@ public sealed class WorkspaceFileVersionService(
                     .ToList());
     }
 
-    /// <summary>Out-of-date file-config token rows for a single repository (badge tooltip).</summary>
+    /// <summary>Out-of-date file-config token rows for a single repository scoped to <paramref name="contextId"/> (badge tooltip).</summary>
     public async Task<IReadOnlyList<(string FileName, string TokenName, string CurrentValue, string ExpectedValue)>> GetMismatchedFileVersionLinesForRepoAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         CancellationToken cancellationToken = default)
     {
         var rows = await dbContext.WorkspaceFileLineStatuses
             .AsNoTracking()
-            .Where(s => s.WorkspaceId == workspaceId && s.RepositoryId == repositoryId && s.TokenName != "")
+            .Where(s => s.WorkspaceId == workspaceId && s.WorkspaceFeatureContextId == contextId.Value && s.RepositoryId == repositoryId && s.TokenName != "")
             .ToListAsync(cancellationToken);
         return rows
             .Select(s => (s.FileName, s.TokenName, s.CurrentValue ?? "", s.ExpectedValue ?? ""))
             .ToList();
     }
 
-    /// <summary>Returns out-of-date file line statuses for the workspace, grouped by RepositoryId.</summary>
+    /// <summary>Returns out-of-date file line statuses for the workspace scoped to <paramref name="contextId"/>, grouped by RepositoryId.</summary>
     public async Task<IReadOnlyDictionary<int, IReadOnlyList<WorkspaceFileLineStatus>>> GetFileLineStatusByWorkspaceAsync(
-        int workspaceId, CancellationToken cancellationToken = default)
+        int workspaceId, WorkspaceFeatureContextId contextId, CancellationToken cancellationToken = default)
     {
         var rows = await dbContext.WorkspaceFileLineStatuses
             .AsNoTracking()
-            .Where(s => s.WorkspaceId == workspaceId)
+            .Where(s => s.WorkspaceId == workspaceId && s.WorkspaceFeatureContextId == contextId.Value)
             .ToListAsync(cancellationToken);
         return rows
             .GroupBy(s => s.RepositoryId)
             .ToDictionary(g => g.Key, g => (IReadOnlyList<WorkspaceFileLineStatus>)g.ToList());
     }
 
-    /// <summary>Out-of-date file line statuses for a single repository.</summary>
+    /// <summary>Out-of-date file line statuses for a single repository scoped to <paramref name="contextId"/>.</summary>
     public async Task<IReadOnlyList<WorkspaceFileLineStatus>> GetFileLineStatusForRepoAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         CancellationToken cancellationToken = default)
     {
         return await dbContext.WorkspaceFileLineStatuses
             .AsNoTracking()
-            .Where(s => s.WorkspaceId == workspaceId && s.RepositoryId == repositoryId)
+            .Where(s => s.WorkspaceId == workspaceId && s.WorkspaceFeatureContextId == contextId.Value && s.RepositoryId == repositoryId)
             .ToListAsync(cancellationToken);
     }
 
@@ -932,10 +1021,12 @@ public sealed class WorkspaceFileVersionService(
     /// </summary>
     public async Task<IReadOnlyDictionary<int, IReadOnlyList<(string FileName, string TokenName, string Version)>>> GetAllFileVersionLinesByRepoAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlyDictionary<string, string> repoVersionMap,
         CancellationToken cancellationToken = default)
     {
         var configs = await versionConfigRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
+        ApplyMissingFlagOverlay(configs, await GetMissingFlagsByFileIdAsync(workspaceId, contextId, cancellationToken));
         var result = new Dictionary<int, List<(string FileName, string TokenName, string Version)>>();
 
         foreach (var cfg in configs)
@@ -963,11 +1054,13 @@ public sealed class WorkspaceFileVersionService(
     /// <summary>OK-badge file version lines for a single repository.</summary>
     public async Task<IReadOnlyList<(string FileName, string TokenName, string Version)>> GetAllFileVersionLinesForRepoAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         IReadOnlyDictionary<string, string> repoVersionMap,
         CancellationToken cancellationToken = default)
     {
         var configs = await versionConfigRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
+        ApplyMissingFlagOverlay(configs, await GetMissingFlagsByFileIdAsync(workspaceId, contextId, cancellationToken));
         var list = new List<(string FileName, string TokenName, string Version)>();
 
         foreach (var cfg in configs)

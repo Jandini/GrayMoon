@@ -201,6 +201,81 @@ public sealed class WorkspaceRepository(
         _logger.LogInformation("Persistence: saved Workspace. Action=ToggleDefault (set), WorkspaceId={WorkspaceId}, Name={Name}", workspaceId, workspace.Name);
     }
 
+    /// <summary>
+    /// Lightweight check (no dependency-package lookup) for which of the given repositories have unpushed commits
+    /// or a branch never pushed upstream, scoped to <paramref name="workspaceFeatureContextId"/>: reads
+    /// <see cref="WorkspaceRepositoryContextState"/>'s own OutgoingCommits/BranchHasUpstream/CheckedOutTag when a
+    /// row exists for that context, falling back to the shared <see cref="WorkspaceRepositoryLink"/> only for the
+    /// special Workspace context (or when no context-state row has been persisted for that repo yet) - same rule
+    /// as <c>WorkspaceProjectRepository.GetContextVersionAndLevelByRepoAsync</c>. A repo with neither a context
+    /// row nor special-Workspace status is treated as "not needing push" rather than borrowing the Workspace's
+    /// answer - see AGENTS.md "Feature-context scoping".
+    /// </summary>
+    public async Task<IReadOnlySet<int>> GetRepositoryIdsNeedingPushAsync(
+        int workspaceId,
+        int workspaceFeatureContextId,
+        IReadOnlySet<int> repositoryIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (repositoryIds.Count == 0)
+            return new HashSet<int>();
+
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        var isSpecialWorkspace = await db.WorkspaceFeatureContexts
+            .AsNoTracking()
+            .Where(c => c.WorkspaceFeatureContextId == workspaceFeatureContextId)
+            .Select(c => c.Kind == WorkspaceFeatureContextKind.Workspace)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var links = await db.WorkspaceRepositories
+            .AsNoTracking()
+            .Where(wr => wr.WorkspaceId == workspaceId && repositoryIds.Contains(wr.RepositoryId))
+            .Select(wr => new { wr.WorkspaceRepositoryId, wr.RepositoryId, wr.CheckedOutTag, wr.OutgoingCommits, wr.BranchHasUpstream })
+            .ToListAsync(cancellationToken);
+        if (links.Count == 0)
+            return new HashSet<int>();
+
+        var linkIds = links.Select(l => l.WorkspaceRepositoryId).ToList();
+        var states = await db.WorkspaceRepositoryContextStates
+            .AsNoTracking()
+            .Where(s => s.WorkspaceFeatureContextId == workspaceFeatureContextId && linkIds.Contains(s.WorkspaceRepositoryId))
+            .Select(s => new { s.WorkspaceRepositoryId, s.CheckedOutTag, s.OutgoingCommits, s.BranchHasUpstream })
+            .ToListAsync(cancellationToken);
+        var stateByLinkId = states.ToDictionary(s => s.WorkspaceRepositoryId);
+
+        var result = new HashSet<int>();
+        foreach (var link in links)
+        {
+            string? checkedOutTag;
+            int? outgoingCommits;
+            bool? branchHasUpstream;
+
+            if (stateByLinkId.TryGetValue(link.WorkspaceRepositoryId, out var state))
+            {
+                checkedOutTag = state.CheckedOutTag;
+                outgoingCommits = state.OutgoingCommits;
+                branchHasUpstream = state.BranchHasUpstream;
+            }
+            else if (isSpecialWorkspace)
+            {
+                checkedOutTag = link.CheckedOutTag;
+                outgoingCommits = link.OutgoingCommits;
+                branchHasUpstream = link.BranchHasUpstream;
+            }
+            else
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(checkedOutTag))
+                continue;
+            if ((outgoingCommits ?? 0) > 0 || branchHasUpstream == false)
+                result.Add(link.RepositoryId);
+        }
+        return result;
+    }
+
     public async Task AddRepositoriesAsync(int workspaceId, IReadOnlyCollection<int> repositoryIds, CancellationToken cancellationToken = default)
     {
         if (await _dbContext.WorkspaceFeatures.AnyAsync(f => f.WorkspaceId == workspaceId, cancellationToken))

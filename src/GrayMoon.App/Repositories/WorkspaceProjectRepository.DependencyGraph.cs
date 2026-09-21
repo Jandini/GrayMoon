@@ -260,7 +260,8 @@ public sealed partial class WorkspaceProjectRepository
         Dictionary<string, int> nameToRepoId,
         List<(int DependentProjectId, int ReferencedProjectId, string? Version)> uniqueEdges,
         Dictionary<int, WorkspaceProject> byProject,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int? workspaceFeatureContextId = null)
     {
         // Split project-derived edges into real (physical .csproj to .csproj) and generated-package edges (the
         // referenced project is a virtual/generated WorkspaceProject inferred from a configured .csproj version
@@ -282,9 +283,44 @@ public sealed partial class WorkspaceProjectRepository
 
         var fileConfigRepoEdges = new HashSet<(int DepRepoId, int RefRepoId)>();
         var configs = await versionConfigRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
+
+        // Context-scoped "missing on disk" check (§7/AGENTS.md "Feature-context scoping") when a context was
+        // supplied: WorkspaceFile.IsMissingOnDisk alone is the special Workspace's own answer, so a Feature's
+        // file-config dependency edges must instead read that Feature's own WorkspaceFileContextState row
+        // (falling back to the shared flag only when no such row exists and this is the special Workspace).
+        // Callers that did not pass a context (existing dependency-graph-visualization call sites, unchanged
+        // in this pass) keep the legacy shared-flag-only behavior.
+        Dictionary<int, bool?>? missingFlagsByFileId = null;
+        if (workspaceFeatureContextId is int ctxId)
+        {
+            var isSpecialWorkspace = await dbContext.WorkspaceFeatureContexts
+                .AsNoTracking()
+                .Where(c => c.WorkspaceFeatureContextId == ctxId)
+                .Select(c => c.Kind == WorkspaceFeatureContextKind.Workspace)
+                .FirstOrDefaultAsync(cancellationToken);
+            var fileIds = configs.Where(c => c.File != null).Select(c => c.File!.FileId).Distinct().ToList();
+            var states = await dbContext.WorkspaceFileContextStates
+                .AsNoTracking()
+                .Where(s => s.WorkspaceFeatureContextId == ctxId && fileIds.Contains(s.FileId))
+                .ToDictionaryAsync(s => s.FileId, cancellationToken);
+            missingFlagsByFileId = new Dictionary<int, bool?>();
+            foreach (var fileId in fileIds)
+            {
+                if (states.TryGetValue(fileId, out var state))
+                    missingFlagsByFileId[fileId] = state.IsMissingOnDisk;
+                else if (isSpecialWorkspace)
+                    missingFlagsByFileId[fileId] = configs.First(c => c.File!.FileId == fileId).File!.IsMissingOnDisk;
+                else
+                    missingFlagsByFileId[fileId] = null;
+            }
+        }
+
         foreach (var cfg in configs)
         {
-            if (cfg.File?.IsMissingOnDisk == true) continue;
+            var isMissing = missingFlagsByFileId != null
+                ? cfg.File != null && (missingFlagsByFileId.GetValueOrDefault(cfg.File.FileId) == true)
+                : cfg.File?.IsMissingOnDisk == true;
+            if (isMissing) continue;
             var fileRepoId = cfg.File?.RepositoryId;
             if (!fileRepoId.HasValue || fileRepoId.Value == 0 || !repoIdsInWorkspace.Contains(fileRepoId.Value)) continue;
             var dependentRepoId = fileRepoId.Value;

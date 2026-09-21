@@ -1,4 +1,5 @@
 using GrayMoon.App.Models;
+using GrayMoon.App.Repositories;
 using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Services.Orchestration;
@@ -10,19 +11,31 @@ namespace GrayMoon.App.Services.Orchestration;
 public sealed class WorkspacePushHandler(
     PushOrchestrator pushOrchestrator,
     WorkspacePushService workspacePushService,
+    WorkspaceRepository workspaceRepository,
     ILogger<WorkspacePushHandler> logger)
 {
+    /// <summary>
+    /// Builds the push plan scoped to <paramref name="contextId"/>: payload/levels come from that context's own
+    /// dependency graph (<see cref="WorkspacePushService.GetPushPlanAsync(int,int,CancellationToken)"/>), and
+    /// "needs push" comes from that context's own <see cref="WorkspaceRepositoryContextState"/> row per repo
+    /// (<see cref="WorkspaceRepository.GetRepositoryIdsNeedingPushAsync"/>) instead of the shared
+    /// <see cref="WorkspaceRepositoryLink"/> fields on <paramref name="workspaceRepositories"/> - a Feature's
+    /// push plan must never be computed from the Workspace's own commit counts/dependency level (see
+    /// AGENTS.md "Feature-context scoping").
+    /// </summary>
     public async Task<(IReadOnlyList<PushRepoPayload> Payload, IReadOnlySet<int> PushRepoIds, bool HasUnpushed)> GetPushPlanAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlyList<WorkspaceRepositoryLink> workspaceRepositories,
         CancellationToken cancellationToken,
         int? maxLevel = null)
     {
-        var (payload, _) = await workspacePushService.GetPushPlanAsync(workspaceId, cancellationToken);
-        var repoIdsWithUnpushed = workspaceRepositories
-            .Where(wr => !wr.IsOnTag && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false))
-            .Where(wr => !maxLevel.HasValue || (wr.DependencyLevel ?? 0) <= maxLevel.Value)
-            .Select(wr => wr.RepositoryId)
+        var (payload, _) = await workspacePushService.GetPushPlanAsync(workspaceId, contextId.Value, cancellationToken);
+        var allRepoIds = workspaceRepositories.Select(wr => wr.RepositoryId).ToHashSet();
+        var needingPush = await workspaceRepository.GetRepositoryIdsNeedingPushAsync(workspaceId, contextId.Value, allRepoIds, cancellationToken);
+        var levelByRepo = payload.ToDictionary(p => p.RepoId, p => p.DependencyLevel);
+        var repoIdsWithUnpushed = needingPush
+            .Where(id => !maxLevel.HasValue || (levelByRepo.GetValueOrDefault(id) ?? 0) <= maxLevel.Value)
             .ToHashSet();
         var toPush = payload.Where(p => repoIdsWithUnpushed.Contains(p.RepoId)).ToList();
         var pushRepoIds = toPush.Select(p => p.RepoId).ToHashSet();

@@ -285,6 +285,11 @@
                 .Select(r => new WorkspaceRepoItem { RepositoryId = r.RepositoryId, RepositoryName = r.Repository!.RepositoryName })
                 .ToList();
             var list = await WorkspaceFileRepository.GetByWorkspaceIdAsync(WorkspaceId);
+            // Context-scoped (§7/AGENTS.md "Feature-context scoping"): IsMissingOnDisk is per-context state, not
+            // a single shared flag - a Feature must see its own worktree's missing-file answer, not the
+            // Workspace's (or another Feature's). Falls back to the shared WorkspaceFile row only for the
+            // special Workspace / files with no context-state row yet.
+            var missingFlags = await FileVersionService.GetMissingFlagsByFileIdAsync(WorkspaceId, _selectedContextId.Value);
             files = list.Select(f => new WorkspaceFileDto
             {
                 FileId = f.FileId,
@@ -293,7 +298,7 @@
                 RepositoryName = f.Repository?.RepositoryName,
                 FileName = f.FileName,
                 FilePath = f.FilePath,
-                IsMissingOnDisk = f.IsMissingOnDisk == true
+                IsMissingOnDisk = missingFlags.GetValueOrDefault(f.FileId) == true
             }).ToList();
             var configs = await VersionConfigRepository.GetByWorkspaceIdAsync(WorkspaceId);
             fileVersionConfigs = configs.ToDictionary(c => c.FileId, c => c.VersionPattern);

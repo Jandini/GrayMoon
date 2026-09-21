@@ -59,10 +59,17 @@ public sealed class WorkspacePushService(
     private readonly GhaWorkflowLiveFeedService? _ghaWorkflowLiveFeedService = ghaWorkflowLiveFeedService;
     private readonly OverlayCommandTerminalService? _overlayCommandTerminalService = overlayCommandTerminalService;
 
-    /// <summary>Gets the push plan: all workspace repos by dependency level. Used to show multi-level push dialog and push with dependency synchronization.</summary>
+    /// <summary>Gets the push plan for the special Workspace context: all workspace repos by dependency level. Legacy overload for callers without a context id.</summary>
     public async Task<(IReadOnlyList<PushRepoPayload> Payload, bool IsMultiLevel)> GetPushPlanAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
-        var payload = await _workspaceDependencyService.GetPushPlanPayloadAsync(workspaceId, cancellationToken);
+        var contextId = await _contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+        return await GetPushPlanAsync(workspaceId, contextId.Value, cancellationToken);
+    }
+
+    /// <summary>Gets the push plan scoped to <paramref name="workspaceFeatureContextId"/>: that context's own repos by dependency level. Used to show multi-level push dialog and push with dependency synchronization.</summary>
+    public async Task<(IReadOnlyList<PushRepoPayload> Payload, bool IsMultiLevel)> GetPushPlanAsync(int workspaceId, int workspaceFeatureContextId, CancellationToken cancellationToken = default)
+    {
+        var payload = await _workspaceDependencyService.GetPushPlanPayloadAsync(workspaceId, workspaceFeatureContextId, cancellationToken);
         if (payload.Count == 0)
             return (payload, false);
         var levels = payload.Select(p => p.DependencyLevel ?? 0).Distinct().ToList();

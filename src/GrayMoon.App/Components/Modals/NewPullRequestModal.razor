@@ -1,6 +1,7 @@
 @using GrayMoon.App.Models
 @using GrayMoon.App.Services
 @using GrayMoon.Application
+@using GrayMoon.Application.Features
 @using Microsoft.Extensions.Options
 @implements IDisposable
 @inject IPullRequestService PullRequestService
@@ -163,6 +164,7 @@
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public bool IsBusy { get; set; }
     [Parameter] public int WorkspaceId { get; set; }
+    [Parameter] public WorkspaceFeatureContextId ContextId { get; set; }
     [Parameter] public IReadOnlyList<NewPrTargetRepo> Targets { get; set; } = Array.Empty<NewPrTargetRepo>();
     [Parameter] public EventCallback<NewPrFormResult> OnCreate { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
@@ -346,7 +348,7 @@
         try
         {
             var repoIds = Targets.Select(t => t.RepositoryId).ToHashSet();
-            var needingPush = await PushOperations.GetRepositoryIdsNeedingPushAsync(WorkspaceId, repoIds, ct);
+            var needingPush = await PushOperations.GetRepositoryIdsNeedingPushAsync(WorkspaceId, ContextId, repoIds, ct);
             if (ct.IsCancellationRequested) return;
 
             _repoIdsNeedingPush = needingPush.ToHashSet();

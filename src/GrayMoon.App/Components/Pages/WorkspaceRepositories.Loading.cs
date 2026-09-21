@@ -487,12 +487,12 @@ public sealed partial class WorkspaceRepositories
             var customDepRepo = scope.ServiceProvider.GetRequiredService<WorkspaceRepositoryCustomDependencyRepository>();
             var mismatched = await projectRepo.GetMismatchedDependencyLinesForRepoAsync(WorkspaceId, repositoryId);
             var allDeps = await projectRepo.GetPackageDependencyLinesForRepoAsync(WorkspaceId, repositoryId);
-            var mismatchedFiles = await fileVersionService.GetMismatchedFileVersionLinesForRepoAsync(WorkspaceId, repositoryId);
-            var fileStatuses = await fileVersionService.GetFileLineStatusForRepoAsync(WorkspaceId, repositoryId);
+            var mismatchedFiles = await fileVersionService.GetMismatchedFileVersionLinesForRepoAsync(WorkspaceId, RequireSelectedContextId(), repositoryId);
+            var fileStatuses = await fileVersionService.GetFileLineStatusForRepoAsync(WorkspaceId, RequireSelectedContextId(), repositoryId);
             var linkListQuery = scope.ServiceProvider.GetRequiredService<IWorkspaceRepositoryLinkListQueryService>();
             var repoVersionMap = await linkListQuery.GetGitVersionNameMapAsync(
                 WorkspaceId, _selectedContextId, !_isFeatureContext);
-            var allFileLines = await fileVersionService.GetAllFileVersionLinesForRepoAsync(WorkspaceId, repositoryId, repoVersionMap);
+            var allFileLines = await fileVersionService.GetAllFileVersionLinesForRepoAsync(WorkspaceId, RequireSelectedContextId(), repositoryId, repoVersionMap);
             var custom = await customDepRepo.GetCustomDependencyNamesForRepoAsync(WorkspaceId, repositoryId);
             var mismatchDict = _mismatchedDependencyLinesByRepo as Dictionary<int, IReadOnlyList<DependencyMismatchLine>>
                 ?? _mismatchedDependencyLinesByRepo.ToDictionary(kv => kv.Key, kv => kv.Value);

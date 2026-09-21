@@ -5,6 +5,7 @@
 @using GrayMoon.Application.Features
 @inject IWorkspaceBranchOperations BranchOperations
 @inject IWorkspaceBranchOccupancyService OccupancyService
+@inject GrayMoon.Application.Features.IWorkspaceExternalWorktreeOperations ExternalWorktreeOperations
 @inject IJSRuntime JSRuntime
 @inject ILogger<SwitchBranchModal> Logger
 
@@ -193,6 +194,17 @@
                                                                 <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i>
                                                             </button>
                                                         }
+                                                        else if (branch != currentBranchLocal && TryGetOccupancy(branch, out var occForExternalCleanup) && occForExternalCleanup.RequiresExternalCleanup)
+                                                        {
+                                                            <button type="button"
+                                                                    class="btn btn-link p-0 branch-delete-link"
+                                                                    title="@($"Checked out in an external worktree at {occForExternalCleanup.WorktreePath} - remove that worktree to delete this branch")"
+                                                                    aria-label="Remove external worktree to delete this branch"
+                                                                    @onclick="(e) => RequestExternalWorktreeCleanupAsync(branch, occForExternalCleanup)"
+                                                                    @onclick:stopPropagation="true">
+                                                                <i class="bi bi-folder-x" aria-hidden="true"></i>
+                                                            </button>
+                                                        }
                                                         else if (branch != currentBranchLocal)
                                                         {
                                                             <button type="button"
@@ -240,6 +252,52 @@
                                                                     Delete
                                                                 </button>
                                                                 <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="DismissDeleteConfirmation" disabled="@(isDeleting || isRefreshing)" @onclick:stopPropagation="true">Cancel</button>
+                                                            </div>
+                                                        </div>
+                                                    }
+                                                </div>
+                                            }
+                                            @if (worktreeCleanupBranch == branch)
+                                            {
+                                                <div class="branch-delete-confirm d-flex flex-column gap-2 px-2 py-2" @ref="worktreeCleanupConfirmElementRef">
+                                                    @if (_worktreeCleanupPlan == null)
+                                                    {
+                                                        <div class="small text-muted">
+                                                            <span class="spinner-border spinner-border-sm me-1"></span>
+                                                            Checking external worktree...
+                                                        </div>
+                                                    }
+                                                    else if (!_worktreeCleanupPlan.Success)
+                                                    {
+                                                        <div class="d-flex align-items-center justify-content-between">
+                                                            <span class="text-danger small">@_worktreeCleanupPlan.Error</span>
+                                                            <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="DismissExternalWorktreeCleanup" @onclick:stopPropagation="true">Close</button>
+                                                        </div>
+                                                    }
+                                                    else if (_worktreeCleanupPlan.IsDirty && !_awaitingForceWorktreeCleanupConfirmation)
+                                                    {
+                                                        <div class="small">
+                                                            <span class="text-danger">@_worktreeCleanupPlan.Summary has uncommitted changes.</span>
+                                                            <div class="text-muted mt-1" style="font-size: 0.8rem;">Removing it will discard those changes.</div>
+                                                        </div>
+                                                        <div class="d-flex gap-2 flex-shrink-0 align-self-end">
+                                                            <button type="button" class="btn btn-danger btn-sm" @onclick="() => { _awaitingForceWorktreeCleanupConfirmation = true; }" disabled="@(isCleaningUpWorktree || isRefreshing)" @onclick:stopPropagation="true">Remove Anyway</button>
+                                                            <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="DismissExternalWorktreeCleanup" disabled="@(isCleaningUpWorktree || isRefreshing)" @onclick:stopPropagation="true">Cancel</button>
+                                                        </div>
+                                                    }
+                                                    else
+                                                    {
+                                                        <div class="d-flex align-items-center justify-content-between">
+                                                            <span class="text-danger small">Remove external worktree at @_worktreeCleanupPlan.WorktreePath?</span>
+                                                            <div class="d-flex gap-2 flex-shrink-0">
+                                                                <button type="button" class="btn btn-danger btn-sm" @onclick="ProceedWithExternalWorktreeCleanupAsync" disabled="@(isCleaningUpWorktree || isRefreshing)" @onclick:stopPropagation="true">
+                                                                    @if (isCleaningUpWorktree)
+                                                                    {
+                                                                        <span class="spinner-border spinner-border-sm me-1"></span>
+                                                                    }
+                                                                    Remove
+                                                                </button>
+                                                                <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="DismissExternalWorktreeCleanup" disabled="@(isCleaningUpWorktree || isRefreshing)" @onclick:stopPropagation="true">Cancel</button>
                                                             </div>
                                                         </div>
                                                     }
@@ -569,6 +627,14 @@
     private bool _awaitingForceDeleteConfirmation;
     private bool _wasBusy;
 
+    /// <summary>Branch whose "Worktree" badge cleanup confirm is open (§28B) - the counterpart to <see cref="branchToDelete"/> for external (non-Feature) git worktrees.</summary>
+    private string? worktreeCleanupBranch;
+    private GrayMoon.Application.Features.ExternalWorktreeCleanupPlan? _worktreeCleanupPlan;
+    private bool isCleaningUpWorktree;
+    private bool _awaitingForceWorktreeCleanupConfirmation;
+    private ElementReference worktreeCleanupConfirmElementRef;
+    private bool _scrollToWorktreeCleanupConfirm;
+
     protected override async Task OnParametersSetAsync()
     {
         var busyJustEnded = _wasBusy && !IsBusy;
@@ -681,6 +747,16 @@
             try
             {
                 await JSRuntime.InvokeVoidAsync("scrollElementIntoView", deleteConfirmElementRef);
+            }
+            catch { }
+        }
+        // Scroll external worktree cleanup confirmation into view when shown - same rationale as branch delete above.
+        if (IsVisible && _scrollToWorktreeCleanupConfirm && worktreeCleanupBranch != null)
+        {
+            _scrollToWorktreeCleanupConfirm = false;
+            try
+            {
+                await JSRuntime.InvokeVoidAsync("scrollElementIntoView", worktreeCleanupConfirmElementRef);
             }
             catch { }
         }
@@ -1096,6 +1172,99 @@
         deleteConfirmMessage = "";
         _awaitingForceDeleteConfirmation = false;
         StateHasChanged();
+    }
+
+    /// <summary>
+    /// Opens the inline cleanup confirm for a branch checked out in an external (non-Feature) git worktree
+    /// (§28B) and kicks off the analyze call. Counterpart to <see cref="RequestDeleteBranch"/> for the
+    /// "Worktree" occupancy badge - routes to <see cref="IWorkspaceExternalWorktreeOperations"/> instead of an
+    /// ordinary branch delete, which git worktree rules would reject anyway.
+    /// </summary>
+    private async Task RequestExternalWorktreeCleanupAsync(string branch, BranchOccupancyBadge occupancy)
+    {
+        worktreeCleanupBranch = branch;
+        _worktreeCleanupPlan = null;
+        _awaitingForceWorktreeCleanupConfirmation = false;
+        errorMessage = null;
+        _scrollToWorktreeCleanupConfirm = true;
+        StateHasChanged();
+
+        if (string.IsNullOrWhiteSpace(occupancy.WorktreePath))
+        {
+            _worktreeCleanupPlan = new GrayMoon.Application.Features.ExternalWorktreeCleanupPlan
+            {
+                Success = false,
+                Error = "Worktree path is unknown."
+            };
+            StateHasChanged();
+            return;
+        }
+
+        try
+        {
+            _worktreeCleanupPlan = await ExternalWorktreeOperations.AnalyzeExternalWorktreeCleanupAsync(
+                WorkspaceId, WorkspaceRepositoryId, occupancy.WorktreePath);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "AnalyzeExternalWorktreeCleanup failed for {WorktreePath}", occupancy.WorktreePath);
+            _worktreeCleanupPlan = new GrayMoon.Application.Features.ExternalWorktreeCleanupPlan
+            {
+                Success = false,
+                Error = "Could not inspect the external worktree."
+            };
+        }
+        StateHasChanged();
+    }
+
+    private void DismissExternalWorktreeCleanup()
+    {
+        worktreeCleanupBranch = null;
+        _worktreeCleanupPlan = null;
+        _awaitingForceWorktreeCleanupConfirmation = false;
+        StateHasChanged();
+    }
+
+    private async Task ProceedWithExternalWorktreeCleanupAsync()
+    {
+        if (_worktreeCleanupPlan is not { Success: true } plan)
+            return;
+
+        isCleaningUpWorktree = true;
+        errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var result = await ExternalWorktreeOperations.RemoveExternalWorktreeAsync(
+                WorkspaceId,
+                WorkspaceRepositoryId,
+                plan.WorktreePath,
+                new GrayMoon.Application.Features.ExternalWorktreeCleanupOptions
+                {
+                    AllowForceRemoveDirty = _awaitingForceWorktreeCleanupConfirmation
+                });
+
+            if (result.Success)
+            {
+                DismissExternalWorktreeCleanup();
+                await ReloadBranchesFromPersistenceAsync();
+            }
+            else
+            {
+                errorMessage = result.Error ?? "Failed to remove the external worktree.";
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = "An error occurred while removing the external worktree.";
+            Logger.LogError(ex, "Error removing external worktree");
+        }
+        finally
+        {
+            isCleaningUpWorktree = false;
+            StateHasChanged();
+        }
     }
 
     /// <summary>Git exit when branch -d fails on unmerged branch; stable phrase from git's error output.</summary>

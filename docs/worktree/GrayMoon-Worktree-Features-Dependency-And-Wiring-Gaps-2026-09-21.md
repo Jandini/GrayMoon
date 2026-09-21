@@ -93,12 +93,122 @@ for item 5).
   tests) passes unchanged (no new persistence behavior was added — `RefreshContextPullRequestsAsync` already
   existed and is exercised by `WorkspacePullRequestServiceTests.cs`).
 
-**Not yet done:** items 7–9, plus the remainder of item 2 (`IWorkspacePushOperations`/Razor push pages), and
-generated-package context-scoping (`SyncGeneratedPackageDependenciesAsync` still isn't context-scoped; the
-`WorkspaceProjectRepositoryGeneratedPackageTests` seed data and the new-context filter both currently carve out
-generated/virtual package rows rather than scoping them). See the table in §1 and the fix sequence in §5 below
-for what's left; the summary and evidence in §§1–4 otherwise still describe the code as it stood *before* this
-update and should be read with the corrections above in mind.
+- **Item 2 remainder (thread `contextId` through `IWorkspacePushOperations`/Razor push pages) — done.**
+  `IWorkspacePushOperations.GetPlanAsync`/`GetRepositoryIdsNeedingPushAsync` now take a `WorkspaceFeatureContextId
+  contextId` parameter (matching the sibling methods on the same interface), threaded through
+  `WorkspacePushOperations`, `WorkspacePushHandler.GetPushPlanAsync` (which now calls a new context-aware
+  overload of `WorkspacePushService.GetPushPlanAsync`), and every call site that already had a context in
+  scope: `WorkspaceRepositories.Push.cs` (`OnPushClickAsync`, `PushBadgeClickCoreAsync`, `BuildPushPlanAsync` -
+  the latter also used by `WorkspaceRepositories.Update.cs`/`.PrepareWorkspace.cs`),
+  `WorkspaceActionNotificationPanel.razor` (both push-badge/plan-building call sites, using the same
+  `ResolveOperationContextAsync` the panel's own `PushAsync`/`PushSingleAsync` calls already resolved), and
+  `NewPullRequestModal.razor` (gained a new `ContextId` parameter, wired from
+  `WorkspaceRepositories.razor`'s `RequireSelectedContextId()`).
+  Added `WorkspaceRepository.GetRepositoryIdsNeedingPushAsync(workspaceId, contextId, repositoryIds, ...)`: for a
+  Feature it reads OutgoingCommits/BranchHasUpstream/CheckedOutTag off that repo's own
+  `WorkspaceRepositoryContextState` row (falling back to the shared link only for the special Workspace, same
+  rule as `WorkspaceProjectRepository.GetContextVersionAndLevelByRepoAsync`), replacing the old
+  `workspace.Repositories`-only (shared-link) computation in both `WorkspacePushOperations` and
+  `WorkspacePushHandler.GetPushPlanAsync`. A Feature's Push button / not-upstreamed badge / bulk Create-PR
+  push-first flow now decides "does this repo need a push" and "what level is it at" from that Feature's own
+  state, not the Workspace's.
+  **Known remaining asymmetry, out of scope for this item:** `WorkspaceProjectRepository.GetPushPlanPayloadAsync`'s
+  tag-pinned-repo exclusion still reads the shared `WorkspaceRepositoryLink.CheckedOutTag` rather than the
+  context's own `CheckedOutTag`, and `WorkspaceActionNotificationPanel.razor`'s `repoIdsThatNeedPush` (used only
+  to decide whether to *show the sync-push modal*, not which repos actually get pushed) is still built from
+  `WorkspaceRepository.GetByIdAsync`'s shared links rather than a context-aware read - the notification panel is
+  workspace-level UI that has not otherwise been made context-aware end-to-end, and doing so is a larger,
+  separate piece of work.
+  Verified: full solution builds cleanly; full test suite (177 + 320 + 134 = 631 tests) passes unchanged (no
+  behavior change for the special Workspace - the new parameters resolve to the same legacy code path when
+  `contextId` is the special Workspace context).
+- **Item 9 (§31 repository-membership guard) — verified already implemented, not a gap.** Contrary to §3.6's
+  "not verified as enforced" flag, `WorkspaceRepository.AddRepositoriesAsync` and `.ReplaceRepositoriesAsync`
+  (called by `UpdateAsync`) both already throw `InvalidOperationException("Cannot add/change Workspace
+  repository membership while Features exist. Remove Features first.")` when
+  `dbContext.WorkspaceFeatures.AnyAsync(f => f.WorkspaceId == workspaceId)` is true. No code change was needed;
+  §3.6 and the table in §1 are corrected below.
+
+- **Item 8 (§28A/§28B branch dialog worktree awareness + external worktree cleanup) — §28A found already
+  substantially implemented; §28B wired in this pass.** Contrary to §3.4/§3.5, `SwitchBranchModal.razor` (the
+  per-repository branch switcher) already injects `IWorkspaceBranchOccupancyService` and renders "Feature"/
+  "Worktree" occupancy badges, blocks checkout onto an occupied branch (`IsCheckoutDisabled`), and routes a
+  Feature-owned branch's delete icon to `RequestFeatureCleanup` → `OnRequestFeatureCleanup` (opens
+  `RemoveFeatureModal`) instead of attempting an ordinary `git branch -d` that worktree rules would reject -
+  this is §28A. What was still missing (§28B): the "Worktree" (external, non-Feature) badge had no
+  corresponding cleanup action - its delete icon fell through to the same ordinary-delete button as an
+  unoccupied branch, which would fail with git's "already checked out" error. Added a third branch alongside
+  the existing Feature-cleanup icon: for `RequiresExternalCleanup` badges, a new delete-icon button now calls
+  `RequestExternalWorktreeCleanupAsync`, which analyzes the worktree via the already-existing
+  `IWorkspaceExternalWorktreeOperations.AnalyzeExternalWorktreeCleanupAsync` (registered in DI, previously never
+  called from any UI) and shows an inline confirm (dirty-worktree double-confirm, same shape as the existing
+  force-delete-branch confirm) before calling `RemoveExternalWorktreeAsync`.
+  **Known remaining gap, flagged rather than fixed:** the separate bulk `BranchModal.razor` ("New Branch"/
+  "Switch Branch" tabs, which switch *every* repository in the workspace to a common branch name at once) has
+  no occupancy awareness at all - it has no per-repo branch list to attach a badge to, so a bulk switch can
+  still hit "already checked out" mid-run for whichever repo has an occupied worktree. Giving the bulk dialog
+  the same awareness is a larger redesign (surfacing per-repo occupancy in an aggregate view) and was left as a
+  follow-up rather than attempted here.
+  Verified: full solution builds cleanly; full test suite (177 + 320 + 134 = 631 tests) passes unchanged (no
+  automated coverage exists for this Blazor-component interaction; manual testing against a live workspace with
+  an external `git worktree add` is recommended before relying on this).
+
+- **Item 7 (`WorkspaceFileContextState` for `IsMissingOnDisk`) — done.** The schema (`WorkspaceFileContextState`
+  model, `WorkspaceFileContextStates` table/migration, `AppDbContext` `DbSet`, and a backfill routine) already
+  existed but nothing read or wrote it - `WorkspaceFileVersionService.CheckAndPersistFileVersionStatusCoreAsync`
+  mutated the shared `WorkspaceFile.IsMissingOnDisk` directly and unconditionally, and every decision point that
+  gated on "is this file missing" (`UpdateAllVersionsAsync`, `SyncGeneratedPackageDependenciesAsync`, the
+  file-config dependency-edge builder, the OK-badge tooltip lines) read that same shared flag with no context
+  filter - the exact "context-scoped write, workspace-scoped read" shape AGENTS.md's Feature-context-scoping
+  section calls out.
+  - **Write path:** `CheckAndPersistFileVersionStatusCoreAsync` now get-or-creates a
+    `WorkspaceFileContextState` row keyed on `(contextId, FileId)` and writes the freshly-checked
+    `IsMissingOnDisk` there; it only mirrors onto the shared `WorkspaceFile.IsMissingOnDisk` when the context is
+    the special Workspace.
+  - **Read path:** added `WorkspaceFileVersionService.GetMissingFlagsByFileIdAsync(workspaceId, contextId, ...)`
+    (public) and `ApplyMissingFlagOverlay(configs, flags)`, following the same "context row, else shared row only
+    for special Workspace, else null" rule as `WorkspaceProjectRepository.GetContextVersionAndLevelByRepoAsync`.
+    Applied at the top of every method in `WorkspaceFileVersionService` that reads `versionConfigRepository
+    .GetByWorkspaceIdAsync` and already had (or gained) a `contextId` parameter: `UpdateAllVersionsAsync`,
+    `CheckAndPersistFileVersionStatusCoreAsync` itself, `SyncGeneratedPackageDependenciesAsync`, and the new
+    `contextId` parameter added to `GetAllFileVersionLinesByRepoAsync`/`GetAllFileVersionLinesForRepoAsync`
+    (the latter's only call site, `WorkspaceRepositories.Loading.cs`'s tooltip loader, already had
+    `_selectedContextId` in scope). Also added the same `contextId`-scoped overlay to
+    `WorkspaceProjectRepository.BuildRepoDependencyEdgeSetsAsync`'s file-config-edge missing check (used by
+    `RecomputeAndPersistRepositoryDependencyStatsAsync`, which already had a context in scope) via a new
+    optional `workspaceFeatureContextId` parameter - existing dependency-graph-*visualization* callers
+    (`GetRepositoryDependencyGraphAsync`, `LoadWorkspaceRepoDependencyGraphAsync`) were left on the legacy,
+    unparameterized overload rather than migrated, since neither had a context available and changing that is a
+    separate, larger piece of work (see below).
+  - **Same-class fix folded in:** `GetMismatchedFileVersionLinesByRepoAsync`/`ForRepoAsync` and
+    `GetFileLineStatusByWorkspaceAsync`/`ForRepoAsync` read `WorkspaceFileLineStatuses` filtered only by
+    `WorkspaceId` despite that table already carrying its own `WorkspaceFeatureContextId` column and the write
+    side already stamping it correctly - so a Feature's out-of-date-line badge/tooltip was silently mixing in
+    the Workspace's (and every other Feature's) stale-line rows. All four now take a `contextId` and filter by
+    it; the one live caller (`WorkspaceRepositories.Loading.cs`'s tooltip loader) was updated to pass
+    `RequireSelectedContextId()`.
+  - **Page-level fix:** `WorkspaceFiles.razor` (the Files page, already Feature-context-aware for everything
+    else on the page) loaded its file list's `IsMissingOnDisk` straight off `WorkspaceFileRepository
+    .GetByWorkspaceIdAsync` (the shared row) with no context overlay at all; it now calls the new
+    `GetMissingFlagsByFileIdAsync` and overlays per-file.
+  **Known remaining gap, flagged rather than fixed:** `IWorkspaceFileOperations.ListAsync` (used only by the
+  `GET /api/workspaces/{id}/files` REST endpoint, not by any Blazor page) and the dependency-graph
+  *visualization* methods noted above remain on the legacy special-Workspace-only path - neither had a context
+  parameter to begin with, and adding one is a public-API/visualization-feature change orthogonal to this fix.
+  Verified: full solution builds cleanly; full test suite (177 + 320 + 134 = 631 tests) passes (one
+  `GitChangesLineStatsRefreshTests` timing test flaked once on a full run and passed cleanly on immediate
+  re-run in isolation and as part of a second full run - confirmed pre-existing flakiness unrelated to this
+  change, not a regression). No new automated test was added for this item (the service requires a
+  fuller agent-bridge/DB test harness than existed for it); manual verification against a live workspace with
+  a Feature whose worktree is missing a configured version file is recommended before relying on this.
+
+**Not yet done:** generated-package context-scoping (`SyncGeneratedPackageDependenciesAsync` still isn't
+context-scoped; the `WorkspaceProjectRepositoryGeneratedPackageTests` seed data and the new-context filter both
+currently carve out generated/virtual package rows rather than scoping them), the `IWorkspaceFileOperations
+.ListAsync`/dependency-graph-visualization gap noted under item 7, and the `BranchModal.razor` bulk-switch gap
+noted under item 8. See the table in §1 and the fix sequence in §5 below for what's left; the summary and
+evidence in §§1–4 otherwise still describe the code as it stood *before* this update and should be read with the
+corrections above in mind.
 
 ---
 
@@ -117,11 +227,11 @@ update and should be read with the corrections above in mind.
 | PR **persistence infrastructure** (`WorkspaceRepositoryContextPullRequest`, `UpsertContextAsync`, `RefreshContextPullRequestsAsync`) | **Done, and now called from the page** (§0, item 6) | See §4 |
 | PR **polling / Create-PR flow** | **Done** (§0, item 6) — both routed through context | `WorkspaceRepositories.PrPolling.cs`, `WorkspaceRepositories.PullRequests.cs` |
 | **Dependency graph / dependency level / dependency stats** | **Done** (§0, items 1 & 4) — no longer cross-contaminates contexts | See §2 — the core finding of this document (superseded by §0) |
-| **Update / SyncDependencies / Push planning** | **Context-aware for the data layer** (§0, items 2 & 3); **UI/interface threading above `WorkspaceGitService`/`WorkspacePushService` still not done** for push planning specifically | See §2 (superseded by §0) |
-| File-version missing-state / line-status mismatch | **Partially done.** `WorkspaceFileLineStatus` rows now carry `WorkspaceFeatureContextId` and are filtered by it. But `WorkspaceFile.IsMissingOnDisk` (the shared file row) is still mutated directly — no `WorkspaceFileContextState` table is used despite existing in the design (§6.11/§16.2) | See §5 |
-| Branch dialog worktree awareness (§28A) | **Not implemented** | No `GitWorktreeInfo`/`LocalBranchView.WorktreeKind` found in `BranchModal.razor`/`SwitchBranchModal.razor` |
-| External worktree cleanup (§28B) | **Not implemented** | `IWorkspaceExternalWorktreeOperations` interface exists but no corresponding UI/analysis service found wired |
-| Repository membership guard while Features exist (§31) | **Not verified as enforced** — needs explicit check | See §7 |
+| **Update / SyncDependencies / Push planning** | **Done** (§0, items 2 & 3; item-2 remainder) — data layer and `IWorkspacePushOperations`/Razor push pages are all context-aware now | See §2 (superseded by §0) |
+| File-version missing-state / line-status mismatch | **Done** (§0, item 7) | See §3.3 (superseded by §0) |
+| Branch dialog worktree awareness (§28A) | **Done, found already implemented** (§0, item 8) | `SwitchBranchModal.razor` + `WorkspaceBranchOccupancyService` (per-repo dialog only; bulk `BranchModal.razor` not covered) |
+| External worktree cleanup (§28B) | **Done** (§0, item 8) | `SwitchBranchModal.razor` now calls `IWorkspaceExternalWorktreeOperations` |
+| Repository membership guard while Features exist (§31) | **Done, found already implemented** (§0, item 9) | `WorkspaceRepository.AddRepositoriesAsync`/`.ReplaceRepositoriesAsync` |
 
 ---
 
@@ -359,7 +469,7 @@ the Workspace's shared row for a Feature context — meaning the PR badge for a 
 all**, silently. This matches §2.4 of the prior code-review doc but confirms the fix is still one-sided: writing
 is blocked, but the context-aware alternative was never wired into the caller.
 
-### 3.3 File-version "missing on disk" state is shared across every context
+### 3.3 File-version "missing on disk" state is shared across every context — fixed (§0, item 7)
 
 ```375:412:src/GrayMoon.App/Services/Workspaces/WorkspaceFileVersionService.cs
                     var wasMissing = trackedFile.IsMissingOnDisk == true;
@@ -377,29 +487,33 @@ the "configured file missing" indicator is still one boolean per file, shared by
 A file that's missing only in a Feature's worktree (e.g. a version file added later on `main` after the Feature
 branched) will incorrectly mark it missing for the Workspace too, and vice versa.
 
-### 3.4 Branch dialog worktree awareness (§28A) not implemented
+### 3.4 Branch dialog worktree awareness (§28A) — corrected: already implemented for the per-repo dialog
 
-No `GitWorktreeInfo`, `LocalBranchView.WorktreeKind`, or equivalent classification logic was found in
-`BranchModal.razor` / `SwitchBranchModal.razor`. `WorkspaceBranchOccupancyService.cs` exists (confirmed by file
-search) but nothing in the branch dialogs references it for row-level badges/checkout blocking. This means a
-user can still hit `branch is already checked out at <path>` by attempting to switch the special Workspace onto
-a branch that a Feature (or an external tool) already has checked out in a worktree — the exact failure mode
-§28A was written to prevent.
+This section originally reported no occupancy classification wired into either branch dialog. That was
+inaccurate for `SwitchBranchModal.razor` (the per-repository branch switcher used from the Repositories grid):
+it already injects `IWorkspaceBranchOccupancyService`, renders "Feature"/"Worktree" badges per branch row, and
+blocks checkout onto an occupied branch. `BranchModal.razor` (the separate bulk "switch every repo in the
+workspace to a common branch" dialog) genuinely has no occupancy awareness - see §0, item 8, for the corrected
+status and the remaining bulk-dialog gap.
 
-### 3.5 External worktree cleanup (§28B) not implemented
+### 3.5 External worktree cleanup (§28B) — fixed (§0, item 8)
 
-`IWorkspaceExternalWorktreeOperations` exists as an interface
-(`src/GrayMoon.Application/Features/IWorkspaceExternalWorktreeOperations.cs`) but no implementing service or
-modal was found wired into `SwitchBranchModal`/`BranchModal`. External worktrees (created by another IDE, Claude,
-or manual `git worktree add`) are therefore not cleanable from GrayMoon at all yet.
+`IWorkspaceExternalWorktreeOperations` existed as a fully-implemented service
+(`src/GrayMoon.App/Services/Features/WorkspaceExternalWorktreeOperations.cs`, registered in DI) but was not
+called from any UI. `SwitchBranchModal.razor` now calls it from a new delete-icon action on "Worktree"-badged
+branches (see §0, item 8 for detail). External worktrees (created by another IDE, Claude, or manual `git
+worktree add`) are now cleanable from the per-repository Switch Branch dialog.
 
-### 3.6 Repository membership change guard while Features exist (§31)
+### 3.6 Repository membership change guard while Features exist (§31) — corrected: already implemented
 
 Design §31 requires blocking Workspace repository add/remove while any Feature exists, "unless the implementation
-includes fully transactional fanout across every Feature." No such guard was found during this pass in the
-repository-membership edit path. **This needs a follow-up code search before relying on this document as proof
-either way** — it was not exhaustively traced in this session and is flagged here as an open verification item,
-not a confirmed gap.
+includes fully transactional fanout across every Feature." This section originally flagged the guard as
+unverified. It has since been confirmed present: `WorkspaceRepository.AddRepositoriesAsync` and
+`.ReplaceRepositoriesAsync` (the latter called from both `AddAsync` and `UpdateAsync`) each check
+`dbContext.WorkspaceFeatures.AnyAsync(f => f.WorkspaceId == workspaceId)` and throw
+`InvalidOperationException("Cannot add/change Workspace repository membership while Features exist. Remove
+Features first.")` before touching `WorkspaceRepositoryLink` rows. No further action needed for §31 (see §0,
+item 9).
 
 ---
 
@@ -429,11 +543,11 @@ subsystem, and it was not caught by that pass.
    `MergeWorkspaceProjectDependenciesAsync`'s call into it, so a Feature's recompute never reads/writes the
    Workspace's rows. Persist the result onto `WorkspaceRepositoryContextState.DependencyLevel/Dependencies/UnmatchedDeps`
    for that context, and keep the existing `WorkspaceRepositoryLink` write path only for `isSpecialWorkspace`.
-2. ✅ **Data layer done (§0); UI/interface threading for push planning still open.**
-   ~~Context-scope~~ `GetSyncDependenciesPayloadAsync` / `GetPushPlanPayloadAsync` / `GetPushDependencyInfoForRepo*`:
-   filter `WorkspaceProjects` by context, and read `GitVersion` from `WorkspaceRepositoryContextState` (falling
-   back to the link only for the special Workspace). **Remaining:** thread `contextId` up through
-   `IWorkspacePushOperations` and the Razor push pages/dialogs that currently call the legacy overloads.
+2. ✅ **Done (§0).** ~~Context-scope~~ `GetSyncDependenciesPayloadAsync` / `GetPushPlanPayloadAsync` /
+   `GetPushDependencyInfoForRepo*`: filter `WorkspaceProjects` by context, and read `GitVersion` from
+   `WorkspaceRepositoryContextState` (falling back to the link only for the special Workspace). ~~Remaining:~~
+   `contextId` is now threaded up through `IWorkspacePushOperations` and the Razor push pages/dialogs
+   (`WorkspaceRepositories.Push.cs`, `WorkspaceActionNotificationPanel.razor`, `NewPullRequestModal.razor`).
 3. ✅ **Done (§0).** ~~Add the missing~~ `contextId` parameter to `IWorkspaceUpdateOperations.GetUpdatePlanAsync`,
    threaded all the way to `WorkspaceGitService.GetUpdatePlanAsync`, mirroring the pattern already used by the
    sibling methods on the same interface.
@@ -445,14 +559,18 @@ subsystem, and it was not caught by that pass.
 6. ✅ **Done (§0).** ~~Wire~~ `RefreshContextPullRequestsAsync` into the Repositories page's PR polling loop and
    Create-PR-success refresh, branching on selected context the same way `WorkspaceActions.Loading.cs`/
    `.AutoRefresh.cs` already branch on `ctxForActions`.
-7. **Not yet done.** Add `WorkspaceFileContextState` (or equivalent) and move `IsMissingOnDisk` off the shared
-   `WorkspaceFile` row, following the same "context table + special-Workspace-only legacy mirror" pattern already
-   used correctly for Git Changes (`GitChangesSnapshotPushHandler`) and now for Actions.
-8. **Not yet done.** Implement §28A (Branch dialog worktree awareness) using the already-existing
-   `WorkspaceBranchOccupancyService`, then §28B (external worktree cleanup) using the already-declared
-   `IWorkspaceExternalWorktreeOperations` interface.
-9. **Not yet done / not verified.** Verify/implement the §31 repository-membership guard while any Feature
-   exists.
+7. ✅ **Done (§0).** ~~Add~~ `WorkspaceFileContextState` (the schema already existed) is now actually read/written;
+   `IsMissingOnDisk` is off the shared `WorkspaceFile` row for every decision point that had (or could gain) a
+   `contextId`, following the same "context table + special-Workspace-only legacy mirror" pattern already used
+   correctly for Git Changes (`GitChangesSnapshotPushHandler`) and now for Actions.
+8. ✅ **Done (§0).** §28A (branch dialog worktree awareness) was found already implemented in
+   `SwitchBranchModal.razor` via `WorkspaceBranchOccupancyService`. ~~Implement~~ §28B (external worktree
+   cleanup) is now wired into the same dialog using the already-declared `IWorkspaceExternalWorktreeOperations`
+   interface. The bulk `BranchModal.razor` dialog remains without occupancy awareness (flagged as a follow-up,
+   not fixed - see §0, item 8).
+9. ✅ **Verified already implemented (§0).** The §31 repository-membership guard while any Feature exists is
+   already present in `WorkspaceRepository.AddRepositoriesAsync`/`.ReplaceRepositoriesAsync` - no code change
+   was needed, only verification (see the correction to §3.6).
 
 Each of these should be its own reviewable change per design §36, gated by re-running the full baseline sweep in
 `GrayMoon-Workspace-Current-Features-Baseline-Appendix.md` for the special Workspace before and after, since item
