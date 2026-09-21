@@ -170,7 +170,7 @@ public sealed partial class WorkspaceProjectRepository
                 {
                     WorkspaceFeatureContextId = workspaceFeatureContextId,
                     WorkspaceRepositoryId = link.WorkspaceRepositoryId,
-                    SyncStatus = RepoSyncStatus.NeedsSync
+                    SyncStatus = link.SyncStatus
                 };
                 dbContext.WorkspaceRepositoryContextStates.Add(state);
             }

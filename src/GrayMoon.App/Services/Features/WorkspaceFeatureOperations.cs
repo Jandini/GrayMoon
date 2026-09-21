@@ -517,6 +517,9 @@ public sealed class WorkspaceFeatureOperations(
             .Where(s => s.WorkspaceFeatureContextId == specialId.Value)
             .ToDictionaryAsync(s => s.WorkspaceRepositoryId, cancellationToken);
 
+        // Workspace grid SyncStatus / GitVersion come from the link for the special context
+        // (Project() reads wr.SyncStatus). Feature grids read context state instead, so seed from
+        // the link as the source of truth — special-state SyncStatus can lag and left new Features all-red.
         foreach (var link in links)
         {
             specialStates.TryGetValue(link.WorkspaceRepositoryId, out var src);
@@ -525,26 +528,26 @@ public sealed class WorkspaceFeatureOperations(
                 WorkspaceFeatureContextId = contextId.Value,
                 WorkspaceRepositoryId = link.WorkspaceRepositoryId,
                 BranchName = featureBranch,
-                CheckedOutTag = src?.CheckedOutTag,
+                CheckedOutTag = src?.CheckedOutTag ?? link.CheckedOutTag,
                 HeadCommit = src?.HeadCommit,
-                HasNewerTag = src?.HasNewerTag,
-                GitVersion = src?.GitVersion,
-                Projects = src?.Projects,
-                RepositoryType = src?.RepositoryType,
+                HasNewerTag = src?.HasNewerTag ?? link.HasNewerTag,
+                GitVersion = src?.GitVersion ?? link.GitVersion,
+                Projects = src?.Projects ?? link.Projects,
+                RepositoryType = src?.RepositoryType ?? link.RepositoryType,
                 OutgoingCommits = 0,
-                IncomingCommits = src?.IncomingCommits,
-                DefaultBranchBehindCommits = src?.DefaultBranchBehindCommits,
-                DefaultBranchAheadCommits = src?.DefaultBranchAheadCommits,
+                IncomingCommits = src?.IncomingCommits ?? link.IncomingCommits,
+                DefaultBranchBehindCommits = src?.DefaultBranchBehindCommits ?? link.DefaultBranchBehindCommits,
+                DefaultBranchAheadCommits = src?.DefaultBranchAheadCommits ?? link.DefaultBranchAheadCommits,
                 BranchHasUpstream = false,
-                SyncStatus = src?.SyncStatus ?? RepoSyncStatus.NeedsSync,
-                DependencyLevel = src?.DependencyLevel,
-                Dependencies = src?.Dependencies,
-                UnmatchedDeps = src?.UnmatchedDeps,
-                OutOfDateFileLines = src?.OutOfDateFileLines,
-                OutOfDateFileRepos = src?.OutOfDateFileRepos,
-                TotalFileConfigRepos = src?.TotalFileConfigRepos,
-                HasSelfFileVersionToken = src?.HasSelfFileVersionToken,
-                TotalFileLines = src?.TotalFileLines
+                SyncStatus = link.SyncStatus,
+                DependencyLevel = src?.DependencyLevel ?? link.DependencyLevel,
+                Dependencies = src?.Dependencies ?? link.Dependencies,
+                UnmatchedDeps = src?.UnmatchedDeps ?? link.UnmatchedDeps,
+                OutOfDateFileLines = src?.OutOfDateFileLines ?? link.OutOfDateFileLines,
+                OutOfDateFileRepos = src?.OutOfDateFileRepos ?? link.OutOfDateFileRepos,
+                TotalFileConfigRepos = src?.TotalFileConfigRepos ?? link.TotalFileConfigRepos,
+                HasSelfFileVersionToken = src?.HasSelfFileVersionToken ?? link.HasSelfFileVersionToken,
+                TotalFileLines = src?.TotalFileLines ?? link.TotalFileLines
             });
         }
 
@@ -613,6 +616,13 @@ public sealed class WorkspaceFeatureOperations(
                 "Feature {ContextId}: dependency-level recompute after seed failed; copied levels may still apply.",
                 contextId.Value);
         }
+
+        var featureContext = await db.WorkspaceFeatureContexts
+            .FirstAsync(c => c.WorkspaceFeatureContextId == contextId.Value, cancellationToken);
+        featureContext.IsInSync = links.All(l => l.SyncStatus == RepoSyncStatus.InSync);
+        if (featureContext.IsInSync)
+            featureContext.LastSyncedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     private async Task<Dictionary<string, string>> GetHeadCommitsAsync(
