@@ -110,6 +110,13 @@
 }
 
 .workspace-feature-selector__trigger--no-add .workspace-feature-selector__caret-zone {
+    /* Moving the caret into a flush-right, "+"-sized zone (below) drops the space this trigger
+       would otherwise spend on the caret's own margin-left (1rem), its triangle's rendered width
+       (2 x 0.28em), and the trigger's own trailing padding (0.55rem, zeroed above) - all of which
+       still exist on pages that DO have the "+" button. Restoring that same amount of space here,
+       just moved in front of the zone instead of after it, keeps the *total* control width equal
+       on both kinds of pages while still leaving the caret exactly where "+" would be. */
+    margin-left: calc(1rem + 0.56em + 0.55rem);
     width: 2.25rem;
     justify-content: center;
 }
