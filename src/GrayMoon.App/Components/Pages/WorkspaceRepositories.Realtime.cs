@@ -75,7 +75,8 @@ public sealed partial class WorkspaceRepositories
 
                 try
                 {
-                    var dto = await LinkListQueryService.GetSnapshotAsync(WorkspaceId, repositoryId);
+                    var dto = await LinkListQueryService.GetSnapshotAsync(
+                        WorkspaceId, repositoryId, _selectedContextId, !_isFeatureContext);
                     if (dto is null || _disposed)
                         return;
 

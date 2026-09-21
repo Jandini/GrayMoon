@@ -278,7 +278,8 @@
                    OnBranchChanged="@OnBranchChangedAsync"
                    OnCheckoutBranch="@CheckoutBranchAsync"
                    OnReturnToDefault="@ReturnToDefaultFromModalAsync"
-                   OnCreateBranch="@CreateSingleBranchAsync" />
+                   OnCreateBranch="@CreateSingleBranchAsync"
+                   OnRequestFeatureCleanup="@OnRequestFeatureCleanupFromBranchModalAsync" />
 
 <UpdateBranchModal IsVisible="@_updateBranchModal.IsVisible"
                   RepositoryName="@_updateBranchModal.RepositoryName"

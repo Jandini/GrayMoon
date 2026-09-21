@@ -174,6 +174,86 @@ public sealed class WorkspacePullRequestService(
         await pullRequestRepository.UpsertAsync(workspaceRepositoryId, null, cancellationToken);
     }
 
+    /// <summary>
+    /// Clears a Feature context's own PR projection (<see cref="WorkspaceRepositoryContextPullRequest"/>) without
+    /// contacting GitHub. Counterpart to <see cref="ClearPullRequestAsync"/> for non-special contexts - see §17.
+    /// </summary>
+    public Task ClearContextPullRequestAsync(int contextId, int workspaceRepositoryId, CancellationToken cancellationToken = default) =>
+        pullRequestRepository.UpsertContextAsync(contextId, workspaceRepositoryId, null, cancellationToken);
+
+    /// <summary>
+    /// Fetches PR state from the API for the given repos' checked-out branch <paramref name="branchByRepositoryId"/>
+    /// under a Feature context, and persists it into that context's own <see cref="WorkspaceRepositoryContextPullRequest"/>
+    /// projection (never mutating the shared link or legacy PR row - see §17 and the data-corruption note in
+    /// <see cref="Workspaces.WorkspaceRepositoryStateWriter"/>). Repositories missing from
+    /// <paramref name="branchByRepositoryId"/> or with a blank branch have their context PR row cleared.
+    /// </summary>
+    public async Task RefreshContextPullRequestsAsync(
+        int workspaceId,
+        int contextId,
+        IReadOnlyDictionary<int, string?> branchByRepositoryId,
+        bool force = false,
+        CancellationToken cancellationToken = default)
+    {
+        if (branchByRepositoryId.Count == 0) return;
+
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var repositoryIds = branchByRepositoryId.Keys.ToList();
+        var links = await dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Include(wr => wr.Repository)
+            .ThenInclude(r => r!.Connector)
+            .Where(wr => wr.WorkspaceId == workspaceId && repositoryIds.Contains(wr.RepositoryId))
+            .ToListAsync(cancellationToken);
+
+        var toClear = links.Where(wr => wr.Repository == null || string.IsNullOrWhiteSpace(branchByRepositoryId.GetValueOrDefault(wr.RepositoryId))).ToList();
+        foreach (var wr in toClear)
+            await pullRequestRepository.UpsertContextAsync(contextId, wr.WorkspaceRepositoryId, null, cancellationToken);
+
+        var toRefresh = links.Where(wr => wr.Repository != null && !string.IsNullOrWhiteSpace(branchByRepositoryId.GetValueOrDefault(wr.RepositoryId))).ToList();
+        if (toRefresh.Count == 0) return;
+
+        using var semaphore = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
+        var fetchTasks = toRefresh.Select(async wr =>
+        {
+            await semaphore.WaitAsync(cancellationToken);
+            try
+            {
+                var branch = branchByRepositoryId[wr.RepositoryId]!;
+                var cacheKey = (wr.RepositoryId, branch);
+                if (!force && _cache.TryGetValue(cacheKey, out var cached) && DateTime.UtcNow - cached.FetchedAt < CacheTtl)
+                    return (Wr: wr, Pr: cached.Result, ShouldPersist: true);
+
+                var connectorName = wr.Repository!.Connector?.ConnectorName;
+                if (!string.IsNullOrWhiteSpace(connectorName) && rateLimitTracker.GetPausedUntil(connectorName) is { } pausedUntil)
+                {
+                    logger.LogTrace("Context PR refresh skipped (rate-limited until {PausedUntil}) for repo {RepositoryId}", pausedUntil, wr.RepositoryId);
+                    return (Wr: wr, Pr: (PullRequestInfo?)null, ShouldPersist: false);
+                }
+
+                var pr = await gitHubPullRequestService.GetPullRequestForBranchAsync(wr.Repository!, wr.Repository!.Connector, branch, cancellationToken);
+                _cache[cacheKey] = (pr, DateTime.UtcNow);
+                return (Wr: wr, Pr: pr, ShouldPersist: true);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "RefreshContextPullRequest failed. WorkspaceId={WorkspaceId}, ContextId={ContextId}, RepositoryId={RepositoryId}", workspaceId, contextId, wr.RepositoryId);
+                return (Wr: wr, Pr: (PullRequestInfo?)null, ShouldPersist: false);
+            }
+            finally
+            {
+                semaphore.Release();
+            }
+        });
+        var fetched = await Task.WhenAll(fetchTasks);
+
+        foreach (var result in fetched)
+        {
+            if (result.ShouldPersist)
+                await pullRequestRepository.UpsertContextAsync(contextId, result.Wr.WorkspaceRepositoryId, result.Pr, cancellationToken);
+        }
+    }
+
     /// <summary>Drops every cached PR lookup for a repository. Call on branch change so the old branch's entry cannot be served after a later checkout back onto it.</summary>
     public void EvictCacheForRepository(int repositoryId)
     {

@@ -150,6 +150,18 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// A branch in the Switch Branch dialog was owned by a Feature worktree (§28A): rather than attempting an
+    /// ordinary git branch delete (which the worktree would reject anyway), route straight to Remove Feature
+    /// for that Feature's own context.
+    /// </summary>
+    private Task OnRequestFeatureCleanupFromBranchModalAsync(WorkspaceFeatureContextId featureContextId)
+    {
+        _removeFeatureContextId = featureContextId;
+        _removeFeatureModalVisible = true;
+        return Task.CompletedTask;
+    }
+
     private async Task OnFeatureCreatedAsync(CreateFeatureResult result)
     {
         _createFeatureModalVisible = false;

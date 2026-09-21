@@ -1,3 +1,5 @@
+using GrayMoon.Application.Features;
+
 namespace GrayMoon.App.Services.Queries;
 
 public interface IWorkspaceRepositoryLinkListQueryService
@@ -6,11 +8,22 @@ public interface IWorkspaceRepositoryLinkListQueryService
 
     Task<int> CountAsync(WorkspaceRepositoryLinkListFilter filter, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// <paramref name="contextId"/>/<paramref name="isSpecialWorkspace"/> select which context's checkout/PR/
+    /// dependency state is overlaid onto the returned rows. Omit them (or pass <paramref name="isSpecialWorkspace"/>
+    /// true) to read the special Workspace's state straight off the shared link, matching legacy behavior.
+    /// </summary>
     Task<WorkspaceRepositoryLinkListPageResult> GetPageAsync(
         WorkspaceRepositoryLinkListRequest request,
+        WorkspaceFeatureContextId? contextId = null,
+        bool isSpecialWorkspace = true,
         CancellationToken cancellationToken = default);
 
-    Task<WorkspaceRepositoryHeaderStateDto> GetHeaderStateAsync(int workspaceId, CancellationToken cancellationToken = default);
+    Task<WorkspaceRepositoryHeaderStateDto> GetHeaderStateAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId? contextId = null,
+        bool isSpecialWorkspace = true,
+        CancellationToken cancellationToken = default);
 
     /// <summary>Ordered lightweight index for virtual scroll (same sort as the grid).</summary>
     Task<IReadOnlyList<WorkspaceRepositoryLinkIndexEntry>> GetIndexAsync(
@@ -21,6 +34,8 @@ public interface IWorkspaceRepositoryLinkListQueryService
     Task<IReadOnlyList<WorkspaceRepositoryLinkListItemDto>> GetByIdsAsync(
         int workspaceId,
         IReadOnlyList<int> workspaceRepositoryIds,
+        WorkspaceFeatureContextId? contextId = null,
+        bool isSpecialWorkspace = true,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<int>> GetRepositoryIdsAtLevelAsync(
@@ -31,6 +46,8 @@ public interface IWorkspaceRepositoryLinkListQueryService
 
     Task<IReadOnlyList<WorkspaceRepositoryLinkListItemDto>> GetAllSnapshotsAsync(
         int workspaceId,
+        WorkspaceFeatureContextId? contextId = null,
+        bool isSpecialWorkspace = true,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyDictionary<string, string>> GetGitVersionNameMapAsync(
@@ -40,5 +57,7 @@ public interface IWorkspaceRepositoryLinkListQueryService
     Task<WorkspaceRepositoryLinkListItemDto?> GetSnapshotAsync(
         int workspaceId,
         int repositoryId,
+        WorkspaceFeatureContextId? contextId = null,
+        bool isSpecialWorkspace = true,
         CancellationToken cancellationToken = default);
 }

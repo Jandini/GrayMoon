@@ -317,92 +317,40 @@ public sealed class WorkspaceRepositoryStateWriter(
         if (branchChanged)
             pullRequestService.EvictCacheForRepository(repositoryId);
 
-        // WorkspacePullRequestService/WorkspaceRepositoryPullRequest are still keyed by WorkspaceRepositoryId
-        // alone (one PR row per repository, not per context - see design doc §17/§37.3). Mutating
-        // wr.BranchName or the legacy PR row from a Feature context write would silently overwrite the
-        // special Workspace's own branch/PR display with the Feature's, corrupting the shared checkout state
-        // every other page reads. Until that service is migrated to accept an explicit context/branch, only
-        // the special Workspace context is allowed to touch the shared link + legacy PR row here; a Feature's
-        // own PR projection is intentionally left unpopulated rather than risking that corruption.
-        if (!isSpecialWorkspace)
-            return;
-
-        wr.BranchName = state.BranchName;
-
         var branch = state.BranchName;
         var isOnDefault = !Blank(branch) && !Blank(wr.DefaultBranchName)
             && string.Equals(branch, wr.DefaultBranchName, StringComparison.OrdinalIgnoreCase);
 
+        if (!isSpecialWorkspace)
+        {
+            // A Feature context's own PR projection (§17) is refreshed against its own checked-out branch and
+            // written only to WorkspaceRepositoryContextPullRequests - never to wr.BranchName or the legacy
+            // per-link PR row, which stay reserved for the special Workspace (see the data-corruption note this
+            // guard replaced: a Feature sync used to silently overwrite the Workspace's own branch/PR display).
+            if (Blank(branch) || isOnDefault)
+            {
+                await pullRequestService.ClearContextPullRequestAsync(contextId.Value, wr.WorkspaceRepositoryId, cancellationToken);
+                return;
+            }
+
+            await pullRequestService.RefreshContextPullRequestsAsync(
+                workspaceId,
+                contextId.Value,
+                new Dictionary<int, string?> { [repositoryId] = branch },
+                force: branchChanged,
+                cancellationToken);
+            return;
+        }
+
+        wr.BranchName = state.BranchName;
+
         if (Blank(branch) || isOnDefault)
         {
             await pullRequestService.ClearPullRequestAsync(workspaceId, repositoryId, cancellationToken);
-            await ClearContextPullRequestAsync(contextId, wr.WorkspaceRepositoryId, cancellationToken);
             return;
         }
 
         await pullRequestService.RefreshPullRequestsAsync(workspaceId, [repositoryId], force: branchChanged, cancellationToken);
-        await MirrorPullRequestToContextAsync(contextId, wr.WorkspaceRepositoryId, cancellationToken);
-    }
-
-    private async Task ClearContextPullRequestAsync(
-        WorkspaceFeatureContextId contextId,
-        int workspaceRepositoryId,
-        CancellationToken cancellationToken)
-    {
-        var row = await dbContext.WorkspaceRepositoryContextPullRequests
-            .FirstOrDefaultAsync(
-                pr => pr.WorkspaceFeatureContextId == contextId.Value && pr.WorkspaceRepositoryId == workspaceRepositoryId,
-                cancellationToken);
-        if (row is not null)
-        {
-            dbContext.WorkspaceRepositoryContextPullRequests.Remove(row);
-            await dbContext.SaveChangesAsync(cancellationToken);
-        }
-    }
-
-    private async Task MirrorPullRequestToContextAsync(
-        WorkspaceFeatureContextId contextId,
-        int workspaceRepositoryId,
-        CancellationToken cancellationToken)
-    {
-        var legacy = await dbContext.WorkspaceRepositoryPullRequests
-            .AsNoTracking()
-            .FirstOrDefaultAsync(pr => pr.WorkspaceRepositoryId == workspaceRepositoryId, cancellationToken);
-
-        var row = await dbContext.WorkspaceRepositoryContextPullRequests
-            .FirstOrDefaultAsync(
-                pr => pr.WorkspaceFeatureContextId == contextId.Value && pr.WorkspaceRepositoryId == workspaceRepositoryId,
-                cancellationToken);
-
-        if (legacy is null)
-        {
-            if (row is not null)
-            {
-                dbContext.WorkspaceRepositoryContextPullRequests.Remove(row);
-                await dbContext.SaveChangesAsync(cancellationToken);
-            }
-            return;
-        }
-
-        if (row is null)
-        {
-            row = new WorkspaceRepositoryContextPullRequest
-            {
-                WorkspaceFeatureContextId = contextId.Value,
-                WorkspaceRepositoryId = workspaceRepositoryId
-            };
-            dbContext.WorkspaceRepositoryContextPullRequests.Add(row);
-        }
-
-        row.PullRequestNumber = legacy.PullRequestNumber;
-        row.State = legacy.State;
-        row.Mergeable = legacy.Mergeable;
-        row.MergeableState = legacy.MergeableState;
-        row.HtmlUrl = legacy.HtmlUrl;
-        row.MergedAt = legacy.MergedAt;
-        row.ChangedFiles = legacy.ChangedFiles;
-        row.LastCheckedAt = legacy.LastCheckedAt;
-        await dbContext.SaveChangesAsync(cancellationToken);
     }
 
     /// <summary>Dominant project type for the repository: Service &gt; Package &gt; Executable &gt; Library &gt; Test.</summary>

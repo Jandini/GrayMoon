@@ -20,6 +20,7 @@ public sealed partial class WorkspaceActions : IDisposable
     public int? ContextQuery { get; set; }
 
     private WorkspaceFeatureContextId? _selectedContextId;
+    private bool _isFeatureContext;
 
     [Inject] private WorkspaceActionService ActionService { get; set; } = null!;
     [Inject] private GitHubActionsService GitHubActionsService { get; set; } = null!;
@@ -30,6 +31,8 @@ public sealed partial class WorkspaceActions : IDisposable
     [Inject] private ILogger<WorkspaceActions> Logger { get; set; } = null!;
     [Inject] private AppActivityStateService ActivityStateService { get; set; } = null!;
     [Inject] private WorkspaceContextNavigationService ContextNavigation { get; set; } = null!;
+    [Inject] private IWorkspaceFeatureContextResolver FeatureContextResolver { get; set; } = null!;
+    [Inject] private GrayMoon.App.Services.Queries.IWorkspaceRepositoryLinkListQueryService LinkListQueryService { get; set; } = null!;
 
     private int MaxConcurrency => Math.Max(1, WorkspaceOptions.Value.MaxParallelOperations);
 
@@ -39,6 +42,7 @@ public sealed partial class WorkspaceActions : IDisposable
         ActivityStateService.BecameActive += OnActivityBecameActive;
         var info = await ContextNavigation.ResolveForPageAsync(WorkspaceId, ContextQuery);
         _selectedContextId = info.ContextId;
+        _isFeatureContext = !info.IsSpecialWorkspace;
         await LoadWorkspaceAsync();
     }
 
@@ -126,7 +130,9 @@ public sealed partial class WorkspaceActions : IDisposable
     }
     private async Task OnSelectedContextChangedAsync(WorkspaceFeatureContextId contextId)
     {
-        _selectedContextId = contextId;
+        var info = await FeatureContextResolver.GetRequiredAsync(contextId, WorkspaceId);
+        _selectedContextId = info.ContextId;
+        _isFeatureContext = !info.IsSpecialWorkspace;
         await LoadWorkspaceAsync();
     }
 }

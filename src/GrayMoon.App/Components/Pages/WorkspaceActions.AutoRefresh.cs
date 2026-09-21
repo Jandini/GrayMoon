@@ -1,3 +1,5 @@
+using GrayMoon.Application.Features;
+
 namespace GrayMoon.App.Components.Pages;
 
 public sealed partial class WorkspaceActions
@@ -304,11 +306,18 @@ public sealed partial class WorkspaceActions
             await using var scope = ServiceScopeFactory.CreateAsyncScope();
             var actionService = scope.ServiceProvider.GetRequiredService<WorkspaceActionService>();
 
-            var list = await actionService.FetchAndPersistAsync(
-                row.Link.WorkspaceRepositoryId,
-                row.Repo,
-                row.Link.BranchName!,
-                cancellationToken);
+            var list = _isFeatureContext && _selectedContextId is WorkspaceFeatureContextId ctxForFetch
+                ? await actionService.FetchAndPersistContextAsync(
+                    ctxForFetch.Value,
+                    row.Link.WorkspaceRepositoryId,
+                    row.Repo,
+                    row.Link.BranchName!,
+                    cancellationToken)
+                : await actionService.FetchAndPersistAsync(
+                    row.Link.WorkspaceRepositoryId,
+                    row.Repo,
+                    row.Link.BranchName!,
+                    cancellationToken);
 
             if (!cancellationToken.IsCancellationRequested && list != null)
             {

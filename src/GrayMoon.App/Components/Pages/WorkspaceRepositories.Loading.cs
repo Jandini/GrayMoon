@@ -38,7 +38,8 @@ public sealed partial class WorkspaceRepositories
     }
     private async Task LoadHeaderStateAsync(CancellationToken cancellationToken = default)
     {
-        _headerState = await LinkListQueryService.GetHeaderStateAsync(WorkspaceId, cancellationToken);
+        _headerState = await LinkListQueryService.GetHeaderStateAsync(
+            WorkspaceId, _selectedContextId, !_isFeatureContext, cancellationToken);
     }
     private async Task ResetAndLoadFromTopAsync(bool restoreScroll = true)
     {
@@ -140,7 +141,8 @@ public sealed partial class WorkspaceRepositories
         {
             return false;
         }
-        var dtos = await LinkListQueryService.GetByIdsAsync(WorkspaceId, missingIds, cancellationToken);
+        var dtos = await LinkListQueryService.GetByIdsAsync(
+            WorkspaceId, missingIds, _selectedContextId, !_isFeatureContext, cancellationToken);
         if (cancellationToken.IsCancellationRequested || _disposed)
         {
             return false;
@@ -319,7 +321,8 @@ public sealed partial class WorkspaceRepositories
             }
             if (ids.Count > 0)
             {
-                var dtos = await LinkListQueryService.GetByIdsAsync(WorkspaceId, ids, cancellationToken);
+                var dtos = await LinkListQueryService.GetByIdsAsync(
+                    WorkspaceId, ids, _selectedContextId, !_isFeatureContext, cancellationToken);
                 ApplyItemsFromDtos(dtos, replace: false);
             }
         }

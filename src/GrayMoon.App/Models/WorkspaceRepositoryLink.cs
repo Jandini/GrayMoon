@@ -105,4 +105,45 @@ public class WorkspaceRepositoryLink
 
     /// <summary>Persisted Git Changes file rows for this workspace-repo link. Navigation only.</summary>
     public ICollection<WorkspaceGitChangeEntry> GitChangeEntries { get; set; } = new List<WorkspaceGitChangeEntry>();
+
+    /// <summary>
+    /// Shallow-clones this link with <see cref="BranchName"/> overridden - used by Feature-context-aware pages
+    /// (e.g. GitHub Actions, §18) that read most of their row shape off the special Workspace's link but need
+    /// the checked-out branch to reflect the viewed Feature context's own <c>WorkspaceRepositoryContextState</c>
+    /// instead. Does not deep-clone navigation collections.
+    /// </summary>
+    public WorkspaceRepositoryLink WithBranchOverride(string? branchName) => new()
+    {
+        WorkspaceRepositoryId = WorkspaceRepositoryId,
+        WorkspaceId = WorkspaceId,
+        Workspace = Workspace,
+        RepositoryId = RepositoryId,
+        Repository = Repository,
+        GitVersion = GitVersion,
+        BranchName = branchName,
+        CheckedOutTag = CheckedOutTag,
+        HasNewerTag = HasNewerTag,
+        DefaultBranchName = DefaultBranchName,
+        Projects = Projects,
+        OutgoingCommits = OutgoingCommits,
+        IncomingCommits = IncomingCommits,
+        DefaultBranchBehindCommits = DefaultBranchBehindCommits,
+        DefaultBranchAheadCommits = DefaultBranchAheadCommits,
+        BranchHasUpstream = BranchHasUpstream,
+        SyncStatus = SyncStatus,
+        DependencyLevel = DependencyLevel,
+        Dependencies = Dependencies,
+        UnmatchedDeps = UnmatchedDeps,
+        OutOfDateFileLines = OutOfDateFileLines,
+        OutOfDateFileRepos = OutOfDateFileRepos,
+        TotalFileConfigRepos = TotalFileConfigRepos,
+        HasSelfFileVersionToken = HasSelfFileVersionToken,
+        TotalFileLines = TotalFileLines,
+        RepositoryType = RepositoryType,
+        PullRequest = PullRequest,
+        Action = Action,
+        GitStatus = GitStatus,
+        UncommittedChangedFileCount = UncommittedChangedFileCount,
+        GitChangeEntries = GitChangeEntries,
+    };
 }

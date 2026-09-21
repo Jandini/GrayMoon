@@ -83,6 +83,8 @@ public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, I
         var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
         var prService = scope.ServiceProvider.GetRequiredService<WorkspacePullRequestService>();
         var query = scope.ServiceProvider.GetRequiredService<IWorkspaceRepositoryLinkListQueryService>();
+        var contextResolver = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureContextResolver>();
+        var isSpecialWorkspace = (await contextResolver.GetRequiredAsync(contextId, workspaceId, cancellationToken)).IsSpecialWorkspace;
 
         progress.Report(ids.Count == 1
             ? "Fetching latest branch state..."
@@ -126,7 +128,7 @@ public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, I
         foreach (var repoId in ids)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var dto = await query.GetSnapshotAsync(workspaceId, repoId, cancellationToken);
+            var dto = await query.GetSnapshotAsync(workspaceId, repoId, contextId, isSpecialWorkspace, cancellationToken: cancellationToken);
             if (dto == null)
                 return ReturnToDefaultPlan.Failed(workspaceId, "Repository state could not be read. Return to default was aborted.");
 
@@ -158,6 +160,8 @@ public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, I
         var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
         var prService = scope.ServiceProvider.GetRequiredService<WorkspacePullRequestService>();
         var query = scope.ServiceProvider.GetRequiredService<IWorkspaceRepositoryLinkListQueryService>();
+        var contextResolver = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureContextResolver>();
+        var isSpecialWorkspace = (await contextResolver.GetRequiredAsync(contextId, workspaceId, cancellationToken)).IsSpecialWorkspace;
 
         progress.Report(ids.Count == 1
             ? "Returning to default branch..."
@@ -170,7 +174,7 @@ public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, I
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var dto = await query.GetSnapshotAsync(workspaceId, repoId, cancellationToken);
+            var dto = await query.GetSnapshotAsync(workspaceId, repoId, contextId, isSpecialWorkspace, cancellationToken: cancellationToken);
             if (dto == null)
             {
                 repoErrors[repoId] = "Repository state could not be read.";

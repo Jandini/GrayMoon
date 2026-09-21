@@ -119,7 +119,8 @@ public sealed partial class WorkspaceRepositories
         {
             return link;
         }
-        var dto = await LinkListQueryService.GetSnapshotAsync(WorkspaceId, repositoryId);
+        var dto = await LinkListQueryService.GetSnapshotAsync(
+            WorkspaceId, repositoryId, _selectedContextId, !_isFeatureContext);
         if (dto is null)
         {
             return null;
@@ -130,7 +131,7 @@ public sealed partial class WorkspaceRepositories
     }
     private async Task<IReadOnlyList<WorkspaceRepositoryLink>> GetAllLinksForOperationAsync()
     {
-        var snapshots = await LinkListQueryService.GetAllSnapshotsAsync(WorkspaceId);
+        var snapshots = await LinkListQueryService.GetAllSnapshotsAsync(WorkspaceId, _selectedContextId, !_isFeatureContext);
         return snapshots.Select(WorkspaceRepositoryLinkListMapper.ToLink).ToList();
     }
 
@@ -147,7 +148,7 @@ public sealed partial class WorkspaceRepositories
             return new Dictionary<int, FreshLinkState>();
 
         var wanted = repositoryIds.ToHashSet();
-        var snapshots = await LinkListQueryService.GetAllSnapshotsAsync(WorkspaceId);
+        var snapshots = await LinkListQueryService.GetAllSnapshotsAsync(WorkspaceId, _selectedContextId, !_isFeatureContext);
         return snapshots
             .Where(dto => wanted.Contains(dto.RepositoryId))
             .ToDictionary(

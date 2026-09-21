@@ -58,7 +58,7 @@ public static class WorkspaceOperationsEndpoints
         if (await catalog.GetAsync(workspaceId, cancellationToken) == null)
             return Results.NotFound("Workspace not found.");
 
-        return Results.Ok(await query.GetAllSnapshotsAsync(workspaceId, cancellationToken));
+        return Results.Ok(await query.GetAllSnapshotsAsync(workspaceId, cancellationToken: cancellationToken));
     }
 
     private static IResult GetRunningOperation(int workspaceId, IWorkspaceOperationRunner runner)

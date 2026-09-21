@@ -182,7 +182,18 @@
                                                                 <i class="bi bi-git" aria-hidden="true"></i>
                                                             </a>
                                                         }
-                                                        @if (branch != currentBranchLocal)
+                                                        @if (branch != currentBranchLocal && TryGetOccupancy(branch, out var occForDelete) && occForDelete.RequiresFeatureCleanup)
+                                                        {
+                                                            <button type="button"
+                                                                    class="btn btn-link p-0 branch-delete-link"
+                                                                    title="@($"Owned by Feature '{occForDelete.FeatureName}' - use Remove Feature to delete this branch")"
+                                                                    aria-label="Remove owning Feature to delete this branch"
+                                                                    @onclick="(e) => RequestFeatureCleanup(occForDelete)"
+                                                                    @onclick:stopPropagation="true">
+                                                                <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i>
+                                                            </button>
+                                                        }
+                                                        else if (branch != currentBranchLocal)
                                                         {
                                                             <button type="button"
                                                                     class="btn btn-link p-0 branch-delete-link"
@@ -497,6 +508,8 @@
     [Parameter] public EventCallback<(int RepositoryId, string? RepositoryName, string NewBranchName, string BaseBranch, bool SetUpstream)> OnCreateBranch { get; set; }
     /// <summary>Tab to activate when the modal opens. Null defaults to "local", but callers can pass "tags" to jump straight to the Tags tab (e.g. from the upgrade badge).</summary>
     [Parameter] public string? InitialTab { get; set; }
+    /// <summary>Raised instead of an ordinary delete when the selected local branch is owned by a Feature worktree (§28A) - the caller should close this dialog and route to Remove Feature for that context.</summary>
+    [Parameter] public EventCallback<WorkspaceFeatureContextId> OnRequestFeatureCleanup { get; set; }
 
     private string activeTab = "local";
     private bool _scrollToCurrentTag;
@@ -1054,6 +1067,14 @@
         DismissBranchExistsConfirmation();
         await OnCancel.InvokeAsync();
         await OnCheckoutBranch.InvokeAsync((RepositoryId, branchToCheckout, false));
+    }
+
+    private async Task RequestFeatureCleanup(BranchOccupancyBadge occupancy)
+    {
+        if (occupancy.ContextId is not WorkspaceFeatureContextId contextId)
+            return;
+        await OnCancel.InvokeAsync();
+        await OnRequestFeatureCleanup.InvokeAsync(contextId);
     }
 
     private void RequestDeleteBranch(string branch, bool isRemote)

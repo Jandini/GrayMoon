@@ -1,5 +1,6 @@
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
+using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Components.Pages;
 
@@ -20,16 +21,30 @@ public sealed partial class WorkspaceActions
                 return;
             }
 
-            var persistedActions = await ActionService.GetPersistedActionsForWorkspaceAsync(WorkspaceId);
+            var persistedActions = _isFeatureContext && _selectedContextId is WorkspaceFeatureContextId ctxForActions
+                ? await ActionService.GetPersistedActionsForWorkspaceContextAsync(WorkspaceId, ctxForActions.Value, cancellationToken: default)
+                : await ActionService.GetPersistedActionsForWorkspaceAsync(WorkspaceId);
+
+            // For a Feature context, the checked-out branch lives on WorkspaceRepositoryContextState, not on
+            // the special Workspace's link - overlay it per repository so Actions polls/displays the Feature's
+            // own branch instead of silently showing the Workspace's (§18/§2.2).
+            var branchByRepositoryId = _isFeatureContext
+                ? (await LinkListQueryService.GetAllSnapshotsAsync(WorkspaceId, _selectedContextId, isSpecialWorkspace: false))
+                    .ToDictionary(dto => dto.RepositoryId, dto => dto.BranchName)
+                : new Dictionary<int, string?>();
 
             rows = workspace.Repositories
                 .Where(link => link.Repository != null && link.Repository.Connector != null)
                 .OrderBy(link => link.Repository!.RepositoryName)
                 .Select(link =>
                 {
-                    var hasPersisted = persistedActions.TryGetValue(link.RepositoryId, out var persisted);
+                    var effectiveLink = _isFeatureContext
+                        ? link.WithBranchOverride(branchByRepositoryId.GetValueOrDefault(link.RepositoryId))
+                        : link;
+
+                    var hasPersisted = persistedActions.TryGetValue(effectiveLink.RepositoryId, out var persisted);
                     var branchMatches = hasPersisted &&
-                        string.Equals(persisted?.BranchName, link.BranchName, StringComparison.OrdinalIgnoreCase);
+                        string.Equals(persisted?.BranchName, effectiveLink.BranchName, StringComparison.OrdinalIgnoreCase);
 
                     List<WorkflowActionLine> workflowLines;
                     if (branchMatches && persisted != null && persisted.Workflows.Count > 0)
@@ -43,7 +58,7 @@ public sealed partial class WorkspaceActions
 
                     return new WorkspaceActionRow
                     {
-                        Link = link,
+                        Link = effectiveLink,
                         Repo = new GitHubRepositoryEntry
                         {
                             RepositoryId = link.Repository!.RepositoryId,
@@ -136,9 +151,17 @@ public sealed partial class WorkspaceActions
 
         workspace = freshWorkspace;
 
+        IReadOnlyDictionary<int, string?> branchByRepositoryId = new Dictionary<int, string?>();
+        if (_isFeatureContext)
+        {
+            var linkListQuery = scope.ServiceProvider.GetRequiredService<GrayMoon.App.Services.Queries.IWorkspaceRepositoryLinkListQueryService>();
+            branchByRepositoryId = (await linkListQuery.GetAllSnapshotsAsync(WorkspaceId, _selectedContextId, isSpecialWorkspace: false))
+                .ToDictionary(dto => dto.RepositoryId, dto => dto.BranchName);
+        }
+
         var freshLinks = freshWorkspace.Repositories
             .Where(l => l.Repository != null && l.Repository.Connector != null)
-            .ToDictionary(l => l.RepositoryId);
+            .ToDictionary(l => l.RepositoryId, l => _isFeatureContext ? l.WithBranchOverride(branchByRepositoryId.GetValueOrDefault(l.RepositoryId)) : l);
 
         foreach (var row in rows)
         {

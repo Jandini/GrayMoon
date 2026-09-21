@@ -74,4 +74,63 @@ public sealed class WorkspacePullRequestRepository(IDbContextFactory<AppDbContex
         await dbContext.SaveChangesAsync(cancellationToken);
         logger.LogTrace("Upserted PR for WorkspaceRepositoryId={WorkspaceRepositoryId}, PR#={Number}", workspaceRepositoryId, pr?.Number);
     }
+
+    /// <summary>
+    /// Inserts, updates, or removes the PR row for a Feature context (<see cref="WorkspaceRepositoryContextPullRequest"/>),
+    /// keyed by (ContextId, WorkspaceRepositoryId) rather than the legacy WorkspaceRepositoryId-only row - see design
+    /// doc §17. Pass null to remove the row (no PR / no branch to have one).
+    /// </summary>
+    public async Task UpsertContextAsync(int contextId, int workspaceRepositoryId, PullRequestInfo? pr, CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        var existing = await dbContext.WorkspaceRepositoryContextPullRequests
+            .FirstOrDefaultAsync(
+                prr => prr.WorkspaceFeatureContextId == contextId && prr.WorkspaceRepositoryId == workspaceRepositoryId,
+                cancellationToken);
+
+        if (pr == null)
+        {
+            if (existing != null)
+            {
+                dbContext.WorkspaceRepositoryContextPullRequests.Remove(existing);
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        if (existing != null)
+        {
+            existing.PullRequestNumber = pr.Number;
+            existing.State = pr.State;
+            existing.Mergeable = pr.Mergeable;
+            existing.MergeableState = pr.MergeableState;
+            existing.HtmlUrl = pr.HtmlUrl;
+            existing.MergedAt = pr.MergedAt;
+            existing.ChangedFiles = pr.ChangedFiles;
+            existing.LastCheckedAt = now;
+        }
+        else
+        {
+            dbContext.WorkspaceRepositoryContextPullRequests.Add(new WorkspaceRepositoryContextPullRequest
+            {
+                WorkspaceFeatureContextId = contextId,
+                WorkspaceRepositoryId = workspaceRepositoryId,
+                PullRequestNumber = pr.Number,
+                State = pr.State,
+                Mergeable = pr.Mergeable,
+                MergeableState = pr.MergeableState,
+                HtmlUrl = pr.HtmlUrl,
+                MergedAt = pr.MergedAt,
+                ChangedFiles = pr.ChangedFiles,
+                LastCheckedAt = now
+            });
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        logger.LogTrace(
+            "Upserted context PR for ContextId={ContextId}, WorkspaceRepositoryId={WorkspaceRepositoryId}, PR#={Number}",
+            contextId, workspaceRepositoryId, pr.Number);
+    }
 }

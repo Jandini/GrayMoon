@@ -61,6 +61,7 @@ public sealed class WorkspaceBranchOccupancyService(
             var badge = BranchOccupancyKind.None;
             string? featureName = null;
             string? worktreePath = wt.WorktreePath;
+            WorkspaceFeatureContextId? ownerContextId = null;
 
             if (kind == GitWorktreeBranchOccupancyKind.Current)
             {
@@ -73,6 +74,7 @@ public sealed class WorkspaceBranchOccupancyService(
                 {
                     badge = BranchOccupancyKind.Feature;
                     featureName = owned.WorkspaceFeatureContext?.WorkspaceFeature?.Name;
+                    ownerContextId = owned.WorkspaceFeatureContextId is int cid ? new WorkspaceFeatureContextId(cid) : null;
                 }
                 else
                 {
@@ -90,7 +92,8 @@ public sealed class WorkspaceBranchOccupancyService(
                     AllowCheckout = badge == BranchOccupancyKind.None || badge == BranchOccupancyKind.Current,
                     AllowOrdinaryDelete = badge == BranchOccupancyKind.None,
                     RequiresFeatureCleanup = badge == BranchOccupancyKind.Feature,
-                    RequiresExternalCleanup = badge == BranchOccupancyKind.Worktree
+                    RequiresExternalCleanup = badge == BranchOccupancyKind.Worktree,
+                    ContextId = ownerContextId
                 };
             }
         }
@@ -109,7 +112,8 @@ public sealed class WorkspaceBranchOccupancyService(
                 AllowCheckout = false,
                 AllowOrdinaryDelete = false,
                 RequiresFeatureCleanup = true,
-                RequiresExternalCleanup = false
+                RequiresExternalCleanup = false,
+                ContextId = new WorkspaceFeatureContextId(row.WorkspaceFeatureContextId)
             };
         }
 
@@ -143,6 +147,11 @@ public sealed class BranchOccupancyBadge
     public bool AllowOrdinaryDelete { get; init; }
     public bool RequiresFeatureCleanup { get; init; }
     public bool RequiresExternalCleanup { get; init; }
+
+    /// <summary>The owning Feature's context id when <see cref="RequiresFeatureCleanup"/> is true - lets the UI
+    /// route "delete this branch" to Remove Feature (§28A) instead of attempting an ordinary git branch delete
+    /// that git worktree rules would reject anyway.</summary>
+    public WorkspaceFeatureContextId? ContextId { get; init; }
 }
 
 file sealed class ListWorktreesAgentResponse
