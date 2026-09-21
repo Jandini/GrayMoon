@@ -85,7 +85,7 @@
     flex: 0 0 auto;
     width: 0;
     height: 0;
-    margin-left: 0.75rem;
+    margin-left: 1rem;
     border-left: 0.28em solid transparent;
     border-right: 0.28em solid transparent;
     border-top: 0.32em solid var(--text-primary);

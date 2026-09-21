@@ -65,13 +65,25 @@ public sealed partial class WorkspaceProjectRepository(
         logger.LogTrace("SetPackagesMatchedConnectors: persisted {Count} package(s) for workspace {WorkspaceId}.", projects.Count, workspaceId);
     }
 
-    /// <summary>Gets all projects for repositories linked to the given workspace.</summary>
+    /// <summary>Gets all projects for repositories linked to the given workspace, across every Feature context. Prefer the context-scoped overload for anything that computes or persists a dependency graph.</summary>
     public async Task<List<WorkspaceProject>> GetByWorkspaceIdAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
         return await dbContext.WorkspaceProjects
             .AsNoTracking()
             .Include(p => p.Repository)
             .Where(p => p.WorkspaceId == workspaceId)
+            .OrderBy(p => p.ProjectType == ProjectType.Service ? 0 : p.ProjectType == ProjectType.Library ? 1 : p.ProjectType == ProjectType.Package ? 2 : p.ProjectType == ProjectType.Test ? 3 : 4)
+            .ThenBy(p => p.ProjectName)
+            .ToListAsync(cancellationToken);
+    }
+
+    /// <summary>Gets all projects for repositories linked to the given workspace, scoped to a single Feature context so a Feature's project graph never mixes with the Workspace's (or another Feature's) rows for the same repo/path. Generated/virtual package rows (<see cref="WorkspaceProject.IsGenerated"/>) are not yet context-scoped upstream (see <see cref="SyncGeneratedPackageDependenciesAsync"/>) so they are always included.</summary>
+    public async Task<List<WorkspaceProject>> GetByWorkspaceIdAsync(int workspaceId, int workspaceFeatureContextId, CancellationToken cancellationToken = default)
+    {
+        return await dbContext.WorkspaceProjects
+            .AsNoTracking()
+            .Include(p => p.Repository)
+            .Where(p => p.WorkspaceId == workspaceId && (p.WorkspaceFeatureContextId == workspaceFeatureContextId || p.IsGenerated))
             .OrderBy(p => p.ProjectType == ProjectType.Service ? 0 : p.ProjectType == ProjectType.Library ? 1 : p.ProjectType == ProjectType.Package ? 2 : p.ProjectType == ProjectType.Test ? 3 : 4)
             .ThenBy(p => p.ProjectName)
             .ToListAsync(cancellationToken);

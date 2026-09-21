@@ -75,7 +75,7 @@ public sealed partial class WorkspaceRepositories
         try
         {
             var (payload, _) = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, (IReadOnlyList<SyncDependenciesRepoPayload> Payload, bool IsMultiLevel)>(
-                svc => svc.GetUpdatePlanAsync(WorkspaceId, new HashSet<int> { repositoryId }));
+                svc => svc.GetUpdatePlanAsync(WorkspaceId, RequireSelectedContextId(), new HashSet<int> { repositoryId }));
             if (payload == null || payload.Count == 0)
             {
                 if (HasOutOfDateFiles(repositoryId))

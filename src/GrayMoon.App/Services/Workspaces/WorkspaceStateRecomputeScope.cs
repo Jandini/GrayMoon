@@ -57,6 +57,6 @@ public sealed class WorkspaceStateRecomputeScope(
             }
         }
 
-        await workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, cancellationToken);
+        await workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, contextId.Value, cancellationToken);
     }
 }

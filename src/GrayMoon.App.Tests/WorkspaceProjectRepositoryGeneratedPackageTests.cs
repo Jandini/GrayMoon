@@ -201,6 +201,7 @@ public sealed class GeneratedPackageTestContext : IAsyncDisposable
     public int ProducerRepositoryId { get; private set; }
     public int ConsumerRepositoryId { get; private set; }
     public int ConsumerProjectId { get; private set; }
+    public int SpecialContextId { get; private set; }
 
     private GeneratedPackageTestContext(SqliteConnection connection, ServiceProvider provider)
     {
@@ -258,9 +259,24 @@ public sealed class GeneratedPackageTestContext : IAsyncDisposable
             new WorkspaceRepositoryLink { WorkspaceId = workspace.WorkspaceId, RepositoryId = consumer.RepositoryId });
         await db.SaveChangesAsync();
 
+        // Pre-create the special Workspace context so it has a stable id that matches what
+        // WorkspaceProjectRepository's internal ResolveSpecialWorkspaceContextIdAsync resolves to,
+        // and seed the real project against that context (mirroring how the app always writes an
+        // explicit context id, never a null one, once a repository sync has run).
+        var specialContext = new WorkspaceFeatureContext
+        {
+            WorkspaceId = workspace.WorkspaceId,
+            Kind = WorkspaceFeatureContextKind.Workspace,
+            CreatedAt = DateTime.UtcNow,
+            IsInSync = true
+        };
+        db.WorkspaceFeatureContexts.Add(specialContext);
+        await db.SaveChangesAsync();
+
         var consumerProject = new WorkspaceProject
         {
             WorkspaceId = workspace.WorkspaceId,
+            WorkspaceFeatureContextId = specialContext.WorkspaceFeatureContextId,
             RepositoryId = consumer.RepositoryId,
             ProjectName = "Consumer",
             ProjectType = ProjectType.Library,
@@ -274,6 +290,7 @@ public sealed class GeneratedPackageTestContext : IAsyncDisposable
         ProducerRepositoryId = producer.RepositoryId;
         ConsumerRepositoryId = consumer.RepositoryId;
         ConsumerProjectId = consumerProject.ProjectId;
+        SpecialContextId = specialContext.WorkspaceFeatureContextId;
     }
 
     public AsyncServiceScope CreateScope() => _provider.CreateAsyncScope();

@@ -24,7 +24,7 @@ public sealed partial class WorkspaceRepositories
         }
 
         var (updatePlan, _) = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, (IReadOnlyList<SyncDependenciesRepoPayload> Payload, bool IsMultiLevel)>(
-            svc => svc.GetUpdatePlanAsync(WorkspaceId));
+            svc => svc.GetUpdatePlanAsync(WorkspaceId, RequireSelectedContextId()));
         var repoIdsWithUpdates = updatePlan.Select(p => p.RepoId).ToHashSet();
 
         var reposOnDefault = allLinks
@@ -131,7 +131,7 @@ public sealed partial class WorkspaceRepositories
         }
 
         var (updatePlan, _) = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, (IReadOnlyList<SyncDependenciesRepoPayload> Payload, bool IsMultiLevel)>(
-            svc => svc.GetUpdatePlanAsync(WorkspaceId));
+            svc => svc.GetUpdatePlanAsync(WorkspaceId, RequireSelectedContextId()));
         var repoIdsWithUpdates = updatePlan.Select(p => p.RepoId).ToHashSet();
 
         var reposOnDefault = allLinks
@@ -199,7 +199,7 @@ public sealed partial class WorkspaceRepositories
         }
 
         var (updatePlan, _) = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, (IReadOnlyList<SyncDependenciesRepoPayload> Payload, bool IsMultiLevel)>(
-            svc => svc.GetUpdatePlanAsync(WorkspaceId));
+            svc => svc.GetUpdatePlanAsync(WorkspaceId, RequireSelectedContextId()));
         var repoIdsWithUpdates = updatePlan.Select(p => p.RepoId).ToHashSet();
 
         var reposOnDefault = allLinks

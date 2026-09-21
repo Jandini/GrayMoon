@@ -116,7 +116,7 @@ public sealed class WorkspacePushService(
                 await _packageRegistrySyncService.SyncWorkspacePackageRegistriesAsync(workspaceId, cancellationToken: cancellationToken);
         }
 
-        var fullPayload = await _workspaceDependencyService.GetPushPlanPayloadAsync(workspaceId, cancellationToken);
+        var fullPayload = await _workspaceDependencyService.GetPushPlanPayloadAsync(workspaceId, contextId.Value, cancellationToken);
         var payload = repoIdsToPush is { Count: > 0 }
             ? fullPayload.Where(p => repoIdsToPush.Contains(p.RepoId)).ToList()
             : fullPayload;
@@ -492,7 +492,7 @@ public sealed class WorkspacePushService(
         if (workspace == null)
             throw new InvalidOperationException($"Workspace {workspaceId} not found.");
 
-        var fullPayload = await _workspaceDependencyService.GetPushPlanPayloadAsync(workspaceId, cancellationToken);
+        var fullPayload = await _workspaceDependencyService.GetPushPlanPayloadAsync(workspaceId, contextId.Value, cancellationToken);
         var payload = fullPayload.Where(p => repoIds.Contains(p.RepoId)).ToList();
         if (payload.Count == 0)
         {
@@ -559,7 +559,7 @@ public sealed class WorkspacePushService(
         if (workspace == null)
             throw new InvalidOperationException($"Workspace {workspaceId} not found.");
 
-        var fullPayload = await _workspaceDependencyService.GetPushPlanPayloadAsync(workspaceId, cancellationToken);
+        var fullPayload = await _workspaceDependencyService.GetPushPlanPayloadAsync(workspaceId, contextId.Value, cancellationToken);
         var payload = fullPayload.Where(p => repoIds.Contains(p.RepoId)).ToList();
         if (payload.Count == 0)
         {

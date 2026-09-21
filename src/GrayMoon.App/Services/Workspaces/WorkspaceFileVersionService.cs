@@ -454,7 +454,7 @@ public sealed class WorkspaceFileVersionService(
         var contextInfo = await contextResolver.GetRequiredAsync(contextId, workspaceId, cancellationToken);
 
         if (await SyncGeneratedPackageDependenciesAsync(workspaceId, contextId, cancellationToken))
-            await workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, cancellationToken);
+            await workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, contextId.Value, cancellationToken);
 
         var configs = await versionConfigRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
         var trackedFiles = await dbContext.WorkspaceFiles
@@ -624,7 +624,7 @@ public sealed class WorkspaceFileVersionService(
                 workspaceId, contextId, contextInfo.IsSpecialWorkspace, configs, nameToRepoId, repoOutOfDateTokens, cancellationToken);
 
             if (missingFlagChanged)
-                await workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, cancellationToken);
+                await workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, contextId.Value, cancellationToken);
 
             await hubContext.Clients.All.SendAsync("ContextSynced", workspaceId, contextId.Value, cancellationToken);
             if (contextInfo.IsSpecialWorkspace)

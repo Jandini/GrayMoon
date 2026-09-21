@@ -7,6 +7,7 @@ public interface IWorkspaceUpdateOperations
 {
     Task<(IReadOnlyList<SyncDependenciesRepoPayload> Payload, bool IsMultiLevel)> GetUpdatePlanAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlySet<int>? repositoryIds = null,
         CancellationToken cancellationToken = default);
 

@@ -5,20 +5,72 @@ namespace GrayMoon.App.Repositories;
 
 public sealed partial class WorkspaceProjectRepository
 {
-    /// <summary>Returns payload for syncing dependency versions: per repo, list of (project path, package ID to new version) for dependencies that do not match the referenced repo's GitVersion.</summary>
-    public async Task<List<SyncDependenciesRepoPayload>> GetSyncDependenciesPayloadAsync(int workspaceId, CancellationToken cancellationToken = default)
+    /// <summary>Loads per-repo GitVersion and DependencyLevel scoped to a Feature context: read from <see cref="WorkspaceRepositoryContextState"/> when a row exists for that context, falling back to the shared <see cref="WorkspaceRepositoryLink"/> only for the special Workspace context (or when no context-state row has been persisted for that repo yet).</summary>
+    private async Task<(Dictionary<int, string?> VersionByRepo, Dictionary<int, int?> LevelByRepo)> GetContextVersionAndLevelByRepoAsync(
+        int workspaceId,
+        int workspaceFeatureContextId,
+        CancellationToken cancellationToken)
     {
-        var versionByRepoId = await dbContext.WorkspaceRepositories
+        var isSpecialWorkspace = await dbContext.WorkspaceFeatureContexts
+            .AsNoTracking()
+            .Where(c => c.WorkspaceFeatureContextId == workspaceFeatureContextId)
+            .Select(c => c.Kind == WorkspaceFeatureContextKind.Workspace)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var links = await dbContext.WorkspaceRepositories
             .AsNoTracking()
             .Where(wr => wr.WorkspaceId == workspaceId)
-            .Select(wr => new { wr.RepositoryId, wr.GitVersion })
+            .Select(wr => new { wr.RepositoryId, wr.WorkspaceRepositoryId, wr.GitVersion, wr.DependencyLevel })
             .ToListAsync(cancellationToken);
-        var versionByRepo = versionByRepoId.ToDictionary(x => x.RepositoryId, x => x.GitVersion, null);
+
+        var states = await dbContext.WorkspaceRepositoryContextStates
+            .AsNoTracking()
+            .Where(s => s.WorkspaceFeatureContextId == workspaceFeatureContextId
+                && links.Select(l => l.WorkspaceRepositoryId).Contains(s.WorkspaceRepositoryId))
+            .Select(s => new { s.WorkspaceRepositoryId, s.GitVersion, s.DependencyLevel })
+            .ToListAsync(cancellationToken);
+        var stateByLinkId = states.ToDictionary(s => s.WorkspaceRepositoryId);
+
+        var versionByRepo = new Dictionary<int, string?>();
+        var levelByRepo = new Dictionary<int, int?>();
+        foreach (var link in links)
+        {
+            if (stateByLinkId.TryGetValue(link.WorkspaceRepositoryId, out var state))
+            {
+                versionByRepo[link.RepositoryId] = state.GitVersion;
+                levelByRepo[link.RepositoryId] = state.DependencyLevel;
+            }
+            else if (isSpecialWorkspace)
+            {
+                versionByRepo[link.RepositoryId] = link.GitVersion;
+                levelByRepo[link.RepositoryId] = link.DependencyLevel;
+            }
+            else
+            {
+                versionByRepo[link.RepositoryId] = null;
+                levelByRepo[link.RepositoryId] = null;
+            }
+        }
+
+        return (versionByRepo, levelByRepo);
+    }
+
+    /// <summary>Legacy overload for callers without a context id: resolves the special Workspace context.</summary>
+    public async Task<List<SyncDependenciesRepoPayload>> GetSyncDependenciesPayloadAsync(int workspaceId, CancellationToken cancellationToken = default)
+    {
+        var contextId = await ResolveSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+        return await GetSyncDependenciesPayloadAsync(workspaceId, contextId, cancellationToken);
+    }
+
+    /// <summary>Returns payload for syncing dependency versions, scoped to <paramref name="workspaceFeatureContextId"/>: per repo, list of (project path, package ID to new version) for dependencies that do not match the referenced repo's checked-out version for that context.</summary>
+    public async Task<List<SyncDependenciesRepoPayload>> GetSyncDependenciesPayloadAsync(int workspaceId, int workspaceFeatureContextId, CancellationToken cancellationToken = default)
+    {
+        var (versionByRepo, levelByRepo) = await GetContextVersionAndLevelByRepoAsync(workspaceId, workspaceFeatureContextId, cancellationToken);
 
         var projects = await dbContext.WorkspaceProjects
             .AsNoTracking()
             .Include(p => p.Repository)
-            .Where(p => p.WorkspaceId == workspaceId)
+            .Where(p => p.WorkspaceId == workspaceId && (p.WorkspaceFeatureContextId == workspaceFeatureContextId || p.IsGenerated))
             .ToListAsync(cancellationToken);
         if (projects.Count == 0) return new List<SyncDependenciesRepoPayload>();
         var projectIds = projects.Select(p => p.ProjectId).ToHashSet();
@@ -63,12 +115,6 @@ public sealed partial class WorkspaceProjectRepository
             packageDict[packageId] = (depVersion, refVersionNorm);
         }
 
-        var linkLevelByRepo = await dbContext.WorkspaceRepositories
-            .AsNoTracking()
-            .Where(wr => wr.WorkspaceId == workspaceId)
-            .Select(wr => new { wr.RepositoryId, wr.DependencyLevel })
-            .ToDictionaryAsync(x => x.RepositoryId, x => x.DependencyLevel, cancellationToken);
-
         var result = new List<SyncDependenciesRepoPayload>();
         foreach (var p in projects.GroupBy(p => p.RepositoryId).Select(g => g.First()))
         {
@@ -79,7 +125,7 @@ public sealed partial class WorkspaceProjectRepository
             if (!repoToProjectUpdates.TryGetValue(repoId, out var projectUpdatesDict) || projectUpdatesDict.Count == 0)
                 continue;
 
-            var dependencyLevel = linkLevelByRepo.GetValueOrDefault(repoId);
+            var dependencyLevel = levelByRepo.GetValueOrDefault(repoId);
             var projectUpdates = projectUpdatesDict
                 .Select(kv => new SyncDependenciesProjectUpdate(kv.Key, kv.Value.Select(p => (p.Key, p.Value.Current, p.Value.New)).ToList()))
                 .ToList();
@@ -89,8 +135,15 @@ public sealed partial class WorkspaceProjectRepository
         return result.OrderBy(r => r.RepoName, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    /// <summary>Returns push plan: all workspace repos with dependency level and, for each repo, the list of (PackageId, Version, MatchedConnectorId) that it depends on from lower-level repos. Used for dependency-synchronized push.</summary>
+    /// <summary>Legacy overload for callers without a context id: resolves the special Workspace context.</summary>
     public async Task<List<PushRepoPayload>> GetPushPlanPayloadAsync(int workspaceId, CancellationToken cancellationToken = default)
+    {
+        var contextId = await ResolveSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+        return await GetPushPlanPayloadAsync(workspaceId, contextId, cancellationToken);
+    }
+
+    /// <summary>Returns push plan for <paramref name="workspaceFeatureContextId"/>: all workspace repos with that context's dependency level and, for each repo, the list of (PackageId, Version, MatchedConnectorId) that it depends on from lower-level repos. Used for dependency-synchronized push.</summary>
+    public async Task<List<PushRepoPayload>> GetPushPlanPayloadAsync(int workspaceId, int workspaceFeatureContextId, CancellationToken cancellationToken = default)
     {
         var links = await dbContext.WorkspaceRepositories
             .AsNoTracking()
@@ -99,17 +152,19 @@ public sealed partial class WorkspaceProjectRepository
             .ToListAsync(cancellationToken);
         if (links.Count == 0) return new List<PushRepoPayload>();
 
+        var (_, contextLevelByRepo) = await GetContextVersionAndLevelByRepoAsync(workspaceId, workspaceFeatureContextId, cancellationToken);
+
         var repoIdsInWorkspace = links.Select(l => l.RepositoryId).ToHashSet();
-        var levelByRepo = links
-            .Where(wr => wr.DependencyLevel.HasValue)
-            .ToDictionary(wr => wr.RepositoryId, wr => wr.DependencyLevel!.Value);
+        var levelByRepo = contextLevelByRepo
+            .Where(kv => kv.Value.HasValue)
+            .ToDictionary(kv => kv.Key, kv => kv.Value!.Value);
         var maxLevel = levelByRepo.Values.DefaultIfEmpty(0).Max();
         int effectiveLevel(int repoId) => levelByRepo.TryGetValue(repoId, out var l) ? l : maxLevel + 1;
 
         var allProjects = await dbContext.WorkspaceProjects
             .AsNoTracking()
             .Include(p => p.Repository)
-            .Where(p => p.WorkspaceId == workspaceId)
+            .Where(p => p.WorkspaceId == workspaceId && (p.WorkspaceFeatureContextId == workspaceFeatureContextId || p.IsGenerated))
             .ToListAsync(cancellationToken);
         var projects = allProjects.Where(p => repoIdsInWorkspace.Contains(p.RepositoryId)).ToList();
         var projectIds = projects.Select(p => p.ProjectId).ToHashSet();
@@ -155,15 +210,22 @@ public sealed partial class WorkspaceProjectRepository
             var repoName = repo?.RepositoryName ?? "";
             if (string.IsNullOrEmpty(repoName)) continue;
             var required = repoToRequired[link.RepositoryId];
-            result.Add(new PushRepoPayload(link.RepositoryId, repoName, link.DependencyLevel, required));
+            result.Add(new PushRepoPayload(link.RepositoryId, repoName, levelByRepo.GetValueOrDefault(link.RepositoryId), required));
         }
         return result.OrderBy(r => r.DependencyLevel ?? int.MaxValue).ThenBy(r => r.RepoName, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    /// <summary>Gets push dependency info for a single repo: its payload, the repo IDs it depends on (lower level), and those repos' payloads in level order. Returns null if repo not in workspace.</summary>
+    /// <summary>Legacy overload for callers without a context id: resolves the special Workspace context.</summary>
     public async Task<PushDependencyInfoForRepo?> GetPushDependencyInfoForRepoAsync(int workspaceId, int repositoryId, CancellationToken cancellationToken = default)
     {
-        var fullPlan = await GetPushPlanPayloadAsync(workspaceId, cancellationToken);
+        var contextId = await ResolveSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+        return await GetPushDependencyInfoForRepoAsync(workspaceId, contextId, repositoryId, cancellationToken);
+    }
+
+    /// <summary>Gets push dependency info for a single repo scoped to <paramref name="workspaceFeatureContextId"/>: its payload, the repo IDs it depends on (lower level), and those repos' payloads in level order. Returns null if repo not in workspace.</summary>
+    public async Task<PushDependencyInfoForRepo?> GetPushDependencyInfoForRepoAsync(int workspaceId, int workspaceFeatureContextId, int repositoryId, CancellationToken cancellationToken = default)
+    {
+        var fullPlan = await GetPushPlanPayloadAsync(workspaceId, workspaceFeatureContextId, cancellationToken);
         var payloadByRepo = fullPlan.ToDictionary(p => p.RepoId);
         if (!payloadByRepo.TryGetValue(repositoryId, out var payloadForRepo))
             return null;
@@ -171,17 +233,14 @@ public sealed partial class WorkspaceProjectRepository
         if (payloadForRepo.RequiredPackages.Count == 0)
             return new PushDependencyInfoForRepo(payloadForRepo, Array.Empty<int>(), Array.Empty<PushRepoPayload>());
 
-        var links = await dbContext.WorkspaceRepositories
-            .AsNoTracking()
-            .Where(wr => wr.WorkspaceId == workspaceId)
-            .ToListAsync(cancellationToken);
-        var levelByRepo = links.Where(wr => wr.DependencyLevel.HasValue).ToDictionary(wr => wr.RepositoryId, wr => wr.DependencyLevel!.Value);
+        var (_, contextLevelByRepo) = await GetContextVersionAndLevelByRepoAsync(workspaceId, workspaceFeatureContextId, cancellationToken);
+        var levelByRepo = contextLevelByRepo.Where(kv => kv.Value.HasValue).ToDictionary(kv => kv.Key, kv => kv.Value!.Value);
         var maxLevel = levelByRepo.Values.DefaultIfEmpty(0).Max();
         int effectiveLevel(int rId) => levelByRepo.TryGetValue(rId, out var l) ? l : maxLevel + 1;
 
         var projects = await dbContext.WorkspaceProjects
             .AsNoTracking()
-            .Where(p => p.WorkspaceId == workspaceId)
+            .Where(p => p.WorkspaceId == workspaceId && (p.WorkspaceFeatureContextId == workspaceFeatureContextId || p.IsGenerated))
             .ToListAsync(cancellationToken);
         var byProject = projects.ToDictionary(p => p.ProjectId);
         var projectIds = projects.Select(p => p.ProjectId).ToHashSet();
@@ -225,17 +284,24 @@ public sealed partial class WorkspaceProjectRepository
         return new PushDependencyInfoForRepo(payloadForRepo, dependencyRepoIdsList, dependencyPathPayloads, packageIdToLevel.Count > 0 ? packageIdToLevel : null);
     }
 
-    /// <summary>Gets push dependency info for a set of repos: merged required packages and dependency path (union of all repos' paths). Used for main Push button to show same modal as single-repo.</summary>
-    /// <remarks>
-    /// Computes the shared push-plan/links/projects/dependencies payload once (via <see cref="GetPushPlanPayloadAsync"/> plus one
-    /// links, one projects, and one dependencies query below) and slices it per requested repo in memory, rather than calling
-    /// <see cref="GetPushDependencyInfoForRepoAsync"/> once per repo - each such call re-ran that same ~3-query payload
-    /// computation, making the previous version roughly 6xN+3 EF queries for N repos where this is O(1) in repo count.
-    /// </remarks>
+    /// <summary>Legacy overload for callers without a context id: resolves the special Workspace context.</summary>
     public async Task<PushDependencyInfoForRepo?> GetPushDependencyInfoForRepoSetAsync(int workspaceId, IReadOnlySet<int> repoIds, CancellationToken cancellationToken = default)
     {
+        var contextId = await ResolveSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+        return await GetPushDependencyInfoForRepoSetAsync(workspaceId, contextId, repoIds, cancellationToken);
+    }
+
+    /// <summary>Gets push dependency info for a set of repos scoped to <paramref name="workspaceFeatureContextId"/>: merged required packages and dependency path (union of all repos' paths). Used for main Push button to show same modal as single-repo.</summary>
+    /// <remarks>
+    /// Computes the shared push-plan/links/projects/dependencies payload once (via <see cref="GetPushPlanPayloadAsync(int,int,CancellationToken)"/> plus one
+    /// links, one projects, and one dependencies query below) and slices it per requested repo in memory, rather than calling
+    /// <see cref="GetPushDependencyInfoForRepoAsync(int,int,int,CancellationToken)"/> once per repo - each such call re-ran that same ~3-query payload
+    /// computation, making the previous version roughly 6xN+3 EF queries for N repos where this is O(1) in repo count.
+    /// </remarks>
+    public async Task<PushDependencyInfoForRepo?> GetPushDependencyInfoForRepoSetAsync(int workspaceId, int workspaceFeatureContextId, IReadOnlySet<int> repoIds, CancellationToken cancellationToken = default)
+    {
         if (repoIds == null || repoIds.Count == 0) return null;
-        var fullPlan = await GetPushPlanPayloadAsync(workspaceId, cancellationToken);
+        var fullPlan = await GetPushPlanPayloadAsync(workspaceId, workspaceFeatureContextId, cancellationToken);
         var payloadByRepo = fullPlan.ToDictionary(p => p.RepoId);
         var repoIdsList = repoIds.ToList();
 
@@ -256,17 +322,14 @@ public sealed partial class WorkspaceProjectRepository
             return new PushDependencyInfoForRepo(syntheticPayload, Array.Empty<int>(), Array.Empty<PushRepoPayload>());
 
         // Same shared fetch GetPushDependencyInfoForRepoAsync would otherwise re-run per repo.
-        var links = await dbContext.WorkspaceRepositories
-            .AsNoTracking()
-            .Where(wr => wr.WorkspaceId == workspaceId)
-            .ToListAsync(cancellationToken);
-        var levelByRepo = links.Where(wr => wr.DependencyLevel.HasValue).ToDictionary(wr => wr.RepositoryId, wr => wr.DependencyLevel!.Value);
+        var (_, contextLevelByRepo) = await GetContextVersionAndLevelByRepoAsync(workspaceId, workspaceFeatureContextId, cancellationToken);
+        var levelByRepo = contextLevelByRepo.Where(kv => kv.Value.HasValue).ToDictionary(kv => kv.Key, kv => kv.Value!.Value);
         var maxLevel = levelByRepo.Values.DefaultIfEmpty(0).Max();
         int effectiveLevel(int rId) => levelByRepo.TryGetValue(rId, out var l) ? l : maxLevel + 1;
 
         var projects = await dbContext.WorkspaceProjects
             .AsNoTracking()
-            .Where(p => p.WorkspaceId == workspaceId)
+            .Where(p => p.WorkspaceId == workspaceId && (p.WorkspaceFeatureContextId == workspaceFeatureContextId || p.IsGenerated))
             .ToListAsync(cancellationToken);
         var byProject = projects.ToDictionary(p => p.ProjectId);
         var projectIds = projects.Select(p => p.ProjectId).ToHashSet();

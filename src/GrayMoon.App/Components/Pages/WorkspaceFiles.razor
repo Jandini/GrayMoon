@@ -387,7 +387,7 @@
         var fileVersionService = scope.ServiceProvider.GetRequiredService<WorkspaceFileVersionService>();
         var projectRepo = scope.ServiceProvider.GetRequiredService<WorkspaceProjectRepository>();
         await fileVersionService.CheckAndPersistFileVersionStatusAsync(WorkspaceId, _selectedContextId!.Value, forceFresh: true);
-        await projectRepo.RecomputeAndPersistRepositoryDependencyStatsAsync(WorkspaceId);
+        await projectRepo.RecomputeAndPersistRepositoryDependencyStatsAsync(WorkspaceId, _selectedContextId!.Value.Value);
         await LoadAsync();
     }
 

@@ -256,19 +256,30 @@ public sealed partial class WorkspaceProjectRepository
             workspaceId, workspaceFeatureContextId, dependentProjectIds.Count, uniqueEdges.Count);
 
         if (persistDependencyLevel)
-            await RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, cancellationToken);
+            await RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, workspaceFeatureContextId, cancellationToken);
     }
 
-    /// <summary>Persists the new Version for ProjectDependencies that were updated by sync dependencies. Matches by (RepoId, ProjectPath) -> DependentProjectId and PackageId -> ReferencedProjectId.</summary>
+    /// <summary>Legacy overload for callers without a context id: resolves the special Workspace context.</summary>
     public async Task UpdateProjectDependencyVersionsAsync(
         int workspaceId,
         IReadOnlyList<(int RepoId, string ProjectPath, string PackageId, string NewVersion)> updates,
         CancellationToken cancellationToken = default)
     {
+        var contextId = await ResolveSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+        await UpdateProjectDependencyVersionsAsync(workspaceId, updates, contextId, cancellationToken);
+    }
+
+    /// <summary>Persists the new Version for ProjectDependencies that were updated by sync dependencies, scoped to <paramref name="workspaceFeatureContextId"/>. Matches by (ContextId, RepoId, ProjectPath) -> DependentProjectId and PackageId -> ReferencedProjectId, so a Feature and the Workspace (or another Feature) never collide on a project at the same relative path in the same repository.</summary>
+    public async Task UpdateProjectDependencyVersionsAsync(
+        int workspaceId,
+        IReadOnlyList<(int RepoId, string ProjectPath, string PackageId, string NewVersion)> updates,
+        int workspaceFeatureContextId,
+        CancellationToken cancellationToken = default)
+    {
         if (updates == null || updates.Count == 0) return;
 
         var projects = await dbContext.WorkspaceProjects
-            .Where(p => p.WorkspaceId == workspaceId)
+            .Where(p => p.WorkspaceId == workspaceId && p.WorkspaceFeatureContextId == workspaceFeatureContextId)
             .ToListAsync(cancellationToken);
         if (projects.Count == 0) return;
 

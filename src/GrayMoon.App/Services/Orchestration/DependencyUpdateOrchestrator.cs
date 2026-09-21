@@ -190,7 +190,7 @@ public sealed class DependencyUpdateOrchestrator(
             if (csprojScope.Count == 0)
                 continue;
 
-            var (payload, _) = await workspaceGitService.GetUpdatePlanAsync(workspaceId, csprojScope, cancellationToken);
+            var (payload, _) = await workspaceGitService.GetUpdatePlanAsync(workspaceId, contextId, csprojScope, cancellationToken);
             var reposAtLevel = payload
                 .Where(p => csprojScope.Contains(p.RepoId))
                 .ToList();
