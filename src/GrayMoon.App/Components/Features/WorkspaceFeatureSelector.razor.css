@@ -44,13 +44,6 @@
     cursor: not-allowed;
 }
 
-/* Pages without the "+" New Feature button (see workspace-feature-selector__add) would otherwise
-   render narrower - the trigger is this control's only child, so its own content sets the whole
-   control's width. Padding out the trigger by the add button's width (2.25rem) keeps the control
-   the same total width as it has on pages that do have the button, e.g. Workspace Repositories. */
-.workspace-feature-selector__trigger--no-add {
-    padding-right: calc(0.55rem + 2.25rem);
-}
 
 .workspace-feature-selector__add {
     display: flex;
@@ -89,14 +82,40 @@
     white-space: nowrap;
 }
 
-.workspace-feature-selector__caret {
+.workspace-feature-selector__caret-zone {
+    display: flex;
+    align-items: center;
     flex: 0 0 auto;
+}
+
+.workspace-feature-selector__caret {
     width: 0;
     height: 0;
     margin-left: 1rem;
     border-left: 0.28em solid transparent;
     border-right: 0.28em solid transparent;
     border-top: 0.32em solid var(--text-primary);
+}
+
+/* Pages without the "+" New Feature button (see workspace-feature-selector__add) would otherwise
+   render narrower - the trigger is this control's only child, so its own content sets the whole
+   control's width. Widening the caret's zone to the add button's width (2.25rem) and centering the
+   caret inside it puts the caret in exactly the spot the "+" button occupies on pages that do have
+   it (e.g. Workspace Repositories), instead of leaving it sitting right against the label. */
+.workspace-feature-selector__trigger--no-add {
+    /* The "+" button sits flush against the trigger's border with zero padding of its own - drop
+       this trigger's own right padding too, so the centered caret-zone below lines up with exactly
+       the same spot instead of sitting an extra 0.55rem to the left of it. */
+    padding-right: 0;
+}
+
+.workspace-feature-selector__trigger--no-add .workspace-feature-selector__caret-zone {
+    width: 2.25rem;
+    justify-content: center;
+}
+
+.workspace-feature-selector__trigger--no-add .workspace-feature-selector__caret {
+    margin-left: 0;
 }
 
 .workspace-feature-selector__menu {

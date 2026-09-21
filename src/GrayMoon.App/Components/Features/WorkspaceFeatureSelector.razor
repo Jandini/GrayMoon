@@ -16,7 +16,9 @@
             @onclick="ToggleDropdownAsync"
             @onclick:stopPropagation>
         <span class="workspace-feature-selector__label">@SelectedLabel</span>
-        <span class="workspace-feature-selector__caret" aria-hidden="true"></span>
+        <span class="workspace-feature-selector__caret-zone">
+            <span class="workspace-feature-selector__caret" aria-hidden="true"></span>
+        </span>
     </button>
     @if (OnRequestCreateFeature.HasDelegate)
     {
