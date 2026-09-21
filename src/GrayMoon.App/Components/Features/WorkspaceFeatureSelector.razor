@@ -8,7 +8,7 @@
 <div class="btn-group position-relative workspace-feature-selector">
     <button type="button"
             id="@InputId"
-            class="@TriggerCssClass"
+            class="workspace-feature-selector__trigger@(_open ? " is-open" : "")"
             disabled="@Disabled"
             aria-label="Context"
             aria-expanded="@_open"
@@ -146,19 +146,6 @@
     private bool _desktopAvailable;
     private int? _lastKnownSelectedValue;
     private ToolAvailabilityDto? _toolAvailability;
-
-    private string TriggerCssClass
-    {
-        get
-        {
-            var css = "workspace-feature-selector__trigger";
-            if (_open)
-                css += " is-open";
-            if (!OnRequestCreateFeature.HasDelegate)
-                css += " workspace-feature-selector__trigger--no-add";
-            return css;
-        }
-    }
 
     private bool HasAnyIdeAvailable =>
         _toolAvailability is { } t && (t.Cursor || t.ClaudeCli || t.VsCode || t.VisualStudio);

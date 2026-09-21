@@ -22,7 +22,7 @@
     align-items: center;
     width: 100%;
     min-width: 0;
-    padding-inline: 0.75rem 0.55rem;
+    padding-inline: 0.75rem 0;
     border: none;
     border-right: 1px solid var(--border-input);
     border-radius: var(--bs-border-radius, 0.375rem) 0 0 var(--bs-border-radius, 0.375rem);
@@ -88,41 +88,27 @@
     white-space: nowrap;
 }
 
+/* The "+" New Feature button (see workspace-feature-selector__add) is 2.25rem wide and sits flush
+   against the trigger's border with zero padding of its own. On pages without it, the trigger is
+   this control's only child, so giving the caret-zone that same 2.25rem width - and centering the
+   caret inside it - puts the caret in exactly the spot the "+" button would occupy. That keeps both
+   the trigger's own width (it no longer changes shape depending on whether "+" is present) and the
+   control's overall width (fixed above) identical across every page, whether or not "+" is shown. */
 .workspace-feature-selector__caret-zone {
     display: flex;
     align-items: center;
+    justify-content: center;
     flex: 0 0 auto;
+    width: 2.25rem;
 }
 
 .workspace-feature-selector__caret {
     width: 0;
     height: 0;
-    margin-left: 1rem;
+    margin-left: 0;
     border-left: 0.28em solid transparent;
     border-right: 0.28em solid transparent;
     border-top: 0.32em solid var(--text-primary);
-}
-
-/* Pages without the "+" New Feature button (see workspace-feature-selector__add) would otherwise
-   render narrower - the trigger is this control's only child, so its own content sets the whole
-   control's width. Widening the caret's zone to the add button's width (2.25rem) and centering the
-   caret inside it puts the caret in exactly the spot the "+" button occupies on pages that do have
-   it (e.g. Workspace Repositories), instead of leaving it sitting right against the label. */
-.workspace-feature-selector__trigger--no-add {
-    /* The "+" button sits flush against the trigger's border with zero padding of its own - drop
-       this trigger's own right padding too, so the centered caret-zone below lines up with exactly
-       the same spot instead of sitting an extra 0.55rem to the left of it. The control's overall
-       width is fixed above, so unlike the caret-zone's width this needs no further compensation. */
-    padding-right: 0;
-}
-
-.workspace-feature-selector__trigger--no-add .workspace-feature-selector__caret-zone {
-    width: 2.25rem;
-    justify-content: center;
-}
-
-.workspace-feature-selector__trigger--no-add .workspace-feature-selector__caret {
-    margin-left: 0;
 }
 
 .workspace-feature-selector__menu {
