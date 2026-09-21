@@ -80,8 +80,7 @@ public sealed partial class WorkspaceRepositories
                     continue;
                 }
 
-                await WorkspacePageService.WorkspacePullRequestService.RefreshPullRequestsAsync(
-                    WorkspaceId, repositoryIds, cancellationToken: cancellationToken);
+                await RefreshPullRequestsForContextAsync(repositoryIds, force: false, cancellationToken);
                 if (_disposed || cancellationToken.IsCancellationRequested)
                 {
                     return;

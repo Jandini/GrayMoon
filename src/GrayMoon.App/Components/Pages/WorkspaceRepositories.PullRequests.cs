@@ -79,6 +79,33 @@ public sealed partial class WorkspaceRepositories
         StateHasChanged();
     }
 
+    /// <summary>
+    /// Refreshes PR state for the given repositories from GitHub, branching on the currently selected context
+    /// (§3.2/item 6): a Feature context writes into its own <see cref="WorkspaceRepositoryContextPullRequest"/>
+    /// projection via <see cref="WorkspacePullRequestService.RefreshContextPullRequestsAsync"/>, keyed off that
+    /// context's own checked-out branch (from <see cref="IWorkspaceRepositoryLinkListQueryService"/>), instead of
+    /// unconditionally calling the legacy special-Workspace overload that reads the shared link's branch.
+    /// </summary>
+    private async Task RefreshPullRequestsForContextAsync(IReadOnlyList<int> repositoryIds, bool force, CancellationToken cancellationToken)
+    {
+        if (repositoryIds.Count == 0) return;
+
+        if (!_isFeatureContext || _selectedContextId is not { } contextId)
+        {
+            await WorkspacePageService.WorkspacePullRequestService.RefreshPullRequestsAsync(
+                WorkspaceId, repositoryIds, force: force, cancellationToken: cancellationToken);
+            return;
+        }
+
+        var wanted = repositoryIds.ToHashSet();
+        var branchByRepositoryId = (await LinkListQueryService.GetAllSnapshotsAsync(WorkspaceId, _selectedContextId, isSpecialWorkspace: false))
+            .Where(dto => wanted.Contains(dto.RepositoryId))
+            .ToDictionary(dto => dto.RepositoryId, dto => dto.BranchName);
+
+        await WorkspacePageService.WorkspacePullRequestService.RefreshContextPullRequestsAsync(
+            WorkspaceId, contextId.Value, branchByRepositoryId, force: force, cancellationToken: cancellationToken);
+    }
+
     private async Task HandleNewPrOpenInGitHubAsync()
     {
         var targets = _newPrModal.Targets;
@@ -256,12 +283,10 @@ public sealed partial class WorkspaceRepositories
             {
                 try
                 {
-                    var freshPrs = await ScopedExecutor.ExecuteAsync<WorkspacePullRequestService, IReadOnlyDictionary<int, PullRequestInfo?>>(async svc =>
-                    {
-                        await svc.RefreshPullRequestsAsync(WorkspaceId, refreshedIds, cancellationToken: ct);
-                        return await svc.GetPersistedPullRequestsForWorkspaceAsync(WorkspaceId, ct);
-                    });
-                    SafeInvoke(() => { prByRepositoryId = freshPrs; });
+                    // Context-aware: for a Feature this persists into that context's own PR projection instead
+                    // of the legacy per-link row (§3.2/item 6). RefreshFromSync below re-reads via the
+                    // context-aware Project(...) overlay, so no separate prByRepositoryId snapshot is needed here.
+                    await RefreshPullRequestsForContextAsync(refreshedIds, force: true, ct);
                 }
                 catch (Exception ex)
                 {

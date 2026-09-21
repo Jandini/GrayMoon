@@ -74,7 +74,26 @@ for item 5).
   context whose `WorkspaceRepositoryContextState` rows are the deliberate inverse of the shared link's fields,
   to catch any code path that silently falls back to reading the link.
 
-**Not yet done:** items 6–9, plus the remainder of item 2 (`IWorkspacePushOperations`/Razor push pages), and
+- **Item 6 (wire PR polling/Create-PR refresh to context) — done.** `WorkspaceRepositories.PrPolling.cs`'s
+  background poll and `WorkspaceRepositories.PullRequests.cs`'s post-Create-PR refresh both previously called
+  the legacy `WorkspacePullRequestService.RefreshPullRequestsAsync(workspaceId, repositoryIds, ...)`
+  unconditionally, which reads the shared link's branch and writes the shared/legacy PR row regardless of which
+  context the page was viewing. Added `RefreshPullRequestsForContextAsync` (in `WorkspaceRepositories.PullRequests.cs`)
+  that branches on `_isFeatureContext`/`_selectedContextId` the same way `WorkspaceActions.Loading.cs` already
+  does: for the special Workspace it still calls the legacy overload; for a Feature it looks up that context's
+  own checked-out branch per repo via `LinkListQueryService.GetAllSnapshotsAsync(..., isSpecialWorkspace: false)`
+  and calls `WorkspacePullRequestService.RefreshContextPullRequestsAsync`, which persists into
+  `WorkspaceRepositoryContextPullRequest` only. Both call sites now go through this helper. The redundant
+  `prByRepositoryId = freshPrs` snapshot after Create-PR was also removed — the immediately-following
+  `RefreshFromSync()` already re-reads the grid through the context-aware `Project(...)` overlay, so a
+  Feature's freshly created PR badge now actually appears instead of silently never populating (§3.2).
+  **Not covered by this fix:** `WorkspaceRepositoryStateWriter`'s own reconciliation path was already
+  context-aware before this change (see `ReconcilePullRequestAsync`) — this item only closes the two page-level
+  read paths that bypassed it. Verified: full solution builds cleanly; full test suite (177 + 320 + 134 = 631
+  tests) passes unchanged (no new persistence behavior was added — `RefreshContextPullRequestsAsync` already
+  existed and is exercised by `WorkspacePullRequestServiceTests.cs`).
+
+**Not yet done:** items 7–9, plus the remainder of item 2 (`IWorkspacePushOperations`/Razor push pages), and
 generated-package context-scoping (`SyncGeneratedPackageDependenciesAsync` still isn't context-scoped; the
 `WorkspaceProjectRepositoryGeneratedPackageTests` seed data and the new-context filter both currently carve out
 generated/virtual package rows rather than scoping them). See the table in §1 and the fix sequence in §5 below
@@ -95,8 +114,8 @@ update and should be read with the corrections above in mind.
 | Repositories grid **sort / keyset paging / "group by level"** | **Done** (§0, item 5) | `ApplySort`/`ApplyKeyset`/`GetIndexAsync`/`GetRepositoryIdsAtLevelAsync`/`GetGitVersionNameMapAsync` in `WorkspaceRepositoryLinkListQueryService` now join `WorkspaceRepositoryContextState` for a Feature context (see §3.1, superseded) |
 | Git Changes persistence | **Done** (context-scoped tables + mirror-on-special-only pattern) | `GitChangesSnapshotPushHandler.cs` |
 | GitHub Actions read/write | **Done at the service layer**, wired into the Actions page | `WorkspaceActionService.FetchAndPersistContextAsync/GetPersistedActionsForWorkspaceContextAsync`, called from `WorkspaceActions.Loading.cs` / `WorkspaceActions.AutoRefresh.cs` |
-| PR **persistence infrastructure** (`WorkspaceRepositoryContextPullRequest`, `UpsertContextAsync`, `RefreshContextPullRequestsAsync`) | **Built, but not called from any page** | See §4 |
-| PR **polling / Create-PR flow** | **Not wired to context at all** | `WorkspaceRepositories.PrPolling.cs`, `WorkspaceRepositories.PullRequests.cs` |
+| PR **persistence infrastructure** (`WorkspaceRepositoryContextPullRequest`, `UpsertContextAsync`, `RefreshContextPullRequestsAsync`) | **Done, and now called from the page** (§0, item 6) | See §4 |
+| PR **polling / Create-PR flow** | **Done** (§0, item 6) — both routed through context | `WorkspaceRepositories.PrPolling.cs`, `WorkspaceRepositories.PullRequests.cs` |
 | **Dependency graph / dependency level / dependency stats** | **Done** (§0, items 1 & 4) — no longer cross-contaminates contexts | See §2 — the core finding of this document (superseded by §0) |
 | **Update / SyncDependencies / Push planning** | **Context-aware for the data layer** (§0, items 2 & 3); **UI/interface threading above `WorkspaceGitService`/`WorkspacePushService` still not done** for push planning specifically | See §2 (superseded by §0) |
 | File-version missing-state / line-status mismatch | **Partially done.** `WorkspaceFileLineStatus` rows now carry `WorkspaceFeatureContextId` and are filtered by it. But `WorkspaceFile.IsMissingOnDisk` (the shared file row) is still mutated directly — no `WorkspaceFileContextState` table is used despite existing in the design (§6.11/§16.2) | See §5 |
@@ -423,9 +442,9 @@ subsystem, and it was not caught by that pass.
 5. ✅ **Done (§0).** ~~Migrate~~ grid sort/keyset/level-grouping (`ApplySort`, `ApplyKeyset`,
    `GetRepositoryIdsAtLevelAsync`, `GetGitVersionNameMapAsync`) now use the same context-state join pattern
    already used by `Project(...)`.
-6. **Not yet done.** Wire `RefreshContextPullRequestsAsync`/`ClearContextPullRequestAsync` into the Repositories
-   page's PR polling loop and Create-PR-success refresh, branching on selected context the same way
-   `WorkspaceActions.Loading.cs`/`.AutoRefresh.cs` already branch on `ctxForActions`.
+6. ✅ **Done (§0).** ~~Wire~~ `RefreshContextPullRequestsAsync` into the Repositories page's PR polling loop and
+   Create-PR-success refresh, branching on selected context the same way `WorkspaceActions.Loading.cs`/
+   `.AutoRefresh.cs` already branch on `ctxForActions`.
 7. **Not yet done.** Add `WorkspaceFileContextState` (or equivalent) and move `IsMissingOnDisk` off the shared
    `WorkspaceFile` row, following the same "context table + special-Workspace-only legacy mirror" pattern already
    used correctly for Git Changes (`GitChangesSnapshotPushHandler`) and now for Actions.
