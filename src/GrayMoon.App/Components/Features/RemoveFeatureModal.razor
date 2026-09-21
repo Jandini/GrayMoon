@@ -3,14 +3,14 @@
 @inject IWorkspaceFeatureOperations FeatureOperations
 @inject ILogger<RemoveFeatureModal> Logger
 
-@if (IsVisible)
+@if (IsVisible && !_removing)
 {
     <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: 1085;">
         <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">Remove Feature</h5>
-                    <button type="button" class="btn-close" aria-label="Close" @onclick="Cancel" disabled="@_busy"></button>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="Cancel" disabled="@_analyzing"></button>
                 </div>
                 <div class="modal-body">
                     @if (!string.IsNullOrEmpty(_error))
@@ -43,13 +43,13 @@
                                 will permanently delete that work. Confirm below to continue anyway.
                             </div>
                             <div class="form-check mb-2">
-                                <input class="form-check-input" type="checkbox" id="allow-discard" @bind="_allowDiscard" disabled="@_busy" />
+                                <input class="form-check-input" type="checkbox" id="allow-discard" @bind="_allowDiscard" disabled="@_analyzing" />
                                 <label class="form-check-label" for="allow-discard">
                                     Yes, permanently discard any uncommitted changes in these repositories
                                 </label>
                             </div>
                             <div class="form-check mb-2">
-                                <input class="form-check-input" type="checkbox" id="allow-force" @bind="_allowForce" disabled="@_busy" />
+                                <input class="form-check-input" type="checkbox" id="allow-force" @bind="_allowForce" disabled="@_analyzing" />
                                 <label class="form-check-label" for="allow-force">
                                     Yes, delete the local branch even if it still has commits that were never pushed
                                 </label>
@@ -58,13 +58,9 @@
                     }
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-outline-secondary" @onclick="Cancel" disabled="@_busy">Cancel</button>
+                    <button type="button" class="btn btn-outline-secondary" @onclick="Cancel" disabled="@_analyzing">Cancel</button>
                     <button type="button" class="btn btn-danger" @onclick="RemoveAsync"
-                            disabled="@(_busy || _plan is null || (!_plan.IsAutomaticallySafe && !_allowDiscard && !_allowForce))">
-                        @if (_busy)
-                        {
-                            <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
-                        }
+                            disabled="@(_analyzing || _plan is null || (!_plan.IsAutomaticallySafe && !_allowDiscard && !_allowForce))">
                         Remove Feature
                     </button>
                 </div>
@@ -72,6 +68,8 @@
         </div>
     </div>
 }
+@* While _removing, the dialog is hidden and the page-level BackgroundJobOverlay (driven by the
+   "remove-feature" structural operation) covers the page with its own "Removing Feature..." message. *@
 
 @code {
     [Parameter] public bool IsVisible { get; set; }
@@ -81,7 +79,8 @@
 
     private RemoveFeaturePlan? _plan;
     private string? _error;
-    private bool _busy;
+    private bool _analyzing;
+    private bool _removing;
     private bool _allowDiscard;
     private bool _allowForce;
     private int? _analyzedFor;
@@ -155,7 +154,7 @@
         if (_analyzedFor == FeatureContextId.Value.Value && _plan is not null)
             return;
 
-        _busy = true;
+        _analyzing = true;
         _error = null;
         try
         {
@@ -171,7 +170,7 @@
         }
         finally
         {
-            _busy = false;
+            _analyzing = false;
         }
     }
 
@@ -179,7 +178,7 @@
     {
         if (FeatureContextId is null)
             return;
-        _busy = true;
+        _removing = true;
         _error = null;
         try
         {
@@ -206,7 +205,7 @@
         }
         finally
         {
-            _busy = false;
+            _removing = false;
         }
     }
 
