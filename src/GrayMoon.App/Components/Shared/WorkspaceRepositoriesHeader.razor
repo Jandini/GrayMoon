@@ -42,6 +42,7 @@
                              SelectedContextId="SelectedContextId"
                              SelectedContextIdChanged="OnSelectedContextChanged"
                              OnRequestCreateFeature="OnRequestCreateFeature"
+                             OnRequestRemoveFeature="OnRequestRemoveFeature"
                              Disabled="@(IsSyncing || IsUpdating || IsPushing)">
             <FilterSearchInput Value="@(SearchTerm ?? string.Empty)"
                                ValueChanged="OnSearchValueChangedAsync"
@@ -386,6 +387,7 @@
     [Parameter] public bool IsFeatureContext { get; set; }
     [Parameter] public EventCallback<WorkspaceFeatureContextId> OnSelectedContextChanged { get; set; }
     [Parameter] public EventCallback<string> OnRequestCreateFeature { get; set; }
+    [Parameter] public EventCallback<WorkspaceFeatureContextId> OnRequestRemoveFeature { get; set; }
     [Parameter] public EventCallback OnRemoveFeature { get; set; }
     [Parameter] public int RepositoriesCount { get; set; }
     [Parameter] public bool HasFilter { get; set; }

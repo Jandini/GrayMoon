@@ -22,6 +22,7 @@
                                     IsFeatureContext="_isFeatureContext"
                                     OnSelectedContextChanged="OnSelectedContextChangedAsync"
                                     OnRequestCreateFeature="OnRequestCreateFeatureAsync"
+                                    OnRequestRemoveFeature="OnRequestRemoveFeatureFromSelectorAsync"
                                     OnRemoveFeature="OnRemoveFeatureAsync"
                                     RepositoriesCount="@(_headerState?.TotalCount ?? 0)"
                                     HasFilter="@HasSearchFilter"

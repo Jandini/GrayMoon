@@ -151,6 +151,17 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     }
 
     /// <summary>
+    /// The "-" icon on a Feature row inside the context-switcher dropdown (WorkspaceFeatureSelector): opens
+    /// Remove Feature for that specific Feature, regardless of which context is currently selected/viewed.
+    /// </summary>
+    private Task OnRequestRemoveFeatureFromSelectorAsync(WorkspaceFeatureContextId contextId)
+    {
+        _removeFeatureContextId = contextId;
+        _removeFeatureModalVisible = true;
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
     /// A branch in the Switch Branch dialog was owned by a Feature worktree (§28A): rather than attempting an
     /// ordinary git branch delete (which the worktree would reject anyway), route straight to Remove Feature
     /// for that Feature's own context.
@@ -177,11 +188,25 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     private async Task OnFeatureRemovedAsync()
     {
         _removeFeatureModalVisible = false;
-        var special = await FeatureContextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(WorkspaceId);
-        await SelectedFeatureContextService.SetSelectedAsync(WorkspaceId, special);
-        await OnSelectedContextChangedAsync(special);
-        var path = new Uri(NavigationManager.Uri).GetLeftPart(UriPartial.Path);
-        NavigationManager.NavigateTo(path, replace: true);
+
+        // Only force a navigation away from the current view when the Feature that was just removed is the
+        // one being viewed (e.g. removed via the "Feature" button's own "Remove Feature" menu item, or via the
+        // "-" icon on the currently-selected row in the context-switcher dropdown). Removing a *different*
+        // Feature from that dropdown's "-" icon shouldn't kick the user out of whatever context they're
+        // currently viewing.
+        var removedCurrentContext = _removeFeatureContextId is { } removedId
+            && _selectedContextId is { } selectedId
+            && removedId.Value == selectedId.Value;
+        _removeFeatureContextId = null;
+
+        if (removedCurrentContext)
+        {
+            var special = await FeatureContextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(WorkspaceId);
+            await SelectedFeatureContextService.SetSelectedAsync(WorkspaceId, special);
+            await OnSelectedContextChangedAsync(special);
+            var path = new Uri(NavigationManager.Uri).GetLeftPart(UriPartial.Path);
+            NavigationManager.NavigateTo(path, replace: true);
+        }
         ToastService.Show("Feature removed.");
     }
 

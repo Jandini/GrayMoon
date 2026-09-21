@@ -18,6 +18,18 @@
         <span class="workspace-feature-selector__label">@SelectedLabel</span>
         <span class="workspace-feature-selector__caret" aria-hidden="true"></span>
     </button>
+    @if (OnRequestCreateFeature.HasDelegate)
+    {
+        <button type="button"
+                class="workspace-feature-selector__add"
+                disabled="@Disabled"
+                title="New Feature"
+                aria-label="New Feature"
+                @onclick="RequestCreate"
+                @onclick:stopPropagation>
+            <i class="bi bi-plus-lg" aria-hidden="true"></i>
+        </button>
+    }
     @if (_open)
     {
         <div class="workspace-feature-selector__backdrop" @onclick="CloseDropdown"></div>
@@ -40,7 +52,7 @@
             <li class="dropdown-header workspace-feature-selector__section-title">Features</li>
             @foreach (var option in _options.Where(o => !o.IsSpecialWorkspace))
             {
-                <li>
+                <li class="workspace-feature-selector__feature-row">
                     <button type="button"
                             class="dropdown-item @(IsSelected(option) ? "active" : "")"
                             role="menuitem"
@@ -52,15 +64,18 @@
                             <span class="text-muted small"> (@option.LifecycleState)</span>
                         }
                     </button>
-                </li>
-            }
-            @if (OnRequestCreateFeature.HasDelegate)
-            {
-                <li><hr class="dropdown-divider branch-menu-divider" /></li>
-                <li>
-                    <button type="button" class="dropdown-item" role="menuitem" @onclick="RequestCreate">
-                        New Feature
-                    </button>
+                    @if (OnRequestRemoveFeature.HasDelegate)
+                    {
+                        <button type="button"
+                                class="workspace-feature-selector__remove-btn"
+                                role="menuitem"
+                                title="Remove Feature"
+                                aria-label="Remove Feature"
+                                @onclick="() => RequestRemove(option)"
+                                @onclick:stopPropagation>
+                            <i class="bi bi-dash-lg" aria-hidden="true"></i>
+                        </button>
+                    }
                 </li>
             }
             @if (_desktopAvailable && SelectedContextId is not null)
@@ -88,6 +103,7 @@
     [Parameter] public WorkspaceFeatureContextId? SelectedContextId { get; set; }
     [Parameter] public EventCallback<WorkspaceFeatureContextId> SelectedContextIdChanged { get; set; }
     [Parameter] public EventCallback<string> OnRequestCreateFeature { get; set; }
+    [Parameter] public EventCallback<WorkspaceFeatureContextId> OnRequestRemoveFeature { get; set; }
     [Parameter] public bool Disabled { get; set; }
     [Parameter] public string InputId { get; set; } = "workspace-feature-selector";
     [Parameter] public string? WorkspaceName { get; set; }
@@ -217,6 +233,12 @@
     {
         _open = false;
         await OnRequestCreateFeature.InvokeAsync("");
+    }
+
+    private async Task RequestRemove(WorkspaceFeatureContextInfo option)
+    {
+        _open = false;
+        await OnRequestRemoveFeature.InvokeAsync(option.ContextId);
     }
 
     public Task RefreshAsync() => ReloadAsync();
