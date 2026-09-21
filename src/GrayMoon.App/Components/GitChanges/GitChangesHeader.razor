@@ -1,7 +1,9 @@
 @namespace GrayMoon.App.Components.GitChanges
+@using GrayMoon.App.Components.Features
 @using GrayMoon.App.Components.Shared
 @using GrayMoon.App.Models
 @using GrayMoon.App.Services.GitChanges
+@using GrayMoon.Application.Features
 @using Microsoft.AspNetCore.Components.Web
 
 <div class="workspace-repos-header git-changes-header">
@@ -61,17 +63,21 @@
             </div>
         }
     </div>
-    @if (HasChanges)
-    {
-        <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
-            <div class="workspace-grid-search-wrapper">
-                <FilterSearchInput Value="@FilterQuery"
-                                   ValueChanged="OnFilterValueChangedAsync"
-                                   InputId="git-changes-filter"
-                                   InputAdditionalClass="workspace-grid-search"
-                                   Placeholder="Filter by repo, path, status..."
-                                   Disabled="@IsFilterDisabled" />
-            </div>
+    <div class="d-flex gap-2 align-items-center workspace-repos-header-actions flex-wrap">
+        <WorkspaceContextBar WorkspaceId="WorkspaceId"
+                             WorkspaceName="@WorkspaceName"
+                             SelectedContextId="SelectedContextId"
+                             SelectedContextIdChanged="SelectedContextIdChanged"
+                             Disabled="@IsContextSwitchDisabled">
+            <FilterSearchInput Value="@FilterQuery"
+                               ValueChanged="OnFilterValueChangedAsync"
+                               InputId="git-changes-filter"
+                               InputAdditionalClass="workspace-grid-search"
+                               Placeholder="Filter by repo, path, status..."
+                               Disabled="@IsFilterDisabled" />
+        </WorkspaceContextBar>
+        @if (HasChanges)
+        {
             <button type="button"
                     class="btn btn-outline-secondary"
                     title="Next change"
@@ -96,16 +102,26 @@
                     @onclick="() => OnRefresh.InvokeAsync()">
                 <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
             </button>
-        </div>
-    }
+        }
+    </div>
 </div>
 
 @code {
     [Parameter] public WorkspaceGitChangesView? View { get; set; }
 
-    /// <summary>Gates the entire actions row (filter, change nav, refresh) - hidden while there are no
-    /// changes anywhere in the workspace, so the empty state is a clean "No changes" message instead.</summary>
+    /// <summary>Gates the change-nav/refresh controls - hidden while there are no changes anywhere in
+    /// the workspace, so the empty state is a clean "No changes" message instead. The Feature context
+    /// selector and filter box remain visible regardless, matching the other Workspace pages.</summary>
     [Parameter] public bool HasChanges { get; set; }
+
+    [Parameter] public int WorkspaceId { get; set; }
+    [Parameter] public string? WorkspaceName { get; set; }
+    [Parameter] public WorkspaceFeatureContextId? SelectedContextId { get; set; }
+    [Parameter] public EventCallback<WorkspaceFeatureContextId> SelectedContextIdChanged { get; set; }
+
+    /// <summary>Disables the Feature context selector while a scan or page job is in flight - switching
+    /// context mid-mutation would otherwise race the in-flight operation's own reload.</summary>
+    [Parameter] public bool IsContextSwitchDisabled { get; set; }
 
     [Parameter] public string FilterQuery { get; set; } = string.Empty;
     [Parameter] public EventCallback<string> FilterQueryChanged { get; set; }

@@ -13,6 +13,11 @@
     <div class="grid-page-header">
         <GitChangesHeader View="_view"
                            HasChanges="@(ChangedRepositoryCount > 0)"
+                           WorkspaceId="WorkspaceId"
+                           WorkspaceName="@(_workspace?.Name)"
+                           SelectedContextId="_selectedContextId"
+                           SelectedContextIdChanged="OnSelectedContextChangedAsync"
+                           IsContextSwitchDisabled="@IsAnyScanRunning"
                            FilterQuery="@_filterQuery"
                            FilterQueryChanged="OnFilterChanged"
                            IsFilterDisabled="@(_view == null)"

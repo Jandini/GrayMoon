@@ -95,7 +95,8 @@
     flex-shrink: 0;
 }
 
-/* Match workspace-repos-header-actions margins (actions row is only present when there are changes). */
+/* Match workspace-repos-header-actions margins (the actions row - context selector + filter/nav -
+   is always present now; only the change-nav/refresh buttons within it are gated on HasChanges). */
 .git-changes-page .git-changes-header {
     margin-bottom: 0.75rem;
 }
