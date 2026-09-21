@@ -73,6 +73,11 @@
     box-shadow: none;
 }
 
+.workspace-feature-selector__add-spacer {
+    flex: 0 0 auto;
+    width: 2.25rem;
+}
+
 .workspace-feature-selector__label {
     flex: 1 1 auto;
     min-width: 0;
@@ -164,6 +169,17 @@
     inset: 0;
     background: transparent;
     z-index: 1050;
+}
+
+.workspace-feature-selector__switch-workspace-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.workspace-feature-selector__switch-workspace-item i {
+    font-size: 0.85rem;
+    color: var(--text-muted);
 }
 
 .workspace-feature-selector__flyout {

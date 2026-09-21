@@ -13,7 +13,7 @@
             <div class="modal-dialog modal-dialog-centered">
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h5 class="modal-title">New Feature</h5>
+                        <h5 class="modal-title">New Feature <small class="text-muted fw-normal">worktree</small></h5>
                         <button type="button" class="btn-close" aria-label="Close" @onclick="Cancel"></button>
                     </div>
                     <div class="modal-body">
@@ -22,7 +22,7 @@
                             <div class="gm-callout gm-callout--error mb-3" role="alert">@_error</div>
                         }
                         <div class="mb-3">
-                            <label class="form-label" for="create-feature-name">Feature name</label>
+                            <label class="form-label" for="create-feature-name">Feature name <small class="text-muted fw-normal">branch</small></label>
                             <input id="create-feature-name"
                                    class="form-control"
                                    @bind="_name"
@@ -51,7 +51,7 @@
         </div>
     }
     @* While _busy, the dialog is hidden and the page-level BackgroundJobOverlay (driven by the
-       "create-feature" structural operation) covers the page with its own "Creating Feature..." message. *@
+       "create-feature" structural operation) covers the page with its own "Creating feature..." message. *@
 }
 
 @code {

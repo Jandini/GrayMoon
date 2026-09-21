@@ -1,0 +1,49 @@
+---
+description: AppDbContext is scoped per Blazor circuit - never inject it directly or share it across concurrent/background work
+alwaysApply: true
+---
+
+# DbContext handling (do not skip this)
+
+Has caused two real production bugs: a bulk PR merge threw `A second operation
+was started on this context instance before a previous operation completed`,
+and left the shared `AppDbContext` unusable for the rest of the browser tab -
+including unrelated pages, which then failed with `ObjectDisposedException`.
+
+## Why
+
+`AppDbContext` is registered **scoped**. A Blazor Server circuit is one
+browser tab = one DI scope, so every component in that tab that injects
+`AppDbContext` gets the **same instance**. EF Core `DbContext` is not
+thread-safe. If anything throws while an operation is in flight, that
+instance can stay broken/disposed for the rest of the tab's lifetime.
+
+## The rule
+
+1. **Never inject `AppDbContext` directly into a page/component.** Inject
+   `IDbContextFactory<AppDbContext>` and create a short-lived context per
+   operation:
+   ```csharp
+   [Inject] private IDbContextFactory<AppDbContext> DbContextFactory { get; set; } = default!;
+   await using var db = await DbContextFactory.CreateDbContextAsync(cancellationToken);
+   ```
+   Reference: `WorkspaceGitChangesReadService`, `WorkspaceGitChangesWriteQueue`.
+2. **Any repository/service method that calls `SaveChangesAsync`, or can run
+   concurrently (`Task.WhenAll`, a bounded `SemaphoreSlim` fan-out, etc.), must
+   use `IDbContextFactory<AppDbContext>` and create its own context per call.**
+   Do not accept an injected scoped `AppDbContext` in a class whose methods can
+   run in parallel with themselves or each other.
+3. **Background/fire-and-forget work that can outlive the page** (auto-poll
+   loops, `Task.Run` bodies) must resolve its own DI scope via
+   `IServiceScopeFactory.CreateAsyncScope()`, not reuse the circuit-scoped
+   instance. Reference: `WorkspaceActions.AutoRefresh.cs`'s `RefreshRowAsync`.
+4. A plain scoped `AppDbContext` field used only for simple, one-at-a-time
+   reads in a service that is never fanned out is fine - don't rewrite it.
+
+## Before merging a change that touches `AppDbContext`
+
+- Grep the class for `Task.WhenAll`, `SemaphoreSlim`, or
+  `IServiceScopeFactory.CreateAsyncScope()` and check whether a
+  DbContext-touching method sits inside that fan-out.
+- If a Blazor page injects `AppDbContext` directly, fix it in the same change
+  - it's a silent hazard for every other feature sharing that circuit.

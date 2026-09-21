@@ -47,7 +47,7 @@ public sealed class WorkspaceFeatureOperations(
             workspaceId,
             "create-feature",
             overlayKey,
-            "Creating Feature...",
+            "Creating feature...",
             async (op, ct) =>
             {
                 try
@@ -340,7 +340,7 @@ public sealed class WorkspaceFeatureOperations(
             info.WorkspaceId,
             "remove-feature",
             overlayKey,
-            "Removing Feature...",
+            "Removing feature...",
             async (op, ct) =>
             {
                 try

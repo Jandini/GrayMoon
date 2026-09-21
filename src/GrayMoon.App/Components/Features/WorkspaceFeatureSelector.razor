@@ -30,6 +30,13 @@
             <i class="bi bi-plus-lg" aria-hidden="true"></i>
         </button>
     }
+    else
+    {
+        <!-- Reserves the same width as the "+" button above so the overall control is exactly as
+             wide here as on pages that do have the "New Feature" button (e.g. Workspace Repositories) -
+             otherwise this trigger's own flex-basis (width: 100%) grows to fill the freed-up space. -->
+        <span class="workspace-feature-selector__add-spacer" aria-hidden="true"></span>
+    }
     @if (_open)
     {
         <div class="workspace-feature-selector__backdrop" @onclick="CloseDropdown"></div>
@@ -48,6 +55,15 @@
                     </button>
                 </li>
             }
+            <li>
+                <button type="button"
+                        class="dropdown-item workspace-feature-selector__switch-workspace-item"
+                        role="menuitem"
+                        @onclick="GoToWorkspaces">
+                    <i class="bi bi-arrow-left-right" aria-hidden="true"></i>
+                    Switch Workspace
+                </button>
+            </li>
             @if (_options.Any(o => !o.IsSpecialWorkspace))
             {
                 <li><hr class="dropdown-divider branch-menu-divider" /></li>
@@ -86,14 +102,32 @@
                 <li><hr class="dropdown-divider branch-menu-divider" /></li>
                 <li class="workspace-feature-selector__flyout">
                     <button type="button" class="dropdown-item workspace-feature-selector__flyout-item" role="menuitem">
-                        Open
+                        Open in...
                         <i class="bi bi-chevron-right" aria-hidden="true"></i>
                     </button>
                     <ul class="dropdown-menu show shadow workspace-feature-selector__submenu" role="menu">
-                        <li><button type="button" class="dropdown-item" role="menuitem" @onclick='() => LaunchAsync("openInCursor")'>Open in Cursor</button></li>
-                        <li><button type="button" class="dropdown-item" role="menuitem" @onclick='() => LaunchAsync("openInVsCode")'>Open in VS Code</button></li>
-                        <li><button type="button" class="dropdown-item" role="menuitem" @onclick='() => LaunchAsync("openInTerminal")'>Open in Terminal</button></li>
-                        <li><button type="button" class="dropdown-item" role="menuitem" @onclick='() => LaunchAsync("showInExplorer")'>Show in Explorer</button></li>
+                        @if (_toolAvailability?.Cursor == true)
+                        {
+                            <li><button type="button" class="dropdown-item" role="menuitem" @onclick='() => LaunchAsync("openInCursor")'>Cursor</button></li>
+                        }
+                        @if (_toolAvailability?.ClaudeCli == true)
+                        {
+                            <li><button type="button" class="dropdown-item" role="menuitem" @onclick='() => LaunchAsync("openInClaudeCli")'>Claude CLI</button></li>
+                        }
+                        @if (_toolAvailability?.VsCode == true)
+                        {
+                            <li><button type="button" class="dropdown-item" role="menuitem" @onclick='() => LaunchAsync("openInVsCode")'>VS Code</button></li>
+                        }
+                        @if (_toolAvailability?.VisualStudio == true)
+                        {
+                            <li><button type="button" class="dropdown-item" role="menuitem" @onclick='() => LaunchAsync("openInVisualStudio")'>Visual Studio</button></li>
+                        }
+                        @if (HasAnyIdeAvailable)
+                        {
+                            <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                        }
+                        <li><button type="button" class="dropdown-item" role="menuitem" @onclick='() => LaunchAsync("openInTerminal")'>Terminal</button></li>
+                        <li><button type="button" class="dropdown-item" role="menuitem" @onclick='() => LaunchAsync("showInExplorer")'>Explorer</button></li>
                     </ul>
                 </li>
             }
@@ -116,6 +150,18 @@
     private bool _loaded;
     private bool _desktopAvailable;
     private int? _lastKnownSelectedValue;
+    private ToolAvailabilityDto? _toolAvailability;
+
+    private bool HasAnyIdeAvailable =>
+        _toolAvailability is { } t && (t.Cursor || t.ClaudeCli || t.VsCode || t.VisualStudio);
+
+    private sealed class ToolAvailabilityDto
+    {
+        public bool Cursor { get; set; }
+        public bool VsCode { get; set; }
+        public bool VisualStudio { get; set; }
+        public bool ClaudeCli { get; set; }
+    }
 
     private string SelectedLabel
     {
@@ -154,11 +200,28 @@
         {
             _desktopAvailable = await JS.InvokeAsync<bool>("eval", "!!(window.graymoonDesktop && window.graymoonDesktop.isAvailable && window.graymoonDesktop.isAvailable())");
             if (_desktopAvailable)
+            {
+                await RefreshToolAvailabilityAsync();
                 await InvokeAsync(StateHasChanged);
+            }
         }
         catch
         {
             _desktopAvailable = false;
+        }
+    }
+
+    private async Task RefreshToolAvailabilityAsync()
+    {
+        try
+        {
+            // GrayMoon.Desktop pushes tool detection results shortly after navigation (see
+            // MainWindow.NotifyToolAvailability); may still be null on the very first render.
+            _toolAvailability = await JS.InvokeAsync<ToolAvailabilityDto?>("eval", "window.graymoonDesktop && window.graymoonDesktop.getToolAvailability && window.graymoonDesktop.getToolAvailability()");
+        }
+        catch
+        {
+            _toolAvailability = null;
         }
     }
 
@@ -172,6 +235,8 @@
             // Refresh the Feature list every time the menu opens so a Feature removed/created from
             // elsewhere (or by an operation that finished since the last load) is reflected immediately.
             await ReloadAsync();
+            if (_desktopAvailable)
+                await RefreshToolAvailabilityAsync();
         }
     }
 
@@ -230,6 +295,12 @@
             Navigation.NavigateTo(path, replace: true);
         else
             Navigation.NavigateTo($"{path}?context={option.ContextId.Value}", replace: true);
+    }
+
+    private void GoToWorkspaces()
+    {
+        _open = false;
+        Navigation.NavigateTo("workspaces");
     }
 
     private async Task RequestCreate()

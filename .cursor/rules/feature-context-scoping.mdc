@@ -1,0 +1,60 @@
+---
+description: Feature (worktree) data reads/writes must filter by WorkspaceFeatureContextId, never fall back to the shared Workspace row
+alwaysApply: true
+---
+
+# Feature-context scoping (worktree Features)
+
+Has caused a real cross-context data-corruption bug: a Feature's dependency
+sync recomputed stats from a project graph that silently mixed every
+context's rows together, then wrote the result onto the special Workspace's
+own `WorkspaceRepositoryLink` row - so running Update inside a Feature visibly
+changed the Workspace's own Dependencies grid.
+
+## Why
+
+A `WorkspaceRepositoryLink` row is shared by the whole workspace (one per
+repo, no context column). A Feature's own view lives in a separate
+`WorkspaceRepositoryContextState` row (one per
+`(WorkspaceFeatureContextId, WorkspaceRepositoryId)`), plus context-scoped
+sibling tables for PRs, Actions, and Git Changes. `WorkspaceProject` rows also
+carry a `WorkspaceFeatureContextId` column. Any query/write on these tables
+filtered only by `WorkspaceId` either mixes every context's data together or
+persists onto the wrong row.
+
+## The rule
+
+1. **Any new/edited query or command touching `WorkspaceProject`, dependency
+   stats, `GitVersion`, PR, Actions, or Git-Changes data for a repository must
+   take a `WorkspaceFeatureContextId?` / `bool isSpecialWorkspace` pair**, not
+   just `workspaceId`. Omitting the context must reproduce the pre-Feature
+   legacy behavior exactly (read the shared row).
+2. **For a Feature context, read/write the context-scoped table
+   (`WorkspaceRepositoryContextState` et al.), never the shared link/row.**
+   Never fall back to the Workspace's own value when a Feature has no context
+   row yet - the correct answer is "unknown"/`null`. Reference:
+   `WorkspaceRepositoryLinkListQueryService.Project(...)` and its
+   `ApplySort`/`ApplyKeyset`/`GetIndexAsync`/`GetRepositoryIdsAtLevelAsync`/
+   `GetGitVersionNameMapAsync` siblings.
+3. **Only mirror a write onto the shared `WorkspaceRepositoryLink`/
+   `WorkspaceProject` row when the context actually is the special
+   Workspace.** A Feature's recompute/sync must never touch those shared
+   rows. Reference: `RecomputeAndPersistRepositoryDependencyStatsAsync`
+   (get-or-create the context state row, mirror onto the link only for
+   `isSpecialWorkspace`).
+4. **Any dictionary/lookup keyed by something not globally unique across
+   contexts** (e.g. `(RepositoryId, ProjectFilePath)`) **must include the
+   context id in the key**, or two contexts' rows silently collide.
+5. When adding a context-aware overload, **grep every existing call site and
+   update the ones that already have a `contextId` in scope** (e.g. a page's
+   `_selectedContextId`/`_isFeatureContext` fields). A half-migrated method is
+   a silent no-op fix, not a real one.
+
+## Before merging a change that touches Feature/worktree data
+
+- Grep the table/column you changed for every other query/write that reads it
+  without a context filter.
+- Add a test that seeds a Feature context whose context-state row is
+  deliberately different from the shared link/row, and assert the
+  context-scoped read/write actually used the context data. See
+  `WorkspaceRepositoryLinkListQueryServiceTests.Feature_context_sort_keyset_and_level_grouping_use_context_state_not_shared_link`.
