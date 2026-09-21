@@ -27,7 +27,21 @@ public sealed class WorkspaceBranchOperations(
     IWorkspaceContextPathResolver pathResolver,
     ILogger<WorkspaceBranchOperations> logger) : IWorkspaceBranchOperations
 {
-    public async Task<BranchHttpOutcome> GetBranchesAsync(int workspaceId, int repositoryId, CancellationToken cancellationToken = default)
+    public Task<BranchHttpOutcome> GetBranchesAsync(int workspaceId, int repositoryId, CancellationToken cancellationToken = default)
+        => GetBranchesAsync(workspaceId, contextId: null, repositoryId, cancellationToken);
+
+    public async Task<BranchHttpOutcome> GetBranchesAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        int repositoryId,
+        CancellationToken cancellationToken = default)
+        => await GetBranchesAsync(workspaceId, (WorkspaceFeatureContextId?)contextId, repositoryId, cancellationToken);
+
+    private async Task<BranchHttpOutcome> GetBranchesAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId? contextId,
+        int repositoryId,
+        CancellationToken cancellationToken)
     {
         var resolved = await TryResolveLinkedRepoAsync(workspaceId, repositoryId, requireAgent: false, cancellationToken);
         if (resolved.Error != null)
@@ -69,8 +83,35 @@ public sealed class WorkspaceBranchOperations(
                 .Select(b => b.BranchName)
                 .ToList();
 
-            var currentBranch = wr.BranchName;
-            var currentTag = wr.CheckedOutTag;
+            string? currentBranch = wr.BranchName;
+            string? currentTag = wr.CheckedOutTag;
+
+            if (contextId is { } cid)
+            {
+                var info = await contextResolver.GetRequiredAsync(cid, workspaceId, cancellationToken);
+                if (!info.IsSpecialWorkspace)
+                {
+                    var state = await db.WorkspaceRepositoryContextStates
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(
+                            s => s.WorkspaceFeatureContextId == cid.Value
+                                 && s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId,
+                            cancellationToken);
+                    if (state != null)
+                    {
+                        currentBranch = state.BranchName;
+                        currentTag = state.CheckedOutTag;
+                    }
+
+                    // Feature branch may not yet be in shared RepositoryBranches (until Fetch).
+                    if (!string.IsNullOrWhiteSpace(currentBranch)
+                        && !localBranches.Contains(currentBranch, StringComparer.OrdinalIgnoreCase))
+                    {
+                        localBranches.Add(currentBranch);
+                        localBranches.Sort(StringComparer.OrdinalIgnoreCase);
+                    }
+                }
+            }
 
             var defaultBranchRow = rows.FirstOrDefault(b => b.IsDefault && !b.IsTag);
             var defaultBranch = defaultBranchRow?.BranchName;
@@ -583,7 +624,23 @@ public sealed class WorkspaceBranchOperations(
 
         if (!isRemote)
         {
-            var currentBranch = wr.BranchName;
+            string? currentBranch = wr.BranchName;
+            await using (var db = await dbContextFactory.CreateDbContextAsync(cancellationToken))
+            {
+                var info = await contextResolver.GetRequiredAsync(contextId, workspaceId, cancellationToken);
+                if (!info.IsSpecialWorkspace)
+                {
+                    var state = await db.WorkspaceRepositoryContextStates
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(
+                            s => s.WorkspaceFeatureContextId == contextId.Value
+                                 && s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId,
+                            cancellationToken);
+                    if (state != null)
+                        currentBranch = state.BranchName;
+                }
+            }
+
             if (string.Equals(currentBranch, branchName, StringComparison.OrdinalIgnoreCase))
                 return BranchHttpOutcome.BadRequest("Cannot delete the current branch. Check out another branch first.");
         }

@@ -101,14 +101,17 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
     }
 
     public async Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, CancellationToken ct)
-        => await GetVersionAsync(repoPath, nonNormalize: false, ct);
+        => await GetVersionAsync(repoPath, nonNormalize: false, commitSha: null, ct);
 
     public async Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, bool nonNormalize, CancellationToken ct)
+        => await GetVersionAsync(repoPath, nonNormalize, commitSha: null, ct);
+
+    public async Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, bool nonNormalize, string? commitSha, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
             return (null, null);
 
-        var (fileName, arguments) = GetGitVersionInvocation(repoPath, nonNormalize);
+        var (fileName, arguments) = GetGitVersionInvocation(repoPath, nonNormalize, commitSha);
         var toolName = fileName == "dotnet" ? "dotnet gitversion" : "dotnet-gitversion";
 
         var sw = Stopwatch.StartNew();
@@ -161,7 +164,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         }
     }
 
-    private static (string FileName, string Arguments) GetGitVersionInvocation(string repoPath, bool nonNormalize)
+    private static (string FileName, string Arguments) GetGitVersionInvocation(string repoPath, bool nonNormalize, string? commitSha)
     {
         const string manifestFileName = "dotnet-tools.json";
         var inRoot = Path.Combine(repoPath, manifestFileName);
@@ -169,6 +172,8 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         var commonArgs = "/output json /nofetch /verbosity quiet";
         if (nonNormalize)
             commonArgs += " /nonormalize";
+        if (!string.IsNullOrWhiteSpace(commitSha))
+            commonArgs += " /c " + commitSha.Trim();
         if (File.Exists(inRoot) || File.Exists(inConfig))
             return ("dotnet", "gitversion " + commonArgs);
         return ("dotnet-gitversion", commonArgs);
@@ -193,6 +198,19 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             return null;
 
         var (exitCode, stdout, _) = await runner.RunAsync("git", ["rev-parse", "HEAD"], repoPath, null, ct);
+        if (exitCode != 0)
+            return null;
+
+        var sha = (stdout ?? "").Trim();
+        return string.IsNullOrWhiteSpace(sha) ? null : sha;
+    }
+
+    public async Task<string?> RevParseAsync(string repoPath, string rev, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(rev))
+            return null;
+
+        var (exitCode, stdout, _) = await runner.RunAsync("git", ["rev-parse", rev.Trim()], repoPath, null, ct);
         if (exitCode != 0)
             return null;
 

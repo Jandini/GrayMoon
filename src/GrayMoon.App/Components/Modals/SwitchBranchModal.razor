@@ -166,6 +166,10 @@
                                                                 {
                                                                     <span class="badge bg-secondary ms-2" title="@occ.WorktreePath">Worktree</span>
                                                                 }
+                                                                else if (occ.Kind == BranchOccupancyKind.Workspace)
+                                                                {
+                                                                    <span class="badge bg-secondary ms-2" title="Checked out in Workspace">Workspace</span>
+                                                                }
                                                             }
                                                         </span>
                                                     </div>
@@ -555,6 +559,8 @@
     [Parameter] public int RepositoryId { get; set; }
     [Parameter] public int WorkspaceRepositoryId { get; set; }
     [Parameter] public WorkspaceFeatureContextId? ViewingContextId { get; set; }
+    /// <summary>When true, Return to Default is hidden (Workspace-only operation).</summary>
+    [Parameter] public bool IsFeatureContext { get; set; }
     [Parameter] public string? RepositoryName { get; set; }
     [Parameter] public string? CurrentBranch { get; set; }
     [Parameter] public string? RepositoryUrl { get; set; }
@@ -689,7 +695,7 @@
     {
         try
         {
-            var outcome = await BranchOperations.GetBranchesAsync(WorkspaceId, RepositoryId);
+            var outcome = await BranchOperations.GetBranchesAsync(WorkspaceId, ViewingContextId!.Value, RepositoryId);
             if (outcome.IsSuccessStatus)
             {
                 ApplyBranchLists(outcome.Body);
@@ -781,7 +787,7 @@
 
         try
         {
-            var outcome = await BranchOperations.GetBranchesAsync(WorkspaceId, RepositoryId);
+            var outcome = await BranchOperations.GetBranchesAsync(WorkspaceId, ViewingContextId!.Value, RepositoryId);
             if (outcome.IsSuccessStatus)
             {
                 ApplyBranchLists(outcome.Body);
@@ -833,7 +839,7 @@
     {
         try
         {
-            var outcome = await BranchOperations.GetBranchesAsync(WorkspaceId, RepositoryId);
+            var outcome = await BranchOperations.GetBranchesAsync(WorkspaceId, ViewingContextId!.Value, RepositoryId);
             if (outcome.IsSuccessStatus)
             {
                 ApplyBranchLists(outcome.Body);
@@ -1006,8 +1012,11 @@
     }
 
     /// <summary>True when current is a real branch that is not the default and has no remote-tracking counterpart.</summary>
+    /// <summary>True when current is a real branch that is not the default and has no remote-tracking counterpart.</summary>
     private bool ShouldShowReturnToDefaultButton()
     {
+        if (IsFeatureContext)
+            return false;
         if (!string.IsNullOrWhiteSpace(currentTag) || string.IsNullOrWhiteSpace(currentBranchLocal))
             return false;
         if (!string.IsNullOrWhiteSpace(defaultBranch)
@@ -1317,7 +1326,7 @@
             }
             else
             {
-                errorMessage = $"Delete failed: {outcome.StatusCode}";
+                errorMessage = outcome.ErrorText ?? $"Delete failed: {outcome.StatusCode}";
                 Logger.LogError("Delete branch failed: {StatusCode}, {Error}", outcome.StatusCode, outcome.ErrorText);
             }
         }

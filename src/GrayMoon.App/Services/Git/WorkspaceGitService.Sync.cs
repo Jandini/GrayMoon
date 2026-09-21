@@ -7,6 +7,7 @@ using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
+using GrayMoon.App.Services.Agent;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using GrayMoon.Application.Features;
@@ -92,6 +93,8 @@ public sealed partial class WorkspaceGitService
         var results = await Task.WhenAll(syncTasks);
 
         await PersistVersionsAsync(workspaceId, contextId, results, persistDependencyLevel: !skipDependencyLevelPersistence, cancellationToken);
+
+        await ApplyDefaultTipVersionsForMergedFeatureReposAsync(workspaceId, contextId, cancellationToken);
 
         bool isInSync;
         if (repositoryIds != null && repositoryIds.Count > 0)
@@ -284,5 +287,98 @@ public sealed partial class WorkspaceGitService
             BranchesProbed = info.LocalBranches != null || info.RemoteBranches != null || info.Tags != null,
             ProjectsProbed = info.ProjectsDetail != null,
         };
+    }
+
+    /// <summary>
+    /// For Feature contexts: when a repo's Feature PR is merged, replace context GitVersion with the
+    /// InformationalVersion of <c>origin/{default}</c> tip so Update Dependencies writes default-branch
+    /// version strings into higher-level csprojs (no checkout of main required).
+    /// </summary>
+    private async Task ApplyDefaultTipVersionsForMergedFeatureReposAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        CancellationToken cancellationToken)
+    {
+        var info = await _contextResolver.GetRequiredAsync(contextId, workspaceId, cancellationToken);
+        if (info.IsSpecialWorkspace)
+            return;
+
+        var mergedRepoWrlIds = await _dbContext.WorkspaceRepositoryContextPullRequests
+            .AsNoTracking()
+            .Where(p => p.WorkspaceFeatureContextId == contextId.Value && p.MergedAt != null)
+            .Select(p => p.WorkspaceRepositoryId)
+            .ToListAsync(cancellationToken);
+        if (mergedRepoWrlIds.Count == 0)
+            return;
+
+        var links = await _dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Include(l => l.Repository)
+            .Where(l => l.WorkspaceId == workspaceId && mergedRepoWrlIds.Contains(l.WorkspaceRepositoryId))
+            .ToListAsync(cancellationToken);
+        if (links.Count == 0)
+            return;
+
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspaceId, contextId, cancellationToken);
+        foreach (var link in links)
+        {
+            var repoName = link.Repository?.RepositoryName;
+            if (string.IsNullOrWhiteSpace(repoName))
+                continue;
+
+            var response = await _agentBridge.SendCommandAsync(
+                "GetGitVersionAtDefaultTip",
+                new { workspaceName = workspaceFolderName, repositoryName = repoName, workspaceRoot },
+                cancellationToken);
+            if (!response.Success || response.Data == null)
+            {
+                _logger.LogDebug(
+                    "GetGitVersionAtDefaultTip failed for {Repo} in Feature context {ContextId}: {Error}",
+                    repoName, contextId.Value, response.Error);
+                continue;
+            }
+
+            var payload = AgentResponseJson.DeserializeAgentResponse<DefaultTipVersionAgentResponse>(response.Data);
+            if (payload is not { Success: true } || string.IsNullOrWhiteSpace(payload.Version))
+            {
+                _logger.LogDebug(
+                    "GetGitVersionAtDefaultTip returned no version for {Repo}: {Error}",
+                    repoName, payload?.ErrorMessage);
+                continue;
+            }
+
+            var state = await _dbContext.WorkspaceRepositoryContextStates
+                .FirstOrDefaultAsync(
+                    s => s.WorkspaceFeatureContextId == contextId.Value
+                         && s.WorkspaceRepositoryId == link.WorkspaceRepositoryId,
+                    cancellationToken);
+            if (state == null)
+                continue;
+
+            if (string.Equals(state.GitVersion, payload.Version, StringComparison.Ordinal))
+                continue;
+
+            state.GitVersion = payload.Version;
+            _logger.LogInformation(
+                "Feature context {ContextId}: set GitVersion for {Repo} from origin/{DefaultBranch} tip to {Version}",
+                contextId.Value, repoName, payload.DefaultBranch, payload.Version);
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private sealed class DefaultTipVersionAgentResponse
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("success")]
+        public bool Success { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("version")]
+        public string? Version { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("defaultBranch")]
+        public string? DefaultBranch { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("errorMessage")]
+        public string? ErrorMessage { get; set; }
     }
 }

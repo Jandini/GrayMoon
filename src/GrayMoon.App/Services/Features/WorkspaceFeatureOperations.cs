@@ -4,17 +4,20 @@ using System.Text.RegularExpressions;
 using GrayMoon.Abstractions.Agent;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
+using GrayMoon.App.Repositories;
 using GrayMoon.App.Services.Agent;
 using GrayMoon.App.Services.Jobs;
 using GrayMoon.App.Services.Workspaces;
 using GrayMoon.Application;
 using GrayMoon.Application.Features;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace GrayMoon.App.Services.Features;
 
 public sealed class WorkspaceFeatureOperations(
     IDbContextFactory<AppDbContext> dbContextFactory,
+    IServiceScopeFactory scopeFactory,
     IWorkspaceOperationLock operationLock,
     IWorkspaceFeatureContextResolver contextResolver,
     IWorkspaceContextPathResolver pathResolver,
@@ -406,6 +409,64 @@ public sealed class WorkspaceFeatureOperations(
                 await db.SaveChangesAsync(cancellationToken);
                 return;
             }
+
+            // §27.8: after worktree remove, delete the Feature branch from the main repository.
+            var branchName = info.FeatureName;
+            if (!string.IsNullOrWhiteSpace(branchName))
+            {
+                progress?.Report(new OperationProgress($"Deleting local branch {branchName}..."));
+                var link = await db.WorkspaceRepositories
+                    .AsNoTracking()
+                    .Include(l => l.Repository)
+                    .FirstOrDefaultAsync(l => l.WorkspaceRepositoryId == row.WorkspaceRepositoryId, cancellationToken);
+                var repoName = link?.Repository?.RepositoryName;
+                if (!string.IsNullOrWhiteSpace(repoName))
+                {
+                    var (workspaceRoot, workspaceFolderName) =
+                        await pathResolver.GetAgentWorkspaceArgsAsync(specialContextId, cancellationToken);
+                    var deleteLocal = await agentBridge.SendCommandAsync(
+                        "DeleteBranch",
+                        new
+                        {
+                            workspaceName = workspaceFolderName,
+                            repositoryName = repoName,
+                            branchName,
+                            isRemote = false,
+                            force = options.AllowForceDeleteLocalBranches || options.AllowDiscardUncommitted,
+                            workspaceRoot
+                        },
+                        cancellationToken);
+                    if (!deleteLocal.Success)
+                    {
+                        logger.LogWarning(
+                            "Delete local Feature branch {Branch} failed for {Repo}: {Error}",
+                            branchName, repoName, deleteLocal.Error);
+                    }
+
+                    if (options.DeleteRemoteBranches)
+                    {
+                        progress?.Report(new OperationProgress($"Deleting remote branch {branchName}..."));
+                        var deleteRemote = await agentBridge.SendCommandAsync(
+                            "DeleteBranch",
+                            new
+                            {
+                                workspaceName = workspaceFolderName,
+                                repositoryName = repoName,
+                                branchName,
+                                isRemote = true,
+                                force = false,
+                                workspaceRoot
+                            },
+                            cancellationToken);
+                        if (!deleteRemote.Success)
+                        {
+                            logger.LogWarning(
+                                "Delete remote Feature branch {Branch} failed for {Repo}: {Error}",
+                                branchName, repoName, deleteRemote.Error);
+                        }
+                    }
+                }
+            }
         }
 
         var selected = await selectedContextService.GetSelectedAsync(info.WorkspaceId, cancellationToken);
@@ -464,7 +525,9 @@ public sealed class WorkspaceFeatureOperations(
                 WorkspaceFeatureContextId = contextId.Value,
                 WorkspaceRepositoryId = link.WorkspaceRepositoryId,
                 BranchName = featureBranch,
+                CheckedOutTag = src?.CheckedOutTag,
                 HeadCommit = src?.HeadCommit,
+                HasNewerTag = src?.HasNewerTag,
                 GitVersion = src?.GitVersion,
                 Projects = src?.Projects,
                 RepositoryType = src?.RepositoryType,
@@ -474,8 +537,14 @@ public sealed class WorkspaceFeatureOperations(
                 DefaultBranchAheadCommits = src?.DefaultBranchAheadCommits,
                 BranchHasUpstream = false,
                 SyncStatus = src?.SyncStatus ?? RepoSyncStatus.NeedsSync,
+                DependencyLevel = src?.DependencyLevel,
+                Dependencies = src?.Dependencies,
+                UnmatchedDeps = src?.UnmatchedDeps,
+                OutOfDateFileLines = src?.OutOfDateFileLines,
                 OutOfDateFileRepos = src?.OutOfDateFileRepos,
-                TotalFileConfigRepos = src?.TotalFileConfigRepos
+                TotalFileConfigRepos = src?.TotalFileConfigRepos,
+                HasSelfFileVersionToken = src?.HasSelfFileVersionToken,
+                TotalFileLines = src?.TotalFileLines
             });
         }
 
@@ -527,6 +596,22 @@ public sealed class WorkspaceFeatureOperations(
             }
 
             await db.SaveChangesAsync(cancellationToken);
+        }
+
+        // Recompute levels from the cloned Feature graph so headers match projects/deps even when
+        // special-Workspace context state was missing DependencyLevel.
+        try
+        {
+            await using var statsScope = scopeFactory.CreateAsyncScope();
+            var projectRepo = statsScope.ServiceProvider.GetRequiredService<WorkspaceProjectRepository>();
+            await projectRepo.RecomputeAndPersistRepositoryDependencyStatsAsync(
+                workspaceId, contextId.Value, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "Feature {ContextId}: dependency-level recompute after seed failed; copied levels may still apply.",
+                contextId.Value);
         }
     }
 

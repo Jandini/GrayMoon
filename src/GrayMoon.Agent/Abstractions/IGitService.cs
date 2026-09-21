@@ -15,10 +15,17 @@ public interface IGitService
     /// have already ensured fetch ordering (e.g. minimal fetch).
     /// </summary>
     Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, bool nonNormalize, CancellationToken ct);
+    /// <summary>
+    /// Same as the nonNormalize overload, plus optional <paramref name="commitSha"/> (<c>/c</c>) to version a
+    /// specific commit (e.g. tip of <c>origin/main</c>) without checking it out.
+    /// </summary>
+    Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, bool nonNormalize, string? commitSha, CancellationToken ct);
     /// <summary>Gets the current branch name (e.g. "main") with a single git call. Use instead of GetVersionAsync when only branch name is needed.</summary>
     Task<string?> GetCurrentBranchNameAsync(string repoPath, CancellationToken ct);
     /// <summary>Returns the full SHA of HEAD via <c>git rev-parse HEAD</c>, or null when the repo is missing/unborn or the command fails.</summary>
     Task<string?> GetHeadCommitAsync(string repoPath, CancellationToken ct);
+    /// <summary>Returns the full SHA for <paramref name="rev"/> via <c>git rev-parse</c> (e.g. <c>origin/main</c>), or null on failure.</summary>
+    Task<string?> RevParseAsync(string repoPath, string rev, CancellationToken ct);
     Task<string?> GetRemoteOriginUrlAsync(string repoPath, CancellationToken ct);
     /// <summary>Fetches from origin; when <paramref name="includeTags"/> is true, fetches tags as well. Returns (success, errorMessage).</summary>
     Task<(bool Success, string? ErrorMessage)> FetchAsync(string repoPath, bool includeTags, string? bearerToken, CancellationToken ct);

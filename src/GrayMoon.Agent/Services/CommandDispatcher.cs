@@ -47,7 +47,8 @@ public sealed class CommandDispatcher(
     ICommandHandler<CommitGitChangesRequest, CommitGitChangesResponse> commitGitChangesCommand,
     ICommandHandler<ListGitWorktreesRequest, ListGitWorktreesResponse> listGitWorktreesCommand,
     ICommandHandler<CreateGitWorktreeRequest, CreateGitWorktreeResponse> createGitWorktreeCommand,
-    ICommandHandler<RemoveGitWorktreeRequest, RemoveGitWorktreeResponse> removeGitWorktreeCommand) : ICommandDispatcher
+    ICommandHandler<RemoveGitWorktreeRequest, RemoveGitWorktreeResponse> removeGitWorktreeCommand,
+    ICommandHandler<GetGitVersionAtDefaultTipRequest, GetGitVersionAtDefaultTipResponse> getGitVersionAtDefaultTipCommand) : ICommandDispatcher
     {
     private readonly IReadOnlyDictionary<string, Func<object, CancellationToken, Task<object?>>> _executors = new Dictionary<string, Func<object, CancellationToken, Task<object?>>>(StringComparer.Ordinal)
     {
@@ -58,6 +59,7 @@ public sealed class CommandDispatcher(
         ["EnsureWorkspace"] = async (req, ct) => await ensureWorkspaceCommand.ExecuteAsync((EnsureWorkspaceRequest)req, ct),
         ["GetWorkspaceRepositories"] = async (req, ct) => await getWorkspaceRepositoriesCommand.ExecuteAsync((GetWorkspaceRepositoriesRequest)req, ct),
         ["GetRepositoryVersion"] = async (req, ct) => await getRepositoryVersionCommand.ExecuteAsync((GetRepositoryVersionRequest)req, ct),
+        ["GetGitVersionAtDefaultTip"] = async (req, ct) => await getGitVersionAtDefaultTipCommand.ExecuteAsync((GetGitVersionAtDefaultTipRequest)req, ct),
         ["GetWorkspaceExists"] = async (req, ct) => await getWorkspaceExistsCommand.ExecuteAsync((GetWorkspaceExistsRequest)req, ct),
         ["GetHostInfo"] = async (req, ct) => await getHostInfoCommand.ExecuteAsync((GetHostInfoRequest)req, ct),
         ["SyncRepositoryDependencies"] = async (req, ct) => await syncRepositoryDependenciesCommand.ExecuteAsync((SyncRepositoryDependenciesRequest)req, ct),

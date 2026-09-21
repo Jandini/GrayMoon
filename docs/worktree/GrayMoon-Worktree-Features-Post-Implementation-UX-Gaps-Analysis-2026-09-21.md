@@ -518,4 +518,25 @@ Do not build the hierarchical Features / “based on” tree in `WorkspaceFeatur
 
 The dependency-wiring gap doc (items 1–6, 8–9) made Feature grids **able** to show levels and context state. This analysis explains why **create-time seeding and branch UX** still leave Features looking broken until Sync/Fetch, and why Workspace-era Return to Default collides with worktree occupancy.
 
-No code was changed for this document.
+---
+
+## 13. RUN status (2026-09-22)
+
+Implemented on branch `worktree` (this pass):
+
+| Item | Status |
+|---|---|
+| O3 Seed DependencyLevel (+ recompute after create) | Done |
+| O4 Context-aware GetBranches + Feature branch in list | Done |
+| O7 Workspace occupancy (not external Worktree cleanup) | Done |
+| O5 Return to Default blocked for Feature (service + UI) | Done |
+| O6 Delete error text + context current-branch guard | Done |
+| O8 Remove Feature deletes local (+ optional remote) branches | Done |
+| Versions-from-default (`GetGitVersionAtDefaultTip` + Sync applies for merged Feature PRs) | Done (Agent + Sync hook) |
+| Feature header yellow Create PR | Done (earlier) |
+| Recent workspaces on Switch Workspace icon | Done (earlier) |
+| Based on / selector tree | Deferred per §11 |
+
+**Spike still recommended:** confirm `/c origin-default-sha` InformationalVersion matches a real `main` checkout on your GitVersion.yml configs.
+
+No code was changed for this document section beyond this status note.

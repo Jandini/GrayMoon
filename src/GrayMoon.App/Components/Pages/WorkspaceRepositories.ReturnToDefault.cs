@@ -10,6 +10,13 @@ public sealed partial class WorkspaceRepositories
         if (workspace == null || repositoryIds == null || repositoryIds.Count == 0)
             return;
 
+        if (_isFeatureContext)
+        {
+            ToastService.Show(
+                "Return to Default is Workspace-only. After merges, refresh versions from default and Update Dependencies, or Remove Feature when done.");
+            return;
+        }
+
         var freshLinks = await GetFreshLinkStatesAsync(repositoryIds.Distinct().ToList());
         var nonDefaultRepoIds = freshLinks.Values
             .Where(s => s.NeedsReturnToDefault)
@@ -107,6 +114,13 @@ public sealed partial class WorkspaceRepositories
         var (repositoryId, repositoryName, currentBranchName, defaultBranch) = request;
         if (workspace == null || IsJobRunning)
             return;
+        if (_isFeatureContext)
+        {
+            ToastService.Show(
+                "Return to Default is Workspace-only. Switch to Workspace, or Remove Feature when finished.");
+            CloseSwitchBranchModal();
+            return;
+        }
         if (string.IsNullOrWhiteSpace(repositoryName))
             return;
         if (IsRepoOnTag(repositoryId))
@@ -284,6 +298,13 @@ public sealed partial class WorkspaceRepositories
     {
         if (workspace == null || IsJobRunning)
             return;
+
+        if (_isFeatureContext)
+        {
+            ToastService.Show(
+                "Return to Default is Workspace-only. After merges, refresh versions from default and Update Dependencies, or Remove Feature when done.");
+            return;
+        }
 
         var allLinks = await GetAllLinksForOperationAsync();
         var eligibleRepos = allLinks

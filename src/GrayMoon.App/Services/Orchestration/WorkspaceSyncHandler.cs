@@ -93,6 +93,12 @@ public sealed class WorkspaceSyncHandler(
         var query = scope.ServiceProvider.GetRequiredService<IWorkspaceRepositoryLinkListQueryService>();
         var contextResolver = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureContextResolver>();
         var isSpecialWorkspace = (await contextResolver.GetRequiredAsync(contextId, workspaceId, cancellationToken)).IsSpecialWorkspace;
+        if (!isSpecialWorkspace)
+        {
+            return ReturnToDefaultPlan.Failed(
+                workspaceId,
+                "Return to Default is Workspace-only. Stay on the Feature and update dependencies from default-branch versions after merges, or Remove Feature when finished.");
+        }
 
         progress.Report(ids.Count == 1
             ? "Fetching latest branch state..."
@@ -183,6 +189,9 @@ public sealed class WorkspaceSyncHandler(
         var query = scope.ServiceProvider.GetRequiredService<IWorkspaceRepositoryLinkListQueryService>();
         var contextResolver = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureContextResolver>();
         var isSpecialWorkspace = (await contextResolver.GetRequiredAsync(contextId, workspaceId, cancellationToken)).IsSpecialWorkspace;
+        if (!isSpecialWorkspace)
+            return OperationResult.Fail(
+                "Return to Default is Workspace-only. Stay on the Feature and update dependencies from default-branch versions after merges, or Remove Feature when finished.");
 
         progress.Report(ids.Count == 1
             ? "Returning to default branch..."
