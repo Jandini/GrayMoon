@@ -77,7 +77,13 @@ public interface IGitService
     void CreateDirectory(string path);
     bool DirectoryExists(string path);
     string[] GetDirectories(string path);
-    void WriteSyncHooks(string repoPath, int workspaceId, int repositoryId);
+    /// <summary>
+    /// Installs the shared sync hooks (post-commit/post-checkout/post-merge/post-update/pre-push) once
+    /// per common Git directory. Safe to call for a linked worktree (Feature) checkout - resolves the
+    /// actual common <c>hooks</c> directory rather than assuming <c>.git</c> at <paramref name="repoPath"/>
+    /// is a directory.
+    /// </summary>
+    Task WriteSyncHooksAsync(string repoPath, int workspaceId, int repositoryId, CancellationToken ct);
 
     /// <summary>Lists worktrees for the repository at <paramref name="mainRepositoryPath"/> via <c>git worktree list --porcelain</c>.</summary>
     Task<(bool Success, IReadOnlyList<GitWorktreeInfo> Worktrees, string? ErrorCode, string? ErrorMessage)> ListWorktreesAsync(

@@ -13,7 +13,7 @@
             aria-label="Context"
             aria-expanded="@_open"
             aria-haspopup="menu"
-            @onclick="ToggleDropdown"
+            @onclick="ToggleDropdownAsync"
             @onclick:stopPropagation>
         <span class="workspace-feature-selector__label">@SelectedLabel</span>
         <span class="workspace-feature-selector__caret" aria-hidden="true"></span>
@@ -80,6 +80,7 @@
     private bool _open;
     private bool _loaded;
     private bool _desktopAvailable;
+    private int? _lastKnownSelectedValue;
 
     private string SelectedLabel
     {
@@ -94,10 +95,19 @@
 
     protected override async Task OnParametersSetAsync()
     {
-        if (!_loaded && WorkspaceId > 0)
+        if (WorkspaceId <= 0)
+            return;
+
+        var currentSelectedValue = SelectedContextId?.Value;
+        // Reload whenever we haven't loaded yet, or the selected context changed (e.g. a Feature was just
+        // created/removed and the parent page pushed the new/previous context down to us). Without this the
+        // dropdown keeps showing options from the very first load - including Features that have since been
+        // removed, which crashes the circuit if the user re-selects one (see WorkspaceFeatureOperations).
+        if (!_loaded || currentSelectedValue != _lastKnownSelectedValue)
         {
             await ReloadAsync();
             _loaded = true;
+            _lastKnownSelectedValue = currentSelectedValue;
         }
     }
 
@@ -117,11 +127,17 @@
         }
     }
 
-    private void ToggleDropdown()
+    private async Task ToggleDropdownAsync()
     {
         if (Disabled)
             return;
         _open = !_open;
+        if (_open)
+        {
+            // Refresh the Feature list every time the menu opens so a Feature removed/created from
+            // elsewhere (or by an operation that finished since the last load) is reflected immediately.
+            await ReloadAsync();
+        }
     }
 
     private void CloseDropdown() => _open = false;

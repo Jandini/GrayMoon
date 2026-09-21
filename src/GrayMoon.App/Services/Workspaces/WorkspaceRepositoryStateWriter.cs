@@ -201,7 +201,7 @@ public sealed class WorkspaceRepositoryStateWriter(
             await ApplyProjectsAsync(contextId, workspaceId, repositoryId, wr, state, isSpecialWorkspace, snapshot, cancellationToken);
 
         if (options.ReconcilePullRequest)
-            await ReconcilePullRequestAsync(contextId, workspaceId, repositoryId, wr, state, previousBranch, cancellationToken);
+            await ReconcilePullRequestAsync(contextId, workspaceId, repositoryId, wr, state, previousBranch, isSpecialWorkspace, cancellationToken);
 
         return true;
     }
@@ -310,14 +310,24 @@ public sealed class WorkspaceRepositoryStateWriter(
         WorkspaceRepositoryLink wr,
         WorkspaceRepositoryContextState state,
         string? previousBranch,
+        bool isSpecialWorkspace,
         CancellationToken cancellationToken)
     {
-        // Prefer context checkout branch for PR reconciliation; mirror onto the link for special Workspace.
-        wr.BranchName = state.BranchName;
-
         var branchChanged = !string.Equals(previousBranch, state.BranchName, StringComparison.Ordinal);
         if (branchChanged)
             pullRequestService.EvictCacheForRepository(repositoryId);
+
+        // WorkspacePullRequestService/WorkspaceRepositoryPullRequest are still keyed by WorkspaceRepositoryId
+        // alone (one PR row per repository, not per context - see design doc §17/§37.3). Mutating
+        // wr.BranchName or the legacy PR row from a Feature context write would silently overwrite the
+        // special Workspace's own branch/PR display with the Feature's, corrupting the shared checkout state
+        // every other page reads. Until that service is migrated to accept an explicit context/branch, only
+        // the special Workspace context is allowed to touch the shared link + legacy PR row here; a Feature's
+        // own PR projection is intentionally left unpopulated rather than risking that corruption.
+        if (!isSpecialWorkspace)
+            return;
+
+        wr.BranchName = state.BranchName;
 
         var branch = state.BranchName;
         var isOnDefault = !Blank(branch) && !Blank(wr.DefaultBranchName)

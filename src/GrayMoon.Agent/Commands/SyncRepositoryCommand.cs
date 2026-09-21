@@ -78,7 +78,7 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
             }
 
             if (version != "-" && branch != "-")
-                git.WriteSyncHooks(repoPath, workspaceId, repositoryId);
+                await git.WriteSyncHooksAsync(repoPath, workspaceId, repositoryId, cancellationToken);
 
             // Resolve default branch once; run commit counts and vs-default in parallel when we have a branch.
             var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, cancellationToken);

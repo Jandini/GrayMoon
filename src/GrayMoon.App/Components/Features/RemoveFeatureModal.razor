@@ -19,38 +19,40 @@
                     }
                     @if (_plan is null)
                     {
-                        <p class="mb-0 text-muted">Analyzing Feature…</p>
+                        <p class="mb-0 text-muted">Checking what will happen if this Feature is removed…</p>
                     }
-                    else
+                    else if (_plan.Success)
                     {
-                        <p class="mb-2">@_plan.Summary</p>
-                        <p class="mb-3">Classification: <strong>@_plan.Classification</strong></p>
+                        <div class="gm-callout @CalloutClass mb-3" role="alert">
+                            @StatusHeadline
+                        </div>
+                        <p class="mb-2 fw-semibold">This will remove the following from your computer:</p>
                         <ul class="list-unstyled mb-3">
                             @foreach (var repo in _plan.Repositories)
                             {
-                                <li class="mb-1">
+                                <li class="mb-2">
                                     <strong>@repo.RepositoryName</strong>
-                                    - @(repo.WorktreeExists ? "worktree present" : "worktree missing")
-                                    @if (repo.OutgoingCommits is int outGo && outGo > 0)
-                                    {
-                                        <span>; @outGo outgoing</span>
-                                    }
-                                    @if (!string.IsNullOrEmpty(repo.Warning))
-                                    {
-                                        <span class="text-warning">; @repo.Warning</span>
-                                    }
+                                    <div class="text-muted small">@DescribeRepository(repo)</div>
                                 </li>
                             }
                         </ul>
                         @if (!_plan.IsAutomaticallySafe)
                         {
+                            <div class="gm-callout gm-callout--warning mb-3" role="alert">
+                                Some work in this Feature hasn't been safely saved yet (see above). Removing it now
+                                will permanently delete that work. Confirm below to continue anyway.
+                            </div>
                             <div class="form-check mb-2">
                                 <input class="form-check-input" type="checkbox" id="allow-discard" @bind="_allowDiscard" disabled="@_busy" />
-                                <label class="form-check-label" for="allow-discard">Allow discard of uncommitted changes</label>
+                                <label class="form-check-label" for="allow-discard">
+                                    Yes, permanently discard any uncommitted changes in these repositories
+                                </label>
                             </div>
                             <div class="form-check mb-2">
                                 <input class="form-check-input" type="checkbox" id="allow-force" @bind="_allowForce" disabled="@_busy" />
-                                <label class="form-check-label" for="allow-force">Allow force-delete local Feature branches</label>
+                                <label class="form-check-label" for="allow-force">
+                                    Yes, delete the local branch even if it still has commits that were never pushed
+                                </label>
                             </div>
                         }
                     }
@@ -83,6 +85,68 @@
     private bool _allowDiscard;
     private bool _allowForce;
     private int? _analyzedFor;
+
+    /// <summary>Plain-language summary of the Feature's completion state, replacing the raw enum name in the UI.</summary>
+    private string StatusHeadline => _plan?.Classification switch
+    {
+        RemoveFeatureClassification.Completed =>
+            "This Feature's pull request has been merged, so it's safe to remove.",
+        RemoveFeatureClassification.Abandoned =>
+            "This Feature's pull request was closed without merging. Removing it will permanently delete this work.",
+        RemoveFeatureClassification.Active =>
+            "This Feature still has work that hasn't been merged yet. Removing it now will discard that work.",
+        RemoveFeatureClassification.NeedsRepair =>
+            "GrayMoon couldn't confirm the state of one or more repositories for this Feature. Review the details below before removing it.",
+        _ => "Review the details below before removing this Feature."
+    };
+
+    private string CalloutClass => _plan?.Classification switch
+    {
+        RemoveFeatureClassification.Completed => "gm-callout--success",
+        RemoveFeatureClassification.Abandoned => "gm-callout--warning",
+        RemoveFeatureClassification.NeedsRepair => "gm-callout--warning",
+        _ => "gm-callout--info"
+    };
+
+    /// <summary>Plain-language, per-repository summary replacing raw field dumps like "worktree present; 3 outgoing".</summary>
+    private static string DescribeRepository(RemoveFeatureRepositoryPlan repo)
+    {
+        var parts = new List<string>();
+
+        if (!repo.WorktreeExists)
+        {
+            parts.Add("Folder is already missing on disk");
+        }
+
+        if (repo.OutgoingCommits is int outgoing && outgoing > 0)
+        {
+            parts.Add($"{outgoing} commit{(outgoing == 1 ? "" : "s")} not pushed to the remote");
+        }
+
+        if (repo.PullRequestNumber is int prNumber)
+        {
+            var state = repo.PullRequestMerged == true ? "merged"
+                : string.Equals(repo.PullRequestState, "closed", StringComparison.OrdinalIgnoreCase) ? "closed without merging"
+                : "still open";
+            parts.Add($"Pull request #{prNumber} is {state}");
+        }
+        else if (repo.HasUpstream)
+        {
+            parts.Add("No pull request has been opened for this branch");
+        }
+
+        if (!string.IsNullOrEmpty(repo.Warning))
+        {
+            parts.Add(repo.Warning);
+        }
+
+        if (parts.Count == 0)
+        {
+            parts.Add("Up to date with nothing pending");
+        }
+
+        return string.Join(" · ", parts);
+    }
 
     protected override async Task OnParametersSetAsync()
     {

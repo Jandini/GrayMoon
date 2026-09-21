@@ -101,10 +101,36 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
 
     private async Task OnSelectedContextChangedAsync(WorkspaceFeatureContextId contextId)
     {
-        var info = await FeatureContextResolver.GetRequiredAsync(contextId, WorkspaceId);
+        WorkspaceFeatureContextInfo info;
+        try
+        {
+            info = await FeatureContextResolver.GetRequiredAsync(contextId, WorkspaceId);
+        }
+        catch (Exception ex)
+        {
+            // The selector's option list can be briefly stale (e.g. right after another tab/user removed
+            // this Feature). Fall back to the special Workspace context instead of letting the resolver's
+            // exception bubble up and tear down the circuit.
+            Logger.LogWarning(ex, "Selected context {ContextId} could not be resolved for workspace {WorkspaceId}; falling back to Workspace.", contextId.Value, WorkspaceId);
+            ToastService.Show("That Feature no longer exists. Switched back to Workspace.");
+            info = await FeatureContextResolver.GetRequiredAsync(
+                await FeatureContextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(WorkspaceId),
+                WorkspaceId);
+            var fallbackPath = new Uri(NavigationManager.Uri).GetLeftPart(UriPartial.Path);
+            NavigationManager.NavigateTo(fallbackPath, replace: true);
+        }
+
         _selectedContextId = info.ContextId;
         _isFeatureContext = !info.IsSpecialWorkspace;
-        await InvokeAsync(StateHasChanged);
+        await SelectedFeatureContextService.SetSelectedAsync(WorkspaceId, info.ContextId);
+        await InvokeAsync(async () =>
+        {
+            if (_disposed) return;
+            ClearGridState();
+            await LoadWorkspaceAsync();
+            ApplySyncStateFromLoadedItems();
+            StateHasChanged();
+        });
     }
 
     private Task OnRequestCreateFeatureAsync(string name)

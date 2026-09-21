@@ -1154,9 +1154,16 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return Directory.GetDirectories(path).Select(Path.GetFileName).Where(n => n != null).Cast<string>().ToArray();
     }
 
-    public void WriteSyncHooks(string repoPath, int workspaceId, int repositoryId)
+    public async Task WriteSyncHooksAsync(string repoPath, int workspaceId, int repositoryId, CancellationToken ct)
     {
-        var hooksDir = Path.Combine(repoPath, ".git", "hooks");
+        var hooksDir = await ResolveGitHooksDirectoryAsync(repoPath, ct);
+        if (hooksDir is null)
+        {
+            logger.LogWarning(
+                "Could not resolve git hooks directory for {RepoPath} (workspace {WorkspaceId}, repo {RepositoryId}); skipping hook install.",
+                repoPath, workspaceId, repositoryId);
+            return;
+        }
         Directory.CreateDirectory(hooksDir);
 
         // Context-agnostic hooks: resolve the executing worktree root at runtime so linked
@@ -1184,6 +1191,37 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         WriteHookFile(Path.Combine(hooksDir, "pre-push"),
             "#!/bin/sh\n" + comment + resolveBody + Curl("push") + "\n", utf8);
         logger.LogDebug("Sync hooks written for repo {RepoId} in workspace {WorkspaceId}", repositoryId, workspaceId);
+    }
+
+    /// <summary>
+    /// Resolves the hooks directory that Git will actually execute for <paramref name="repoPath"/>.
+    /// For a normal checkout, <c>.git</c> is a directory and this is simply <c>.git/hooks</c>. For a
+    /// linked worktree (a GrayMoon Feature or an external worktree), <c>.git</c> is a *file* containing
+    /// a <c>gitdir:</c> pointer into the common repository's private worktree admin area - hooks are not
+    /// stored there. Hooks live once in the common Git directory and are shared by every linked worktree
+    /// (see design doc &#167;13.1), so this always resolves to the common directory's <c>hooks</c> folder via
+    /// <c>git rev-parse --git-common-dir</c> rather than assuming <c>.git</c> is a directory.
+    /// </summary>
+    private async Task<string?> ResolveGitHooksDirectoryAsync(string repoPath, CancellationToken ct)
+    {
+        var (exitCode, stdout, _) = await runner.RunAsync(
+            "git",
+            "rev-parse --git-common-dir",
+            repoPath,
+            ct,
+            streamStderrAsStdout: true,
+            mirrorFailureOutputAsStderr: false,
+            intent: GitLockIntent.Read);
+
+        if (exitCode != 0 || string.IsNullOrWhiteSpace(stdout))
+            return null;
+
+        var commonDir = stdout.Trim();
+        var fullCommonDir = Path.IsPathRooted(commonDir)
+            ? commonDir
+            : Path.GetFullPath(Path.Combine(repoPath, commonDir));
+
+        return Path.Combine(fullCommonDir, "hooks");
     }
 
     public async Task<(bool Success, IReadOnlyList<GitWorktreeInfo> Worktrees, string? ErrorCode, string? ErrorMessage)> ListWorktreesAsync(

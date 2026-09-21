@@ -51,11 +51,11 @@
                                OnClear="OnClearSearch" />
         </WorkspaceContextBar>
         <div class="btn-group position-relative">
-            <button class="btn @(HasCreatablePr ? "btn-warning" : "btn-outline-secondary")"
+            <button class="btn @(!IsFeatureContext && HasCreatablePr ? "btn-warning" : "btn-outline-secondary")"
                     @onclick="HandleBranchPrimaryClick"
                     @onclick:stopPropagation
                     disabled="@BranchActionsDisabled">
-                @(HasCreatablePr ? "Create PR" : "Branch")
+                @(IsFeatureContext ? "Feature" : (HasCreatablePr ? "Create PR" : "Branch"))
             </button>
             <button type="button"
                     class="btn btn-outline-secondary dropdown-toggle dropdown-toggle-split"
@@ -557,6 +557,14 @@
 
     private async Task HandleBranchPrimaryClick()
     {
+        if (IsFeatureContext)
+        {
+            // No Branch dialog / quick-PR shortcut exists for a Feature (§24): the primary half just
+            // opens the same "Feature ▼" menu as the caret.
+            ToggleBranchMenu();
+            return;
+        }
+
         CloseBranchMenu();
         if (HasCreatablePr)
             await OnNewPullRequest.InvokeAsync();
