@@ -149,16 +149,25 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     // this page must never trigger a status scan.
     private async Task LoadAsync()
     {
-        _isLoading = true;
         _errorMessage = null;
+
+        // Fetched before the _isLoading/StateHasChanged below (rather than after, alongside the
+        // heavier git-status read further down) so the header's Workspace name is already correct
+        // by the time this intermediate render happens. Otherwise WorkspaceFeatureSelector briefly
+        // renders its special-workspace fallback label ("Workspace") for the ~100-300ms the git
+        // status read takes, before flipping to the real name - a longer, more noticeable flicker
+        // than the other workspace pages show (they resolve the name via a similarly-fast, separate
+        // query before their own heavier grid loads).
+        await using (var db = await DbContextFactory.CreateDbContextAsync())
+        {
+            _workspace = await db.Workspaces.AsNoTracking().FirstOrDefaultAsync(w => w.WorkspaceId == WorkspaceId);
+        }
+
+        _isLoading = true;
         StateHasChanged();
 
         try
         {
-            await using (var db = await DbContextFactory.CreateDbContextAsync())
-            {
-                _workspace = await db.Workspaces.AsNoTracking().FirstOrDefaultAsync(w => w.WorkspaceId == WorkspaceId);
-            }
             if (_selectedContextId is WorkspaceFeatureContextId ctxId)
                 _view = await ReadService.GetContextAsync(WorkspaceId, ctxId, CancellationToken.None);
             else
