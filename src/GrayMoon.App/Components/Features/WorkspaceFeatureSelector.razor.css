@@ -153,10 +153,13 @@
     cursor: pointer;
 }
 
+/* Switch Workspace stays visible so recent-workspaces hover works without hunting for a row-hover icon. */
+.workspace-feature-selector__switch-btn {
+    display: flex;
+}
+
 .workspace-feature-selector__feature-row:hover .workspace-feature-selector__remove-btn,
-.workspace-feature-selector__feature-row:focus-within .workspace-feature-selector__remove-btn,
-.workspace-feature-selector__feature-row:hover .workspace-feature-selector__switch-btn,
-.workspace-feature-selector__feature-row:focus-within .workspace-feature-selector__switch-btn {
+.workspace-feature-selector__feature-row:focus-within .workspace-feature-selector__remove-btn {
     display: flex;
 }
 
