@@ -8,7 +8,7 @@
 <div class="btn-group position-relative workspace-feature-selector">
     <button type="button"
             id="@InputId"
-            class="workspace-feature-selector__trigger@(_open ? " is-open" : "")"
+            class="@TriggerCssClass"
             disabled="@Disabled"
             aria-label="Context"
             aria-expanded="@_open"
@@ -30,13 +30,6 @@
             <i class="bi bi-plus-lg" aria-hidden="true"></i>
         </button>
     }
-    else
-    {
-        <!-- Reserves the same width as the "+" button above so the overall control is exactly as
-             wide here as on pages that do have the "New Feature" button (e.g. Workspace Repositories) -
-             otherwise this trigger's own flex-basis (width: 100%) grows to fill the freed-up space. -->
-        <span class="workspace-feature-selector__add-spacer" aria-hidden="true"></span>
-    }
     @if (_open)
     {
         <div class="workspace-feature-selector__backdrop" @onclick="CloseDropdown"></div>
@@ -45,7 +38,7 @@
             <li class="dropdown-header workspace-feature-selector__section-title">Workspace</li>
             @foreach (var option in _options.Where(o => o.IsSpecialWorkspace))
             {
-                <li>
+                <li class="workspace-feature-selector__feature-row">
                     <button type="button"
                             class="dropdown-item @(IsSelected(option) ? "active" : "")"
                             role="menuitem"
@@ -53,17 +46,17 @@
                             @onclick="() => SelectAsync(option)">
                         @DisplayName(option)
                     </button>
+                    <button type="button"
+                            class="workspace-feature-selector__switch-btn"
+                            role="menuitem"
+                            title="Switch Workspace"
+                            aria-label="Switch Workspace"
+                            @onclick="GoToWorkspaces"
+                            @onclick:stopPropagation>
+                        <i class="bi bi-arrow-left-right" aria-hidden="true"></i>
+                    </button>
                 </li>
             }
-            <li>
-                <button type="button"
-                        class="dropdown-item workspace-feature-selector__switch-workspace-item"
-                        role="menuitem"
-                        @onclick="GoToWorkspaces">
-                    <i class="bi bi-arrow-left-right" aria-hidden="true"></i>
-                    Switch Workspace
-                </button>
-            </li>
             @if (_options.Any(o => !o.IsSpecialWorkspace))
             {
                 <li><hr class="dropdown-divider branch-menu-divider" /></li>
@@ -151,6 +144,19 @@
     private bool _desktopAvailable;
     private int? _lastKnownSelectedValue;
     private ToolAvailabilityDto? _toolAvailability;
+
+    private string TriggerCssClass
+    {
+        get
+        {
+            var css = "workspace-feature-selector__trigger";
+            if (_open)
+                css += " is-open";
+            if (!OnRequestCreateFeature.HasDelegate)
+                css += " workspace-feature-selector__trigger--no-add";
+            return css;
+        }
+    }
 
     private bool HasAnyIdeAvailable =>
         _toolAvailability is { } t && (t.Cursor || t.ClaudeCli || t.VsCode || t.VisualStudio);

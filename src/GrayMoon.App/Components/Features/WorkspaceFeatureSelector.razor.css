@@ -44,6 +44,14 @@
     cursor: not-allowed;
 }
 
+/* Pages without the "+" New Feature button (see workspace-feature-selector__add) would otherwise
+   render narrower - the trigger is this control's only child, so its own content sets the whole
+   control's width. Padding out the trigger by the add button's width (2.25rem) keeps the control
+   the same total width as it has on pages that do have the button, e.g. Workspace Repositories. */
+.workspace-feature-selector__trigger--no-add {
+    padding-right: calc(0.55rem + 2.25rem);
+}
+
 .workspace-feature-selector__add {
     display: flex;
     align-items: center;
@@ -71,11 +79,6 @@
 .workspace-feature-selector__add:focus-visible {
     outline: none;
     box-shadow: none;
-}
-
-.workspace-feature-selector__add-spacer {
-    flex: 0 0 auto;
-    width: 2.25rem;
 }
 
 .workspace-feature-selector__label {
@@ -123,7 +126,8 @@
     padding-right: 2.25rem;
 }
 
-.workspace-feature-selector__remove-btn {
+.workspace-feature-selector__remove-btn,
+.workspace-feature-selector__switch-btn {
     display: none;
     align-items: center;
     justify-content: center;
@@ -140,12 +144,18 @@
 }
 
 .workspace-feature-selector__feature-row:hover .workspace-feature-selector__remove-btn,
-.workspace-feature-selector__feature-row:focus-within .workspace-feature-selector__remove-btn {
+.workspace-feature-selector__feature-row:focus-within .workspace-feature-selector__remove-btn,
+.workspace-feature-selector__feature-row:hover .workspace-feature-selector__switch-btn,
+.workspace-feature-selector__feature-row:focus-within .workspace-feature-selector__switch-btn {
     display: flex;
 }
 
 .workspace-feature-selector__remove-btn:hover {
     color: var(--bs-danger, #dc3545);
+}
+
+.workspace-feature-selector__switch-btn:hover {
+    color: var(--text-primary);
 }
 
 .workspace-feature-selector__section-title {
@@ -169,17 +179,6 @@
     inset: 0;
     background: transparent;
     z-index: 1050;
-}
-
-.workspace-feature-selector__switch-workspace-item {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-}
-
-.workspace-feature-selector__switch-workspace-item i {
-    font-size: 0.85rem;
-    color: var(--text-muted);
 }
 
 .workspace-feature-selector__flyout {
