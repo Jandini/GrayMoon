@@ -53,15 +53,15 @@
                                OnClear="OnClearSearch" />
         </WorkspaceContextBar>
         <div class="btn-group position-relative">
-            <button class="btn @(!IsFeatureContext && HasCreatablePr ? "btn-warning" : "btn-outline-secondary") text-nowrap"
+            <button class="btn @(HasCreatablePr ? "btn-warning" : "btn-outline-secondary") text-nowrap"
                     @onclick="HandleBranchPrimaryClick"
                     @onclick:stopPropagation
                     disabled="@BranchActionsDisabled">
-                @(IsFeatureContext ? "Feature" : (HasCreatablePr ? "Create PR" : "Branch"))
+                @(HasCreatablePr ? "Create PR" : (IsFeatureContext ? "Feature" : "Branch"))
             </button>
             <button type="button"
                     class="btn btn-outline-secondary dropdown-toggle dropdown-toggle-split"
-                    aria-label="Toggle Branch menu"
+                    aria-label="@(IsFeatureContext ? "Toggle Feature menu" : "Toggle Branch menu")"
                     aria-expanded="@(_branchMenuOpen ? "true" : "false")"
                     @onclick="ToggleBranchMenu"
                     @onclick:stopPropagation
@@ -394,7 +394,7 @@
     [Parameter] public int FilteredCount { get; set; }
     [Parameter] public string? SearchTerm { get; set; }
     [Parameter] public bool HasUnmatchedDependencies { get; set; }
-    /// <summary>True when at least one repository would show the yellow "create" PR badge — primary Branch control becomes yellow "Create PR".</summary>
+    /// <summary>True when at least one repository would show the yellow "create" PR badge — primary Branch/Feature control becomes yellow "Create PR".</summary>
     [Parameter] public bool HasCreatablePr { get; set; }
     [Parameter] public bool IsPushRecommended { get; set; }
     [Parameter] public bool HasIncomingCommits { get; set; }
@@ -560,19 +560,23 @@
 
     private async Task HandleBranchPrimaryClick()
     {
+        // Yellow "Create PR" hint: same shortcut in Workspace and Feature.
+        if (HasCreatablePr)
+        {
+            CloseBranchMenu();
+            await OnNewPullRequest.InvokeAsync();
+            return;
+        }
+
         if (IsFeatureContext)
         {
-            // No Branch dialog / quick-PR shortcut exists for a Feature (§24): the primary half just
-            // opens the same "Feature ▼" menu as the caret.
+            // No Branch dialog for a Feature — open the Feature menu (Remove Feature, Create PR, …).
             ToggleBranchMenu();
             return;
         }
 
         CloseBranchMenu();
-        if (HasCreatablePr)
-            await OnNewPullRequest.InvokeAsync();
-        else
-            await OnShowBranch.InvokeAsync();
+        await OnShowBranch.InvokeAsync();
     }
 
     private async Task HandlePrepareWorkspaceClick()
