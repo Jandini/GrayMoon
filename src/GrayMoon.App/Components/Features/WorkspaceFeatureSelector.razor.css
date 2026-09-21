@@ -3,14 +3,10 @@
     align-items: stretch;
     flex: 0 0 auto;
     align-self: stretch;
-    /* Shrink-to-fit the current label's width (e.g. the Workspace/Feature name) instead of always
-       reserving the full max width - short names no longer leave a lot of empty space in the
-       control. min-width keeps very short names from making the trigger feel cramped, and
-       max-width caps it (the label already has overflow:hidden + text-overflow:ellipsis so longer
-       names still degrade gracefully instead of growing the control past the cap). */
-    width: fit-content;
-    min-width: 8.5rem;
-    max-width: 14rem;
+    /* Size to the trigger plus the optional "+" button. Width limits live on the trigger so the
+       "+" never steals space from the name or chevron. */
+    width: max-content;
+    max-width: none;
 }
 
 .workspace-feature-selector.btn-group {
@@ -20,8 +16,14 @@
 .workspace-feature-selector__trigger {
     display: flex;
     align-items: center;
-    flex: 1 1 auto;
-    min-width: 0;
+    /* Do not grow or shrink when the "+" button is present. min/max width are the name + chevron
+       only, so that block is the same width — and the chevron stays in the same place — on every
+       page. The "+" is the only thing that appears or disappears. */
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    width: max-content;
+    min-width: 8.5rem;
+    max-width: 14rem;
     padding-inline: 0.75rem 0;
     border: none;
     border-right: 1px solid var(--border-input);
@@ -88,12 +90,8 @@
     white-space: nowrap;
 }
 
-/* The "+" New Feature button (see workspace-feature-selector__add) is 2.25rem wide and sits flush
-   against the trigger's border with zero padding of its own. On pages without it, the trigger is
-   this control's only child, so giving the caret-zone that same 2.25rem width - and centering the
-   caret inside it - puts the caret in exactly the spot the "+" button would occupy. That keeps both
-   the trigger's own width (it no longer changes shape depending on whether "+" is present) and the
-   control's overall width (fixed above) identical across every page, whether or not "+" is shown. */
+/* Fixed slot at the end of the trigger so the chevron does not move when the "+" button is added
+   beside it. This width is part of the trigger, not a stand-in for the "+" button. */
 .workspace-feature-selector__caret-zone {
     display: flex;
     align-items: center;
