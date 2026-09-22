@@ -103,6 +103,28 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         }
     }
 
+    /// <summary>Drops the typed filter when navigating to another workspace so the previous workspace's
+    /// query does not carry over. Resets <see cref="_appliedFilterQuery"/> so a new <c>?q=</c> on the
+    /// destination route can still be applied by <see cref="ApplyIncomingFilterQuery"/>.</summary>
+    private void ClearFilterForWorkspaceChange()
+    {
+        _filterQuery = string.Empty;
+        _appliedFilterQuery = null;
+    }
+
+    /// <summary>Clears the filter once every repository has no staged or changed files left (e.g. after a
+    /// successful commit). Leaves <see cref="_appliedFilterQuery"/> alone so an unchanged <c>?q=</c> is not
+    /// immediately re-applied on the next parameters pass.</summary>
+    private void ClearFilterIfNoChangesRemain()
+    {
+        if (string.IsNullOrEmpty(_filterQuery) || ChangedRepositoryCount > 0)
+        {
+            return;
+        }
+
+        _filterQuery = string.Empty;
+    }
+
     private void OnJobServiceChanged()
     {
         if (_disposed)
@@ -115,6 +137,12 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
     protected override async Task OnParametersSetAsync()
     {
+        var workspaceChanged = _loadedWorkspaceId is int loadedWorkspaceId && loadedWorkspaceId != WorkspaceId;
+        if (workspaceChanged)
+        {
+            ClearFilterForWorkspaceChange();
+        }
+
         ApplyIncomingFilterQuery();
         EnsureActivitySubscription();
 
@@ -174,6 +202,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
                 _view = await ReadService.GetContextAsync(WorkspaceId, ctxId, CancellationToken.None);
             else
                 _view = await ReadService.GetWorkspaceAsync(WorkspaceId, CancellationToken.None);
+            ClearFilterIfNoChangesRemain();
             RebuildRows();
             await ClearSelectionIfStaleAsync();
         }
