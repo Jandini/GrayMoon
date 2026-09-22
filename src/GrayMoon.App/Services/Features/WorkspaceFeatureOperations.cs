@@ -6,6 +6,7 @@ using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services.Agent;
+using GrayMoon.App.Services.Git;
 using GrayMoon.App.Services.Jobs;
 using GrayMoon.App.Services.Workspaces;
 using GrayMoon.Application;
@@ -386,6 +387,15 @@ public sealed class WorkspaceFeatureOperations(
             .Where(r => r.WorkspaceFeatureContextId == featureContextId.Value)
             .ToListAsync(cancellationToken);
 
+        var wrIds = rows.Select(r => r.WorkspaceRepositoryId).ToList();
+        var links = await db.WorkspaceRepositories
+            .AsNoTracking()
+            .Include(l => l.Repository)
+            .Where(l => wrIds.Contains(l.WorkspaceRepositoryId))
+            .ToListAsync(cancellationToken);
+        var linkByWrId = links.ToDictionary(l => l.WorkspaceRepositoryId);
+        var repositoryIds = links.Select(l => l.RepositoryId).Distinct().ToList();
+
         foreach (var row in rows)
         {
             progress?.Report(new OperationProgress($"Removing worktree {row.WorktreePath}..."));
@@ -412,62 +422,67 @@ public sealed class WorkspaceFeatureOperations(
 
             // §27.8: after worktree remove, delete the Feature branch from the main repository.
             var branchName = info.FeatureName;
-            if (!string.IsNullOrWhiteSpace(branchName))
+            if (!string.IsNullOrWhiteSpace(branchName)
+                && linkByWrId.TryGetValue(row.WorkspaceRepositoryId, out var link)
+                && !string.IsNullOrWhiteSpace(link.Repository?.RepositoryName))
             {
+                var repoName = link.Repository!.RepositoryName;
                 progress?.Report(new OperationProgress($"Deleting local branch {branchName}..."));
-                var link = await db.WorkspaceRepositories
-                    .AsNoTracking()
-                    .Include(l => l.Repository)
-                    .FirstOrDefaultAsync(l => l.WorkspaceRepositoryId == row.WorkspaceRepositoryId, cancellationToken);
-                var repoName = link?.Repository?.RepositoryName;
-                if (!string.IsNullOrWhiteSpace(repoName))
+                var (workspaceRoot, workspaceFolderName) =
+                    await pathResolver.GetAgentWorkspaceArgsAsync(specialContextId, cancellationToken);
+                var deleteLocal = await agentBridge.SendCommandAsync(
+                    "DeleteBranch",
+                    new
+                    {
+                        workspaceName = workspaceFolderName,
+                        repositoryName = repoName,
+                        branchName,
+                        isRemote = false,
+                        force = options.AllowForceDeleteLocalBranches || options.AllowDiscardUncommitted,
+                        workspaceRoot
+                    },
+                    cancellationToken);
+                if (!deleteLocal.Success)
                 {
-                    var (workspaceRoot, workspaceFolderName) =
-                        await pathResolver.GetAgentWorkspaceArgsAsync(specialContextId, cancellationToken);
-                    var deleteLocal = await agentBridge.SendCommandAsync(
+                    logger.LogWarning(
+                        "Delete local Feature branch {Branch} failed for {Repo}: {Error}",
+                        branchName, repoName, deleteLocal.Error);
+                }
+
+                if (options.DeleteRemoteBranches)
+                {
+                    progress?.Report(new OperationProgress($"Deleting remote branch {branchName}..."));
+                    var deleteRemote = await agentBridge.SendCommandAsync(
                         "DeleteBranch",
                         new
                         {
                             workspaceName = workspaceFolderName,
                             repositoryName = repoName,
                             branchName,
-                            isRemote = false,
-                            force = options.AllowForceDeleteLocalBranches || options.AllowDiscardUncommitted,
+                            isRemote = true,
+                            force = false,
                             workspaceRoot
                         },
                         cancellationToken);
-                    if (!deleteLocal.Success)
+                    if (!deleteRemote.Success)
                     {
                         logger.LogWarning(
-                            "Delete local Feature branch {Branch} failed for {Repo}: {Error}",
-                            branchName, repoName, deleteLocal.Error);
-                    }
-
-                    if (options.DeleteRemoteBranches)
-                    {
-                        progress?.Report(new OperationProgress($"Deleting remote branch {branchName}..."));
-                        var deleteRemote = await agentBridge.SendCommandAsync(
-                            "DeleteBranch",
-                            new
-                            {
-                                workspaceName = workspaceFolderName,
-                                repositoryName = repoName,
-                                branchName,
-                                isRemote = true,
-                                force = false,
-                                workspaceRoot
-                            },
-                            cancellationToken);
-                        if (!deleteRemote.Success)
-                        {
-                            logger.LogWarning(
-                                "Delete remote Feature branch {Branch} failed for {Repo}: {Error}",
-                                branchName, repoName, deleteRemote.Error);
-                        }
+                            "Delete remote Feature branch {Branch} failed for {Repo}: {Error}",
+                            branchName, repoName, deleteRemote.Error);
                     }
                 }
             }
         }
+
+        // Refresh special Workspace snapshot before dropping Feature rows so the grid is not stale
+        // after navigation back to Workspace (Return to Default skips already-on-default repos).
+        await RefreshWorkspaceAfterFeatureRemoveAsync(
+            info.WorkspaceId,
+            specialContextId,
+            repositoryIds,
+            options,
+            progress,
+            cancellationToken);
 
         var selected = await selectedContextService.GetSelectedAsync(info.WorkspaceId, cancellationToken);
         if (selected?.Value == featureContextId.Value)
@@ -479,6 +494,76 @@ public sealed class WorkspaceFeatureOperations(
         db.WorkspaceFeatureContexts.Remove(context);
         db.WorkspaceFeatures.Remove(feature);
         await db.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// After Feature worktrees are gone, refresh the special Workspace checkout snapshot.
+    /// Pull path calls <see cref="WorkspaceGitService.ReturnToDefaultDirectAsync"/> even when already
+    /// on default (unlike ExecuteReturnToDefault, which skips those). Sync-only path updates
+    /// Incoming/Outgoing/HasUpstream without pulling.
+    /// </summary>
+    private async Task RefreshWorkspaceAfterFeatureRemoveAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId specialContextId,
+        IReadOnlyList<int> repositoryIds,
+        RemoveFeatureOptions options,
+        IProgress<OperationProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        if (repositoryIds.Count == 0)
+            return;
+
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+        var scopedDb = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        if (options.ReturnWorkspaceToDefaultAndPull)
+        {
+            progress?.Report(new OperationProgress(
+                repositoryIds.Count == 1
+                    ? "Returning Workspace repository to default and pulling..."
+                    : $"Returning {repositoryIds.Count} Workspace repositories to default and pulling..."));
+
+            foreach (var repositoryId in repositoryIds)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var link = await scopedDb.WorkspaceRepositories
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(
+                        l => l.WorkspaceId == workspaceId && l.RepositoryId == repositoryId,
+                        cancellationToken);
+                var branchName = !string.IsNullOrWhiteSpace(link?.BranchName)
+                    ? link!.BranchName!
+                    : (!string.IsNullOrWhiteSpace(link?.DefaultBranchName) ? link!.DefaultBranchName! : "main");
+
+                var (success, err) = await git.ReturnToDefaultDirectAsync(
+                    workspaceId,
+                    specialContextId,
+                    repositoryId,
+                    branchName,
+                    deleteRemoteBranch: options.DeleteRemoteBranches,
+                    allowForceDeleteLocalBranch: options.AllowForceDeleteLocalBranches
+                        || options.AllowDiscardUncommitted,
+                    cancellationToken);
+                if (!success)
+                {
+                    logger.LogWarning(
+                        "ReturnToDefault after Remove Feature failed for repository {RepositoryId}: {Error}",
+                        repositoryId, err);
+                }
+            }
+
+            await git.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, specialContextId, cancellationToken);
+            return;
+        }
+
+        progress?.Report(new OperationProgress("Refreshing Workspace repository status..."));
+        await git.SyncAsync(
+            workspaceId,
+            specialContextId,
+            repositoryIds: repositoryIds,
+            cancellationToken: cancellationToken);
+        await git.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, specialContextId, cancellationToken);
     }
 
     public async Task<IReadOnlyList<WorkspaceFeatureContextInfo>> ListFeaturesAsync(

@@ -45,6 +45,13 @@ public sealed class RemoveFeatureOptions
     public bool AllowDiscardUncommitted { get; init; }
     public bool AllowForceDeleteLocalBranches { get; init; }
     public bool DeleteRemoteBranches { get; init; }
+
+    /// <summary>
+    /// When true (default), after removing Feature worktrees, run return-to-default on the special
+    /// Workspace checkout for each Feature repo - including repos already on default - so fetch,
+    /// pull, and commit-count probes refresh the grid. When false, Sync only (no pull).
+    /// </summary>
+    public bool ReturnWorkspaceToDefaultAndPull { get; init; } = true;
 }
 
 public sealed class RemoveFeaturePlan
