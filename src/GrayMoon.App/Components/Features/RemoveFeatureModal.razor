@@ -175,19 +175,35 @@
         _error = null;
         try
         {
+            await RefreshPlanAsync();
+        }
+        finally
+        {
+            _analyzing = false;
+        }
+    }
+
+    /// <summary>
+    /// Reloads the removal plan. Used on open and after a failed remove so a locked folder's
+    /// stored error shows in the open dialog without closing it. Does not clear <see cref="_error"/>.
+    /// </summary>
+    private async Task RefreshPlanAsync()
+    {
+        if (FeatureContextId is null)
+            return;
+
+        try
+        {
             _plan = await FeatureOperations.AnalyzeRemoveFeatureAsync(FeatureContextId.Value);
             _analyzedFor = FeatureContextId.Value.Value;
-            if (!_plan.Success)
+            if (!_plan.Success && string.IsNullOrEmpty(_error))
                 _error = _plan.Error;
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "AnalyzeRemoveFeature failed");
-            _error = ex.Message;
-        }
-        finally
-        {
-            _analyzing = false;
+            if (string.IsNullOrEmpty(_error))
+                _error = ex.Message;
         }
     }
 
@@ -210,6 +226,7 @@
             if (!result.Success)
             {
                 _error = result.Error ?? "Remove Feature failed.";
+                await RefreshPlanAsync();
                 return;
             }
             _plan = null;

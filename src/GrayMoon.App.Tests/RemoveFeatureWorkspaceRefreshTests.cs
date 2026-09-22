@@ -184,6 +184,66 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
         Assert.Equal(WorkspaceFeatureLifecycleState.NeedsRepair, feature.LifecycleState);
     }
 
+    [Fact]
+    public async Task Analyze_after_permission_denied_keeps_merged_feature_automatically_safe()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var worktreePath = Path.Combine(Path.GetTempPath(), "gm-remove-feature-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(worktreePath);
+        try
+        {
+            var featureContextId = await SeedRemovableFeatureAsync(ctx);
+            const string locked = "error: failed to delete 'features/mime-magic-only/EDX1': Permission denied";
+
+            await using (var scope = ctx.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                var row = await db.WorkspaceFeatureRepositories.SingleAsync(r => r.WorkspaceFeatureContextId == featureContextId.Value);
+                row.WorktreePath = worktreePath;
+                row.State = WorkspaceFeatureRepositoryState.NeedsRepair;
+                row.LastError = locked;
+                db.WorkspaceRepositoryContextStates.Add(new WorkspaceRepositoryContextState
+                {
+                    WorkspaceFeatureContextId = featureContextId.Value,
+                    WorkspaceRepositoryId = ctx.WorkspaceRepositoryId,
+                    BranchName = "feat-refresh",
+                    OutgoingCommits = 0,
+                    BranchHasUpstream = true,
+                });
+                db.WorkspaceRepositoryContextPullRequests.Add(new WorkspaceRepositoryContextPullRequest
+                {
+                    WorkspaceFeatureContextId = featureContextId.Value,
+                    WorkspaceRepositoryId = ctx.WorkspaceRepositoryId,
+                    PullRequestNumber = 55,
+                    State = "closed",
+                    MergedAt = DateTimeOffset.UtcNow,
+                    LastCheckedAt = DateTime.UtcNow,
+                });
+                await db.SaveChangesAsync();
+            }
+
+            await using var read = ctx.CreateScope();
+            var ops = read.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+            var plan = await ops.AnalyzeRemoveFeatureAsync(featureContextId);
+
+            Assert.True(plan.Success, plan.Error);
+            Assert.Equal(RemoveFeatureClassification.Completed, plan.Classification);
+            Assert.True(plan.IsAutomaticallySafe);
+            var repo = Assert.Single(plan.Repositories);
+            Assert.True(repo.WorktreeExists);
+            Assert.Contains("Permission denied", repo.Warning);
+
+            var retry = await ops.RemoveFeatureAsync(featureContextId, new RemoveFeatureOptions());
+            Assert.False(retry.Success);
+            Assert.DoesNotContain("not automatically safe", retry.Error);
+        }
+        finally
+        {
+            if (Directory.Exists(worktreePath))
+                Directory.Delete(worktreePath, recursive: true);
+        }
+    }
+
     private static async Task<WorkspaceFeatureContextId> SeedRemovableFeatureAsync(SyncStateTestContext ctx)
     {
         await using var scope = ctx.CreateScope();

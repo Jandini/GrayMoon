@@ -769,7 +769,10 @@ public sealed class WorkspaceFeatureOperations(
 
     private static RemoveFeatureClassification Classify(IReadOnlyList<RemoveFeatureRepositoryPlan> plans)
     {
-        if (plans.Any(p => p.Warning is not null || !p.WorktreeExists))
+        // A previous delete error (folder busy, permission denied) stays on the repository line as
+        // Warning. It does not override pull-request classification: the retry is the same removal
+        // once the folder is free. A missing worktree is different — GrayMoon cannot confirm the folder.
+        if (plans.Any(p => !p.WorktreeExists))
             return RemoveFeatureClassification.NeedsRepair;
         if (plans.All(p => p.PullRequestMerged == true))
             return RemoveFeatureClassification.Completed;
