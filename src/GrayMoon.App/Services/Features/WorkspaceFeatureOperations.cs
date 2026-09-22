@@ -351,8 +351,8 @@ public sealed class WorkspaceFeatureOperations(
                 {
                     using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, cancellationToken);
                     progress?.Report(new OperationProgress(op.DisplayMessage));
-                    await RemoveFeatureCoreAsync(featureContextId, info, options, progress, linked.Token);
-                    tcs.TrySetResult(OperationResult.Ok());
+                    var outcome = await RemoveFeatureCoreAsync(featureContextId, info, options, progress, linked.Token);
+                    tcs.TrySetResult(outcome);
                 }
                 catch (Exception ex)
                 {
@@ -368,7 +368,7 @@ public sealed class WorkspaceFeatureOperations(
         return await tcs.Task.WaitAsync(cancellationToken);
     }
 
-    private async Task RemoveFeatureCoreAsync(
+    private async Task<OperationResult> RemoveFeatureCoreAsync(
         WorkspaceFeatureContextId featureContextId,
         WorkspaceFeatureContextInfo info,
         RemoveFeatureOptions options,
@@ -417,7 +417,13 @@ public sealed class WorkspaceFeatureOperations(
                 feature.LastError = response.Error;
                 feature.UpdatedAt = DateTime.UtcNow;
                 await db.SaveChangesAsync(cancellationToken);
-                return;
+                // Do not continue into branch delete or the Workspace refresh, and do not report
+                // success: the UI would navigate back to Workspace while the stored branch is still
+                // the Feature. The worktree is still registered, so the Feature stays for repair.
+                return OperationResult.Fail(
+                    string.IsNullOrWhiteSpace(response.Error)
+                        ? $"Failed to remove worktree {row.WorktreePath}."
+                        : response.Error);
             }
 
             // §27.8: after worktree remove, delete the Feature branch from the main repository.
@@ -494,6 +500,7 @@ public sealed class WorkspaceFeatureOperations(
         db.WorkspaceFeatureContexts.Remove(context);
         db.WorkspaceFeatures.Remove(feature);
         await db.SaveChangesAsync(cancellationToken);
+        return OperationResult.Ok();
     }
 
     /// <summary>

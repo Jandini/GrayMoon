@@ -148,6 +148,42 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
         await AssertFeatureGoneAsync(ctx, featureContextId);
     }
 
+    [Fact]
+    public async Task Remove_when_worktree_delete_fails_does_not_report_success_or_refresh_workspace()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var featureContextId = await SeedRemovableFeatureAsync(ctx);
+
+        ctx.AgentBridge.Respond(
+            AgentHubMethods.RemoveGitWorktree,
+            data: null,
+            success: false,
+            error: "error: failed to delete 'features/feat-refresh': Permission denied");
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var result = await ops.RemoveFeatureAsync(
+            featureContextId,
+            new RemoveFeatureOptions
+            {
+                AllowDiscardUncommitted = true,
+                AllowForceDeleteLocalBranches = true,
+                ReturnWorkspaceToDefaultAndPull = true,
+            });
+
+        Assert.False(result.Success);
+        Assert.Contains("Permission denied", result.Error);
+        Assert.DoesNotContain(ctx.AgentBridge.Calls, c => c.Command == "ReturnToDefaultBranch");
+        Assert.DoesNotContain(ctx.AgentBridge.Calls, c => c.Command == "SyncRepository");
+        Assert.DoesNotContain(ctx.AgentBridge.Calls, c => c.Command == "DeleteBranch");
+
+        await using var read = ctx.CreateScope();
+        var db = read.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.True(await db.WorkspaceFeatureContexts.AnyAsync(c => c.WorkspaceFeatureContextId == featureContextId.Value));
+        var feature = await db.WorkspaceFeatures.SingleAsync(f => f.Name == "feat-refresh" && f.WorkspaceId == ctx.WorkspaceId);
+        Assert.Equal(WorkspaceFeatureLifecycleState.NeedsRepair, feature.LifecycleState);
+    }
+
     private static async Task<WorkspaceFeatureContextId> SeedRemovableFeatureAsync(SyncStateTestContext ctx)
     {
         await using var scope = ctx.CreateScope();

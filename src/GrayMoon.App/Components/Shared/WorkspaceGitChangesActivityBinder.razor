@@ -1,32 +1,33 @@
-@implements IDisposable
-@inject NavigationManager NavigationManager
-@inject WorkspaceGitChangesRouteActivity RouteActivity
-@* No markup - mounted once per circuit (MainLayout.razor) so any /workspaces/{id}/... page keeps
-   Git Changes activity (and Agent watchers) warm without page-level activation leases. *@
-
-@code {
-    protected override void OnInitialized()
-    {
-        NavigationManager.LocationChanged += OnLocationChanged;
-        SyncFromCurrentUri();
-    }
-
-    private void OnLocationChanged(object? sender, LocationChangedEventArgs args)
-    {
-        SyncFromCurrentUri();
-    }
-
-    private void SyncFromCurrentUri()
-    {
-        var relativePath = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
-        RouteActivity.Sync(WorkspaceRouteParser.TryGetWorkspaceId(relativePath));
-    }
-
-    public void Dispose()
-    {
-        NavigationManager.LocationChanged -= OnLocationChanged;
-        // Release the lease; the circuit DI scope disposes RouteActivity itself.
-        RouteActivity.Sync(null);
-    }
-}
+@implements IDisposable
+@inject NavigationManager NavigationManager
+@inject WorkspaceGitChangesRouteActivity RouteActivity
+@* No markup - mounted once per circuit (MainLayout.razor) so any /workspaces/{id}/... page keeps
+   Git Changes activity (and Agent watchers) warm without page-level activation leases. *@
+
+@code {
+    protected override void OnInitialized()
+    {
+        NavigationManager.LocationChanged += OnLocationChanged;
+        SyncFromCurrentUri();
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs args)
+    {
+        SyncFromCurrentUri();
+    }
+
+    private void SyncFromCurrentUri()
+    {
+        var relativePath = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
+        RouteActivity.Sync(WorkspaceRouteParser.TryGetWorkspaceId(relativePath));
+    }
+
+    public void Dispose()
+    {
+        NavigationManager.LocationChanged -= OnLocationChanged;
+        // Release the lease when this component goes away first. If the circuit scope already
+        // disposed RouteActivity, Sync is a no-op because that Dispose released the lease.
+        RouteActivity.Sync(null);
+    }
+}
 
