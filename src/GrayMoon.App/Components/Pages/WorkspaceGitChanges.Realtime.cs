@@ -23,7 +23,7 @@ public sealed partial class WorkspaceGitChanges
                 await InvokeAsync(LoadAsync);
             });
 
-            _hubConnection.On<int, int>("ContextGitChangesUpdated", async (workspaceId, contextId) =>
+            _hubConnection.On<int, int, int>("ContextGitChangesUpdated", async (workspaceId, contextId, _) =>
             {
                 if (workspaceId != WorkspaceId || _disposed)
                     return;

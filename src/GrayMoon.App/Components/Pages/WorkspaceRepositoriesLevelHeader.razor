@@ -24,9 +24,12 @@
                 <div class="gm-menu-panel level-actions-menu">
                     <div class="gm-menu-title">@(LevelKey == null ? "No dependencies" : $"Level {LevelKey}")</div>
                     <div class="gm-menu-items @(ActionsDisabled ? "gm-menu-items--disabled" : "")">
-                        <div class="gm-menu-item @(HasMergedPr ? "gm-menu-item--highlight" : "")" role="button" tabindex="0" title="Return to default branch" @onclick="HandleReturnToDefault" @onclick:stopPropagation>
-                            <i class="bi bi-rewind" aria-hidden="true"></i><span>Return to Default</span>
-                        </div>
+                        @if (!IsFeatureContext)
+                        {
+                            <div class="gm-menu-item @(HasMergedPr ? "gm-menu-item--highlight" : "")" role="button" tabindex="0" title="Return to default branch" @onclick="HandleReturnToDefault" @onclick:stopPropagation>
+                                <i class="bi bi-rewind" aria-hidden="true"></i><span>Return to Default</span>
+                            </div>
+                        }
                         <div class="gm-menu-item @(HasSyncCommits ? "gm-menu-item--highlight" : "")" role="button" tabindex="0" title="Sync commits" @onclick="HandleSyncCommits" @onclick:stopPropagation>
                             <i class="bi bi-arrow-down-up" aria-hidden="true"></i><span>Sync Commits</span>
                         </div>
@@ -91,6 +94,8 @@
     /// <summary>Total repositories at this level (may exceed hydrated <see cref="Group"/> count under virtual scroll).</summary>
     [Parameter] public int RepositoryCount { get; set; }
     [Parameter] public bool ActionsDisabled { get; set; }
+    /// <summary>When true, Return to Default is hidden (Workspace-only operation).</summary>
+    [Parameter] public bool IsFeatureContext { get; set; }
     [Parameter] public EventCallback OnReturnToDefault { get; set; }
     [Parameter] public EventCallback OnSyncCommits { get; set; }
     [Parameter] public EventCallback OnOpenPr { get; set; }

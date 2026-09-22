@@ -268,6 +268,23 @@
                 return visited.filter(function (w) { return w.id !== currentId; });
             }
 
+            // Recent-only: land on the same workspace sub-page the switch was triggered from.
+            function hrefForRecentWorkspace(targetWsId) {
+                var path = (location.pathname || '').replace(/^\//, '');
+                var m = path.match(/^workspaces\/(\d+)(\/.*)?$/i);
+                var suffix = (m && m[2]) ? m[2] : '';
+                var q = '';
+                if (location.search) {
+                    try {
+                        var params = new URLSearchParams(location.search);
+                        params.delete('context');
+                        var qs = params.toString();
+                        if (qs) q = '?' + qs;
+                    } catch (e) { /* ignore */ }
+                }
+                return '/workspaces/' + targetWsId + suffix + q;
+            }
+
             function buildMenu(others) {
                 var m = ensureMenu();
                 m.innerHTML = '';
@@ -275,7 +292,7 @@
                     var w = others[i];
                     var row = document.createElement('a');
                     row.className = 'gm-gh-dropdown-item';
-                    row.href = '/' + w.url;
+                    row.href = hrefForRecentWorkspace(w.id);
                     row.innerHTML = '<i class="bi bi-clock-history" aria-hidden="true"></i><span>' + escapeHtml(w.name) + '</span>';
                     m.appendChild(row);
                 }

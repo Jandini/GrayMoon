@@ -150,11 +150,14 @@
                 else if (!IsRunning)
                 {
                     <div class="modal-footer bulk-merge-pr-modal-footer">
-                        <div class="form-check mb-0 merge-pr-return-default-check">
-                            <input class="form-check-input" type="checkbox" id="bulk-merge-pr-return-default"
-                                   checked="@ReturnToDefaultAfterMerge" @onchange="OnSyncCheckboxChanged" />
-                            <label class="form-check-label" for="bulk-merge-pr-return-default">Return to default branch after merging</label>
-                        </div>
+                        @if (ShowReturnToDefault)
+                        {
+                            <div class="form-check mb-0 merge-pr-return-default-check">
+                                <input class="form-check-input" type="checkbox" id="bulk-merge-pr-return-default"
+                                       checked="@ReturnToDefaultAfterMerge" @onchange="OnSyncCheckboxChanged" />
+                                <label class="form-check-label" for="bulk-merge-pr-return-default">Return to default branch after merging</label>
+                            </div>
+                        }
                         <button type="button" class="btn merge-pr-btn-github" disabled="@(SelectedCount == 0 || AnySelectedSnapshotPending)" @onclick="() => OnMerge.InvokeAsync()">
                             Merge @SelectedCount pull request@(SelectedCount == 1 ? "" : "s")
                         </button>
@@ -173,6 +176,8 @@
     [Parameter] public EventCallback<BulkMergeMethodSelection> SelectedMethodChanged { get; set; }
     [Parameter] public bool ReturnToDefaultAfterMerge { get; set; }
     [Parameter] public EventCallback<bool> ReturnToDefaultAfterMergeChanged { get; set; }
+    /// <summary>When false, hides the Return to default branch checkbox (Feature contexts).</summary>
+    [Parameter] public bool ShowReturnToDefault { get; set; } = true;
     [Parameter] public bool IsRunning { get; set; }
     /// <summary>True while a job started by the drill-in single-PR dialog (stacked on top of this one) is running. Only affects the z-index style (see the comment above the outer div) - never <see cref="IsCompletedView"/> or the footer-mode checks, which must stay driven by this dialog's own <see cref="IsRunning"/>/<see cref="HasRun"/> state.</summary>
     [Parameter] public bool IsCoveredByOverlay { get; set; }

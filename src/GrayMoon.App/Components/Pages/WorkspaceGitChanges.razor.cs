@@ -29,7 +29,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     [Inject] private IWorkspaceGitChangesReadService ReadService { get; set; } = default!;
     [Inject] private IWorkspaceGitChangesOperations GitChangesOperations { get; set; } = default!;
     [Inject] private IGitChangesAgentClient AgentClient { get; set; } = default!;
-    [Inject] private WorkspaceGitChangesWriteQueue WriteQueue { get; set; } = default!;
+    [Inject] private GitChangesSnapshotPushHandler SnapshotPushHandler { get; set; } = default!;
     [Inject] private IDbContextFactory<AppDbContext> DbContextFactory { get; set; } = default!;
     [Inject] private WorkspaceService WorkspaceService { get; set; } = default!;
     [Inject] private IWorkspaceContextPathResolver PathResolver { get; set; } = default!;
@@ -45,6 +45,8 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     [Inject] private IJSRuntime Js { get; set; } = default!;
     [Inject] private WorkspaceContextNavigationService ContextNavigation { get; set; } = default!;
 
+    private int? _loadedWorkspaceId;
+    private int? _loadedContextQuery;
     private Workspace? _workspace;
     private WorkspaceGitChangesView? _view;
     private IReadOnlyList<GitChangesTreeRow> _rows = [];
@@ -111,19 +113,19 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         _ = InvokeAsync(StateHasChanged);
     }
 
-    protected override Task OnParametersSetAsync()
+    protected override async Task OnParametersSetAsync()
     {
         ApplyIncomingFilterQuery();
         EnsureActivitySubscription();
 
-        if (_view != null && _view.WorkspaceId == WorkspaceId)
-        {
-            return Task.CompletedTask;
-        }
+        var contextChanged = _loadedContextQuery != ContextQuery;
+        if (_loadedWorkspaceId == WorkspaceId && _view != null && _view.WorkspaceId == WorkspaceId && !contextChanged)
+            return;
 
+        _loadedWorkspaceId = WorkspaceId;
+        _loadedContextQuery = ContextQuery;
         RestoreWorkspaceCommitMessage();
-        StartInitialLoadJob();
-        return Task.CompletedTask;
+        await ResolveContextAndStartLoadAsync();
     }
 
     private Task? _initialLoadTask;
@@ -663,7 +665,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     }
 
     /// <summary>
-    /// Persists a mutation's returned snapshot through the same queue/handler used for Agent-pushed
+    /// Persists a mutation's returned snapshot through the same handler used for Agent-pushed
     /// snapshots, so stage/unstage/commit never create a separate optimistic front-end truth - the tree
     /// always re-renders from the persisted SQLite projection, reloaded once the write completes.
     /// <paramref name="reload"/> is false for multi-repository fan-out, which reloads once after every
@@ -681,22 +683,32 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             return;
         }
 
-        WriteQueue.Enqueue(new GitChangesSnapshotNotification
+        // RepositoryPath is required for Feature attribution; null path falls back to special Workspace only.
+        string? repositoryPath = null;
+        if (_selectedContextId is WorkspaceFeatureContextId contextId)
+        {
+            try
+            {
+                repositoryPath = await PathResolver.GetRepositoryPathAsync(contextId, workspaceRepositoryId);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex,
+                    "Could not resolve repository path for WorkspaceRepository {WorkspaceRepositoryId}; snapshot may attribute to Workspace context",
+                    workspaceRepositoryId);
+            }
+        }
+
+        await SnapshotPushHandler.HandleAsync(new GitChangesSnapshotNotification
         {
             WorkspaceId = WorkspaceId,
             RepositoryId = repositoryId,
+            RepositoryPath = repositoryPath,
             Snapshot = snapshot,
-        });
+        }, CancellationToken.None);
 
-        if (!reload)
-        {
-            return;
-        }
-
-        // The write queue processes on a background worker; give it a moment before reloading so the
-        // page reflects the just-persisted state rather than racing the write.
-        await Task.Delay(150);
-        await LoadAsync();
+        if (reload)
+            await LoadAsync();
     }
 
     private async Task<(string Root, string WorkspaceName, string RepositoryName, int RepositoryId)?> ResolveRepositoryAsync(int workspaceRepositoryId)
@@ -746,6 +758,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     private async Task OnSelectedContextChangedAsync(WorkspaceFeatureContextId contextId)
     {
         _selectedContextId = contextId;
+        _loadedContextQuery = contextId.Value;
         StartInitialLoadJob();
         await InvokeAsync(StateHasChanged);
     }

@@ -81,7 +81,15 @@ public sealed class GitChangesWorkspaceScanner(
                 continue;
             }
 
-            targets.Add(new MonitorTarget(root, workspaceFolderName, link.Repository.RepositoryName, link.WorkspaceId, link.RepositoryId));
+            var repositoryPath = await pathResolver.GetRepositoryPathAsync(
+                contextId, link.WorkspaceRepositoryId, cancellationToken);
+            targets.Add(new MonitorTarget(
+                root,
+                workspaceFolderName,
+                link.Repository.RepositoryName,
+                link.WorkspaceId,
+                link.RepositoryId,
+                repositoryPath));
         }
 
         if (targets.Count == 0)
@@ -111,7 +119,7 @@ public sealed class GitChangesWorkspaceScanner(
                     {
                         WorkspaceId = target.WorkspaceId,
                         RepositoryId = target.RepositoryId,
-                        RepositoryPath = target.Root,
+                        RepositoryPath = target.RepositoryPath,
                         Snapshot = result.Snapshot,
                     };
 
@@ -155,5 +163,11 @@ public sealed class GitChangesWorkspaceScanner(
         await Task.WhenAll(tasks);
     }
 
-    private sealed record MonitorTarget(string Root, string WorkspaceName, string RepositoryName, int WorkspaceId, int RepositoryId);
+    private sealed record MonitorTarget(
+        string Root,
+        string WorkspaceName,
+        string RepositoryName,
+        int WorkspaceId,
+        int RepositoryId,
+        string RepositoryPath);
 }

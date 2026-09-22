@@ -301,12 +301,15 @@
                 </div>
                 @* Always visible (even mid-load) so the dialog's footprint doesn't jump once the button becomes enabled. *@
                 <div class="modal-footer merge-pr-modal-footer">
-                    <div class="form-check mb-0 merge-pr-return-default-check">
-                        <input class="form-check-input" type="checkbox" id="merge-pr-return-default"
-                               @bind="_returnToDefault"
-                               disabled="@(IsLoading || IsLoadingReviewDetails || IsMerging)" />
-                        <label class="form-check-label" for="merge-pr-return-default">Return to default branch</label>
-                    </div>
+                    @if (ShowReturnToDefault)
+                    {
+                        <div class="form-check mb-0 merge-pr-return-default-check">
+                            <input class="form-check-input" type="checkbox" id="merge-pr-return-default"
+                                   @bind="_returnToDefault"
+                                   disabled="@(IsLoading || IsLoadingReviewDetails || IsMerging)" />
+                            <label class="form-check-label" for="merge-pr-return-default">Return to default branch</label>
+                        </div>
+                    }
                     <div class="merge-pr-footer-actions">
                         <div class="btn-group merge-pr-split-btn @(IsPrimaryActionDisabled ? "merge-pr-split-btn--pending" : null)">
                             <button type="button"
@@ -404,6 +407,8 @@
     [Parameter] public bool IsSyncingLocalState { get; set; }
     /// <summary>Raised with the new title so the caller can PATCH it on GitHub, then re-run the review/checks phase only after that update succeeds.</summary>
     [Parameter] public EventCallback<string> OnTitleChanged { get; set; }
+    /// <summary>When false, hides the Return to default branch checkbox (Feature contexts).</summary>
+    [Parameter] public bool ShowReturnToDefault { get; set; } = true;
 
     private MergeMethod _selectedMethod;
     private bool _showMethodDropdown;
@@ -695,7 +700,7 @@
     {
         _showMethodDropdown = false;
         if (Details != null && OnMerge.HasDelegate)
-            await OnMerge.InvokeAsync(new MergePullRequestChoice(_selectedMethod, _returnToDefault));
+            await OnMerge.InvokeAsync(new MergePullRequestChoice(_selectedMethod, ShowReturnToDefault && _returnToDefault));
     }
 
     private async Task HandleCloseClick()

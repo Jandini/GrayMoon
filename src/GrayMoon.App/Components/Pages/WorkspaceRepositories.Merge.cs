@@ -432,7 +432,8 @@ public sealed partial class WorkspaceRepositories
 
     private Task HandleMergeRequestedAsync(MergePullRequestChoice choice)
     {
-        if (choice.ReturnToDefault)
+        var returnToDefault = !_isFeatureContext && choice.ReturnToDefault;
+        if (returnToDefault)
         {
             var prNumber = _mergePrModal.PrNumber;
             ShowConfirm(

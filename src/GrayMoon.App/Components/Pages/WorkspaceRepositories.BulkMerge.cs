@@ -260,7 +260,8 @@ public sealed partial class WorkspaceRepositories
         // otherwise a "Retry failed" click could pick up whatever that singleton now holds (e.g. changed via
         // the single-PR merge dialog in the meantime) instead of the choice this batch was actually confirmed
         // with, leaving sibling rows from the same run inconsistently synced.
-        var returnToDefault = BulkMergeReturnToDefault;
+        // Feature contexts never return to default after merge.
+        var returnToDefault = !_isFeatureContext && BulkMergeReturnToDefault;
         var methodPhrase = _bulkMergeModal.SelectedMethod.ToConfirmationPhrase();
         var syncSuffix = returnToDefault ? " and synced to the default branch" : string.Empty;
         var message = $"Merge {rows.Count} pull request{(rows.Count == 1 ? "" : "s")} using {methodPhrase}{syncSuffix}?";
