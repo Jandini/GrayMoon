@@ -68,9 +68,10 @@
 }
 
 .deps-graph-legend__swatch--package {
-    width: 0.8rem;
-    height: 0.75rem;
-    clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
+    width: 0.9rem;
+    height: 0.7rem;
+    /* Match graph: squat hexagon with short side points */
+    clip-path: polygon(4% 0%, 96% 0%, 100% 50%, 96% 100%, 4% 100%, 0% 50%);
     background: #16353f;
     border: none;
     box-shadow: 0 0 0 1.5px #38bdf8;
