@@ -263,13 +263,23 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: nowrap;
+    gap: 0.5rem;
     margin-top: 0.4rem;
+    container-type: inline-size;
+    container-name: git-changes-commit-actions;
 }
 
 .git-changes-workspace-commit__buttons {
     display: flex;
     align-items: center;
+    flex-wrap: nowrap;
+    flex-shrink: 0;
     gap: 0.4rem;
+}
+
+.git-changes-workspace-commit__buttons .btn {
+    white-space: nowrap;
 }
 
 /* Bootstrap's .form-check pairs padding-left:1.5em on this element with margin-left:-1.5em on the
@@ -278,6 +288,7 @@
 .git-changes-workspace-commit__push-check {
     display: flex;
     align-items: center;
+    flex-shrink: 0;
     gap: 0.4rem;
     margin: 0;
     padding-left: 0;
@@ -310,11 +321,28 @@
     margin: 0;
     color: var(--text-secondary);
     user-select: none;
+    white-space: nowrap;
     /* Optical nudge - a text line box's visual center sits slightly above its geometric center
        (font ascent/descent is asymmetric), so align-items:center alone reads as "a bit high"
        next to the checkbox's symmetric box. */
     position: relative;
     top: 1px;
+}
+
+/* Default: full "Push committed". Below ~22rem the Commit (+ Commit All) row leaves too little
+   room, so swap to "Push". Title / aria-label keep the full meaning when abbreviated. */
+.git-changes-workspace-commit__push-label-short {
+    display: none;
+}
+
+@container git-changes-commit-actions (max-width: 22rem) {
+    .git-changes-workspace-commit__push-label-full {
+        display: none;
+    }
+
+    .git-changes-workspace-commit__push-label-short {
+        display: inline;
+    }
 }
 
 .git-changes-diff-placeholder {

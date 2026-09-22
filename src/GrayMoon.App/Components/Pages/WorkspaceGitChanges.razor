@@ -122,12 +122,14 @@
                                 }
                             </div>
                             <div class="form-check git-changes-workspace-commit__push-check @(IsCommitButtonDisabled ? "git-changes-workspace-commit__push-check--inactive" : "")">
-                                <label class="form-check-label" for="git-changes-push-after-commit">
-                                    Push committed
+                                <label class="form-check-label" for="git-changes-push-after-commit" title="Push committed">
+                                    <span class="git-changes-workspace-commit__push-label-full">Push committed</span>
+                                    <span class="git-changes-workspace-commit__push-label-short" aria-hidden="true">Push</span>
                                 </label>
                                 <input class="form-check-input" type="checkbox" id="git-changes-push-after-commit"
                                        disabled="@IsJobRunning"
                                        checked="@PushAfterCommit"
+                                       aria-label="Push committed"
                                        @onchange="OnPushAfterCommitChanged" />
                             </div>
                         </div>

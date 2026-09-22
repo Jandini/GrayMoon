@@ -16,7 +16,6 @@ namespace GrayMoon.App.Services.Workspaces;
 
 public sealed class WorkspaceFileVersionService(
     IAgentBridge agentBridge,
-    WorkspaceService workspaceService,
     WorkspaceRepository workspaceRepository,
     WorkspaceProjectRepository workspaceProjectRepository,
     WorkspaceFileVersionConfigRepository versionConfigRepository,

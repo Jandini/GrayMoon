@@ -292,8 +292,9 @@ public sealed partial class WorkspaceRepositories
     /// Merges <paramref name="rowsToMerge"/> via the plural IWorkspacePullRequestOperations.MergeManyAsync, then
     /// syncs to default (one repo at a time) whichever of those succeed - plus, unconditionally,
     /// <paramref name="rowsToReturnOnly"/> (rows whose merge already succeeded on an earlier run and only need
-    /// their sync step retried, regardless of the live "return to default" checkbox state). Runs as the standard
-    /// page job so BackgroundJobOverlay's LoadingOverlay (with terminal) covers the still-mounted dialog.
+    /// their sync step retried, regardless of the live "return to default" checkbox state). Hides the dialog for
+    /// the run so BackgroundJobOverlay's LoadingOverlay (with terminal) is the only UI; on full success a toast
+    /// closes the flow, and on any failure the dialog reopens as the completed-run summary.
     /// Reused for the primary "Merge N pull requests" button, "Retry failed (n)", and a single row's retry icon.
     /// </summary>
     private void RunBulkMergeAndReturnToDefaultAsync(IReadOnlyList<BulkMergePrRow> rowsToMerge, IReadOnlyList<BulkMergePrRow> rowsToReturnOnly)
@@ -312,6 +313,7 @@ public sealed partial class WorkspaceRepositories
         _bulkMergeModal.HasRun = false;
         _bulkMergeModal.Completed = 0;
         _bulkMergeModal.Failed = 0;
+        _bulkMergeModal.IsVisible = false;
         StateHasChanged();
 
         var returnToDefault = _bulkMergeModal.ReturnToDefault;
@@ -465,8 +467,9 @@ public sealed partial class WorkspaceRepositories
     /// <summary>
     /// Marks any row this run left in a non-terminal state as Skipped (still Merging - unattempted when Abort was
     /// pressed) or ReturnFailed (still ReturningToDefault - the merge itself already succeeded, only the return-to-default step was
-    /// interrupted), and flips the modal from running to its finished summary. Runs unconditionally from the job's
-    /// own finally, so it fires whether the run finished, faulted, or was cancelled via the overlay Abort.
+    /// interrupted), and flips the modal from running to its finished summary. Full success keeps the dialog hidden
+    /// and toasts; any failure (or cancel mid-run) brings the dialog back with results. Runs unconditionally from the
+    /// job's own finally, so it fires whether the run finished, faulted, or was cancelled via the overlay Abort.
     /// </summary>
     private void FinishBulkMergeRun(IReadOnlyList<BulkMergePrRow> touchedRows)
     {
@@ -485,6 +488,50 @@ public sealed partial class WorkspaceRepositories
 
         _bulkMergeModal.IsRunning = false;
         _bulkMergeModal.HasRun = true;
+
+        var failedCount = touchedRows.Count(r => r.Status == BulkMergeRowStatus.Failed);
+        var returnFailedCount = touchedRows.Count(r => r.Status == BulkMergeRowStatus.ReturnFailed);
+        var skippedCount = touchedRows.Count(r => r.Status == BulkMergeRowStatus.Skipped);
+        var succeededCount = touchedRows.Count(r =>
+            r.Status is BulkMergeRowStatus.Merged or BulkMergeRowStatus.ReturnedToDefault);
+
+        if (failedCount == 0 && returnFailedCount == 0 && skippedCount == 0)
+        {
+            _bulkMergeModal.IsVisible = false;
+            ToastService.Show(succeededCount == 1
+                ? "1 pull request merged successfully."
+                : $"{succeededCount} pull requests merged successfully.");
+            return;
+        }
+
+        // Incomplete / failed / cancelled - reopen the completed-run summary. Cancel already toasts via
+        // PageJobOptions.CancelToast, so only real merge/return failures get a red toast here.
+        _bulkMergeModal.IsVisible = true;
+
+        const string cancelledReturnMessage = "Return to default branch was cancelled.";
+        var realReturnFailedCount = touchedRows.Count(r =>
+            r.Status == BulkMergeRowStatus.ReturnFailed &&
+            !string.Equals(r.ErrorMessage, cancelledReturnMessage, StringComparison.Ordinal));
+
+        if (failedCount == 0 && realReturnFailedCount == 0)
+            return;
+
+        if (failedCount > 0 && realReturnFailedCount > 0)
+        {
+            ToastService.ShowError("Bulk merge finished with failures.");
+        }
+        else if (failedCount > 0)
+        {
+            ToastService.ShowError(failedCount == 1
+                ? "1 pull request failed to merge."
+                : $"{failedCount} pull requests failed to merge.");
+        }
+        else
+        {
+            ToastService.ShowError(realReturnFailedCount == 1
+                ? "1 pull request merged, but return to default failed."
+                : $"{realReturnFailedCount} pull requests merged, but return to default failed.");
+        }
     }
 
     private static MergeMethod? ToMergeMethod(BulkMergeMethodSelection selection) => selection switch

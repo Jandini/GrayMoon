@@ -13,7 +13,6 @@ namespace GrayMoon.App.Services.Application;
 
 public sealed class WorkspaceBranchOperations(
     IAgentBridge agentBridge,
-    WorkspaceService workspaceService,
     WorkspaceRepository workspaceRepository,
     GitHubRepositoryRepository repoRepository,
     AppDbContext dbContext,

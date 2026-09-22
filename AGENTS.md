@@ -139,6 +139,16 @@ mixes every context's data into one answer, or persists onto the wrong row.
   `WorkspaceRepositoryLinkListQueryServiceTests.Feature_context_sort_keyset_and_level_grouping_use_context_state_not_shared_link`
   for the pattern.
 
+## Buttons and short action labels never word-wrap
+
+When adding or changing Blazor UX, button text must stay on a single line.
+The same applies to short labels paired with buttons (checkbox captions such
+as "Push committed", toolbar action text, and similar). Use Bootstrap
+`text-nowrap` and/or `white-space: nowrap`, and on tight flex rows also
+`flex-shrink: 0` / `flex-wrap: nowrap`, so a narrow column never stacks
+"Commit" / "Commit All" or wraps a checkbox label. See also "CSS conventions
+for buttons and action labels" in `CLAUDE.md`.
+
 ## Desktop README when features change
 
 When you add a user-facing feature or change how an existing one behaves,

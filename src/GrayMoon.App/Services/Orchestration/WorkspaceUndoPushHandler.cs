@@ -9,9 +9,7 @@ namespace GrayMoon.App.Services.Orchestration;
 public sealed class WorkspaceUndoPushHandler(
     IAgentBridge agentBridge,
     WorkspaceRepository workspaceRepo,
-    WorkspaceService workspaceService,
     IOptions<WorkspaceOptions> options,
-    IWorkspaceFeatureContextResolver contextResolver,
     IWorkspaceContextPathResolver pathResolver,
     ILogger<WorkspaceUndoPushHandler> logger)
 {

@@ -343,10 +343,10 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
     /// <c>ToDictionary</c> would throw on a duplicate key - keep the first match instead, same as before this
     /// was factored out.
     /// </summary>
-    private static IReadOnlyDictionary<string, string> ToNameVersionMap(IEnumerable<(string? RepositoryName, string? GitVersion)> rows) =>
+    private static IReadOnlyDictionary<string, string> ToNameVersionMap(IEnumerable<(string RepositoryName, string? GitVersion)> rows) =>
         rows
             .Where(r => !string.IsNullOrWhiteSpace(r.RepositoryName) && !string.IsNullOrEmpty(r.GitVersion))
-            .GroupBy(r => r.RepositoryName!, StringComparer.OrdinalIgnoreCase)
+            .GroupBy(r => r.RepositoryName, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.First().GitVersion!, StringComparer.OrdinalIgnoreCase);
 
     public async Task<WorkspaceRepositoryLinkListItemDto?> GetSnapshotAsync(

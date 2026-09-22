@@ -53,7 +53,6 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     private readonly HashSet<string> _collapsedKeys = [];
     private string _filterQuery = string.Empty;
     private string? _appliedFilterQuery;
-    private bool _isLoading = true;
     private string? _errorMessage;
     private bool _disposed;
     private bool _scrollSelectionIntoViewPending;
@@ -159,11 +158,10 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     private Task? _initialLoadTask;
 
     /// <summary>
-    /// Runs the initial (or workspace-switch) load inline behind the lightweight _isLoading flag instead
-    /// of a background job, so opening this page (including re-opening it with a remembered file
-    /// selection) never shows the BackgroundJobOverlay's "Loading changes..." LoadingOverlay - the tree
-    /// itself renders as soon as the persisted projection is read, which is fast since it never sends an
-    /// Agent command.
+    /// Runs the initial (or workspace-switch) load inline instead of a background job, so opening this
+    /// page (including re-opening it with a remembered file selection) never shows the
+    /// BackgroundJobOverlay's "Loading changes..." LoadingOverlay - the tree itself renders as soon as
+    /// the persisted projection is read, which is fast since it never sends an Agent command.
     /// </summary>
     private void StartInitialLoadJob()
     {
@@ -181,19 +179,18 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     {
         _errorMessage = null;
 
-        // Fetched before the _isLoading/StateHasChanged below (rather than after, alongside the
-        // heavier git-status read further down) so the header's Workspace name is already correct
-        // by the time this intermediate render happens. Otherwise WorkspaceFeatureSelector briefly
-        // renders its special-workspace fallback label ("Workspace") for the ~100-300ms the git
-        // status read takes, before flipping to the real name - a longer, more noticeable flicker
-        // than the other workspace pages show (they resolve the name via a similarly-fast, separate
-        // query before their own heavier grid loads).
+        // Fetched before the StateHasChanged below (rather than after, alongside the heavier git-status
+        // read further down) so the header's Workspace name is already correct by the time this
+        // intermediate render happens. Otherwise WorkspaceFeatureSelector briefly renders its
+        // special-workspace fallback label ("Workspace") for the ~100-300ms the git status read takes,
+        // before flipping to the real name - a longer, more noticeable flicker than the other workspace
+        // pages show (they resolve the name via a similarly-fast, separate query before their own
+        // heavier grid loads).
         await using (var db = await DbContextFactory.CreateDbContextAsync())
         {
             _workspace = await db.Workspaces.AsNoTracking().FirstOrDefaultAsync(w => w.WorkspaceId == WorkspaceId);
         }
 
-        _isLoading = true;
         StateHasChanged();
 
         try
@@ -213,15 +210,14 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         }
         finally
         {
-            _isLoading = false;
             StateHasChanged();
         }
 
         // Restoring a remembered file selection re-fetches its diff from the Agent, which can be slow
-        // (and, unlike the tree read above, is a real Agent command) - it must never gate _isLoading (and
-        // therefore the Refresh button) or the tree render above. TryRestoreSelectionAsync only does work
-        // when this page instance has no selection yet (first load / workspace switch); later reloads
-        // triggered by Refresh or a mutation already have a selection and return immediately.
+        // (and, unlike the tree read above, is a real Agent command) - it must never gate the tree
+        // render above. TryRestoreSelectionAsync only does work when this page instance has no
+        // selection yet (first load / workspace switch); later reloads triggered by Refresh or a
+        // mutation already have a selection and return immediately.
         if (_errorMessage == null)
         {
             await TryRestoreSelectionAsync();

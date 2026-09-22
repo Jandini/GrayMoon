@@ -21,12 +21,10 @@ public sealed class WorkspaceBranchUpdateHandler(
     IAgentBridge agentBridge,
     WorkspaceRepository workspaceRepository,
     GitHubRepositoryRepository repoRepository,
-    WorkspaceService workspaceService,
     ConnectorHealthService connectorHealthService,
     AppDbContext dbContext,
     WorkspaceRepositoryStateWriter stateWriter,
     IHubContext<WorkspaceSyncHub> hubContext,
-    IWorkspaceFeatureContextResolver contextResolver,
     IWorkspaceContextPathResolver pathResolver,
     ILogger<WorkspaceBranchUpdateHandler> logger)
 {

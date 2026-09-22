@@ -3,12 +3,11 @@
 @if (IsVisible)
 {
     @*
-        z-index drops below the page's BackgroundJobOverlay (.loading-overlay--page, z-index: 100) while
-        IsRunning so that overlay (with the live command terminal) covers the dialog for the merge and
-        optional return-to-default - without unmounting the dialog, which would look like it closed and reopened.
-        IsCoveredByOverlay is the same drop for a job started by the drill-in single-PR dialog (stacked on top
-        of this one) - kept separate from IsRunning so it never touches IsCompletedView/the footer-mode
+        The bulk-merge page job hides this dialog for the run (IsVisible=false) so only LoadingOverlay shows.
+        IsCoveredByOverlay still drops z-index under BackgroundJobOverlay when a drill-in single-PR job is
+        stacked on top - kept separate from IsRunning so it never touches IsCompletedView/the footer-mode
         switches below, which must keep reflecting this dialog's own batch-run state, not the drill-in dialog's.
+        IsRunning remains in the z-index expression for retry/edge cases if the dialog is briefly still mounted.
     *@
     <div class="modal show d-block bulk-merge-pr-modal-container" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: @((IsRunning || IsCoveredByOverlay) ? 50 : 1074);"
          @onkeydown="HandleKeyDown"

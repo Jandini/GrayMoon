@@ -20,13 +20,11 @@ public sealed class WorkspaceCommitSyncHandler(
     IAgentBridge agentBridge,
     WorkspaceRepository workspaceRepository,
     GitHubRepositoryRepository repoRepository,
-    WorkspaceService workspaceService,
     ConnectorHealthService connectorHealthService,
     AppDbContext dbContext,
     WorkspaceRepositoryStateWriter stateWriter,
     IHubContext<WorkspaceSyncHub> hubContext,
     IServiceScopeFactory serviceScopeFactory,
-    IWorkspaceFeatureContextResolver contextResolver,
     IWorkspaceContextPathResolver pathResolver,
     ILogger<WorkspaceCommitSyncHandler> logger)
 {
