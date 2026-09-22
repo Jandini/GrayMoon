@@ -194,6 +194,7 @@ try
     builder.Services.AddSingleton<IGitChangesWorkspaceScanner, GitChangesWorkspaceScanner>();
     builder.Services.AddSingleton<IGitChangesLineStatsRefresh, GitChangesLineStatsRefresh>();
     builder.Services.AddScoped<IWorkspaceGitChangesActivation, WorkspaceGitChangesActivation>();
+    builder.Services.AddScoped<WorkspaceGitChangesRouteActivity>();
 
     builder.Services.AddSingleton<ICommandLineService, CommandLineService>();
     builder.Services.AddSingleton<IScopedServiceExecutor, ScopedServiceExecutor>();

@@ -7,15 +7,16 @@ namespace GrayMoon.App.Services.GitChanges;
 /// <summary>
 /// Owns the Git Changes background monitoring policy. Per the feature's design, a repository's
 /// Agent-side <c>FileSystemWatcher</c> lease belongs to the workspace background service, not the
-/// browser page - opening or closing Repositories or Changes must never directly start or stop
-/// monitoring. This sweep periodically calls <c>GetGitChangeStatus</c> for every repository in every
-/// <i>actively viewed</i> workspace (per <see cref="IWorkspaceGitChangesActivityTracker"/>) - not every
+/// browser page - navigating among workspace pages must never directly start or stop monitoring.
+/// This sweep periodically calls <c>GetGitChangeStatus</c> for every repository in every
+/// <i>active</i> workspace (per <see cref="IWorkspaceGitChangesActivityTracker"/>) - not every
 /// workspace in the database - which both seeds/renews the Agent's <c>GitRepositoryWatcherManager</c>
 /// lease (idle grace period is <see cref="GitChangesOptions.WatcherIdleGraceMinutes"/>) and keeps the
-/// persisted SQLite projection fresh while a workspace is in view. Workspaces with no recent viewer fall
-/// out of scope on their own once <see cref="GitChangesOptions.WorkspaceActivityGraceMinutes"/> elapses,
-/// so this never blasts every repository across every workspace regardless of whether anyone is looking.
-/// The actual per-workspace scan (also used for on-open warm-up and manual Refresh) lives in
+/// persisted SQLite projection fresh while a workspace is in view anywhere in GrayMoon. Workspaces with
+/// no recent viewer fall out of scope on their own once
+/// <see cref="GitChangesOptions.WorkspaceActivityGraceMinutes"/> elapses, so this never blasts every
+/// repository across every workspace regardless of whether anyone is looking. The actual per-workspace
+/// scan (also used for on-entry warm-up and manual Refresh) lives in
 /// <see cref="IGitChangesWorkspaceScanner"/>.
 /// </summary>
 public sealed class GitChangesMonitoringBackgroundService(

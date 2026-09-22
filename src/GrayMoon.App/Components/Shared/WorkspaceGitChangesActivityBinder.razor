@@ -1,0 +1,32 @@
+@implements IDisposable
+@inject NavigationManager NavigationManager
+@inject WorkspaceGitChangesRouteActivity RouteActivity
+@* No markup - mounted once per circuit (MainLayout.razor) so any /workspaces/{id}/... page keeps
+   Git Changes activity (and Agent watchers) warm without page-level activation leases. *@
+
+@code {
+    protected override void OnInitialized()
+    {
+        NavigationManager.LocationChanged += OnLocationChanged;
+        SyncFromCurrentUri();
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs args)
+    {
+        SyncFromCurrentUri();
+    }
+
+    private void SyncFromCurrentUri()
+    {
+        var relativePath = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
+        RouteActivity.Sync(WorkspaceRouteParser.TryGetWorkspaceId(relativePath));
+    }
+
+    public void Dispose()
+    {
+        NavigationManager.LocationChanged -= OnLocationChanged;
+        // Release the lease; the circuit DI scope disposes RouteActivity itself.
+        RouteActivity.Sync(null);
+    }
+}
+
