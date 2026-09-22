@@ -29,7 +29,7 @@ public sealed class WorkspaceContextPathResolver(
         }
 
         var workspaceFolder = await ResolveSpecialWorkspaceFolderAsync(workspace.Name, workspace, cancellationToken);
-        var parent = Path.GetDirectoryName(workspaceFolder.Replace('/', '\\'))
+        var parent = GetWindowsDirectoryName(workspaceFolder)
             ?? throw new InvalidOperationException("Cannot derive Feature storage parent from workspace root.");
         var derivedFeaturesRoot = CombineWindows(parent, ".graymoon", workspace.Name, "features");
         var feature = info.FeatureName
@@ -78,12 +78,12 @@ public sealed class WorkspaceContextPathResolver(
         CancellationToken cancellationToken = default)
     {
         var contextRoot = await GetContextRootAsync(contextId, cancellationToken);
-        var normalized = contextRoot.Replace('/', '\\').TrimEnd('\\');
-        var folderName = Path.GetFileName(normalized);
+        // Agent paths are Windows-shaped even when the App (and CI) run on Linux - do not use host Path.*.
+        var folderName = GetWindowsFileName(contextRoot);
         if (string.IsNullOrWhiteSpace(folderName))
             throw new InvalidOperationException($"Cannot derive agent folder name from context root '{contextRoot}'.");
 
-        var parent = Path.GetDirectoryName(normalized);
+        var parent = GetWindowsDirectoryName(contextRoot);
         if (string.IsNullOrWhiteSpace(parent))
             throw new InvalidOperationException($"Cannot derive agent parent root from context root '{contextRoot}'.");
 
@@ -113,5 +113,23 @@ public sealed class WorkspaceContextPathResolver(
             .Select(p => p.Replace('/', '\\').Trim('\\'))
             .ToArray();
         return string.Join('\\', cleaned);
+    }
+
+    private static string GetWindowsFileName(string path)
+    {
+        var normalized = path.Replace('/', '\\').TrimEnd('\\');
+        if (string.IsNullOrEmpty(normalized))
+            return string.Empty;
+        var last = normalized.LastIndexOf('\\');
+        return last >= 0 ? normalized[(last + 1)..] : normalized;
+    }
+
+    private static string? GetWindowsDirectoryName(string path)
+    {
+        var normalized = path.Replace('/', '\\').TrimEnd('\\');
+        if (string.IsNullOrEmpty(normalized))
+            return null;
+        var last = normalized.LastIndexOf('\\');
+        return last >= 0 ? normalized[..last] : null;
     }
 }

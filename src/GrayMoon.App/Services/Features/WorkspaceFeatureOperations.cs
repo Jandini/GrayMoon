@@ -654,11 +654,25 @@ public sealed class WorkspaceFeatureOperations(
         if (!string.IsNullOrWhiteSpace(workspace.ManagedFeatureStorageRoot))
             return;
 
-        var parent = Path.GetDirectoryName((workspace.RootPath ?? string.Empty).Replace('/', '\\'));
+        var parent = GetWindowsDirectoryName(workspace.RootPath ?? string.Empty);
         if (string.IsNullOrWhiteSpace(parent))
             parent = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-        workspace.ManagedFeatureStorageRoot = Path.Combine(parent!, ".graymoon", workspace.Name, "features");
+        // Keep Agent-facing Feature storage roots Windows-shaped (App/CI may run on Linux).
+        workspace.ManagedFeatureStorageRoot = string.Join('\\',
+            parent!.Replace('/', '\\').TrimEnd('\\'),
+            ".graymoon",
+            workspace.Name,
+            "features");
+    }
+
+    private static string? GetWindowsDirectoryName(string path)
+    {
+        var normalized = path.Replace('/', '\\').TrimEnd('\\');
+        if (string.IsNullOrEmpty(normalized))
+            return null;
+        var last = normalized.LastIndexOf('\\');
+        return last >= 0 ? normalized[..last] : null;
     }
 
     private static RemoveFeatureClassification Classify(IReadOnlyList<RemoveFeatureRepositoryPlan> plans)
