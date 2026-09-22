@@ -113,6 +113,16 @@
     {
         <div class="grid-page-body">
             <div id="cytoscape-dependency-graph" class="cytoscape-graph"></div>
+            @if (graph.Nodes.Count > 0 && !NoRepositoriesMatchSearch)
+            {
+                <ul class="deps-graph-legend" aria-label="Repository type legend">
+                    <li><span class="deps-graph-legend__swatch deps-graph-legend__swatch--service" aria-hidden="true"></span>Service</li>
+                    <li><span class="deps-graph-legend__swatch deps-graph-legend__swatch--package" aria-hidden="true"></span>Package</li>
+                    <li><span class="deps-graph-legend__swatch deps-graph-legend__swatch--library" aria-hidden="true"></span>Library</li>
+                    <li><span class="deps-graph-legend__swatch deps-graph-legend__swatch--executable" aria-hidden="true"></span>Executable</li>
+                    <li><span class="deps-graph-legend__swatch deps-graph-legend__swatch--test" aria-hidden="true"></span>Test</li>
+                </ul>
+            }
             @if (graph.Nodes.Count == 0)
             {
                 <p class="dependencies-empty-message text-muted text-center mb-0">No dependencies to display. Sync repositories to discover projects and dependencies.</p>
