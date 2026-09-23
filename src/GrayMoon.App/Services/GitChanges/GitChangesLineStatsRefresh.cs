@@ -84,8 +84,7 @@ public sealed class GitChangesLineStatsRefresh(
         var cts = new CancellationTokenSource();
         if (_repoDebounce.TryRemove(key, out var previous))
         {
-            previous.Cancel();
-            previous.Dispose();
+            CancelAndDispose(previous);
         }
 
         _repoDebounce[key] = cts;
@@ -165,12 +164,12 @@ public sealed class GitChangesLineStatsRefresh(
         }
         finally
         {
-            if (_repoDebounce.TryGetValue(key, out var current) && ReferenceEquals(current, cts))
+            // Only dispose if we still own the slot. Cancel/replace already removed it and
+            // owns cancel+dispose — disposing here would race with their Cancel().
+            if (_repoDebounce.TryRemove(new KeyValuePair<RepoKey, CancellationTokenSource>(key, cts)))
             {
-                _repoDebounce.TryRemove(key, out _);
+                cts.Dispose();
             }
-
-            cts.Dispose();
         }
     }
 
@@ -208,9 +207,34 @@ public sealed class GitChangesLineStatsRefresh(
 
             if (_repoDebounce.TryRemove(key, out var cts))
             {
-                cts.Cancel();
-                cts.Dispose();
+                CancelAndDispose(cts);
             }
+        }
+    }
+
+    /// <summary>
+    /// Cancels then disposes a CTS after removing it from the debounce map.
+    /// Tolerates ObjectDisposedException if another path already disposed it.
+    /// </summary>
+    private static void CancelAndDispose(CancellationTokenSource cts)
+    {
+        try
+        {
+            if (!cts.IsCancellationRequested)
+            {
+                cts.Cancel();
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+
+        try
+        {
+            cts.Dispose();
+        }
+        catch (ObjectDisposedException)
+        {
         }
     }
 
