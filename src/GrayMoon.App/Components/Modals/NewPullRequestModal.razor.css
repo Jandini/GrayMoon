@@ -3,6 +3,95 @@
     border-color: #6c757d;
 }
 
+/* Keep the dialog fixed in the viewport center (same pattern as Custom Dependencies). */
+.new-pr-modal {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.new-pr-modal-dialog {
+    margin: 1rem;
+    max-height: calc(100vh - 2rem);
+    width: calc(100% - 2rem);
+}
+
+.new-pr-modal-dialog > .modal-content {
+    max-height: calc(100vh - 2rem);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.new-pr-modal-dialog .modal-body {
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+/* Tabs — same pattern as Switch Branch / Branch modals */
+.new-pr-tabs {
+    border-bottom: 1px solid var(--border-color);
+}
+
+.new-pr-tabs .nav-link {
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    border-bottom: none;
+    margin-bottom: -1px;
+    background: var(--bg-tertiary);
+    border-radius: 0.375rem 0.375rem 0 0 !important;
+}
+
+.new-pr-tabs .nav-link:hover {
+    color: var(--text-primary);
+    border-color: var(--border-color);
+    border-bottom: none;
+    background: var(--bg-hover);
+    border-radius: 0.375rem 0.375rem 0 0 !important;
+}
+
+.new-pr-tabs .nav-link.active {
+    color: #fff;
+    border-color: var(--accent-blue) var(--accent-blue) var(--border-color);
+    border-bottom: 1px solid var(--bg-card, var(--bg-primary));
+    background: var(--accent-blue);
+    border-radius: 0.375rem 0.375rem 0 0 !important;
+}
+
+.new-pr-tabs .nav-link.active:hover {
+    color: #fff;
+    background: var(--accent-blue-hover);
+    border-color: var(--accent-blue-hover) var(--accent-blue-hover) var(--border-color);
+    border-bottom: 1px solid var(--bg-card, var(--bg-primary));
+    border-radius: 0.375rem 0.375rem 0 0 !important;
+}
+
+.new-pr-tabs .nav-link:focus {
+    box-shadow: none;
+}
+
+.new-pr-tabs .nav-link:focus-visible {
+    box-shadow: 0 0 0 1px var(--focus-ring-outer);
+}
+
+/* Keep tab panels the same height so the dialog does not jump on switch. */
+.new-pr-tab-panels {
+    display: grid;
+}
+
+.new-pr-tab-panel {
+    grid-area: 1 / 1;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.new-pr-tab-panel--active {
+    visibility: visible;
+    pointer-events: auto;
+}
+
 .new-pr-branch-label-row {
     position: relative;
     display: flex;
@@ -63,6 +152,37 @@
     overflow: visible;
 }
 
+/* Multi-repo Branch tab: keep rows scrollable when the list grows. */
+.new-pr-branch-panel--scroll {
+    max-height: min(22rem, 55vh);
+    overflow-x: hidden;
+    overflow-y: auto;
+    scrollbar-color: rgba(148, 152, 158, 0.55) transparent;
+    scrollbar-width: auto;
+}
+
+.new-pr-branch-panel--scroll::-webkit-scrollbar {
+    width: auto;
+}
+
+.new-pr-branch-panel--scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.new-pr-branch-panel--scroll::-webkit-scrollbar-thumb {
+    background-color: rgba(148, 152, 158, 0.55);
+    border-radius: 5px;
+}
+
+.new-pr-branch-panel--scroll::-webkit-scrollbar-thumb:hover {
+    background-color: #8a8a8a;
+}
+
+/* Allow target menus to paint outside the scroll clip while open. */
+.new-pr-branch-panel--scroll.new-pr-branch-panel--menu-open {
+    overflow: visible;
+}
+
 .new-pr-branch-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -83,9 +203,10 @@
     padding: 0 0.75rem;
 }
 
+/* Repo name takes remaining source-column space; branch sits right-aligned. */
 .new-pr-branch-repo {
-    flex: 0 1 6.5rem;
-    max-width: 6.5rem;
+    flex: 1 1 auto;
+    min-width: 0;
     font-size: 0.8125rem;
     font-weight: 600;
     color: var(--text-muted);
@@ -99,6 +220,13 @@
     line-height: 1.5;
     color: var(--text-primary);
     font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+}
+
+.new-pr-branch-row--multi .new-pr-branch-name {
+    flex: 0 1 auto;
+    max-width: 48%;
+    margin-left: auto;
+    text-align: right;
 }
 
 /* Dark target segment - same tone as the chevron (no lighter nested field). */
@@ -146,7 +274,7 @@
     font-size: 1rem;
     font-weight: 600;
     line-height: 1.5;
-    color: var(--text-primary);
+    color: goldenrod;
     font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
     text-align: left;
     cursor: pointer;
@@ -156,16 +284,21 @@
     display: block;
     min-width: 0;
     width: 100%;
+    color: goldenrod;
+}
+
+/* Hover/open on the whole target segment so right-side radius is never squared off by the button fill. */
+.new-pr-branch-target:hover,
+.new-pr-branch-target--open,
+.new-pr-branch-target:focus-within {
+    background-color: color-mix(in srgb, var(--new-pr-branch-target-bg) 80%, #000 20%);
 }
 
 .new-pr-branch-select:hover:not(:disabled),
-.new-pr-branch-target--open .new-pr-branch-select {
-    background-color: color-mix(in srgb, var(--new-pr-branch-target-bg) 80%, #000 20%);
-}
-
+.new-pr-branch-target--open .new-pr-branch-select,
 .new-pr-branch-select:focus {
+    background-color: transparent;
     outline: none;
-    background-color: color-mix(in srgb, var(--new-pr-branch-target-bg) 80%, #000 20%);
 }
 
 .new-pr-branch-select:disabled {
@@ -208,7 +341,9 @@
     color: var(--text-muted);
 }
 
-.new-pr-branch-target--open .new-pr-branch-chevron {
+.new-pr-branch-target:hover .new-pr-branch-chevron,
+.new-pr-branch-target--open .new-pr-branch-chevron,
+.new-pr-branch-target:focus-within .new-pr-branch-chevron {
     background-color: color-mix(in srgb, var(--new-pr-branch-target-bg) 80%, #000 20%);
 }
 
@@ -256,10 +391,12 @@
 
 .new-pr-branch-menu-item--selected {
     background-color: var(--bg-active, #37373d);
+    color: goldenrod;
 }
 
 .new-pr-branch-menu-item--selected:hover {
     background-color: color-mix(in srgb, var(--bg-active, #37373d) 80%, var(--bg-hover, #2a2d2e) 20%);
+    color: goldenrod;
 }
 
 .new-pr-branch-loading {
@@ -318,6 +455,11 @@
     color: var(--text-primary);
     scrollbar-color: rgba(148, 152, 158, 0.55) transparent;
     scrollbar-width: auto;
+}
+
+/* Review tab: give the list more room now that it has the panel to itself. */
+.new-pr-reviewer-list--tab {
+    height: min(18rem, 45vh);
 }
 
 .new-pr-reviewer-list::-webkit-scrollbar {
