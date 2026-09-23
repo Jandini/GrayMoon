@@ -48,19 +48,18 @@
       <AgentPublishDir>$(IntermediateOutputPath)agent-publish</AgentPublishDir>
       <AgentZipPath>$(PublishDir)agent\graymoon-agent-windows.zip</AgentZipPath>
     </PropertyGroup>
-    <Error Text="GrayMoon.Agent.csproj not found at $(AgentProj). GrayMoon.Desktop publishing requires the GrayMoon and GrayMoon.Desktop repositories checked out as sibling directories."
-           Condition="!Exists('$(AgentProj)')" />
-    <Exec Command="dotnet publish &quot;$(AgentProj)&quot; -c $(Configuration) -r win-x64 --self-contained false -o &quot;$(AgentPublishDir)&quot; /p:DebugType=None /p:DebugSymbols=false /p:PublishReadyToRun=true"
-          Condition="Exists('$(AgentProj)')" />
-    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;Get-ChildItem -LiteralPath '$(AgentPublishDir)' -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -eq '.pdb' -or $_.Name -match '\.Development(\.|$)' } | Remove-Item -Force&quot;"
-          Condition="Exists('$(AgentProj)')" />
+    <Error Text="GrayMoon.Agent.csproj not found at $(AgentProj). GrayMoon.Desktop publishing requires the GrayMoon and GrayMoon.Desktop repositories checked out as sibling directories." Condition="!Exists('$(AgentProj)')" />
+    <Exec Command="dotnet publish &quot;$(AgentProj)&quot; -c $(Configuration) -r win-x64 --self-contained false -o &quot;$(AgentPublishDir)&quot; /p:DebugType=None /p:DebugSymbols=false /p:PublishReadyToRun=true" Condition="Exists('$(AgentProj)')" />
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;Get-ChildItem -LiteralPath '$(AgentPublishDir)' -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -eq '.pdb' -or $_.Name -match '\.Development(\.|$)' } | Remove-Item -Force&quot;" Condition="Exists('$(AgentProj)')" />
     <MakeDir Directories="$(PublishDir)agent" Condition="Exists('$(AgentProj)') AND !Exists('$(PublishDir)agent')" />
     <Delete Files="$(AgentZipPath)" Condition="Exists('$(AgentZipPath)')" />
-    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;Compress-Archive -Path '$(AgentPublishDir)\*' -DestinationPath '$(AgentZipPath)' -Force&quot;"
-          Condition="Exists('$(AgentProj)')" />
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;Compress-Archive -Path '$(AgentPublishDir)\*' -DestinationPath '$(AgentZipPath)' -Force&quot;" Condition="Exists('$(AgentProj)')" />
   </Target>
 
   <ItemGroup>
+    <PackageReference Include="htmldiff.net" Version="1.5.0" />
+    <PackageReference Include="HtmlSanitizer" Version="9.2.1039" />
+    <PackageReference Include="Markdig" Version="1.4.0" />
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.*" />
     <PackageReference Include="GitVersion.MsBuild" Version="5.12.*">
       <PrivateAssets>all</PrivateAssets>

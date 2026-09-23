@@ -44,6 +44,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     [Inject] private IScopedServiceExecutor ScopedExecutor { get; set; } = default!;
     [Inject] private IJSRuntime Js { get; set; } = default!;
     [Inject] private WorkspaceContextNavigationService ContextNavigation { get; set; } = default!;
+    [Inject] private MarkdownProseDiffService MarkdownProseDiffService { get; set; } = default!;
 
     private int? _loadedWorkspaceId;
     private int? _loadedContextQuery;
@@ -438,6 +439,8 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         {
             await _diffViewerRef.ClearAsync();
         }
+
+        await ClearMarkdownViewerAsync();
     }
 
     private async Task ScrollSelectionIntoViewIfPendingAsync()

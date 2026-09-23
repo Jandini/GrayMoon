@@ -186,6 +186,8 @@ try
 
     builder.Services.AddScoped<IWorkspaceGitChangesReadService, WorkspaceGitChangesReadService>();
     builder.Services.AddScoped<IGitChangesAgentClient, GitChangesAgentClient>();
+    builder.Services.AddSingleton<MarkdownProseDiffService>();
+
     builder.Services.AddScoped<GitChangesSnapshotPushHandler>();
     builder.Services.AddScoped<WorkspaceGitChangesSelectionMemory>();
     builder.Services.AddScoped<WorkspaceGitChangesCommitMessageMemory>();
