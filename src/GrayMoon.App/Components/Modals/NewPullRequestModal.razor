@@ -6,6 +6,7 @@
 @implements IDisposable
 @inject IPullRequestService PullRequestService
 @inject IWorkspacePushOperations PushOperations
+@inject IWorkspaceBranchOperations BranchOperations
 @inject IOptions<WorkspaceOptions> WorkspaceOptions
 @inject ILogger<NewPullRequestModal> Logger
 @inject IJSRuntime JS
@@ -25,6 +26,87 @@
                     <button type="button" class="btn-close" aria-label="Close" @onclick="HandleCancelClick" disabled="@IsBusy"></button>
                 </div>
                 <div class="modal-body">
+                    <div class="mb-3">
+                        <div class="new-pr-branch-label-row">
+                            <label class="form-label" for="new-pr-branch">Branch</label>
+                            <span class="new-pr-branch-direction" aria-hidden="true">
+                                <span class="new-pr-branch-caption">Source</span>
+                                <span class="new-pr-branch-arrow">→</span>
+                                <span class="new-pr-branch-caption">Target</span>
+                            </span>
+                        </div>
+                        <div id="new-pr-branch" class="new-pr-branch-panel" role="group" aria-label="Pull request branches">
+                            @foreach (var target in Targets)
+                            {
+                                var state = GetRepoBranchState(target.RepositoryId);
+                                var menuOpen = _openTargetMenuRepoId == target.RepositoryId;
+                                <div class="new-pr-branch-row @(Targets.Count > 1 ? "new-pr-branch-row--multi" : null)">
+                                    <div class="new-pr-branch-main">
+                                        @if (Targets.Count > 1)
+                                        {
+                                            <span class="new-pr-branch-repo text-truncate" title="@target.RepositoryName">@target.RepositoryName</span>
+                                        }
+                                        <span class="new-pr-branch-name text-truncate" title="@target.HeadBranch">@target.HeadBranch</span>
+                                    </div>
+                                    @if (state.IsLoading)
+                                    {
+                                        <div class="new-pr-branch-target new-pr-branch-target--loading">
+                                            <span class="new-pr-branch-loading d-inline-flex align-items-center gap-2 text-muted">
+                                                <span class="spinner-border new-pr-branch-spinner" role="status" aria-hidden="true"></span>
+                                                Loading…
+                                            </span>
+                                        </div>
+                                    }
+                                    else if (state.Candidates.Count == 0)
+                                    {
+                                        <div class="new-pr-branch-target new-pr-branch-target--error" title="@(state.Error ?? "No target branches available")">
+                                            <span class="new-pr-branch-target-value text-truncate">@(state.Error ?? "Unavailable")</span>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <div class="new-pr-branch-target @(menuOpen ? "new-pr-branch-target--open" : null)">
+                                            <button type="button"
+                                                    class="new-pr-branch-select"
+                                                    id="@($"new-pr-target-{target.RepositoryId}")"
+                                                    aria-label="@($"Target branch for {target.RepositoryName}")"
+                                                    aria-haspopup="listbox"
+                                                    aria-expanded="@menuOpen"
+                                                    title="@state.SelectedBase"
+                                                    disabled="@(IsBusy || state.IsLoading)"
+                                                    @onclick="() => ToggleTargetMenu(target.RepositoryId)">
+                                                <span class="new-pr-branch-select-text text-truncate">@state.SelectedBase</span>
+                                            </button>
+                                            <span class="new-pr-branch-chevron" aria-hidden="true"></span>
+                                            @if (menuOpen)
+                                            {
+                                                <div class="new-pr-branch-menu-backdrop" @onclick="CloseTargetMenu"></div>
+                                                <ul class="new-pr-branch-menu"
+                                                    role="listbox"
+                                                    aria-labelledby="@($"new-pr-target-{target.RepositoryId}")">
+                                                    @foreach (var branch in state.Candidates)
+                                                    {
+                                                        var selected = string.Equals(branch, state.SelectedBase, StringComparison.Ordinal);
+                                                        <li role="option"
+                                                            aria-selected="@selected"
+                                                            class="new-pr-branch-menu-item @(selected ? "new-pr-branch-menu-item--selected" : null)"
+                                                            @onclick="() => SelectTargetBranch(target.RepositoryId, branch)">
+                                                            <span class="text-truncate" title="@branch">@branch</span>
+                                                        </li>
+                                                    }
+                                                </ul>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                        @if (!string.IsNullOrEmpty(_branchLoadError))
+                        {
+                            <div class="form-text text-muted">@_branchLoadError</div>
+                        }
+                    </div>
+
                     <div class="mb-3">
                         <label class="form-label" for="new-pr-title">Title</label>
                         <input id="new-pr-title"
@@ -168,7 +250,7 @@
     [Parameter] public IReadOnlyList<NewPrTargetRepo> Targets { get; set; } = Array.Empty<NewPrTargetRepo>();
     [Parameter] public EventCallback<NewPrFormResult> OnCreate { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
-    [Parameter] public EventCallback OnOpenInGitHub { get; set; }
+    [Parameter] public EventCallback<IReadOnlyDictionary<int, string>> OnOpenInGitHub { get; set; }
 
     private ElementReference modalElement;
     private ElementReference titleInput;
@@ -188,11 +270,23 @@
     private bool _isCheckingUnpushed;
     private HashSet<int> _repoIdsNeedingPush = new();
     private CancellationTokenSource? _pushCheckCts;
+    private CancellationTokenSource? _branchesCts;
+    private string? _branchLoadError;
+    private int? _openTargetMenuRepoId;
 
-    private bool HasUnifiedHeadBranch => Targets.Count > 0
-        && Targets.Select(t => t.HeadBranch).Distinct(StringComparer.Ordinal).Count() == 1;
+    private readonly Dictionary<int, RepoBranchUiState> _branchByRepoId = new();
 
-    private bool IsValid => !string.IsNullOrWhiteSpace(_title) && Targets.Count > 0;
+    private bool IsValid =>
+        !string.IsNullOrWhiteSpace(_title)
+        && Targets.Count > 0
+        && !_branchByRepoId.Values.Any(s => s.IsLoading)
+        && Targets.All(t =>
+        {
+            var state = GetRepoBranchState(t.RepositoryId);
+            return !string.IsNullOrWhiteSpace(state.SelectedBase)
+                   && state.Candidates.Count > 0
+                   && !string.Equals(state.SelectedBase, t.HeadBranch, StringComparison.Ordinal);
+        });
 
     private int MaxConcurrency => Math.Max(1, WorkspaceOptions.Value.MaxParallelOperations);
 
@@ -209,7 +303,15 @@
             _focusTitleOnNextRender = true;
             _isCheckingUnpushed = false;
             _repoIdsNeedingPush = new();
+            _branchLoadError = null;
+            _openTargetMenuRepoId = null;
+            _branchByRepoId.Clear();
+            foreach (var t in Targets)
+            {
+                _branchByRepoId[t.RepositoryId] = new RepoBranchUiState { IsLoading = true };
+            }
 
+            _ = LoadTargetBranchesAsync();
             _ = LoadReviewersAsync();
             _ = CheckUnpushedCommitsAsync();
         }
@@ -243,6 +345,9 @@
             _pushCheckCts?.Cancel();
             _pushCheckCts?.Dispose();
             _pushCheckCts = null;
+            _branchesCts?.Cancel();
+            _branchesCts?.Dispose();
+            _branchesCts = null;
         }
         else if (IsVisible && !_wasVisible)
         {
@@ -271,6 +376,141 @@
         _dotNetRef?.Dispose();
         _pushCheckCts?.Cancel();
         _pushCheckCts?.Dispose();
+        _branchesCts?.Cancel();
+        _branchesCts?.Dispose();
+    }
+
+    private RepoBranchUiState GetRepoBranchState(int repositoryId)
+        => _branchByRepoId.TryGetValue(repositoryId, out var state)
+            ? state
+            : new RepoBranchUiState { IsLoading = true };
+
+    private void ToggleTargetMenu(int repositoryId)
+    {
+        if (IsBusy) return;
+        _openTargetMenuRepoId = _openTargetMenuRepoId == repositoryId ? null : repositoryId;
+    }
+
+    private void CloseTargetMenu() => _openTargetMenuRepoId = null;
+
+    private void SelectTargetBranch(int repositoryId, string branch)
+    {
+        OnTargetBaseChanged(repositoryId, branch);
+        _openTargetMenuRepoId = null;
+    }
+
+    private void OnTargetBaseChanged(int repositoryId, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return;
+        if (!_branchByRepoId.TryGetValue(repositoryId, out var state))
+            return;
+        _branchByRepoId[repositoryId] = state with { SelectedBase = value.Trim() };
+    }
+
+    private async Task LoadTargetBranchesAsync()
+    {
+        if (Targets.Count == 0) return;
+
+        _branchesCts?.Cancel();
+        _branchesCts?.Dispose();
+        _branchesCts = new CancellationTokenSource();
+        var ct = _branchesCts.Token;
+
+        try
+        {
+            using var semaphore = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
+            var tasks = Targets.Select(t => LoadOneRepoBranchesAsync(t, semaphore, ct)).ToList();
+            await Task.WhenAll(tasks);
+            if (ct.IsCancellationRequested) return;
+
+            if (_branchByRepoId.Values.Any(s => !string.IsNullOrEmpty(s.Error)))
+                _branchLoadError = "Some repositories could not load target branches.";
+            else
+                _branchLoadError = null;
+        }
+        catch (OperationCanceledException)
+        {
+            // ignored
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to load target branches for {Count} PR target(s)", Targets.Count);
+            _branchLoadError = "Could not load target branches.";
+            foreach (var t in Targets)
+            {
+                _branchByRepoId[t.RepositoryId] = new RepoBranchUiState
+                {
+                    IsLoading = false,
+                    Error = "Could not load branches",
+                    Candidates = [],
+                    SelectedBase = t.DefaultBranch,
+                };
+            }
+        }
+        finally
+        {
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadOneRepoBranchesAsync(NewPrTargetRepo target, SemaphoreSlim semaphore, CancellationToken ct)
+    {
+        await semaphore.WaitAsync(ct);
+        try
+        {
+            // Refresh then read - remote branch list suitable for GitHub PR bases. Does not checkout.
+            await BranchOperations.RefreshBranchesAsync(WorkspaceId, ContextId, target.RepositoryId, ct);
+            if (ct.IsCancellationRequested) return;
+
+            var outcome = await BranchOperations.GetBranchesAsync(WorkspaceId, ContextId, target.RepositoryId, ct);
+            if (ct.IsCancellationRequested) return;
+
+            if (!outcome.IsSuccessStatus || outcome.Body is not WorkspaceBranchesSnapshot snapshot)
+            {
+                _branchByRepoId[target.RepositoryId] = new RepoBranchUiState
+                {
+                    IsLoading = false,
+                    Error = outcome.ErrorText ?? "Could not load branches",
+                    Candidates = [],
+                    SelectedBase = target.DefaultBranch,
+                };
+                return;
+            }
+
+            var candidates = NewPullRequestTargetBranch.BuildBaseCandidates(snapshot);
+            var selected = NewPullRequestTargetBranch.ResolveInitialBase(
+                target.ParentBranchName,
+                target.DefaultBranch,
+                target.HeadBranch,
+                candidates);
+
+            _branchByRepoId[target.RepositoryId] = new RepoBranchUiState
+            {
+                IsLoading = false,
+                Candidates = candidates,
+                SelectedBase = selected,
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            // ignored
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Load target branches failed for RepositoryId={RepositoryId}", target.RepositoryId);
+            _branchByRepoId[target.RepositoryId] = new RepoBranchUiState
+            {
+                IsLoading = false,
+                Error = "Could not load branches",
+                Candidates = [],
+                SelectedBase = target.DefaultBranch,
+            };
+        }
+        finally
+        {
+            semaphore.Release();
+        }
     }
 
     private string ComputeDefaultTitle()
@@ -297,8 +537,6 @@
             var users = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var teams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            // Bounded to MaxConcurrency so opening the dialog for many target repos at once doesn't fire an
-            // unbounded burst of GitHub GETs (2 per target) that can trip a secondary/abuse rate limit.
             using var semaphore = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
             var tasks = Targets.SelectMany(t => new Task[]
             {
@@ -462,10 +700,29 @@
             : $"{selected} selected of {total}";
     }
 
+    private IReadOnlyDictionary<int, string> GetSelectedBases()
+    {
+        var map = new Dictionary<int, string>();
+        foreach (var t in Targets)
+        {
+            var state = GetRepoBranchState(t.RepositoryId);
+            if (!string.IsNullOrWhiteSpace(state.SelectedBase))
+                map[t.RepositoryId] = state.SelectedBase;
+        }
+        return map;
+    }
+
     private async Task HandleKeyDown(KeyboardEventArgs e)
     {
         if (e.Key == "Escape" && !IsBusy)
+        {
+            if (_openTargetMenuRepoId is not null)
+            {
+                CloseTargetMenu();
+                return;
+            }
             await HandleCancelClick();
+        }
     }
 
     private async Task HandleCancelClick()
@@ -475,7 +732,7 @@
 
     private async Task HandleOpenInGitHubClick()
     {
-        await OnOpenInGitHub.InvokeAsync();
+        await OnOpenInGitHub.InvokeAsync(GetSelectedBases());
     }
 
     private async Task HandleCreateClick(bool pushAndCreate)
@@ -497,10 +754,19 @@
             IsDraft: _isDraft,
             Reviewers: users,
             TeamReviewers: teams,
-            RepositoryIdsToPush: pushAndCreate ? _repoIdsNeedingPush.ToList() : Array.Empty<int>());
+            RepositoryIdsToPush: pushAndCreate ? _repoIdsNeedingPush.ToList() : Array.Empty<int>(),
+            BaseBranchByRepositoryId: GetSelectedBases());
 
         await OnCreate.InvokeAsync(result);
     }
 
     private sealed record ReviewerItem(string Name, bool IsTeam);
+
+    private sealed record RepoBranchUiState
+    {
+        public bool IsLoading { get; init; }
+        public IReadOnlyList<string> Candidates { get; init; } = Array.Empty<string>();
+        public string SelectedBase { get; init; } = "";
+        public string? Error { get; init; }
+    }
 }

@@ -109,8 +109,8 @@ public sealed class WorkspaceFeatureOperations(
             .ToList();
 
         progress?.Report(new OperationProgress("Reading Workspace HEAD commits..."));
-        var heads = await GetHeadCommitsAsync(workspace, repoNames, cancellationToken);
-        if (heads.Count != repoNames.Count)
+        var snapshot = await GetHeadSnapshotAsync(workspace, repoNames, cancellationToken);
+        if (snapshot.Commits.Count != repoNames.Count)
             return FailCreate("HeadCommitsIncomplete", "Could not resolve HEAD for every Workspace repository.");
 
         var now = DateTime.UtcNow;
@@ -142,8 +142,13 @@ public sealed class WorkspaceFeatureOperations(
         foreach (var link in links)
         {
             var repoName = link.Repository!.RepositoryName;
-            if (!heads.TryGetValue(repoName, out var sha) || string.IsNullOrWhiteSpace(sha))
+            if (!snapshot.Commits.TryGetValue(repoName, out var sha) || string.IsNullOrWhiteSpace(sha))
                 return FailCreate("HeadCommitsIncomplete", $"Missing HEAD for repository '{repoName}'.");
+
+            // Parent branch from the same agent snapshot as BaseCommitSha. Detached HEAD -> null
+            // (do not invent a name from mutable Workspace link state).
+            snapshot.Branches.TryGetValue(repoName, out var parentBranch);
+            parentBranch = string.IsNullOrWhiteSpace(parentBranch) ? null : parentBranch.Trim();
 
             var worktreePath = await pathResolver.GetRepositoryPathAsync(contextId, link.WorkspaceRepositoryId, cancellationToken);
             var row = new WorkspaceFeatureRepository
@@ -152,7 +157,7 @@ public sealed class WorkspaceFeatureOperations(
                 WorkspaceRepositoryId = link.WorkspaceRepositoryId,
                 WorktreePath = worktreePath,
                 BaseCommitSha = sha,
-                ParentBranchName = string.IsNullOrWhiteSpace(link.BranchName) ? null : link.BranchName.Trim(),
+                ParentBranchName = parentBranch,
                 CreatedAt = now,
                 State = WorkspaceFeatureRepositoryState.Pending
             };
@@ -808,11 +813,35 @@ public sealed class WorkspaceFeatureOperations(
         await db.SaveChangesAsync(cancellationToken);
     }
 
-    private async Task<Dictionary<string, string>> GetHeadCommitsAsync(
+    public async Task<IReadOnlyDictionary<int, string?>> GetParentBranchNamesByRepositoryIdAsync(
+        WorkspaceFeatureContextId featureContextId,
+        CancellationToken cancellationToken = default)
+    {
+        var info = await contextResolver.GetRequiredAsync(featureContextId, cancellationToken: cancellationToken);
+        if (info.IsSpecialWorkspace)
+            return new Dictionary<int, string?>();
+
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var rows = await db.WorkspaceFeatureRepositories
+            .AsNoTracking()
+            .Where(r => r.WorkspaceFeatureContextId == featureContextId.Value)
+            .Join(
+                db.WorkspaceRepositories.AsNoTracking(),
+                r => r.WorkspaceRepositoryId,
+                l => l.WorkspaceRepositoryId,
+                (r, l) => new { l.RepositoryId, r.ParentBranchName })
+            .ToListAsync(cancellationToken);
+
+        return rows.ToDictionary(x => x.RepositoryId, x => x.ParentBranchName);
+    }
+
+    private async Task<(Dictionary<string, string> Commits, Dictionary<string, string> Branches)> GetHeadSnapshotAsync(
         Workspace workspace,
         IReadOnlyList<string> repositoryNames,
         CancellationToken cancellationToken)
     {
+        var emptyCommits = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var emptyBranches = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var root = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
         var response = await agentBridge.SendCommandAsync(
             AgentHubMethods.GetHeadCommits,
@@ -826,10 +855,12 @@ public sealed class WorkspaceFeatureOperations(
             cancellationToken);
 
         if (!response.Success)
-            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            return (emptyCommits, emptyBranches);
 
         var payload = AgentResponseJson.DeserializeAgentResponse<GetHeadCommitsAgentResponse>(response.Data);
-        return payload?.Commits ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        return (
+            payload?.Commits ?? emptyCommits,
+            payload?.Branches ?? emptyBranches);
     }
 
     private static void EnsureManagedFeatureStorageRoot(Workspace workspace)
@@ -884,6 +915,9 @@ public sealed class WorkspaceFeatureOperations(
     {
         [JsonPropertyName("commits")]
         public Dictionary<string, string>? Commits { get; set; }
+
+        [JsonPropertyName("branches")]
+        public Dictionary<string, string>? Branches { get; set; }
     }
 
     private sealed class CreateGitWorktreeAgentResponse

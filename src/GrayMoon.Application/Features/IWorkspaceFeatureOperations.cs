@@ -24,6 +24,14 @@ public interface IWorkspaceFeatureOperations
     Task<IReadOnlyList<WorkspaceFeatureContextInfo>> ListFeaturesAsync(
         int workspaceId,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Per-repository parent/source branch captured at Feature creation (RepositoryId -> ParentBranchName).
+    /// Empty for the special Workspace context. Values may be null when provenance was unknown.
+    /// </summary>
+    Task<IReadOnlyDictionary<int, string?>> GetParentBranchNamesByRepositoryIdAsync(
+        WorkspaceFeatureContextId featureContextId,
+        CancellationToken cancellationToken = default);
 }
 
 public enum WorkspaceFeatureBaseKindApplication

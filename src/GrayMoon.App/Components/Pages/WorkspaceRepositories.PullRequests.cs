@@ -30,8 +30,21 @@ public sealed partial class WorkspaceRepositories
     private Task OpenPullRequestDialogForRepositoriesAsync(IReadOnlyList<WorkspaceRepositoryLink> links)
         => OpenPullRequestDialogCoreAsync(links);
 
-    private Task OpenPullRequestDialogCoreAsync(IEnumerable<WorkspaceRepositoryLink> links)
+    private async Task OpenPullRequestDialogCoreAsync(IEnumerable<WorkspaceRepositoryLink> links)
     {
+        IReadOnlyDictionary<int, string?> parentByRepoId = new Dictionary<int, string?>();
+        if (_isFeatureContext && _selectedContextId is { } featureContextId)
+        {
+            try
+            {
+                parentByRepoId = await FeatureOperations.GetParentBranchNamesByRepositoryIdAsync(featureContextId);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Failed to load Feature parent branches for New PR");
+            }
+        }
+
         var targets = new List<NewPrTargetRepo>();
         foreach (var wr in links)
         {
@@ -48,19 +61,22 @@ public sealed partial class WorkspaceRepositories
             var hasOpenPr = wr.PullRequest != null && string.Equals(wr.PullRequest.State, "open", StringComparison.OrdinalIgnoreCase);
             if (hasOpenPr) continue;
 
+            parentByRepoId.TryGetValue(wr.RepositoryId, out var parentBranch);
+
             targets.Add(new NewPrTargetRepo(
                 RepositoryId: wr.RepositoryId,
                 Owner: owner,
                 RepositoryName: repoName,
                 HeadBranch: wr.BranchName!,
-                BaseBranch: wr.DefaultBranchName!,
+                DefaultBranch: wr.DefaultBranchName!,
+                ParentBranchName: parentBranch,
                 CloneUrl: repo.CloneUrl));
         }
 
         if (targets.Count == 0)
         {
             ToastService.Show("No eligible repositories to create a pull request from.");
-            return Task.CompletedTask;
+            return;
         }
 
         _newPrModal = new NewPullRequestModalState
@@ -69,7 +85,6 @@ public sealed partial class WorkspaceRepositories
             Targets = targets
         };
         StateHasChanged();
-        return Task.CompletedTask;
     }
 
     private void CloseNewPullRequestModal()
@@ -106,7 +121,7 @@ public sealed partial class WorkspaceRepositories
             WorkspaceId, contextId.Value, branchByRepositoryId, force: force, cancellationToken: cancellationToken);
     }
 
-    private async Task HandleNewPrOpenInGitHubAsync()
+    private async Task HandleNewPrOpenInGitHubAsync(IReadOnlyDictionary<int, string> baseByRepositoryId)
     {
         var targets = _newPrModal.Targets;
         if (targets.Count == 0) return;
@@ -116,7 +131,10 @@ public sealed partial class WorkspaceRepositories
         {
             var repoUrl = RepositoryUrlHelper.GetRepositoryUrl(t.CloneUrl);
             if (string.IsNullOrEmpty(repoUrl)) continue;
-            urls.Add($"{repoUrl}/compare/{t.BaseBranch}...{Uri.EscapeDataString(t.HeadBranch)}");
+            var baseBranch = baseByRepositoryId.TryGetValue(t.RepositoryId, out var selected) && !string.IsNullOrWhiteSpace(selected)
+                ? selected
+                : t.DefaultBranch;
+            urls.Add($"{repoUrl}/compare/{Uri.EscapeDataString(baseBranch)}...{Uri.EscapeDataString(t.HeadBranch)}");
         }
         if (urls.Count == 0)
         {
@@ -149,19 +167,36 @@ public sealed partial class WorkspaceRepositories
             return Task.CompletedTask;
         }
 
-        var requests = targets.Select(t => new CreatePullRequestRequest
+        var requests = new List<CreatePullRequestRequest>();
+        foreach (var t in targets)
         {
-            RepositoryId = t.RepositoryId,
-            Owner = t.Owner,
-            RepositoryName = t.RepositoryName,
-            HeadBranch = t.HeadBranch,
-            BaseBranch = t.BaseBranch,
-            Title = form.Title,
-            Body = form.Body,
-            IsDraft = form.IsDraft,
-            Reviewers = form.Reviewers,
-            TeamReviewers = form.TeamReviewers
-        }).ToList();
+            if (!form.BaseBranchByRepositoryId.TryGetValue(t.RepositoryId, out var baseBranch)
+                || string.IsNullOrWhiteSpace(baseBranch))
+            {
+                ToastService.ShowError($"Target branch is required for {t.RepositoryName}.");
+                return Task.CompletedTask;
+            }
+
+            if (string.Equals(baseBranch, t.HeadBranch, StringComparison.Ordinal))
+            {
+                ToastService.ShowError($"Source and target branch cannot be the same for {t.RepositoryName}.");
+                return Task.CompletedTask;
+            }
+
+            requests.Add(new CreatePullRequestRequest
+            {
+                RepositoryId = t.RepositoryId,
+                Owner = t.Owner,
+                RepositoryName = t.RepositoryName,
+                HeadBranch = t.HeadBranch,
+                BaseBranch = baseBranch,
+                Title = form.Title,
+                Body = form.Body,
+                IsDraft = form.IsDraft,
+                Reviewers = form.Reviewers,
+                TeamReviewers = form.TeamReviewers
+            });
+        }
 
         var repoIdsToPush = form.RepositoryIdsToPush.ToHashSet();
         var draftSuffix = form.IsDraft ? " as draft" : string.Empty;

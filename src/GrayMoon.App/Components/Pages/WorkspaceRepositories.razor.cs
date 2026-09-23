@@ -1,5 +1,6 @@
 using GrayMoon.App.Services;
 using GrayMoon.App.Services.Queries;
+using GrayMoon.Application;
 using GrayMoon.Application.Features;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.Options;
@@ -29,6 +30,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     [Inject] private AppActivityStateService ActivityStateService { get; set; } = default!;
     [Inject] private IWorkspaceFeatureContextResolver FeatureContextResolver { get; set; } = default!;
     [Inject] private IWorkspaceSelectedFeatureContextService SelectedFeatureContextService { get; set; } = default!;
+    [Inject] private IWorkspaceFeatureOperations FeatureOperations { get; set; } = default!;
 
     private WorkspaceFeatureContextId? _selectedContextId;
     private bool _isFeatureContext;
