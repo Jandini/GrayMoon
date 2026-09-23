@@ -223,6 +223,9 @@
     flex: 0 0 auto;
     padding: 0.45rem 0.5rem 0.5rem;
     border-bottom: 1px solid var(--border-color);
+    /* Narrow-left-panel label swap for "Push committed" → "Push" (see @container below). */
+    container-type: inline-size;
+    container-name: git-changes-commit;
 }
 
 .git-changes-workspace-commit__message {
@@ -262,13 +265,21 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 0.4rem;
     margin-top: 0.4rem;
+    min-width: 0;
 }
 
 .git-changes-workspace-commit__buttons {
     display: flex;
     align-items: center;
     gap: 0.4rem;
+    flex-shrink: 0;
+}
+
+.git-changes-workspace-commit__buttons .btn {
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 /* Bootstrap's .form-check pairs padding-left:1.5em on this element with margin-left:-1.5em on the
@@ -280,6 +291,8 @@
     gap: 0.4rem;
     margin: 0;
     padding-left: 0;
+    flex-shrink: 0;
+    white-space: nowrap;
 }
 
 .git-changes-workspace-commit__push-check .form-check-input {
@@ -309,11 +322,27 @@
     margin: 0;
     color: var(--text-secondary);
     user-select: none;
+    white-space: nowrap;
     /* Optical nudge - a text line box's visual center sits slightly above its geometric center
        (font ascent/descent is asymmetric), so align-items:center alone reads as "a bit high"
        next to the checkbox's symmetric box. */
     position: relative;
     top: 1px;
+}
+
+.git-changes-workspace-commit__push-text--short {
+    display: none;
+}
+
+/* Left splitter column can be dragged narrow; shorten the checkbox label before it wraps. */
+@container git-changes-commit (max-width: 340px) {
+    .git-changes-workspace-commit__push-text--full {
+        display: none;
+    }
+
+    .git-changes-workspace-commit__push-text--short {
+        display: inline;
+    }
 }
 
 .git-changes-diff-placeholder {
