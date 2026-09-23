@@ -226,9 +226,25 @@ public sealed partial class WorkspaceGitChanges
             return;
         }
 
+        var html = result.Html ?? string.Empty;
+        if (!string.IsNullOrEmpty(html)
+            && _selectedRow is { FilePath: { } mdPath, WorkspaceRepositoryId: var wrId })
+        {
+            var resolved = await ResolveRepositoryAsync(wrId);
+            if (resolved is { } repo)
+            {
+                html = await MarkdownImageEmbedder.EmbedAsync(
+                    html,
+                    repo.Root,
+                    repo.WorkspaceName,
+                    repo.RepositoryName,
+                    mdPath);
+            }
+        }
+
         if (_markdownViewerRef != null)
         {
-            await _markdownViewerRef.SetHtmlAsync(result.Html ?? string.Empty);
+            await _markdownViewerRef.SetHtmlAsync(html);
         }
     }
 

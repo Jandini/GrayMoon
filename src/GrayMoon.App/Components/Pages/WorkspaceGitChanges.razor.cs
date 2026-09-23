@@ -45,6 +45,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     [Inject] private IJSRuntime Js { get; set; } = default!;
     [Inject] private WorkspaceContextNavigationService ContextNavigation { get; set; } = default!;
     [Inject] private MarkdownProseDiffService MarkdownProseDiffService { get; set; } = default!;
+    [Inject] private MarkdownImageEmbedder MarkdownImageEmbedder { get; set; } = default!;
 
     private int? _loadedWorkspaceId;
     private int? _loadedContextQuery;

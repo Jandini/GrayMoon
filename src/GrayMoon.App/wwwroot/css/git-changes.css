@@ -739,6 +739,7 @@
 
 .git-diff-markdown-container {
     background: #1e1e1e;
+    width: 100%;
 }
 
 .markdown-diff-viewer-wrap {
@@ -747,6 +748,7 @@
     height: 100%;
     min-height: 0;
     min-width: 0;
+    width: 100%;
 }
 
 .markdown-diff-viewer-header {
@@ -770,12 +772,6 @@
     color: var(--text-secondary);
 }
 
-.markdown-diff-viewer-header__badge {
-    margin-left: auto;
-    font-size: 0.7rem;
-    color: var(--text-muted);
-}
-
 .markdown-diff-viewer.markdown-body {
     flex: 1 1 auto;
     min-height: 0;
@@ -784,7 +780,31 @@
     color: #d4d4d4;
     font-size: 0.95rem;
     line-height: 1.55;
+    box-sizing: border-box;
+    width: 100%;
     max-width: none;
+    margin: 0;
+    /* Auto-width gray scrollbars (match tree / Firefox + Chromium/WebView2) */
+    scrollbar-width: auto;
+    scrollbar-color: #5a5a5a #2a2a2a;
+}
+
+.markdown-diff-viewer.markdown-body::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.markdown-diff-viewer.markdown-body::-webkit-scrollbar-track {
+    background: #2a2a2a;
+}
+
+.markdown-diff-viewer.markdown-body::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 4px;
+}
+
+.markdown-diff-viewer.markdown-body::-webkit-scrollbar-thumb:hover {
+    background: #7a7a7a;
 }
 
 .markdown-body > *:first-child {
@@ -802,6 +822,8 @@
     margin-bottom: 0.5em;
     font-weight: 600;
     line-height: 1.25;
+    max-width: none;
+    width: 100%;
 }
 
 .markdown-body h1 { font-size: 1.75em; border-bottom: 1px solid #333; padding-bottom: 0.3em; }
@@ -813,8 +835,11 @@
 .markdown-body ol,
 .markdown-body blockquote,
 .markdown-body table,
-.markdown-body pre {
-    max-width: 72ch;
+.markdown-body pre,
+.markdown-body .mermaid-panzoom {
+    max-width: none;
+    width: 100%;
+    box-sizing: border-box;
 }
 
 .markdown-body a {
@@ -835,6 +860,28 @@
     border-radius: 4px;
     padding: 0.75rem 1rem;
     overflow: auto;
+    scrollbar-width: auto;
+    scrollbar-color: #5a5a5a #2a2a2a;
+}
+
+.markdown-body pre::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.markdown-body pre::-webkit-scrollbar-track {
+    background: #2a2a2a;
+}
+
+.markdown-body pre::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 4px;
+}
+
+.markdown-body img {
+    max-width: 100%;
+    height: auto;
+    display: block;
 }
 
 .markdown-body pre code {

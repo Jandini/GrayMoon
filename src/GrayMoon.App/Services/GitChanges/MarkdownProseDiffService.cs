@@ -168,6 +168,8 @@ public sealed class MarkdownProseDiffService
         sanitizer.AllowedAttributes.Add("checked");
         sanitizer.AllowedAttributes.Add("type");
         sanitizer.AllowedAttributes.Add("disabled");
+        // data: URIs after MarkdownImageEmbedder rewrites relative/remote images.
+        sanitizer.AllowedSchemes.Add("data");
         return sanitizer;
     }
 }
