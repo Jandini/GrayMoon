@@ -224,6 +224,9 @@
     flex: 0 0 auto;
     padding: 0.45rem 0.5rem 0.5rem;
     border-bottom: 1px solid var(--border-color);
+    /* Narrow-left-panel label swap for "Push committed" → "Push" (see @container below). */
+    container-type: inline-size;
+    container-name: git-changes-commit;
 }
 
 .git-changes-workspace-commit__message {
@@ -276,6 +279,7 @@
     flex-wrap: nowrap;
     flex-shrink: 0;
     gap: 0.4rem;
+    flex-shrink: 0;
 }
 
 .git-changes-workspace-commit__buttons .btn {
@@ -292,6 +296,8 @@
     gap: 0.4rem;
     margin: 0;
     padding-left: 0;
+    flex-shrink: 0;
+    white-space: nowrap;
 }
 
 .git-changes-workspace-commit__push-check .form-check-input {
