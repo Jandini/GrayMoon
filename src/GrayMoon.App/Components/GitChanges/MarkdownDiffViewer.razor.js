@@ -1,4 +1,4 @@
-﻿// Rendered markdown preview host for Git Changes. Uses the same co-located .razor.js +
+// Rendered markdown preview host for Git Changes. Uses the same co-located .razor.js +
 // IJSObjectReference pattern as GitDiffViewer so each instance can be set/cleared/disposed
 // independently. Mermaid is lazy-loaded from /mermaid/mermaid.min.js on first diagram.
 
@@ -140,14 +140,29 @@ function attachPanZoom(container, content, options = {}) {
     let startX = 0;
     let startY = 0;
     const minScale = 0.25;
-    const maxScale = 5;
-    const { onExpand = null, showExpand = true } = options;
+    const maxScale = 8;
+    // directInteract: lightbox mode - wheel zooms and drag pans without Alt.
+    const {
+        onExpand = null,
+        showExpand = true,
+        host = null,
+        directInteract = false,
+    } = options;
+    const diagramHost = host || content.querySelector('.mermaid') || content;
 
     const apply = () => {
         content.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
     };
 
-    const reset = () => {
+    const clearTextSelection = () => {
+        const sel = window.getSelection?.();
+        if (sel && sel.rangeCount > 0) {
+            sel.removeAllRanges();
+        }
+    };
+
+    const fit = () => {
+        fitSvgToContainer(container, diagramHost);
         scale = 1;
         translateX = 0;
         translateY = 0;
@@ -170,11 +185,14 @@ function attachPanZoom(container, content, options = {}) {
     const expandBtn = showExpand
         ? '<button type="button" class="mermaid-panzoom-btn" data-act="expand" title="Expand diagram" aria-label="Expand diagram"><i class="bi bi-arrows-fullscreen" aria-hidden="true"></i></button>'
         : '';
+    const panBtn = directInteract
+        ? ''
+        : '<button type="button" class="mermaid-panzoom-btn" data-act="pan" title="Toggle pan mode" aria-label="Toggle pan mode"><i class="bi bi-arrows-move" aria-hidden="true"></i></button>';
     controls.innerHTML =
         '<button type="button" class="mermaid-panzoom-btn" data-act="in" title="Zoom in" aria-label="Zoom in"><i class="bi bi-zoom-in" aria-hidden="true"></i></button>' +
         '<button type="button" class="mermaid-panzoom-btn" data-act="out" title="Zoom out" aria-label="Zoom out"><i class="bi bi-zoom-out" aria-hidden="true"></i></button>' +
         '<button type="button" class="mermaid-panzoom-btn" data-act="reset" title="Reset view" aria-label="Reset view"><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i></button>' +
-        '<button type="button" class="mermaid-panzoom-btn" data-act="pan" title="Toggle pan mode" aria-label="Toggle pan mode"><i class="bi bi-arrows-move" aria-hidden="true"></i></button>' +
+        panBtn +
         expandBtn;
 
     controls.addEventListener('click', (e) => {
@@ -190,7 +208,7 @@ function attachPanZoom(container, content, options = {}) {
         } else if (act === 'out') {
             zoomBy(1 / 1.2);
         } else if (act === 'reset') {
-            reset();
+            fit();
         } else if (act === 'pan') {
             panMode = !panMode;
             btn.classList.toggle('is-active', panMode);
@@ -201,16 +219,30 @@ function attachPanZoom(container, content, options = {}) {
     });
 
     container.appendChild(controls);
+    container.classList.add('mermaid-panzoom--ready');
+    if (directInteract) {
+        container.classList.add('mermaid-panzoom--direct');
+    }
     content.style.transformOrigin = '0 0';
-    apply();
+    // Prevent accidental text selection while dragging / panning the diagram.
+    container.style.userSelect = 'none';
+    container.style.webkitUserSelect = 'none';
+    container.addEventListener('selectstart', (e) => e.preventDefault());
+
+    requestAnimationFrame(() => {
+        fit();
+        // Second pass after layout settles (lightbox flex height especially).
+        requestAnimationFrame(fit);
+    });
 
     container.addEventListener(
         'wheel',
         (e) => {
-            if (!e.altKey) {
+            if (!directInteract && !e.altKey) {
                 return;
             }
             e.preventDefault();
+            clearTextSelection();
             const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
             zoomBy(factor, e.clientX, e.clientY);
         },
@@ -218,9 +250,15 @@ function attachPanZoom(container, content, options = {}) {
     );
 
     container.addEventListener('pointerdown', (e) => {
-        if (!(panMode || e.altKey) || e.button !== 0) {
+        if (e.target.closest('.mermaid-panzoom-controls')) {
             return;
         }
+        const canPan = directInteract || panMode || e.altKey;
+        if (!canPan || e.button !== 0) {
+            return;
+        }
+        e.preventDefault();
+        clearTextSelection();
         isPanning = true;
         startX = e.clientX - translateX;
         startY = e.clientY - translateY;
@@ -232,6 +270,8 @@ function attachPanZoom(container, content, options = {}) {
         if (!isPanning) {
             return;
         }
+        e.preventDefault();
+        clearTextSelection();
         translateX = e.clientX - startX;
         translateY = e.clientY - startY;
         apply();
@@ -243,6 +283,7 @@ function attachPanZoom(container, content, options = {}) {
         }
         isPanning = false;
         container.classList.remove('mermaid-panzoom--dragging');
+        clearTextSelection();
         try {
             container.releasePointerCapture(e.pointerId);
         } catch {
@@ -262,54 +303,103 @@ function attachPanZoom(container, content, options = {}) {
             onExpand();
         }
     });
+
+    return { fit };
 }
 
-function sizeMermaidFrame(wrap, host) {
-    const svg = host.querySelector('svg');
-    if (!svg) {
-        wrap.style.height = '360px';
-        return;
-    }
-
-    let naturalHeight = 0;
+function getSvgNaturalSize(svg) {
     try {
         const viewBox = svg.viewBox?.baseVal;
-        if (viewBox && Number.isFinite(viewBox.height) && viewBox.height > 0) {
-            naturalHeight = viewBox.height;
+        if (viewBox && viewBox.width > 0 && viewBox.height > 0) {
+            return { width: viewBox.width, height: viewBox.height };
         }
     } catch {
         // ignore
     }
 
-    if (naturalHeight <= 0) {
-        try {
-            const box = svg.getBBox();
-            if (Number.isFinite(box.height) && box.height > 0) {
-                naturalHeight = box.height;
-            }
-        } catch {
-            // ignore
+    try {
+        const box = svg.getBBox();
+        if (box.width > 0 && box.height > 0) {
+            return { width: box.width, height: box.height };
         }
+    } catch {
+        // ignore
     }
 
-    if (naturalHeight <= 0) {
-        const attrH = parseFloat(svg.getAttribute('height') || '');
-        if (Number.isFinite(attrH) && attrH > 0) {
-            naturalHeight = attrH;
-        }
+    const attrW = parseFloat(svg.getAttribute('width') || '');
+    const attrH = parseFloat(svg.getAttribute('height') || '');
+    if (Number.isFinite(attrW) && Number.isFinite(attrH) && attrW > 0 && attrH > 0) {
+        return { width: attrW, height: attrH };
     }
 
-    // Prefer a comfortable frame; never collapse (SVG max-height:100% + height:auto can paint as 0).
-    const preferred = naturalHeight > 0
-        ? Math.max(260, Math.min(640, Math.round(naturalHeight + 56)))
-        : 360;
+    return null;
+}
+
+/** Scale the SVG to fill the container while preserving aspect ratio (CSS object-fit: contain). */
+function fitSvgToContainer(container, host) {
+    const svg = host?.querySelector?.('svg') || (host?.tagName === 'svg' ? host : null);
+    if (!svg || !container) {
+        return;
+    }
+
+    const natural = getSvgNaturalSize(svg);
+    if (!natural) {
+        return;
+    }
+
+    const style = window.getComputedStyle(container);
+    const padX = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
+    const padY = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+    const availW = Math.max(40, container.clientWidth - padX - 16);
+    const availH = Math.max(40, container.clientHeight - padY - 16);
+    if (availW <= 0 || availH <= 0) {
+        return;
+    }
+
+    const fitScale = Math.min(availW / natural.width, availH / natural.height);
+    const displayW = Math.max(1, Math.floor(natural.width * fitScale));
+    const displayH = Math.max(1, Math.floor(natural.height * fitScale));
+
+    svg.setAttribute('width', String(displayW));
+    svg.setAttribute('height', String(displayH));
+    svg.style.cssText = `width:${displayW}px;height:${displayH}px;max-width:none;max-height:none;display:block;`;
+}
+
+function sizeMermaidFrame(wrap) {
+    const vh = window.innerHeight || 800;
+    // Tall default frame; diagram is then fit-to-fill this box.
+    const preferred = Math.max(340, Math.min(580, Math.round(vh * 0.48)));
     wrap.style.minHeight = `${preferred}px`;
     wrap.style.height = `${preferred}px`;
+}
 
-    svg.style.maxWidth = '100%';
-    svg.style.width = '100%';
-    svg.style.height = 'auto';
-    svg.style.maxHeight = 'none';
+function cleanHeadingTitle(text) {
+    let t = (text || '').replace(/\s+/g, ' ').trim();
+    // Strip leading/trailing punctuation and markdown leftovers (# : - | ·).
+    t = t.replace(/^[\s#.:\-\u2013\u2014|·•*]+/u, '').replace(/[\s#.:\-\u2013\u2014|·•*]+$/u, '').trim();
+    return t || 'Diagram';
+}
+
+/** Walk a few previous siblings for the nearest heading to title the lightbox. */
+function findPrecedingHeadingTitle(fromEl) {
+    let el = fromEl?.previousElementSibling || null;
+    for (let i = 0; el && i < 10; i++, el = el.previousElementSibling) {
+        if (/^H[1-6]$/i.test(el.tagName)) {
+            return cleanHeadingTitle(el.textContent || '');
+        }
+    }
+
+    const parent = fromEl?.parentElement;
+    if (parent) {
+        el = parent.previousElementSibling;
+        for (let i = 0; el && i < 6; i++, el = el.previousElementSibling) {
+            if (/^H[1-6]$/i.test(el.tagName)) {
+                return cleanHeadingTitle(el.textContent || '');
+            }
+        }
+    }
+
+    return 'Diagram';
 }
 
 function closeMermaidLightbox() {
@@ -330,7 +420,7 @@ function onMermaidLightboxKeydown(e) {
     }
 }
 
-async function openMermaidLightbox(source) {
+async function openMermaidLightbox(source, title) {
     closeMermaidLightbox();
 
     let mermaid;
@@ -340,22 +430,24 @@ async function openMermaidLightbox(source) {
         return;
     }
 
+    const label = cleanHeadingTitle(title) || 'Diagram';
     const overlay = document.createElement('div');
     overlay.id = 'gm-mermaid-lightbox';
     overlay.className = 'mermaid-lightbox';
     overlay.setAttribute('role', 'dialog');
     overlay.setAttribute('aria-modal', 'true');
-    overlay.setAttribute('aria-label', 'Mermaid diagram');
+    overlay.setAttribute('aria-label', label);
 
-    const panel = document.createElement('div');
-    panel.className = 'mermaid-lightbox__panel';
+    const titleEl = document.createElement('div');
+    titleEl.className = 'mermaid-lightbox__title';
+    titleEl.textContent = label;
 
-    const header = document.createElement('div');
-    header.className = 'mermaid-lightbox__header';
-    header.innerHTML =
-        '<span class="mermaid-lightbox__title">Diagram</span>' +
-        '<span class="mermaid-lightbox__hint">Alt+wheel zoom · Esc close</span>' +
-        '<button type="button" class="mermaid-lightbox__close" title="Close" aria-label="Close"><i class="bi bi-x-lg" aria-hidden="true"></i></button>';
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'mermaid-lightbox__close';
+    closeBtn.title = 'Close';
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.innerHTML = '<i class="bi bi-x-lg" aria-hidden="true"></i>';
 
     const stage = document.createElement('div');
     stage.className = 'mermaid-panzoom mermaid-panzoom--lightbox';
@@ -366,29 +458,24 @@ async function openMermaidLightbox(source) {
     content.appendChild(host);
     stage.appendChild(content);
 
-    panel.appendChild(header);
-    panel.appendChild(stage);
-    overlay.appendChild(panel);
+    overlay.appendChild(titleEl);
+    overlay.appendChild(closeBtn);
+    overlay.appendChild(stage);
     document.body.appendChild(overlay);
     document.body.classList.add('gm-mermaid-lightbox-open');
     document.addEventListener('keydown', onMermaidLightboxKeydown, true);
 
-    header.querySelector('.mermaid-lightbox__close')?.addEventListener('click', (e) => {
+    closeBtn.addEventListener('click', (e) => {
         e.preventDefault();
         closeMermaidLightbox();
-    });
-    overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) {
-            closeMermaidLightbox();
-        }
     });
 
     try {
         const id = `gm-mermaid-lb-${Math.random().toString(36).slice(2)}`;
         const { svg } = await mermaid.render(id, source);
         host.innerHTML = svg;
-        attachPanZoom(stage, content, { showExpand: false });
-        header.querySelector('.mermaid-lightbox__close')?.focus();
+        attachPanZoom(stage, content, { showExpand: false, host, directInteract: true });
+        closeBtn.focus();
     } catch (err) {
         const pre = document.createElement('pre');
         pre.className = 'mermaid-fallback';
@@ -423,9 +510,11 @@ async function renderMermaidIn(root) {
 
     for (const node of nodes) {
         const source = node.textContent ?? '';
+        const title = findPrecedingHeadingTitle(node);
         const wrap = document.createElement('div');
         wrap.className = 'mermaid-panzoom';
         wrap.dataset.mermaidSource = source;
+        wrap.dataset.mermaidTitle = title;
         const content = document.createElement('div');
         content.className = 'mermaid-panzoom__content';
         const host = document.createElement('div');
@@ -438,10 +527,11 @@ async function renderMermaidIn(root) {
             const id = `gm-mermaid-${Math.random().toString(36).slice(2)}`;
             const { svg } = await mermaid.render(id, source);
             host.innerHTML = svg;
-            sizeMermaidFrame(wrap, host);
+            sizeMermaidFrame(wrap);
             attachPanZoom(wrap, content, {
                 showExpand: true,
-                onExpand: () => openMermaidLightbox(source),
+                host,
+                onExpand: () => openMermaidLightbox(source, title),
             });
         } catch (err) {
             const pre = document.createElement('pre');
