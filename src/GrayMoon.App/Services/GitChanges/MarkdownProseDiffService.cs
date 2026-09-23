@@ -1,4 +1,5 @@
-﻿using System.Text.RegularExpressions;
+﻿using System.Text;
+using System.Text.RegularExpressions;
 using Ganss.Xss;
 using Markdig;
 
@@ -36,8 +37,11 @@ public sealed class MarkdownProseDiffService
 
     private static readonly HtmlSanitizer Sanitizer = CreateSanitizer();
 
-    private static readonly Regex MermaidPreBlock = new(
-        @"<pre\s+class=""mermaid"">[\s\S]*?</pre>",
+    // Keep entire fenced code blocks atomic (including rewritten <pre class="mermaid">) so tree
+    // diagrams and Mermaid source are not word-diffed. HtmlDiff allows only non-overlapping
+    // block expressions - do not register a second mermaid-only pattern.
+    private static readonly Regex AnyPreBlock = new(
+        @"<pre\b[\s\S]*?</pre>",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     // Markdig GFM emits either pre>code.language-mermaid or (with some renderers) pre.language-mermaid.
@@ -47,8 +51,8 @@ public sealed class MarkdownProseDiffService
 
     public MarkdownProseDiffResult Render(string? originalMarkdown, string? modifiedMarkdown, MarkdownProsePreviewMode mode)
     {
-        var original = originalMarkdown ?? string.Empty;
-        var modified = modifiedMarkdown ?? string.Empty;
+        var original = RepairUtf8Mojibake(originalMarkdown ?? string.Empty);
+        var modified = RepairUtf8Mojibake(modifiedMarkdown ?? string.Empty);
 
         if (original.Length > SoftCharLimitPerSide || modified.Length > SoftCharLimitPerSide)
         {
@@ -114,7 +118,9 @@ public sealed class MarkdownProseDiffService
         var oldHtml = ToHtml(originalMarkdown);
         var newHtml = ToHtml(modifiedMarkdown);
         var differ = new HtmlDiff.HtmlDiff(oldHtml, newHtml);
-        differ.AddBlockExpression(MermaidPreBlock);
+        // One block expression only - HtmlDiff rejects overlapping patterns. Mermaid fences are
+        // already rewritten to <pre class="mermaid">, so AnyPreBlock covers those too.
+        differ.AddBlockExpression(AnyPreBlock);
         var diffHtml = differ.Build();
         return Sanitize(diffHtml);
     }
@@ -147,6 +153,53 @@ public sealed class MarkdownProseDiffService
         }
 
         return Sanitizer.Sanitize(html);
+    }
+
+    /// <summary>
+    /// Repairs text that was UTF-8 box-drawing / arrows mis-decoded as Windows-1252 and then
+    /// saved again as UTF-8 (classic <c>â"œâ"€â"€</c> for <c>├──</c>). Prefer targeted replacements
+    /// so clean Unicode elsewhere is left alone.
+    /// </summary>
+    internal static string RepairUtf8Mojibake(string text)
+    {
+        if (string.IsNullOrEmpty(text) || text.IndexOf('\u00E2') < 0)
+        {
+            return text;
+        }
+
+        // UTF-8 for ├ (E2 94 9C) / ─ (E2 94 80) / └ (E2 94 94) / → (E2 86 92) / ← (E2 86 90)
+        // mis-read as CP1252 yields these Unicode sequences when re-saved as UTF-8.
+        var repaired = text
+            .Replace("\u00E2\u201D\u0153", "\u251C", StringComparison.Ordinal) // â"œ -> ├  (0x94 as U+201D)
+            .Replace("\u00E2\u201C\u0153", "\u251C", StringComparison.Ordinal) // â"œ variant (0x93 as U+201C)
+            .Replace("\u00E2\u201D\u20AC", "\u2500", StringComparison.Ordinal) // â"€ -> ─
+            .Replace("\u00E2\u201C\u20AC", "\u2500", StringComparison.Ordinal)
+            .Replace("\u00E2\u201D\u201D", "\u2514", StringComparison.Ordinal) // â"" -> └ (0x94 0x94)
+            .Replace("\u00E2\u201C\u201D", "\u2514", StringComparison.Ordinal)
+            .Replace("\u00E2\u20AC\u2122", "\u2192", StringComparison.Ordinal) // â€™ messy - try common → forms
+            .Replace("\u00E2\u2020\u2019", "\u2192", StringComparison.Ordinal) // â†' as seen in some files
+            .Replace("\u00E2\u2020\u2018", "\u2190", StringComparison.Ordinal);
+
+        // Fallback: whole-string CP1252 round-trip when targeted replaces did nothing useful
+        // but classic box-drawing mojibake markers remain.
+        if (repaired.IndexOf('\u00E2') >= 0
+            && (repaired.Contains("\u00E2\u201D", StringComparison.Ordinal) || repaired.Contains("\u00E2\u201C", StringComparison.Ordinal)))
+        {
+            try
+            {
+                var latin1 = Encoding.GetEncoding(1252);
+                var roundTrip = Encoding.UTF8.GetString(latin1.GetBytes(repaired));
+                if (roundTrip.Contains('\u251C') || roundTrip.Contains('\u2514') || roundTrip.Contains('\u2500'))
+                {
+                    return roundTrip;
+                }
+            }
+            catch (ArgumentException)
+            {
+            }
+        }
+
+        return repaired;
     }
 
     private static HtmlSanitizer CreateSanitizer()

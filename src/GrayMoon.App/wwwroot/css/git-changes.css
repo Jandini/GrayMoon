@@ -881,7 +881,41 @@
 .markdown-body img {
     max-width: 100%;
     height: auto;
+    vertical-align: middle;
+}
+
+/* Badges are almost always linked images - keep them badge-sized inline, not block giants. */
+.markdown-body a img {
+    display: inline;
+    max-height: 1.35em;
+    width: auto;
+    margin: 0 0.15em 0 0;
+}
+
+.markdown-body p > img {
     display: block;
+    margin: 0.75em 0;
+}
+
+/* Compact stand-in when a remote image (e.g. private Actions badge) cannot be embedded. */
+.markdown-img-fallback {
+    display: inline-block;
+    font-size: 0.72em;
+    font-weight: 600;
+    line-height: 1.25;
+    padding: 0.12em 0.5em;
+    margin-right: 0.2em;
+    border-radius: 3px;
+    border: 1px solid #555;
+    background: #30363d;
+    color: #c9d1d9;
+    vertical-align: middle;
+    white-space: nowrap;
+    text-decoration: none;
+}
+
+a .markdown-img-fallback {
+    color: #c9d1d9;
 }
 
 .markdown-body pre code {
@@ -916,7 +950,7 @@
 .markdown-diff-all-ins {
     background: rgba(46, 160, 67, 0.28);
     text-decoration: none;
-    color: inherit;
+    color: #aff5b4;
 }
 
 .markdown-body del.diffdel,
@@ -924,7 +958,44 @@
 .markdown-diff-all-del {
     background: rgba(248, 81, 73, 0.28);
     text-decoration: line-through;
-    color: inherit;
+    color: #ffa198;
+}
+
+/* Block children (pre/code/tables) paint their own background and would hide del/ins tints. */
+.markdown-body ins.diffins pre,
+.markdown-body ins.diffmod pre,
+.markdown-diff-all-ins pre,
+.markdown-body ins.diffins code,
+.markdown-body ins.diffmod code {
+    background: rgba(46, 160, 67, 0.22);
+    border-color: rgba(46, 160, 67, 0.55);
+    color: #aff5b4;
+}
+
+.markdown-body del.diffdel pre,
+.markdown-body del.diffmod pre,
+.markdown-diff-all-del pre,
+.markdown-body del.diffdel code,
+.markdown-body del.diffmod code {
+    background: rgba(248, 81, 73, 0.22);
+    border-color: rgba(248, 81, 73, 0.55);
+    color: #ffa198;
+    text-decoration: line-through;
+}
+
+.markdown-body ins.diffins table,
+.markdown-body ins.diffmod table,
+.markdown-diff-all-ins table {
+    outline: 2px solid rgba(46, 160, 67, 0.45);
+    outline-offset: 2px;
+}
+
+.markdown-body del.diffdel table,
+.markdown-body del.diffmod table,
+.markdown-diff-all-del table {
+    outline: 2px solid rgba(248, 81, 73, 0.45);
+    outline-offset: 2px;
+    opacity: 0.9;
 }
 
 .markdown-diff-change-flash {
@@ -943,23 +1014,28 @@
     border-radius: 4px;
     background: #1a1a1a;
     overflow: hidden;
-    min-height: 120px;
-    max-height: 480px;
+    min-height: 260px;
+    max-height: min(640px, 70vh);
+    height: 360px;
 }
 
 .mermaid-panzoom__content {
     width: 100%;
     height: 100%;
-    min-height: 120px;
+    min-height: 260px;
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 0.5rem;
+    padding: 0.75rem;
+    box-sizing: border-box;
 }
 
+/* Do not use max-height:100% on SVG - with height:auto it can collapse to an invisible diagram. */
 .mermaid-panzoom__content svg {
     max-width: 100%;
+    width: 100%;
     height: auto;
+    display: block;
 }
 
 .mermaid-panzoom-controls {
@@ -967,8 +1043,9 @@
     top: 0.4rem;
     right: 0.4rem;
     display: none;
-    gap: 0.25rem;
+    gap: 0.2rem;
     z-index: 2;
+    flex-wrap: nowrap;
 }
 
 .mermaid-panzoom:hover .mermaid-panzoom-controls,
@@ -981,16 +1058,28 @@
     background: #2a2a2a;
     color: #ddd;
     border-radius: 3px;
-    font-size: 0.7rem;
+    font-size: 0.85rem;
     line-height: 1;
-    padding: 0.25rem 0.4rem;
+    width: 1.7rem;
+    height: 1.7rem;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     cursor: pointer;
+    flex-shrink: 0;
+}
+
+.mermaid-panzoom-btn .bi {
+    font-size: 0.9rem;
+    line-height: 1;
 }
 
 .mermaid-panzoom-btn:hover,
 .mermaid-panzoom-btn.is-active {
     background: #3a3a3a;
     border-color: #4da3ff;
+    color: #fff;
 }
 
 .mermaid-panzoom--pan-mode,
@@ -1000,6 +1089,101 @@
 
 .mermaid-panzoom--dragging {
     cursor: grabbing;
+}
+
+.mermaid-panzoom--lightbox {
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto !important;
+    max-height: none;
+    margin: 0;
+    border: none;
+    border-radius: 0;
+    background: #111;
+}
+
+.mermaid-panzoom--lightbox .mermaid-panzoom__content {
+    min-height: 0;
+    height: 100%;
+}
+
+.mermaid-panzoom--lightbox .mermaid-panzoom-controls {
+    display: flex;
+}
+
+body.gm-mermaid-lightbox-open {
+    overflow: hidden;
+}
+
+.mermaid-lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: flex;
+    align-items: stretch;
+    justify-content: stretch;
+    padding: 0.75rem;
+    box-sizing: border-box;
+    background: rgba(0, 0, 0, 0.72);
+    backdrop-filter: blur(2px);
+}
+
+.mermaid-lightbox__panel {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    border: 1px solid #444;
+    border-radius: 8px;
+    background: #1a1a1a;
+    overflow: hidden;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+}
+
+.mermaid-lightbox__header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex: 0 0 auto;
+    padding: 0.45rem 0.75rem;
+    border-bottom: 1px solid #333;
+    background: #222;
+}
+
+.mermaid-lightbox__title {
+    font-weight: 600;
+    color: #e8e8e8;
+    font-size: 0.9rem;
+}
+
+.mermaid-lightbox__hint {
+    margin-left: auto;
+    color: var(--text-muted, #888);
+    font-size: 0.75rem;
+    white-space: nowrap;
+}
+
+.mermaid-lightbox__close {
+    border: 1px solid #555;
+    background: #2a2a2a;
+    color: #ddd;
+    border-radius: 3px;
+    font-size: 0.95rem;
+    line-height: 1;
+    width: 1.85rem;
+    height: 1.85rem;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.mermaid-lightbox__close:hover {
+    border-color: #4da3ff;
+    background: #3a3a3a;
 }
 
 .mermaid-error {

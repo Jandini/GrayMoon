@@ -1,7 +1,9 @@
 ﻿using System.Text.Json;
 using GrayMoon.App.Components.GitChanges;
+using GrayMoon.App.Models;
 using GrayMoon.App.Services.GitChanges;
 using GrayMoon.Common.Git;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.JSInterop;
 
 namespace GrayMoon.App.Components.Pages;
@@ -233,18 +235,54 @@ public sealed partial class WorkspaceGitChanges
             var resolved = await ResolveRepositoryAsync(wrId);
             if (resolved is { } repo)
             {
+                var githubToken = await TryGetRepositoryGitHubTokenAsync(wrId);
                 html = await MarkdownImageEmbedder.EmbedAsync(
                     html,
                     repo.Root,
                     repo.WorkspaceName,
                     repo.RepositoryName,
-                    mdPath);
+                    mdPath,
+                    githubToken);
             }
+            else
+            {
+                html = MarkdownImageEmbedder.RewriteUnembeddedRemoteImages(html);
+            }
+        }
+        else if (!string.IsNullOrEmpty(html))
+        {
+            html = MarkdownImageEmbedder.RewriteUnembeddedRemoteImages(html);
         }
 
         if (_markdownViewerRef != null)
         {
             await _markdownViewerRef.SetHtmlAsync(html);
+        }
+    }
+
+    private async Task<string?> TryGetRepositoryGitHubTokenAsync(int workspaceRepositoryId)
+    {
+        try
+        {
+            await using var db = await DbContextFactory.CreateDbContextAsync();
+            var link = await db.WorkspaceRepositories
+                .AsNoTracking()
+                .Include(l => l.Repository!)
+                .ThenInclude(r => r.Connector)
+                .FirstOrDefaultAsync(l => l.WorkspaceRepositoryId == workspaceRepositoryId);
+
+            var connector = link?.Repository?.Connector;
+            if (connector is null || connector.ConnectorType != ConnectorType.GitHub)
+            {
+                return null;
+            }
+
+            return ConnectorHelpers.UnprotectToken(connector.UserToken);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to resolve GitHub token for markdown image embed");
+            return null;
         }
     }
 
