@@ -1,7 +1,20 @@
+.merge-pr-modal-container {
+    /* Bootstrap `.modal` is `overflow-x: hidden` / `overflow-y: auto`, which clips a menu
+       that extends outside a shrink-to-fit dialog. */
+    overflow: visible;
+}
+
 ::deep .merge-pr-modal-dialog {
     /* Auto-width up to a sensible cap so long PR titles have room without the dialog always being huge. */
     width: auto;
     max-width: 720px;
+    overflow: visible;
+}
+
+::deep .merge-pr-modal-dialog > .modal-content {
+    /* Global `.modal-dialog > .modal-content { overflow: hidden }` clips the method menu
+       when it is wider than the dialog or hangs past the footer. */
+    overflow: visible;
 }
 
 ::deep .merge-pr-title {
@@ -386,6 +399,9 @@
     align-items: center;
     gap: 0.5rem;
     flex: 0 0 auto;
+    /* Stays on the right when the return-to-default checkbox is hidden (feature contexts).
+       space-between alone packs a single footer child to the start. */
+    margin-left: auto;
 }
 
 /*
