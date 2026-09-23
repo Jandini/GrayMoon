@@ -36,22 +36,6 @@
                                 </li>
                             }
                         </ul>
-                        <div class="form-check mb-2">
-                            <input class="form-check-input" type="checkbox" id="return-workspace-default" @bind="_returnToDefaultAndPull" disabled="@_analyzing" />
-                            <label class="form-check-label" for="return-workspace-default">
-                                Return Workspace repositories to default and pull latest
-                            </label>
-                        </div>
-                        <p class="text-muted small mb-3">
-                            @if (_returnToDefaultAndPull)
-                            {
-                                <text>After removing this Feature, Workspace checkouts switch to the default branch and pull so the grid matches remote.</text>
-                            }
-                            else
-                            {
-                                <text>After removing this Feature, Workspace status is refreshed from git (no pull). Incoming and upstream badges update without changing your local tip.</text>
-                            }
-                        </p>
                         @if (!_plan.IsAutomaticallySafe)
                         {
                             <div class="gm-callout gm-callout--warning mb-3" role="alert">
@@ -99,7 +83,6 @@
     private bool _removing;
     private bool _allowDiscard;
     private bool _allowForce;
-    private bool _returnToDefaultAndPull = true;
     private int? _analyzedFor;
 
     /// <summary>Plain-language summary of the Feature's completion state, replacing the raw enum name in the UI.</summary>
@@ -132,6 +115,19 @@
         if (!repo.WorktreeExists)
         {
             parts.Add("Folder is already missing on disk");
+        }
+        else if (!repo.LiveStatusEstablished)
+        {
+            parts.Add("Live worktree status unavailable");
+        }
+        else
+        {
+            if (repo.HasConflicts)
+                parts.Add("Has unresolved conflicts");
+            if (repo.HasStagedChanges)
+                parts.Add("Has staged changes");
+            if (repo.HasUncommittedChanges)
+                parts.Add("Has uncommitted changes");
         }
 
         if (repo.OutgoingCommits is int outgoing && outgoing > 0)
@@ -220,8 +216,7 @@
                 new RemoveFeatureOptions
                 {
                     AllowDiscardUncommitted = _allowDiscard,
-                    AllowForceDeleteLocalBranches = _allowForce,
-                    ReturnWorkspaceToDefaultAndPull = _returnToDefaultAndPull
+                    AllowForceDeleteLocalBranches = _allowForce
                 });
             if (!result.Success)
             {

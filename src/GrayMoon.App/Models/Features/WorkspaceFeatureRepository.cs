@@ -28,6 +28,13 @@ public sealed class WorkspaceFeatureRepository
     [MaxLength(64)]
     public string BaseCommitSha { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Workspace branch that was checked out when this Feature repository was created.
+    /// Provenance / PR-target suggestion only - never used to restore the Workspace on Feature removal.
+    /// </summary>
+    [MaxLength(200)]
+    public string? ParentBranchName { get; set; }
+
     public DateTime CreatedAt { get; set; }
 
     public WorkspaceFeatureRepositoryState State { get; set; } = WorkspaceFeatureRepositoryState.Pending;

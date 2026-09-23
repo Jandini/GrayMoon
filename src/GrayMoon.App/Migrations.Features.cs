@@ -22,6 +22,7 @@ public static partial class Migrations
             await AddNullableTextColumnIfMissingAsync(conn, "Workspaces", "ManagedFeatureStorageRoot");
 
             await EnsureFeatureCoreTablesAsync(conn);
+            await AddNullableTextColumnIfMissingAsync(conn, "WorkspaceFeatureRepositories", "ParentBranchName");
             await EnsureFeatureProjectionTablesAsync(conn);
             await EnsureProjectAndFileLineContextColumnsAsync(conn);
             await BackfillSpecialWorkspaceContextsAsync(dbContext);
@@ -86,6 +87,7 @@ public static partial class Migrations
                 "WorkspaceRepositoryId" INTEGER NOT NULL,
                 "WorktreePath" TEXT NOT NULL,
                 "BaseCommitSha" TEXT NOT NULL,
+                "ParentBranchName" TEXT NULL,
                 "CreatedAt" TEXT NOT NULL,
                 "State" INTEGER NOT NULL,
                 "LastError" TEXT NULL,

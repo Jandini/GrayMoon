@@ -45,13 +45,6 @@ public sealed class RemoveFeatureOptions
     public bool AllowDiscardUncommitted { get; init; }
     public bool AllowForceDeleteLocalBranches { get; init; }
     public bool DeleteRemoteBranches { get; init; }
-
-    /// <summary>
-    /// When true (default), after removing Feature worktrees, run return-to-default on the special
-    /// Workspace checkout for each Feature repo - including repos already on default - so fetch,
-    /// pull, and commit-count probes refresh the grid. When false, Sync only (no pull).
-    /// </summary>
-    public bool ReturnWorkspaceToDefaultAndPull { get; init; } = true;
 }
 
 public sealed class RemoveFeaturePlan
@@ -83,6 +76,11 @@ public sealed class RemoveFeatureRepositoryPlan
     public bool HasUncommittedChanges { get; init; }
     public bool HasStagedChanges { get; init; }
     public bool HasConflicts { get; init; }
+    /// <summary>
+    /// True when a live Feature-worktree status scan succeeded. Unknown or failed status is never
+    /// treated as clean for automatic-safe classification.
+    /// </summary>
+    public bool LiveStatusEstablished { get; init; }
     public int? OutgoingCommits { get; init; }
     public bool HasUpstream { get; init; }
     public int? PullRequestNumber { get; init; }

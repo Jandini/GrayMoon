@@ -7,10 +7,12 @@ using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services.Agent;
 using GrayMoon.App.Services.Git;
+using GrayMoon.App.Services.GitChanges;
 using GrayMoon.App.Services.Jobs;
 using GrayMoon.App.Services.Workspaces;
 using GrayMoon.Application;
 using GrayMoon.Application.Features;
+using GrayMoon.Common.Git;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -150,6 +152,7 @@ public sealed class WorkspaceFeatureOperations(
                 WorkspaceRepositoryId = link.WorkspaceRepositoryId,
                 WorktreePath = worktreePath,
                 BaseCommitSha = sha,
+                ParentBranchName = string.IsNullOrWhiteSpace(link.BranchName) ? null : link.BranchName.Trim(),
                 CreatedAt = now,
                 State = WorkspaceFeatureRepositoryState.Pending
             };
@@ -276,12 +279,32 @@ public sealed class WorkspaceFeatureOperations(
             .Where(s => s.WorkspaceFeatureContextId == featureContextId.Value)
             .ToListAsync(cancellationToken);
 
+        string? featureWorkspaceRoot = null;
+        string? featureWorkspaceFolder = null;
+        try
+        {
+            (featureWorkspaceRoot, featureWorkspaceFolder) =
+                await pathResolver.GetAgentWorkspaceArgsAsync(featureContextId, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not resolve Feature workspace paths for remove analysis.");
+        }
+
         var plans = new List<RemoveFeatureRepositoryPlan>();
         foreach (var row in rows)
         {
             var state = states.FirstOrDefault(s => s.WorkspaceRepositoryId == row.WorkspaceRepositoryId);
             var pr = prs.FirstOrDefault(p => p.WorkspaceRepositoryId == row.WorkspaceRepositoryId);
             var exists = Directory.Exists(row.WorktreePath);
+            var live = await ProbeFeatureWorktreeLiveStatusAsync(
+                featureWorkspaceRoot,
+                featureWorkspaceFolder,
+                info.WorkspaceId,
+                row,
+                exists,
+                cancellationToken);
+
             plans.Add(new RemoveFeatureRepositoryPlan
             {
                 WorkspaceRepositoryId = row.WorkspaceRepositoryId,
@@ -289,22 +312,22 @@ public sealed class WorkspaceFeatureOperations(
                 WorktreePath = row.WorktreePath,
                 WorktreeExists = exists,
                 BranchName = state?.BranchName ?? info.FeatureName,
-                HeadCommit = state?.HeadCommit,
-                HasUncommittedChanges = false,
-                HasStagedChanges = false,
-                HasConflicts = false,
+                HeadCommit = live.HeadCommit ?? state?.HeadCommit,
+                HasUncommittedChanges = live.HasUncommittedChanges,
+                HasStagedChanges = live.HasStagedChanges,
+                HasConflicts = live.HasConflicts,
+                LiveStatusEstablished = live.LiveStatusEstablished,
                 OutgoingCommits = state?.OutgoingCommits,
                 HasUpstream = state?.BranchHasUpstream == true,
                 PullRequestNumber = pr?.PullRequestNumber,
                 PullRequestState = pr?.State,
                 PullRequestMerged = pr?.MergedAt is not null,
-                Warning = row.State == WorkspaceFeatureRepositoryState.NeedsRepair ? row.LastError : null
+                Warning = ComposeRemoveWarning(row, live)
             });
         }
 
         var classification = Classify(plans);
-        var safe = classification is RemoveFeatureClassification.Completed
-                   && plans.All(p => (p.OutgoingCommits ?? 0) == 0);
+        var safe = IsAutomaticallySafe(classification, plans);
 
         return new RemoveFeaturePlan
         {
@@ -401,7 +424,9 @@ public sealed class WorkspaceFeatureOperations(
             progress?.Report(new OperationProgress($"Removing worktree {row.WorktreePath}..."));
             var mainPath = await pathResolver.GetRepositoryPathAsync(
                 specialContextId, row.WorkspaceRepositoryId, cancellationToken);
-            var force = options.AllowDiscardUncommitted || options.AllowForceDeleteLocalBranches;
+            // Force worktree remove only when the user authorized discarding dirty Feature files.
+            // AllowForceDeleteLocalBranches does not imply discard permission.
+            var force = options.AllowDiscardUncommitted;
             var response = await agentBridge.SendCommandAsync(
                 AgentHubMethods.RemoveGitWorktree,
                 new { mainRepositoryPath = mainPath, worktreePath = row.WorktreePath, force },
@@ -444,7 +469,7 @@ public sealed class WorkspaceFeatureOperations(
                         repositoryName = repoName,
                         branchName,
                         isRemote = false,
-                        force = options.AllowForceDeleteLocalBranches || options.AllowDiscardUncommitted,
+                        force = options.AllowForceDeleteLocalBranches,
                         workspaceRoot
                     },
                     cancellationToken);
@@ -481,12 +506,12 @@ public sealed class WorkspaceFeatureOperations(
         }
 
         // Refresh special Workspace snapshot before dropping Feature rows so the grid is not stale
-        // after navigation back to Workspace (Return to Default skips already-on-default repos).
-        await RefreshWorkspaceAfterFeatureRemoveAsync(
+        // after navigation back to Workspace. ParentBranchName / SourceBranchName is provenance only
+        // and must never drive a checkout or return-to-default here.
+        await RefreshWorkspaceStateAfterFeatureRemoveAsync(
             info.WorkspaceId,
             specialContextId,
             repositoryIds,
-            options,
             progress,
             cancellationToken);
 
@@ -504,73 +529,139 @@ public sealed class WorkspaceFeatureOperations(
     }
 
     /// <summary>
-    /// After Feature worktrees are gone, refresh the special Workspace checkout snapshot.
-    /// Pull path calls <see cref="WorkspaceGitService.ReturnToDefaultDirectAsync"/> even when already
-    /// on default (unlike ExecuteReturnToDefault, which skips those). Sync-only path updates
-    /// Incoming/Outgoing/HasUpstream without pulling.
+    /// After Feature worktrees are gone, observe and persist the special Workspace checkout that
+    /// already exists. Never checkout, switch branch, pull, or restore <c>ParentBranchName</c>.
+    /// Refresh failure is logged only - Feature Git resources were already removed successfully.
     /// </summary>
-    private async Task RefreshWorkspaceAfterFeatureRemoveAsync(
+    private async Task RefreshWorkspaceStateAfterFeatureRemoveAsync(
         int workspaceId,
         WorkspaceFeatureContextId specialContextId,
         IReadOnlyList<int> repositoryIds,
-        RemoveFeatureOptions options,
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken)
     {
         if (repositoryIds.Count == 0)
             return;
 
-        await using var scope = scopeFactory.CreateAsyncScope();
-        var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-        var scopedDb = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        progress?.Report(new OperationProgress("Refreshing Workspace repository status..."));
 
-        if (options.ReturnWorkspaceToDefaultAndPull)
+        try
         {
-            progress?.Report(new OperationProgress(
-                repositoryIds.Count == 1
-                    ? "Returning Workspace repository to default and pulling..."
-                    : $"Returning {repositoryIds.Count} Workspace repositories to default and pulling..."));
-
-            foreach (var repositoryId in repositoryIds)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var link = await scopedDb.WorkspaceRepositories
-                    .AsNoTracking()
-                    .FirstOrDefaultAsync(
-                        l => l.WorkspaceId == workspaceId && l.RepositoryId == repositoryId,
-                        cancellationToken);
-                var branchName = !string.IsNullOrWhiteSpace(link?.BranchName)
-                    ? link!.BranchName!
-                    : (!string.IsNullOrWhiteSpace(link?.DefaultBranchName) ? link!.DefaultBranchName! : "main");
-
-                var (success, err) = await git.ReturnToDefaultDirectAsync(
-                    workspaceId,
-                    specialContextId,
-                    repositoryId,
-                    branchName,
-                    deleteRemoteBranch: options.DeleteRemoteBranches,
-                    allowForceDeleteLocalBranch: options.AllowForceDeleteLocalBranches
-                        || options.AllowDiscardUncommitted,
-                    cancellationToken);
-                if (!success)
-                {
-                    logger.LogWarning(
-                        "ReturnToDefault after Remove Feature failed for repository {RepositoryId}: {Error}",
-                        repositoryId, err);
-                }
-            }
-
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+            await git.SyncAsync(
+                workspaceId,
+                specialContextId,
+                repositoryIds: repositoryIds,
+                cancellationToken: cancellationToken);
             await git.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, specialContextId, cancellationToken);
-            return;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Non-mutating Workspace status refresh after Remove Feature failed for workspace {WorkspaceId}. Feature resources were already removed; a later Sync can recover.",
+                workspaceId);
+        }
+    }
+
+    private async Task<FeatureWorktreeLiveStatus> ProbeFeatureWorktreeLiveStatusAsync(
+        string? featureWorkspaceRoot,
+        string? featureWorkspaceFolder,
+        int workspaceId,
+        WorkspaceFeatureRepository row,
+        bool worktreeExists,
+        CancellationToken cancellationToken)
+    {
+        if (!worktreeExists)
+            return FeatureWorktreeLiveStatus.Unavailable;
+
+        var repoName = row.WorkspaceRepository?.Repository?.RepositoryName;
+        var repositoryId = row.WorkspaceRepository?.RepositoryId;
+        if (string.IsNullOrWhiteSpace(featureWorkspaceRoot)
+            || string.IsNullOrWhiteSpace(featureWorkspaceFolder)
+            || string.IsNullOrWhiteSpace(repoName)
+            || repositoryId is null
+            || !agentBridge.IsAgentConnected)
+        {
+            return FeatureWorktreeLiveStatus.Unavailable;
         }
 
-        progress?.Report(new OperationProgress("Refreshing Workspace repository status..."));
-        await git.SyncAsync(
-            workspaceId,
-            specialContextId,
-            repositoryIds: repositoryIds,
-            cancellationToken: cancellationToken);
-        await git.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, specialContextId, cancellationToken);
+        try
+        {
+            var response = await agentBridge.SendCommandAsync(
+                "GetGitChangeStatus",
+                new
+                {
+                    workspaceRoot = featureWorkspaceRoot,
+                    workspaceName = featureWorkspaceFolder,
+                    repositoryName = repoName,
+                    workspaceId,
+                    repositoryId = repositoryId.Value,
+                    includeLineStats = false
+                },
+                cancellationToken);
+
+            var status = AgentResponseJson.DeserializeAgentResponse<GitChangesStatusResult>(response.Data);
+            if (status is null || !status.Success || status.Snapshot is null)
+            {
+                logger.LogWarning(
+                    "GetGitChangeStatus failed for Feature worktree {Path}: {Error}",
+                    row.WorktreePath,
+                    status?.ErrorMessage ?? response.Error ?? "unknown");
+                return FeatureWorktreeLiveStatus.Unavailable;
+            }
+
+            var snapshot = status.Snapshot;
+            var hasUncommitted = snapshot.Changes.Any(c => c.IsChanged || c.WorktreeChange == GitChangeKind.Untracked);
+            var hasStaged = snapshot.Changes.Any(c => c.IsStaged);
+            var hasConflicts = snapshot.Changes.Any(c => c.IsConflicted)
+                               || snapshot.IsMerging
+                               || snapshot.IsRebasing
+                               || snapshot.IsCherryPicking;
+
+            return new FeatureWorktreeLiveStatus(
+                LiveStatusEstablished: true,
+                HasUncommittedChanges: hasUncommitted,
+                HasStagedChanges: hasStaged,
+                HasConflicts: hasConflicts,
+                HeadCommit: snapshot.HeadCommit);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Live Feature worktree status probe failed for {Path}", row.WorktreePath);
+            return FeatureWorktreeLiveStatus.Unavailable;
+        }
+    }
+
+    private static string? ComposeRemoveWarning(WorkspaceFeatureRepository row, FeatureWorktreeLiveStatus live)
+    {
+        if (row.State == WorkspaceFeatureRepositoryState.NeedsRepair && !string.IsNullOrWhiteSpace(row.LastError))
+            return row.LastError;
+        if (!live.LiveStatusEstablished && Directory.Exists(row.WorktreePath))
+            return "Live worktree status could not be established";
+        return null;
+    }
+
+    private static bool IsAutomaticallySafe(
+        RemoveFeatureClassification classification,
+        IReadOnlyList<RemoveFeatureRepositoryPlan> plans) =>
+        classification is RemoveFeatureClassification.Completed
+        && plans.All(p =>
+            p.LiveStatusEstablished
+            && (p.OutgoingCommits ?? 0) == 0
+            && !p.HasUncommittedChanges
+            && !p.HasStagedChanges
+            && !p.HasConflicts);
+
+    private readonly record struct FeatureWorktreeLiveStatus(
+        bool LiveStatusEstablished,
+        bool HasUncommittedChanges,
+        bool HasStagedChanges,
+        bool HasConflicts,
+        string? HeadCommit)
+    {
+        public static FeatureWorktreeLiveStatus Unavailable { get; } = new(false, false, false, false, null);
     }
 
     public async Task<IReadOnlyList<WorkspaceFeatureContextInfo>> ListFeaturesAsync(

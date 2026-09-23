@@ -59,6 +59,7 @@ public partial class AppDbContext
             entity.HasIndex(r => new { r.WorkspaceFeatureContextId, r.WorkspaceRepositoryId }).IsUnique();
             entity.Property(r => r.WorktreePath).IsRequired().HasMaxLength(2000);
             entity.Property(r => r.BaseCommitSha).IsRequired().HasMaxLength(64);
+            entity.Property(r => r.ParentBranchName).HasMaxLength(200);
             entity.Property(r => r.LastError).HasMaxLength(2000);
             entity.Property(r => r.State).HasConversion<int>();
             entity.HasOne(r => r.WorkspaceFeatureContext)
