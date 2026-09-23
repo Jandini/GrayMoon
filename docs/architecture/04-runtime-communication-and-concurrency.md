@@ -6,30 +6,23 @@ The App sends local-work commands to the Agent through SignalR.
 
 Conceptually:
 
-```text
-Blazor / application operation
-        │
-        ▼
-AgentBridge.SendCommandAsync
-        │
-        │ RequestCommand(requestId, commandName, JSON)
-        ▼
-AgentHub / connected Agent
-        │
-        ▼
-Agent command queue
-        │
-        ▼
-typed command handler
-        │
-        ▼
-ResponseCommand(requestId, JSON)
-        │
-        ▼
-AgentResponseDelivery
-        │
-        ▼
-awaiting App caller
+```mermaid
+sequenceDiagram
+  participant UI as Blazor / application operation
+  participant Bridge as AgentBridge
+  participant Hub as AgentHub
+  participant Queue as Agent command queue
+  participant Handler as typed command handler
+  participant Delivery as AgentResponseDelivery
+
+  UI->>Bridge: SendCommandAsync
+  Bridge->>Hub: RequestCommand(requestId, name, JSON)
+  Hub->>Queue: enqueue
+  Queue->>Handler: execute
+  Handler->>Hub: ResponseCommand(requestId, JSON)
+  Hub->>Delivery: complete
+  Delivery->>Bridge: unblock awaiter
+  Bridge->>UI: result
 ```
 
 A unique request ID correlates response and caller.
@@ -44,15 +37,12 @@ The Agent uses separate bounded queues for different command categories.
 
 Current architecture:
 
-```text
-main pool
-- most commands and mutations
-
-read/status pool
-- GetGitChangeStatus
-
-diff pool
-- GetGitFileDiff
+```mermaid
+flowchart LR
+  In["Incoming commands"] --> Route{"route by name"}
+  Route -->|"most mutations"| Main["main pool"]
+  Route -->|"GetGitChangeStatus"| Read["read/status pool"]
+  Route -->|"GetGitFileDiff"| Diff["diff pool"]
 ```
 
 This isolation matters.
@@ -118,12 +108,14 @@ Synchronized push and dependency update work by dependency level.
 
 Pattern:
 
-```text
-level 1 in parallel
-wait for completion / package publication
-level 2 in parallel
-wait
-...
+```mermaid
+flowchart TB
+  L1["Level 1 in parallel"]
+  W1["Wait for completion / package publication"]
+  L2["Level 2 in parallel"]
+  W2["Wait"]
+  Ln["Level N ..."]
+  L1 --> W1 --> L2 --> W2 --> Ln
 ```
 
 Dependency ordering is a business rule, not a performance detail.
@@ -138,38 +130,24 @@ Hooks report local Git events even when changes were initiated outside GrayMoon.
 
 End-to-end:
 
-```text
-developer commits/checks out/merges/pushes in IDE or CLI
-        │
-        ▼
-Git hook
-        │ HTTP POST to loopback Agent listener
-        ▼
-HookListenerHostedService
-        │
-        ▼
-notify job / hook dispatcher
-        │
-        ▼
-GitVersion / branch / commit-count work
-        │
-        ▼
-RepositorySyncNotification
-        │ SignalR SyncCommand
-        ▼
-GrayMoon.App SyncCommandHandler
-        │
-        ▼
-WorkspaceRepositoryStateWriter
-        │
-        ▼
-batch/derived-state recomputation
-        │
-        ▼
-WorkspaceSyncHub broadcast
-        │
-        ▼
-browser reloads persisted state
+```mermaid
+sequenceDiagram
+  participant Dev as IDE / CLI
+  participant Hook as Git hook
+  participant Listen as HookListenerHostedService
+  participant Agent as Agent notify job
+  participant App as SyncCommandHandler
+  participant Writer as WorkspaceRepositoryStateWriter
+  participant Hub as WorkspaceSyncHub
+  participant Browser as Browser circuit
+
+  Dev->>Hook: commit / checkout / merge / push
+  Hook->>Listen: HTTP POST loopback
+  Listen->>Agent: notify job
+  Agent->>App: SignalR SyncCommand
+  App->>Writer: partial persist
+  Writer->>Hub: broadcast
+  Hub->>Browser: reload persisted state
 ```
 
 Hook notification failure must not break the Git operation that triggered the hook.
@@ -201,16 +179,15 @@ Git Changes uses filesystem watchers on the Agent.
 
 Important components include:
 
-```text
-GitRepositoryWatcher
-GitRepositoryWatcherManager
-GitChangesRepositoryRegistry
-GitStatusRefreshCoordinator
-GitChangesSnapshotCache
-GitChangesSnapshotPublisher
-GitChangesMonitoringBackgroundService
-WorkspaceGitChangesWriteQueue
-GitChangesSnapshotPushHandler
+```mermaid
+flowchart LR
+  Watch["GitRepositoryWatcher"] --> Mgr["GitRepositoryWatcherManager"]
+  Mgr --> Reg["GitChangesRepositoryRegistry"]
+  Watch -->|"dirty"| Coord["GitStatusRefreshCoordinator"]
+  Coord --> Cache["GitChangesSnapshotCache"]
+  Cache --> Pub["GitChangesSnapshotPublisher"]
+  Pub -->|"SignalR"| Queue["WorkspaceGitChangesWriteQueue"]
+  Queue --> Handler["GitChangesSnapshotPushHandler"]
 ```
 
 ### Watcher lifecycle
@@ -257,12 +234,12 @@ An explicit refresh ultimately requests a new Agent status scan.
 
 When the snapshot returns:
 
-```text
-Agent snapshot
-→ App write queue
-→ SQLite
-→ GitChangesUpdated broadcast
-→ page re-reads
+```mermaid
+flowchart LR
+  A["Agent snapshot"] --> B["App write queue"]
+  B --> C["SQLite"]
+  C --> D["GitChangesUpdated broadcast"]
+  D --> E["page re-reads"]
 ```
 
 The UI remains projection-driven.
