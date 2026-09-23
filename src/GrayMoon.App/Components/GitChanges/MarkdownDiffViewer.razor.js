@@ -487,6 +487,17 @@ async function openMermaidLightbox(source, title) {
     }
 }
 
+/** Map HtmlDiff wrappers onto Mermaid frames so Old/New keep red/green after pre→panzoom swap. */
+function resolveMermaidDiffKind(node) {
+    if (node.closest('ins.diffins, ins.diffmod, .markdown-diff-all-ins')) {
+        return 'added';
+    }
+    if (node.closest('del.diffdel, del.diffmod, .markdown-diff-all-del')) {
+        return 'removed';
+    }
+    return null;
+}
+
 async function renderMermaidIn(root) {
     const nodes = Array.from(root.querySelectorAll('pre.mermaid'));
     if (nodes.length === 0) {
@@ -513,6 +524,11 @@ async function renderMermaidIn(root) {
         const title = findPrecedingHeadingTitle(node);
         const wrap = document.createElement('div');
         wrap.className = 'mermaid-panzoom';
+        const diffKind = resolveMermaidDiffKind(node);
+        if (diffKind) {
+            wrap.classList.add(`mermaid-panzoom--${diffKind}`);
+            wrap.dataset.mermaidDiff = diffKind;
+        }
         wrap.dataset.mermaidSource = source;
         wrap.dataset.mermaidTitle = title;
         const content = document.createElement('div');

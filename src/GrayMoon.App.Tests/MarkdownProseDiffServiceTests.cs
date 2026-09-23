@@ -166,6 +166,9 @@ public sealed class MarkdownProseDiffServiceTests
         Assert.NotNull(result.Html);
         Assert.Contains("mermaid", result.Html, StringComparison.OrdinalIgnoreCase);
         Assert.Contains('\u251C', result.Html);
+        Assert.Contains("<del", result.Html, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("<ins", result.Html, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("class=\"mermaid\"", result.Html, StringComparison.Ordinal);
     }
 
     [Fact]
