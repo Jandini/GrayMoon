@@ -739,15 +739,10 @@
     justify-content: space-between;
     gap: 0.35rem;
     flex: 0 0 auto;
-    /* Flush with the right pane's left edge while the tree is visible. */
-    padding: 0.2rem 0.35rem 0.2rem 0;
+    /* Flush with the right pane's left edge, with a 3px gap so Source does not touch the frame. */
+    padding: 0.2rem 0.35rem 0.2rem 3px;
     border-bottom: 1px solid var(--border-color);
     background: var(--bg-secondary);
-}
-
-/* Tree hidden: same inset as Monaco pane headers so Source is not flush to the outer frame. */
-.git-changes-splitter--review-expanded .git-diff-chrome {
-    padding-left: 0.6rem;
 }
 
 .git-diff-chrome__tools {
