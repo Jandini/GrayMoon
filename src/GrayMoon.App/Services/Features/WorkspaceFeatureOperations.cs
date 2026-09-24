@@ -869,7 +869,10 @@ public sealed class WorkspaceFeatureOperations(
             return;
 
         var parent = GetWindowsDirectoryName(workspace.RootPath ?? string.Empty);
-        if (string.IsNullOrWhiteSpace(parent))
+        // Empty parent (no RootPath) or drive root (e.g. workspace at C:\MyWs → parent C:\) would put
+        // .graymoon on the drive root — fall back to the user profile instead. Do not relocate an
+        // already-persisted ManagedFeatureStorageRoot.
+        if (string.IsNullOrWhiteSpace(parent) || IsWindowsDriveRoot(parent))
             parent = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
         // Keep Agent-facing Feature storage roots Windows-shaped (App/CI may run on Linux).
@@ -889,6 +892,15 @@ public sealed class WorkspaceFeatureOperations(
         return last >= 0 ? normalized[..last] : null;
     }
 
+    /// <summary>True for Windows drive roots such as <c>C:</c> / <c>C:\</c> (after trim).</summary>
+    private static bool IsWindowsDriveRoot(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return false;
+        var normalized = path.Replace('/', '\\').TrimEnd('\\');
+        return normalized.Length == 2 && char.IsLetter(normalized[0]) && normalized[1] == ':';
+    }
+
     private static RemoveFeatureClassification Classify(IReadOnlyList<RemoveFeatureRepositoryPlan> plans)
     {
         // A previous delete error (folder busy, permission denied) stays on the repository line as
@@ -896,13 +908,23 @@ public sealed class WorkspaceFeatureOperations(
         // once the folder is free. A missing worktree is different — GrayMoon cannot confirm the folder.
         if (plans.Any(p => !p.WorktreeExists))
             return RemoveFeatureClassification.NeedsRepair;
-        if (plans.All(p => p.PullRequestMerged == true))
+        // Merged PRs and never-created PRs (fresh Feature with no commits/PR) are Completed-equivalent
+        // so Remove is automatically safe when the live worktree is clean.
+        if (plans.All(IsPrMergedOrNeverCreated))
             return RemoveFeatureClassification.Completed;
         if (plans.Any(p => string.Equals(p.PullRequestState, "closed", StringComparison.OrdinalIgnoreCase)
                            && p.PullRequestMerged != true))
             return RemoveFeatureClassification.Abandoned;
         return RemoveFeatureClassification.Active;
     }
+
+    /// <summary>
+    /// True when the repo's PR is merged, or no PR was ever opened (null/empty number and state).
+    /// Fresh Features with zero commits fall into the latter bucket.
+    /// </summary>
+    private static bool IsPrMergedOrNeverCreated(RemoveFeatureRepositoryPlan p) =>
+        p.PullRequestMerged == true
+        || (p.PullRequestNumber is null or 0 && string.IsNullOrWhiteSpace(p.PullRequestState));
 
     private static CreateFeatureResult FailCreate(string condition, string error) => new()
     {

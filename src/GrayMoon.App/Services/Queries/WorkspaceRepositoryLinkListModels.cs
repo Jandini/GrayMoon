@@ -63,7 +63,9 @@ public sealed record WorkspaceRepositoryHeaderStateDto(
     bool IsOutOfSync,
     int? LowestLevelNeedingWork,
     /// <summary>True when at least one repository would show the yellow "create" PR badge (ahead of default, no open/merged/closed PR).</summary>
-    bool HasCreatablePr);
+    bool HasCreatablePr,
+    /// <summary>True when at least one repository has an open pull request in the selected context.</summary>
+    bool HasOpenPr);
 
 /// <summary>Lightweight row for virtual-scroll index (no PR/join payload).</summary>
 public sealed record WorkspaceRepositoryLinkIndexEntry(

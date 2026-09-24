@@ -123,6 +123,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
 
         _selectedContextId = info.ContextId;
         _isFeatureContext = !info.IsSpecialWorkspace;
+        Interlocked.Increment(ref _contextGeneration);
         await SelectedFeatureContextService.SetSelectedAsync(WorkspaceId, info.ContextId);
         await InvokeAsync(async () =>
         {

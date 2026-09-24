@@ -474,6 +474,52 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
         }
     }
 
+    [Fact]
+    public async Task Analyze_fresh_Feature_with_no_PR_is_completed_and_automatically_safe_when_clean()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var worktreePath = Path.Combine(Path.GetTempPath(), "gm-remove-feature-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(worktreePath);
+        try
+        {
+            var featureContextId = await SeedRemovableFeatureAsync(ctx);
+            await using (var scope = ctx.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                var row = await db.WorkspaceFeatureRepositories.SingleAsync(r => r.WorkspaceFeatureContextId == featureContextId.Value);
+                row.WorktreePath = worktreePath;
+                db.WorkspaceRepositoryContextStates.Add(new WorkspaceRepositoryContextState
+                {
+                    WorkspaceFeatureContextId = featureContextId.Value,
+                    WorkspaceRepositoryId = ctx.WorkspaceRepositoryId,
+                    BranchName = "feat-refresh",
+                    OutgoingCommits = 0,
+                    BranchHasUpstream = true,
+                });
+                // No WorkspaceRepositoryContextPullRequest row — never-created PR.
+                await db.SaveChangesAsync();
+            }
+
+            ctx.AgentBridge.Respond("GetGitChangeStatus", CleanGitChangeStatus());
+
+            await using var read = ctx.CreateScope();
+            var ops = read.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+            var plan = await ops.AnalyzeRemoveFeatureAsync(featureContextId);
+
+            Assert.True(plan.Success, plan.Error);
+            Assert.Equal(RemoveFeatureClassification.Completed, plan.Classification);
+            Assert.True(plan.IsAutomaticallySafe);
+            var repo = Assert.Single(plan.Repositories);
+            Assert.Null(repo.PullRequestNumber);
+            Assert.True(string.IsNullOrWhiteSpace(repo.PullRequestState));
+        }
+        finally
+        {
+            if (Directory.Exists(worktreePath))
+                Directory.Delete(worktreePath, recursive: true);
+        }
+    }
+
     private static async Task AssertAnalyzeNotAutomaticallySafeAsync(SyncStateTestContext ctx, object statusResponse)
     {
         var worktreePath = Path.Combine(Path.GetTempPath(), "gm-remove-feature-" + Guid.NewGuid().ToString("N"));

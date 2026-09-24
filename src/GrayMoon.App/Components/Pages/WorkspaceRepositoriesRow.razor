@@ -107,6 +107,9 @@
                                     RepositoryUrl="@RepositoryUrlHelper.GetRepositoryUrl(repo.CloneUrl)"
                                     DefaultBranchName="@Link.DefaultBranchName"
                                     IsOnTag="@Link.IsOnTag"
+                                    IsPrMergeBlocked="@(PrInfo != null
+                                        && string.Equals(PrInfo.State, "open", StringComparison.OrdinalIgnoreCase)
+                                        && PrInfo.Mergeable == false)"
                                     OnUpdateBranchClick="@OnUpdateBranchClick" />
                 </span>
                 <span class="metrics-block metrics-pr text-nowrap">

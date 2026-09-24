@@ -89,7 +89,7 @@
     private string StatusHeadline => _plan?.Classification switch
     {
         RemoveFeatureClassification.Completed =>
-            "This Feature's pull request has been merged, so it's safe to remove.",
+            "This Feature is finished (pull request merged, or never opened), so it's safe to remove.",
         RemoveFeatureClassification.Abandoned =>
             "This Feature's pull request was closed without merging. Removing it will permanently delete this work.",
         RemoveFeatureClassification.Active =>

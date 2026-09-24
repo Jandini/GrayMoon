@@ -31,6 +31,9 @@ public sealed class WorkspaceContextPathResolver(
         var workspaceFolder = await ResolveSpecialWorkspaceFolderAsync(workspace.Name, workspace, cancellationToken);
         var parent = GetWindowsDirectoryName(workspaceFolder)
             ?? throw new InvalidOperationException("Cannot derive Feature storage parent from workspace root.");
+        // Mirror EnsureManagedFeatureStorageRoot: never place .graymoon under a drive root (e.g. C:\).
+        if (IsWindowsDriveRoot(parent))
+            parent = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var derivedFeaturesRoot = CombineWindows(parent, ".graymoon", workspace.Name, "features");
         var feature = info.FeatureName
             ?? throw new InvalidOperationException($"Feature context {contextId.Value} has no Feature name.");
@@ -131,5 +134,14 @@ public sealed class WorkspaceContextPathResolver(
             return null;
         var last = normalized.LastIndexOf('\\');
         return last >= 0 ? normalized[..last] : null;
+    }
+
+    /// <summary>True for Windows drive roots such as <c>C:</c> / <c>C:\</c> (after trim).</summary>
+    private static bool IsWindowsDriveRoot(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return false;
+        var normalized = path.Replace('/', '\\').TrimEnd('\\');
+        return normalized.Length == 2 && char.IsLetter(normalized[0]) && normalized[1] == ':';
     }
 }

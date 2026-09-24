@@ -48,7 +48,11 @@
 
             @if (behind > 0 && !isOnDefault && OnUpdateBranchClick.HasDelegate)
             {
-                <button type="button" class="divergence-link divergence-link-behind divergence-link-behind--actionable" title="@behindTitle" @onclick="OnUpdateBranchClick">@behind</button>
+                @* Yellow only when an open PR is not mergeable (conflict); otherwise gray but still clickable. *@
+                var behindActionClass = IsPrMergeBlocked
+                    ? "divergence-link divergence-link-behind divergence-link-behind--actionable divergence-link-behind--conflict"
+                    : "divergence-link divergence-link-behind divergence-link-behind--actionable";
+                <button type="button" class="@behindActionClass" title="@behindTitle" @onclick="OnUpdateBranchClick">@behind</button>
             }
             else if (!string.IsNullOrWhiteSpace(behindUrl))
             {
@@ -79,6 +83,11 @@
     [Parameter] public string? DefaultBranchName { get; set; }
     /// <summary>True when the repository is checked out at a tag (detached HEAD); divergence vs. default branch is not meaningful, render blank.</summary>
     [Parameter] public bool IsOnTag { get; set; }
-    /// <summary>When set, the behind count on a non-default branch renders as an actionable red button that invokes this callback instead of opening GitHub. Ignored when the current branch is the default branch - that case is a pull, not an update-from-default.</summary>
+    /// <summary>When set, the behind count on a non-default branch renders as an actionable button that invokes this callback instead of opening GitHub. Ignored when the current branch is the default branch - that case is a pull, not an update-from-default.</summary>
     [Parameter] public EventCallback OnUpdateBranchClick { get; set; }
+    /// <summary>
+    /// True when there is an open PR that GitHub reports as not mergeable (typically a conflict).
+    /// Drives yellow styling on the actionable behind count; otherwise the actionable behind count stays gray.
+    /// </summary>
+    [Parameter] public bool IsPrMergeBlocked { get; set; }
 }

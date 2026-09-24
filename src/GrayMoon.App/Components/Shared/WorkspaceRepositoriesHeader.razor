@@ -56,7 +56,7 @@
                     @onclick="HandleBranchPrimaryClick"
                     @onclick:stopPropagation
                     disabled="@BranchActionsDisabled">
-                @(HasCreatablePr ? "Create PR" : (IsFeatureContext ? "Feature" : "Branch"))
+                @(HasCreatablePr ? "Create PR" : (ShowRemoveFeaturePrimary ? "Remove" : (IsFeatureContext ? "Feature" : "Branch")))
             </button>
             <button type="button"
                     class="btn btn-outline-secondary dropdown-toggle dropdown-toggle-split"
@@ -395,6 +395,8 @@
     [Parameter] public bool HasUnmatchedDependencies { get; set; }
     /// <summary>True when at least one repository would show the yellow "create" PR badge — primary Branch/Feature control becomes yellow "Create PR".</summary>
     [Parameter] public bool HasCreatablePr { get; set; }
+    /// <summary>True when at least one repository has an open pull request. Combined with Feature context to decide whether the primary control shows Remove.</summary>
+    [Parameter] public bool HasOpenPr { get; set; }
     [Parameter] public bool IsPushRecommended { get; set; }
     [Parameter] public bool HasIncomingCommits { get; set; }
     [Parameter] public bool? IsOutOfSync { get; set; }
@@ -448,6 +450,13 @@
 
     private bool BranchMenuToggleDisabled =>
         IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0;
+
+    /// <summary>
+    /// Feature context with nothing creatable and no open PRs (merged, never-created, or abandoned closed).
+    /// Primary control becomes "Remove" and opens the existing Remove Feature flow.
+    /// </summary>
+    private bool ShowRemoveFeaturePrimary =>
+        IsFeatureContext && !HasCreatablePr && !HasOpenPr;
 
     private void ToggleBranchMenu()
     {
@@ -564,6 +573,12 @@
         {
             CloseBranchMenu();
             await OnNewPullRequest.InvokeAsync();
+            return;
+        }
+
+        if (ShowRemoveFeaturePrimary)
+        {
+            await HandleRemoveFeatureClick();
             return;
         }
 

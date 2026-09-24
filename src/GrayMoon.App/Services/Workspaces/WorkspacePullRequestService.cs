@@ -67,6 +67,16 @@ public sealed class WorkspacePullRequestService(
     }
 
     /// <summary>
+    /// Context-aware counterpart of <see cref="GetPersistedPullRequestsForWorkspaceAsync"/> for a Feature context —
+    /// reads <see cref="Models.WorkspaceRepositoryContextPullRequest"/> instead of the legacy workspace-link table.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<int, PullRequestInfo?>> GetPersistedPullRequestsForWorkspaceContextAsync(
+        int workspaceId, int contextId, CancellationToken cancellationToken = default)
+    {
+        return await pullRequestRepository.GetByWorkspaceIdContextAsync(workspaceId, contextId, cancellationToken);
+    }
+
+    /// <summary>
     /// Fetches PR state from the API for the given repos and persists it. Call after sync, refresh, push, or hooks.
     /// Returns the outcome per repository so callers can tell "there is no PR" apart from "we could not find out".
     /// </summary>

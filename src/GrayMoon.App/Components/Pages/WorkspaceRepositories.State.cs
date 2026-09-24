@@ -12,6 +12,11 @@ public sealed partial class WorkspaceRepositories
     private const int VirtualOverscanSlots = 24;
     private const int VirtualInitialViewportSlots = 48;
     private int _scrollGeneration;
+    /// <summary>
+    /// Bumped on Feature/Workspace context switch. Background job UI writes (e.g. sync live git info)
+    /// capture the generation at job start and ignore updates if the user switched context meanwhile.
+    /// </summary>
+    private int _contextGeneration;
     private readonly DebouncedQueryLoader _queryLoader = new();
     private readonly Dictionary<int, WorkspaceRepositoryLink> _linkByRepoId = new();
     private readonly Dictionary<int, WorkspaceRepositoryLink> _linkByWrlId = new();
@@ -44,6 +49,7 @@ public sealed partial class WorkspaceRepositories
     private bool HasRepositories => (_headerState?.TotalCount ?? 0) > 0;
     private bool hasUnmatchedDependencies => _headerState?.HasUnmatchedDependencies ?? false;
     private bool hasCreatablePr => _headerState?.HasCreatablePr ?? false;
+    private bool hasOpenPr => _headerState?.HasOpenPr ?? false;
     private bool isPushRecommended => _headerState?.IsPushRecommended ?? false;
     private int? lowestLevelNeedingWork => _headerState?.LowestLevelNeedingWork;
     private bool hasTaggedRepos => _headerState?.HasTaggedRepos ?? false;

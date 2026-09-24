@@ -37,8 +37,16 @@ public sealed partial class WorkspaceRepositories
         try
         {
             links = await GetAllLinksForOperationAsync();
-            persistedPrs = await ScopedExecutor.ExecuteAsync<WorkspacePullRequestService, IReadOnlyDictionary<int, PullRequestInfo?>>(
-                svc => svc.GetPersistedPullRequestsForWorkspaceAsync(WorkspaceId));
+            if (_isFeatureContext && _selectedContextId is { } featureContextId)
+            {
+                persistedPrs = await ScopedExecutor.ExecuteAsync<WorkspacePullRequestService, IReadOnlyDictionary<int, PullRequestInfo?>>(
+                    svc => svc.GetPersistedPullRequestsForWorkspaceContextAsync(WorkspaceId, featureContextId.Value));
+            }
+            else
+            {
+                persistedPrs = await ScopedExecutor.ExecuteAsync<WorkspacePullRequestService, IReadOnlyDictionary<int, PullRequestInfo?>>(
+                    svc => svc.GetPersistedPullRequestsForWorkspaceAsync(WorkspaceId));
+            }
         }
         catch (Exception ex)
         {

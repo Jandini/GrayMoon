@@ -30,6 +30,34 @@ public sealed class WorkspacePullRequestRepository(IDbContextFactory<AppDbContex
     }
 
     /// <summary>
+    /// Context-aware counterpart of <see cref="GetByWorkspaceIdAsync"/> — reads
+    /// <see cref="WorkspaceRepositoryContextPullRequest"/> for the given Feature context instead of the
+    /// legacy workspace-link PR row. Keyed by RepositoryId. Missing row omitted (no PR or not yet checked).
+    /// </summary>
+    public async Task<IReadOnlyDictionary<int, PullRequestInfo?>> GetByWorkspaceIdContextAsync(
+        int workspaceId, int contextId, CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        var rows = await dbContext.WorkspaceRepositoryContextPullRequests
+            .AsNoTracking()
+            .Where(pr => pr.WorkspaceFeatureContextId == contextId
+                         && pr.WorkspaceRepository!.WorkspaceId == workspaceId)
+            .Include(pr => pr.WorkspaceRepository)
+            .ToListAsync(cancellationToken);
+
+        var result = new Dictionary<int, PullRequestInfo?>();
+        foreach (var row in rows)
+        {
+            if (row.WorkspaceRepository == null) continue;
+            result[row.WorkspaceRepository.RepositoryId] = row.PullRequestNumber.HasValue
+                ? row.ToPullRequestInfo()
+                : null;
+        }
+        return result;
+    }
+
+    /// <summary>
     /// Inserts or updates the PR row for the given workspace-repo link. Pass null to persist "no PR" with LastCheckedAt.
     /// Uses its own factory-created <see cref="AppDbContext"/> (rather than a shared, circuit-scoped instance) because
     /// callers such as bulk merge run many of these concurrently via a bounded <c>Task.WhenAll</c> fan-out - a shared

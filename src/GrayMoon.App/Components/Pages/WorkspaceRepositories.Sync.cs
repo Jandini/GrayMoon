@@ -71,13 +71,15 @@ public sealed partial class WorkspaceRepositories
     private Task QuickFetchAsync()
     {
         if (workspace == null || !HasRepositories || IsJobRunning) return Task.CompletedTask;
+        var jobContextGeneration = _contextGeneration;
+        var jobContextId = RequireSelectedContextId();
         JobService.StartJob(PageJobKey, "Fetching commits...", async (job, ct) =>
         {
             try
             {
                 var result = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, OperationResult>(
                     svc => svc.QuickFetchAsync(
-                        WorkspaceId, RequireSelectedContextId(),
+                        WorkspaceId, jobContextId,
                         repositoryIds: null,
                         job.ToOperationProgress(),
                         ct),
@@ -86,6 +88,8 @@ public sealed partial class WorkspaceRepositories
                 await InvokeAsync(async () =>
                 {
                     if (_disposed) return;
+                    if (jobContextGeneration != _contextGeneration)
+                        return;
                     await ReloadWorkspaceDataFromFreshScopeAsync();
                     ApplySyncStateFromLoadedItems();
                     ApplyFetchResult(result, _linkByRepoId.Keys);
@@ -94,13 +98,15 @@ public sealed partial class WorkspaceRepositories
             }
             catch (OperationCanceledException)
             {
-                await ReloadWorkspaceDataAfterCancelAsync();
+                if (jobContextGeneration == _contextGeneration)
+                    await ReloadWorkspaceDataAfterCancelAsync();
                 throw;
             }
             catch (Exception ex)
             {
                 Logger.LogError(ex, "Quick Fetch failed for workspace {WorkspaceId}", WorkspaceId);
-                SafeInvoke(() => SetPageError("Fetch failed. Check the logs for details."));
+                if (jobContextGeneration == _contextGeneration)
+                    SafeInvoke(() => SetPageError("Fetch failed. Check the logs for details."));
                 throw;
             }
         });
@@ -131,19 +137,24 @@ public sealed partial class WorkspaceRepositories
 
     private Task RunSyncJobAsync(IReadOnlyList<int>? repositoryIds, string jobLabel, bool skipDependencyLevelPersistence)
     {
+        var jobContextGeneration = _contextGeneration;
+        var jobContextId = RequireSelectedContextId();
         JobService.StartJob(PageJobKey, jobLabel, async (job, ct) =>
         {
             try
             {
                 var repoGitInfos = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, IReadOnlyDictionary<int, RepoGitVersionInfo>>(
                     svc => svc.SyncAsync(
-                        WorkspaceId, RequireSelectedContextId(),
+                        WorkspaceId, jobContextId,
                         repositoryIds,
                         skipDependencyLevelPersistence,
                         cancellationToken: ct,
                         progress: job.ToOperationProgress(),
                         updateRepoGitInfo: (repoId, info) => SafeInvoke(() =>
                         {
+                            // Context switched while this job was running — don't clobber the new grid.
+                            if (jobContextGeneration != _contextGeneration)
+                                return;
                             if (_linkByRepoId.TryGetValue(repoId, out var wr))
                             {
                                 wr.GitVersion = info.Version == "-" ? null : info.Version;
@@ -153,11 +164,18 @@ public sealed partial class WorkspaceRepositories
                                 wr.IncomingCommits = info.IncomingCommits;
                             }
                         }),
-                        setRepoSyncStatus: (repoId, status) => repoSyncStatus[repoId] = status));
+                        setRepoSyncStatus: (repoId, status) =>
+                        {
+                            if (jobContextGeneration != _contextGeneration)
+                                return;
+                            repoSyncStatus[repoId] = status;
+                        }));
 
                 await InvokeAsync(async () =>
                 {
                     if (_disposed) return;
+                    if (jobContextGeneration != _contextGeneration)
+                        return;
                     await ReloadWorkspaceDataFromFreshScopeAsync();
                     ApplySyncStateFromLoadedItems();
                     foreach (var (repoId, info) in repoGitInfos)
@@ -172,25 +190,29 @@ public sealed partial class WorkspaceRepositories
             }
             catch (OperationCanceledException)
             {
-                await ReloadWorkspaceDataAfterCancelAsync();
+                if (jobContextGeneration == _contextGeneration)
+                    await ReloadWorkspaceDataAfterCancelAsync();
                 throw;
             }
             catch (AgentNotConnectedException ex)
             {
                 Logger.LogError(ex, "Sync failed for workspace {WorkspaceId}", WorkspaceId);
-                SafeInvoke(() => SetPageError($"Sync failed. {ex.Message}"));
+                if (jobContextGeneration == _contextGeneration)
+                    SafeInvoke(() => SetPageError($"Sync failed. {ex.Message}"));
                 throw;
             }
             catch (ConnectorHealthException ex)
             {
                 Logger.LogError(ex, "Sync failed for workspace {WorkspaceId}", WorkspaceId);
-                SafeInvoke(() => SetPageError($"Sync failed. {ex.Message}"));
+                if (jobContextGeneration == _contextGeneration)
+                    SafeInvoke(() => SetPageError($"Sync failed. {ex.Message}"));
                 throw;
             }
             catch (Exception ex)
             {
                 Logger.LogError(ex, "Sync failed for workspace {WorkspaceId}", WorkspaceId);
-                SafeInvoke(() => SetPageError("Sync failed. An unexpected error occurred. Check the logs for details."));
+                if (jobContextGeneration == _contextGeneration)
+                    SafeInvoke(() => SetPageError("Sync failed. An unexpected error occurred. Check the logs for details."));
                 throw;
             }
         });

@@ -111,6 +111,12 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
                             && wr.PullRequest.State != "closed")),
                 cancellationToken);
 
+            var hasOpenPrLegacy = await linkQuery.AnyAsync(
+                wr => wr.PullRequest != null
+                    && wr.PullRequest.PullRequestNumber != null
+                    && wr.PullRequest.State == "open",
+                cancellationToken);
+
             return new WorkspaceRepositoryHeaderStateDto(
                 totalCount,
                 hasUnmatchedDependenciesLegacy,
@@ -119,7 +125,8 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
                 hasTaggedReposLegacy,
                 isOutOfSyncLegacy,
                 lowestLevelNeedingWorkLegacy,
-                hasCreatablePrLegacy);
+                hasCreatablePrLegacy,
+                hasOpenPrLegacy);
         }
 
         var cid = contextId.Value.Value;
@@ -182,6 +189,12 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
                     || (x.pr.MergedAt == null && x.pr.State != "open" && x.pr.State != "closed")),
             cancellationToken);
 
+        var hasOpenPr = await prQuery.AnyAsync(
+            x => x.pr != null
+                && x.pr.PullRequestNumber != null
+                && x.pr.State == "open",
+            cancellationToken);
+
         return new WorkspaceRepositoryHeaderStateDto(
             totalCount,
             hasUnmatchedDependencies,
@@ -190,7 +203,8 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
             hasTaggedRepos,
             isOutOfSync,
             lowestLevelNeedingWork,
-            hasCreatablePr);
+            hasCreatablePr,
+            hasOpenPr);
     }
 
     public async Task<IReadOnlyList<WorkspaceRepositoryLinkIndexEntry>> GetIndexAsync(
