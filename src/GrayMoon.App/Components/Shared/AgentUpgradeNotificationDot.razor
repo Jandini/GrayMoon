@@ -1,0 +1,21 @@
+@inject AgentConnectionTracker AgentConnectionTracker
+@rendermode @(new InteractiveServerRenderMode(prerender: true))
+
+@if (ShowDot)
+{
+    <span class="nav-notification-dot"
+          title="Agent update available"
+          aria-label="Agent update available"
+          role="status"></span>
+}
+
+@code {
+    private bool ShowDot =>
+        AgentConnectionTracker.State == AgentConnectionState.VersionMismatch
+        && !AgentConnectionTracker.IsSelfUpdateInProgress;
+
+    protected override void OnInitialized()
+    {
+        AgentConnectionTracker.OnStateChanged(state => { _ = InvokeAsync(StateHasChanged); });
+    }
+}

@@ -1,0 +1,12 @@
+.nav-notification-dot {
+    position: absolute;
+    top: -0.1rem;
+    right: -0.15rem;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background-color: #ff3b30;
+    border: 1.5px solid var(--bg-card, #252526);
+    box-sizing: content-box;
+    pointer-events: none;
+}
