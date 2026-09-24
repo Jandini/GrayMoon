@@ -4,32 +4,34 @@
 
 GrayMoon is a distributed local-development application with a strict App/Agent boundary.
 
-```text
-Browser
-   │
-   │ Blazor Server circuit
-   ▼
-GrayMoon.App
-   ├─ UI and page orchestration
-   ├─ GrayMoon.Application implementations
-   ├─ SQLite / EF Core
-   ├─ GitHub and registry connectors
-   ├─ REST API
-   ├─ AgentHub
-   ├─ WorkspaceSyncHub
-   └─ optional Desktop integration
-          │
-          │ SignalR
-          ▼
-GrayMoon.Agent
-   ├─ Git commands
-   ├─ GitVersion
-   ├─ filesystem
-   ├─ project discovery
-   ├─ dotnet restore
-   ├─ Git Changes
-   ├─ file watchers
-   └─ local hook listener
+```mermaid
+flowchart TB
+  Browser["Browser / WebView2"]
+  Browser -->|"Blazor Server circuit"| App
+
+  subgraph App["GrayMoon.App"]
+    UI["UI and page orchestration"]
+    Appl["GrayMoon.Application implementations"]
+    SQLite["SQLite / EF Core"]
+    Conn["GitHub and registry connectors"]
+    REST["REST API"]
+    AgentHub["AgentHub"]
+    SyncHub["WorkspaceSyncHub"]
+    DesktopOpt["optional Desktop integration"]
+  end
+
+  subgraph Agent["GrayMoon.Agent"]
+    GitCmd["Git commands"]
+    GitVer["GitVersion"]
+    Filesys["filesystem"]
+    Discover["project discovery"]
+    Dotnet["dotnet restore"]
+    GitChg["Git Changes"]
+    Watch["file watchers"]
+    HookL["local hook listener"]
+  end
+
+  App <-->|"SignalR"| Agent
 ```
 
 This separation is foundational.
@@ -332,14 +334,20 @@ GrayMoon has workflows that span many repositories and therefore cannot be expre
 
 Examples:
 
-```text
-PrepareWorkspaceOrchestrator
-DependencyUpdateOrchestrator
-PushOrchestrator / WorkspacePushService
-WorkspaceCommitSyncHandler
-WorkspaceBranchUpdateHandler
-WorkspaceSyncHandler
-WorkspaceUndoPushHandler
+```mermaid
+flowchart TB
+  Prep["PrepareWorkspaceOrchestrator"]
+  Dep["DependencyUpdateOrchestrator"]
+  Push["PushOrchestrator / WorkspacePushService"]
+  Sync["WorkspaceCommitSyncHandler / WorkspaceSyncHandler"]
+  Branch["WorkspaceBranchUpdateHandler"]
+  Undo["WorkspaceUndoPushHandler"]
+  Prep --> AgentOps["Agent local operations"]
+  Dep --> AgentOps
+  Push --> AgentOps
+  Sync --> AgentOps
+  Branch --> AgentOps
+  Undo --> AgentOps
 ```
 
 Orchestrators own:

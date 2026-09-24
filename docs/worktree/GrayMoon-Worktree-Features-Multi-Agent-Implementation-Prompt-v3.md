@@ -666,7 +666,7 @@ Presentation:
 
 ```text
 main                         [Current]
-BAM-2856                     [Feature]
+ABC-2856                     [Feature]
 external-experiment          [Worktree]
 ```
 

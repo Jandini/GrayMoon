@@ -43,6 +43,9 @@ flowchart LR
   Route -->|"most mutations"| Main["main pool"]
   Route -->|"GetGitChangeStatus"| Read["read/status pool"]
   Route -->|"GetGitFileDiff"| Diff["diff pool"]
+  Main -.-> Cap["bounded concurrency"]
+  Read -.-> Cap
+  Diff -.-> Cap
 ```
 
 This isolation matters.
