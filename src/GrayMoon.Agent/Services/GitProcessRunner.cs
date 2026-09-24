@@ -177,6 +177,41 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, IOptions<G
         return await RunCoreAsync(fileName, arguments, workingDirectory, stdinBytes, ct);
     }
 
+    /// <summary>
+    /// Holds the per-repository write lock for a multi-step critical section (e.g. Commit All's
+    /// <c>git add --all</c> + verify + <c>git commit</c>). Nested calls must use
+    /// <see cref="RunHoldingLockAsync"/> - <see cref="RunAsync"/> would deadlock on the same
+    /// non-reentrant <see cref="SemaphoreSlim"/>.
+    /// </summary>
+    internal async Task<T> WithRepoWriteLockAsync<T>(
+        string workingDirectory,
+        Func<CancellationToken, Task<T>> action,
+        CancellationToken ct)
+    {
+        var repoLock = GetRepoLock(workingDirectory);
+        await repoLock.WaitAsync(ct);
+        try
+        {
+            return await action(ct);
+        }
+        finally
+        {
+            repoLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Runs a git/process invocation without acquiring <see cref="RepoLocks"/>. Caller must already
+    /// hold the write lock via <see cref="WithRepoWriteLockAsync"/> (or deliberately accept races).
+    /// </summary>
+    internal Task<(int ExitCode, string? Stdout, string? Stderr)> RunHoldingLockAsync(
+        string fileName,
+        IReadOnlyList<string> arguments,
+        string? workingDirectory,
+        byte[]? stdinBytes,
+        CancellationToken ct)
+        => RunCoreAsync(fileName, arguments, workingDirectory, stdinBytes, ct);
+
     private async Task<(int ExitCode, string? Stdout, string? Stderr)> RunCoreAsync(
         string fileName,
         IReadOnlyList<string> arguments,

@@ -443,37 +443,129 @@ public sealed class GitCliRepositoryGitChangesService(GitProcessRunner runner, I
             "Git commit starting for {RepoPath}: StageAllFirst={StageAllFirst}",
             repoPath, request.StageAllFirst);
 
-        if (request.StageAllFirst)
+        // Hold the write lock across stage + verify + commit so a concurrent mutation cannot
+        // unstage/partially restage between add and commit (and so Commit All's re-add retries
+        // see a stable index). Nested git calls use RunHoldingLockAsync to avoid deadlock.
+        return await runner.WithRepoWriteLockAsync(repoPath, async ct =>
         {
-            var (addExit, addOut, addErr) = await runner.RunAsync("git", ["add", "--all"], repoPath, null, cancellationToken);
+            if (request.StageAllFirst)
+            {
+                var stageError = await StageAllForCommitAsync(repoPath, ct);
+                if (stageError != null)
+                {
+                    var snapshot = await TryGetSnapshotAsync(repoPath, nextSnapshotVersion, ct);
+                    return new GitCommitResult
+                    {
+                        Success = false,
+                        ErrorCode = "StageFailed",
+                        ErrorMessage = stageError,
+                        Snapshot = snapshot,
+                    };
+                }
+            }
+
+            var (stagedExit, _, _) = await runner.RunHoldingLockAsync(
+                "git", ["diff", "--cached", "--quiet"], repoPath, null, ct);
+            if (stagedExit == 0)
+            {
+                var snapshot = await TryGetSnapshotAsync(repoPath, nextSnapshotVersion, ct);
+                return new GitCommitResult
+                {
+                    Success = false,
+                    ErrorCode = "NothingStaged",
+                    ErrorMessage = "No staged changes to commit.",
+                    Snapshot = snapshot,
+                };
+            }
+
+            var messageBytes = Encoding.UTF8.GetBytes(NormalizeCommitMessage(request.CommitMessage));
+            var (commitExit, commitOut, commitErr) = await runner.RunHoldingLockAsync(
+                "git", ["commit", "-F", "-"], repoPath, messageBytes, ct);
+            if (commitExit != 0)
+            {
+                var snapshot = await TryGetSnapshotAsync(repoPath, nextSnapshotVersion, ct);
+                var error = (commitErr ?? commitOut ?? "git commit failed").Trim();
+                logger.LogError("Git commit failed for {RepoPath}. ExitCode={ExitCode}, Stderr={Stderr}", repoPath, commitExit, error);
+                return new GitCommitResult { Success = false, ErrorCode = "CommitFailed", ErrorMessage = error, Snapshot = snapshot };
+            }
+
+            var commitSha = await GetHeadCommitShaAsyncHoldingLockAsync(repoPath, ct);
+            var finalSnapshot = await TryGetSnapshotAsync(repoPath, nextSnapshotVersion, ct);
+            logger.LogInformation("Git commit completed for {RepoPath}: {CommitSha}", repoPath, commitSha);
+            return new GitCommitResult { Success = true, CommitSha = commitSha, Snapshot = finalSnapshot };
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// <c>git add --all</c>, then confirm the working tree has no remaining unstaged tracked edits
+    /// or untracked files. Retries a few times under the caller's write lock so a large Commit All
+    /// is not left half-staged when files are still settling (or the first add only partially
+    /// caught up). Returns null on success, or an error message.
+    /// </summary>
+    private async Task<string?> StageAllForCommitAsync(string repoPath, CancellationToken cancellationToken)
+    {
+        const int maxAttempts = 3;
+        string? lastError = null;
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            var (addExit, addOut, addErr) = await runner.RunHoldingLockAsync(
+                "git", ["add", "--all"], repoPath, null, cancellationToken);
             if (addExit != 0)
             {
-                var snapshot = await TryGetSnapshotAsync(repoPath, nextSnapshotVersion, cancellationToken);
-                return new GitCommitResult { Success = false, ErrorCode = "StageFailed", ErrorMessage = (addErr ?? addOut ?? "git add failed").Trim(), Snapshot = snapshot };
+                return (addErr ?? addOut ?? "git add failed").Trim();
             }
+
+            if (!await HasUnstagedOrUntrackedAsync(repoPath, cancellationToken))
+            {
+                if (attempt > 1)
+                {
+                    logger.LogInformation(
+                        "Commit All staging settled for {RepoPath} on attempt {Attempt}",
+                        repoPath, attempt);
+                }
+
+                return null;
+            }
+
+            lastError = "Working tree still had unstaged or untracked changes after git add --all.";
+            logger.LogWarning(
+                "Commit All staging still dirty for {RepoPath} after attempt {Attempt} of {MaxAttempts}; retrying git add --all",
+                repoPath, attempt, maxAttempts);
         }
 
-        var (stagedExit, _, _) = await runner.RunAsync("git", ["diff", "--cached", "--quiet"], repoPath, null, cancellationToken);
-        if (stagedExit == 0)
+        return lastError;
+    }
+
+    private async Task<bool> HasUnstagedOrUntrackedAsync(string repoPath, CancellationToken cancellationToken)
+    {
+        // Match the UI's "Changed" notion: any porcelain worktree/untracked entry after add --all.
+        var (exitCode, stdout, _) = await runner.RunHoldingLockAsync(
+            "git",
+            ["--no-optional-locks", "status", "--porcelain=v2", "-z", "--untracked-files=all"],
+            repoPath,
+            null,
+            cancellationToken);
+        if (exitCode != 0)
         {
-            var snapshot = await TryGetSnapshotAsync(repoPath, nextSnapshotVersion, cancellationToken);
-            return new GitCommitResult { Success = false, ErrorCode = "NothingStaged", ErrorMessage = "No staged changes to commit.", Snapshot = snapshot };
+            return true;
         }
 
-        var messageBytes = Encoding.UTF8.GetBytes(NormalizeCommitMessage(request.CommitMessage));
-        var (commitExit, commitOut, commitErr) = await runner.RunAsync("git", ["commit", "-F", "-"], repoPath, messageBytes, cancellationToken);
-        if (commitExit != 0)
+        var parsed = GitPorcelainV2Parser.Parse(stdout);
+        return parsed.Changes.Any(c => c.IsChanged);
+    }
+
+    private async Task<string?> GetHeadCommitShaAsyncHoldingLockAsync(string repoPath, CancellationToken cancellationToken)
+    {
+        var (exitCode, stdout, _) = await runner.RunHoldingLockAsync(
+            "git", ["rev-parse", "HEAD"], repoPath, null, cancellationToken);
+        if (exitCode != 0)
         {
-            var snapshot = await TryGetSnapshotAsync(repoPath, nextSnapshotVersion, cancellationToken);
-            var error = (commitErr ?? commitOut ?? "git commit failed").Trim();
-            logger.LogError("Git commit failed for {RepoPath}. ExitCode={ExitCode}, Stderr={Stderr}", repoPath, commitExit, error);
-            return new GitCommitResult { Success = false, ErrorCode = "CommitFailed", ErrorMessage = error, Snapshot = snapshot };
+            return null;
         }
 
-        var commitSha = await GetHeadCommitShaAsync(repoPath, cancellationToken);
-        var finalSnapshot = await TryGetSnapshotAsync(repoPath, nextSnapshotVersion, cancellationToken);
-        logger.LogInformation("Git commit completed for {RepoPath}: {CommitSha}", repoPath, commitSha);
-        return new GitCommitResult { Success = true, CommitSha = commitSha, Snapshot = finalSnapshot };
+        var sha = (stdout ?? string.Empty).Trim();
+        return string.IsNullOrWhiteSpace(sha) ? null : sha;
     }
 
     private static bool IsWholeRepositoryScope(GitChangeOperationScope scope) =>

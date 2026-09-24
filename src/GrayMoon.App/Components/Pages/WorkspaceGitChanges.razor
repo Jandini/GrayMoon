@@ -90,36 +90,46 @@
                         </form>
                         <div class="git-changes-workspace-commit__actions">
                             @{
-                                // Capture modes at render so click handlers execute the command shown,
-                                // not a later recompute of StagedRepositoryCount from mutable _view (TOCTOU).
-                                var primaryCommitMode = OfferedCommitMode;
-                                var showExplicitCommitAll = primaryCommitMode == WorkspaceCommitMode.Staged;
+                                // Staged presence only chooses whether Commit Staged is shown beside
+                                // Commit All. Commit All itself always binds WorkspaceCommitMode.All.
+                                var showExplicitCommitAll = OfferedCommitMode == WorkspaceCommitMode.Staged;
                             }
                             <div class="git-changes-workspace-commit__buttons">
-                                <button type="button"
-                                        class="@(string.IsNullOrWhiteSpace(_workspaceCommitMessage) ? "btn btn-sm btn-outline-primary" : "btn btn-sm btn-primary")"
-                                        disabled="@IsCommitButtonDisabled"
-                                        title="@(PushAfterCommit
-                                                    ? "Commits, then pushes exactly the repositories that committed successfully. Ctrl+Enter from the message box."
-                                                    : primaryCommitMode == WorkspaceCommitMode.Staged
-                                                        ? "Commits only already-staged changes in each applicable repository. Ctrl+Enter from the message box."
-                                                        : "Stages all changes then commits in each applicable repository. Ctrl+Enter from the message box.")"
-                                        aria-keyshortcuts="Control+Enter"
-                                        @onclick="() => CommitWorkspaceAsync(primaryCommitMode, PushAfterCommit)">
-                                    @WorkspaceCommitModeHelper.ButtonTitle(primaryCommitMode)
-                                </button>
+                                @*
+                                  Commit All keeps a stable @key and always binds WorkspaceCommitMode.All.
+                                  Blazor reuses event-handler IDs across re-renders; if the primary button
+                                  morphs from All → Staged when a watcher refresh arrives mid-click, the
+                                  in-flight click would execute Commit Staged. Keeping Commit All as its
+                                  own keyed element prevents that (and preserves an in-flight All click
+                                  when the Staged primary appears beside it).
+                                *@
                                 @if (showExplicitCommitAll)
                                 {
                                     <button type="button"
-                                            class="btn btn-sm btn-outline-primary"
+                                            @key="@("commit-primary-staged")"
+                                            class="@(string.IsNullOrWhiteSpace(_workspaceCommitMessage) ? "btn btn-sm btn-outline-primary" : "btn btn-sm btn-primary")"
                                             disabled="@IsCommitButtonDisabled"
                                             title="@(PushAfterCommit
-                                                        ? "Stages all changes, commits, then pushes the repositories that committed successfully."
-                                                        : "Stages all changes (git add --all) then commits in each repository with changes.")"
-                                            @onclick="() => CommitWorkspaceAsync(WorkspaceCommitMode.All, PushAfterCommit)">
-                                        Commit All
+                                                        ? "Commits only already-staged changes, then pushes exactly the repositories that committed successfully. Ctrl+Enter from the message box."
+                                                        : "Commits only already-staged changes in each applicable repository. Ctrl+Enter from the message box.")"
+                                            aria-keyshortcuts="Control+Enter"
+                                            @onclick="() => CommitWorkspaceAsync(WorkspaceCommitMode.Staged, PushAfterCommit)">
+                                        Commit Staged
                                     </button>
                                 }
+                                <button type="button"
+                                        @key="@("commit-all")"
+                                        class="@(showExplicitCommitAll
+                                                    ? "btn btn-sm btn-outline-primary"
+                                                    : string.IsNullOrWhiteSpace(_workspaceCommitMessage) ? "btn btn-sm btn-outline-primary" : "btn btn-sm btn-primary")"
+                                        disabled="@IsCommitButtonDisabled"
+                                        title="@(PushAfterCommit
+                                                    ? "Stages all changes, commits, then pushes the repositories that committed successfully."
+                                                    : "Stages all changes (git add --all) then commits in each repository with changes.")"
+                                        aria-keyshortcuts="@(showExplicitCommitAll ? null : "Control+Enter")"
+                                        @onclick="() => CommitWorkspaceAsync(WorkspaceCommitMode.All, PushAfterCommit)">
+                                    Commit All
+                                </button>
                             </div>
                             <div class="form-check git-changes-workspace-commit__push-check @(IsCommitButtonDisabled ? "git-changes-workspace-commit__push-check--inactive" : "")">
                                 <label class="form-check-label" for="git-changes-push-after-commit" title="Push committed">
