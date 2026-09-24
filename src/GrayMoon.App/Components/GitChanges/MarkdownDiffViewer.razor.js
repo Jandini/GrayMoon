@@ -144,6 +144,7 @@ function attachPanZoom(container, content, options = {}) {
     // directInteract: lightbox mode - wheel zooms and drag pans without Alt.
     const {
         onExpand = null,
+        onClose = null,
         showExpand = true,
         host = null,
         directInteract = false,
@@ -296,6 +297,11 @@ function attachPanZoom(container, content, options = {}) {
 
     container.addEventListener('dblclick', (e) => {
         if (e.target.closest('.mermaid-panzoom-controls')) {
+            return;
+        }
+        if (typeof onClose === 'function') {
+            e.preventDefault();
+            onClose();
             return;
         }
         if (typeof onExpand === 'function') {
@@ -474,7 +480,12 @@ async function openMermaidLightbox(source, title) {
         const id = `gm-mermaid-lb-${Math.random().toString(36).slice(2)}`;
         const { svg } = await mermaid.render(id, source);
         host.innerHTML = svg;
-        attachPanZoom(stage, content, { showExpand: false, host, directInteract: true });
+        attachPanZoom(stage, content, {
+            showExpand: false,
+            host,
+            directInteract: true,
+            onClose: closeMermaidLightbox,
+        });
         closeBtn.focus();
     } catch (err) {
         const pre = document.createElement('pre');

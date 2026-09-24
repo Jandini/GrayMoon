@@ -219,6 +219,16 @@
     opacity: 0.4;
 }
 
+/* Wide review: hide tree + splitter so Monaco / markdown preview can use full width. */
+.git-changes-splitter--review-expanded .git-changes-splitter__left,
+.git-changes-splitter--review-expanded .git-changes-splitter__handle {
+    display: none;
+}
+
+.git-changes-splitter--review-expanded .git-changes-splitter__right {
+    border-left: none;
+}
+
 /* Commit sits inside the left column; only the textarea keeps an input border (no second frame). */
 .git-changes-workspace-commit {
     flex: 0 0 auto;
@@ -719,12 +729,13 @@
     margin-top: 0.4rem;
 }
 
-/* ---- Markdown preview (Git Changes) ---- */
+/* ---- Diff / markdown review chrome (Git Changes) ---- */
 
-.git-diff-md-chrome {
+.git-diff-chrome {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: center;
+    justify-content: space-between;
     gap: 0.5rem;
     flex: 0 0 auto;
     padding: 0.35rem 0.6rem;
@@ -732,9 +743,34 @@
     background: var(--bg-secondary);
 }
 
-.git-diff-md-chrome__group .btn {
+.git-diff-chrome__tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+}
+
+.git-diff-chrome__group .btn {
     font-size: 0.75rem;
     padding: 0.15rem 0.55rem;
+    white-space: nowrap;
+}
+
+.git-diff-chrome__expand {
+    width: 1.85rem;
+    height: 1.85rem;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-left: auto;
+}
+
+.git-diff-chrome__expand .bi {
+    font-size: 0.95rem;
+    line-height: 1;
 }
 
 .git-diff-markdown-container {

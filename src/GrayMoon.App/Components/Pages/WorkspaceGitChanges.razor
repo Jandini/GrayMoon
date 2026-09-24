@@ -68,7 +68,7 @@
     }
     else
     {
-        <div class="graymoon-splitter git-changes-splitter" id="git-changes-splitter" data-workspace-id="@WorkspaceId">
+        <div class="graymoon-splitter git-changes-splitter @(_diffReviewExpanded ? "git-changes-splitter--review-expanded" : null)" id="git-changes-splitter" data-workspace-id="@WorkspaceId">
             <div class="graymoon-splitter__left git-changes-splitter__left">
                 @if (ChangedRepositoryCount > 0)
                 {
@@ -205,38 +205,51 @@
                         </div>
                     }
 
-                    @if (_selectedDiff != null && RendersInMonaco(_selectedDiff.State) && IsMarkdownFile)
+                    @if (_selectedDiff != null && RendersInMonaco(_selectedDiff.State))
                     {
-                        <div class="git-diff-md-chrome">
-                            <div class="btn-group git-diff-md-chrome__group" role="group" aria-label="Markdown surface">
-                                <button type="button"
-                                        class="btn btn-sm @(_mdSurface == MdSurface.Source ? "btn-secondary" : "btn-outline-secondary")"
-                                        title="Show Monaco source diff"
-                                        @onclick="() => SetMdSurfaceAsync(MdSurface.Source)">Source</button>
-                                <button type="button"
-                                        class="btn btn-sm @(_mdSurface == MdSurface.Preview ? "btn-secondary" : "btn-outline-secondary")"
-                                        title="Show rendered markdown"
-                                        @onclick="() => SetMdSurfaceAsync(MdSurface.Preview)">Preview</button>
+                        <div class="git-diff-chrome">
+                            <div class="git-diff-chrome__tools">
+                                @if (IsMarkdownFile)
+                                {
+                                    <div class="btn-group git-diff-chrome__group" role="group" aria-label="Markdown surface">
+                                        <button type="button"
+                                                class="btn btn-sm text-nowrap @(_mdSurface == MdSurface.Source ? "btn-secondary" : "btn-outline-secondary")"
+                                                title="Show Monaco source diff"
+                                                @onclick="() => SetMdSurfaceAsync(MdSurface.Source)">Source</button>
+                                        <button type="button"
+                                                class="btn btn-sm text-nowrap @(_mdSurface == MdSurface.Preview ? "btn-secondary" : "btn-outline-secondary")"
+                                                title="Show rendered markdown"
+                                                @onclick="() => SetMdSurfaceAsync(MdSurface.Preview)">Preview</button>
+                                    </div>
+                                    @if (_mdSurface == MdSurface.Preview)
+                                    {
+                                        <div class="btn-group git-diff-chrome__group" role="group" aria-label="Markdown preview mode">
+                                            <button type="button"
+                                                    class="btn btn-sm text-nowrap @(_mdPreviewMode == MarkdownProsePreviewMode.Changes ? "btn-secondary" : "btn-outline-secondary")"
+                                                    title="Rendered document with insertions and deletions highlighted"
+                                                    @onclick="() => SetMdPreviewModeAsync(MarkdownProsePreviewMode.Changes)">Changes</button>
+                                            <button type="button"
+                                                    class="btn btn-sm text-nowrap @(_mdPreviewMode == MarkdownProsePreviewMode.After ? "btn-secondary" : "btn-outline-secondary")"
+                                                    title="Rendered result after changes"
+                                                    disabled="@IsMdAfterDisabled"
+                                                    @onclick="() => SetMdPreviewModeAsync(MarkdownProsePreviewMode.After)">After</button>
+                                            <button type="button"
+                                                    class="btn btn-sm text-nowrap @(_mdPreviewMode == MarkdownProsePreviewMode.Before ? "btn-secondary" : "btn-outline-secondary")"
+                                                    title="Rendered document before changes"
+                                                    disabled="@IsMdBeforeDisabled"
+                                                    @onclick="() => SetMdPreviewModeAsync(MarkdownProsePreviewMode.Before)">Before</button>
+                                        </div>
+                                    }
+                                }
                             </div>
-                            @if (_mdSurface == MdSurface.Preview)
-                            {
-                                <div class="btn-group git-diff-md-chrome__group" role="group" aria-label="Markdown preview mode">
-                                    <button type="button"
-                                            class="btn btn-sm @(_mdPreviewMode == MarkdownProsePreviewMode.Changes ? "btn-secondary" : "btn-outline-secondary")"
-                                            title="Rendered document with insertions and deletions highlighted"
-                                            @onclick="() => SetMdPreviewModeAsync(MarkdownProsePreviewMode.Changes)">Changes</button>
-                                    <button type="button"
-                                            class="btn btn-sm @(_mdPreviewMode == MarkdownProsePreviewMode.After ? "btn-secondary" : "btn-outline-secondary")"
-                                            title="Rendered result after changes"
-                                            disabled="@IsMdAfterDisabled"
-                                            @onclick="() => SetMdPreviewModeAsync(MarkdownProsePreviewMode.After)">After</button>
-                                    <button type="button"
-                                            class="btn btn-sm @(_mdPreviewMode == MarkdownProsePreviewMode.Before ? "btn-secondary" : "btn-outline-secondary")"
-                                            title="Rendered document before changes"
-                                            disabled="@IsMdBeforeDisabled"
-                                            @onclick="() => SetMdPreviewModeAsync(MarkdownProsePreviewMode.Before)">Before</button>
-                                </div>
-                            }
+                            <button type="button"
+                                    class="btn btn-sm btn-outline-secondary git-diff-chrome__expand text-nowrap flex-shrink-0"
+                                    title="@(_diffReviewExpanded ? "Show file tree" : "Hide file tree for wider review")"
+                                    aria-label="@(_diffReviewExpanded ? "Show file tree" : "Hide file tree for wider review")"
+                                    aria-pressed="@_diffReviewExpanded"
+                                    @onclick="ToggleDiffReviewExpandedAsync">
+                                <i class="bi @(_diffReviewExpanded ? "bi-fullscreen-exit" : "bi-arrows-fullscreen")" aria-hidden="true"></i>
+                            </button>
                         </div>
                     }
 
