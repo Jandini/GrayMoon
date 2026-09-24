@@ -234,9 +234,15 @@ internal sealed class RepositoryRefreshTracker : IDisposable
                 case RepositoryRefreshState.Refreshing:
                     _state = RepositoryRefreshState.RefreshingAndDirty;
                     return;
-                case RepositoryRefreshState.Dirty:
                 case RepositoryRefreshState.RefreshingAndDirty:
-                    // Already dirty with a scan scheduled or pending; nothing new to do.
+                    // Follow-up scan already pending; nothing new to do.
+                    return;
+                case RepositoryRefreshState.Dirty:
+                    // Reset the debounce window so the scan runs after the last event, not the first.
+                    // Without this, a slow burst that outlasts the original window starts a scan mid-burst
+                    // and later MarkDirty calls legitimately queue a follow-up (flaky CallCount == 2 in CI).
+                    _debounceTimer?.Dispose();
+                    _debounceTimer = new Timer(_ => onDebounceElapsed(), null, debounceMilliseconds, Timeout.Infinite);
                     return;
             }
 

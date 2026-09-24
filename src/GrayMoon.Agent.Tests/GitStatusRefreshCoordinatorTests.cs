@@ -75,21 +75,20 @@ public class GitStatusRefreshCoordinatorTests
     public async Task MarkDirty_debounces_repeated_events_into_a_single_scan()
     {
         var fake = new FakeRepositoryGitChangesService { Delay = TimeSpan.FromMilliseconds(10) };
-        // Debounce window is deliberately much larger than the time spent firing all 10 events, so every
-        // event is guaranteed to land before the single debounce timer elapses (avoids test flakiness from
-        // a later event racing against the timer callback, which would legitimately trigger a follow-up).
-        var options = new GitChangesOptions { WatcherDebounceMilliseconds = 500 };
+        // Debounce window must outlast the quiet period after the last event. Resetting the timer on
+        // every Dirty MarkDirty (true trailing debounce) keeps a long burst as one scan even when the
+        // burst itself is slower than the window (common on loaded CI agents).
+        var options = new GitChangesOptions { WatcherDebounceMilliseconds = 150 };
         using var coordinator = CreateCoordinator(fake, options);
         const string repoPath = @"C:\repo-debounce";
 
         for (var i = 0; i < 10; i++)
         {
             coordinator.MarkDirty(repoPath);
-            await Task.Delay(5);
         }
 
         var sawScan = await WaitForAsync(() => fake.CallCount >= 1, TimeSpan.FromSeconds(3));
-        await Task.Delay(200); // give any erroneous extra scans a chance to fire before asserting the final count
+        await Task.Delay(300); // quiet period longer than the debounce window
 
         Assert.True(sawScan);
         Assert.Equal(1, fake.CallCount);
