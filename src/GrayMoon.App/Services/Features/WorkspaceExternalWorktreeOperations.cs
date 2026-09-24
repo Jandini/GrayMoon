@@ -17,67 +17,93 @@ public sealed class WorkspaceExternalWorktreeOperations(
     IAgentBridge agentBridge,
     ILogger<WorkspaceExternalWorktreeOperations> logger) : IWorkspaceExternalWorktreeOperations
 {
+    internal const string FeatureOwnedError = "This worktree belongs to a GrayMoon Feature. Use Remove Feature instead.";
+    internal const string InspectFailedError = "Could not inspect the external worktree.";
+
     public async Task<ExternalWorktreeCleanupPlan> AnalyzeExternalWorktreeCleanupAsync(
         int workspaceId,
         int workspaceRepositoryId,
         string worktreePath,
         CancellationToken cancellationToken = default)
     {
-        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var link = await db.WorkspaceRepositories
-            .AsNoTracking()
-            .Include(l => l.Repository)
-            .FirstOrDefaultAsync(
-                l => l.WorkspaceId == workspaceId && l.WorkspaceRepositoryId == workspaceRepositoryId,
-                cancellationToken);
-        if (link?.Repository is null)
-            return new ExternalWorktreeCleanupPlan { Success = false, Error = "Repository not found." };
+        try
+        {
+            await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+            var link = await db.WorkspaceRepositories
+                .AsNoTracking()
+                .Include(l => l.Repository)
+                .FirstOrDefaultAsync(
+                    l => l.WorkspaceId == workspaceId && l.WorkspaceRepositoryId == workspaceRepositoryId,
+                    cancellationToken);
+            if (link?.Repository is null)
+            {
+                return new ExternalWorktreeCleanupPlan
+                {
+                    Success = false,
+                    Error = "Repository not found.",
+                    WorktreePath = worktreePath
+                };
+            }
 
-        // Refuse GrayMoon-owned Feature paths - those use RemoveFeature.
-        var owned = await db.WorkspaceFeatureRepositories.AsNoTracking()
-            .AnyAsync(r => r.WorkspaceRepositoryId == workspaceRepositoryId
-                           && r.WorktreePath != null
-                           && r.WorktreePath.Replace('/', '\\').TrimEnd('\\')
-                              .Equals(worktreePath.Replace('/', '\\').TrimEnd('\\'), StringComparison.OrdinalIgnoreCase),
+            // Refuse GrayMoon-owned Feature paths - those use RemoveFeature.
+            // Path normalize/compare must be client-side: EF cannot translate Equals(StringComparison).
+            var featurePaths = await db.WorkspaceFeatureRepositories.AsNoTracking()
+                .Where(r => r.WorkspaceRepositoryId == workspaceRepositoryId && r.WorktreePath != null)
+                .Select(r => r.WorktreePath!)
+                .ToListAsync(cancellationToken);
+            var owned = featurePaths.Any(p => GitWorktreeOccupancy.PathsEqual(p, worktreePath));
+            if (owned)
+            {
+                return new ExternalWorktreeCleanupPlan
+                {
+                    Success = false,
+                    Error = FeatureOwnedError,
+                    WorktreePath = worktreePath
+                };
+            }
+
+            var special = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+            var mainPath = await pathResolver.GetRepositoryPathAsync(special, workspaceRepositoryId, cancellationToken);
+            var listResp = await agentBridge.SendCommandAsync(
+                AgentHubMethods.ListGitWorktrees,
+                new { mainRepositoryPath = mainPath },
                 cancellationToken);
-        if (owned)
+
+            GitWorktreeInfo? match = null;
+            if (listResp.Success && listResp.Data != null)
+            {
+                var payload = AgentResponseJson.DeserializeAgentResponse<ListWorktreesAgentResponse>(listResp.Data);
+                match = GitWorktreeOccupancy.FindByPath(payload?.Worktrees, worktreePath);
+            }
+
+            var exists = Directory.Exists(worktreePath);
+            var dirty = false; // Agent-side dirty probe deferred; force path still requires explicit auth.
+            return new ExternalWorktreeCleanupPlan
+            {
+                Success = true,
+                RepositoryName = link.Repository.RepositoryName,
+                BranchName = match?.BranchName,
+                WorktreePath = worktreePath,
+                HeadCommit = match?.HeadSha,
+                WorktreeExists = exists || match != null,
+                IsDirty = dirty,
+                CanRemoveNormally = exists && !dirty,
+                RequiresForce = dirty,
+                Summary = exists
+                    ? $"External worktree at {worktreePath}"
+                    : "Worktree path not found on disk"
+            };
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "AnalyzeExternalWorktreeCleanup failed for {WorktreePath}", worktreePath);
             return new ExternalWorktreeCleanupPlan
             {
                 Success = false,
-                Error = "This worktree belongs to a GrayMoon Feature. Use Remove Feature instead."
+                Error = InspectFailedError,
+                WorktreePath = worktreePath
             };
-
-        var special = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
-        var mainPath = await pathResolver.GetRepositoryPathAsync(special, workspaceRepositoryId, cancellationToken);
-        var listResp = await agentBridge.SendCommandAsync(
-            AgentHubMethods.ListGitWorktrees,
-            new { mainRepositoryPath = mainPath },
-            cancellationToken);
-
-        GitWorktreeInfo? match = null;
-        if (listResp.Success && listResp.Data != null)
-        {
-            var payload = AgentResponseJson.DeserializeAgentResponse<ListWorktreesAgentResponse>(listResp.Data);
-            match = GitWorktreeOccupancy.FindByPath(payload?.Worktrees, worktreePath);
         }
-
-        var exists = Directory.Exists(worktreePath);
-        var dirty = false; // Agent-side dirty probe deferred; force path still requires explicit auth.
-        return new ExternalWorktreeCleanupPlan
-        {
-            Success = true,
-            RepositoryName = link.Repository.RepositoryName,
-            BranchName = match?.BranchName,
-            WorktreePath = worktreePath,
-            HeadCommit = match?.HeadSha,
-            WorktreeExists = exists || match != null,
-            IsDirty = dirty,
-            CanRemoveNormally = exists && !dirty,
-            RequiresForce = dirty,
-            Summary = exists
-                ? $"External worktree at {worktreePath}"
-                : "Worktree path not found on disk"
-        };
     }
 
     public async Task<OperationResult> RemoveExternalWorktreeAsync(
@@ -90,9 +116,19 @@ public sealed class WorkspaceExternalWorktreeOperations(
     {
         var plan = await AnalyzeExternalWorktreeCleanupAsync(workspaceId, workspaceRepositoryId, worktreePath, cancellationToken);
         if (!plan.Success)
-            return OperationResult.Fail(plan.Error ?? "Analyze failed.");
-        if (plan.RequiresForce && !options.AllowForceRemoveDirty)
+        {
+            // Feature-owned paths must never be force-removed via this API.
+            if (string.Equals(plan.Error, FeatureOwnedError, StringComparison.Ordinal))
+                return OperationResult.Fail(plan.Error);
+
+            // Stray / uninspectable worktrees: allow an explicitly authorized force remove.
+            if (!options.AllowForceRemoveDirty)
+                return OperationResult.Fail(plan.Error ?? "Analyze failed.");
+        }
+        else if (plan.RequiresForce && !options.AllowForceRemoveDirty)
+        {
             return OperationResult.Fail("Worktree is dirty; authorize force removal explicitly.");
+        }
 
         var tcs = new TaskCompletionSource<OperationResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         var started = operationLock.TryStartStructural(
@@ -108,7 +144,7 @@ public sealed class WorkspaceExternalWorktreeOperations(
                     progress?.Report(new OperationProgress(op.DisplayMessage));
                     var special = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, linked.Token);
                     var mainPath = await pathResolver.GetRepositoryPathAsync(special, workspaceRepositoryId, linked.Token);
-                    var force = options.AllowForceRemoveDirty || plan.RequiresForce;
+                    var force = options.AllowForceRemoveDirty || plan.RequiresForce || !plan.Success;
                     var resp = await agentBridge.SendCommandAsync(
                         AgentHubMethods.RemoveGitWorktree,
                         new { mainRepositoryPath = mainPath, worktreePath, force },

@@ -273,9 +273,25 @@
                                                     }
                                                     else if (!_worktreeCleanupPlan.Success)
                                                     {
-                                                        <div class="d-flex align-items-center justify-content-between">
-                                                            <span class="text-danger small">@_worktreeCleanupPlan.Error</span>
-                                                            <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="DismissExternalWorktreeCleanup" @onclick:stopPropagation="true">Close</button>
+                                                        <div class="small">
+                                                            <span class="text-danger">@_worktreeCleanupPlan.Error</span>
+                                                            @if (CanForceDeleteUninspectedWorktree(_worktreeCleanupPlan))
+                                                            {
+                                                                <div class="text-muted mt-1" style="font-size: 0.8rem;">Force delete will run <code>git worktree remove --force</code> using the known path.</div>
+                                                            }
+                                                        </div>
+                                                        <div class="d-flex gap-2 flex-shrink-0 align-self-end">
+                                                            @if (CanForceDeleteUninspectedWorktree(_worktreeCleanupPlan))
+                                                            {
+                                                                <button type="button" class="btn btn-danger btn-sm" @onclick="ProceedWithForceExternalWorktreeCleanupAsync" disabled="@(isCleaningUpWorktree || isRefreshing)" @onclick:stopPropagation="true">
+                                                                    @if (isCleaningUpWorktree)
+                                                                    {
+                                                                        <span class="spinner-border spinner-border-sm me-1"></span>
+                                                                    }
+                                                                    Force Delete
+                                                                </button>
+                                                            }
+                                                            <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="DismissExternalWorktreeCleanup" disabled="@(isCleaningUpWorktree || isRefreshing)" @onclick:stopPropagation="true">Close</button>
                                                         </div>
                                                     }
                                                     else if (_worktreeCleanupPlan.IsDirty && !_awaitingForceWorktreeCleanupConfirmation)
@@ -1220,7 +1236,8 @@
             _worktreeCleanupPlan = new GrayMoon.Application.Features.ExternalWorktreeCleanupPlan
             {
                 Success = false,
-                Error = "Could not inspect the external worktree."
+                Error = "Could not inspect the external worktree.",
+                WorktreePath = occupancy.WorktreePath
             };
         }
         StateHasChanged();
@@ -1234,9 +1251,34 @@
         StateHasChanged();
     }
 
+    private static bool CanForceDeleteUninspectedWorktree(GrayMoon.Application.Features.ExternalWorktreeCleanupPlan plan)
+        => !plan.Success
+           && !string.IsNullOrWhiteSpace(plan.WorktreePath)
+           && !string.Equals(
+               plan.Error,
+               WorkspaceExternalWorktreeOperations.FeatureOwnedError,
+               StringComparison.Ordinal);
+
+    private Task ProceedWithForceExternalWorktreeCleanupAsync()
+    {
+        _awaitingForceWorktreeCleanupConfirmation = true;
+        return ProceedWithExternalWorktreeCleanupAsync();
+    }
+
     private async Task ProceedWithExternalWorktreeCleanupAsync()
     {
-        if (_worktreeCleanupPlan is not { Success: true } plan)
+        if (_worktreeCleanupPlan is null)
+            return;
+
+        var plan = _worktreeCleanupPlan;
+        if (string.IsNullOrWhiteSpace(plan.WorktreePath))
+            return;
+
+        // Successful analyze: normal remove (or dirty after "Remove Anyway").
+        // Failed analyze: only when the user explicitly force-authorized (stray / uninspectable worktree).
+        if (!plan.Success && !_awaitingForceWorktreeCleanupConfirmation)
+            return;
+        if (!plan.Success && !CanForceDeleteUninspectedWorktree(plan))
             return;
 
         isCleaningUpWorktree = true;
