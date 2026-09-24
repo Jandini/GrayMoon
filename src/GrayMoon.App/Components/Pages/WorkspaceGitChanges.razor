@@ -207,10 +207,10 @@
 
                     @if (_selectedDiff != null && RendersInMonaco(_selectedDiff.State))
                     {
-                        <div class="git-diff-chrome">
-                            <div class="git-diff-chrome__tools">
-                                @if (IsMarkdownFile)
-                                {
+                        @if (IsMarkdownFile)
+                        {
+                            <div class="git-diff-chrome">
+                                <div class="git-diff-chrome__tools">
                                     <div class="btn-group git-diff-chrome__group" role="group" aria-label="Markdown surface">
                                         <button type="button"
                                                 class="btn btn-sm text-nowrap @(_mdSurface == MdSurface.Source ? "btn-secondary" : "btn-outline-secondary")"
@@ -240,17 +240,28 @@
                                                     @onclick="() => SetMdPreviewModeAsync(MarkdownProsePreviewMode.Before)">Before</button>
                                         </div>
                                     }
-                                }
+                                </div>
+                                <button type="button"
+                                        class="git-diff-expand-btn text-nowrap flex-shrink-0"
+                                        title="@(_diffReviewExpanded ? "Show file tree" : "Hide file tree for wider review")"
+                                        aria-label="@(_diffReviewExpanded ? "Show file tree" : "Hide file tree for wider review")"
+                                        aria-pressed="@_diffReviewExpanded"
+                                        @onclick="ToggleDiffReviewExpandedAsync">
+                                    <i class="bi @(_diffReviewExpanded ? "bi-fullscreen-exit" : "bi-arrows-fullscreen")" aria-hidden="true"></i>
+                                </button>
                             </div>
+                        }
+                        else
+                        {
                             <button type="button"
-                                    class="btn btn-sm btn-outline-secondary git-diff-chrome__expand text-nowrap flex-shrink-0"
+                                    class="git-diff-expand-btn git-diff-expand-btn--float text-nowrap"
                                     title="@(_diffReviewExpanded ? "Show file tree" : "Hide file tree for wider review")"
                                     aria-label="@(_diffReviewExpanded ? "Show file tree" : "Hide file tree for wider review")"
                                     aria-pressed="@_diffReviewExpanded"
                                     @onclick="ToggleDiffReviewExpandedAsync">
                                 <i class="bi @(_diffReviewExpanded ? "bi-fullscreen-exit" : "bi-arrows-fullscreen")" aria-hidden="true"></i>
                             </button>
-                        </div>
+                        }
                     }
 
                     @if (!string.IsNullOrEmpty(_markdownPreviewError) && ShowMarkdownPreview)

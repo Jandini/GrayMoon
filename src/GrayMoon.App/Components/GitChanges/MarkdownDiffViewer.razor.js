@@ -136,7 +136,6 @@ function attachPanZoom(container, content, options = {}) {
     let translateX = 0;
     let translateY = 0;
     let isPanning = false;
-    let panMode = false;
     let startX = 0;
     let startY = 0;
     const minScale = 0.25;
@@ -186,14 +185,10 @@ function attachPanZoom(container, content, options = {}) {
     const expandBtn = showExpand
         ? '<button type="button" class="mermaid-panzoom-btn" data-act="expand" title="Expand diagram" aria-label="Expand diagram"><i class="bi bi-arrows-fullscreen" aria-hidden="true"></i></button>'
         : '';
-    const panBtn = directInteract
-        ? ''
-        : '<button type="button" class="mermaid-panzoom-btn" data-act="pan" title="Toggle pan mode" aria-label="Toggle pan mode"><i class="bi bi-arrows-move" aria-hidden="true"></i></button>';
     controls.innerHTML =
         '<button type="button" class="mermaid-panzoom-btn" data-act="in" title="Zoom in" aria-label="Zoom in"><i class="bi bi-zoom-in" aria-hidden="true"></i></button>' +
         '<button type="button" class="mermaid-panzoom-btn" data-act="out" title="Zoom out" aria-label="Zoom out"><i class="bi bi-zoom-out" aria-hidden="true"></i></button>' +
         '<button type="button" class="mermaid-panzoom-btn" data-act="reset" title="Reset view" aria-label="Reset view"><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i></button>' +
-        panBtn +
         expandBtn;
 
     controls.addEventListener('click', (e) => {
@@ -210,10 +205,6 @@ function attachPanZoom(container, content, options = {}) {
             zoomBy(1 / 1.2);
         } else if (act === 'reset') {
             fit();
-        } else if (act === 'pan') {
-            panMode = !panMode;
-            btn.classList.toggle('is-active', panMode);
-            container.classList.toggle('mermaid-panzoom--pan-mode', panMode);
         } else if (act === 'expand' && typeof onExpand === 'function') {
             onExpand();
         }
@@ -254,7 +245,7 @@ function attachPanZoom(container, content, options = {}) {
         if (e.target.closest('.mermaid-panzoom-controls')) {
             return;
         }
-        const canPan = directInteract || panMode || e.altKey;
+        const canPan = directInteract || e.altKey;
         if (!canPan || e.button !== 0) {
             return;
         }
