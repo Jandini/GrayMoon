@@ -767,6 +767,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         _disposed = true;
         JobService.Changed -= OnJobServiceChanged;
         ReleaseActivitySubscription();
+        await UnbindDiffReviewEscListenerAsync();
 
         if (_hubConnection != null)
         {

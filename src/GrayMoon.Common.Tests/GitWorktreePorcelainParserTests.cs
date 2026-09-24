@@ -21,9 +21,9 @@ public sealed class GitWorktreePorcelainParserTests
             HEAD abc111
             branch refs/heads/main
 
-            worktree C:/repos/features/BAM-1/main
+            worktree C:/repos/features/ABC-1/main
             HEAD def222
-            branch refs/heads/BAM-1
+            branch refs/heads/ABC-1
 
             """;
 
@@ -36,8 +36,8 @@ public sealed class GitWorktreePorcelainParserTests
         Assert.Equal("main", list[0].BranchName);
         Assert.False(list[0].IsDetached);
 
-        Assert.Equal("C:/repos/features/BAM-1/main", list[1].WorktreePath);
-        Assert.Equal("BAM-1", list[1].BranchName);
+        Assert.Equal("C:/repos/features/ABC-1/main", list[1].WorktreePath);
+        Assert.Equal("ABC-1", list[1].BranchName);
         Assert.Equal("def222", list[1].HeadSha);
     }
 

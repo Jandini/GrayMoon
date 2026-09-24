@@ -19,6 +19,7 @@ public sealed partial class WorkspaceGitChanges
     /// <summary>When true, the file tree column is hidden so the diff/preview can use full width.</summary>
     private bool _diffReviewExpanded;
     private bool _diffReviewExpandedLoaded;
+    private DotNetObjectReference<WorkspaceGitChanges>? _diffReviewEscDotNetRef;
 
     // Normal/NewFile/DeletedFile all have valid Original/Modified content (one side may simply be
     // empty) and render in Monaco. Binary/TooLarge/UnsupportedEncoding/Error never send content and
@@ -50,11 +51,21 @@ public sealed partial class WorkspaceGitChanges
         {
             Logger.LogDebug(ex, "Failed to load diff review expand preference");
         }
+
+        await SyncDiffReviewEscListenerAsync();
     }
 
     private async Task ToggleDiffReviewExpandedAsync()
+        => await SetDiffReviewExpandedAsync(!_diffReviewExpanded);
+
+    private async Task SetDiffReviewExpandedAsync(bool expanded)
     {
-        _diffReviewExpanded = !_diffReviewExpanded;
+        if (_disposed)
+        {
+            return;
+        }
+
+        _diffReviewExpanded = expanded;
 
         try
         {
@@ -70,6 +81,69 @@ public sealed partial class WorkspaceGitChanges
         {
             Logger.LogDebug(ex, "Failed to persist diff review expand preference");
         }
+
+        await SyncDiffReviewEscListenerAsync();
+    }
+
+    private async Task SyncDiffReviewEscListenerAsync()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        try
+        {
+            if (_diffReviewExpanded)
+            {
+                _diffReviewEscDotNetRef ??= DotNetObjectReference.Create(this);
+                await Js.InvokeVoidAsync("graymoonGitChangesBindDiffReviewEscape", _diffReviewEscDotNetRef);
+            }
+            else
+            {
+                await Js.InvokeVoidAsync("graymoonGitChangesUnbindDiffReviewEscape");
+            }
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to sync diff review Escape listener");
+        }
+    }
+
+    /// <summary>Invoked from JS when Escape is pressed while the file tree is hidden.</summary>
+    [JSInvokable]
+    public Task CollapseDiffReviewFromEscapeAsync()
+    {
+        if (_disposed || !_diffReviewExpanded)
+        {
+            return Task.CompletedTask;
+        }
+
+        return InvokeAsync(async () =>
+        {
+            await SetDiffReviewExpandedAsync(false);
+            StateHasChanged();
+        });
+    }
+
+    internal async Task UnbindDiffReviewEscListenerAsync()
+    {
+        try
+        {
+            await Js.InvokeVoidAsync("graymoonGitChangesUnbindDiffReviewEscape");
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+        catch (Exception)
+        {
+        }
+
+        _diffReviewEscDotNetRef?.Dispose();
+        _diffReviewEscDotNetRef = null;
     }
 
     private async Task LoadDiffAsync(GitChangesTreeRow row)

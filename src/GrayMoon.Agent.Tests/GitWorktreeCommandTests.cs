@@ -47,17 +47,17 @@ public sealed class GitWorktreeCommandTests : IDisposable
         Assert.False(string.IsNullOrWhiteSpace(listed.Worktrees![0].BranchName));
         Assert.Equal(await CurrentBranchAsync(mainPath), listed.Worktrees![0].BranchName);
 
-        var worktreePath = Path.Combine(_root, "features", "BAM-1", "main");
+        var worktreePath = Path.Combine(_root, "features", "ABC-1", "main");
         var created = await _create.ExecuteAsync(new CreateGitWorktreeRequest
         {
             MainRepositoryPath = mainPath,
             WorktreePath = worktreePath,
-            BranchName = "BAM-1",
+            BranchName = "ABC-1",
             BaseCommitSha = head,
         });
         Assert.True(created.Success, created.ErrorMessage);
         Assert.False(created.AlreadyExisted);
-        Assert.Equal("BAM-1", created.BranchName);
+        Assert.Equal("ABC-1", created.BranchName);
         Assert.True(Directory.Exists(created.WorktreePath!));
         Assert.Equal(head, created.HeadSha, StringComparer.OrdinalIgnoreCase);
 
@@ -65,7 +65,7 @@ public sealed class GitWorktreeCommandTests : IDisposable
         {
             MainRepositoryPath = mainPath,
             WorktreePath = worktreePath,
-            BranchName = "BAM-1",
+            BranchName = "ABC-1",
             BaseCommitSha = head,
         });
         Assert.True(again.Success, again.ErrorMessage);
@@ -73,7 +73,7 @@ public sealed class GitWorktreeCommandTests : IDisposable
 
         var occupancy = GitWorktreeOccupancy.ClassifyBranch(
             (await _list.ExecuteAsync(new ListGitWorktreesRequest { MainRepositoryPath = mainPath })).Worktrees,
-            "BAM-1",
+            "ABC-1",
             mainPath);
         Assert.Equal(GitWorktreeBranchOccupancyKind.OccupiedElsewhere, occupancy);
 
@@ -89,7 +89,7 @@ public sealed class GitWorktreeCommandTests : IDisposable
         var listedAfter = await _list.ExecuteAsync(new ListGitWorktreesRequest { MainRepositoryPath = mainPath });
         Assert.True(listedAfter.Success);
         Assert.Single(listedAfter.Worktrees!);
-        Assert.Null(GitWorktreeOccupancy.FindByBranch(listedAfter.Worktrees, "BAM-1"));
+        Assert.Null(GitWorktreeOccupancy.FindByBranch(listedAfter.Worktrees, "ABC-1"));
 
         var removeAgain = await _remove.ExecuteAsync(new RemoveGitWorktreeRequest
         {
