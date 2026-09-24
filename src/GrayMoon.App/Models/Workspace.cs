@@ -21,7 +21,7 @@ public class Workspace
 
     public bool ExcludeAiWorkflows { get; set; } = true;
 
-    /// <summary>Persisted GrayMoon-managed Feature storage root (e.g. C:\Workspace\.graymoon\AVR\features). Set on first Feature creation; not relocated on Workspace rename.</summary>
+    /// <summary>Persisted GrayMoon-managed Feature storage root for this Workspace (e.g. C:\Users\name\.graymoon\AVR\features). Set on first Feature creation from the global Feature storage setting; not relocated when that setting or the Workspace name changes.</summary>
     [MaxLength(1000)]
     public string? ManagedFeatureStorageRoot { get; set; }
 

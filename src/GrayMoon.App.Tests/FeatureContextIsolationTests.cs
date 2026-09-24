@@ -199,13 +199,14 @@ public sealed class FeatureContextIsolationTests
         Assert.False(WorkspaceJobKeys.TryGetContextId("/workspaces/3/changes", out _, out _));
     }
 
+    private const string SeededFeatureStorageRoot = @"C:\Users\test\.graymoon";
+
     [Fact]
-    public async Task Path_resolver_drive_root_parent_falls_back_to_user_profile()
+    public async Task Path_resolver_feature_root_uses_configured_feature_storage_setting()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
         await using var scope = ctx.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var resolver = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureContextResolver>();
         var pathResolver = scope.ServiceProvider.GetRequiredService<IWorkspaceContextPathResolver>();
 
         var feature = await CreateFeatureContextAsync(db, ctx.WorkspaceId, "feat-drive");
@@ -213,27 +214,74 @@ public sealed class FeatureContextIsolationTests
         await using var seedDb = await scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>()
             .CreateDbContextAsync();
         var workspace = await seedDb.Workspaces.FirstAsync(w => w.WorkspaceId == ctx.WorkspaceId);
-        // Workspace folder directly under drive root → parent would be C:\; must not use C:\.graymoon.
-        workspace.RootPath = @"C:\";
+        workspace.RootPath = @"C:\Workspace";
         workspace.ManagedFeatureStorageRoot = null;
         await seedDb.SaveChangesAsync();
 
         var featureRoot = await pathResolver.GetContextRootAsync(feature);
-        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile).Replace('/', '\\').TrimEnd('\\');
-        Assert.StartsWith(profile + @"\.graymoon\", featureRoot.Replace('/', '\\'), StringComparison.OrdinalIgnoreCase);
+        Assert.StartsWith(SeededFeatureStorageRoot + @"\test-ws\features\", featureRoot.Replace('/', '\\'), StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(@":\.graymoon", featureRoot.Replace('/', '\\').Substring(1), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task Create_feature_drive_root_workspace_persists_profile_managed_root()
+    public async Task Path_resolver_ignores_persisted_drive_root_graymoon()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await using var scope = ctx.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var pathResolver = scope.ServiceProvider.GetRequiredService<IWorkspaceContextPathResolver>();
+
+        var feature = await CreateFeatureContextAsync(db, ctx.WorkspaceId, "feat-legacy");
+
+        await using var seedDb = await scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>()
+            .CreateDbContextAsync();
+        var workspace = await seedDb.Workspaces.FirstAsync(w => w.WorkspaceId == ctx.WorkspaceId);
+        workspace.RootPath = @"C:\Workspace";
+        workspace.ManagedFeatureStorageRoot = @"C:\.graymoon\test-ws\features";
+        await seedDb.SaveChangesAsync();
+
+        var featureRoot = await pathResolver.GetContextRootAsync(feature);
+        Assert.StartsWith(SeededFeatureStorageRoot + @"\test-ws\features\", featureRoot.Replace('/', '\\'), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(@"C:\.graymoon", featureRoot.Replace('/', '\\'), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Path_resolver_keeps_persisted_root_when_feature_storage_setting_changes()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await using var scope = ctx.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var pathResolver = scope.ServiceProvider.GetRequiredService<IWorkspaceContextPathResolver>();
+        var settings = scope.ServiceProvider.GetRequiredService<AppSettingRepository>();
+        var workspaceService = scope.ServiceProvider.GetRequiredService<WorkspaceService>();
+
+        var feature = await CreateFeatureContextAsync(db, ctx.WorkspaceId, "feat-stable");
+        const string originalRoot = @"D:\old-graymoon\test-ws\features";
+
+        await using var seedDb = await scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>()
+            .CreateDbContextAsync();
+        var workspace = await seedDb.Workspaces.FirstAsync(w => w.WorkspaceId == ctx.WorkspaceId);
+        workspace.ManagedFeatureStorageRoot = originalRoot;
+        await seedDb.SaveChangesAsync();
+
+        await settings.SetValueAsync(AppSettingRepository.FeatureStorageRootPathKey, @"E:\new-graymoon");
+        workspaceService.ClearCachedFeatureStorageRootPath();
+
+        var featureRoot = await pathResolver.GetContextRootAsync(feature);
+        Assert.Equal(originalRoot + @"\feat-stable", featureRoot.Replace('/', '\\'));
+    }
+
+    [Fact]
+    public async Task Create_feature_persists_configured_storage_root_and_relocates_drive_root_graymoon()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
         await using (var scope = ctx.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var workspace = await db.Workspaces.FirstAsync(w => w.WorkspaceId == ctx.WorkspaceId);
-            workspace.RootPath = @"C:\DriveWs";
-            workspace.ManagedFeatureStorageRoot = null;
+            workspace.RootPath = @"C:\Workspace";
+            // Legacy bad path from GetWindowsDirectoryName(RootPath) bug — must be relocated.
+            workspace.ManagedFeatureStorageRoot = @"C:\.graymoon\test-ws\features";
             await db.SaveChangesAsync();
         }
 
@@ -252,18 +300,25 @@ public sealed class FeatureContextIsolationTests
 
         await using var opsScope = ctx.CreateScope();
         var ops = opsScope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
-        var result = await ops.CreateFeatureAsync(ctx.WorkspaceId, "feat-drive-root", WorkspaceFeatureBaseKindApplication.CurrentWorkspace);
+        var result = await ops.CreateFeatureAsync(ctx.WorkspaceId, "feat-relocate", WorkspaceFeatureBaseKindApplication.CurrentWorkspace);
         Assert.True(result.Success, result.Error);
 
         await using var read = ctx.CreateScope();
         var readDb = read.ServiceProvider.GetRequiredService<AppDbContext>();
         var updated = await readDb.Workspaces.AsNoTracking().FirstAsync(w => w.WorkspaceId == ctx.WorkspaceId);
         Assert.False(string.IsNullOrWhiteSpace(updated.ManagedFeatureStorageRoot));
-        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile).Replace('/', '\\').TrimEnd('\\');
-        Assert.StartsWith(profile + @"\.graymoon\", updated.ManagedFeatureStorageRoot!.Replace('/', '\\'), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(SeededFeatureStorageRoot + @"\test-ws\features", updated.ManagedFeatureStorageRoot!.Replace('/', '\\'));
         Assert.False(
             updated.ManagedFeatureStorageRoot.Replace('/', '\\')
                 .StartsWith(@"C:\.graymoon", StringComparison.OrdinalIgnoreCase));
+
+        // Agent receives the configured storage path (CreateGitWorktree response may overwrite the stored path).
+        var createCall = Assert.Single(ctx.AgentBridge.Calls, c => c.Command == AgentHubMethods.CreateGitWorktree);
+        var worktreePathProp = createCall.Args.GetType().GetProperty("worktreePath");
+        Assert.NotNull(worktreePathProp);
+        var requestedPath = Assert.IsType<string>(worktreePathProp!.GetValue(createCall.Args));
+        Assert.StartsWith(SeededFeatureStorageRoot + @"\test-ws\features\", requestedPath.Replace('/', '\\'), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(@"C:\.graymoon", requestedPath.Replace('/', '\\'), StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task<WorkspaceFeatureContextId> CreateFeatureContextAsync(

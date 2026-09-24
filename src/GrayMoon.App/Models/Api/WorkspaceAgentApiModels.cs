@@ -68,3 +68,10 @@ public sealed class ValidatePathAgentResponse
     [JsonPropertyName("errorMessage")]
     public string? ErrorMessage { get; set; }
 }
+
+/// <summary>Agent GetHostInfo response (subset used by App).</summary>
+public sealed class GetHostInfoAgentResponse
+{
+    [JsonPropertyName("userProfilePath")]
+    public string? UserProfilePath { get; set; }
+}

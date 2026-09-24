@@ -90,7 +90,7 @@ public sealed class WorkspaceFeatureOperations(
         var workspace = await db.Workspaces.FirstOrDefaultAsync(w => w.WorkspaceId == workspaceId, cancellationToken)
             ?? throw new InvalidOperationException($"Workspace {workspaceId} was not found.");
 
-        EnsureManagedFeatureStorageRoot(workspace);
+        await EnsureManagedFeatureStorageRootAsync(workspace, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
 
         var links = await db.WorkspaceRepositories
@@ -863,42 +863,42 @@ public sealed class WorkspaceFeatureOperations(
             payload?.Branches ?? emptyBranches);
     }
 
-    private static void EnsureManagedFeatureStorageRoot(Workspace workspace)
+    private async Task EnsureManagedFeatureStorageRootAsync(Workspace workspace, CancellationToken cancellationToken)
     {
-        if (!string.IsNullOrWhiteSpace(workspace.ManagedFeatureStorageRoot))
+        // Keep any already-persisted root so reconfiguring Settings does not orphan existing Features.
+        // Relocate only the legacy drive-root bug (C:\.graymoon\...).
+        if (!string.IsNullOrWhiteSpace(workspace.ManagedFeatureStorageRoot)
+            && !IsWindowsDriveRootGraymoonPath(workspace.ManagedFeatureStorageRoot))
             return;
 
-        var parent = GetWindowsDirectoryName(workspace.RootPath ?? string.Empty);
-        // Empty parent (no RootPath) or drive root (e.g. workspace at C:\MyWs → parent C:\) would put
-        // .graymoon on the drive root — fall back to the user profile instead. Do not relocate an
-        // already-persisted ManagedFeatureStorageRoot.
-        if (string.IsNullOrWhiteSpace(parent) || IsWindowsDriveRoot(parent))
-            parent = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var storageRoot = await workspaceService.ResolveFeatureStorageRootPathAsync(
+            persistIfMissing: true,
+            cancellationToken);
+        if (string.IsNullOrWhiteSpace(storageRoot))
+            throw new InvalidOperationException(
+                "Feature storage root is not configured. Set it on the Settings page (or connect the Agent so the host user profile can be used as the default).");
 
         // Keep Agent-facing Feature storage roots Windows-shaped (App/CI may run on Linux).
         workspace.ManagedFeatureStorageRoot = string.Join('\\',
-            parent!.Replace('/', '\\').TrimEnd('\\'),
-            ".graymoon",
+            storageRoot.Replace('/', '\\').TrimEnd('\\'),
             workspace.Name,
             "features");
     }
 
-    private static string? GetWindowsDirectoryName(string path)
-    {
-        var normalized = path.Replace('/', '\\').TrimEnd('\\');
-        if (string.IsNullOrEmpty(normalized))
-            return null;
-        var last = normalized.LastIndexOf('\\');
-        return last >= 0 ? normalized[..last] : null;
-    }
-
-    /// <summary>True for Windows drive roots such as <c>C:</c> / <c>C:\</c> (after trim).</summary>
-    private static bool IsWindowsDriveRoot(string? path)
+    /// <summary>True for <c>X:\.graymoon</c> / <c>X:\.graymoon\...</c> (Feature storage incorrectly rooted on a drive).</summary>
+    private static bool IsWindowsDriveRootGraymoonPath(string? path)
     {
         if (string.IsNullOrWhiteSpace(path))
             return false;
         var normalized = path.Replace('/', '\\').TrimEnd('\\');
-        return normalized.Length == 2 && char.IsLetter(normalized[0]) && normalized[1] == ':';
+        // "C:\.graymoon" is 12 chars; longer paths must continue with '\'.
+        if (normalized.Length < 12)
+            return false;
+        if (!char.IsLetter(normalized[0]) || normalized[1] != ':' || normalized[2] != '\\')
+            return false;
+        if (!normalized.AsSpan(3).StartsWith(".graymoon", StringComparison.OrdinalIgnoreCase))
+            return false;
+        return normalized.Length == 12 || normalized[12] == '\\';
     }
 
     private static RemoveFeatureClassification Classify(IReadOnlyList<RemoveFeatureRepositoryPlan> plans)

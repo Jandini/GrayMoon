@@ -138,6 +138,11 @@ public sealed class SyncStateTestContext : IAsyncDisposable
 
         var workspace = new Workspace { Name = "test-ws", RootPath = @"C:\gm-test-root" };
         db.Workspaces.Add(workspace);
+        db.Settings.Add(new Setting
+        {
+            Key = AppSettingRepository.FeatureStorageRootPathKey,
+            Value = @"C:\Users\test\.graymoon",
+        });
         await db.SaveChangesAsync();
 
         var link = new WorkspaceRepositoryLink

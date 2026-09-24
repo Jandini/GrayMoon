@@ -64,6 +64,68 @@
                         </div>
                     }
                 </div>
+
+                <div class="mb-0">
+                    <label class="form-label fw-semibold" for="featureStorageRootPath">Feature storage root</label>
+                    <p class="text-muted small mb-2">
+                        Where GrayMoon creates Feature worktrees on the Agent host
+                        (under this folder as workspace\features\feature).
+                        Defaults to the Agent machine's user profile <span class="font-monospace">\.graymoon</span>
+                        so the App can run in a container. Changing this does not move existing Features.
+                    </p>
+                    <div class="input-group">
+                        <input type="text"
+                               class="form-control font-monospace @(featurePathValidation == false ? "is-invalid" : featurePathValidation == true ? "is-valid" : "")"
+                               id="featureStorageRootPath"
+                               placeholder="e.g. C:\Users\you\.graymoon"
+                               @bind="featureStorageRootPath"
+                               @bind:event="oninput"
+                               @onkeydown="OnFeatureStorageRootKeyDownAsync" />
+                        <button class="btn btn-outline-secondary" type="button"
+                                @onclick="UseAgentFeatureStorageDefaultAsync"
+                                disabled="@(isSavingFeature || isResolvingAgentDefault)"
+                                title="Ask the connected Agent for the host user profile and append \.graymoon">
+                            @if (isResolvingAgentDefault)
+                            {
+                                <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+                            }
+                            Use Agent default
+                        </button>
+                        <button class="btn btn-primary" type="button" @onclick="SaveFeatureStorageRootPathAsync" disabled="@isSavingFeature">
+                            @if (isSavingFeature)
+                            {
+                                <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+                            }
+                            Save
+                        </button>
+                    </div>
+
+                    @if (featureSaveSuccess.HasValue || featurePathValidation == false || !string.IsNullOrEmpty(featureAgentDefaultMessage))
+                    {
+                        <div class="mt-2 small @(featurePathValidation == false ? "text-danger" : featureSaveSuccess == true || !string.IsNullOrEmpty(featureAgentDefaultMessage) ? "text-success" : "text-danger")">
+                            @if (featurePathValidation == false)
+                            {
+                                <i class="bi bi-exclamation-circle me-1"></i>
+                                <span>@featurePathValidationMessage</span>
+                            }
+                            else if (featureSaveSuccess == true)
+                            {
+                                <i class="bi bi-check-circle me-1"></i>
+                                <span>Feature storage root saved. Existing Features keep their previous paths.</span>
+                            }
+                            else if (featureSaveSuccess == false)
+                            {
+                                <i class="bi bi-exclamation-circle me-1"></i>
+                                <span>Failed to save. Please try again.</span>
+                            }
+                            else if (!string.IsNullOrEmpty(featureAgentDefaultMessage))
+                            {
+                                <i class="bi bi-info-circle me-1"></i>
+                                <span>@featureAgentDefaultMessage</span>
+                            }
+                        </div>
+                    }
+                </div>
             </div>
         </div>
 
@@ -169,6 +231,14 @@
     private bool? pathValidation;
     private string? pathValidationMessage;
 
+    private string? featureStorageRootPath;
+    private bool isSavingFeature;
+    private bool isResolvingAgentDefault;
+    private bool? featureSaveSuccess;
+    private bool? featurePathValidation;
+    private string? featurePathValidationMessage;
+    private string? featureAgentDefaultMessage;
+
     private bool terminalShowByDefault;
     private bool terminalTransparentBackdrop = true;
     private TerminalColorScheme terminalColorScheme = TerminalColorScheme.Yellow;
@@ -177,6 +247,17 @@
     protected override async Task OnInitializedAsync()
     {
         workspaceRootPath = await AppSettingRepository.GetValueAsync(AppSettingRepository.WorkspaceRootPathKey);
+        featureStorageRootPath = await AppSettingRepository.GetValueAsync(AppSettingRepository.FeatureStorageRootPathKey);
+        if (string.IsNullOrWhiteSpace(featureStorageRootPath))
+        {
+            var agentDefault = await WorkspaceService.TryGetAgentDefaultFeatureStorageRootAsync();
+            if (!string.IsNullOrWhiteSpace(agentDefault))
+            {
+                featureStorageRootPath = agentDefault;
+                featureAgentDefaultMessage = "Suggested from the connected Agent host user profile. Save to keep it.";
+            }
+        }
+
         await LoadTerminalPreferencesAsync();
     }
 
@@ -230,6 +311,38 @@
             await SaveWorkspaceRootPathAsync();
     }
 
+    private async Task OnFeatureStorageRootKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+            await SaveFeatureStorageRootPathAsync();
+    }
+
+    private async Task UseAgentFeatureStorageDefaultAsync()
+    {
+        isResolvingAgentDefault = true;
+        featureAgentDefaultMessage = null;
+        featureSaveSuccess = null;
+        featurePathValidation = null;
+        featurePathValidationMessage = null;
+        try
+        {
+            var agentDefault = await WorkspaceService.TryGetAgentDefaultFeatureStorageRootAsync();
+            if (string.IsNullOrWhiteSpace(agentDefault))
+            {
+                featurePathValidation = false;
+                featurePathValidationMessage = "Could not resolve the Agent host user profile. Connect the Agent and try again.";
+                return;
+            }
+
+            featureStorageRootPath = agentDefault;
+            featureAgentDefaultMessage = "Filled from the Agent host user profile. Click Save to apply.";
+        }
+        finally
+        {
+            isResolvingAgentDefault = false;
+        }
+    }
+
     private async Task SaveWorkspaceRootPathAsync()
     {
         isSaving = true;
@@ -265,6 +378,45 @@
         finally
         {
             isSaving = false;
+        }
+    }
+
+    private async Task SaveFeatureStorageRootPathAsync()
+    {
+        isSavingFeature = true;
+        featureSaveSuccess = null;
+        featurePathValidation = null;
+        featurePathValidationMessage = null;
+        featureAgentDefaultMessage = null;
+
+        try
+        {
+            var trimmed = featureStorageRootPath?.Trim();
+
+            if (!string.IsNullOrWhiteSpace(trimmed))
+            {
+                var (isValid, errorMessage) = await WorkspaceService.ValidatePathAsync(trimmed);
+                if (!isValid)
+                {
+                    featurePathValidation = false;
+                    featurePathValidationMessage = errorMessage ?? "The path is not valid or cannot be created.";
+                    return;
+                }
+                featurePathValidation = true;
+            }
+
+            await AppSettingRepository.SetValueAsync(AppSettingRepository.FeatureStorageRootPathKey, trimmed);
+            WorkspaceService.ClearCachedFeatureStorageRootPath();
+            featureStorageRootPath = await AppSettingRepository.GetValueAsync(AppSettingRepository.FeatureStorageRootPathKey);
+            featureSaveSuccess = true;
+        }
+        catch
+        {
+            featureSaveSuccess = false;
+        }
+        finally
+        {
+            isSavingFeature = false;
         }
     }
 }

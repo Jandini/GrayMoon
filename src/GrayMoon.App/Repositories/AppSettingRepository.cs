@@ -9,6 +9,12 @@ public sealed class AppSettingRepository(AppDbContext db)
 {
     public const string WorkspaceRootPathKey = "WorkspaceRootPath";
 
+    /// <summary>
+    /// Root directory for GrayMoon-managed Feature worktrees on the Agent host
+    /// (e.g. C:\Users\name\.graymoon). Per-workspace paths are {root}\{WorkspaceName}\features.
+    /// </summary>
+    public const string FeatureStorageRootPathKey = "FeatureStorageRootPath";
+
     public const string TerminalShowByDefaultKey = "Terminal.ShowByDefault";
     public const string TerminalTransparentBackdropKey = "Terminal.TransparentBackdrop";
     public const string TerminalColorSchemeKey = "Terminal.ColorScheme";
