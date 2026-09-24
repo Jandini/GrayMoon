@@ -186,6 +186,15 @@ try
 
     builder.Services.AddScoped<IWorkspaceGitChangesReadService, WorkspaceGitChangesReadService>();
     builder.Services.AddScoped<IGitChangesAgentClient, GitChangesAgentClient>();
+    builder.Services.AddSingleton<MarkdownProseDiffService>();
+    builder.Services.AddScoped<MarkdownImageEmbedder>();
+    builder.Services.AddHttpClient(nameof(MarkdownImageEmbedder))
+        .ConfigureHttpClient(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(15);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GrayMoon-MarkdownPreview/1.0");
+        });
+
     builder.Services.AddScoped<GitChangesSnapshotPushHandler>();
     builder.Services.AddScoped<WorkspaceGitChangesSelectionMemory>();
     builder.Services.AddScoped<WorkspaceGitChangesCommitMessageMemory>();

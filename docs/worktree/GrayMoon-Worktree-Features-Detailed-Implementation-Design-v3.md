@@ -42,12 +42,17 @@ GrayMoon currently assumes one physical checkout for each `WorkspaceRepositoryLi
 
 The implementation must evolve that model to support:
 
-```text
-Workspace
-├─ special Workspace context
-├─ Feature BAM-2856
-├─ Feature search-index
-└─ Feature ...
+```mermaid
+flowchart TB
+  WS["Workspace"]
+  Spec["special Workspace context"]
+  F1["Feature ABC-2856"]
+  F2["Feature search-index"]
+  Fn["Feature ..."]
+  WS --> Spec
+  WS --> F1
+  WS --> F2
+  WS --> Fn
 ```
 
 where every context has an independent working tree for every Workspace repository, while Workspace-level configuration remains shared.
@@ -2013,7 +2018,7 @@ Use existing GM badge styling.
 
 ```text
 main                              [Current]
-BAM-2856                          [Feature]
+ABC-2856                          [Feature]
 external-experiment               [Worktree]
 normal-local-branch
 ```

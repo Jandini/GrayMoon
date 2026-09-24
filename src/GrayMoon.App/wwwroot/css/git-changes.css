@@ -206,6 +206,7 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    position: relative;
 }
 
 .git-changes-splitter__handle {
@@ -217,6 +218,16 @@
 .git-changes-splitter__handle:hover {
     background: var(--accent-blue);
     opacity: 0.4;
+}
+
+/* Wide review: hide tree + splitter so Monaco / markdown preview can use full width. */
+.git-changes-splitter--review-expanded .git-changes-splitter__left,
+.git-changes-splitter--review-expanded .git-changes-splitter__handle {
+    display: none;
+}
+
+.git-changes-splitter--review-expanded .git-changes-splitter__right {
+    border-left: none;
 }
 
 /* Commit sits inside the left column; only the textarea keeps an input border (no second frame). */
@@ -717,4 +728,578 @@
     display: flex;
     gap: 0.5rem;
     margin-top: 0.4rem;
+}
+
+/* ---- Diff / markdown review chrome (Git Changes) ---- */
+
+.git-diff-chrome {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.35rem;
+    flex: 0 0 auto;
+    /* Flush with the right pane's left edge, with a 3px gap so Source does not touch the frame. */
+    padding: 0.2rem 0.35rem 0.2rem 3px;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+}
+
+.git-diff-chrome__tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+    min-width: 0;
+}
+
+.git-diff-chrome__group .btn {
+    font-size: 0.75rem;
+    padding: 0.15rem 0.55rem;
+    white-space: nowrap;
+}
+
+/* Shared miniature frameless expand / shrink control. */
+.git-diff-expand-btn {
+    width: 1.35rem;
+    height: 1.35rem;
+    padding: 0;
+    margin: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    color: var(--text-secondary, #aaa);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.git-diff-expand-btn .bi {
+    font-size: 0.82rem;
+    line-height: 1;
+}
+
+.git-diff-expand-btn:hover {
+    color: var(--text-primary, #fff);
+    background: transparent;
+    border: none;
+}
+
+.git-diff-expand-btn:focus-visible {
+    outline: 1px solid var(--accent-blue, #4da3ff);
+    outline-offset: 1px;
+}
+
+/* Non-markdown: float over the Monaco pane instead of an empty chrome row. */
+.git-diff-expand-btn--float {
+    position: absolute;
+    top: 0.3rem;
+    right: 0.35rem;
+    z-index: 6;
+}
+
+.git-diff-markdown-container {
+    background: #1e1e1e;
+    width: 100%;
+}
+
+.markdown-diff-viewer-wrap {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    min-width: 0;
+    width: 100%;
+}
+
+.markdown-diff-viewer-header {
+    display: flex;
+    align-items: baseline;
+    gap: 0.45rem;
+    flex: 0 0 auto;
+    padding: 0.3rem 0.75rem;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    background: #1e1e1e;
+}
+
+.markdown-diff-viewer-header__file {
+    color: var(--text-primary);
+    font-weight: 700;
+}
+
+.markdown-diff-viewer-header__side {
+    color: var(--text-secondary);
+}
+
+.markdown-diff-viewer.markdown-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    padding: 1rem 1.25rem 2rem;
+    color: #d4d4d4;
+    font-size: 0.95rem;
+    line-height: 1.55;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    /* Auto-width gray scrollbars (match tree / Firefox + Chromium/WebView2) */
+    scrollbar-width: auto;
+    scrollbar-color: #5a5a5a #2a2a2a;
+}
+
+.markdown-diff-viewer.markdown-body::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.markdown-diff-viewer.markdown-body::-webkit-scrollbar-track {
+    background: #2a2a2a;
+}
+
+.markdown-diff-viewer.markdown-body::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 4px;
+}
+
+.markdown-diff-viewer.markdown-body::-webkit-scrollbar-thumb:hover {
+    background: #7a7a7a;
+}
+
+.markdown-body > *:first-child {
+    margin-top: 0;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
+    color: #e8e8e8;
+    margin-top: 1.4em;
+    margin-bottom: 0.5em;
+    font-weight: 600;
+    line-height: 1.25;
+    max-width: none;
+    width: 100%;
+}
+
+.markdown-body h1 { font-size: 1.75em; border-bottom: 1px solid #333; padding-bottom: 0.3em; }
+.markdown-body h2 { font-size: 1.4em; border-bottom: 1px solid #333; padding-bottom: 0.25em; }
+.markdown-body h3 { font-size: 1.2em; }
+
+.markdown-body p,
+.markdown-body ul,
+.markdown-body ol,
+.markdown-body blockquote,
+.markdown-body table,
+.markdown-body pre,
+.markdown-body .mermaid-panzoom {
+    max-width: none;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.markdown-body a {
+    color: #4da3ff;
+}
+
+.markdown-body code {
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 0.88em;
+    background: #2a2a2a;
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+}
+
+.markdown-body pre {
+    background: #252526;
+    border: 1px solid #333;
+    border-radius: 4px;
+    padding: 0.75rem 1rem;
+    overflow: auto;
+    scrollbar-width: auto;
+    scrollbar-color: #5a5a5a #2a2a2a;
+}
+
+.markdown-body pre::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.markdown-body pre::-webkit-scrollbar-track {
+    background: #2a2a2a;
+}
+
+.markdown-body pre::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 4px;
+}
+
+.markdown-body img {
+    max-width: 100%;
+    height: auto;
+    vertical-align: middle;
+}
+
+/* Badges are almost always linked images - keep them badge-sized inline, not block giants. */
+.markdown-body a img {
+    display: inline;
+    max-height: 1.35em;
+    width: auto;
+    margin: 0 0.15em 0 0;
+}
+
+.markdown-body p > img {
+    display: block;
+    margin: 0.75em 0;
+}
+
+/* Compact stand-in when a remote image (e.g. private Actions badge) cannot be embedded. */
+.markdown-img-fallback {
+    display: inline-block;
+    font-size: 0.72em;
+    font-weight: 600;
+    line-height: 1.25;
+    padding: 0.12em 0.5em;
+    margin-right: 0.2em;
+    border-radius: 3px;
+    border: 1px solid #555;
+    background: #30363d;
+    color: #c9d1d9;
+    vertical-align: middle;
+    white-space: nowrap;
+    text-decoration: none;
+}
+
+a .markdown-img-fallback {
+    color: #c9d1d9;
+}
+
+.markdown-body pre code {
+    background: transparent;
+    padding: 0;
+}
+
+.markdown-body blockquote {
+    margin: 0.75em 0;
+    padding: 0.25em 0.9em;
+    border-left: 3px solid #555;
+    color: var(--text-muted);
+}
+
+.markdown-body table {
+    border-collapse: collapse;
+    margin: 0.75em 0;
+}
+
+.markdown-body th,
+.markdown-body td {
+    border: 1px solid #444;
+    padding: 0.35em 0.65em;
+}
+
+.markdown-body th {
+    background: #2a2a2a;
+}
+
+.markdown-body ins.diffins,
+.markdown-body ins.diffmod,
+.markdown-diff-all-ins {
+    background: rgba(46, 160, 67, 0.28);
+    text-decoration: none;
+    color: #aff5b4;
+}
+
+.markdown-body del.diffdel,
+.markdown-body del.diffmod,
+.markdown-diff-all-del {
+    background: rgba(248, 81, 73, 0.28);
+    text-decoration: line-through;
+    color: #ffa198;
+}
+
+/* Block children (pre/code/tables) paint their own background and would hide del/ins tints. */
+.markdown-body ins.diffins pre,
+.markdown-body ins.diffmod pre,
+.markdown-diff-all-ins pre,
+.markdown-body ins.diffins code,
+.markdown-body ins.diffmod code {
+    background: rgba(46, 160, 67, 0.22);
+    border-color: rgba(46, 160, 67, 0.55);
+    color: #aff5b4;
+}
+
+.markdown-body del.diffdel pre,
+.markdown-body del.diffmod pre,
+.markdown-diff-all-del pre,
+.markdown-body del.diffdel code,
+.markdown-body del.diffmod code {
+    background: rgba(248, 81, 73, 0.22);
+    border-color: rgba(248, 81, 73, 0.55);
+    color: #ffa198;
+    text-decoration: line-through;
+}
+
+.markdown-body ins.diffins table,
+.markdown-body ins.diffmod table,
+.markdown-diff-all-ins table {
+    outline: 2px solid rgba(46, 160, 67, 0.45);
+    outline-offset: 2px;
+}
+
+.markdown-body del.diffdel table,
+.markdown-body del.diffmod table,
+.markdown-diff-all-del table {
+    outline: 2px solid rgba(248, 81, 73, 0.45);
+    outline-offset: 2px;
+    opacity: 0.9;
+}
+
+/* Mermaid frames replace <pre>; keep Old/New tint on the panzoom chrome instead. */
+.markdown-body ins.diffins:has(.mermaid-panzoom),
+.markdown-body ins.diffmod:has(.mermaid-panzoom),
+.markdown-body del.diffdel:has(.mermaid-panzoom),
+.markdown-body del.diffmod:has(.mermaid-panzoom) {
+    display: block;
+    text-decoration: none;
+    background: transparent;
+    color: inherit;
+}
+
+.mermaid-panzoom--added {
+    background: rgba(46, 160, 67, 0.16);
+    border-color: rgba(46, 160, 67, 0.7);
+    box-shadow: inset 0 0 0 1px rgba(46, 160, 67, 0.35);
+}
+
+.mermaid-panzoom--removed {
+    background: rgba(248, 81, 73, 0.16);
+    border-color: rgba(248, 81, 73, 0.7);
+    box-shadow: inset 0 0 0 1px rgba(248, 81, 73, 0.35);
+}
+
+.mermaid-panzoom--added::before,
+.mermaid-panzoom--removed::before {
+    position: absolute;
+    top: 0.4rem;
+    left: 0.45rem;
+    z-index: 2;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    line-height: 1.2;
+    pointer-events: none;
+    white-space: nowrap;
+}
+
+.mermaid-panzoom--added::before {
+    content: "New";
+    color: #aff5b4;
+    background: rgba(46, 160, 67, 0.45);
+    border: 1px solid rgba(46, 160, 67, 0.7);
+}
+
+.mermaid-panzoom--removed::before {
+    content: "Old";
+    color: #ffa198;
+    background: rgba(248, 81, 73, 0.45);
+    border: 1px solid rgba(248, 81, 73, 0.7);
+}
+
+.markdown-diff-change-flash {
+    outline: 2px solid #4da3ff;
+    outline-offset: 2px;
+}
+
+.markdown-diff-empty {
+    margin: 1rem 0;
+}
+
+.mermaid-panzoom {
+    position: relative;
+    margin: 0.75rem 0;
+    border: 1px solid #333;
+    border-radius: 4px;
+    background: #1a1a1a;
+    overflow: hidden;
+    min-height: 260px;
+    max-height: min(640px, 70vh);
+    height: 360px;
+}
+
+.mermaid-panzoom__content {
+    width: 100%;
+    height: 100%;
+    min-height: 260px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.75rem;
+    box-sizing: border-box;
+}
+
+/* Do not use max-height:100% on SVG - with height:auto it can collapse to an invisible diagram. */
+.mermaid-panzoom__content svg {
+    max-width: 100%;
+    width: 100%;
+    height: auto;
+    display: block;
+}
+
+.mermaid-panzoom-controls {
+    position: absolute;
+    top: 0.4rem;
+    right: 0.4rem;
+    display: none;
+    gap: 0.2rem;
+    z-index: 2;
+    flex-wrap: nowrap;
+}
+
+.mermaid-panzoom:hover .mermaid-panzoom-controls,
+.mermaid-panzoom:focus-within .mermaid-panzoom-controls {
+    display: flex;
+}
+
+.mermaid-panzoom-btn {
+    border: 1px solid #555;
+    background: #2a2a2a;
+    color: #ddd;
+    border-radius: 3px;
+    font-size: 0.85rem;
+    line-height: 1;
+    width: 1.7rem;
+    height: 1.7rem;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.mermaid-panzoom-btn .bi {
+    font-size: 0.9rem;
+    line-height: 1;
+}
+
+.mermaid-panzoom-btn:hover,
+.mermaid-panzoom-btn.is-active {
+    background: #3a3a3a;
+    border-color: #4da3ff;
+    color: #fff;
+}
+
+.mermaid-panzoom--dragging,
+.mermaid-panzoom--direct {
+    cursor: grab;
+}
+
+.mermaid-panzoom--dragging {
+    cursor: grabbing;
+}
+
+.mermaid-panzoom--lightbox {
+    flex: 1 1 auto;
+    min-height: 0;
+    height: 100% !important;
+    max-height: none;
+    margin: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+}
+
+.mermaid-panzoom--lightbox .mermaid-panzoom__content {
+    min-height: 0;
+    height: 100%;
+}
+
+.mermaid-panzoom--lightbox .mermaid-panzoom-controls {
+    display: flex;
+    top: 2.75rem;
+    right: 0.75rem;
+}
+
+body.gm-mermaid-lightbox-open {
+    overflow: hidden;
+}
+
+/* Frameless full-viewport overlay - GrayMoon dark surface, floating title + X only. */
+.mermaid-lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: stretch;
+    padding: 0;
+    box-sizing: border-box;
+    background: var(--bg-primary, #1e1e1e);
+}
+
+.mermaid-lightbox__title {
+    position: absolute;
+    top: 0.85rem;
+    left: 1rem;
+    right: 3.5rem;
+    z-index: 3;
+    font-weight: 600;
+    color: var(--text-primary, #e8e8e8);
+    font-size: 0.95rem;
+    line-height: 1.3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;
+}
+
+.mermaid-lightbox__close {
+    position: absolute;
+    top: 0.65rem;
+    right: 0.65rem;
+    z-index: 4;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary, #aaa);
+    border-radius: 0;
+    font-size: 1.15rem;
+    line-height: 1;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.mermaid-lightbox__close:hover {
+    color: var(--text-primary, #fff);
+    background: transparent;
+}
+
+.mermaid-error {
+    color: #f85149;
+    font-size: 0.85rem;
+    margin: 0.5rem 0;
+}
+
+.mermaid-fallback {
+    background: #252526;
+    border: 1px solid #444;
+    padding: 0.75rem;
+    overflow: auto;
+    white-space: pre-wrap;
 }

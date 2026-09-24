@@ -762,7 +762,7 @@ public sealed class GitCliRepositoryGitChangesService(GitProcessRunner runner, I
             return null;
         }
 
-        return await File.ReadAllTextAsync(fullPath, cancellationToken);
+        return await File.ReadAllTextAsync(fullPath, Encoding.UTF8, cancellationToken);
     }
 
     private static bool ContainsBinaryMarker(string? content) => content != null && content.Contains('\0');

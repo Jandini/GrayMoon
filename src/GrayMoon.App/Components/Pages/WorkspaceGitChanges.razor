@@ -22,9 +22,9 @@
                            FilterQueryChanged="OnFilterChanged"
                            IsFilterDisabled="@(_view == null)"
                            OnRefresh="ManualRefreshAsync"
-                           OnPreviousChange="() => _diffViewerRef!.GoToPreviousChangeAsync()"
-                           OnNextChange="() => _diffViewerRef!.GoToNextChangeAsync()"
-                           IsChangeNavDisabled="@(_selectedDiff == null || !RendersInMonaco(_selectedDiff.State))"
+                           OnPreviousChange="NavigatePreviousChangeAsync"
+                           OnNextChange="NavigateNextChangeAsync"
+                           IsChangeNavDisabled="@(!CanNavigateDiffChanges)"
                            IsScanRunning="@(IsScanRunning && ChangedRepositoryCount > 0)"
                            ScanStatusText="@ScanStatus"
                            OnAbortScan="AbortScan" />
@@ -68,7 +68,7 @@
     }
     else
     {
-        <div class="graymoon-splitter git-changes-splitter" id="git-changes-splitter" data-workspace-id="@WorkspaceId">
+        <div class="graymoon-splitter git-changes-splitter @(_diffReviewExpanded ? "git-changes-splitter--review-expanded" : null)" id="git-changes-splitter" data-workspace-id="@WorkspaceId">
             <div class="graymoon-splitter__left git-changes-splitter__left">
                 @if (ChangedRepositoryCount > 0)
                 {
@@ -205,11 +205,81 @@
                         </div>
                     }
 
-                    <div class="git-diff-viewer-container" style="display:@((_selectedDiff != null && RendersInMonaco(_selectedDiff.State)) ? "flex" : "none")">
+                    @if (_selectedDiff != null && RendersInMonaco(_selectedDiff.State))
+                    {
+                        @if (IsMarkdownFile)
+                        {
+                            <div class="git-diff-chrome">
+                                <div class="git-diff-chrome__tools">
+                                    <div class="btn-group git-diff-chrome__group" role="group" aria-label="Markdown surface">
+                                        <button type="button"
+                                                class="btn btn-sm text-nowrap @(_mdSurface == MdSurface.Source ? "btn-secondary" : "btn-outline-secondary")"
+                                                title="Show Monaco source diff"
+                                                @onclick="() => SetMdSurfaceAsync(MdSurface.Source)">Source</button>
+                                        <button type="button"
+                                                class="btn btn-sm text-nowrap @(_mdSurface == MdSurface.Preview ? "btn-secondary" : "btn-outline-secondary")"
+                                                title="Show rendered markdown"
+                                                @onclick="() => SetMdSurfaceAsync(MdSurface.Preview)">Preview</button>
+                                    </div>
+                                    @if (_mdSurface == MdSurface.Preview)
+                                    {
+                                        <div class="btn-group git-diff-chrome__group" role="group" aria-label="Markdown preview mode">
+                                            <button type="button"
+                                                    class="btn btn-sm text-nowrap @(_mdPreviewMode == MarkdownProsePreviewMode.Changes ? "btn-secondary" : "btn-outline-secondary")"
+                                                    title="Rendered document with insertions and deletions highlighted"
+                                                    @onclick="() => SetMdPreviewModeAsync(MarkdownProsePreviewMode.Changes)">Changes</button>
+                                            <button type="button"
+                                                    class="btn btn-sm text-nowrap @(_mdPreviewMode == MarkdownProsePreviewMode.After ? "btn-secondary" : "btn-outline-secondary")"
+                                                    title="Rendered result after changes"
+                                                    disabled="@IsMdAfterDisabled"
+                                                    @onclick="() => SetMdPreviewModeAsync(MarkdownProsePreviewMode.After)">After</button>
+                                            <button type="button"
+                                                    class="btn btn-sm text-nowrap @(_mdPreviewMode == MarkdownProsePreviewMode.Before ? "btn-secondary" : "btn-outline-secondary")"
+                                                    title="Rendered document before changes"
+                                                    disabled="@IsMdBeforeDisabled"
+                                                    @onclick="() => SetMdPreviewModeAsync(MarkdownProsePreviewMode.Before)">Before</button>
+                                        </div>
+                                    }
+                                </div>
+                                <button type="button"
+                                        class="git-diff-expand-btn text-nowrap flex-shrink-0"
+                                        title="@(_diffReviewExpanded ? "Show file tree" : "Hide file tree for wider review")"
+                                        aria-label="@(_diffReviewExpanded ? "Show file tree" : "Hide file tree for wider review")"
+                                        aria-pressed="@_diffReviewExpanded"
+                                        @onclick="ToggleDiffReviewExpandedAsync">
+                                    <i class="bi @(_diffReviewExpanded ? "bi-fullscreen-exit" : "bi-arrows-fullscreen")" aria-hidden="true"></i>
+                                </button>
+                            </div>
+                        }
+                        else
+                        {
+                            <button type="button"
+                                    class="git-diff-expand-btn git-diff-expand-btn--float text-nowrap"
+                                    title="@(_diffReviewExpanded ? "Show file tree" : "Hide file tree for wider review")"
+                                    aria-label="@(_diffReviewExpanded ? "Show file tree" : "Hide file tree for wider review")"
+                                    aria-pressed="@_diffReviewExpanded"
+                                    @onclick="ToggleDiffReviewExpandedAsync">
+                                <i class="bi @(_diffReviewExpanded ? "bi-fullscreen-exit" : "bi-arrows-fullscreen")" aria-hidden="true"></i>
+                            </button>
+                        }
+                    }
+
+                    @if (!string.IsNullOrEmpty(_markdownPreviewError) && ShowMarkdownPreview)
+                    {
+                        <div class="gm-callout gm-callout--error m-2" role="alert">@_markdownPreviewError</div>
+                    }
+
+                    <div class="git-diff-viewer-container" style="display:@(ShowMonacoDiff ? "flex" : "none")">
                         <GitDiffViewer @ref="_diffViewerRef"
                                        FileName="@System.IO.Path.GetFileName(_selectedRow.FilePath)"
                                        OriginalSideLabel="@(_selectedRow.IsStagedSection ? "(HEAD)" : "(Index)")"
                                        ModifiedSideLabel="@(_selectedRow.IsStagedSection ? "(Index)" : "(Working Tree)")" />
+                    </div>
+
+                    <div class="git-diff-viewer-container git-diff-markdown-container" style="display:@(ShowMarkdownPreview ? "flex" : "none")">
+                        <MarkdownDiffViewer @ref="_markdownViewerRef"
+                                            FileName="@System.IO.Path.GetFileName(_selectedRow.FilePath)"
+                                            SideLabel="@MarkdownSideLabel" />
                     </div>
                 }
             </div>

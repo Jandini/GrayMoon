@@ -8,6 +8,28 @@ The database is more than configuration storage. It also contains durable projec
 
 This means the database contains two categories:
 
+```mermaid
+flowchart TB
+  subgraph Config["Authoritative GrayMoon configuration"]
+    C1["Connectors"]
+    C2["Repositories"]
+    C3["Workspaces / membership"]
+    C4["Configured files / patterns"]
+    C5["Custom dependencies / settings"]
+  end
+
+  subgraph Proj["Cached / derived projections"]
+    P1["Branch / GitVersion / commits"]
+    P2["Projects / dependency levels"]
+    P3["Pull requests / Actions"]
+    P4["Git Changes status"]
+    P5["File version mismatches"]
+  end
+
+  Ext["Git / filesystem / GitHub / registries"] -.->|"authoritative reality"| Proj
+  Config --> Proj
+```
+
 ### Authoritative GrayMoon configuration
 
 Examples:

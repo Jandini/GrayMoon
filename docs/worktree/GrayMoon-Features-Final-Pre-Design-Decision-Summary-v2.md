@@ -36,13 +36,14 @@ GrayMoon must continue to work exactly as it does today even if the user never c
 
 The current Workspace remains the **special mutable checkout**:
 
-```text
-Workspace
-→ existing checkout
-→ normal branch switching
-→ Prepare Workspace
-→ Return to Default
-→ current GrayMoon behavior
+```mermaid
+flowchart TB
+  Spec["Workspace special checkout"]
+  Spec --> Checkout["existing checkout"]
+  Spec --> Branch["normal branch switching"]
+  Spec --> Prep["Prepare Workspace"]
+  Spec --> Return["Return to Default"]
+  Spec --> Behavior["current GrayMoon behavior"]
 ```
 
 A Feature is additional, optional, and isolated. Creating Features must not convert or replace the normal Workspace.
@@ -54,14 +55,14 @@ A Feature name is the same thing as its Git branch name.
 Examples:
 
 ```text
-BAM-2856
+ABC-2856
 search-index
 refactor-auth
 ```
 
 There is no separate user-facing “Feature name” and “Branch name” concept. GrayMoon should enforce valid Git branch/ref naming rules in the Feature creation UX.
 
-A Feature name must be unique within a Workspace. If a Feature named `BAM-2856` already exists, typing `BAM-2856` into the Feature selector and pressing Enter selects that Feature; GrayMoon must not create a duplicate Feature.
+A Feature name must be unique within a Workspace. If a Feature named `ABC-2856` already exists, typing `ABC-2856` into the Feature selector and pressing Enter selects that Feature; GrayMoon must not create a duplicate Feature.
 
 ## Feature creation entry point
 
@@ -71,7 +72,7 @@ Conceptually:
 
 ```text
 ┌──────────────────┬────────────────────────────────────────────┐
-│ BAM-2856       ▾ │ Search repositories...                    │
+│ ABC-2856       ▾ │ Search repositories...                    │
 └──────────────────┴────────────────────────────────────────────┘
 ```
 
@@ -109,7 +110,7 @@ The dialog should contain at least:
 Create Feature
 
 Feature name
-[ BAM-2910 ]
+[ ABC-2910 ]
 
 Based on
 [ Current Workspace ▾ ]
@@ -136,7 +137,7 @@ A Feature is workspace-wide. Every Feature contains a worktree for every reposit
 Example:
 
 ```text
-BAM-2856/
+ABC-2856/
     RepoA/
     RepoB/
     RepoC/
@@ -158,7 +159,7 @@ C:\Workspace\AVR\
 
 C:\Workspace\.graymoon\AVR\
     features\
-        BAM-2856\
+        ABC-2856\
             RepoA\
             RepoB\
             RepoC\
@@ -191,11 +192,11 @@ RepoA/src/Directory.Build.props
 RepoB/version.json
 ```
 
-then when `BAM-2856` is selected, GrayMoon resolves them against:
+then when `ABC-2856` is selected, GrayMoon resolves them against:
 
 ```text
-C:\Workspace\.graymoon\AVR\features\BAM-2856\RepoA\...
-C:\Workspace\.graymoon\AVR\features\BAM-2856\RepoB\...
+C:\Workspace\.graymoon\AVR\features\ABC-2856\RepoA\...
+C:\Workspace\.graymoon\AVR\features\ABC-2856\RepoB\...
 ```
 
 When `Workspace` is selected, the same configuration resolves against the normal Workspace root.
@@ -234,7 +235,7 @@ Repositories
 → back to Repositories
 ```
 
-If `BAM-2856` is selected, all applicable pages continue to operate against `BAM-2856`. Switching to `Workspace` returns all applicable pages and operations to the special Workspace checkout.
+If `ABC-2856` is selected, all applicable pages continue to operate against `ABC-2856`. Switching to `Workspace` returns all applicable pages and operations to the special Workspace checkout.
 
 This is a hard architectural requirement.
 
@@ -252,8 +253,8 @@ WorkspaceFeatureContext
         ├─ Workspace
         │    → C:\Workspace\AVR
         │
-        └─ Feature BAM-2856
-             → C:\Workspace\.graymoon\AVR\features\BAM-2856
+        └─ Feature ABC-2856
+             → C:\Workspace\.graymoon\AVR\features\ABC-2856
 ```
 
 A context-aware root/path resolver should become the normal execution boundary. Individual services should not independently decide which physical root to use.
@@ -347,14 +348,14 @@ upstream branch established when a natural push occurs
 GrayMoon should establish upstream naturally when appropriate, conceptually:
 
 ```text
-git push -u origin BAM-2856
+git push -u origin ABC-2856
 ```
 
 Publication “locks in” the branch name at origin when connectivity exists, but publication is not a prerequisite for Feature existence.
 
 ## Remote name collision / external branches
 
-If a Feature was created locally/offline and GrayMoon later discovers `origin/BAM-2856` already exists with unexpected lineage, GrayMoon must not force-push over it.
+If a Feature was created locally/offline and GrayMoon later discovers `origin/ABC-2856` already exists with unexpected lineage, GrayMoon must not force-push over it.
 
 This becomes a reconciliation state. Potential future recovery options may include:
 
@@ -542,7 +543,7 @@ Therefore these may run concurrently:
 
 ```text
 Workspace      → Push
-BAM-2856       → Update
+ABC-2856       → Update
 search-index   → Commit
 ```
 
@@ -593,7 +594,7 @@ C:\Workspace\AVR\RepoA
 and:
 
 ```text
-C:\Workspace\.graymoon\AVR\features\BAM-2856\RepoA
+C:\Workspace\.graymoon\AVR\features\ABC-2856\RepoA
 ```
 
 are independent monitored repositories. A change in one Feature must not dirty another Feature or the special Workspace.
@@ -647,7 +648,7 @@ Claude Code should normally be launched through a terminal whose working directo
 The Feature root is the workspace-wide Feature directory containing all repository worktrees, for example:
 
 ```text
-C:\Workspace\.graymoon\AVR\features\BAM-2856
+C:\Workspace\.graymoon\AVR\features\ABC-2856
 ```
 
 No MCP is part of the initial Feature design.
@@ -668,7 +669,7 @@ PR state must be stored/read in the correct `WorkspaceFeatureContext`, including
 
 Actions/workflow status currently persists against `WorkspaceRepositoryLink` and contains branch context. It must become context-specific.
 
-When `BAM-2856` is selected, Actions should represent the relevant state for `BAM-2856`, not overwrite or reuse Workspace/main state.
+When `ABC-2856` is selected, Actions should represent the relevant state for `ABC-2856`, not overwrite or reuse Workspace/main state.
 
 Where Actions are genuinely repository/global rather than branch-specific, the detailed design may explicitly classify them as shared instead of duplicating them blindly.
 
@@ -716,7 +717,7 @@ Workspace
 ├─ WorkspaceFeatureContext: Workspace
 │    └─ normal existing checkout
 │
-├─ WorkspaceFeatureContext: BAM-2856
+├─ WorkspaceFeatureContext: ABC-2856
 │    └─ isolated worktree set
 │
 ├─ WorkspaceFeatureContext: search-index
@@ -762,7 +763,7 @@ That identity is no longer sufficient when the same repository exists simultaneo
 
 ```text
 Workspace
-BAM-2856
+ABC-2856
 search-index
 ...
 ```
@@ -1135,7 +1136,7 @@ using stable GrayMoon identities/names.
 They should not need to construct or understand:
 
 ```text
-C:\Workspace\.graymoon\AVR\features\BAM-2856\RepoA
+C:\Workspace\.graymoon\AVR\features\ABC-2856\RepoA
 ```
 
 GrayMoon owns:
@@ -1582,7 +1583,7 @@ Presentation:
 
 ```text
 main                         [Current]
-BAM-2856                     [Feature]
+ABC-2856                     [Feature]
 external-experiment          [Worktree]
 normal-local-branch
 ```

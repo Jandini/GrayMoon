@@ -11,7 +11,7 @@ public sealed class GitWorktreeOccupancyTests
     private static List<GitWorktreeInfo> SampleInventory() =>
     [
         new() { WorktreePath = Current, HeadSha = "aaa", BranchRef = "refs/heads/main", BranchName = "main" },
-        new() { WorktreePath = Feature, HeadSha = "bbb", BranchRef = "refs/heads/BAM-1", BranchName = "BAM-1" },
+        new() { WorktreePath = Feature, HeadSha = "bbb", BranchRef = "refs/heads/ABC-1", BranchName = "ABC-1" },
         new() { WorktreePath = External, HeadSha = "ccc", BranchRef = "refs/heads/experiment", BranchName = "experiment" },
         new() { WorktreePath = Path.Combine(Path.GetTempPath(), "gm-wt-detached"), HeadSha = "ddd", IsDetached = true },
     ];
@@ -27,7 +27,7 @@ public sealed class GitWorktreeOccupancyTests
 
         Assert.Equal(
             GitWorktreeBranchOccupancyKind.OccupiedElsewhere,
-            GitWorktreeOccupancy.ClassifyBranch(inventory, "BAM-1", Current));
+            GitWorktreeOccupancy.ClassifyBranch(inventory, "ABC-1", Current));
 
         Assert.Equal(
             GitWorktreeBranchOccupancyKind.None,
@@ -39,7 +39,7 @@ public sealed class GitWorktreeOccupancyTests
     {
         var inventory = SampleInventory();
         Assert.Null(GitWorktreeOccupancy.FindByBranch(inventory, "HEAD"));
-        Assert.Equal(Feature, GitWorktreeOccupancy.FindByBranch(inventory, "BAM-1")!.WorktreePath);
+        Assert.Equal(Feature, GitWorktreeOccupancy.FindByBranch(inventory, "ABC-1")!.WorktreePath);
     }
 
     [Fact]
@@ -57,13 +57,13 @@ public sealed class GitWorktreeOccupancyTests
         var wt = new GitWorktreeInfo
         {
             WorktreePath = Feature,
-            BranchName = "BAM-1",
+            BranchName = "ABC-1",
             HeadSha = "bbb",
         };
 
-        Assert.True(GitWorktreeOccupancy.MatchesExpected(wt, "BAM-1"));
-        Assert.True(GitWorktreeOccupancy.MatchesExpected(wt, "BAM-1", "bbb"));
-        Assert.False(GitWorktreeOccupancy.MatchesExpected(wt, "BAM-1", "zzz"));
+        Assert.True(GitWorktreeOccupancy.MatchesExpected(wt, "ABC-1"));
+        Assert.True(GitWorktreeOccupancy.MatchesExpected(wt, "ABC-1", "bbb"));
+        Assert.False(GitWorktreeOccupancy.MatchesExpected(wt, "ABC-1", "zzz"));
         Assert.False(GitWorktreeOccupancy.MatchesExpected(wt, "other"));
     }
 }

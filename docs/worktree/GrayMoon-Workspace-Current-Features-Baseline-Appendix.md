@@ -1533,8 +1533,8 @@ The detailed implementation plan should include regression tests for scenarios s
 
 ```text
 Workspace / RepoA       -> main
-Feature A / RepoA       -> BAM-100
-Feature B / RepoA       -> BAM-200
+Feature A / RepoA       -> ABC-100
+Feature B / RepoA       -> ABC-200
 ```
 
 Verify independently:

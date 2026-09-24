@@ -132,3 +132,40 @@
     const observer = new MutationObserver(initAll);
     observer.observe(document.body, { childList: true, subtree: true });
 })();
+
+/* Esc restores the Git Changes file tree when review-expand has hidden it. */
+(function () {
+    let handler = null;
+
+    window.graymoonGitChangesBindDiffReviewEscape = function (dotNetRef) {
+        window.graymoonGitChangesUnbindDiffReviewEscape();
+        handler = function (e) {
+            if (e.key !== 'Escape' || e.repeat) {
+                return;
+            }
+            // Mermaid lightbox and Bootstrap dialogs own Escape first.
+            if (document.getElementById('gm-mermaid-lightbox')) {
+                return;
+            }
+            if (document.querySelector('.modal.show')) {
+                return;
+            }
+            const target = e.target;
+            if (target && typeof target.closest === 'function'
+                && target.closest('textarea, input:not([type="checkbox"]):not([type="radio"]), select, [contenteditable="true"]')) {
+                return;
+            }
+            e.preventDefault();
+            e.stopPropagation();
+            dotNetRef.invokeMethodAsync('CollapseDiffReviewFromEscapeAsync');
+        };
+        document.addEventListener('keydown', handler, true);
+    };
+
+    window.graymoonGitChangesUnbindDiffReviewEscape = function () {
+        if (handler) {
+            document.removeEventListener('keydown', handler, true);
+            handler = null;
+        }
+    };
+})();

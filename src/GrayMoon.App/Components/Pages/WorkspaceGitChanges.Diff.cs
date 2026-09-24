@@ -3,15 +3,23 @@ using GrayMoon.App.Services;
 using GrayMoon.App.Services.GitChanges;
 using GrayMoon.Common.Git;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.JSInterop;
 
 namespace GrayMoon.App.Components.Pages;
 
 public sealed partial class WorkspaceGitChanges
 {
+    private const string DiffReviewExpandedStorageKey = "graymoon.git-changes.diff-review-expanded";
+
     private GitDiffViewer? _diffViewerRef;
     private GitDiffDocument? _selectedDiff;
     private bool _isDiffLoading;
     private string? _diffError;
+
+    /// <summary>When true, the file tree column is hidden so the diff/preview can use full width.</summary>
+    private bool _diffReviewExpanded;
+    private bool _diffReviewExpandedLoaded;
+    private DotNetObjectReference<WorkspaceGitChanges>? _diffReviewEscDotNetRef;
 
     // Normal/NewFile/DeletedFile all have valid Original/Modified content (one side may simply be
     // empty) and render in Monaco. Binary/TooLarge/UnsupportedEncoding/Error never send content and
@@ -21,12 +29,130 @@ public sealed partial class WorkspaceGitChanges
 
     private int _diffRequestVersion;
 
+    private async Task EnsureDiffReviewExpandedLoadedAsync()
+    {
+        if (_diffReviewExpandedLoaded || _disposed)
+        {
+            return;
+        }
+
+        _diffReviewExpandedLoaded = true;
+
+        try
+        {
+            var raw = await Js.InvokeAsync<string?>("graymoonStorageGet", DiffReviewExpandedStorageKey);
+            _diffReviewExpanded = string.Equals(raw, "1", StringComparison.Ordinal)
+                || string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to load diff review expand preference");
+        }
+
+        await SyncDiffReviewEscListenerAsync();
+    }
+
+    private async Task ToggleDiffReviewExpandedAsync()
+        => await SetDiffReviewExpandedAsync(!_diffReviewExpanded);
+
+    private async Task SetDiffReviewExpandedAsync(bool expanded)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _diffReviewExpanded = expanded;
+
+        try
+        {
+            await Js.InvokeVoidAsync(
+                "graymoonStorageSet",
+                DiffReviewExpandedStorageKey,
+                _diffReviewExpanded ? "1" : "0");
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to persist diff review expand preference");
+        }
+
+        await SyncDiffReviewEscListenerAsync();
+    }
+
+    private async Task SyncDiffReviewEscListenerAsync()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        try
+        {
+            if (_diffReviewExpanded)
+            {
+                _diffReviewEscDotNetRef ??= DotNetObjectReference.Create(this);
+                await Js.InvokeVoidAsync("graymoonGitChangesBindDiffReviewEscape", _diffReviewEscDotNetRef);
+            }
+            else
+            {
+                await Js.InvokeVoidAsync("graymoonGitChangesUnbindDiffReviewEscape");
+            }
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to sync diff review Escape listener");
+        }
+    }
+
+    /// <summary>Invoked from JS when Escape is pressed while the file tree is hidden.</summary>
+    [JSInvokable]
+    public Task CollapseDiffReviewFromEscapeAsync()
+    {
+        if (_disposed || !_diffReviewExpanded)
+        {
+            return Task.CompletedTask;
+        }
+
+        return InvokeAsync(async () =>
+        {
+            await SetDiffReviewExpandedAsync(false);
+            StateHasChanged();
+        });
+    }
+
+    internal async Task UnbindDiffReviewEscListenerAsync()
+    {
+        try
+        {
+            await Js.InvokeVoidAsync("graymoonGitChangesUnbindDiffReviewEscape");
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+        catch (Exception)
+        {
+        }
+
+        _diffReviewEscDotNetRef?.Dispose();
+        _diffReviewEscDotNetRef = null;
+    }
+
     private async Task LoadDiffAsync(GitChangesTreeRow row)
     {
         var requestVersion = ++_diffRequestVersion;
 
         _selectedDiff = null;
         _diffError = null;
+        _markdownPreviewError = null;
         _isDiffLoading = true;
         StateHasChanged();
 
@@ -36,6 +162,10 @@ public sealed partial class WorkspaceGitChanges
             {
                 await _diffViewerRef.ClearAsync();
             }
+
+            await ClearMarkdownViewerAsync();
+            await EnsureMdPreferenceLoadedAsync();
+            await EnsureDiffReviewExpandedLoadedAsync();
 
             await using var db = await DbContextFactory.CreateDbContextAsync();
             var link = await db.WorkspaceRepositories
@@ -91,15 +221,23 @@ public sealed partial class WorkspaceGitChanges
             }
 
             _selectedDiff = result.Diff;
+            CoerceMdPreviewModeForDocument();
 
-            if (RendersInMonaco(_selectedDiff.State) && _diffViewerRef != null)
+            if (RendersInMonaco(_selectedDiff.State))
             {
-                // Reveal the container (display:flex) before pushing models into Monaco, rather than only
-                // in the finally block below, so setModel() runs against an already-visible, correctly
-                // sized container instead of one still transitioning from display:none.
+                // Reveal the active surface before pushing content so layout/observers see non-zero size.
                 _isDiffLoading = false;
                 StateHasChanged();
-                await _diffViewerRef.SetDiffAsync(_selectedDiff);
+
+                if (_diffViewerRef != null)
+                {
+                    await _diffViewerRef.SetDiffAsync(_selectedDiff);
+                }
+
+                if (IsMarkdownPath(row.FilePath!) && _mdSurface == MdSurface.Preview)
+                {
+                    await PushMarkdownPreviewAsync();
+                }
             }
         }
         catch (Exception ex)
@@ -117,3 +255,4 @@ public sealed partial class WorkspaceGitChanges
         }
     }
 }
+

@@ -18,21 +18,16 @@ version/configuration repositories
 
 Without GrayMoon, a cross-repository change often requires a developer to repeat the same work manually:
 
-```text
-clone repository
-find current branch
-create or switch branch
-discover package dependencies
-update PackageReference versions
-update version files
-restore
-commit
-push
-wait for packages
-create pull requests
-check GitHub Actions
-merge
-return repositories to default branches
+```mermaid
+flowchart LR
+  A["clone"] --> B["branch"]
+  B --> C["update deps"]
+  C --> D["restore"]
+  D --> E["commit"]
+  E --> F["push"]
+  F --> G["wait packages"]
+  G --> H["PR / Actions"]
+  H --> I["merge / return"]
 ```
 
 GrayMoon treats the repository collection as one coordinated Workspace.
@@ -312,14 +307,13 @@ Prepare Workspace is a coordinated multi-repository workflow.
 
 Conceptually:
 
-```text
-choose new branch name
-choose base
-create branch across target repositories
-persist branch state
-optionally update dependencies
-optionally commit generated changes
-optionally synchronized push
+```mermaid
+flowchart TB
+  A["choose new branch name / base"] --> B["create branch across target repos"]
+  B --> C["persist branch state"]
+  C --> D{"optional update dependencies"}
+  D --> E{"optional commit"}
+  E --> F{"optional synchronized push"}
 ```
 
 The operation deliberately suppresses or controls hook-driven races while it is making coordinated changes.
@@ -352,6 +346,16 @@ Dependency sources include:
 2. configured file tokens;
 3. generated/virtual package relationships;
 4. custom repository dependencies.
+
+```mermaid
+flowchart LR
+  Csproj["csproj PackageReference"] --> Graph["Workspace dependency graph"]
+  FileTok["file-config tokens"] --> Graph
+  Gen["generated package edges"] --> Graph
+  Custom["custom repo dependencies"] --> Graph
+  Graph --> Levels["dependency levels"]
+  Levels --> Push["ordered push / update"]
+```
 
 The graph drives:
 

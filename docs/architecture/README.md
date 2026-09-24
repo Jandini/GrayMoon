@@ -50,25 +50,35 @@ GrayMoon is a control plane for multi-repository .NET development. A Workspace g
 
 GrayMoon is a two-process system:
 
-```text
-GrayMoon.App
-- UI
-- orchestration
-- SQLite
-- GitHub / connector API calls
-- application services
-- browser notifications
+```mermaid
+flowchart TB
+  subgraph AppSide["GrayMoon.App"]
+    UI["UI / Blazor"]
+    Orch["Orchestration"]
+    DB["SQLite"]
+    GH["GitHub / connectors"]
+    Hub["AgentHub + WorkspaceSyncHub"]
+  end
 
-        SignalR
+  subgraph AgentSide["GrayMoon.Agent"]
+    Git["Local Git"]
+    FS["Filesystem"]
+    GV["GitVersion"]
+    GC["Git Changes"]
+    Hooks["Hook listener"]
+    Restore["dotnet restore"]
+  end
 
-GrayMoon.Agent
-- local Git
-- GitVersion
-- repository filesystem
-- project discovery
-- dotnet restore
-- Git Changes status/diff/mutations
-- Git hook listener
+  UI --> Orch
+  Orch --> DB
+  Orch --> GH
+  Orch --> Hub
+  Hub <-->|"SignalR"| Git
+  Hub <--> FS
+  Hub <--> GV
+  Hub <--> GC
+  Hub <--> Hooks
+  Hub <--> Restore
 ```
 
 GrayMoon.App must not directly operate the developer's local repositories.
@@ -77,12 +87,17 @@ GrayMoon.App must not directly operate the developer's local repositories.
 
 Today:
 
-```text
-Workspace
-├─ RepoA working tree
-├─ RepoB working tree
-├─ RepoC working tree
-└─ ...
+```mermaid
+flowchart TB
+  WS["Workspace"]
+  A["RepoA working tree"]
+  B["RepoB working tree"]
+  C["RepoC working tree"]
+  N["..."]
+  WS --> A
+  WS --> B
+  WS --> C
+  WS --> N
 ```
 
 Each `WorkspaceRepositoryLink` represents membership plus the current persisted checkout projection for that repository.
@@ -109,14 +124,21 @@ The future worktree project will move many of these observations behind an execu
 
 A Workspace exposes:
 
-```text
-Repositories
-Changes
-Projects
-Packages
-Files
-Deps
-Actions
+```mermaid
+flowchart LR
+  Repos["Repositories"]
+  Changes["Changes"]
+  Projects["Projects"]
+  Packages["Packages"]
+  Files["Files"]
+  Deps["Deps"]
+  Actions["Actions"]
+  Repos --- Changes
+  Repos --- Projects
+  Repos --- Packages
+  Repos --- Files
+  Repos --- Deps
+  Repos --- Actions
 ```
 
 The Repositories page is the main operational dashboard. The remaining pages provide focused views over source control, project/package discovery, configured files, dependency relationships, and GitHub workflow state.
