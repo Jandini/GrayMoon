@@ -3,6 +3,8 @@
 @using System.Text.Json
 @using GrayMoon.Abstractions.Agent
 @using GrayMoon.App.Services
+@using GrayMoon.App.Services.Agent
+@implements IAsyncDisposable
 @inject NavigationManager NavigationManager
 @inject IJSRuntime JSRuntime
 @inject AgentConnectionTracker AgentConnectionTracker
@@ -72,7 +74,7 @@
                             <div class="tab-pane @(ActiveTab == "host" ? "show active" : "")" role="tabpanel">
                                 @if (hostInfo == null && hostInfoLoadError == null)
                                 {
-                                    <p class="text-muted mb-0">Loading…</p>
+                                    <p class="text-muted mb-0">Loading...</p>
                                 }
                                 else if (hostInfoLoadError != null)
                                 {
@@ -83,12 +85,12 @@
                                     <div class="host-info-grid small">
                                         <span class="text-muted">Agent</span>
                                         <span>@VersionBadge(AgentConnectionTracker.AgentSemVer)</span>
-                                        <span class="text-muted">Dotnet</span>
-                                        <span>@DotnetCell(hostInfo.DotnetVersion)</span>
+                                        <span class="text-muted">.NET SDK</span>
+                                        <span>@PrerequisiteCell(hostInfo.DotnetVersion, HostPrerequisiteInstallCommands.DotnetSdk)</span>
                                         <span class="text-muted">Git</span>
-                                        <span>@GitCell(hostInfo.GitVersion)</span>
+                                        <span>@PrerequisiteCell(hostInfo.GitVersion, HostPrerequisiteInstallCommands.Git)</span>
                                         <span class="text-muted">GitVersion</span>
-                                        <span>@GitVersionToolCell(hostInfo.GitVersionToolVersion)</span>
+                                        <span>@PrerequisiteCell(hostInfo.GitVersionToolVersion, HostPrerequisiteInstallCommands.GitVersion)</span>
                                     </div>
                                     <p class="small text-muted mt-3 mb-0">@HostPrerequisitesNote(hostInfo)</p>
                                 }
@@ -104,11 +106,20 @@
                             @if (ShowUpdateNowButton)
                             {
                                 <button type="button" class="btn btn-danger" disabled="@_isUpdating" @onclick="UpdateAgentNowAsync">
-                                    @(_isUpdating ? "Updating…" : "Update Now")
+                                    @(_isUpdating ? "Updating..." : "Update Now")
                                 </button>
                             }
                             <button type="button" class="btn btn-outline-secondary" @onclick="DownloadAgent">Download</button>
                         </div>
+                    </div>
+                }
+                else if (ShowHostInstallAllFooter)
+                {
+                    <div class="card-footer card-footer-agent d-flex justify-content-between align-items-center">
+                        <small class="text-muted">GrayMoon Desktop can install the missing prerequisites automatically.</small>
+                        <button type="button" class="btn btn-primary" disabled="@_isInstallingPrerequisites" @onclick="InstallAllHostPrerequisitesAsync">
+                            @(_isInstallingPrerequisites ? "Installing..." : "Install All")
+                        </button>
                     </div>
                 }
             </div>
@@ -121,6 +132,7 @@
 
 @code {
     private const string AgentDotnet10RuntimeUrl = "https://aka.ms/dotnet-core-applaunch?framework=Microsoft.NETCore.App&framework_version=10.0.0&arch=x64&rid=win-x64&os=win10";
+    private static readonly TimeSpan HostInstallReconnectTimeout = TimeSpan.FromSeconds(90);
 
     private sealed record HostInfoDto(string? DotnetVersion, string? GitVersion, string? GitVersionToolVersion);
 
@@ -131,6 +143,11 @@
     private string? hostInfoLoadError;
     private bool _isUpdating;
     private bool _waitingForReconnect;
+    private bool _isDesktopHost;
+    private bool _desktopHostDetected;
+    private bool _isInstallingPrerequisites;
+    private string? _pendingInstallRequestId;
+    private DotNetObjectReference<Agent>? _desktopBridgeRef;
 
     protected override void OnInitialized()
     {
@@ -157,7 +174,23 @@
                     StateHasChanged();
                 });
             });
+
+            try
+            {
+                _isDesktopHost = await JSRuntime.InvokeAsync<bool>("graymoonDesktopBridge.isAvailable");
+            }
+            catch (JSException)
+            {
+                _isDesktopHost = false;
+            }
+            catch (JSDisconnectedException)
+            {
+                _isDesktopHost = false;
+            }
+
+            _desktopHostDetected = true;
             await LoadHostInfoAsync();
+            StateHasChanged();
         }
     }
 
@@ -201,9 +234,6 @@
         await InvokeAsync(StateHasChanged);
     }
 
-    private const string GitInstallCommand = "winget install --id Git.Git -e --source winget";
-    private const string GitVersionToolInstallCommand = "dotnet tool install --global GitVersion.Tool --version 5.*";
-
     private static RenderFragment VersionBadge(string? version) => builder =>
     {
         if (string.IsNullOrWhiteSpace(version))
@@ -219,79 +249,49 @@
         }
     };
 
-    private RenderFragment DotnetCell(string? version) => builder =>
+    private RenderFragment PrerequisiteCell(string? version, string installCommandText) => builder =>
     {
         if (!string.IsNullOrWhiteSpace(version))
         {
             builder.AddContent(0, version);
             return;
         }
-        builder.OpenElement(0, "a");
-        builder.AddAttribute(1, "href", AgentDotnet10RuntimeUrl);
-        builder.AddAttribute(2, "target", "_blank");
-        builder.AddAttribute(3, "rel", "noopener noreferrer");
-        builder.AddContent(4, "Download .NET 10 runtime");
-        builder.CloseElement();
-    };
 
-    private RenderFragment GitCell(string? version) => builder =>
-    {
-        if (!string.IsNullOrWhiteSpace(version))
-        {
-            builder.AddContent(0, version);
-            return;
-        }
-        builder.OpenElement(0, "span");
-        builder.AddAttribute(1, "class", "d-inline-flex align-items-center gap-2");
-        builder.OpenElement(2, "span");
-        builder.AddAttribute(3, "class", "badge bg-secondary");
-        builder.AddContent(4, "not installed");
-        builder.CloseElement();
-        builder.OpenElement(5, "button");
-        builder.AddAttribute(6, "type", "button");
-        builder.AddAttribute(7, "class", "btn btn-outline-secondary btn-sm");
-        builder.AddAttribute(8, "onclick", EventCallback.Factory.Create(this, async () => await CopyToClipboard(GitInstallCommand)));
-        builder.AddContent(9, "Copy");
-        builder.CloseElement();
-        builder.CloseElement();
-    };
-
-    private RenderFragment GitVersionToolCell(string? version) => builder =>
-    {
-        if (!string.IsNullOrWhiteSpace(version))
-        {
-            builder.AddContent(0, version);
-            return;
-        }
         builder.OpenElement(0, "div");
-        builder.AddAttribute(1, "class", "input-group input-group-sm");
+        builder.AddAttribute(1, "class", "input-group input-group-sm host-prerequisite-command");
         builder.OpenElement(2, "input");
         builder.AddAttribute(3, "type", "text");
         builder.AddAttribute(4, "class", "form-control font-monospace bg-dark");
         builder.AddAttribute(5, "readonly", true);
-        builder.AddAttribute(6, "value", GitVersionToolInstallCommand);
+        builder.AddAttribute(6, "value", installCommandText);
         builder.CloseElement();
         builder.OpenElement(7, "button");
         builder.AddAttribute(8, "type", "button");
         builder.AddAttribute(9, "class", "btn btn-outline-secondary");
-        builder.AddAttribute(10, "onclick", EventCallback.Factory.Create(this, async () => await CopyToClipboard(GitVersionToolInstallCommand)));
+        builder.AddAttribute(10, "onclick", EventCallback.Factory.Create(this, async () => await CopyToClipboard(installCommandText)));
         builder.AddContent(11, "Copy");
         builder.CloseElement();
         builder.CloseElement();
     };
 
-    private bool HostTabMissingPrerequisites => hostInfo != null && (
-        string.IsNullOrWhiteSpace(hostInfo.DotnetVersion) ||
-        string.IsNullOrWhiteSpace(hostInfo.GitVersion) ||
-        string.IsNullOrWhiteSpace(hostInfo.GitVersionToolVersion));
+    private HostPrerequisiteVersions CurrentHostVersions =>
+        new(hostInfo?.DotnetVersion, hostInfo?.GitVersion, hostInfo?.GitVersionToolVersion);
 
-    private static string HostPrerequisitesNote(HostInfoDto hostInfo)
-    {
-        var allInstalled = !string.IsNullOrWhiteSpace(hostInfo.DotnetVersion)
-            && !string.IsNullOrWhiteSpace(hostInfo.GitVersion)
-            && !string.IsNullOrWhiteSpace(hostInfo.GitVersionToolVersion);
-        return allInstalled ? "All prerequisites are installed." : "Install the missing prerequisites above.";
-    }
+    private bool HostTabMissingPrerequisites =>
+        hostInfo != null && HostPrerequisiteState.AnyMissing(CurrentHostVersions);
+
+    private static string HostPrerequisitesNote(HostInfoDto hostInfo) =>
+        HostPrerequisiteState.Note(new HostPrerequisiteVersions(
+            hostInfo.DotnetVersion,
+            hostInfo.GitVersion,
+            hostInfo.GitVersionToolVersion));
+
+    private bool ShowHostInstallAllFooter =>
+        ActiveTab == "host"
+        && _desktopHostDetected
+        && _isDesktopHost
+        && HostTabMissingPrerequisites
+        && hostInfoLoadError is null;
 
     private bool InstallTabIsRed => AgentConnectionTracker.State == AgentConnectionState.Offline || AgentConnectionTracker.State == AgentConnectionState.VersionMismatch;
 
@@ -314,6 +314,136 @@
     {
         await JSRuntime.InvokeVoidAsync("graymoonDownloadAgent");
     }
+
+    private async Task InstallAllHostPrerequisitesAsync()
+    {
+        if (_isInstallingPrerequisites || hostInfo is null || !_isDesktopHost)
+            return;
+
+        var missing = HostPrerequisiteState.GetMissingIds(CurrentHostVersions);
+        if (missing.Count == 0)
+            return;
+
+        _isInstallingPrerequisites = true;
+        StateHasChanged();
+
+        try
+        {
+            _desktopBridgeRef ??= DotNetObjectReference.Create(this);
+            var requestId = Guid.NewGuid().ToString("N");
+            _pendingInstallRequestId = requestId;
+
+            await JSRuntime.InvokeVoidAsync("graymoonDesktopBridge.registerPending", requestId, _desktopBridgeRef);
+            var posted = await JSRuntime.InvokeAsync<bool>(
+                "graymoonDesktopBridge.postCommand",
+                "InstallHostPrerequisites",
+                new { prerequisites = missing.ToArray() },
+                requestId);
+
+            if (!posted)
+            {
+                _isInstallingPrerequisites = false;
+                _pendingInstallRequestId = null;
+                ToastService.ShowError("GrayMoon Desktop bridge is not available.");
+                StateHasChanged();
+            }
+        }
+        catch (Exception)
+        {
+            _isInstallingPrerequisites = false;
+            _pendingInstallRequestId = null;
+            ToastService.ShowError("Could not start Host prerequisite installation.");
+            StateHasChanged();
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnNativeCommandResult(
+        string id,
+        bool success,
+        bool cancelled,
+        string? message,
+        string[]? failedPrerequisiteIds)
+    {
+        if (!string.Equals(id, _pendingInstallRequestId, StringComparison.Ordinal))
+            return;
+
+        _pendingInstallRequestId = null;
+
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("graymoonDesktopBridge.unregisterPending", id);
+        }
+        catch
+        {
+            // Best effort cleanup.
+        }
+
+        if (cancelled)
+        {
+            _isInstallingPrerequisites = false;
+            ToastService.Show(string.IsNullOrWhiteSpace(message) ? "Installation cancelled." : message);
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        try
+        {
+            await WaitForAgentReadyAfterInstallAsync(HostInstallReconnectTimeout);
+            await LoadHostInfoAsync();
+
+            if (hostInfo is not null && !HostPrerequisiteState.AnyMissing(CurrentHostVersions))
+            {
+                ToastService.Show("Host prerequisites installed.");
+            }
+            else if (success)
+            {
+                ToastService.Show(string.IsNullOrWhiteSpace(message) ? "Host prerequisites installed." : message);
+            }
+            else
+            {
+                var namedFailures = (failedPrerequisiteIds ?? [])
+                    .Select(DisplayPrerequisiteName)
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray();
+                var remaining = hostInfo is null
+                    ? namedFailures
+                    : HostPrerequisiteState.GetMissingIds(CurrentHostVersions).Select(DisplayPrerequisiteName).ToArray();
+                var detail = remaining.Length > 0
+                    ? $"Still missing: {string.Join(", ", remaining)}."
+                    : namedFailures.Length > 0
+                        ? $"Failed to install: {string.Join(", ", namedFailures)}."
+                        : (message ?? "Host prerequisite installation did not complete successfully.");
+                ToastService.ShowError(detail);
+            }
+        }
+        finally
+        {
+            _isInstallingPrerequisites = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task WaitForAgentReadyAfterInstallAsync(TimeSpan timeout)
+    {
+        // Always reload afterward even if the Agent already restarted before this runs.
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            if (AgentConnectionTracker.State == AgentConnectionState.Online && AgentBridge.IsAgentConnected)
+                return;
+
+            await Task.Delay(500);
+        }
+    }
+
+    private static string DisplayPrerequisiteName(string id) => id switch
+    {
+        HostPrerequisiteIds.DotnetSdk => ".NET SDK",
+        HostPrerequisiteIds.Git => "Git",
+        HostPrerequisiteIds.GitVersion => "GitVersion",
+        _ => id
+    };
 
     private async Task UpdateAgentNowAsync()
     {
@@ -373,6 +503,24 @@
         catch (JSDisconnectedException)
         {
             ToastService.ShowError("Could not copy to clipboard: the connection to the server was lost.");
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_desktopBridgeRef is not null)
+        {
+            try
+            {
+                await JSRuntime.InvokeVoidAsync("graymoonDesktopBridge.disposeAll", _desktopBridgeRef);
+            }
+            catch
+            {
+                // Circuit may already be gone.
+            }
+
+            _desktopBridgeRef.Dispose();
+            _desktopBridgeRef = null;
         }
     }
 }

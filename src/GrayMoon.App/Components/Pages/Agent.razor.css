@@ -106,3 +106,15 @@
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+
+.host-info-grid .host-prerequisite-command {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+    max-width: 100%;
+}
+
+.host-info-grid .host-prerequisite-command .form-control {
+    min-width: 0;
+}
+
