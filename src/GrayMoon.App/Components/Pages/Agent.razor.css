@@ -33,24 +33,20 @@
     box-shadow: 0 0 0 1px var(--focus-ring-outer);
 }
 
-.card-header-tabs .nav-link.host-tab-missing,
 .card-header-tabs .nav-link.install-tab-update {
     color: var(--bs-danger);
 }
 
-.card-header-tabs .nav-link.host-tab-missing:hover,
 .card-header-tabs .nav-link.install-tab-update:hover {
     color: var(--bs-danger);
     background: var(--bg-hover);
 }
 
-.card-header-tabs .nav-link.host-tab-missing.active,
 .card-header-tabs .nav-link.install-tab-update.active {
     color: #fff;
     background: var(--bs-danger);
 }
 
-.card-header-tabs .nav-link.host-tab-missing.active:hover,
 .card-header-tabs .nav-link.install-tab-update.active:hover {
     color: #fff;
 }
@@ -106,3 +102,15 @@
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+
+.host-info-grid .host-prerequisite-command {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+    max-width: 100%;
+}
+
+.host-info-grid .host-prerequisite-command .form-control {
+    min-width: 0;
+}
+
