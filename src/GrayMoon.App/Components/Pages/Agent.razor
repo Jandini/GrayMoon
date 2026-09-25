@@ -32,7 +32,7 @@
                         @if (AgentConnectionTracker.State == AgentConnectionState.Online || AgentConnectionTracker.State == AgentConnectionState.VersionMismatch)
                         {
                             <li class="nav-item" role="presentation">
-                                <button class="nav-link @(ActiveTab == "host" ? "active" : "") @(HostTabMissingPrerequisites ? "host-tab-missing" : "")" type="button" role="tab" @onclick='() => SetActiveTab("host")'>Host</button>
+                                <button class="nav-link @(ActiveTab == "host" ? "active" : "") @(HostTabMissingPrerequisites ? "install-tab-update" : "")" type="button" role="tab" @onclick='() => SetActiveTab("host")'>Host</button>
                             </li>
                         }
                     </ul>
@@ -117,7 +117,7 @@
                 {
                     <div class="card-footer card-footer-agent d-flex justify-content-between align-items-center">
                         <small class="text-muted">GrayMoon Desktop can install the missing prerequisites automatically.</small>
-                        <button type="button" class="btn btn-primary" disabled="@_isInstallingPrerequisites" @onclick="InstallAllHostPrerequisitesAsync">
+                        <button type="button" class="btn btn-danger" disabled="@_isInstallingPrerequisites" @onclick="InstallAllHostPrerequisitesAsync">
                             @(_isInstallingPrerequisites ? "Installing..." : "Install All")
                         </button>
                     </div>
