@@ -8,6 +8,7 @@ using GrayMoon.Agent.Hub;
 using GrayMoon.Agent.Jobs.Requests;
 using GrayMoon.Agent.Jobs.Response;
 using GrayMoon.Agent.Logging;
+using GrayMoon.Agent.Platform.Windows;
 using GrayMoon.Agent.Queue;
 using GrayMoon.Agent.Services;
 using GrayMoon.Agent.Services.GitChanges;
@@ -27,6 +28,11 @@ internal static class RunCommandHandler
     /// </summary>
     public static async Task<int> RunAsync(AgentOptions options, CancellationToken cancellationToken = default)
     {
+        // Refresh process PATH from the current machine/user environment before any git/dotnet
+        // commands run. Windows services often inherit a stale SCM PATH snapshot.
+        if (OperatingSystem.IsWindows())
+            HostEnvironmentPath.RefreshProcessPath();
+
         var appConfig = new ConfigurationBuilder()
             .SetBasePath(AppContext.BaseDirectory)
             .AddApplicationSettings()
