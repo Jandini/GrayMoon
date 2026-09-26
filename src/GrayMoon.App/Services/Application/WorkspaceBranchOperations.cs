@@ -584,6 +584,9 @@ public sealed class WorkspaceBranchOperations(
 
         try
         {
+            if (isRemote)
+                await connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepositoryId, cancellationToken);
+
             var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
             var args = new
             {
@@ -592,6 +595,7 @@ public sealed class WorkspaceBranchOperations(
                 branchName,
                 isRemote,
                 force,
+                bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
                 workspaceRoot
             };
             var response = await agentBridge.SendCommandAsync("DeleteBranch", args, cancellationToken);

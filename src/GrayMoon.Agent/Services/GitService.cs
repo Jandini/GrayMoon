@@ -1203,16 +1203,15 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
     //   CloneAsync, FetchAsync, FetchMinimalAsync, PullAsync, PushAsync, GetRemoteBranchesAsync
     //   (ls-remote), FetchTagsAsync, DeleteBranchAsync (remote), ResetToRemoteAsync (conditional push).
     // Callers that DO pass a token today (via request.BearerToken or IAgentTokenProvider):
-    //   SyncRepository, FetchCommits, ReturnToDefaultBranch (incl. remote delete after this fix),
+    //   SyncRepository, FetchCommits, ReturnToDefaultBranch (incl. remote delete),
+    //   DeleteBranch (remote; Switch Branch modal / API via WorkspaceBranchOperations),
     //   UpdateBranchFromDefault, PushRepository, CommitSyncRepository, UndoPush,
     //   GetBranches, RefreshBranches, SetUpstreamBranch, CreateBranch (minimal fetch),
     //   CheckoutHookSync (minimal fetch + fetch tags), CommitHookSync (ls-remote),
     //   RefreshRepositoryVersion (ls-remote when needed).
-    // Remaining gap that still omits auth for private remotes:
-    //   DeleteBranchCommand → DeleteBranchAsync(isRemote: true) with no bearerToken and no
-    //   IAgentTokenProvider. App call sites also omit bearerToken on the DeleteBranch payload:
-    //   WorkspaceBranchOperations.DeleteBranchAsync (Switch Branch modal / API) and
-    //   WorkspaceFeatureOperations remote-branch cleanup. Local DeleteBranch is fine (no network).
+    // Local DeleteBranch is fine (no network).
+    // Remaining gap off this branch: WorkspaceFeatureOperations remote-branch cleanup (when that
+    // code is present) must also send bearerToken on the DeleteBranch payload.
     // Note: if the connector token itself is missing/null, authenticated callers still fail; that is
     // connector configuration, not a propagation bug. GIT_TERMINAL_PROMPT=0 makes those fail fast.
     private static string BuildAuthHeaderArgs(string bearerToken)
