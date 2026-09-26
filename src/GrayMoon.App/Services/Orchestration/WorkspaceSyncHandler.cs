@@ -1,5 +1,7 @@
+using System.Collections.Concurrent;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services.Queries;
+using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services.Orchestration;
 
@@ -7,8 +9,12 @@ namespace GrayMoon.App.Services.Orchestration;
 /// Handles sync operations (git status, version, branch, commit counts) for workspace repositories.
 /// Stateless; all state is provided via callbacks.
 /// </summary>
-public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, IServiceScopeFactory serviceScopeFactory)
+public sealed class WorkspaceSyncHandler(
+    ILogger<WorkspaceSyncHandler> logger,
+    IServiceScopeFactory serviceScopeFactory,
+    IOptions<WorkspaceOptions> workspaceOptions)
 {
+    private int MaxParallel => Math.Max(1, workspaceOptions.Value.MaxParallelOperations);
     public async Task<IReadOnlyDictionary<int, RepoGitVersionInfo>> RunSyncAsync(
         int workspaceId,
         IReadOnlyList<int>? repositoryIds,
@@ -75,37 +81,48 @@ public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, I
                 AnalysisError: null);
         }
 
-        await using var scope = serviceScopeFactory.CreateAsyncScope();
-        var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-        var prService = scope.ServiceProvider.GetRequiredService<WorkspacePullRequestService>();
-        var query = scope.ServiceProvider.GetRequiredService<IWorkspaceRepositoryLinkListQueryService>();
-
         progress.Report(ids.Count == 1
             ? "Fetching latest branch state..."
             : $"Fetching latest branch state for {ids.Count} repositories...");
 
         var fetchDone = 0;
-        foreach (var repoId in ids)
+        // Per-repo scopes: RefreshBranches touches DbContext; parallel work needs isolated contexts.
+        using (var fetchSemaphore = new SemaphoreSlim(MaxParallel, MaxParallel))
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            bool fetched;
-            try
+            var fetchResults = await Task.WhenAll(ids.Select(async repoId =>
             {
-                fetched = await git.RefreshBranchesForRepositoryAsync(repoId, workspaceId, cancellationToken);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                logger.LogError(ex, "Fetch failed during return-to-default analysis. WorkspaceId={WorkspaceId}, RepositoryId={RepositoryId}", workspaceId, repoId);
-                return ReturnToDefaultPlan.Failed(workspaceId, "Fetch failed. Return to default was aborted.");
-            }
+                await fetchSemaphore.WaitAsync(cancellationToken);
+                try
+                {
+                    await using var repoScope = serviceScopeFactory.CreateAsyncScope();
+                    var repoGit = repoScope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+                    try
+                    {
+                        var fetched = await repoGit.RefreshBranchesForRepositoryAsync(repoId, workspaceId, cancellationToken);
+                        return (RepoId: repoId, Fetched: fetched, Error: (Exception?)null);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        logger.LogError(ex, "Fetch failed during return-to-default analysis. WorkspaceId={WorkspaceId}, RepositoryId={RepositoryId}", workspaceId, repoId);
+                        return (RepoId: repoId, Fetched: false, Error: ex);
+                    }
+                }
+                finally
+                {
+                    fetchSemaphore.Release();
+                    var done = Interlocked.Increment(ref fetchDone);
+                    if (ids.Count > 1)
+                        progress.Report($"Fetched {done} of {ids.Count}...", done, ids.Count);
+                }
+            }));
 
-            if (!fetched)
+            if (fetchResults.Any(r => !r.Fetched))
                 return ReturnToDefaultPlan.Failed(workspaceId, "Fetch failed. Return to default was aborted.");
-
-            fetchDone++;
-            if (ids.Count > 1)
-                progress.Report($"Fetched {fetchDone} of {ids.Count}...", fetchDone, ids.Count);
         }
+
+        await using var scope = serviceScopeFactory.CreateAsyncScope();
+        var prService = scope.ServiceProvider.GetRequiredService<WorkspacePullRequestService>();
+        var query = scope.ServiceProvider.GetRequiredService<IWorkspaceRepositoryLinkListQueryService>();
 
         var prRefreshFailed = false;
         try
@@ -151,15 +168,16 @@ public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, I
 
         await using var scope = serviceScopeFactory.CreateAsyncScope();
         var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-        var prService = scope.ServiceProvider.GetRequiredService<WorkspacePullRequestService>();
         var query = scope.ServiceProvider.GetRequiredService<IWorkspaceRepositoryLinkListQueryService>();
 
         progress.Report(ids.Count == 1
             ? "Returning to default branch..."
             : $"Returning {ids.Count} repositories to default branch...");
 
-        var repoErrors = new Dictionary<int, string>();
-        var synced = 0;
+        // Snapshot reads stay sequential on one DbContext; agent work runs in parallel with per-repo scopes.
+        var workItems = new List<(int RepoId, string BranchName, bool DeleteRemote, bool ClosePr, int? PrNumber)>(ids.Count);
+        var repoErrors = new ConcurrentDictionary<int, string>();
+        var skippedAlreadyOnDefault = 0;
 
         foreach (var repoId in ids)
         {
@@ -182,42 +200,64 @@ public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, I
                 && !string.Equals(dto.BranchName, dto.DefaultBranchName, StringComparison.Ordinal);
             if (!needsSync)
             {
-                synced++;
+                skippedAlreadyOnDefault++;
                 continue;
             }
 
-            if (options.CloseOpenPullRequest
-                && dto.PullRequestNumber is > 0
-                && IsOpenPullRequest(dto))
-            {
-                try
-                {
-                    await prService.ClosePullRequestAsync(workspaceId, repoId, dto.PullRequestNumber.Value, cancellationToken);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    logger.LogWarning(ex, "Failed to close PR {PrNumber} for repository {RepositoryId} before return to default", dto.PullRequestNumber, repoId);
-                }
-            }
-
-            var deleteRemote = options.DeleteRemoteBranch && dto.BranchHasUpstream == true;
-            var (success, errMsg) = await git.ReturnToDefaultDirectAsync(
-                workspaceId,
+            workItems.Add((
                 repoId,
                 dto.BranchName!,
-                deleteRemoteBranch: deleteRemote,
-                allowForceDeleteLocalBranch: options.AllowForceDeleteLocalBranch,
-                cancellationToken);
-
-            if (!success)
-                repoErrors[repoId] = errMsg ?? "Return to default failed.";
-            else
-                synced++;
-
-            if (ids.Count > 1)
-                progress.Report($"Returned {synced + repoErrors.Count} of {ids.Count} to default branch", synced + repoErrors.Count, ids.Count);
+                options.DeleteRemoteBranch && dto.BranchHasUpstream == true,
+                options.CloseOpenPullRequest && dto.PullRequestNumber is > 0 && IsOpenPullRequest(dto),
+                dto.PullRequestNumber));
         }
 
+        var completed = skippedAlreadyOnDefault;
+        using (var semaphore = new SemaphoreSlim(MaxParallel, MaxParallel))
+        {
+            await Task.WhenAll(workItems.Select(async item =>
+            {
+                await semaphore.WaitAsync(cancellationToken);
+                try
+                {
+                    await using var repoScope = serviceScopeFactory.CreateAsyncScope();
+                    var repoGit = repoScope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+                    var prService = repoScope.ServiceProvider.GetRequiredService<WorkspacePullRequestService>();
+
+                    if (item.ClosePr && item.PrNumber is > 0)
+                    {
+                        try
+                        {
+                            await prService.ClosePullRequestAsync(workspaceId, item.RepoId, item.PrNumber.Value, cancellationToken);
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException)
+                        {
+                            logger.LogWarning(ex, "Failed to close PR {PrNumber} for repository {RepositoryId} before return to default", item.PrNumber, item.RepoId);
+                        }
+                    }
+
+                    var (success, errMsg) = await repoGit.ReturnToDefaultDirectAsync(
+                        workspaceId,
+                        item.RepoId,
+                        item.BranchName,
+                        deleteRemoteBranch: item.DeleteRemote,
+                        allowForceDeleteLocalBranch: options.AllowForceDeleteLocalBranch,
+                        cancellationToken);
+
+                    if (!success)
+                        repoErrors[item.RepoId] = errMsg ?? "Return to default failed.";
+                }
+                finally
+                {
+                    semaphore.Release();
+                    var done = Interlocked.Increment(ref completed);
+                    if (ids.Count > 1)
+                        progress.Report($"Returned {done} of {ids.Count} to default branch", done, ids.Count);
+                }
+            }));
+        }
+
+        // One workspace-wide recompute after the whole batch (avoids N concurrent recompute races).
         await git.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
 
         return repoErrors.Count == 0

@@ -497,5 +497,8 @@ public sealed class ReturnToDefaultAnalyzeTests
     }
 
     private static WorkspaceSyncHandler CreateHandler(SyncStateTestContext ctx)
-        => new(NullLogger<WorkspaceSyncHandler>.Instance, ctx.Resolve<IServiceScopeFactory>());
+        => new(
+            NullLogger<WorkspaceSyncHandler>.Instance,
+            ctx.Resolve<IServiceScopeFactory>(),
+            ctx.Resolve<Microsoft.Extensions.Options.IOptions<WorkspaceOptions>>());
 }
