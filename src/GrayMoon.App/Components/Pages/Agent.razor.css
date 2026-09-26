@@ -34,12 +34,13 @@
 }
 
 .card-header-tabs .nav-link.install-tab-update {
-    color: var(--bs-danger);
+    color: #fff;
+    background: var(--bs-danger);
 }
 
 .card-header-tabs .nav-link.install-tab-update:hover {
-    color: var(--bs-danger);
-    background: var(--bg-hover);
+    color: #fff;
+    background: var(--bs-danger);
 }
 
 .card-header-tabs .nav-link.install-tab-update.active {
