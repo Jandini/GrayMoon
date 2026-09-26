@@ -97,6 +97,7 @@
 }
 
 .confirm-modal-details__secondary {
+    margin-left: 0.35rem;
     font-family: var(--bs-font-monospace, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
     font-size: 0.8em;
     color: var(--text-secondary);

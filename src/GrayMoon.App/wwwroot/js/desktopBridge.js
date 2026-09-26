@@ -33,7 +33,7 @@
         data.message || null,
         data.failedPrerequisiteIds || []);
     } catch (e) {
-      // Component may have been disposed during navigation.
+      // Circuit-scoped callback target may already be disposed (tab closed).
     }
   }
 

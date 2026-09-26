@@ -185,7 +185,6 @@ public sealed class WorkspaceSyncHandler(
 
         await using var scope = serviceScopeFactory.CreateAsyncScope();
         var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-        var prService = scope.ServiceProvider.GetRequiredService<WorkspacePullRequestService>();
         var query = scope.ServiceProvider.GetRequiredService<IWorkspaceRepositoryLinkListQueryService>();
         var contextResolver = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureContextResolver>();
         var isSpecialWorkspace = (await contextResolver.GetRequiredAsync(contextId, workspaceId, cancellationToken)).IsSpecialWorkspace;
@@ -224,23 +223,41 @@ public sealed class WorkspaceSyncHandler(
                 && !string.Equals(dto.BranchName, dto.DefaultBranchName, StringComparison.Ordinal);
             if (!needsSync)
             {
-                synced++;
+                skippedAlreadyOnDefault++;
                 continue;
             }
 
-            if (options.CloseOpenPullRequest
-                && dto.PullRequestNumber is > 0
-                && IsOpenPullRequest(dto))
+            workItems.Add((
+                repoId,
+                dto.BranchName!,
+                options.DeleteRemoteBranch && dto.BranchHasUpstream == true,
+                options.CloseOpenPullRequest && dto.PullRequestNumber is > 0 && IsOpenPullRequest(dto),
+                dto.PullRequestNumber));
+        }
+
+        var completed = skippedAlreadyOnDefault;
+        using (var semaphore = new SemaphoreSlim(MaxParallel, MaxParallel))
+        {
+            await Task.WhenAll(workItems.Select(async item =>
             {
+                await semaphore.WaitAsync(cancellationToken);
                 try
                 {
-                    await prService.ClosePullRequestAsync(workspaceId, repoId, dto.PullRequestNumber.Value, cancellationToken);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    logger.LogWarning(ex, "Failed to close PR {PrNumber} for repository {RepositoryId} before return to default", dto.PullRequestNumber, repoId);
-                }
-            }
+                    await using var repoScope = serviceScopeFactory.CreateAsyncScope();
+                    var repoGit = repoScope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+                    var prService = repoScope.ServiceProvider.GetRequiredService<WorkspacePullRequestService>();
+
+                    if (item.ClosePr && item.PrNumber is > 0)
+                    {
+                        try
+                        {
+                            await prService.ClosePullRequestAsync(workspaceId, item.RepoId, item.PrNumber.Value, cancellationToken);
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException)
+                        {
+                            logger.LogWarning(ex, "Failed to close PR {PrNumber} for repository {RepositoryId} before return to default", item.PrNumber, item.RepoId);
+                        }
+                    }
 
             var deleteRemote = options.DeleteRemoteBranch && dto.BranchHasUpstream == true;
             toReturnToDefault.Add((repoId, dto.BranchName!, deleteRemote));
