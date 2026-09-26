@@ -44,7 +44,7 @@ else
     {
         AgentConnectionTracker.BeginSelfUpdate();
         StateHasChanged();
-        var installUrl = NavigationManager.BaseUri.TrimEnd('/') + "/api/agent/install";
+        var installUrl = NavigationManager.BaseUri.TrimEnd('/') + "/api/worker/install";
         var response = await AgentBridge.SendCommandAsync(AgentHubMethods.SelfUpdate, new { installUrl }, CancellationToken.None);
         if (!response.Success)
         {

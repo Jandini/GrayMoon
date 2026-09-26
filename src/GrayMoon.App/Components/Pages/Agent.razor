@@ -152,9 +152,9 @@
     protected override void OnInitialized()
     {
         var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
-        var installUrl = $"{baseUrl}/api/agent/install";
+        var installUrl = $"{baseUrl}/api/worker/install";
         installCommand = $"irm {installUrl} | iex";
-        var uninstallUrl = $"{baseUrl}/api/agent/uninstall";
+        var uninstallUrl = $"{baseUrl}/api/worker/uninstall";
         uninstallCommand = $"irm {uninstallUrl} | iex";
         SetDefaultTab();
     }
@@ -451,7 +451,7 @@
         _waitingForReconnect = false;
         AgentConnectionTracker.BeginSelfUpdate();
         StateHasChanged();
-        var installUrl = NavigationManager.BaseUri.TrimEnd('/') + "/api/agent/install";
+        var installUrl = NavigationManager.BaseUri.TrimEnd('/') + "/api/worker/install";
         var response = await AgentBridge.SendCommandAsync(AgentHubMethods.SelfUpdate, new { installUrl }, CancellationToken.None);
         if (!response.Success)
         {

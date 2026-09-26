@@ -18,20 +18,23 @@ if (-not $isAdmin) {
     return 1
 }
 
-$serviceName = 'GrayMoonAgent'
+$serviceName = 'GrayMoonWorker'
+$legacyServiceName = 'GrayMoonAgent'
 $agentPath   = Join-Path $env:ProgramFiles 'GrayMoon'
 $agentExe    = Join-Path $agentPath 'graymoon-worker.exe'
 $downloadUrl = '{DOWNLOAD_URL}'
 $hubUrl      = '{HUB_URL}'
 $zipPath     = Join-Path $env:TEMP 'graymoon-worker-windows-install.zip'
 
-# Stop the service before replacing files so the executable is not locked.
-$svc = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
-if ($svc -and $svc.Status -eq 'Running') {
-    Write-Host 'Stopping running service...' -ForegroundColor Yellow
-    Stop-Service -Name $serviceName -Force -ErrorAction Stop | Out-Null
-    Start-Sleep -Seconds 2
-    Write-Host 'Service stopped.' -ForegroundColor Green
+# Stop any running service before replacing files so the executable is not locked.
+foreach ($name in @($serviceName, $legacyServiceName)) {
+    $svc = Get-Service -Name $name -ErrorAction SilentlyContinue
+    if ($svc -and $svc.Status -eq 'Running') {
+        Write-Host "Stopping running service '$name'..." -ForegroundColor Yellow
+        Stop-Service -Name $name -Force -ErrorAction Stop | Out-Null
+        Start-Sleep -Seconds 2
+        Write-Host "Service '$name' stopped." -ForegroundColor Green
+    }
 }
 
 # Prepare installation directory.

@@ -76,7 +76,7 @@
             const qs = isWindows ? '?platform=windows' : '';
             const filename = isWindows ? 'graymoon-worker-windows.zip' : 'graymoon-worker-linux.zip';
             const base = (document.querySelector('base')?.getAttribute('href') || '/').replace(/\/$/, '') || '';
-            const path = base + '/api/agent/download' + qs;
+            const path = base + '/api/worker/download' + qs;
             const url = path.startsWith('http') ? path : (window.location.origin + path);
             return { url, filename };
         };

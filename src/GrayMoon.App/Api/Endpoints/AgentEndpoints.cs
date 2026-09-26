@@ -9,9 +9,9 @@ public static class AgentEndpoints
 
     public static IEndpointRouteBuilder MapAgentEndpoints(this IEndpointRouteBuilder routes)
     {
-        routes.MapGet("/api/agent/download", DownloadAgent);
-        routes.MapGet("/api/agent/install", InstallAgent);
-        routes.MapGet("/api/agent/uninstall", UninstallAgent);
+        routes.MapGet("/api/worker/download", DownloadAgent);
+        routes.MapGet("/api/worker/install", InstallAgent);
+        routes.MapGet("/api/worker/uninstall", UninstallAgent);
         return routes;
     }
 
@@ -37,13 +37,13 @@ public static class AgentEndpoints
     {
         var logger = loggerFactory.CreateLogger("GrayMoon.App.Api.Agent");
         var baseUrl = $"{httpContext.Request.Scheme}://{httpContext.Request.Host}";
-        var downloadUrl = $"{baseUrl}/api/agent/download?platform=windows";
+        var downloadUrl = $"{baseUrl}/api/worker/download?platform=windows";
         var hubUrl = $"{baseUrl}/hub/agent";
 
         try
         {
             var assembly = Assembly.GetExecutingAssembly();
-            var resourceName = "GrayMoon.App.Resources.install-agent.ps1";
+            var resourceName = "GrayMoon.App.Resources.install-worker.ps1";
 
             using var stream = assembly.GetManifestResourceStream(resourceName);
             if (stream == null)
@@ -76,7 +76,7 @@ public static class AgentEndpoints
         try
         {
             var assembly = Assembly.GetExecutingAssembly();
-            var resourceName = "GrayMoon.App.Resources.uninstall-agent.ps1";
+            var resourceName = "GrayMoon.App.Resources.uninstall-worker.ps1";
 
             using var stream = assembly.GetManifestResourceStream(resourceName);
             if (stream == null)
