@@ -196,12 +196,11 @@ public sealed class WorkspaceSyncHandler(
             ? "Returning to default branch..."
             : $"Returning {ids.Count} repositories to default branch...");
 
+        // Snapshot reads stay sequential on one DbContext; agent work runs in parallel with per-repo scopes.
+        var workItems = new List<(int RepoId, string BranchName, bool DeleteRemote, bool ClosePr, int? PrNumber)>(ids.Count);
         var repoErrors = new ConcurrentDictionary<int, string>();
-        var synced = 0;
+        var skippedAlreadyOnDefault = 0;
 
-        // Cheap classification pass first (DB reads + optional PR-close calls), sequential since it's not
-        // the bottleneck. Produces the subset that actually needs the (slow, agent-bound) return-to-default call.
-        var toReturnToDefault = new List<(int RepoId, string BranchName, bool DeleteRemote)>();
         foreach (var repoId in ids)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -236,7 +235,7 @@ public sealed class WorkspaceSyncHandler(
         }
 
         var completed = skippedAlreadyOnDefault;
-        using (var semaphore = new SemaphoreSlim(MaxParallel, MaxParallel))
+        using (var semaphore = new SemaphoreSlim(_maxConcurrent, _maxConcurrent))
         {
             await Task.WhenAll(workItems.Select(async item =>
             {
@@ -259,22 +258,6 @@ public sealed class WorkspaceSyncHandler(
                         }
                     }
 
-            var deleteRemote = options.DeleteRemoteBranch && dto.BranchHasUpstream == true;
-            toReturnToDefault.Add((repoId, dto.BranchName!, deleteRemote));
-        }
-
-        // Slow, agent-bound part: bounded parallel fan-out, each task on its own DI scope/DbContext.
-        var returnDone = synced + repoErrors.Count;
-        var totalCount = ids.Count;
-        using (var semaphore = new SemaphoreSlim(_maxConcurrent))
-        {
-            var tasks = toReturnToDefault.Select(async item =>
-            {
-                await semaphore.WaitAsync(cancellationToken);
-                try
-                {
-                    await using var repoScope = serviceScopeFactory.CreateAsyncScope();
-                    var repoGit = repoScope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
                     var (success, errMsg) = await repoGit.ReturnToDefaultDirectAsync(
                         workspaceId,
                         contextId,
@@ -283,27 +266,21 @@ public sealed class WorkspaceSyncHandler(
                         deleteRemoteBranch: item.DeleteRemote,
                         allowForceDeleteLocalBranch: options.AllowForceDeleteLocalBranch,
                         cancellationToken);
-                    return (item.RepoId, Success: success, Error: errMsg);
+
+                    if (!success)
+                        repoErrors[item.RepoId] = errMsg ?? "Return to default failed.";
                 }
                 finally
                 {
                     semaphore.Release();
-                    var done = Interlocked.Increment(ref returnDone);
-                    if (totalCount > 1)
-                        progress.Report($"Returned {done} of {totalCount} to default branch", done, totalCount);
+                    var done = Interlocked.Increment(ref completed);
+                    if (ids.Count > 1)
+                        progress.Report($"Returned {done} of {ids.Count} to default branch", done, ids.Count);
                 }
-            });
-
-            var results = await Task.WhenAll(tasks);
-            foreach (var (repoId, success, errMsg) in results)
-            {
-                if (success)
-                    Interlocked.Increment(ref synced);
-                else
-                    repoErrors[repoId] = errMsg ?? "Return to default failed.";
-            }
+            }));
         }
 
+        // One workspace-wide recompute after the whole batch (avoids N concurrent recompute races).
         await git.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, contextId, cancellationToken);
 
         return repoErrors.Count == 0
