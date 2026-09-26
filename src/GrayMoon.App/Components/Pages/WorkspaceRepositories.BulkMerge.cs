@@ -417,8 +417,8 @@ public sealed partial class WorkspaceRepositories
     /// Calls ReturnToDefaultAsync once per successfully-merged row, never once for the whole set -
     /// ReturnToDefaultAsync aborts its entire call on first failure with no per-repo attribution.
     /// Sequential on purpose: each unattended sync recomputes workspace-wide stats at the end, and
-    /// running those in parallel races SQLite plus the recompute (the same race ReturnToDefaultLevelAsync
-    /// documents and avoids). Overlay progress goes through the standard page-job terminal.
+    /// running those in parallel races SQLite plus the recompute. Overlay progress goes through the
+    /// standard page-job terminal.
     /// </summary>
     private async Task RunBulkReturnToDefaultAsync(IReadOnlyList<BulkMergePrRow> succeededRows, BackgroundJobHandle job, CancellationToken ct)
     {

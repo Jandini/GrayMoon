@@ -4,12 +4,13 @@
 @using GrayMoon.Abstractions.Agent
 @using GrayMoon.App.Services
 @using GrayMoon.App.Services.Agent
-@implements IAsyncDisposable
+@implements IDisposable
 @inject NavigationManager NavigationManager
 @inject IJSRuntime JSRuntime
 @inject AgentConnectionTracker AgentConnectionTracker
 @inject IAgentBridge AgentBridge
 @inject IToastService ToastService
+@inject HostPrerequisiteInstallService HostPrerequisiteInstall
 
 <PageTitle>Worker - GrayMoon</PageTitle>
 
@@ -117,8 +118,8 @@
                 {
                     <div class="card-footer card-footer-agent d-flex justify-content-between align-items-center">
                         <small class="text-muted">GrayMoon Desktop can install the missing prerequisites automatically.</small>
-                        <button type="button" class="btn btn-danger" disabled="@_isInstallingPrerequisites" @onclick="InstallAllHostPrerequisitesAsync">
-                            @(_isInstallingPrerequisites ? "Installing..." : "Install All")
+                        <button type="button" class="btn btn-danger" disabled="@HostPrerequisiteInstall.IsInstalling" @onclick="InstallAllHostPrerequisitesAsync">
+                            @(HostPrerequisiteInstall.IsInstalling ? "Installing..." : "Install All")
                         </button>
                     </div>
                 }
@@ -132,7 +133,6 @@
 
 @code {
     private const string AgentDotnet10RuntimeUrl = "https://aka.ms/dotnet-core-applaunch?framework=Microsoft.NETCore.App&framework_version=10.0.0&arch=x64&rid=win-x64&os=win10";
-    private static readonly TimeSpan HostInstallReconnectTimeout = TimeSpan.FromSeconds(90);
 
     private sealed record HostInfoDto(string? DotnetVersion, string? GitVersion, string? GitVersionToolVersion);
 
@@ -145,9 +145,6 @@
     private bool _waitingForReconnect;
     private bool _isDesktopHost;
     private bool _desktopHostDetected;
-    private bool _isInstallingPrerequisites;
-    private string? _pendingInstallRequestId;
-    private DotNetObjectReference<Agent>? _desktopBridgeRef;
 
     protected override void OnInitialized()
     {
@@ -157,6 +154,17 @@
         var uninstallUrl = $"{baseUrl}/api/worker/uninstall";
         uninstallCommand = $"irm {uninstallUrl} | iex";
         SetDefaultTab();
+        HostPrerequisiteInstall.Changed += OnHostPrerequisiteInstallChanged;
+    }
+
+    private void OnHostPrerequisiteInstallChanged()
+    {
+        _ = InvokeAsync(async () =>
+        {
+            if (!HostPrerequisiteInstall.IsInstalling)
+                await LoadHostInfoAsync();
+            StateHasChanged();
+        });
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -317,133 +325,15 @@
 
     private async Task InstallAllHostPrerequisitesAsync()
     {
-        if (_isInstallingPrerequisites || hostInfo is null || !_isDesktopHost)
+        if (HostPrerequisiteInstall.IsInstalling || hostInfo is null || !_isDesktopHost)
             return;
 
         var missing = HostPrerequisiteState.GetMissingIds(CurrentHostVersions);
         if (missing.Count == 0)
             return;
 
-        _isInstallingPrerequisites = true;
-        StateHasChanged();
-
-        try
-        {
-            _desktopBridgeRef ??= DotNetObjectReference.Create(this);
-            var requestId = Guid.NewGuid().ToString("N");
-            _pendingInstallRequestId = requestId;
-
-            await JSRuntime.InvokeVoidAsync("graymoonDesktopBridge.registerPending", requestId, _desktopBridgeRef);
-            var posted = await JSRuntime.InvokeAsync<bool>(
-                "graymoonDesktopBridge.postCommand",
-                "InstallHostPrerequisites",
-                new { prerequisites = missing.ToArray() },
-                requestId);
-
-            if (!posted)
-            {
-                _isInstallingPrerequisites = false;
-                _pendingInstallRequestId = null;
-                ToastService.ShowError("GrayMoon Desktop bridge is not available.");
-                StateHasChanged();
-            }
-        }
-        catch (Exception)
-        {
-            _isInstallingPrerequisites = false;
-            _pendingInstallRequestId = null;
-            ToastService.ShowError("Could not start Host prerequisite installation.");
-            StateHasChanged();
-        }
+        await HostPrerequisiteInstall.StartAsync(missing);
     }
-
-    [JSInvokable]
-    public async Task OnNativeCommandResult(
-        string id,
-        bool success,
-        bool cancelled,
-        string? message,
-        string[]? failedPrerequisiteIds)
-    {
-        if (!string.Equals(id, _pendingInstallRequestId, StringComparison.Ordinal))
-            return;
-
-        _pendingInstallRequestId = null;
-
-        try
-        {
-            await JSRuntime.InvokeVoidAsync("graymoonDesktopBridge.unregisterPending", id);
-        }
-        catch
-        {
-            // Best effort cleanup.
-        }
-
-        if (cancelled)
-        {
-            _isInstallingPrerequisites = false;
-            ToastService.Show(string.IsNullOrWhiteSpace(message) ? "Installation cancelled." : message);
-            await InvokeAsync(StateHasChanged);
-            return;
-        }
-
-        try
-        {
-            await WaitForAgentReadyAfterInstallAsync(HostInstallReconnectTimeout);
-            await LoadHostInfoAsync();
-
-            if (hostInfo is not null && !HostPrerequisiteState.AnyMissing(CurrentHostVersions))
-            {
-                ToastService.Show("Host prerequisites installed.");
-            }
-            else if (success)
-            {
-                ToastService.Show(string.IsNullOrWhiteSpace(message) ? "Host prerequisites installed." : message);
-            }
-            else
-            {
-                var namedFailures = (failedPrerequisiteIds ?? [])
-                    .Select(DisplayPrerequisiteName)
-                    .Distinct(StringComparer.Ordinal)
-                    .ToArray();
-                var remaining = hostInfo is null
-                    ? namedFailures
-                    : HostPrerequisiteState.GetMissingIds(CurrentHostVersions).Select(DisplayPrerequisiteName).ToArray();
-                var detail = remaining.Length > 0
-                    ? $"Still missing: {string.Join(", ", remaining)}."
-                    : namedFailures.Length > 0
-                        ? $"Failed to install: {string.Join(", ", namedFailures)}."
-                        : (message ?? "Host prerequisite installation did not complete successfully.");
-                ToastService.ShowError(detail);
-            }
-        }
-        finally
-        {
-            _isInstallingPrerequisites = false;
-            await InvokeAsync(StateHasChanged);
-        }
-    }
-
-    private async Task WaitForAgentReadyAfterInstallAsync(TimeSpan timeout)
-    {
-        // Always reload afterward even if the Agent already restarted before this runs.
-        var deadline = DateTime.UtcNow + timeout;
-        while (DateTime.UtcNow < deadline)
-        {
-            if (AgentConnectionTracker.State == AgentConnectionState.Online && AgentBridge.IsAgentConnected)
-                return;
-
-            await Task.Delay(500);
-        }
-    }
-
-    private static string DisplayPrerequisiteName(string id) => id switch
-    {
-        HostPrerequisiteIds.DotnetSdk => ".NET SDK",
-        HostPrerequisiteIds.Git => "Git",
-        HostPrerequisiteIds.GitVersion => "GitVersion",
-        _ => id
-    };
 
     private async Task UpdateAgentNowAsync()
     {
@@ -506,21 +396,8 @@
         }
     }
 
-    public async ValueTask DisposeAsync()
+    public void Dispose()
     {
-        if (_desktopBridgeRef is not null)
-        {
-            try
-            {
-                await JSRuntime.InvokeVoidAsync("graymoonDesktopBridge.disposeAll", _desktopBridgeRef);
-            }
-            catch
-            {
-                // Circuit may already be gone.
-            }
-
-            _desktopBridgeRef.Dispose();
-            _desktopBridgeRef = null;
-        }
+        HostPrerequisiteInstall.Changed -= OnHostPrerequisiteInstallChanged;
     }
 }

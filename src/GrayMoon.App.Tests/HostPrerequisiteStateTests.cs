@@ -58,4 +58,14 @@ public sealed class HostPrerequisiteStateTests
             "dotnet tool install --global GitVersion.Tool --version 5.*",
             HostPrerequisiteState.CommandFor(HostPrerequisiteIds.GitVersion));
     }
+
+    [Theory]
+    [InlineData(HostPrerequisiteIds.DotnetSdk, ".NET SDK")]
+    [InlineData(HostPrerequisiteIds.Git, "Git")]
+    [InlineData(HostPrerequisiteIds.GitVersion, "GitVersion")]
+    [InlineData("unknown", "unknown")]
+    public void DisplayName_maps_known_ids_and_passes_through_unknown(string id, string expected)
+    {
+        Assert.Equal(expected, HostPrerequisiteState.DisplayName(id));
+    }
 }
