@@ -59,6 +59,7 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8,
         };
+        ApplyNonInteractiveGitEnvironment(startInfo, fileName);
 
         using var process = Process.Start(startInfo);
         if (process == null)
@@ -156,6 +157,7 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8,
         };
+        ApplyNonInteractiveGitEnvironment(startInfo, fileName);
 
         foreach (var argument in arguments)
         {
@@ -265,6 +267,16 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
             // Best-effort: the process may have exited between the check and the kill call, or the OS
             // may refuse the kill (already exiting) - either way there is nothing further to clean up.
         }
+    }
+
+    /// <summary>
+    /// Defense in depth for non-interactive Worker/App git: if authentication is missing, fail
+    /// immediately instead of hanging on a credential prompt that no one can answer.
+    /// </summary>
+    internal static void ApplyNonInteractiveGitEnvironment(ProcessStartInfo startInfo, string fileName)
+    {
+        if (string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase))
+            startInfo.Environment["GIT_TERMINAL_PROMPT"] = "0";
     }
 
     /// <summary>

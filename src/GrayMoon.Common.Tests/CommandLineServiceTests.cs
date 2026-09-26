@@ -23,6 +23,27 @@ public sealed class CommandLineServiceTests
     }
 
     [Fact]
+    public void ApplyNonInteractiveGitEnvironment_SetsGitTerminalPromptZero_ForGitExecutable()
+    {
+        var startInfo = new ProcessStartInfo { FileName = "git" };
+
+        CommandLineService.ApplyNonInteractiveGitEnvironment(startInfo, "git");
+
+        Assert.Equal("0", startInfo.Environment["GIT_TERMINAL_PROMPT"]);
+    }
+
+    [Fact]
+    public void ApplyNonInteractiveGitEnvironment_DoesNotSetGitTerminalPrompt_ForNonGitExecutable()
+    {
+        var startInfo = new ProcessStartInfo { FileName = "dotnet" };
+        startInfo.Environment.Remove("GIT_TERMINAL_PROMPT");
+
+        CommandLineService.ApplyNonInteractiveGitEnvironment(startInfo, "dotnet");
+
+        Assert.False(startInfo.Environment.ContainsKey("GIT_TERMINAL_PROMPT"));
+    }
+
+    [Fact]
     public async Task RunAsync_KillsProcessAndReturnsSyntheticFailure_WhenItExceedsTheTimeout()
     {
         var service = CreateService();
