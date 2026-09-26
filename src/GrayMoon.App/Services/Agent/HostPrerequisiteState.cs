@@ -59,4 +59,12 @@ public static class HostPrerequisiteState
         HostPrerequisiteIds.GitVersion => HostPrerequisiteInstallCommands.GitVersion,
         _ => throw new ArgumentOutOfRangeException(nameof(id), id, "Unknown Host prerequisite id.")
     };
+
+    public static string DisplayName(string id) => id switch
+    {
+        HostPrerequisiteIds.DotnetSdk => ".NET SDK",
+        HostPrerequisiteIds.Git => "Git",
+        HostPrerequisiteIds.GitVersion => "GitVersion",
+        _ => id
+    };
 }
