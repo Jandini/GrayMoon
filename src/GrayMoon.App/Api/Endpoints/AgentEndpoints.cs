@@ -4,8 +4,8 @@ namespace GrayMoon.App.Api.Endpoints;
 
 public static class AgentEndpoints
 {
-    public const string AgentArchiveLinux = "graymoon-agent-linux.zip";
-    public const string AgentArchiveWindows = "graymoon-agent-windows.zip";
+    public const string AgentArchiveLinux = "graymoon-worker-linux.zip";
+    public const string AgentArchiveWindows = "graymoon-worker-windows.zip";
 
     public static IEndpointRouteBuilder MapAgentEndpoints(this IEndpointRouteBuilder routes)
     {

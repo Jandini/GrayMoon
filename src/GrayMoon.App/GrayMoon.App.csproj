@@ -46,7 +46,7 @@
     <PropertyGroup>
       <AgentProj>$(MSBuildThisFileDirectory)..\GrayMoon.Agent\GrayMoon.Agent.csproj</AgentProj>
       <AgentPublishDir>$(IntermediateOutputPath)agent-publish</AgentPublishDir>
-      <AgentZipPath>$(PublishDir)agent\graymoon-agent-windows.zip</AgentZipPath>
+      <AgentZipPath>$(PublishDir)agent\graymoon-worker-windows.zip</AgentZipPath>
     </PropertyGroup>
     <Error Text="GrayMoon.Agent.csproj not found at $(AgentProj). GrayMoon.Desktop publishing requires the GrayMoon and GrayMoon.Desktop repositories checked out as sibling directories."
            Condition="!Exists('$(AgentProj)')" />

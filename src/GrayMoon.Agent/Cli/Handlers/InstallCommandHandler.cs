@@ -11,15 +11,15 @@ namespace GrayMoon.Agent.Cli;
 internal static class InstallCommandHandler
 {
     public const string ServiceName = "GrayMoonAgent";
-    private const string ServiceDisplayName = "GrayMoon Agent";
-    private const string ServiceDescription = "Host-side agent for GrayMoon: executes git and repository I/O operations";
+    private const string ServiceDisplayName = "GrayMoon Worker";
+    private const string ServiceDescription = "Host-side worker for GrayMoon: executes git and repository I/O operations";
 
     public static async Task<int> InstallAsync(ParseResult parseResult, CancellationToken cancellationToken, ICommandLineService commandLine)
     {
         var exePath = Environment.ProcessPath;
         if (string.IsNullOrEmpty(exePath) || !File.Exists(exePath))
         {
-            Console.Error.WriteLine("Could not determine agent executable path.");
+            Console.Error.WriteLine("Could not determine worker executable path.");
             return 1;
         }
 
@@ -229,7 +229,7 @@ internal static class InstallCommandHandler
         var unitPath = $"/etc/systemd/system/{ServiceName}.service";
         var unitContent = new StringBuilder();
         unitContent.AppendLine("[Unit]");
-        unitContent.AppendLine("Description=GrayMoon Agent");
+        unitContent.AppendLine("Description=GrayMoon Worker");
         unitContent.AppendLine("After=network.target");
         unitContent.AppendLine();
         unitContent.AppendLine("[Service]");

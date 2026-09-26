@@ -3,9 +3,9 @@ name: add-agent-command
 description: Step-by-step recipe for adding a new GrayMoon.Agent command (ICommandHandler) end-to-end, from request/response DTOs through hub registration.
 ---
 
-# Adding a new Agent command
+# Adding a new Worker command
 
-The Agent uses `System.CommandLine`. Each agent operation implements `ICommandHandler<TRequest, TResponse>` in `src/GrayMoon.Agent/Commands/`.
+The Worker uses `System.CommandLine`. Each worker operation implements `ICommandHandler<TRequest, TResponse>` in `src/GrayMoon.Agent/Commands/`.
 
 To add a new command:
 

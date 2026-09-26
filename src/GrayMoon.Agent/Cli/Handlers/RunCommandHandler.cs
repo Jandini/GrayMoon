@@ -40,7 +40,7 @@ internal static class RunCommandHandler
 
         var version = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0";
         Log.Information(
-            "GrayMoon Agent. Version: {Version}. AppHubUrl: {AppHubUrl}, ListenPort: {ListenPort}, MaxConcurrentCommands: {MaxConcurrentCommands}, MaxConcurrentReadCommands: {MaxConcurrentReadCommands}, MaxConcurrentDiffCommands: {MaxConcurrentDiffCommands}",
+            "GrayMoon Worker. Version: {Version}. AppHubUrl: {AppHubUrl}, ListenPort: {ListenPort}, MaxConcurrentCommands: {MaxConcurrentCommands}, MaxConcurrentReadCommands: {MaxConcurrentReadCommands}, MaxConcurrentDiffCommands: {MaxConcurrentDiffCommands}",
             version, options.AppHubUrl, options.ListenPort, options.MaxConcurrentCommands, options.MaxConcurrentReadCommands, options.MaxConcurrentDiffCommands);
 
         var builder = Host.CreateApplicationBuilder(args: Array.Empty<string>());
@@ -82,7 +82,7 @@ internal static class RunCommandHandler
 
         var logDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "GrayMoon", "logs");
         Directory.CreateDirectory(logDirectory);
-        var logFilePath = Path.Combine(logDirectory, "graymoon-agent-.log");
+        var logFilePath = Path.Combine(logDirectory, "graymoon-worker-.log");
 
         builder.Logging.ClearProviders();
         builder.Logging.AddSerilog(new LoggerConfiguration()

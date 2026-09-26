@@ -45,8 +45,8 @@ internal sealed class AgentDesktopNotificationPolicy
     internal static DesktopNotification UpdateRequired(string? agentSemVer) =>
         new(
             Guid.NewGuid().ToString(),
-            "GrayMoon Agent update required",
-            $"The GrayMoon Agent (version {agentSemVer ?? "unknown"}) is out of date. Click to update now.",
+            "GrayMoon Worker update required",
+            $"The GrayMoon Worker (version {agentSemVer ?? "unknown"}) is out of date. Click to update now.",
             DesktopNotificationSeverity.Warning,
             "/agent",
             DateTimeOffset.UtcNow);
@@ -54,8 +54,8 @@ internal sealed class AgentDesktopNotificationPolicy
     internal static DesktopNotification Installing() =>
         new(
             Guid.NewGuid().ToString(),
-            "GrayMoon Agent is installing",
-            "The GrayMoon Agent is updating and will reconnect when the install finishes.",
+            "GrayMoon Worker is installing",
+            "The GrayMoon Worker is updating and will reconnect when the install finishes.",
             DesktopNotificationSeverity.Info,
             "/agent",
             DateTimeOffset.UtcNow);
@@ -63,8 +63,8 @@ internal sealed class AgentDesktopNotificationPolicy
     internal static DesktopNotification Offline() =>
         new(
             Guid.NewGuid().ToString(),
-            "GrayMoon Agent is offline",
-            "The GrayMoon Agent disconnected. Git and filesystem operations are unavailable until it reconnects.",
+            "GrayMoon Worker is offline",
+            "The GrayMoon Worker disconnected. Git and filesystem operations are unavailable until it reconnects.",
             DesktopNotificationSeverity.Error,
             "/agent",
             DateTimeOffset.UtcNow);

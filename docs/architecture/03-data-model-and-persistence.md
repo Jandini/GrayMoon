@@ -348,7 +348,7 @@ The persisted `BranchName` is used to verify that cached workflow state belongs 
 
 One row per `WorkspaceRepositoryId`.
 
-Stores the latest Agent-reported snapshot metadata:
+Stores the latest Worker-reported snapshot metadata:
 
 ```text
 SnapshotVersion
@@ -388,7 +388,7 @@ The page reads these rows instead of invoking Git during rendering.
 
 `WorkspaceRepositoryStateWriter` is a central correctness mechanism.
 
-Agent operations do not always probe every category of repository state.
+Worker operations do not always probe every category of repository state.
 
 For example, one operation may know:
 

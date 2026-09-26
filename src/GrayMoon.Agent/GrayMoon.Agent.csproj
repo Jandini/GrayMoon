@@ -6,12 +6,12 @@
 		<Nullable>enable</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<RootNamespace>GrayMoon.Agent</RootNamespace>
-		<AssemblyName>graymoon-agent</AssemblyName>
+		<AssemblyName>graymoon-worker</AssemblyName>
 		<Authors>GrayMoon</Authors>
-		<Description>Host-side agent for GrayMoon: executes git and repository I/O operations.</Description>
+		<Description>Host-side worker for GrayMoon: executes git and repository I/O operations.</Description>
 		<PackageType>DotnetTool</PackageType>
 		<PackAsTool>true</PackAsTool>
-		<ToolCommandName>graymoon-agent</ToolCommandName>
+		<ToolCommandName>graymoon-worker</ToolCommandName>
 		<PublishSingleFile>false</PublishSingleFile>
 		<SelfContained>false</SelfContained>
 		<SatelliteResourceLanguages>en</SatelliteResourceLanguages>

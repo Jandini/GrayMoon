@@ -13,28 +13,28 @@ internal static class AgentCli
     /// </summary>
     public static RootCommand Build()
     {
-        var root = new RootCommand("GrayMoon Agent: host-side worker for git and repository operations.");
+        var root = new RootCommand("GrayMoon Worker: host-side worker for git and repository operations.");
 
-        var runCommand = new Command("run", "Run the agent (default). Uses appsettings with optional CLI overrides.");
+        var runCommand = new Command("run", "Run the worker (default). Uses appsettings with optional CLI overrides.");
         AgentCliOptions.AddTo(runCommand);
         runCommand.SetAction(RunAsync);
         root.Subcommands.Add(runCommand);
 
-        var installCommand = new Command("install", "Install the agent as a Windows service or systemd unit.");
+        var installCommand = new Command("install", "Install the worker as a Windows service or systemd unit.");
         AgentCliOptions.AddTo(installCommand);
         installCommand.Options.Add(AgentCliOptions.Account);
         installCommand.SetAction(InstallAsync);
         root.Subcommands.Add(installCommand);
 
-        var uninstallCommand = new Command("uninstall", "Remove the agent Windows service or systemd unit.");
+        var uninstallCommand = new Command("uninstall", "Remove the worker Windows service or systemd unit.");
         uninstallCommand.SetAction(UninstallAsync);
         root.Subcommands.Add(uninstallCommand);
 
-        var stopCommand = new Command("stop", "Stop the GrayMoon Agent Windows service.");
+        var stopCommand = new Command("stop", "Stop the GrayMoon Worker Windows service.");
         stopCommand.SetAction((_, ct) => StopCommandHandler.StopAsync(ct));
         root.Subcommands.Add(stopCommand);
 
-        var startCommand = new Command("start", "Start the GrayMoon Agent Windows service.");
+        var startCommand = new Command("start", "Start the GrayMoon Worker Windows service.");
         startCommand.SetAction((_, ct) => StartCommandHandler.StartAsync(ct));
         root.Subcommands.Add(startCommand);
 

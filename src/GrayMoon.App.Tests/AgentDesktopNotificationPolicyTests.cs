@@ -21,7 +21,7 @@ public sealed class AgentDesktopNotificationPolicyTests
         var notification = policy.OnChange(AgentConnectionState.VersionMismatch, selfUpdateInProgress: false, "1.0.0");
 
         Assert.NotNull(notification);
-        Assert.Equal("GrayMoon Agent update required", notification.Title);
+        Assert.Equal("GrayMoon Worker update required", notification.Title);
         Assert.Equal(DesktopNotificationSeverity.Warning, notification.Severity);
         Assert.Equal("/agent", notification.NavigationPath);
         Assert.Contains("1.0.0", notification.Message);
@@ -46,7 +46,7 @@ public sealed class AgentDesktopNotificationPolicyTests
         var notification = policy.OnChange(AgentConnectionState.Offline, selfUpdateInProgress: true, "1.0.0");
 
         Assert.NotNull(notification);
-        Assert.Equal("GrayMoon Agent is installing", notification.Title);
+        Assert.Equal("GrayMoon Worker is installing", notification.Title);
         Assert.Equal(DesktopNotificationSeverity.Info, notification.Severity);
         Assert.Equal("/agent", notification.NavigationPath);
 
@@ -63,7 +63,7 @@ public sealed class AgentDesktopNotificationPolicyTests
         var notification = policy.OnChange(AgentConnectionState.Offline, selfUpdateInProgress: false, "1.0.0");
 
         Assert.NotNull(notification);
-        Assert.Equal("GrayMoon Agent is offline", notification.Title);
+        Assert.Equal("GrayMoon Worker is offline", notification.Title);
         Assert.Equal(DesktopNotificationSeverity.Error, notification.Severity);
         Assert.Equal("/agent", notification.NavigationPath);
     }
@@ -79,7 +79,7 @@ public sealed class AgentDesktopNotificationPolicyTests
         var notification = policy.OnChange(AgentConnectionState.Offline, selfUpdateInProgress: false, "1.0.0");
 
         Assert.NotNull(notification);
-        Assert.Equal("GrayMoon Agent is offline", notification.Title);
+        Assert.Equal("GrayMoon Worker is offline", notification.Title);
         Assert.Equal(DesktopNotificationSeverity.Error, notification.Severity);
     }
 
@@ -95,7 +95,7 @@ public sealed class AgentDesktopNotificationPolicyTests
         var notification = policy.OnChange(AgentConnectionState.Offline, selfUpdateInProgress: false, "2.0.0");
 
         Assert.NotNull(notification);
-        Assert.Equal("GrayMoon Agent is offline", notification.Title);
+        Assert.Equal("GrayMoon Worker is offline", notification.Title);
         Assert.Equal(DesktopNotificationSeverity.Error, notification.Severity);
     }
 }

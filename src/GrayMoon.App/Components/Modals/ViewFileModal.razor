@@ -124,7 +124,7 @@
         {
             if (!AgentBridge.IsAgentConnected)
             {
-                _errorMessage = "Agent is not connected.";
+                _errorMessage = "Worker is not connected.";
                 _isLoading = false;
                 await InvokeAsync(StateHasChanged);
                 return;
