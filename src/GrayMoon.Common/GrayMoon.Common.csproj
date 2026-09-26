@@ -14,4 +14,8 @@
     <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.*" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="GrayMoon.Common.Tests" />
+  </ItemGroup>
+
 </Project>

@@ -774,7 +774,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return (true, null);
     }
 
-    public async Task<(bool Success, string? ErrorMessage)> DeleteBranchAsync(string repoPath, string branchName, bool isRemote, bool force, CancellationToken ct, bool skipHooks = false)
+    public async Task<(bool Success, string? ErrorMessage)> DeleteBranchAsync(string repoPath, string branchName, bool isRemote, bool force, CancellationToken ct, bool skipHooks = false, string? bearerToken = null)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
             return (false, "Invalid repository path or branch name");
@@ -787,8 +787,11 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             if (string.IsNullOrWhiteSpace(name))
                 return (false, "Invalid branch name");
             var hooksPrefix = GetHooksConfigPrefix(skipHooks);
+            var args = string.IsNullOrWhiteSpace(bearerToken)
+                ? $"{hooksPrefix}push origin --delete {name}"
+                : $"{BuildAuthHeaderArgs(bearerToken)} {hooksPrefix}push origin --delete {name}";
             var (exitCode, stdout, stderr) = await runner.PushPipeline.ExecuteAsync(
-                async cancellationToken => await runner.RunAsync("git", $"{hooksPrefix}push origin --delete {name}", repoPath, cancellationToken),
+                async cancellationToken => await runner.RunAsync("git", args, repoPath, cancellationToken),
                 ct);
             if (exitCode != 0)
             {
@@ -1186,6 +1189,14 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
     }
 
+    // TODO: Harden and centralize GrayMoon Git remote authentication.
+    // Audit all remote Git operations (clone, fetch, pull, push, remote delete, ls-remote, and future
+    // remote operations) and ensure connector authentication is applied consistently from one
+    // well-defined layer. Review non-interactive credential behavior, authentication-error
+    // classification, safe logging/redaction, and fresh-machine behavior for private repositories.
+    // Reduce the possibility that an individual caller can accidentally omit authentication.
+    // This is intentionally deferred so the immediate private-repository fix remains minimal and
+    // easy to transfer between branches.
     private static string BuildAuthHeaderArgs(string bearerToken)
     {
         var credentials = "x-access-token:" + bearerToken;
