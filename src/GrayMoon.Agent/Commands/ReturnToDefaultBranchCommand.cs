@@ -42,7 +42,7 @@ public sealed class ReturnToDefaultBranchCommand(IGitService git, IRepositorySta
         // deleted branch, landing after this command's own authoritative snapshot and overwriting it.
         if (request.DeleteRemoteBranch && !string.Equals(currentBranchName, defaultBranch, StringComparison.OrdinalIgnoreCase))
         {
-            var (remoteDeleteOk, remoteDeleteErr) = await git.DeleteBranchAsync(repoPath, currentBranchName, isRemote: true, force: false, cancellationToken, skipHooks: true);
+            var (remoteDeleteOk, remoteDeleteErr) = await git.DeleteBranchAsync(repoPath, currentBranchName, isRemote: true, force: false, cancellationToken, skipHooks: true, bearerToken: request.BearerToken);
             if (!remoteDeleteOk)
                 logger.LogWarning("Remote branch delete failed for {Branch} in {RepoPath}: {Error}", currentBranchName, repoPath, remoteDeleteErr);
         }
