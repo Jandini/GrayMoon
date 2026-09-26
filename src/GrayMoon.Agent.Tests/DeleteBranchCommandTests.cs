@@ -2,6 +2,7 @@ using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Commands;
 using GrayMoon.Agent.Jobs.Requests;
 using GrayMoon.Agent.Models;
+using GrayMoon.Common.Git;
 
 namespace GrayMoon.Agent.Tests;
 
@@ -55,9 +56,11 @@ public sealed class DeleteBranchCommandTests
         public Task AddSafeDirectoryAsync(string repoPath, CancellationToken ct) => throw new NotImplementedException();
         public Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, CancellationToken ct) => throw new NotImplementedException();
         public Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, bool nonNormalize, CancellationToken ct) => throw new NotImplementedException();
+        public Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, bool nonNormalize, string? commitSha, CancellationToken ct) => throw new NotImplementedException();
         public Task<string?> GetCurrentBranchNameAsync(string repoPath, CancellationToken ct) => throw new NotImplementedException();
         public Task<string?> GetDefaultBranchNameAsync(string repoPath, CancellationToken ct) => throw new NotImplementedException();
         public Task<string?> GetHeadCommitAsync(string repoPath, CancellationToken ct) => throw new NotImplementedException();
+        public Task<string?> RevParseAsync(string repoPath, string rev, CancellationToken ct) => throw new NotImplementedException();
         public Task<string?> GetRemoteOriginUrlAsync(string repoPath, CancellationToken ct) => throw new NotImplementedException();
         public Task<(bool Success, string? ErrorMessage)> FetchAsync(string repoPath, bool includeTags, string? bearerToken, CancellationToken ct) => throw new NotImplementedException();
         public Task<(bool Success, string? ErrorMessage)> FetchMinimalAsync(string repoPath, string branchName, string? defaultBranchOriginRef, string? bearerToken, CancellationToken ct, bool skipUpstreamCheck = false) => throw new NotImplementedException();
@@ -82,6 +85,9 @@ public sealed class DeleteBranchCommandTests
         public Task<(bool Success, string? ErrorMessage)> ResetToRemoteAsync(string repoPath, string branchName, bool keepChanges, string? bearerToken, CancellationToken ct) => throw new NotImplementedException();
         public void CreateDirectory(string path) => throw new NotImplementedException();
         public string[] GetDirectories(string path) => throw new NotImplementedException();
-        public void WriteSyncHooks(string repoPath, int workspaceId, int repositoryId) => throw new NotImplementedException();
+        public Task WriteSyncHooksAsync(string repoPath, int workspaceId, int repositoryId, CancellationToken ct) => throw new NotImplementedException();
+        public Task<(bool Success, IReadOnlyList<GitWorktreeInfo> Worktrees, string? ErrorCode, string? ErrorMessage)> ListWorktreesAsync(string mainRepositoryPath, CancellationToken ct) => throw new NotImplementedException();
+        public Task<(bool Success, GitWorktreeInfo? Worktree, bool AlreadyExisted, string? ErrorCode, string? ErrorMessage)> CreateWorktreeAsync(string mainRepositoryPath, string worktreePath, string branchName, string baseCommitSha, CancellationToken ct) => throw new NotImplementedException();
+        public Task<(bool Success, bool AlreadyRemoved, string? ErrorCode, string? ErrorMessage)> RemoveWorktreeAsync(string mainRepositoryPath, string worktreePath, bool force, CancellationToken ct) => throw new NotImplementedException();
     }
 }
