@@ -30,13 +30,13 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="Resources\install-agent.ps1" />
-    <EmbeddedResource Include="Resources\uninstall-agent.ps1" />
+    <EmbeddedResource Include="Resources\install-worker.ps1" />
+    <EmbeddedResource Include="Resources\uninstall-worker.ps1" />
   </ItemGroup>
 
   <!--
     Publishes GrayMoon.Agent for Windows and packages it as a zip alongside GrayMoon.App's
-    publish output, so the desktop bundle's /api/agent/download endpoint always has something
+    publish output, so the desktop bundle's /api/worker/download endpoint always has something
     to serve. Runs automatically after `dotnet publish` (Visual Studio Publish, CI, or the
     GrayMoon.Desktop bundle script) - never on plain Build, so everyday F5/Ctrl+Shift+B stays fast.
     Windows-only (uses Compress-Archive); the Dockerfile's own build-agent stage still produces
@@ -46,7 +46,7 @@
     <PropertyGroup>
       <AgentProj>$(MSBuildThisFileDirectory)..\GrayMoon.Agent\GrayMoon.Agent.csproj</AgentProj>
       <AgentPublishDir>$(IntermediateOutputPath)agent-publish</AgentPublishDir>
-      <AgentZipPath>$(PublishDir)agent\graymoon-agent-windows.zip</AgentZipPath>
+      <AgentZipPath>$(PublishDir)agent\graymoon-worker-windows.zip</AgentZipPath>
     </PropertyGroup>
     <Error Text="GrayMoon.Agent.csproj not found at $(AgentProj). GrayMoon.Desktop publishing requires the GrayMoon and GrayMoon.Desktop repositories checked out as sibling directories."
            Condition="!Exists('$(AgentProj)')" />

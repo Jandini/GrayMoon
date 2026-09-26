@@ -6,7 +6,7 @@ internal static class AgentCliOptions
 {
     public static readonly Option<string?> HubUrl = new("--hub-url", "-u")
     {
-        Description = "SignalR hub URL the agent connects to",
+        Description = "SignalR hub URL the worker connects to",
         Arity = ArgumentArity.ZeroOrOne
     };
 

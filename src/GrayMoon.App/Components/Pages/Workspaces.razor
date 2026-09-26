@@ -372,7 +372,7 @@
 
         if (!AgentBridge.IsAgentConnected)
         {
-            editorErrorMessage = "Agent is not available. Please start the GrayMoon Agent to add workspaces.";
+            editorErrorMessage = "Worker is not available. Please start the GrayMoon Worker to add workspaces.";
         }
         else
         {
@@ -459,7 +459,7 @@
 
         if (editingWorkspaceId == null && !AgentBridge.IsAgentConnected)
         {
-            editorErrorMessage = "Agent is not available. Please start the GrayMoon Agent to add workspaces.";
+            editorErrorMessage = "Worker is not available. Please start the GrayMoon Worker to add workspaces.";
             return;
         }
 

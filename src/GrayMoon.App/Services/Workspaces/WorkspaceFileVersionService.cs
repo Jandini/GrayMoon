@@ -58,7 +58,7 @@ public sealed class WorkspaceFileVersionService(
     {
         var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null) return (0, 0, "Workspace not found.", []);
-        if (!agentBridge.IsAgentConnected) return (0, 0, "Agent is not connected.", []);
+        if (!agentBridge.IsAgentConnected) return (0, 0, "Worker is not connected.", []);
 
         var configs = await versionConfigRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
         if (configs.Count == 0) return (0, 0, "No version configurations found. Use Configure on a file first.", []);
@@ -309,7 +309,7 @@ public sealed class WorkspaceFileVersionService(
         }
         else if (commitRepos.Count > 0)
         {
-            logger.LogWarning("Agent is not connected; skipping {Count} :commit token(s).", commitRepos.Count);
+            logger.LogWarning("Worker is not connected; skipping {Count} :commit token(s).", commitRepos.Count);
         }
 
         return tokenValues;

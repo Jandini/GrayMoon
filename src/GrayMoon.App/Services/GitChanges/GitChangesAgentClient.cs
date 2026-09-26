@@ -63,7 +63,7 @@ public sealed class GitChangesAgentClient(IAgentBridge agentBridge) : IGitChange
         var args = new { workspaceRoot, workspaceName, repositoryName, workspaceId, repositoryId, includeLineStats };
         var response = await agentBridge.SendCommandAsync("GetGitChangeStatus", args, cancellationToken);
         return AgentResponseJson.DeserializeAgentResponse<GitChangesStatusResult>(response.Data)
-            ?? new GitChangesStatusResult { Success = false, ErrorMessage = response.Error ?? "No response from agent." };
+            ?? new GitChangesStatusResult { Success = false, ErrorMessage = response.Error ?? "No response from worker." };
     }
 
     public async Task<GitChangesDiffResult> GetDiffAsync(
@@ -73,7 +73,7 @@ public sealed class GitChangesAgentClient(IAgentBridge agentBridge) : IGitChange
         var args = new { workspaceRoot, workspaceName, repositoryName, path, comparison = (int)comparison };
         var response = await agentBridge.SendCommandAsync("GetGitFileDiff", args, cancellationToken);
         return AgentResponseJson.DeserializeAgentResponse<GitChangesDiffResult>(response.Data)
-            ?? new GitChangesDiffResult { Success = false, ErrorMessage = response.Error ?? "No response from agent." };
+            ?? new GitChangesDiffResult { Success = false, ErrorMessage = response.Error ?? "No response from worker." };
     }
 
     public async Task<GitChangesMutationResult> StageAsync(
@@ -83,7 +83,7 @@ public sealed class GitChangesAgentClient(IAgentBridge agentBridge) : IGitChange
         var args = new { workspaceRoot, workspaceName, repositoryName, scope = (int)scope, paths };
         var response = await agentBridge.SendCommandAsync("StageGitChanges", args, cancellationToken);
         return AgentResponseJson.DeserializeAgentResponse<GitChangesMutationResult>(response.Data)
-            ?? new GitChangesMutationResult { Success = false, ErrorMessage = response.Error ?? "No response from agent." };
+            ?? new GitChangesMutationResult { Success = false, ErrorMessage = response.Error ?? "No response from worker." };
     }
 
     public async Task<GitChangesMutationResult> UnstageAsync(
@@ -93,7 +93,7 @@ public sealed class GitChangesAgentClient(IAgentBridge agentBridge) : IGitChange
         var args = new { workspaceRoot, workspaceName, repositoryName, scope = (int)scope, paths };
         var response = await agentBridge.SendCommandAsync("UnstageGitChanges", args, cancellationToken);
         return AgentResponseJson.DeserializeAgentResponse<GitChangesMutationResult>(response.Data)
-            ?? new GitChangesMutationResult { Success = false, ErrorMessage = response.Error ?? "No response from agent." };
+            ?? new GitChangesMutationResult { Success = false, ErrorMessage = response.Error ?? "No response from worker." };
     }
 
     public async Task<GitChangesMutationResult> DiscardAsync(
@@ -103,7 +103,7 @@ public sealed class GitChangesAgentClient(IAgentBridge agentBridge) : IGitChange
         var args = new { workspaceRoot, workspaceName, repositoryName, scope = (int)scope, paths };
         var response = await agentBridge.SendCommandAsync("DiscardGitChanges", args, cancellationToken);
         return AgentResponseJson.DeserializeAgentResponse<GitChangesMutationResult>(response.Data)
-            ?? new GitChangesMutationResult { Success = false, ErrorMessage = response.Error ?? "No response from agent." };
+            ?? new GitChangesMutationResult { Success = false, ErrorMessage = response.Error ?? "No response from worker." };
     }
 
     public async Task<GitChangesCommitResult> CommitAsync(
@@ -113,6 +113,6 @@ public sealed class GitChangesAgentClient(IAgentBridge agentBridge) : IGitChange
         var args = new { workspaceRoot, workspaceName, repositoryName, commitMessage, stageAllFirst };
         var response = await agentBridge.SendCommandAsync("CommitGitChanges", args, cancellationToken);
         return AgentResponseJson.DeserializeAgentResponse<GitChangesCommitResult>(response.Data)
-            ?? new GitChangesCommitResult { Success = false, ErrorMessage = response.Error ?? "No response from agent." };
+            ?? new GitChangesCommitResult { Success = false, ErrorMessage = response.Error ?? "No response from worker." };
     }
 }

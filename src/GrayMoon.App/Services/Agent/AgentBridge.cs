@@ -37,7 +37,7 @@ public sealed class AgentBridge(
     {
         var connectionId = connectionTracker.GetAgentConnectionId();
         if (string.IsNullOrEmpty(connectionId))
-            return new AgentCommandResponse(false, null, "Agent not connected. Start GrayMoon.Agent to sync repositories.");
+            return new AgentCommandResponse(false, null, "Worker not connected. Start the GrayMoon Worker to sync repositories.");
 
         var isSelfUpdate = command == AgentHubMethods.SelfUpdate;
         if (isSelfUpdate)
@@ -74,7 +74,7 @@ public sealed class AgentBridge(
                 command, requestId, _commandTimeout.TotalSeconds);
             if (isSelfUpdate)
                 EndSelfUpdateIfStillConnected();
-            return new AgentCommandResponse(false, null, $"Agent command timed out after {_commandTimeout.TotalSeconds:0}s.");
+            return new AgentCommandResponse(false, null, $"Worker command timed out after {_commandTimeout.TotalSeconds:0}s.");
         }
         catch (OperationCanceledException)
         {

@@ -93,7 +93,7 @@ public sealed class WorkspacePushService(
             runId, workspaceId, repoIdsToPush == null ? "all repos" : $"{repoIdsToPush.Count} repo(s): [{string.Join(",", repoIdsToPush)}]");
 
         if (!_agentBridge.IsAgentConnected)
-            throw new InvalidOperationException("Agent not connected. Start GrayMoon.Agent to push.");
+            throw new InvalidOperationException("Worker not connected. Start the GrayMoon Worker to push.");
 
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)
@@ -413,7 +413,7 @@ public sealed class WorkspacePushService(
         CancellationToken cancellationToken = default)
     {
         if (!_agentBridge.IsAgentConnected)
-            return (false, "Agent not connected. Start GrayMoon.Agent to push.");
+            return (false, "Worker not connected. Start the GrayMoon Worker to push.");
 
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)
@@ -476,7 +476,7 @@ public sealed class WorkspacePushService(
         CancellationToken cancellationToken = default)
     {
         if (!_agentBridge.IsAgentConnected)
-            throw new InvalidOperationException("Agent not connected. Start GrayMoon.Agent to push.");
+            throw new InvalidOperationException("Worker not connected. Start the GrayMoon Worker to push.");
 
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)
@@ -542,7 +542,7 @@ public sealed class WorkspacePushService(
         CancellationToken cancellationToken = default)
     {
         if (!_agentBridge.IsAgentConnected)
-            throw new InvalidOperationException("Agent not connected. Start GrayMoon.Agent to push.");
+            throw new InvalidOperationException("Worker not connected. Start the GrayMoon Worker to push.");
 
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)

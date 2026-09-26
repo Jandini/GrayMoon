@@ -176,7 +176,7 @@ public sealed class WorkspaceService(IAgentBridge agentBridge, ILogger<Workspace
     {
         var response = await agentBridge.SendCommandAsync("ValidatePath", new { path }, cancellationToken);
         if (!response.Success)
-            return (false, response.Error ?? "Agent did not respond.");
+            return (false, response.Error ?? "Worker did not respond.");
 
         var data = AgentResponseJson.DeserializeAgentResponse<ValidatePathAgentResponse>(response.Data);
         return (data?.IsValid ?? false, data?.ErrorMessage);

@@ -22,7 +22,7 @@
                 @foreach (var line in _terminalLines)
                 {
                     <p class="loading-overlay-terminal__line loading-overlay-terminal__line--@KindCss(line.Kind)">
-                        <span class="loading-overlay-terminal__prefix">[@(string.IsNullOrWhiteSpace(line.StreamLabel) ? "agent" : line.StreamLabel)]</span><span class="loading-overlay-terminal__text">@line.Text</span>
+                        <span class="loading-overlay-terminal__prefix">[@(string.IsNullOrWhiteSpace(line.StreamLabel) ? "worker" : line.StreamLabel)]</span><span class="loading-overlay-terminal__text">@line.Text</span>
                     </p>
                 }
             </div>

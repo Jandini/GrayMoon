@@ -56,7 +56,7 @@ public sealed class WorkspaceUndoPushHandler(
                 var response = await agentBridge.SendCommandAsync("UndoPush", args, ct);
                 if (!response.Success || response.Data == null)
                 {
-                    var errMsg = response.Error ?? "Agent command failed";
+                    var errMsg = response.Error ?? "Worker command failed";
                     logger.LogError("UndoPush failed for repo {RepositoryId}: {Error}", wr.RepositoryId, errMsg);
                     return (wr.RepositoryId, false, errMsg);
                 }

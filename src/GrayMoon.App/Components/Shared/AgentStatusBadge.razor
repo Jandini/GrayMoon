@@ -44,12 +44,12 @@ else
     {
         AgentConnectionTracker.BeginSelfUpdate();
         StateHasChanged();
-        var installUrl = NavigationManager.BaseUri.TrimEnd('/') + "/api/agent/install";
+        var installUrl = NavigationManager.BaseUri.TrimEnd('/') + "/api/worker/install";
         var response = await AgentBridge.SendCommandAsync(AgentHubMethods.SelfUpdate, new { installUrl }, CancellationToken.None);
         if (!response.Success)
         {
             StateHasChanged();
-            ToastService.ShowError("Agent update failed.");
+            ToastService.ShowError("Worker update failed.");
             NavigationManager.NavigateTo("/agent");
         }
     }
@@ -85,14 +85,14 @@ else
         };
 
     private string TitleText => IsUpdating
-        ? "Agent is installing an update."
+        ? "Worker is installing an update."
         : State switch
         {
-            AgentConnectionState.VersionMismatch => $"Agent version mismatch. Agent version: {AgentSemVer ?? "unknown"}. Click to update.",
-            AgentConnectionState.Online => AgentQueueStateService.GetTotalPendingCount() > 0 ? "Agent is running tasks" : "Agent connection status: online",
-            AgentConnectionState.Offline => "Agent connection status: offline",
-            AgentConnectionState.Connecting => "Agent connection status: connecting",
-            _ => "Agent connection status: unknown"
+            AgentConnectionState.VersionMismatch => $"Worker version mismatch. Worker version: {AgentSemVer ?? "unknown"}. Click to update.",
+            AgentConnectionState.Online => AgentQueueStateService.GetTotalPendingCount() > 0 ? "Worker is running tasks" : "Worker connection status:  online",
+            AgentConnectionState.Offline => "Worker connection status:  offline",
+            AgentConnectionState.Connecting => "Worker connection status:  connecting",
+            _ => "Worker connection status:  unknown"
         };
 
     public void Dispose() => AgentQueueStateService.RemoveQueueStateChanged(OnQueueStateChanged);

@@ -75,7 +75,7 @@ public sealed partial class WorkspaceGitChanges
     {
         if (!AgentBridge.IsAgentConnected)
         {
-            ToastService.ShowError("Agent not connected. Start GrayMoon.Agent and try again.");
+            ToastService.ShowError("Worker not connected. Start the GrayMoon Worker and try again.");
             return;
         }
 
@@ -188,7 +188,7 @@ public sealed partial class WorkspaceGitChanges
     {
         if (!AgentBridge.IsAgentConnected)
         {
-            ToastService.ShowError("Agent not connected. Start GrayMoon.Agent and try again.");
+            ToastService.ShowError("Worker not connected. Start the GrayMoon Worker and try again.");
             return Task.CompletedTask;
         }
 
@@ -227,7 +227,7 @@ public sealed partial class WorkspaceGitChanges
     {
         if (!AgentBridge.IsAgentConnected)
         {
-            ToastService.ShowError("Agent not connected. Start GrayMoon.Agent and try again.");
+            ToastService.ShowError("Worker not connected. Start the GrayMoon Worker and try again.");
             return;
         }
 
@@ -310,7 +310,7 @@ public sealed partial class WorkspaceGitChanges
     {
         if (!AgentBridge.IsAgentConnected)
         {
-            ToastService.ShowError("Agent not connected. Start GrayMoon.Agent and try again.");
+            ToastService.ShowError("Worker not connected. Start the GrayMoon Worker and try again.");
             return;
         }
 

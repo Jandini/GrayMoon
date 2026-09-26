@@ -189,7 +189,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     {
         if (!AgentBridge.IsAgentConnected)
         {
-            ToastService.ShowError("Agent not connected. Start GrayMoon.Agent and try again.");
+            ToastService.ShowError("Worker not connected. Start the GrayMoon Worker and try again.");
             return;
         }
 
@@ -219,8 +219,8 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
                 .FirstOrDefault();
 
             return latest is { } value
-                ? $"Agent is offline, showing state from {value.ToLocalTime():HH:mm}"
-                : "Agent is offline";
+                ? $"Worker is offline, showing state from {value.ToLocalTime():HH:mm}"
+                : "Worker is offline";
         }
     }
 
@@ -564,7 +564,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     {
         if (!AgentBridge.IsAgentConnected)
         {
-            ToastService.ShowError("Agent not connected. Start GrayMoon.Agent and try again.");
+            ToastService.ShowError("Worker not connected. Start the GrayMoon Worker and try again.");
             return Task.CompletedTask;
         }
 
@@ -604,7 +604,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     {
         if (!AgentBridge.IsAgentConnected)
         {
-            ToastService.ShowError("Agent not connected. Start GrayMoon.Agent and try again.");
+            ToastService.ShowError("Worker not connected. Start the GrayMoon Worker and try again.");
             return;
         }
 
