@@ -69,7 +69,7 @@ public sealed class WorkspaceFileOperations(
             return (false, true, null, null);
 
         if (!agentBridge.IsAgentConnected)
-            return (true, false, null, "Agent not connected. Start GrayMoon.Agent to search files.");
+            return (true, false, null, "Worker not connected. Start the GrayMoon Worker to search files.");
 
         var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
         var searchPattern = string.IsNullOrWhiteSpace(pattern) ? "*" : pattern.Trim();

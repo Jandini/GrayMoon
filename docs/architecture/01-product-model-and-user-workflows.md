@@ -129,7 +129,7 @@ At the global level GrayMoon provides areas such as:
 ```text
 Workspaces
 Connectors
-Agent
+Worker
 Settings
 ```
 
@@ -223,16 +223,16 @@ A Workspace has a name and a root path.
 
 Repositories are selected from configured connectors.
 
-GrayMoon supports existing local repository layouts as well as repository creation/cloning through the Agent.
+GrayMoon supports existing local repository layouts as well as repository creation/cloning through the Worker.
 
-The App stores the Workspace configuration; the Agent inspects and modifies the local filesystem.
+The App stores the Workspace configuration; the Worker inspects and modifies the local filesystem.
 
 Important behavior:
 
 - Workspace root is per Workspace.
 - The global root setting acts as a default, not as the permanent source of truth for every Workspace.
 - Repository membership is explicit.
-- Save/import flows may take time because the Agent validates local repositories and obtains Git state.
+- Save/import flows may take time because the Worker validates local repositories and obtains Git state.
 
 ---
 
@@ -324,7 +324,7 @@ It is designed to turn a many-repository branch preparation into one intentional
 
 ## 8. Dependency discovery and graph
 
-GrayMoon discovers `.csproj` projects and package references through the Agent.
+GrayMoon discovers `.csproj` projects and package references through the Worker.
 
 For each project it can persist:
 
@@ -472,7 +472,7 @@ Version patterns reference Workspace repositories through tokens.
 
 GrayMoon can validate a file against the expected repository versions and update the file when needed.
 
-The file system remains Agent-owned.
+The file system remains Worker-owned.
 
 Configured-file references also contribute dependency relationships to the Workspace graph.
 
@@ -590,7 +590,7 @@ keyboard shortcuts
 
 The page reads a persisted SQLite projection.
 
-The Agent owns Git status scanning, diff generation, mutations, and filesystem watchers.
+The Worker owns Git status scanning, diff generation, mutations, and filesystem watchers.
 
 ---
 
@@ -607,9 +607,9 @@ post-merge
 pre-push
 ```
 
-The hook calls the local Agent HTTP listener.
+The hook calls the local Worker HTTP listener.
 
-The Agent gathers the required repository state and sends a synchronization notification back to the App.
+The Worker gathers the required repository state and sends a synchronization notification back to the App.
 
 This is how an IDE or command-line Git operation can update GrayMoon without the user pressing Refresh.
 

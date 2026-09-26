@@ -6,7 +6,7 @@ namespace GrayMoon.Abstractions.Exceptions;
 public sealed class AgentNotConnectedException : Exception
 {
     public AgentNotConnectedException()
-        : base("The GrayMoon Agent is not connected. Start the Agent and try again.")
+        : base("The GrayMoon Worker is not connected. Start the Worker and try again.")
     {
     }
 

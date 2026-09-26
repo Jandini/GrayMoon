@@ -55,7 +55,7 @@ public sealed class WorkspaceCommitSyncHandler(
 
         if (!agentBridge.IsAgentConnected)
         {
-            setPageError("Agent not connected. Start GrayMoon.Agent to sync repositories.");
+            setPageError("Worker not connected. Start the GrayMoon Worker to sync repositories.");
             return;
         }
 
@@ -123,7 +123,7 @@ public sealed class WorkspaceCommitSyncHandler(
 
         if (!agentBridge.IsAgentConnected)
         {
-            setPageError("Agent not connected. Start GrayMoon.Agent to sync repositories.");
+            setPageError("Worker not connected. Start the GrayMoon Worker to sync repositories.");
             return;
         }
 
@@ -194,7 +194,7 @@ public sealed class WorkspaceCommitSyncHandler(
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 logger.LogError(ex, "Error syncing commits for repository {RepositoryId}", repositoryId);
-                setRepositoryError(repositoryId, "Commit sync failed. The GrayMoon Agent may be offline.");
+                setRepositoryError(repositoryId, "Commit sync failed. The GrayMoon Worker may be offline.");
             }
             finally
             {

@@ -31,7 +31,7 @@ Read these documents in order:
    SQLite ownership, Workspace repository state, projects/dependencies, PR/Actions/Git Changes persistence, file configuration, and migration conventions.
 
 4. [04 - Runtime Communication and Concurrency](04-runtime-communication-and-concurrency.md)  
-   App-Agent SignalR, hook-driven synchronization, Git Changes watchers, background jobs, browser broadcasts, locking, polling, and cancellation.
+   App-Worker SignalR, hook-driven synchronization, Git Changes watchers, background jobs, browser broadcasts, locking, polling, and cancellation.
 
 5. [05 - User Capability Reference](05-user-capability-reference.md)  
    A page-by-page and operation-by-operation reference of current user functionality and the code paths behind it.
@@ -44,7 +44,7 @@ Read these documents in order:
 
 ## GrayMoon in one paragraph
 
-GrayMoon is a control plane for multi-repository .NET development. A Workspace groups related Git repositories, discovers their projects and package relationships, calculates dependency levels, coordinates branch and Git operations across them, updates package and configured-file versions, restores and pushes in dependency order, tracks pull requests and GitHub Actions, and provides a multi-repository Git Changes experience. GrayMoon.App owns orchestration and persisted state. GrayMoon.Agent runs on the developer machine and owns all local Git and filesystem work.
+GrayMoon is a control plane for multi-repository .NET development. A Workspace groups related Git repositories, discovers their projects and package relationships, calculates dependency levels, coordinates branch and Git operations across them, updates package and configured-file versions, restores and pushes in dependency order, tracks pull requests and GitHub Actions, and provides a multi-repository Git Changes experience. GrayMoon.App owns orchestration and persisted state. GrayMoon.Agent (the Worker, executable `graymoon-worker`) runs on the developer machine and owns all local Git and filesystem work.
 
 ## The most important architecture rule
 

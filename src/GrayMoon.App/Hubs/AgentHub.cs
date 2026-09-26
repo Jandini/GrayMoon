@@ -44,7 +44,7 @@ public sealed class AgentHub(
         // Fail any request still in flight immediately rather than letting it wait out its full
         // AgentBridge command timeout - there is only ever one agent connection, so no per-connection
         // filtering is needed here.
-        AgentResponseDelivery.FailAll("Agent disconnected before responding.");
+        AgentResponseDelivery.FailAll("Worker disconnected before responding.");
         // Clear cached workspace root when agent disconnects.
         // WorkspaceService is scoped, so resolve it from a fresh scope.
         await using var scope = scopeFactory.CreateAsyncScope();

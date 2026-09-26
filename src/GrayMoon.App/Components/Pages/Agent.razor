@@ -11,12 +11,12 @@
 @inject IAgentBridge AgentBridge
 @inject IToastService ToastService
 
-<PageTitle>Agent - GrayMoon</PageTitle>
+<PageTitle>Worker - GrayMoon</PageTitle>
 
 <div class="container-fluid page-container grid-page">
     <div class="grid-page-header">
-        <h2>Agent</h2>
-        <p class="text-muted">Install or uninstall the GrayMoon Agent Service</p>
+        <h2>Worker</h2>
+        <p class="text-muted">Install or uninstall the GrayMoon Worker Service</p>
     </div>
 
     <div class="grid-page-body">
@@ -42,16 +42,16 @@
                         <div class="tab-pane @(ActiveTab == "install" ? "show active" : "")" role="tabpanel">
                             @if (AgentConnectionTracker.State == AgentConnectionState.VersionMismatch)
                             {
-                                <p class="mb-3 small text-muted">The agent is running version <strong class="text-muted">@(AgentConnectionTracker.AgentSemVer ?? "unknown")</strong>, which is not compatible with this application. Run the command below to update.</p>
+                                <p class="mb-3 small text-muted">The worker is running version <strong class="text-muted">@(AgentConnectionTracker.AgentSemVer ?? "unknown")</strong>, which is not compatible with this application. Run the command below to update.</p>
                             }
-                            <p class="mb-3">Run this PowerShell command as Administrator to install the GrayMoon Agent as a Windows service:</p>
+                            <p class="mb-3">Run this PowerShell command as Administrator to install the GrayMoon Worker as a Windows service:</p>
                             <div class="input-group">
                                 <input type="text" class="form-control font-monospace bg-dark" id="installCommand" readonly
                                        value="@installCommand" />
                                 <button class="btn btn-primary" type="button" @onclick="CopyInstallCommand">Copy</button>
                             </div>
                             <small class="text-muted mt-2 d-block">
-                                The script will download, install, and start the agent service automatically.
+                                The script will download, install, and start the worker service automatically.
                             </small>
                             <p class="mb-0 small agent-runtime-note mt-2 d-block">
                                 The Windows service requires the .NET 10 (x64) runtime on the host.
@@ -59,14 +59,14 @@
                             </p>
                         </div>
                         <div class="tab-pane @(ActiveTab == "uninstall" ? "show active" : "")" role="tabpanel">
-                            <p class="mb-3">Run this PowerShell command as Administrator to uninstall the GrayMoon Agent Windows service:</p>
+                            <p class="mb-3">Run this PowerShell command as Administrator to uninstall the GrayMoon Worker Windows service:</p>
                             <div class="input-group">
                                 <input type="text" class="form-control font-monospace bg-dark" id="uninstallCommand" readonly
                                        value="@uninstallCommand" />
                                 <button class="btn btn-outline-danger" type="button" @onclick="CopyUninstallCommand">Copy</button>
                             </div>
                             <small class="text-muted mt-2 d-block">
-                                The script will stop and remove the agent service.
+                                The script will stop and remove the worker service.
                             </small>
                         </div>
                         @if (AgentConnectionTracker.State == AgentConnectionState.Online || AgentConnectionTracker.State == AgentConnectionState.VersionMismatch)
@@ -83,7 +83,7 @@
                                 else if (hostInfo != null)
                                 {
                                     <div class="host-info-grid small">
-                                        <span class="text-muted">Agent</span>
+                                        <span class="text-muted">Worker</span>
                                         <span>@VersionBadge(AgentConnectionTracker.AgentSemVer)</span>
                                         <span class="text-muted">.NET SDK</span>
                                         <span>@PrerequisiteCell(hostInfo.DotnetVersion, HostPrerequisiteInstallCommands.DotnetSdk)</span>
@@ -101,7 +101,7 @@
                 @if (ActiveTab == "install")
                 {
                     <div class="card-footer card-footer-agent d-flex justify-content-between align-items-center">
-                        <small class="text-muted">You can download and run the agent executable manually.</small>
+                        <small class="text-muted">You can download and run the worker executable manually.</small>
                         <div class="d-flex align-items-center gap-2">
                             @if (ShowUpdateNowButton)
                             {
@@ -127,7 +127,7 @@
     </div>
 
 <LoadingOverlay IsVisible="@_isUpdating" PageScoped="true" ShowCommandTerminal="false"
-                Message="@(_waitingForReconnect ? "Waiting for agent..." : "Updating agent...")"
+                Message="@(_waitingForReconnect ? "Waiting for worker..." : "Updating worker...")"
                 OnAbort="@(_waitingForReconnect ? EventCallback.Factory.Create(this, AbortAgentUpdateWait) : default)" />
 
 @code {
@@ -152,9 +152,9 @@
     protected override void OnInitialized()
     {
         var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
-        var installUrl = $"{baseUrl}/api/agent/install";
+        var installUrl = $"{baseUrl}/api/worker/install";
         installCommand = $"irm {installUrl} | iex";
-        var uninstallUrl = $"{baseUrl}/api/agent/uninstall";
+        var uninstallUrl = $"{baseUrl}/api/worker/uninstall";
         uninstallCommand = $"irm {uninstallUrl} | iex";
         SetDefaultTab();
     }
@@ -451,12 +451,12 @@
         _waitingForReconnect = false;
         AgentConnectionTracker.BeginSelfUpdate();
         StateHasChanged();
-        var installUrl = NavigationManager.BaseUri.TrimEnd('/') + "/api/agent/install";
+        var installUrl = NavigationManager.BaseUri.TrimEnd('/') + "/api/worker/install";
         var response = await AgentBridge.SendCommandAsync(AgentHubMethods.SelfUpdate, new { installUrl }, CancellationToken.None);
         if (!response.Success)
         {
             _isUpdating = false;
-            ToastService.ShowError("Agent update failed.");
+            ToastService.ShowError("Worker update failed.");
         }
         else
         {

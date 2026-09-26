@@ -43,15 +43,15 @@ See the full tour, with real screenshots from a running instance, in the **[Gray
 GrayMoon is two small pieces - keep both running:
 
 - **GrayMoon App** - the web UI and orchestration engine, runs in Docker.
-- **GrayMoon Agent** - a lightweight service on your machine that does the actual git and filesystem work. The App never touches your disk directly.
+- **GrayMoon Worker** - a lightweight service on your machine that does the actual git and filesystem work. The App never touches your disk directly.
 
 ```bash
 docker run -d --restart unless-stopped --name graymoon -p 8384:8384 -v graymoon:/app/db jandini/graymoon:latest
 ```
 
-Open `http://localhost:8384`, install the Agent from the **Agent** page (one PowerShell command), add a GitHub connector, and you're cloning your first workspace in minutes.
+Open `http://localhost:8384`, install the Worker from the **Worker** page (one PowerShell command), add a GitHub connector, and you're cloning your first workspace in minutes.
 
-![PowerShell Agent install](https://raw.githubusercontent.com/wiki/Jandini/GrayMoon/screenshots/agent-install.gif)
+![PowerShell Worker install](https://raw.githubusercontent.com/wiki/Jandini/GrayMoon/screenshots/agent-install.gif)
 
 Full walkthrough, from empty install to a working workspace: **[Getting Started](https://github.com/Jandini/GrayMoon/wiki/Getting-Started)**.
 

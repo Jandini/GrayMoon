@@ -27,7 +27,7 @@ import/use existing local repositories
 Workspaces page/components
 WorkspaceService
 WorkspaceRepository
-Agent repository/filesystem commands
+Worker repository/filesystem commands
 Workspace catalog/query services
 ```
 
@@ -67,19 +67,19 @@ package registry services
 
 ---
 
-## 3. Agent management
+## 3. Worker management
 
 ### User capabilities
 
 ```text
-see Agent presence/status
-install Agent
+see Worker presence/status
+install Worker
 run as service
 receive version/update state
 cancel commands where supported
 ```
 
-### Agent CLI
+### Worker CLI
 
 ```text
 run
@@ -94,9 +94,9 @@ stop
 ```text
 AgentHub
 AgentConnectionTracker
-Agent CLI
+Worker CLI
 SignalRConnectionHostedService
-Agent queue state services
+Worker queue state services
 ```
 
 ---
@@ -163,7 +163,7 @@ BackgroundJobService
 
 Refresh GrayMoon so the persisted grid reflects the real local Git state.
 
-### Agent work
+### Worker work
 
 May include:
 
@@ -245,7 +245,7 @@ IWorkspaceBranchOperations
 WorkspaceBranchOperations
 WorkspaceGitService.Branches
 RepositoryBranchWriter
-Agent branch commands
+Worker branch commands
 ```
 
 ---
@@ -316,7 +316,7 @@ IWorkspaceUpdateOperations
 DependencyUpdateOrchestrator
 WorkspaceProjectRepository
 WorkspaceFileVersionService
-Agent file/project/restore commands
+Worker file/project/restore commands
 ```
 
 ---
@@ -329,7 +329,7 @@ Restore package state from the Workspace or dependency-level workflows.
 
 ### Internal behavior
 
-Uses discovered project paths and calls `dotnet restore` through the Agent.
+Uses discovered project paths and calls `dotnet restore` through the Worker.
 
 Restore may also be part of update/push orchestration.
 
@@ -358,7 +358,7 @@ WorkspacePushOperations
 WorkspacePushService
 PushOrchestrator
 package registry services
-Agent Git push command
+Worker Git push command
 ```
 
 ---
@@ -378,7 +378,7 @@ Implementation:
 ```text
 IWorkspaceSyncOperations
 WorkspaceCommitSyncHandler
-Agent commit-sync command
+Worker commit-sync command
 ```
 
 ---
@@ -395,7 +395,7 @@ Revert outgoing commits while choosing whether to keep changes.
 WorkspaceRepositories.UndoPush
 IWorkspaceSyncOperations.UndoPushAsync
 WorkspaceUndoPushHandler
-Agent undo/reset command path
+Worker undo/reset command path
 ```
 
 ---
@@ -456,7 +456,7 @@ file
 WorkspaceProjects page
 IWorkspaceProjectListQueryService
 WorkspaceProjectRepository
-Agent project discovery
+Worker project discovery
 ```
 
 ---
@@ -549,7 +549,7 @@ WorkspaceFileSearchService
 WorkspaceFileVersionService
 WorkspaceFileRepository
 WorkspaceFileVersionConfigRepository
-Agent SearchFiles / file commands
+Worker SearchFiles / file commands
 ```
 
 ---
@@ -611,7 +611,7 @@ IWorkspaceGitChangesOperations
 GitChangesAgentClient
 WorkspaceGitChangesWriteQueue
 GitChangesSnapshotPushHandler
-Agent Git Changes commands
+Worker Git Changes commands
 Monaco integration
 ```
 
@@ -621,7 +621,7 @@ Monaco integration
 
 Opening relevant Workspace pages activates watcher leases.
 
-File edits from IDEs trigger Agent-side filesystem events.
+File edits from IDEs trigger Worker-side filesystem events.
 
 Events are debounced and result in new snapshots.
 
@@ -753,7 +753,7 @@ The service can identify the lowest dependency level that needs work.
 
 Long-running jobs display progress through the GrayMoon loading overlay.
 
-Agent command output can be streamed into a terminal-style area.
+Worker command output can be streamed into a terminal-style area.
 
 Operations remain process-wide even if the initiating page is disposed.
 

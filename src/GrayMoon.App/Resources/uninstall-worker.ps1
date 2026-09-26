@@ -1,11 +1,11 @@
-# GrayMoon Agent Uninstallation Script
-# Delegates service management to graymoon-agent.exe, then removes installation files.
+# GrayMoon Worker Uninstallation Script
+# Delegates service management to graymoon-worker.exe, then removes installation files.
 #
 # Run from a fresh Administrator PowerShell window.
 
 $ErrorActionPreference = 'Stop'
 
-Write-Host 'GrayMoon Agent Uninstallation' -ForegroundColor Cyan
+Write-Host 'GrayMoon Worker Uninstallation' -ForegroundColor Cyan
 
 # Check if running as Administrator
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
@@ -18,13 +18,13 @@ if (-not $isAdmin) {
 }
 
 $agentPath = Join-Path $env:ProgramFiles 'GrayMoon'
-$agentExe  = Join-Path $agentPath 'graymoon-agent.exe'
+$agentExe  = Join-Path $agentPath 'graymoon-worker.exe'
 
 if (Test-Path -LiteralPath $agentExe) {
     Write-Host 'Removing service...' -ForegroundColor Yellow
     & $agentExe uninstall
     if ($LASTEXITCODE -ne 0) {
-        Write-Host 'ERROR: Agent uninstall failed.' -ForegroundColor Red
+        Write-Host 'ERROR: Worker uninstall failed.' -ForegroundColor Red
         return
     }
 }

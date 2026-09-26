@@ -239,7 +239,7 @@ public sealed partial class WorkspaceRepositories
             OnError = ex =>
             {
                 Logger.LogError(ex, "Error returning to default branch for repository {RepositoryId}", repositoryId);
-                SafeInvoke(() => SetRepositoryError(repositoryId, "An error occurred while returning to default branch. The GrayMoon Agent may be offline."));
+                SafeInvoke(() => SetRepositoryError(repositoryId, "An error occurred while returning to default branch. The GrayMoon Worker may be offline."));
             }
         });
 
@@ -287,7 +287,7 @@ public sealed partial class WorkspaceRepositories
             OnError = ex =>
             {
                 Logger.LogError(ex, "Error returning to default branch for level");
-                SafeInvoke(() => SetPageError("An error occurred while returning to default branch. The GrayMoon Agent may be offline."));
+                SafeInvoke(() => SetPageError("An error occurred while returning to default branch. The GrayMoon Worker may be offline."));
             }
         });
 
@@ -430,7 +430,7 @@ public sealed partial class WorkspaceRepositories
             OnError = ex =>
             {
                 Logger.LogError(ex, "Error returning all repositories to default branch");
-                SafeInvoke(() => SetPageError("An error occurred while returning to default branch. The GrayMoon Agent may be offline."));
+                SafeInvoke(() => SetPageError("An error occurred while returning to default branch. The GrayMoon Worker may be offline."));
             }
         });
 

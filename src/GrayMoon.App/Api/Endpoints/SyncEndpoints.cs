@@ -56,7 +56,7 @@ public static class SyncEndpoints
         if (!agentBridge.IsAgentConnected)
         {
             logger.LogWarning("Sync rejected: agent not connected");
-            return Results.Problem("Agent not connected. Start GrayMoon.Agent to sync repositories.", statusCode: 503);
+            return Results.Problem("Worker not connected. Start the GrayMoon Worker to sync repositories.", statusCode: 503);
         }
 
         logger.LogInformation("Sync requested. Trigger={Trigger}, repositoryId={RepositoryId}, workspaceId={WorkspaceId}", trigger, repositoryId, workspaceId);

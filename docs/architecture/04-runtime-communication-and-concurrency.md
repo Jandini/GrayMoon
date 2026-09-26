@@ -1,8 +1,8 @@
 # 04 - Runtime Communication and Concurrency
 
-## 1. App to Agent request flow
+## 1. App to Worker request flow
 
-The App sends local-work commands to the Agent through SignalR.
+The App sends local-work commands to the Worker through SignalR.
 
 Conceptually:
 
@@ -31,9 +31,9 @@ Command terminal output is streamed separately so long-running operations can sh
 
 ---
 
-## 2. Agent job pools
+## 2. Worker job pools
 
-The Agent uses separate bounded queues for different command categories.
+The Worker uses separate bounded queues for different command categories.
 
 Current architecture:
 
@@ -77,7 +77,7 @@ A long operation may continue after the user navigates away from the page that s
 Therefore:
 
 - page code must not capture disposable page state inside long-running background callbacks unless safely marshaled;
-- cancellation must flow through application/Agent boundaries;
+- cancellation must flow through application/Worker boundaries;
 - the operation result is persisted independently from the initiating page;
 - a later page can re-read the resulting persisted state.
 
@@ -178,7 +178,7 @@ The state writer's partial/probed-group semantics are therefore essential.
 
 ## 9. Git Changes watcher architecture
 
-Git Changes uses filesystem watchers on the Agent.
+Git Changes uses filesystem watchers on the Worker.
 
 Important components include:
 
@@ -211,7 +211,7 @@ It marks the repository dirty.
 
 ### Snapshot push
 
-The Agent can push a fresh snapshot without waiting for an explicit page request.
+The Worker can push a fresh snapshot without waiting for an explicit page request.
 
 The App validates version ordering and persists through the single write queue.
 
@@ -233,7 +233,7 @@ This is a deliberate scalability choice.
 
 "Refresh" is not merely re-reading SQLite.
 
-An explicit refresh ultimately requests a new Agent status scan.
+An explicit refresh ultimately requests a new Worker status scan.
 
 When the snapshot returns:
 
@@ -268,7 +268,7 @@ notify page
 
 ## 13. Snapshot versioning
 
-Agent snapshots carry versions.
+Worker snapshots carry versions.
 
 This protects the App from persisting an older result after a newer result has already arrived.
 
@@ -289,7 +289,7 @@ Do not conflate:
 ```text
 browser tab activity
 Git watcher lease activity
-Agent connection status
+Worker connection status
 background job activity
 ```
 
@@ -341,13 +341,13 @@ This avoids sending large domain graphs through browser broadcast events.
 
 ---
 
-## 18. Agent connection state
+## 18. Worker connection state
 
-The App tracks Agent connectivity.
+The App tracks Worker connectivity.
 
-Operations that require local filesystem/Git access must fail clearly when no Agent is connected.
+Operations that require local filesystem/Git access must fail clearly when no Worker is connected.
 
-Read-only persisted UI may remain available even when the Agent is offline.
+Read-only persisted UI may remain available even when the Worker is offline.
 
 ---
 

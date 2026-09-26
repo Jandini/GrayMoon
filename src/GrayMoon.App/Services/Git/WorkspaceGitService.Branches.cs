@@ -100,7 +100,7 @@ public sealed partial class WorkspaceGitService
         CancellationToken cancellationToken = default)
     {
         if (!_agentBridge.IsAgentConnected)
-            throw new InvalidOperationException("Agent not connected. Start GrayMoon.Agent to create branches.");
+            throw new InvalidOperationException("Worker not connected. Start the GrayMoon Worker to create branches.");
 
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)

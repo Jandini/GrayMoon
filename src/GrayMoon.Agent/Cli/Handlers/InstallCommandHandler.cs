@@ -10,16 +10,18 @@ namespace GrayMoon.Agent.Cli;
 
 internal static class InstallCommandHandler
 {
-    public const string ServiceName = "GrayMoonAgent";
-    private const string ServiceDisplayName = "GrayMoon Agent";
-    private const string ServiceDescription = "Host-side agent for GrayMoon: executes git and repository I/O operations";
+    public const string ServiceName = "GrayMoonWorker";
+    /// <summary>Previous Windows/systemd service id; removed on install/uninstall so upgrades migrate cleanly.</summary>
+    public const string LegacyServiceName = "GrayMoonAgent";
+    private const string ServiceDisplayName = "GrayMoon Worker";
+    private const string ServiceDescription = "Host-side worker for GrayMoon: executes git and repository I/O operations";
 
     public static async Task<int> InstallAsync(ParseResult parseResult, CancellationToken cancellationToken, ICommandLineService commandLine)
     {
         var exePath = Environment.ProcessPath;
         if (string.IsNullOrEmpty(exePath) || !File.Exists(exePath))
         {
-            Console.Error.WriteLine("Could not determine agent executable path.");
+            Console.Error.WriteLine("Could not determine worker executable path.");
             return 1;
         }
 
@@ -38,6 +40,9 @@ internal static class InstallCommandHandler
     private static int InstallWindows(string exePath, string runArgs, ParseResult parseResult)
     {
         var binPath = $"\"{exePath}\" {runArgs}".TrimEnd();
+
+        if (!RemoveWindowsServiceIfPresent(LegacyServiceName, announce: true))
+            return 1;
 
         ServiceController? existing = null;
         bool serviceExists;
@@ -63,6 +68,60 @@ internal static class InstallCommandHandler
         finally
         {
             existing?.Dispose();
+        }
+    }
+
+    /// <summary>Stops and deletes a Windows service by name when it exists. Returns false on failure.</summary>
+    [SupportedOSPlatform("windows")]
+    internal static bool RemoveWindowsServiceIfPresent(string name, bool announce)
+    {
+        ServiceController? controller = null;
+        try
+        {
+            controller = new ServiceController(name);
+            _ = controller.Status;
+        }
+        catch (InvalidOperationException)
+        {
+            controller?.Dispose();
+            return true;
+        }
+
+        try
+        {
+            if (announce)
+                Console.WriteLine($"Removing legacy service '{name}'...");
+
+            if (controller.Status == ServiceControllerStatus.Running)
+            {
+                try
+                {
+                    controller.Stop();
+                    controller.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(30));
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"Failed to stop service '{name}': {ex.Message}");
+                    return false;
+                }
+            }
+
+            try
+            {
+                WindowsServiceManager.RemoveService(name);
+                if (announce)
+                    Console.WriteLine($"Service '{name}' removed.");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Failed to remove service '{name}': {ex.Message}");
+                return false;
+            }
+        }
+        finally
+        {
+            controller.Dispose();
         }
     }
 
@@ -226,10 +285,12 @@ internal static class InstallCommandHandler
 
     private static async Task<int> InstallSystemdAsync(string exePath, string runArgs, CancellationToken cancellationToken, ICommandLineService commandLine)
     {
+        await RemoveSystemdUnitIfPresentAsync(LegacyServiceName, commandLine, cancellationToken, announce: true).ConfigureAwait(false);
+
         var unitPath = $"/etc/systemd/system/{ServiceName}.service";
         var unitContent = new StringBuilder();
         unitContent.AppendLine("[Unit]");
-        unitContent.AppendLine("Description=GrayMoon Agent");
+        unitContent.AppendLine("Description=GrayMoon Worker");
         unitContent.AppendLine("After=network.target");
         unitContent.AppendLine();
         unitContent.AppendLine("[Service]");
@@ -266,5 +327,34 @@ internal static class InstallCommandHandler
 
         Console.WriteLine($"systemd unit installed: {unitPath}. Start with: sudo systemctl start {ServiceName}");
         return 0;
+    }
+
+    internal static async Task RemoveSystemdUnitIfPresentAsync(
+        string name,
+        ICommandLineService commandLine,
+        CancellationToken cancellationToken,
+        bool announce)
+    {
+        var unitPath = $"/etc/systemd/system/{name}.service";
+        if (!File.Exists(unitPath))
+            return;
+
+        if (announce)
+            Console.WriteLine($"Removing legacy systemd unit '{name}'...");
+
+        await commandLine.RunAsync("systemctl", $"disable {name}.service --now", null, null, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            File.Delete(unitPath);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Console.Error.WriteLine($"Cannot remove {unitPath}. Run with sudo.");
+            return;
+        }
+
+        await commandLine.RunAsync("systemctl", "daemon-reload", null, null, cancellationToken).ConfigureAwait(false);
+        if (announce)
+            Console.WriteLine($"systemd unit '{name}' removed.");
     }
 }

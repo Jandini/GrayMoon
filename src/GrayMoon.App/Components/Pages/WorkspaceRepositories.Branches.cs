@@ -305,7 +305,7 @@ public sealed partial class WorkspaceRepositories
             OnError = ex =>
             {
                 Logger.LogError(ex, "Error creating branches for workspace {WorkspaceId}", WorkspaceId);
-                SafeInvoke(() => SetPageError("Create branches failed. The GrayMoon Agent may be offline. Start the Agent and try again."));
+                SafeInvoke(() => SetPageError("Create branches failed. The GrayMoon Worker may be offline. Start the Worker and try again."));
             }
         });
 
@@ -332,7 +332,7 @@ public sealed partial class WorkspaceRepositories
 
             if (!success)
             {
-                SafeInvoke(() => SetRepositoryError(repositoryId, err ?? "Create branch failed. The GrayMoon Agent may be offline. Start the Agent and try again."));
+                SafeInvoke(() => SetRepositoryError(repositoryId, err ?? "Create branch failed. The GrayMoon Worker may be offline. Start the Worker and try again."));
             }
             else
             {
@@ -385,8 +385,8 @@ public sealed partial class WorkspaceRepositories
             {
                 Logger.LogError(ex, "Error checking out {Kind} for repository {RepositoryId}", isTag ? "tag" : "branch", repositoryId);
                 var message = isTag
-                    ? "Failed to checkout tag. The GrayMoon Agent may be offline. Start the Agent and try again."
-                    : "Failed to checkout branch. The GrayMoon Agent may be offline. Start the Agent and try again.";
+                    ? "Failed to checkout tag. The GrayMoon Worker may be offline. Start the Worker and try again."
+                    : "Failed to checkout branch. The GrayMoon Worker may be offline. Start the Worker and try again.";
                 SafeInvoke(() => SetRepositoryError(repositoryId, message));
             }
         });
@@ -508,7 +508,7 @@ public sealed partial class WorkspaceRepositories
             {
                 SafeInvoke(() => SetRepositoryError(
                     repositoryId,
-                    result.ErrorMessage ?? "Failed to update branch. The GrayMoon Agent may be offline."));
+                    result.ErrorMessage ?? "Failed to update branch. The GrayMoon Worker may be offline."));
             }
             else
             {

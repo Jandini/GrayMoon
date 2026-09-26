@@ -645,7 +645,7 @@ public sealed class WorkspaceBranchOperations(
         }
 
         if (!agentBridge.IsAgentConnected)
-            return BranchHttpOutcome.Problem("Agent not connected.", 503);
+            return BranchHttpOutcome.Problem("Worker not connected.", 503);
 
         try
         {
@@ -714,8 +714,9 @@ public sealed class WorkspaceBranchOperations(
         var err = result.ErrorMessage ?? "Failed to update branch";
         if (err.Contains("not found", StringComparison.OrdinalIgnoreCase))
             return BranchHttpOutcome.NotFound(err);
-        if (err.Contains("Agent not connected", StringComparison.OrdinalIgnoreCase))
-            return BranchHttpOutcome.Problem("Agent not connected.", 503);
+        if (err.Contains("Worker not connected", StringComparison.OrdinalIgnoreCase)
+            || err.Contains("Agent not connected", StringComparison.OrdinalIgnoreCase))
+            return BranchHttpOutcome.Problem("Worker not connected.", 503);
         if (err.Contains("unexpected", StringComparison.OrdinalIgnoreCase))
             return BranchHttpOutcome.Problem("An error occurred while updating branch from default", 500);
 
@@ -742,7 +743,7 @@ public sealed class WorkspaceBranchOperations(
             return (BranchHttpOutcome.NotFound("Repository is not in the given workspace."), null, null, null);
 
         if (requireAgent && !agentBridge.IsAgentConnected)
-            return (BranchHttpOutcome.Problem("Agent not connected.", 503), null, null, null);
+            return (BranchHttpOutcome.Problem("Worker not connected.", 503), null, null, null);
 
         return (null, workspace, repo, wr);
     }

@@ -2,7 +2,7 @@
 
 ## 1. High-level architecture
 
-GrayMoon is a distributed local-development application with a strict App/Agent boundary.
+GrayMoon is a distributed local-development application with a strict App/Worker boundary.
 
 ```mermaid
 flowchart TB
@@ -38,7 +38,7 @@ This separation is foundational.
 
 GrayMoon.App normally runs in Docker and cannot assume access to the developer's local repository paths.
 
-GrayMoon.Agent runs on the developer host and performs operations against the real working copies.
+GrayMoon.Agent (the Worker, packaged as `graymoon-worker`) runs on the developer host and performs operations against the real working copies.
 
 ---
 
@@ -60,7 +60,7 @@ connector management
 background jobs
 browser notifications
 REST endpoints
-Agent command coordination
+Worker command coordination
 Desktop-mode integration
 ```
 
@@ -80,7 +80,7 @@ project discovery
 restore
 Git Changes status/diff/mutations
 Git hooks
-Agent command execution
+Worker command execution
 local HTTP callback listener
 ```
 
@@ -120,7 +120,7 @@ This layer is also the intended future seam for automation such as MCP.
 
 `src/GrayMoon.Abstractions`
 
-Shared App-Agent contracts and hub method constants.
+Shared App-Worker contracts and hub method constants.
 
 ### GrayMoon.Common
 
@@ -137,7 +137,7 @@ common Git models
 
 ### Test projects
 
-The repository has dedicated test projects for Common, Agent, and App behavior.
+The repository has dedicated test projects for Common, Worker (GrayMoon.Agent), and App behavior.
 
 The standard development contract is:
 
@@ -191,7 +191,7 @@ IWorkspace*Operations
 GrayMoon.App implementation
         │
         ▼
-orchestrator / repository / Agent bridge
+orchestrator / repository / Worker bridge
 ```
 
 Examples:
@@ -287,7 +287,7 @@ Global settings provide defaults for new Workspaces.
 
 The main App-side facade for many Git-oriented Workspace operations.
 
-It coordinates Agent requests for:
+It coordinates Worker requests for:
 
 ```text
 sync
@@ -306,7 +306,7 @@ Central persistence seam for mutable repository checkout state.
 
 It accepts a `RepositoryStateSnapshot` plus write options and only rewrites the state groups that were actually probed.
 
-That "probed groups only" rule prevents partial Agent responses from blanking unrelated fields.
+That "probed groups only" rule prevents partial Worker responses from blanking unrelated fields.
 
 ### WorkspaceProjectRepository
 
@@ -330,7 +330,7 @@ Own GitHub Actions persistence and refresh logic.
 
 ## 8. Orchestration layer
 
-GrayMoon has workflows that span many repositories and therefore cannot be expressed as one Agent command.
+GrayMoon has workflows that span many repositories and therefore cannot be expressed as one Worker command.
 
 Examples:
 
@@ -361,11 +361,11 @@ error aggregation
 batch-end recomputation
 ```
 
-The Agent remains responsible for concrete local operations.
+The Worker remains responsible for concrete local operations.
 
 ---
 
-## 9. App-Agent bridge
+## 9. App-Worker bridge
 
 `AgentBridge` sends commands over `AgentHub`.
 
@@ -378,7 +378,7 @@ App
   RequestCommand(requestId, commandName, payload)
         │
         ▼
-Agent
+Worker
   enqueue by command category
   execute handler
         │
@@ -393,9 +393,9 @@ The App uses generous SignalR message sizing because repository sync responses c
 
 ---
 
-## 10. Agent command pipeline
+## 10. Worker command pipeline
 
-The Agent has three bounded command pools:
+The Worker has three bounded command pools:
 
 ```text
 main command pool
@@ -421,7 +421,7 @@ Commands are routed by command name to the appropriate pool.
 
 ## 11. Local hook listener
 
-The Agent exposes a local loopback HTTP listener, normally on:
+The Worker exposes a local loopback HTTP listener, normally on:
 
 ```text
 127.0.0.1:9191
@@ -429,7 +429,7 @@ The Agent exposes a local loopback HTTP listener, normally on:
 
 Managed Git hooks POST notifications to this listener.
 
-The hook listener turns them into Agent notification jobs, which collect repository state and push it back to the App over SignalR.
+The hook listener turns them into Worker notification jobs, which collect repository state and push it back to the App over SignalR.
 
 Hook failure must not block the developer's normal Git command.
 
@@ -520,7 +520,7 @@ It should not become an independent second implementation of Workspace rules.
 
 When adding functionality:
 
-1. keep local Git/filesystem work in the Agent;
+1. keep local Git/filesystem work in the Worker;
 2. keep orchestration in the App;
 3. persist expensive remote/local observations and render from SQLite;
 4. use Application contracts for reusable mutations;

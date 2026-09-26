@@ -25,7 +25,7 @@ public sealed partial class WorkspaceGitService
         CancellationToken cancellationToken = default)
     {
         if (!_agentBridge.IsAgentConnected)
-            throw new InvalidOperationException("Agent not connected. Start GrayMoon.Agent to refresh projects.");
+            throw new InvalidOperationException("Worker not connected. Start the GrayMoon Worker to refresh projects.");
 
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)
@@ -119,7 +119,7 @@ public sealed partial class WorkspaceGitService
         CancellationToken cancellationToken = default)
     {
         if (!_agentBridge.IsAgentConnected)
-            throw new InvalidOperationException("Agent not connected. Start GrayMoon.Agent to refresh projects.");
+            throw new InvalidOperationException("Worker not connected. Start the GrayMoon Worker to refresh projects.");
 
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)
@@ -169,7 +169,7 @@ public sealed partial class WorkspaceGitService
         CancellationToken cancellationToken = default)
     {
         if (!_agentBridge.IsAgentConnected)
-            throw new InvalidOperationException("Agent not connected.");
+            throw new InvalidOperationException("Worker not connected.");
 
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)
@@ -223,7 +223,7 @@ public sealed partial class WorkspaceGitService
         CancellationToken cancellationToken = default)
     {
         if (!_agentBridge.IsAgentConnected)
-            throw new InvalidOperationException("Agent not connected. Start GrayMoon.Agent to sync dependencies.");
+            throw new InvalidOperationException("Worker not connected. Start the GrayMoon Worker to sync dependencies.");
 
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)

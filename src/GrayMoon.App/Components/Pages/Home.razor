@@ -54,10 +54,10 @@ else
             <div class="card h-100">
                 <div class="card-body">
                     <h5 class="card-title">
-                        <i class="bi bi-cpu"></i> Agent
+                        <i class="bi bi-cpu"></i> Worker
                     </h5>
                     <p class="card-text">
-                        Install, update, or uninstall the GrayMoon Agent service.
+                        Install, update, or uninstall the GrayMoon Worker service.
                     </p>
                     <a class="btn @AgentButtonClass" href="/agent">@AgentButtonText</a>
                 </div>
@@ -106,9 +106,9 @@ else
 
     private string AgentButtonText => AgentConnectionTracker.State switch
     {
-        AgentConnectionState.Online => "Manage Agent",
-        AgentConnectionState.VersionMismatch => "Upgrade Agent",
-        _ => "Install Agent"
+        AgentConnectionState.Online => "Manage Worker",
+        AgentConnectionState.VersionMismatch => "Upgrade Worker",
+        _ => "Install Worker"
     };
 
     private string AgentButtonClass => AgentConnectionTracker.State == AgentConnectionState.Online ? "btn-primary" : "btn-danger";

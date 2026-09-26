@@ -48,7 +48,7 @@ public sealed class WorkspaceBranchUpdateHandler(
             return new UpdateBranchFromDefaultResult(false, false, Array.Empty<string>(), "Repository is not in the given workspace.");
 
         if (!agentBridge.IsAgentConnected)
-            return new UpdateBranchFromDefaultResult(false, false, Array.Empty<string>(), "Agent not connected. Start GrayMoon.Agent and try again.");
+            return new UpdateBranchFromDefaultResult(false, false, Array.Empty<string>(), "Worker not connected. Start the GrayMoon Worker and try again.");
 
         try
         {

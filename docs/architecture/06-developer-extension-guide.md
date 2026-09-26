@@ -76,16 +76,16 @@ headless execution
 
 ---
 
-## 3. Preserve App-Agent separation
+## 3. Preserve App-Worker separation
 
 Never add code to GrayMoon.App that shells out to local Git just because it is easier.
 
 If App needs local state:
 
 ```text
-define/reuse Agent command
+define/reuse Worker command
 send concrete request
-Agent executes
+Worker executes
 return typed result
 persist in App
 ```
@@ -277,7 +277,7 @@ Do not bypass the snapshot pipeline.
 A new mutation should converge to:
 
 ```text
-Agent mutation
+Worker mutation
 authoritative status snapshot
 versioned cache
 App write queue
@@ -291,7 +291,7 @@ Preserve:
 path validation
 large pathset handling
 watcher debounce
-separate read/diff Agent pools
+separate read/diff Worker pools
 ```
 
 ---
@@ -332,9 +332,9 @@ Do not depend on page-owned scoped services after the component is gone unless t
 
 ---
 
-## 15. Agent command changes
+## 15. Worker command changes
 
-Agent DTO conventions:
+Worker DTO conventions:
 
 ```text
 typed request/response classes
@@ -430,7 +430,7 @@ Examples:
 repository writer tests
 query-service tests
 dependency graph tests
-Agent command tests
+Worker command tests
 operation-runner tests
 hook sync tests
 Git Changes activation/snapshot tests
@@ -453,7 +453,7 @@ ASCII hyphen only
 sealed concrete services/handlers by default
 C# primary constructors where appropriate
 sealed record modal state
-typed sealed Agent DTO classes
+typed sealed Worker DTO classes
 ```
 
 Architecture docs do not replace those coding rules.
