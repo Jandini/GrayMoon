@@ -198,7 +198,7 @@
                     Update
                 </button>
                 <button type="button"
-                        class="btn @(HasUnmatchedDependencies ? "btn-danger" : "btn-outline-secondary") dropdown-toggle dropdown-toggle-split"
+                        class="btn @(HasUnmatchedDependencies ? "btn-outline-secondary" : "btn-outline-secondary") dropdown-toggle dropdown-toggle-split"
                         aria-label="Toggle Update menu"
                         aria-expanded="@(_updateMenuOpen ? "true" : "false")"
                         @onclick="ToggleUpdateMenu"

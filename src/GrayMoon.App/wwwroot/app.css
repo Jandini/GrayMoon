@@ -1004,13 +1004,19 @@ input[list] {
 
 .home-banner-moon {
     position: absolute;
-    width: 48rem;
-    height: 48rem;
-    left: -1.5rem;
-    top: calc(100% + 0.35rem);
+    width: 68rem;
+    height: 68rem;
+    left: 10rem;
+    top: calc(100% - 10rem);
     transform: translateX(-50%);
     pointer-events: none;
     z-index: 0;
+}
+
+.home-banner-brand .banner-title,
+.home-banner-brand .banner-subtitle {
+    position: relative;
+    z-index: 1;
 }
 
 .home-banner-veil {
