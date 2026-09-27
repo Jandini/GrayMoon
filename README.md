@@ -5,6 +5,14 @@
 [![Docker Build](https://github.com/Jandini/GrayMoon/actions/workflows/docker-build.yml/badge.svg)](https://github.com/Jandini/GrayMoon/actions/workflows/docker-build.yml)
 [![Wiki](https://img.shields.io/badge/docs-wiki-blue)](https://github.com/Jandini/GrayMoon/wiki)
 
+## Install now
+
+```powershell
+winget install graymoon
+```
+
+Then launch **GrayMoon** from the Start menu. Windows only - see [Quick start](#quick-start) for other options.
+
 If your .NET solution has spread across a dozen GitHub repositories - services, shared libraries, NuGet packages, all versioned with **GitVersion** - GrayMoon is the missing control plane. It clones, branches, updates, and pushes across every repository in a workspace as one coordinated action, in the correct dependency order, so a single feature or a single package rollout doesn't turn into an afternoon of repo-by-repo bookkeeping.
 
 It is also built for how teams work today: fast, parallel, AI-assisted development across many small repositories instead of one giant monolith.
@@ -42,11 +50,9 @@ See the full tour, with real screenshots from a running instance, in the **[Gray
 
 ### GrayMoon Desktop (Windows)
 
-The fastest way to run GrayMoon on Windows is **GrayMoon Desktop** - a native installer that bundles the App and Worker so you don't need Docker or a separate browser tab.
+Prefer winget? Use [`winget install graymoon`](#install-now) above.
 
-1. Download the latest `Setup.exe` from **[Jandini/GrayMoon.Release](https://github.com/Jandini/GrayMoon.Release/releases)** (stable releases; prereleases are also published there).
-2. Run the installer and launch **GrayMoon** from the Start menu.
-3. Add a GitHub connector and create your first workspace.
+Otherwise download the latest `Setup.exe` from **[Jandini/GrayMoon.Release](https://github.com/Jandini/GrayMoon.Release/releases)**, run the installer, and launch **GrayMoon** from the Start menu. Add a GitHub connector and create your first workspace.
 
 Desktop checks for updates on startup from the same release repository.
 
