@@ -519,7 +519,28 @@ public sealed partial class WorkspaceRepositories
             customDict[repositoryId] = custom;
             _customDependencyLinesByRepo = customDict;
             _tooltipLoadedRepoIds.Add(repositoryId);
-            await InvokeAsync(StateHasChanged);
+            // MERGE NOTE (keep when merging into branches ahead of main):
+            // Tooltip markup is omitted until this load finishes. If the user is still hovering
+            // when we render it, mouseenter does not re-fire, so dependency-badge-tooltip.js never
+            // positions the popup (it remains at -9999px) while the metrics-block title hint still
+            // shows — requiring a leave/re-hover. Reposition after this render; the JS file also
+            // MutationObserver-watches for the tip. Dropping either path reintroduces the bug.
+            await InvokeAsync(async () =>
+            {
+                StateHasChanged();
+                await Task.Yield();
+                try
+                {
+                    await JSRuntime.InvokeVoidAsync("grayMoonDependencyBadgeTooltip.repositionOpen");
+                }
+                catch (JSDisconnectedException)
+                {
+                }
+                catch (InvalidOperationException)
+                {
+                    // Circuit/JS runtime gone (navigated away) during lazy tooltip load.
+                }
+            });
         }
         catch (Exception ex)
         {
