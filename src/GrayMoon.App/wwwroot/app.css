@@ -123,6 +123,13 @@ a.workspaces-breadcrumb-link:hover {
     text-decoration: underline;
 }
 
+/* Buttons are often anchors, so the link hover underline would otherwise apply.
+   Join Discussion keeps that underline. */
+a.btn:hover:not(.btn-link):not(.home-banner-discuss),
+button.btn:hover:not(.btn-link) {
+    text-decoration: none;
+}
+
 /* Buttons */
 .btn-primary,
 .btn-primary:link,
@@ -981,6 +988,88 @@ input[list] {
 
 .jumbotron.banner-card-style.border {
     border-color: var(--border-color) !important;
+}
+
+/* Scaled-down echo of the Desktop About dialog: dark moon, clipped off the right edge. */
+.home-banner {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+}
+
+.home-banner-glow {
+    position: absolute;
+    width: 142px;
+    height: 142px;
+    right: -40px;
+    top: 50%;
+    transform: translateY(-50%);
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(42, 58, 85, 0.2) 0%, rgba(32, 40, 64, 0.09) 45%, transparent 100%);
+    pointer-events: none;
+    z-index: 0;
+}
+
+.home-banner-moon {
+    position: absolute;
+    width: 168px;
+    height: 168px;
+    right: -58px;
+    top: 50%;
+    transform: translateY(calc(-50% - 13px));
+    pointer-events: none;
+    z-index: 1;
+}
+
+.home-banner-veil {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--bg-card) 90%, transparent) 0%,
+        color-mix(in srgb, var(--bg-card) 60%, transparent) 38%,
+        color-mix(in srgb, var(--bg-card) 20%, transparent) 68%,
+        transparent 100%);
+    pointer-events: none;
+    z-index: 2;
+}
+
+.home-banner-copy {
+    position: relative;
+    z-index: 3;
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-width: 0;
+    padding-right: 1rem;
+}
+
+.home-banner-invite {
+    position: relative;
+    z-index: 3;
+    align-self: flex-end;
+    /* Banner padding is 1.5rem; other tiles use card-body padding. */
+    margin-right: calc(var(--bs-card-spacer-x, 1rem) - 1.5rem);
+    margin-bottom: calc(var(--bs-card-spacer-y, 1rem) - 1.5rem);
+    text-align: right;
+}
+
+.home-banner-discuss,
+.home-banner-discuss:link,
+.home-banner-discuss:visited,
+.home-banner-discuss:focus,
+.home-banner-discuss:active {
+    background-color: #9a9a9a;
+    border-color: #8a8a8a;
+    color: #111111 !important;
+}
+
+.home-banner-discuss:hover {
+    background-color: #adadad;
+    border-color: #9a9a9a;
+    color: #000000 !important;
+    text-decoration: underline;
 }
 
 .banner-title {

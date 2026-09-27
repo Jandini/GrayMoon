@@ -1,12 +1,15 @@
 @page "/"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Text.Json
 @using GrayMoon.App.Repositories
 @using GrayMoon.App.Services
 @inject WorkspaceRepository WorkspaceRepository
 @inject NavigationManager NavigationManager
 @inject IJSRuntime JsRuntime
 @inject AgentConnectionTracker AgentConnectionTracker
+@inject IAgentBridge AgentBridge
 @inject ConnectorHealthService ConnectorHealthService
+@inject ConnectorRepository ConnectorRepository
 <PageTitle>Home - GrayMoon</PageTitle>
 
 @if (!showHome)
@@ -20,15 +23,25 @@ else
 <div class="container-fluid page-container">
     <div class="row mb-4 align-items-stretch">
         <div class="col-md-8 col-lg-8 d-flex mb-4 mb-md-0">
-            <div class="jumbotron banner-card-style rounded p-4 border flex-grow-1 d-flex align-items-center">
-                <img src="moon.svg" alt="GrayMoon" class="me-4" style="height: 80px; width: auto; flex-shrink: 0;" />
-                <div>
+            <div class="jumbotron banner-card-style home-banner rounded p-4 border flex-grow-1 d-flex flex-column">
+                <div class="home-banner-glow" aria-hidden="true"></div>
+                <img src="moon-dark.svg" alt="" class="home-banner-moon" aria-hidden="true" />
+                <div class="home-banner-veil" aria-hidden="true"></div>
+                <div class="home-banner-copy">
                     <h1 class="display-5 mb-0 banner-title">
                         GrayMoon
                     </h1>
                     <p class="lead fs-6 mb-0 banner-subtitle">
                         All your repos, moving together.
                     </p>
+                </div>
+                <div class="home-banner-invite">
+                    <p class="card-text mb-0">The GrayMoon journey starts here.</p>
+                    <p class="card-text">Share your thoughts…</p>
+                    <a class="btn home-banner-discuss"
+                       href="https://github.com/Jandini/GrayMoon/discussions"
+                       target="_blank"
+                       rel="noopener noreferrer">Join Discussion</a>
                 </div>
             </div>
         </div>
@@ -74,7 +87,7 @@ else
                         Configure access to GitHub and NuGet registries and manage connector tokens.
                     </p>
                     <a class="btn @ConnectorButtonClass" href="/connectors">
-                        Manage Connectors
+                        @ConnectorButtonText
                     </a>
                 </div>
             </div>
@@ -102,29 +115,111 @@ else
 @code {
     private const string DefaultWorkspaceRedirectKey = "defaultWorkspaceRedirected";
     private bool showHome;
+    private bool hasConnectors;
     private bool anyUsedConnectorUnhealthy;
+    private bool hostPrerequisitesMissing;
+    private int hostInfoGeneration;
 
-    private string AgentButtonText => AgentConnectionTracker.State switch
-    {
-        AgentConnectionState.Online => "Manage Worker",
-        AgentConnectionState.VersionMismatch => "Upgrade Worker",
-        _ => "Install Worker"
-    };
+    private string AgentButtonText =>
+        AgentConnectionTracker.State == AgentConnectionState.Online && hostPrerequisitesMissing
+            ? "Install Prerequisites"
+            : AgentConnectionTracker.State switch
+            {
+                AgentConnectionState.Online => "Manage Worker",
+                AgentConnectionState.VersionMismatch => "Upgrade Worker",
+                _ => "Install Worker"
+            };
 
-    private string AgentButtonClass => AgentConnectionTracker.State == AgentConnectionState.Online ? "btn-primary" : "btn-danger";
+    private string AgentButtonClass =>
+        AgentConnectionTracker.State == AgentConnectionState.Online && !hostPrerequisitesMissing
+            ? "btn-primary"
+            : "btn-danger";
 
-    private string ConnectorButtonClass => anyUsedConnectorUnhealthy ? "btn-danger" : "btn-primary";
+    private string ConnectorButtonText => hasConnectors ? "Manage Connectors" : "Add Connectors";
+
+    private string ConnectorButtonClass => hasConnectors && !anyUsedConnectorUnhealthy ? "btn-primary" : "btn-danger";
 
     protected override async Task OnInitializedAsync()
     {
-        anyUsedConnectorUnhealthy = await ConnectorHealthService.AnyUsedConnectorUnhealthyAsync();
+        var connectors = await ConnectorRepository.GetAllAsync();
+        hasConnectors = connectors.Count > 0;
+        anyUsedConnectorUnhealthy = hasConnectors && await ConnectorHealthService.AnyUsedConnectorUnhealthyAsync();
     }
 
     protected override void OnAfterRender(bool firstRender)
     {
-        if (firstRender)
-            AgentConnectionTracker.OnStateChanged(_ => InvokeAsync(StateHasChanged));
+        if (!firstRender)
+            return;
+
+        AgentConnectionTracker.OnStateChanged(state =>
+        {
+            try
+            {
+                _ = InvokeAsync(() => OnAgentStateChangedAsync(state));
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        });
     }
+
+    private async Task OnAgentStateChangedAsync(AgentConnectionState state)
+    {
+        if (state != AgentConnectionState.Online)
+        {
+            Interlocked.Increment(ref hostInfoGeneration);
+            hostPrerequisitesMissing = false;
+            StateHasChanged();
+            return;
+        }
+
+        StateHasChanged();
+        await RefreshHostPrerequisitesAsync();
+    }
+
+    private async Task RefreshHostPrerequisitesAsync()
+    {
+        var generation = Interlocked.Increment(ref hostInfoGeneration);
+        var missing = await QueryHostPrerequisitesMissingAsync();
+        if (generation != Volatile.Read(ref hostInfoGeneration))
+            return;
+
+        hostPrerequisitesMissing = AgentConnectionTracker.State == AgentConnectionState.Online && missing;
+        StateHasChanged();
+    }
+
+    private async Task<bool> QueryHostPrerequisitesMissingAsync()
+    {
+        if (!AgentBridge.IsAgentConnected)
+            return false;
+
+        try
+        {
+            var response = await AgentBridge.SendCommandAsync("GetHostInfo", new { }, CancellationToken.None);
+            if (!response.Success || response.Data is null)
+                return false;
+
+            var json = response.Data is JsonElement element
+                ? element.GetRawText()
+                : JsonSerializer.Serialize(response.Data);
+            var dto = JsonSerializer.Deserialize<HostInfoDto>(
+                json,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (dto is null)
+                return false;
+
+            return HostPrerequisiteState.AnyMissing(new HostPrerequisiteVersions(
+                dto.DotnetVersion,
+                dto.GitVersion,
+                dto.GitVersionToolVersion));
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private sealed record HostInfoDto(string? DotnetVersion, string? GitVersion, string? GitVersionToolVersion);
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {

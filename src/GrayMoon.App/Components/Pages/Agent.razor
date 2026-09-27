@@ -119,7 +119,7 @@
                     <div class="card-footer card-footer-agent d-flex justify-content-between align-items-center">
                         <small class="text-muted">GrayMoon Desktop can install the missing prerequisites automatically.</small>
                         <button type="button" class="btn btn-danger" disabled="@HostPrerequisiteInstall.IsInstalling" @onclick="InstallAllHostPrerequisitesAsync">
-                            @(HostPrerequisiteInstall.IsInstalling ? "Installing..." : "Install All")
+                            @(HostPrerequisiteInstall.IsInstalling ? "Installing..." : "Install Now")
                         </button>
                     </div>
                 }
