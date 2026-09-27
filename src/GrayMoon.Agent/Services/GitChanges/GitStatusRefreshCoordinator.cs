@@ -216,6 +216,8 @@ internal sealed class RepositoryRefreshTracker : IDisposable
     private readonly object _gate = new();
     private RepositoryRefreshState _state = RepositoryRefreshState.Clean;
     private Timer? _debounceTimer;
+    private Action? _onDebounceElapsed;
+    private int _debounceGeneration;
     private TaskCompletionSource<GitChangeStatusResult>? _pendingCompletion;
 
     public RepositoryRefreshState State
@@ -238,18 +240,65 @@ internal sealed class RepositoryRefreshTracker : IDisposable
                     // Follow-up scan already pending; nothing new to do.
                     return;
                 case RepositoryRefreshState.Dirty:
-                    // Reset the debounce window so the scan runs after the last event, not the first.
-                    // Without this, a slow burst that outlasts the original window starts a scan mid-burst
-                    // and later MarkDirty calls legitimately queue a follow-up (flaky CallCount == 2 in CI).
-                    _debounceTimer?.Dispose();
-                    _debounceTimer = new Timer(_ => onDebounceElapsed(), null, debounceMilliseconds, Timeout.Infinite);
+                    // Reset the same timer so the scan runs after the last event, not the first.
+                    // Disposing and replacing the timer drops the callback on a busy thread pool
+                    // (CI never observes a scan) and can also let a slow burst start a second scan.
+                    ArmDebounce_NoLock(debounceMilliseconds, onDebounceElapsed);
                     return;
             }
 
             _state = RepositoryRefreshState.Dirty;
-            _debounceTimer?.Dispose();
-            _debounceTimer = new Timer(_ => onDebounceElapsed(), null, debounceMilliseconds, Timeout.Infinite);
+            ArmDebounce_NoLock(debounceMilliseconds, onDebounceElapsed);
         }
+    }
+
+    /// <summary>Caller holds <see cref="_gate"/>.</summary>
+    private void ArmDebounce_NoLock(int debounceMilliseconds, Action onDebounceElapsed)
+    {
+        _onDebounceElapsed = onDebounceElapsed;
+        _debounceGeneration++;
+        // Created disarmed so it cannot fire before this field assignment, then armed with Change.
+        _debounceTimer ??= new Timer(
+            static state => ((RepositoryRefreshTracker)state!).OnDebounceTimer(),
+            this,
+            Timeout.Infinite,
+            Timeout.Infinite);
+        _debounceTimer.Change(debounceMilliseconds, Timeout.Infinite);
+    }
+
+    private void OnDebounceTimer()
+    {
+        Action? callback;
+        var generation = 0;
+        lock (_gate)
+        {
+            if (_state != RepositoryRefreshState.Dirty)
+            {
+                return;
+            }
+
+            generation = _debounceGeneration;
+            callback = _onDebounceElapsed;
+        }
+
+        // A MarkDirty that reset the window can land between the check above and the scan.
+        // Starting that scan would be the burst's first event, and the later events would queue a follow-up.
+        lock (_gate)
+        {
+            if (_state != RepositoryRefreshState.Dirty || generation != _debounceGeneration)
+            {
+                return;
+            }
+        }
+
+        callback?.Invoke();
+    }
+
+    /// <summary>Caller holds <see cref="_gate"/>.</summary>
+    private void DisarmDebounce_NoLock()
+    {
+        _debounceGeneration++;
+        _debounceTimer?.Change(Timeout.Infinite, Timeout.Infinite);
     }
 
     /// <summary>Attempts to move into Refreshing. Returns false when a scan is already in flight; in that case
@@ -272,8 +321,7 @@ internal sealed class RepositoryRefreshTracker : IDisposable
                 return false;
             }
 
-            _debounceTimer?.Dispose();
-            _debounceTimer = null;
+            DisarmDebounce_NoLock();
             _state = RepositoryRefreshState.Refreshing;
             coalescedTask = null;
             return true;

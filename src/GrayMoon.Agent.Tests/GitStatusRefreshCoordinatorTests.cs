@@ -87,10 +87,10 @@ public class GitStatusRefreshCoordinatorTests
             coordinator.MarkDirty(repoPath);
         }
 
-        var sawScan = await WaitForAsync(() => fake.CallCount >= 1, TimeSpan.FromSeconds(3));
-        await Task.Delay(300); // quiet period longer than the debounce window
+        var sawScan = await WaitForAsync(() => fake.CallCount >= 1, TimeSpan.FromSeconds(10));
+        await Task.Delay(400); // quiet period longer than the debounce window
 
-        Assert.True(sawScan);
+        Assert.True(sawScan, $"Debounced scan did not start (CallCount={fake.CallCount}).");
         Assert.Equal(1, fake.CallCount);
     }
 

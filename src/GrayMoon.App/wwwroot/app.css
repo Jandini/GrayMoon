@@ -1087,10 +1087,10 @@ input[list] {
 }
 
 .banner-subtitle {
-    font-family: "Cormorant Garamond", "Times New Roman", serif !important;
-    letter-spacing: 0.02em;
-    text-shadow: -1px 0 #000, 1px 0 #000, 0 -1px #000, 0 1px #000;
-    font-weight: 500;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    letter-spacing: normal;
+    color: #f2f2f2;
+    font-weight: 600;
 }
 
 /* List groups */
