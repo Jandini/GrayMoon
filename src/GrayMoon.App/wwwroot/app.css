@@ -990,35 +990,27 @@ input[list] {
     border-color: var(--border-color) !important;
 }
 
-/* Dark moon, zoomed and clipped off the left edge so the visible half sits behind the title. */
+/* Dark moon, zoomed and clipped off the left edge, sitting under the title. */
 .home-banner {
     position: relative;
     overflow: hidden;
     isolation: isolate;
 }
 
-.home-banner-glow {
-    position: absolute;
-    width: 52rem;
-    height: 52rem;
-    left: 0;
-    top: 36%;
-    transform: translate(-50%, -50%);
-    border-radius: 50%;
-    background: radial-gradient(circle, rgba(42, 58, 85, 0.28) 0%, rgba(32, 40, 64, 0.12) 45%, transparent 100%);
-    pointer-events: none;
-    z-index: 0;
+.home-banner-brand {
+    position: relative;
+    width: 100%;
 }
 
 .home-banner-moon {
     position: absolute;
     width: 48rem;
     height: 48rem;
-    left: 0;
-    top: 36%;
-    transform: translate(-50%, -50%);
+    left: -1.5rem;
+    top: calc(100% + 0.35rem);
+    transform: translateX(-50%);
     pointer-events: none;
-    z-index: 1;
+    z-index: 0;
 }
 
 .home-banner-veil {
