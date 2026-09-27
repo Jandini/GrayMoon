@@ -1006,7 +1006,7 @@ input[list] {
     position: absolute;
     width: 68rem;
     height: 68rem;
-    left: -1.5rem;
+    left: 10rem;
     top: calc(100% - 10rem);
     transform: translateX(-50%);
     pointer-events: none;
