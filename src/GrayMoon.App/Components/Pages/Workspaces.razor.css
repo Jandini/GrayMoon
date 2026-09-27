@@ -49,6 +49,13 @@
     width: 30%;
 }
 
+/* Neutral at rest; danger only on hover */
+.btn-sm.btn-outline-secondary.btn-remove:hover:not(:disabled) {
+    background-color: var(--error);
+    border-color: var(--error);
+    color: var(--bg-primary);
+}
+
 .badge-default {
     background-color: #2f6f9f;
     color: #ffffff;

@@ -144,13 +144,13 @@
                                                     @onclick="() => ShowEditModalAsync(workspace.WorkspaceId)">
                                                 Edit
                                             </button>
-                                            <button class="btn btn-sm btn-outline-danger me-2"
-                                                    @onclick="() => ShowDeleteModal(workspace)">
-                                                Delete
-                                            </button>
                                             <button class="btn btn-sm btn-outline-secondary me-2"
                                                     @onclick="() => ShowAddRepositoriesModalAsync(workspace.WorkspaceId)">
                                                 Repositories
+                                            </button>
+                                            <button class="btn btn-sm btn-outline-secondary btn-remove"
+                                                    @onclick="() => ShowDeleteModal(workspace)">
+                                                Remove
                                             </button>
                                         </td>
                                     </tr>
@@ -206,11 +206,12 @@
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Delete Workspace</h5>
+                    <h5 class="modal-title">Remove Workspace</h5>
                     <button type="button" class="btn-close" @onclick="CloseDeleteModal"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="mb-0">Delete workspace <strong>@workspaceToDelete?.Name</strong>?</p>
+                    <p class="mb-2">Remove workspace <strong>@workspaceToDelete?.Name</strong>?</p>
+                    <p class="mb-0 text-muted">Only the GrayMoon workspace will be removed. Repositories on disk will stay untouched.</p>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" @onclick="CloseDeleteModal">Cancel</button>
@@ -219,7 +220,7 @@
                         {
                             <span class="spinner-border spinner-border-sm me-2"></span>
                         }
-                        Delete
+                        Remove
                     </button>
                 </div>
             </div>
