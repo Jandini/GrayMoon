@@ -42,7 +42,6 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     private readonly HashSet<string> _collapsedKeys = [];
     private string _filterQuery = string.Empty;
     private string? _appliedFilterQuery;
-    private bool _isLoading = true;
     private string? _errorMessage;
     private bool _disposed;
     private bool _scrollSelectionIntoViewPending;
@@ -121,11 +120,10 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     private Task? _initialLoadTask;
 
     /// <summary>
-    /// Runs the initial (or workspace-switch) load inline behind the lightweight _isLoading flag instead
-    /// of a background job, so opening this page (including re-opening it with a remembered file
-    /// selection) never shows the BackgroundJobOverlay's "Loading changes..." LoadingOverlay - the tree
-    /// itself renders as soon as the persisted projection is read, which is fast since it never sends an
-    /// Agent command.
+    /// Runs the initial (or workspace-switch) load inline instead of a background job, so opening this
+    /// page (including re-opening it with a remembered file selection) never shows the
+    /// BackgroundJobOverlay's "Loading changes..." LoadingOverlay. The tree itself renders as soon as the
+    /// persisted projection is read, which is fast since it never sends an Agent command.
     /// </summary>
     private void StartInitialLoadJob()
     {
@@ -141,7 +139,6 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     // this page must never trigger a status scan.
     private async Task LoadAsync()
     {
-        _isLoading = true;
         _errorMessage = null;
         StateHasChanged();
 
@@ -162,15 +159,14 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         }
         finally
         {
-            _isLoading = false;
             StateHasChanged();
         }
 
         // Restoring a remembered file selection re-fetches its diff from the Agent, which can be slow
-        // (and, unlike the tree read above, is a real Agent command) - it must never gate _isLoading (and
-        // therefore the Refresh button) or the tree render above. TryRestoreSelectionAsync only does work
-        // when this page instance has no selection yet (first load / workspace switch); later reloads
-        // triggered by Refresh or a mutation already have a selection and return immediately.
+        // and, unlike the tree read above, is a real Agent command. It must not block the tree render
+        // above. TryRestoreSelectionAsync only does work when this page instance has no selection yet
+        // (first load / workspace switch); later reloads triggered by Refresh or a mutation already have
+        // a selection and return immediately.
         if (_errorMessage == null)
         {
             await TryRestoreSelectionAsync();
