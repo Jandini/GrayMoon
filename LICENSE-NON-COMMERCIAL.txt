@@ -29,19 +29,23 @@ You may NOT:
 - provide the software as part of a hosted or SaaS offering for a fee
 - remove or alter copyright notices
 
-3. Distribution
+3. Forks, Modifications, and Derivative Works
+
+Creating a fork, modified version, or other derivative work does not remove or change these license restrictions. Such versions remain subject to this Non-Commercial License and may only be used for Non-Commercial Use. Commercial use of any fork, modified version, or derivative work still requires a valid GrayMoon Commercial License.
+
+4. Distribution
 
 You may distribute unmodified copies of this software for non-commercial purposes only, provided this license is included.
 
-4. No Warranty
+5. No Warranty
 
 This software is provided "AS IS", without warranty of any kind, express or implied, including but not limited to fitness for a particular purpose.
 
-5. Limitation of Liability
+6. Limitation of Liability
 
 In no event shall the author be liable for any claim, damages, or other liability arising from the use of the software.
 
-6. Commercial Use
+7. Commercial Use
 
 Any use that does not qualify as Non-Commercial Use requires a valid Commercial License.
 
