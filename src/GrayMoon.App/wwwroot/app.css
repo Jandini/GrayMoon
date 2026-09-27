@@ -1030,6 +1030,65 @@ input[list] {
 .home-banner-copy {
     position: relative;
     z-index: 3;
+    min-width: 0;
+}
+
+.home-banner-invite {
+    position: relative;
+    z-index: 3;
+    margin-left: auto;
+    padding-left: 1.75rem;
+    text-align: right;
+    flex: 0 1 auto;
+}
+
+.home-banner-invite-text {
+    margin: 0 0 0.55rem;
+    font-family: "Cormorant Garamond", "Times New Roman", serif;
+    font-size: 1.2rem;
+    font-weight: 500;
+    line-height: 1.15;
+    letter-spacing: 0.02em;
+    color: var(--text-primary);
+    text-shadow: -1px 0 #000, 1px 0 #000, 0 -1px #000, 0 1px #000;
+    white-space: nowrap;
+}
+
+.home-banner-discuss,
+.home-banner-discuss:link,
+.home-banner-discuss:visited,
+.home-banner-discuss:focus,
+.home-banner-discuss:active {
+    background-color: #9a9a9a;
+    border-color: #8a8a8a;
+    color: #111111 !important;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    line-height: 1.2;
+    padding: 0.3rem 0.7rem;
+}
+
+.home-banner-discuss:hover {
+    background-color: #adadad;
+    border-color: #9a9a9a;
+    color: #000000 !important;
+}
+
+@media (max-width: 767.98px) {
+    .home-banner {
+        flex-wrap: wrap;
+    }
+
+    .home-banner-invite {
+        margin-left: 0;
+        margin-top: 0.85rem;
+        padding-left: 0;
+        text-align: left;
+    }
+
+    .home-banner-invite-text {
+        white-space: normal;
+    }
 }
 
 .banner-title {
