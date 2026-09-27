@@ -7,6 +7,7 @@
 @inject IJSRuntime JsRuntime
 @inject AgentConnectionTracker AgentConnectionTracker
 @inject ConnectorHealthService ConnectorHealthService
+@inject ConnectorRepository ConnectorRepository
 <PageTitle>Home - GrayMoon</PageTitle>
 
 @if (!showHome)
@@ -20,9 +21,11 @@ else
 <div class="container-fluid page-container">
     <div class="row mb-4 align-items-stretch">
         <div class="col-md-8 col-lg-8 d-flex mb-4 mb-md-0">
-            <div class="jumbotron banner-card-style rounded p-4 border flex-grow-1 d-flex align-items-center">
-                <img src="moon.svg" alt="GrayMoon" class="me-4" style="height: 80px; width: auto; flex-shrink: 0;" />
-                <div>
+            <div class="jumbotron banner-card-style home-banner rounded p-4 border flex-grow-1 d-flex align-items-center">
+                <div class="home-banner-glow" aria-hidden="true"></div>
+                <img src="moon-dark.svg" alt="" class="home-banner-moon" aria-hidden="true" />
+                <div class="home-banner-veil" aria-hidden="true"></div>
+                <div class="home-banner-copy">
                     <h1 class="display-5 mb-0 banner-title">
                         GrayMoon
                     </h1>
@@ -74,7 +77,7 @@ else
                         Configure access to GitHub and NuGet registries and manage connector tokens.
                     </p>
                     <a class="btn @ConnectorButtonClass" href="/connectors">
-                        Manage Connectors
+                        @ConnectorButtonText
                     </a>
                 </div>
             </div>
@@ -102,6 +105,7 @@ else
 @code {
     private const string DefaultWorkspaceRedirectKey = "defaultWorkspaceRedirected";
     private bool showHome;
+    private bool hasConnectors;
     private bool anyUsedConnectorUnhealthy;
 
     private string AgentButtonText => AgentConnectionTracker.State switch
@@ -113,11 +117,15 @@ else
 
     private string AgentButtonClass => AgentConnectionTracker.State == AgentConnectionState.Online ? "btn-primary" : "btn-danger";
 
-    private string ConnectorButtonClass => anyUsedConnectorUnhealthy ? "btn-danger" : "btn-primary";
+    private string ConnectorButtonText => hasConnectors ? "Manage Connectors" : "Add Connectors";
+
+    private string ConnectorButtonClass => hasConnectors && !anyUsedConnectorUnhealthy ? "btn-primary" : "btn-danger";
 
     protected override async Task OnInitializedAsync()
     {
-        anyUsedConnectorUnhealthy = await ConnectorHealthService.AnyUsedConnectorUnhealthyAsync();
+        var connectors = await ConnectorRepository.GetAllAsync();
+        hasConnectors = connectors.Count > 0;
+        anyUsedConnectorUnhealthy = hasConnectors && await ConnectorHealthService.AnyUsedConnectorUnhealthyAsync();
     }
 
     protected override void OnAfterRender(bool firstRender)
