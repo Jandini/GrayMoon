@@ -990,7 +990,7 @@ input[list] {
     border-color: var(--border-color) !important;
 }
 
-/* Scaled-down echo of the Desktop About dialog: dark moon, clipped off the right edge. */
+/* Dark moon, zoomed and clipped off the left edge so the visible half sits behind the title. */
 .home-banner {
     position: relative;
     overflow: hidden;
@@ -999,24 +999,24 @@ input[list] {
 
 .home-banner-glow {
     position: absolute;
-    width: 142px;
-    height: 142px;
-    right: -40px;
-    top: 50%;
-    transform: translateY(-50%);
+    width: 52rem;
+    height: 52rem;
+    left: 0;
+    top: 36%;
+    transform: translate(-50%, -50%);
     border-radius: 50%;
-    background: radial-gradient(circle, rgba(42, 58, 85, 0.2) 0%, rgba(32, 40, 64, 0.09) 45%, transparent 100%);
+    background: radial-gradient(circle, rgba(42, 58, 85, 0.28) 0%, rgba(32, 40, 64, 0.12) 45%, transparent 100%);
     pointer-events: none;
     z-index: 0;
 }
 
 .home-banner-moon {
     position: absolute;
-    width: 168px;
-    height: 168px;
-    right: -58px;
-    top: 50%;
-    transform: translateY(calc(-50% - 13px));
+    width: 48rem;
+    height: 48rem;
+    left: 0;
+    top: 36%;
+    transform: translate(-50%, -50%);
     pointer-events: none;
     z-index: 1;
 }
@@ -1026,9 +1026,8 @@ input[list] {
     inset: 0;
     background: linear-gradient(
         90deg,
-        color-mix(in srgb, var(--bg-card) 90%, transparent) 0%,
-        color-mix(in srgb, var(--bg-card) 60%, transparent) 38%,
-        color-mix(in srgb, var(--bg-card) 20%, transparent) 68%,
+        color-mix(in srgb, var(--bg-card) 18%, transparent) 0%,
+        transparent 42%,
         transparent 100%);
     pointer-events: none;
     z-index: 2;
