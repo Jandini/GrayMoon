@@ -40,6 +40,18 @@ See the full tour, with real screenshots from a running instance, in the **[Gray
 
 ## Quick start
 
+### GrayMoon Desktop (Windows)
+
+The fastest way to run GrayMoon on Windows is **GrayMoon Desktop** - a native installer that bundles the App and Worker so you don't need Docker or a separate browser tab.
+
+1. Download the latest `Setup.exe` from **[Jandini/GrayMoon.Release](https://github.com/Jandini/GrayMoon.Release/releases)** (stable releases; prereleases are also published there).
+2. Run the installer and launch **GrayMoon** from the Start menu.
+3. Add a GitHub connector and create your first workspace.
+
+Desktop checks for updates on startup from the same release repository.
+
+### Docker
+
 GrayMoon is two small pieces - keep both running:
 
 - **GrayMoon App** - the web UI and orchestration engine, runs in Docker.
