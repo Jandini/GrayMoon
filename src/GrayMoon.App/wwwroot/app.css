@@ -1030,28 +1030,22 @@ input[list] {
 .home-banner-copy {
     position: relative;
     z-index: 3;
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
     min-width: 0;
+    padding-right: 1rem;
 }
 
 .home-banner-invite {
     position: relative;
     z-index: 3;
-    margin-left: auto;
-    padding-left: 1.75rem;
+    align-self: flex-end;
+    /* Banner padding is 1.5rem; other tiles use card-body padding. */
+    margin-right: calc(var(--bs-card-spacer-x, 1rem) - 1.5rem);
+    margin-bottom: calc(var(--bs-card-spacer-y, 1rem) - 1.5rem);
     text-align: right;
-    flex: 0 1 auto;
-}
-
-.home-banner-invite-text {
-    margin: 0 0 0.55rem;
-    font-family: "Cormorant Garamond", "Times New Roman", serif;
-    font-size: 1.2rem;
-    font-weight: 500;
-    line-height: 1.15;
-    letter-spacing: 0.02em;
-    color: var(--text-primary);
-    text-shadow: -1px 0 #000, 1px 0 #000, 0 -1px #000, 0 1px #000;
-    white-space: nowrap;
 }
 
 .home-banner-discuss,
@@ -1062,33 +1056,12 @@ input[list] {
     background-color: #9a9a9a;
     border-color: #8a8a8a;
     color: #111111 !important;
-    font-size: 0.8125rem;
-    font-weight: 500;
-    line-height: 1.2;
-    padding: 0.3rem 0.7rem;
 }
 
 .home-banner-discuss:hover {
     background-color: #adadad;
     border-color: #9a9a9a;
     color: #000000 !important;
-}
-
-@media (max-width: 767.98px) {
-    .home-banner {
-        flex-wrap: wrap;
-    }
-
-    .home-banner-invite {
-        margin-left: 0;
-        margin-top: 0.85rem;
-        padding-left: 0;
-        text-align: left;
-    }
-
-    .home-banner-invite-text {
-        white-space: normal;
-    }
 }
 
 .banner-title {
