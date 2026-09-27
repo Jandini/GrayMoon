@@ -5,6 +5,14 @@
 [![Docker Build](https://github.com/Jandini/GrayMoon/actions/workflows/docker-build.yml/badge.svg)](https://github.com/Jandini/GrayMoon/actions/workflows/docker-build.yml)
 [![Wiki](https://img.shields.io/badge/docs-wiki-blue)](https://github.com/Jandini/GrayMoon/wiki)
 
+## Install now
+
+```powershell
+winget install graymoon
+```
+
+Then launch **GrayMoon** from the Start menu. Windows only - see [Quick start](#quick-start) for other options.
+
 If your .NET solution has spread across a dozen GitHub repositories - services, shared libraries, NuGet packages, all versioned with **GitVersion** - GrayMoon is the missing control plane. It clones, branches, updates, and pushes across every repository in a workspace as one coordinated action, in the correct dependency order, so a single feature or a single package rollout doesn't turn into an afternoon of repo-by-repo bookkeeping.
 
 It is also built for how teams work today: fast, parallel, AI-assisted development across many small repositories instead of one giant monolith.
@@ -38,7 +46,26 @@ It is also built for how teams work today: fast, parallel, AI-assisted developme
 
 See the full tour, with real screenshots from a running instance, in the **[GrayMoon wiki](https://github.com/Jandini/GrayMoon/wiki)**.
 
+## Coming soon
+
+![Markdown Preview in Changes](https://raw.githubusercontent.com/wiki/Jandini/GrayMoon/screenshots/workspace-changes-md-preview.png)
+
+- **Worktrees as Features (GrayMoon).** Today a workspace has one checkout per repository, so you typically work one coordinated branch set at a time. Next up: treat each feature as its own set of git worktrees across the workspace - so you can park an in-flight change, start another, and switch contexts without stashing or re-cloning a dozen repos. Built for AI-assisted and human multi-thread development where several short-lived efforts overlap.
+- **Native Markdown changes review (GrayMoon).** Review Markdown diffs the way you read docs - rendered before/after in the product, not only as raw text hunks - so README, wiki, and design-doc edits are easy to approve across many repositories before you commit or open a PR.
+- **Azure DevOps support (GrayMoon).** GrayMoon is GitHub-first today (connectors, Actions, pull requests). Azure DevOps support brings the same workspace model - clone, branch, dependency-aware updates, and pull requests - plus **Pipelines** status and control across the workspace (the Azure DevOps counterpart to GitHub Actions), so teams whose code and CI live in Azure DevOps are not locked to one host.
+- **MCP in GrayMoon Desktop.** An MCP server in the Desktop shell so AI coding agents can drive GrayMoon through a stable tool surface - open workspaces, inspect status, and run coordinated actions - instead of scraping the UI or inventing one-off scripts. Desktop is the natural host: local Worker, native process, and a single place agents already run beside your editor.
+
 ## Quick start
+
+### GrayMoon Desktop (Windows)
+
+Prefer winget? Use [`winget install graymoon`](#install-now) above.
+
+Otherwise download the latest `Setup.exe` from **[Jandini/GrayMoon.Release](https://github.com/Jandini/GrayMoon.Release/releases)**, run the installer, and launch **GrayMoon** from the Start menu. Add a GitHub connector and create your first workspace.
+
+Desktop checks for updates on startup from the same release repository.
+
+### Docker
 
 GrayMoon is two small pieces - keep both running:
 
