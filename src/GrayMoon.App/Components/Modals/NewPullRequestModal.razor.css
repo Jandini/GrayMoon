@@ -3,6 +3,95 @@
     border-color: #6c757d;
 }
 
+/* Keep the dialog fixed in the viewport center (same pattern as Custom Dependencies). */
+.new-pr-modal {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.new-pr-modal-dialog {
+    margin: 1rem;
+    max-height: calc(100vh - 2rem);
+    width: calc(100% - 2rem);
+}
+
+.new-pr-modal-dialog > .modal-content {
+    max-height: calc(100vh - 2rem);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.new-pr-modal-dialog .modal-body {
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+/* Tabs — same pattern as Switch Branch / Branch modals */
+.new-pr-tabs {
+    border-bottom: 1px solid var(--border-color);
+}
+
+.new-pr-tabs .nav-link {
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    border-bottom: none;
+    margin-bottom: -1px;
+    background: var(--bg-tertiary);
+    border-radius: 0.375rem 0.375rem 0 0 !important;
+}
+
+.new-pr-tabs .nav-link:hover {
+    color: var(--text-primary);
+    border-color: var(--border-color);
+    border-bottom: none;
+    background: var(--bg-hover);
+    border-radius: 0.375rem 0.375rem 0 0 !important;
+}
+
+.new-pr-tabs .nav-link.active {
+    color: #fff;
+    border-color: var(--accent-blue) var(--accent-blue) var(--border-color);
+    border-bottom: 1px solid var(--bg-card, var(--bg-primary));
+    background: var(--accent-blue);
+    border-radius: 0.375rem 0.375rem 0 0 !important;
+}
+
+.new-pr-tabs .nav-link.active:hover {
+    color: #fff;
+    background: var(--accent-blue-hover);
+    border-color: var(--accent-blue-hover) var(--accent-blue-hover) var(--border-color);
+    border-bottom: 1px solid var(--bg-card, var(--bg-primary));
+    border-radius: 0.375rem 0.375rem 0 0 !important;
+}
+
+.new-pr-tabs .nav-link:focus {
+    box-shadow: none;
+}
+
+.new-pr-tabs .nav-link:focus-visible {
+    box-shadow: 0 0 0 1px var(--focus-ring-outer);
+}
+
+/* Keep tab panels the same height so the dialog does not jump on switch. */
+.new-pr-tab-panels {
+    display: grid;
+}
+
+.new-pr-tab-panel {
+    grid-area: 1 / 1;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.new-pr-tab-panel--active {
+    visibility: visible;
+    pointer-events: auto;
+}
+
 .new-pr-reviewers-label-row {
     margin-bottom: 0.5rem;
 }

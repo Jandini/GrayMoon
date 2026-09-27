@@ -11,10 +11,10 @@
 
 @if (IsVisible)
 {
-    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
+    <div class="modal show d-block new-pr-modal" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
          @onkeydown="HandleKeyDown"
          @ref="modalElement">
-        <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-dialog modal-lg modal-dialog-centered new-pr-modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">
@@ -24,94 +24,123 @@
                     <button type="button" class="btn-close" aria-label="Close" @onclick="HandleCancelClick" disabled="@IsBusy"></button>
                 </div>
                 <div class="modal-body">
-                    <div class="mb-3">
-                        <label class="form-label" for="new-pr-title">Title</label>
-                        <input id="new-pr-title"
-                               type="text"
-                               class="form-control"
-                               @bind="_title"
-                               @bind:event="oninput"
-                               @ref="titleInput"
-                               disabled="@IsBusy" />
-                    </div>
+                    <ul class="nav nav-tabs new-pr-tabs mb-3" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button type="button"
+                                    class="nav-link @(_activeTab == "details" ? "active" : null)"
+                                    role="tab"
+                                    aria-selected="@(_activeTab == "details")"
+                                    id="new-pr-tab-details"
+                                    @onclick='() => SetActiveTab("details")'>
+                                Details
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button type="button"
+                                    class="nav-link @(_activeTab == "review" ? "active" : null)"
+                                    role="tab"
+                                    aria-selected="@(_activeTab == "review")"
+                                    id="new-pr-tab-review"
+                                    @onclick='() => SetActiveTab("review")'>
+                                Review
+                            </button>
+                        </li>
+                    </ul>
 
-                    <div class="mb-3">
-                        <label class="form-label" for="new-pr-body">Description</label>
-                        <textarea id="new-pr-body"
-                                  class="form-control new-pr-body"
-                                  rows="6"
-                                  @bind="_body"
-                                  @bind:event="oninput"
-                                  disabled="@IsBusy"></textarea>
-                        <div class="form-text text-muted">
-                            If left empty, the repository pull request template will be used if available.
+                    <div class="new-pr-tab-panels">
+                        <div class="@TabPanelClass("details")"
+                             aria-hidden="@(_activeTab != "details")">
+                            <div class="mb-3">
+                                <label class="form-label" for="new-pr-title">Title</label>
+                                <input id="new-pr-title"
+                                       type="text"
+                                       class="form-control"
+                                       @bind="_title"
+                                       @bind:event="oninput"
+                                       @ref="titleInput"
+                                       disabled="@IsBusy" />
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label" for="new-pr-body">Description</label>
+                                <textarea id="new-pr-body"
+                                          class="form-control new-pr-body"
+                                          rows="6"
+                                          @bind="_body"
+                                          @bind:event="oninput"
+                                          disabled="@IsBusy"></textarea>
+                                <div class="form-text text-muted">
+                                    If left empty, the repository pull request template will be used if available.
+                                </div>
+                            </div>
+
+                            <div class="form-check mb-0">
+                                <input id="new-pr-draft"
+                                       type="checkbox"
+                                       class="form-check-input"
+                                       @bind="_isDraft"
+                                       disabled="@IsBusy" />
+                                <label for="new-pr-draft" class="form-check-label">Draft pull request</label>
+                            </div>
                         </div>
-                    </div>
 
-                    <div class="form-check mb-3">
-                        <input id="new-pr-draft"
-                               type="checkbox"
-                               class="form-check-input"
-                               @bind="_isDraft"
-                               disabled="@IsBusy" />
-                        <label for="new-pr-draft" class="form-check-label">Draft pull request</label>
-                    </div>
-
-                    <div class="mb-2">
-                        <div class="d-flex align-items-center justify-content-between new-pr-reviewers-label-row">
-                            <label class="form-label mb-0" for="new-pr-reviewers-filter">Reviewers <span class="text-muted">(optional)</span></label>
-                            <span class="new-pr-reviewers-count">@GetReviewerCountText()</span>
-                        </div>
-                        <div class="new-pr-reviewer-box">
-                            <input id="new-pr-reviewers-filter"
-                                   type="text"
-                                   class="new-pr-reviewer-search"
-                                   placeholder="search user or team..."
-                                   @bind="_reviewerFilter"
-                                   @bind:event="oninput"
-                                   disabled="@(IsBusy || _isLoadingReviewers)" />
-                            <div class="new-pr-reviewer-list">
-                                @if (_isLoadingReviewers)
-                                {
-                                    <div class="new-pr-reviewer-status d-flex align-items-center gap-2 px-2 py-1 text-muted">
-                                        <span class="spinner-border new-pr-reviewer-spinner" role="status" aria-hidden="true"></span>
-                                        Loading reviewers...
-                                    </div>
-                                }
-                                else
-                                {
-                                    var filtered = GetFilteredReviewers();
-                                    @if (filtered.Count == 0)
+                        <div class="@TabPanelClass("review")"
+                             aria-hidden="@(_activeTab != "review")">
+                            <div class="d-flex align-items-center justify-content-between new-pr-reviewers-label-row">
+                                <label class="form-label mb-0" for="new-pr-reviewers-filter">Reviewers <span class="text-muted">(optional)</span></label>
+                                <span class="new-pr-reviewers-count">@GetReviewerCountText()</span>
+                            </div>
+                            <div class="new-pr-reviewer-box">
+                                <input id="new-pr-reviewers-filter"
+                                       type="text"
+                                       class="new-pr-reviewer-search"
+                                       placeholder="search user or team..."
+                                       @bind="_reviewerFilter"
+                                       @bind:event="oninput"
+                                       disabled="@(IsBusy || _isLoadingReviewers)" />
+                                <div class="new-pr-reviewer-list">
+                                    @if (_isLoadingReviewers)
                                     {
-                                        <div class="new-pr-reviewer-status text-muted px-2 py-1">
-                                            @(_allReviewers.Count == 0
-                                                ? "No reviewers were returned by GitHub."
-                                                : "No users or teams match the filter.")
+                                        <div class="new-pr-reviewer-status d-flex align-items-center gap-2 px-2 py-1 text-muted">
+                                            <span class="spinner-border new-pr-reviewer-spinner" role="status" aria-hidden="true"></span>
+                                            Loading reviewers...
                                         </div>
                                     }
                                     else
                                     {
-                                        @foreach (var item in filtered)
+                                        var filtered = GetFilteredReviewers();
+                                        @if (filtered.Count == 0)
                                         {
-                                            var isChecked = IsReviewerSelected(item);
-                                            var key = ReviewerKey(item);
-                                            <label class="new-pr-reviewer-item d-flex align-items-center gap-2 px-2 py-1"
-                                                   for="@($"new-pr-reviewer-{key}")">
-                                                <input id="@($"new-pr-reviewer-{key}")"
-                                                       type="checkbox"
-                                                       class="form-check-input m-0"
-                                                       checked="@isChecked"
-                                                       @onchange="@((ChangeEventArgs e) => ToggleReviewer(item, e.Value is bool b && b))"
-                                                       disabled="@IsBusy" />
-                                                <span class="flex-grow-1">@item.Name</span>
-                                                @if (item.IsTeam)
-                                                {
-                                                    <span class="badge bg-secondary">team</span>
-                                                }
-                                            </label>
+                                            <div class="new-pr-reviewer-status text-muted px-2 py-1">
+                                                @(_allReviewers.Count == 0
+                                                    ? "No reviewers were returned by GitHub."
+                                                    : "No users or teams match the filter.")
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            @foreach (var item in filtered)
+                                            {
+                                                var isChecked = IsReviewerSelected(item);
+                                                var key = ReviewerKey(item);
+                                                <label class="new-pr-reviewer-item d-flex align-items-center gap-2 px-2 py-1"
+                                                       for="@($"new-pr-reviewer-{key}")">
+                                                    <input id="@($"new-pr-reviewer-{key}")"
+                                                           type="checkbox"
+                                                           class="form-check-input m-0"
+                                                           checked="@isChecked"
+                                                           @onchange="@((ChangeEventArgs e) => ToggleReviewer(item, e.Value is bool b && b))"
+                                                           disabled="@IsBusy" />
+                                                    <span class="flex-grow-1">@item.Name</span>
+                                                    @if (item.IsTeam)
+                                                    {
+                                                        <span class="badge bg-secondary">team</span>
+                                                    }
+                                                </label>
+                                            }
                                         }
                                     }
-                                }
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -186,6 +215,18 @@
     private bool _isCheckingUnpushed;
     private HashSet<int> _repoIdsNeedingPush = new();
     private CancellationTokenSource? _pushCheckCts;
+    private string _activeTab = "details";
+
+    private void SetActiveTab(string tab)
+    {
+        if (_activeTab == tab)
+            return;
+
+        _activeTab = tab;
+    }
+
+    private string TabPanelClass(string tab) =>
+        $"new-pr-tab-panel{(_activeTab == tab ? " new-pr-tab-panel--active" : null)}";
 
     private bool HasUnifiedHeadBranch => Targets.Count > 0
         && Targets.Select(t => t.HeadBranch).Distinct(StringComparer.Ordinal).Count() == 1;
@@ -204,6 +245,7 @@
             _reviewerFilter = string.Empty;
             _selectedReviewerKeys.Clear();
             _allReviewers = new();
+            _activeTab = "details";
             _focusTitleOnNextRender = true;
             _isCheckingUnpushed = false;
             _repoIdsNeedingPush = new();
