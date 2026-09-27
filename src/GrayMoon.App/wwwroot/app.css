@@ -123,6 +123,13 @@ a.workspaces-breadcrumb-link:hover {
     text-decoration: underline;
 }
 
+/* Buttons are often anchors, so the link hover underline would otherwise apply.
+   Join Discussion keeps that underline. */
+a.btn:hover:not(.btn-link):not(.home-banner-discuss),
+button.btn:hover:not(.btn-link) {
+    text-decoration: none;
+}
+
 /* Buttons */
 .btn-primary,
 .btn-primary:link,
@@ -1062,6 +1069,7 @@ input[list] {
     background-color: #adadad;
     border-color: #9a9a9a;
     color: #000000 !important;
+    text-decoration: underline;
 }
 
 .banner-title {
