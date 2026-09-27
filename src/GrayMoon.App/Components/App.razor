@@ -128,7 +128,7 @@
                 body: JSON.stringify({ value: collapsed })
             }).catch(function () { });
         };
-        // Collapsed sidebar nav hints: simple tooltip for all icons, workspace dropdown for Repositories.
+        // Collapsed sidebar nav hints: simple tooltip for all icons, recent-workspace dropdown for Workspaces.
         (function () {
             var tip = null;
             var menu = null;
@@ -221,29 +221,30 @@
                 clearTimer();
             }
 
+            function rememberOpenWorkspace() {
+                var path = window.location.pathname || '';
+                var m = path.match(/\/workspaces\/(\d+)/i);
+                if (!m) return;
+                var wsId = parseInt(m[1], 10);
+                var nameEl = document.querySelector('.top-row-workspace-title__link')
+                          || document.querySelector('.top-row-workspace-title__text');
+                var wsName = nameEl ? (nameEl.textContent || '').trim() : '';
+                if (!wsName || (visited.length && visited[0].id === wsId)) return;
+                visited = visited.filter(function (w) { return w.id !== wsId; });
+                visited.unshift({ id: wsId, name: wsName, url: 'workspaces/' + wsId });
+                if (visited.length > 6) visited.length = 6;
+            }
+
             document.addEventListener('mouseover', function (e) {
                 var link = e.target.closest('.sidebar .nav-link');
                 if (!link) return;
+                rememberOpenWorkspace();
                 var page = document.querySelector('.page');
                 if (!page || (!page.classList.contains('page--navbar-collapsed') && !window.matchMedia('(max-width: 640.98px)').matches)) return;
                 var item = link.closest('[data-nav-label]');
                 var label = item ? item.getAttribute('data-nav-label') : '';
                 if (!label) return;
-                if (label === 'Repositories') {
-                    // Detect current workspace from the nav-link href and header title element
-                    var href = link.getAttribute('href') || '';
-                    var m = href.match(/workspaces\/(\d+)/i);
-                    if (m) {
-                        var wsId = parseInt(m[1], 10);
-                        var nameEl = document.querySelector('.top-row-workspace-title__link')
-                                  || document.querySelector('.top-row-workspace-title__text');
-                        var wsName = nameEl ? (nameEl.textContent || '').trim() : '';
-                        if (wsName && (!visited.length || visited[0].id !== wsId)) {
-                            visited = visited.filter(function (w) { return w.id !== wsId; });
-                            visited.unshift({ id: wsId, name: wsName, url: href });
-                            if (visited.length > 6) visited.length = 6;
-                        }
-                    }
+                if (label === 'Workspaces') {
                     if (visited.length > 1) { showMenu(link); return; }
                     if (visited.length === 1) { showTip(link, visited[0].name); return; }
                     showTip(link, label);
