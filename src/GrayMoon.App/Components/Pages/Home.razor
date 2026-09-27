@@ -126,7 +126,7 @@ else
             : AgentConnectionTracker.State switch
             {
                 AgentConnectionState.Online => "Manage Worker",
-                AgentConnectionState.VersionMismatch => "Upgrade Worker",
+                AgentConnectionState.VersionMismatch => "Update Worker",
                 _ => "Install Worker"
             };
 
