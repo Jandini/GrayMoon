@@ -1,11 +1,13 @@
 @page "/"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Text.Json
 @using GrayMoon.App.Repositories
 @using GrayMoon.App.Services
 @inject WorkspaceRepository WorkspaceRepository
 @inject NavigationManager NavigationManager
 @inject IJSRuntime JsRuntime
 @inject AgentConnectionTracker AgentConnectionTracker
+@inject IAgentBridge AgentBridge
 @inject ConnectorHealthService ConnectorHealthService
 @inject ConnectorRepository ConnectorRepository
 <PageTitle>Home - GrayMoon</PageTitle>
@@ -107,15 +109,23 @@ else
     private bool showHome;
     private bool hasConnectors;
     private bool anyUsedConnectorUnhealthy;
+    private bool hostPrerequisitesMissing;
+    private int hostInfoGeneration;
 
-    private string AgentButtonText => AgentConnectionTracker.State switch
-    {
-        AgentConnectionState.Online => "Manage Worker",
-        AgentConnectionState.VersionMismatch => "Upgrade Worker",
-        _ => "Install Worker"
-    };
+    private string AgentButtonText =>
+        AgentConnectionTracker.State == AgentConnectionState.Online && hostPrerequisitesMissing
+            ? "Install Prerequisites"
+            : AgentConnectionTracker.State switch
+            {
+                AgentConnectionState.Online => "Manage Worker",
+                AgentConnectionState.VersionMismatch => "Upgrade Worker",
+                _ => "Install Worker"
+            };
 
-    private string AgentButtonClass => AgentConnectionTracker.State == AgentConnectionState.Online ? "btn-primary" : "btn-danger";
+    private string AgentButtonClass =>
+        AgentConnectionTracker.State == AgentConnectionState.Online && !hostPrerequisitesMissing
+            ? "btn-primary"
+            : "btn-danger";
 
     private string ConnectorButtonText => hasConnectors ? "Manage Connectors" : "Add Connectors";
 
@@ -130,9 +140,78 @@ else
 
     protected override void OnAfterRender(bool firstRender)
     {
-        if (firstRender)
-            AgentConnectionTracker.OnStateChanged(_ => InvokeAsync(StateHasChanged));
+        if (!firstRender)
+            return;
+
+        AgentConnectionTracker.OnStateChanged(state =>
+        {
+            try
+            {
+                _ = InvokeAsync(() => OnAgentStateChangedAsync(state));
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        });
     }
+
+    private async Task OnAgentStateChangedAsync(AgentConnectionState state)
+    {
+        if (state != AgentConnectionState.Online)
+        {
+            Interlocked.Increment(ref hostInfoGeneration);
+            hostPrerequisitesMissing = false;
+            StateHasChanged();
+            return;
+        }
+
+        StateHasChanged();
+        await RefreshHostPrerequisitesAsync();
+    }
+
+    private async Task RefreshHostPrerequisitesAsync()
+    {
+        var generation = Interlocked.Increment(ref hostInfoGeneration);
+        var missing = await QueryHostPrerequisitesMissingAsync();
+        if (generation != Volatile.Read(ref hostInfoGeneration))
+            return;
+
+        hostPrerequisitesMissing = AgentConnectionTracker.State == AgentConnectionState.Online && missing;
+        StateHasChanged();
+    }
+
+    private async Task<bool> QueryHostPrerequisitesMissingAsync()
+    {
+        if (!AgentBridge.IsAgentConnected)
+            return false;
+
+        try
+        {
+            var response = await AgentBridge.SendCommandAsync("GetHostInfo", new { }, CancellationToken.None);
+            if (!response.Success || response.Data is null)
+                return false;
+
+            var json = response.Data is JsonElement element
+                ? element.GetRawText()
+                : JsonSerializer.Serialize(response.Data);
+            var dto = JsonSerializer.Deserialize<HostInfoDto>(
+                json,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (dto is null)
+                return false;
+
+            return HostPrerequisiteState.AnyMissing(new HostPrerequisiteVersions(
+                dto.DotnetVersion,
+                dto.GitVersion,
+                dto.GitVersionToolVersion));
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private sealed record HostInfoDto(string? DotnetVersion, string? GitVersion, string? GitVersionToolVersion);
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
