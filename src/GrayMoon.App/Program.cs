@@ -106,6 +106,7 @@ try
     builder.Services.AddSingleton<DesktopTopBarState>();
     builder.Services.AddSingleton<AgentConnectionTracker>();
     builder.Services.AddScoped<HostPrerequisiteInstallService>();
+    builder.Services.AddScoped<WorkerInstallService>();
     builder.Services.AddHostedService<AgentUpdateDesktopNotifier>();
     builder.Services.AddSingleton<AgentQueueStateService>();
     builder.Services.AddSingleton<AgentCommandCancelSender>();
