@@ -331,7 +331,10 @@
 
     private bool ShowUpdateNowButton => AgentConnectionTracker.State == AgentConnectionState.VersionMismatch;
 
-    private bool ShowDesktopWorkerInstall => _desktopHostDetected && _isDesktopHost;
+    private bool ShowDesktopWorkerInstall =>
+        _desktopHostDetected
+        && _isDesktopHost
+        && AgentConnectionTracker.State == AgentConnectionState.Offline;
 
     private async Task InstallWorkerAsync()
     {
