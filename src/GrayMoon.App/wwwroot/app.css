@@ -863,6 +863,9 @@ select:disabled,
 .modal-header {
     border-bottom-color: var(--border-color);
     background-color: var(--bg-tertiary);
+    /* Title no-wrap/ellipsis support — MUST be merged with the ahead branch later. */
+    min-width: 0;
+    gap: 0.75rem;
 }
 
 .modal-footer {
@@ -870,8 +873,50 @@ select:disabled,
     background-color: var(--bg-tertiary);
 }
 
+/*
+ * Dialog title no-wrap / ellipsis (including compound primary + secondary parts).
+ * MUST be merged with the ahead branch later — do not drop this when reconciling that work.
+ */
 .modal-title {
     color: var(--text-primary);
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.modal-header > .btn-close {
+    flex-shrink: 0;
+}
+
+/* Compound titles (label + repo/file/etc.): keep on one line; truncate the secondary part.
+   MUST be merged with the ahead branch later. */
+.modal-title.modal-title--compound {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: nowrap;
+    gap: 0.35rem;
+}
+
+.modal-title--compound .modal-title__primary,
+.modal-title--compound .modal-title__secondary {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.modal-title--compound .modal-title__primary {
+    flex: 0 1 auto;
+}
+
+.modal-title--compound .modal-title__secondary {
+    flex: 1 1 auto;
+}
+
+.modal-title--compound .modal-title__suffix {
+    flex-shrink: 0;
 }
 
 .modal-header.bg-warning .modal-title {

@@ -14,7 +14,18 @@
         <div class="modal-dialog branch-modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">@(string.IsNullOrEmpty(WorkspaceName) ? "Branch" : $"{WorkspaceName} Branch")</h5>
+                    @* Title no-wrap/ellipsis — MUST be merged with the ahead branch later. *@
+                    <h5 class="modal-title modal-title--compound" title="@(string.IsNullOrEmpty(WorkspaceName) ? "Branch" : $"{WorkspaceName} Branch")">
+                        @if (string.IsNullOrEmpty(WorkspaceName))
+                        {
+                            <span class="modal-title__primary">Branch</span>
+                        }
+                        else
+                        {
+                            <span class="modal-title__primary">@WorkspaceName</span>
+                            <span class="modal-title__suffix">Branch</span>
+                        }
+                    </h5>
                     <button type="button" class="btn-close" @onclick="OnCancel"></button>
                 </div>
                 <div class="modal-body">

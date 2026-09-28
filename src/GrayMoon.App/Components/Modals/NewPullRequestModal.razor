@@ -17,9 +17,14 @@
         <div class="modal-dialog modal-lg modal-dialog-centered new-pr-modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">
-                        New Pull Request <span class="text-muted">·</span>
-                        @(Targets.Count == 1 ? Targets[0].RepositoryName : $"{Targets.Count} repositories")
+                    @* Title no-wrap/ellipsis — MUST be merged with the ahead branch later. *@
+                    <h5 class="modal-title modal-title--compound">
+                        <span class="modal-title__primary">New Pull Request</span>
+                        <span class="modal-title__suffix text-muted">·</span>
+                        @{
+                            var newPrSubtitle = Targets.Count == 1 ? Targets[0].RepositoryName : $"{Targets.Count} repositories";
+                        }
+                        <span class="modal-title__secondary" title="@newPrSubtitle">@newPrSubtitle</span>
                     </h5>
                     <button type="button" class="btn-close" aria-label="Close" @onclick="HandleCancelClick" disabled="@IsBusy"></button>
                 </div>

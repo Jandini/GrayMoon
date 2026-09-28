@@ -9,12 +9,16 @@
         <div class="modal-dialog modal-xl gha-logs-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">
-                        @(WorkflowDisplayName ?? "Workflow Logs")
-                        <span class="text-muted fw-normal fs-6 ms-2">@RepositoryName</span>
+                    @* Title no-wrap/ellipsis — MUST be merged with the ahead branch later. *@
+                    <h5 class="modal-title modal-title--compound">
+                        <span class="modal-title__primary" title="@(WorkflowDisplayName ?? "Workflow Logs")">@(WorkflowDisplayName ?? "Workflow Logs")</span>
+                        @if (!string.IsNullOrEmpty(RepositoryName))
+                        {
+                            <span class="modal-title__secondary text-muted fw-normal fs-6" title="@RepositoryName">@RepositoryName</span>
+                        }
                         @if (RunId > 0)
                         {
-                            <span class="text-muted fw-normal fs-6 ms-2">#@RunId</span>
+                            <span class="modal-title__suffix text-muted fw-normal fs-6">#@RunId</span>
                         }
                     </h5>
                     <button type="button" class="btn-close" @onclick="CloseAsync"></button>
