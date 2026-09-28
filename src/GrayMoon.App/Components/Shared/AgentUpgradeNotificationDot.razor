@@ -1,0 +1,33 @@
+@inject HomeNavAttentionMonitor Attention
+@rendermode @(new InteractiveServerRenderMode(prerender: true))
+@implements IDisposable
+
+@if (Attention.ShowDot)
+{
+    <span class="nav-notification-dot"
+          title="@Attention.Title"
+          aria-label="@Attention.Title"
+          role="status"></span>
+}
+
+@code {
+    protected override void OnInitialized()
+    {
+        Attention.Changed += OnChanged;
+        if (RendererInfo.IsInteractive)
+            Attention.EnsureStarted();
+    }
+
+    private void OnChanged()
+    {
+        try
+        {
+            _ = InvokeAsync(StateHasChanged);
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    public void Dispose() => Attention.Changed -= OnChanged;
+}
