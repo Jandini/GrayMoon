@@ -13,7 +13,7 @@
 		<PackAsTool>true</PackAsTool>
 		<ToolCommandName>graymoon-worker</ToolCommandName>
 		<PublishSingleFile>false</PublishSingleFile>
-		<SelfContained Condition="'$(SelfContained)' == ''">false</SelfContained>
+		<SelfContained>false</SelfContained>
 		<SatelliteResourceLanguages>en</SatelliteResourceLanguages>
 		<IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
 	</PropertyGroup>
