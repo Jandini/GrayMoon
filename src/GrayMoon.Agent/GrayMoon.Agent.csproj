@@ -13,7 +13,6 @@
 		<PackAsTool>true</PackAsTool>
 		<ToolCommandName>graymoon-worker</ToolCommandName>
 		<PublishSingleFile>false</PublishSingleFile>
-		<!-- Default tool/dev publish stays framework-dependent. Release bundle passes --self-contained true. -->
 		<SelfContained Condition="'$(SelfContained)' == ''">false</SelfContained>
 		<SatelliteResourceLanguages>en</SatelliteResourceLanguages>
 		<IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
