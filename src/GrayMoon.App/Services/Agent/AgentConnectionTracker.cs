@@ -74,6 +74,12 @@ public sealed class AgentConnectionTracker
         handler(current);
     }
 
+    public void RemoveStateChanged(Action<AgentConnectionState> handler)
+    {
+        lock (_lock)
+            _onStateChanged -= handler;
+    }
+
     public void BeginSelfUpdate()
     {
         RaiseIfChanged(() =>

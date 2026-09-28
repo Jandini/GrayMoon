@@ -106,6 +106,7 @@ try
     builder.Services.AddSingleton<DesktopTopBarState>();
     builder.Services.AddSingleton<AgentConnectionTracker>();
     builder.Services.AddScoped<HostPrerequisiteInstallService>();
+    builder.Services.AddScoped<WorkerInstallService>();
     builder.Services.AddHostedService<AgentUpdateDesktopNotifier>();
     builder.Services.AddSingleton<AgentQueueStateService>();
     builder.Services.AddSingleton<AgentCommandCancelSender>();
@@ -125,6 +126,7 @@ try
     builder.Services.AddScoped<WorkspaceService>();
     builder.Services.AddScoped<WorkspaceGitService>();
     builder.Services.AddScoped<ConnectorHealthService>();
+    builder.Services.AddScoped<HomeNavAttentionMonitor>();
     builder.Services.AddScoped<GitHubRepositoryService>();
     builder.Services.AddScoped<IRepositoryListQueryService, RepositoryListQueryService>();
     builder.Services.AddScoped<IWorkspaceProjectListQueryService, WorkspaceProjectListQueryService>();

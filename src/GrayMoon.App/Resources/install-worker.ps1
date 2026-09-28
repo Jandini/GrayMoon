@@ -6,6 +6,43 @@
 
 $ErrorActionPreference = 'Stop'
 
+# Desktop launches this file in its own window and sets GRAYMOON_DESKTOP_INSTALL=1
+# so the window can pause on failure and return a process exit code.
+# A copied "irm | iex" session leaves the variable unset and stays open.
+function Complete-WorkerInstall {
+    param([int]$Code = 0)
+
+    if ($env:GRAYMOON_DESKTOP_INSTALL -ne '1') {
+        return
+    }
+
+    if ($script:GrayMoonInstallCompleting) {
+        exit 1
+    }
+
+    $script:GrayMoonInstallCompleting = $true
+    if ($Code -ne 0) {
+        Write-Host ''
+        Write-Host 'Press Enter to close this window.' -ForegroundColor Yellow
+        if (-not [Console]::IsInputRedirected) {
+            [void](Read-Host)
+        }
+    }
+    else {
+        Start-Sleep -Seconds 2
+    }
+
+    exit $Code
+}
+
+if ($env:GRAYMOON_DESKTOP_INSTALL -eq '1') {
+    trap {
+        Write-Host ''
+        Write-Host $_.Exception.Message -ForegroundColor Red
+        Complete-WorkerInstall -Code 1
+    }
+}
+
 Write-Host 'GrayMoon Worker Installation' -ForegroundColor Cyan
 
 # Check if running as Administrator
@@ -15,6 +52,7 @@ $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIde
 
 if (-not $isAdmin) {
     Write-Host 'ERROR: This script must be run as Administrator' -ForegroundColor Red
+    Complete-WorkerInstall -Code 1
     return 1
 }
 
@@ -57,6 +95,7 @@ Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
 
 if (-not (Test-Path -LiteralPath $agentExe)) {
     Write-Host "ERROR: graymoon-worker.exe not found under $agentPath after extract. Install .NET 10 Runtime if the app fails to start." -ForegroundColor Red
+    Complete-WorkerInstall -Code 1
     return 1
 }
 
@@ -65,8 +104,10 @@ Write-Host 'Installing service...' -ForegroundColor Yellow
 & $agentExe install --hub-url $hubUrl
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Installation failed. Correct any errors above and run the script again." -ForegroundColor Red
+    Complete-WorkerInstall -Code 1
     return
 }
 Write-Host ''
 Write-Host 'Installation completed!' -ForegroundColor Green
 Write-Host ''
+Complete-WorkerInstall -Code 0

@@ -11,6 +11,7 @@
 @inject IAgentBridge AgentBridge
 @inject IToastService ToastService
 @inject HostPrerequisiteInstallService HostPrerequisiteInstall
+@inject WorkerInstallService WorkerInstall
 
 <PageTitle>Worker - GrayMoon</PageTitle>
 
@@ -102,12 +103,18 @@
                 @if (ActiveTab == "install")
                 {
                     <div class="card-footer card-footer-agent d-flex justify-content-between align-items-center">
-                        <small class="text-muted">You can download and run the worker executable manually.</small>
+                        <small class="text-muted">@(ShowDesktopWorkerInstall ? "GrayMoon Desktop can install the worker automatically." : "You can download and run the worker executable manually.")</small>
                         <div class="d-flex align-items-center gap-2">
                             @if (ShowUpdateNowButton)
                             {
                                 <button type="button" class="btn btn-danger" disabled="@_isUpdating" @onclick="UpdateAgentNowAsync">
                                     @(_isUpdating ? "Updating..." : "Update Now")
+                                </button>
+                            }
+                            @if (ShowDesktopWorkerInstall)
+                            {
+                                <button type="button" class="btn btn-danger" disabled="@WorkerInstall.IsInstalling" @onclick="InstallWorkerAsync">
+                                    @(WorkerInstall.IsInstalling ? "Installing..." : "Install")
                                 </button>
                             }
                             <button type="button" class="btn btn-outline-secondary" @onclick="DownloadAgent">Download</button>
@@ -155,6 +162,12 @@
         uninstallCommand = $"irm {uninstallUrl} | iex";
         SetDefaultTab();
         HostPrerequisiteInstall.Changed += OnHostPrerequisiteInstallChanged;
+        WorkerInstall.Changed += OnWorkerInstallChanged;
+    }
+
+    private void OnWorkerInstallChanged()
+    {
+        _ = InvokeAsync(StateHasChanged);
     }
 
     private void OnHostPrerequisiteInstallChanged()
@@ -318,6 +331,19 @@
 
     private bool ShowUpdateNowButton => AgentConnectionTracker.State == AgentConnectionState.VersionMismatch;
 
+    private bool ShowDesktopWorkerInstall =>
+        _desktopHostDetected
+        && _isDesktopHost
+        && AgentConnectionTracker.State == AgentConnectionState.Offline;
+
+    private async Task InstallWorkerAsync()
+    {
+        if (WorkerInstall.IsInstalling || !_isDesktopHost)
+            return;
+
+        await WorkerInstall.StartAsync();
+    }
+
     private async Task DownloadAgent()
     {
         await JSRuntime.InvokeVoidAsync("graymoonDownloadAgent");
@@ -399,5 +425,6 @@
     public void Dispose()
     {
         HostPrerequisiteInstall.Changed -= OnHostPrerequisiteInstallChanged;
+        WorkerInstall.Changed -= OnWorkerInstallChanged;
     }
 }
