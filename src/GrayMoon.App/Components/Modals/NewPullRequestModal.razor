@@ -20,11 +20,13 @@
                     @* Title no-wrap/ellipsis — MUST be merged with the ahead branch later. *@
                     <h5 class="modal-title modal-title--compound">
                         <span class="modal-title__primary">New Pull Request</span>
-                        <span class="modal-title__suffix text-muted">·</span>
                         @{
                             var newPrSubtitle = Targets.Count == 1 ? Targets[0].RepositoryName : $"{Targets.Count} repositories";
                         }
-                        <span class="modal-title__secondary" title="@newPrSubtitle">@newPrSubtitle</span>
+                        @if (!string.IsNullOrEmpty(newPrSubtitle))
+                        {
+                            <span class="modal-title__secondary text-muted fw-normal fs-6" title="@newPrSubtitle">@newPrSubtitle</span>
+                        }
                     </h5>
                     <button type="button" class="btn-close" aria-label="Close" @onclick="HandleCancelClick" disabled="@IsBusy"></button>
                 </div>
