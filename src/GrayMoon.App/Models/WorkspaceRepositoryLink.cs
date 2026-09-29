@@ -111,6 +111,10 @@ public class WorkspaceRepositoryLink
     [NotMapped]
     public string? FeatureBaseCommitSha { get; set; }
 
+    /// <summary>Feature parent / PR-base branch when viewing a Feature. Not a link column.</summary>
+    [NotMapped]
+    public string? ParentBranchName { get; set; }
+
     /// <summary>Persisted Git Changes file rows for this workspace-repo link. Navigation only.</summary>
     public ICollection<WorkspaceGitChangeEntry> GitChangeEntries { get; set; } = new List<WorkspaceGitChangeEntry>();
 
@@ -154,6 +158,7 @@ public class WorkspaceRepositoryLink
         UncommittedChangedFileCount = UncommittedChangedFileCount,
         HeadCommit = HeadCommit,
         FeatureBaseCommitSha = FeatureBaseCommitSha,
+        ParentBranchName = ParentBranchName,
         GitChangeEntries = GitChangeEntries,
     };
 }

@@ -60,11 +60,31 @@ public sealed class WorkspaceBranchUpdateHandler(
                 .Select(rb => rb.BranchName)
                 .FirstOrDefaultAsync(cancellationToken) ?? "main";
 
+            // Feature: merge from the Feature parent (PR base), not the repository default.
+            var parentBranch = await (
+                from r in dbContext.WorkspaceFeatureRepositories.AsNoTracking()
+                where r.WorkspaceFeatureContextId == contextId.Value
+                    && r.WorkspaceRepositoryId == wr.WorkspaceRepositoryId
+                select r.ParentBranchName
+            ).FirstOrDefaultAsync(cancellationToken);
+            if (!string.IsNullOrWhiteSpace(parentBranch))
+                defaultBranchName = parentBranch.Trim();
+
+            // Prefer Feature context checkout branch when present.
+            var currentBranchName = await dbContext.WorkspaceRepositoryContextStates
+                .AsNoTracking()
+                .Where(s => s.WorkspaceFeatureContextId == contextId.Value
+                    && s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId)
+                .Select(s => s.BranchName)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (string.IsNullOrWhiteSpace(currentBranchName))
+                currentBranchName = wr.BranchName;
+
             var args = new
             {
                 workspaceName = workspaceFolderName,
                 repositoryName = repo.RepositoryName,
-                currentBranchName = wr.BranchName,
+                currentBranchName,
                 defaultBranchName,
                 bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
                 workspaceRoot

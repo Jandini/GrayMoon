@@ -49,10 +49,14 @@ public sealed class RepositoryStateProbe(IGitService git, ICsProjFileService csP
         if (hasBranch)
         {
             counts = await git.ProbeCommitCountsAsync(repoPath, branch!, defaultRef, ct);
-            var (behind, ahead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, defaultRef, ct);
+            // Feature ahead/behind: explicit override, else worktree-persisted Feature parent, else default.
+            var divergenceRef = git.ToOriginBranchRef(options.DivergenceBaseOriginRef)
+                ?? git.ToOriginBranchRef(await git.GetDivergenceBaseBranchAsync(repoPath, ct))
+                ?? defaultRef;
+            var (behind, ahead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, ct);
             defaultBehind = behind;
             defaultAhead = ahead;
-            vsDefaultProbed = defaultRef != null;
+            vsDefaultProbed = divergenceRef != null;
         }
 
         List<string>? localBranches = null;

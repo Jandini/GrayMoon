@@ -568,7 +568,8 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
                 wr.Repository != null && wr.Repository.Archived,
                 wr.GitChangeEntries.Count(),
                 HeadCommit: null,
-                FeatureBaseCommitSha: null));
+                FeatureBaseCommitSha: null,
+                ParentBranchName: null));
         }
 
         var cid = contextId.Value.Value;
@@ -618,7 +619,8 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
             x.wr.Repository != null && x.wr.Repository.Archived,
             db.WorkspaceGitContextChangeEntries.Count(e => e.WorkspaceFeatureContextId == cid && e.WorkspaceRepositoryId == x.wr.WorkspaceRepositoryId),
             HeadCommit: x.state != null ? x.state.HeadCommit : null,
-            FeatureBaseCommitSha: x.featureRepo != null ? x.featureRepo.BaseCommitSha : null));
+            FeatureBaseCommitSha: x.featureRepo != null ? x.featureRepo.BaseCommitSha : null,
+            ParentBranchName: x.featureRepo != null ? x.featureRepo.ParentBranchName : null));
     }
 
     private static WorkspaceRepositoryLinkListCursor ToCursor(WorkspaceRepositoryLinkListItemDto dto) =>

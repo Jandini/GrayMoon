@@ -31,6 +31,7 @@ internal static class WorkspaceRepositoryLinkListMapper
             UncommittedChangedFileCount = dto.UncommittedChangedFileCount,
             HeadCommit = dto.HeadCommit,
             FeatureBaseCommitSha = dto.FeatureBaseCommitSha,
+            ParentBranchName = dto.ParentBranchName,
             Repository = new Repository
             {
                 RepositoryId = dto.RepositoryId,

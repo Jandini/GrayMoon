@@ -74,10 +74,12 @@ public sealed class CreateBranchCommand(IGitService git, IAgentTokenProvider tok
         bool? hasUpstream = null;
         if (branch != "-")
         {
+            var divergenceRef = git.ToOriginBranchRef(await git.GetDivergenceBaseBranchAsync(repoPath, cancellationToken))
+                ?? defaultRef;
             var (o, i, _) = await git.GetCommitCountsAsync(repoPath, branch, defaultRef, cancellationToken, skipUpstreamCheck: true);
             outgoing = o;
             incoming = i;
-            var (db, da, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, defaultRef, cancellationToken);
+            var (db, da, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, cancellationToken);
             defaultBehind = db;
             defaultAhead = da;
 

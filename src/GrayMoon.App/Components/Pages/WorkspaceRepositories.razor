@@ -93,7 +93,7 @@
                                 <th class="col-branch">Branch</th>
                                 <th class="col-metrics text-center">
                                     <div class="metrics-grid-header">
-                                        <span class="metrics-block metrics-divergence" title="Commits behind | ahead default branch" aria-label="Commits behind | ahead default branch">
+                                        <span class="metrics-block metrics-divergence" title="@(_isFeatureContext ? "Commits behind | ahead parent branch" : "Commits behind | ahead default branch")" aria-label="@(_isFeatureContext ? "Commits behind | ahead parent branch" : "Commits behind | ahead default branch")">
                                             <i class="bi bi-arrow-left-right header-icon"></i>
                                         </span>
                                         <span class="metrics-block metrics-pr" title="Pull Request" aria-label="Pull Request">

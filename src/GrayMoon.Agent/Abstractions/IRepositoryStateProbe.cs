@@ -46,6 +46,12 @@ public sealed class RepositoryStateProbeOptions
     /// <summary>Pre-resolved "origin/&lt;default&gt;" ref, so the probe does not resolve it again.</summary>
     public string? DefaultBranchOriginRef { get; init; }
 
+    /// <summary>
+    /// Optional origin ref (or branch name) for ahead/behind divergence instead of the repository default.
+    /// Feature contexts pass the parent/PR-base branch; Workspace leaves this null.
+    /// </summary>
+    public string? DivergenceBaseOriginRef { get; init; }
+
     /// <summary>Branch to count against, when the caller already knows it (e.g. straight after checking it out).</summary>
     public string? BranchNameOverride { get; init; }
 

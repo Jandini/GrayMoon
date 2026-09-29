@@ -185,7 +185,8 @@ public sealed class WorkspaceFeatureOperations(
                         mainRepositoryPath = mainPath,
                         worktreePath = row.WorktreePath,
                         branchName = name,
-                        baseCommitSha = row.BaseCommitSha
+                        baseCommitSha = row.BaseCommitSha,
+                        divergenceBaseBranch = row.ParentBranchName
                     },
                     cancellationToken);
 
@@ -732,8 +733,10 @@ public sealed class WorkspaceFeatureOperations(
                 RepositoryType = src?.RepositoryType ?? link.RepositoryType,
                 OutgoingCommits = 0,
                 IncomingCommits = src?.IncomingCommits ?? link.IncomingCommits,
-                DefaultBranchBehindCommits = src?.DefaultBranchBehindCommits ?? link.DefaultBranchBehindCommits,
-                DefaultBranchAheadCommits = src?.DefaultBranchAheadCommits ?? link.DefaultBranchAheadCommits,
+                // Feature divergence is vs ParentBranchName (PR base), not vs main. At create,
+                // HEAD == BaseCommitSha so the Feature is neither ahead nor behind its parent tip.
+                DefaultBranchBehindCommits = 0,
+                DefaultBranchAheadCommits = 0,
                 BranchHasUpstream = false,
                 SyncStatus = link.SyncStatus,
                 DependencyLevel = src?.DependencyLevel ?? link.DependencyLevel,

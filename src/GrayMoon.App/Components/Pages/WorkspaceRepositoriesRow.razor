@@ -109,6 +109,7 @@
                                     BranchName="@Link.BranchName"
                                     RepositoryUrl="@RepositoryUrlHelper.GetRepositoryUrl(repo.CloneUrl)"
                                     DefaultBranchName="@Link.DefaultBranchName"
+                                    ComparisonBaseBranchName="@Link.ParentBranchName"
                                     IsOnTag="@Link.IsOnTag"
                                     IsPrMergeBlocked="@(PrInfo != null
                                         && string.Equals(PrInfo.State, "open", StringComparison.OrdinalIgnoreCase)

@@ -16,37 +16,40 @@
             var behind = DefaultBehind ?? 0;
             var ahead = DefaultAhead ?? 0;
             var hasRepoUrl = !string.IsNullOrWhiteSpace(RepositoryUrl);
-            var hasDefaultBranch = !string.IsNullOrWhiteSpace(DefaultBranchName);
-            // On the default branch, behind vs origin/default is the same as incoming vs upstream.
-            // Pull already handles that; "update from default" would merge a branch into itself.
-            var isOnDefault = hasDefaultBranch
+            var comparisonBase = !string.IsNullOrWhiteSpace(ComparisonBaseBranchName)
+                ? ComparisonBaseBranchName
+                : DefaultBranchName;
+            var hasComparisonBase = !string.IsNullOrWhiteSpace(comparisonBase);
+            // On the comparison base branch, behind vs origin/base is the same as incoming vs upstream.
+            // Pull already handles that; "update from base" would merge a branch into itself.
+            var isOnComparisonBase = hasComparisonBase
                 && !string.IsNullOrWhiteSpace(BranchName)
-                && string.Equals(BranchName, DefaultBranchName, StringComparison.OrdinalIgnoreCase);
+                && string.Equals(BranchName, comparisonBase, StringComparison.OrdinalIgnoreCase);
             string? aheadUrl = null;
             string? behindUrl = null;
-            if (hasRepoUrl && hasDefaultBranch && !string.IsNullOrWhiteSpace(BranchName) && !isOnDefault)
+            if (hasRepoUrl && hasComparisonBase && !string.IsNullOrWhiteSpace(BranchName) && !isOnComparisonBase)
             {
-                var encDefault = Uri.EscapeDataString(DefaultBranchName!);
+                var encBase = Uri.EscapeDataString(comparisonBase!);
                 var encBranch = Uri.EscapeDataString(BranchName);
-                aheadUrl = $"{RepositoryUrl}/compare/{encDefault}...{encBranch}";
-                behindUrl = $"{RepositoryUrl}/compare/{encBranch}...{encDefault}";
+                aheadUrl = $"{RepositoryUrl}/compare/{encBase}...{encBranch}";
+                behindUrl = $"{RepositoryUrl}/compare/{encBranch}...{encBase}";
             }
-            var aheadTitle = hasDefaultBranch
+            var aheadTitle = hasComparisonBase
                 ? (ahead == 1
-                    ? $"This branch is 1 commit ahead of {DefaultBranchName}"
-                    : $"This branch is {ahead} commits ahead of {DefaultBranchName}")
+                    ? $"This branch is 1 commit ahead of {comparisonBase}"
+                    : $"This branch is {ahead} commits ahead of {comparisonBase}")
                 : (ahead == 1
                     ? "This branch is 1 commit ahead of the default branch"
                     : $"This branch is {ahead} commits ahead of the default branch");
-            var behindTitle = hasDefaultBranch
+            var behindTitle = hasComparisonBase
                 ? (behind == 1
-                    ? $"This branch is 1 commit behind {DefaultBranchName}"
-                    : $"This branch is {behind} commits behind {DefaultBranchName}")
+                    ? $"This branch is 1 commit behind {comparisonBase}"
+                    : $"This branch is {behind} commits behind {comparisonBase}")
                 : (behind == 1
                     ? "This branch is 1 commit behind the default branch"
                     : $"This branch is {behind} commits behind the default branch");
 
-            @if (behind > 0 && !isOnDefault && OnUpdateBranchClick.HasDelegate)
+            @if (behind > 0 && !isOnComparisonBase && OnUpdateBranchClick.HasDelegate)
             {
                 @* Yellow only when an open PR is not mergeable (conflict); otherwise gray but still clickable. *@
                 var behindActionClass = IsPrMergeBlocked
@@ -81,9 +84,14 @@
     [Parameter] public string? BranchName { get; set; }
     [Parameter] public string? RepositoryUrl { get; set; }
     [Parameter] public string? DefaultBranchName { get; set; }
+    /// <summary>
+    /// When set (Feature parent / PR base), titles and compare links use this instead of
+    /// <see cref="DefaultBranchName"/>. Counts are expected to already be vs this base.
+    /// </summary>
+    [Parameter] public string? ComparisonBaseBranchName { get; set; }
     /// <summary>True when the repository is checked out at a tag (detached HEAD); divergence vs. default branch is not meaningful, render blank.</summary>
     [Parameter] public bool IsOnTag { get; set; }
-    /// <summary>When set, the behind count on a non-default branch renders as an actionable button that invokes this callback instead of opening GitHub. Ignored when the current branch is the default branch - that case is a pull, not an update-from-default.</summary>
+    /// <summary>When set, the behind count on a non-base branch renders as an actionable button that invokes this callback instead of opening GitHub. Ignored when the current branch is the comparison base - that case is a pull, not an update-from-base.</summary>
     [Parameter] public EventCallback OnUpdateBranchClick { get; set; }
     /// <summary>
     /// True when there is an open PR that GitHub reports as not mergeable (typically a conflict).

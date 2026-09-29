@@ -38,8 +38,10 @@ public sealed class RefreshRepositoryVersionCommand(IGitService git, IAgentToken
             if (branch != "-")
             {
                 var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, cancellationToken);
+                await git.SetDivergenceBaseBranchAsync(repoPath, request.DivergenceBaseBranch, cancellationToken);
+                var divergenceRef = git.ToOriginBranchRef(request.DivergenceBaseBranch) ?? defaultRef;
                 var countsTask = git.ProbeCommitCountsAsync(repoPath, branch, defaultRef, cancellationToken);
-                var vsDefaultTask = git.GetCommitCountsVsDefaultAsync(repoPath, defaultRef, cancellationToken);
+                var vsDefaultTask = git.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, cancellationToken);
                 await Task.WhenAll(countsTask, vsDefaultTask);
                 var counts = await countsTask;
                 (defaultBehind, defaultAhead, _) = await vsDefaultTask;

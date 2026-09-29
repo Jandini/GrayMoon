@@ -77,9 +77,12 @@ public sealed class UpdateBranchFromDefaultCommand(IGitService git, ILogger<Upda
         // Refresh commit counts so the UI can update divergence badges immediately.
         // post-commit hook fires automatically for the merge commit and will send a full sync,
         // but we return fresh counts here so the App can persist them without waiting.
+        // Count vs the same base we merged from (Feature parent or repository default).
         var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, cancellationToken);
+        var divergenceRef = git.ToOriginBranchRef(defaultBranchName) ?? defaultRef;
+        await git.SetDivergenceBaseBranchAsync(repoPath, defaultBranchName, cancellationToken);
         var (outgoing, incoming, _) = await git.GetCommitCountsAsync(repoPath, currentBranchName, defaultRef, cancellationToken);
-        var (defaultBehind, defaultAhead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, defaultRef, cancellationToken);
+        var (defaultBehind, defaultAhead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, cancellationToken);
 
         return new UpdateBranchFromDefaultResponse
         {

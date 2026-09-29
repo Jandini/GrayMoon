@@ -49,7 +49,9 @@ public sealed record WorkspaceRepositoryLinkListItemDto(
     /// <summary>HEAD SHA for the selected context (Feature Create PR compares to <see cref="FeatureBaseCommitSha"/>).</summary>
     string? HeadCommit = null,
     /// <summary>Feature creation tip SHA when viewing a Feature; null for Workspace.</summary>
-    string? FeatureBaseCommitSha = null);
+    string? FeatureBaseCommitSha = null,
+    /// <summary>Feature parent / PR-base branch when viewing a Feature; null for Workspace or when unknown.</summary>
+    string? ParentBranchName = null);
 
 public sealed record WorkspaceRepositoryLinkListPageResult(
     IReadOnlyList<WorkspaceRepositoryLinkListItemDto> Items,

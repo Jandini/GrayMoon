@@ -22,4 +22,11 @@ public sealed class CreateGitWorktreeRequest
     /// <summary>Committed HEAD SHA from the special Workspace checkout used as the start point.</summary>
     [JsonPropertyName("baseCommitSha")]
     public string? BaseCommitSha { get; set; }
+
+    /// <summary>
+    /// Feature parent branch for ahead/behind divergence (PR base). Persisted on the new worktree's git dir
+    /// so commit/checkout hooks count vs parent instead of the repository default.
+    /// </summary>
+    [JsonPropertyName("divergenceBaseBranch")]
+    public string? DivergenceBaseBranch { get; set; }
 }

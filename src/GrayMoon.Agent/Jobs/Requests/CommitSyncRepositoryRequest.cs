@@ -18,4 +18,8 @@ public sealed class CommitSyncRepositoryRequest : WorkspaceCommandRequest
 
     [JsonPropertyName("workspaceId")]
     public int WorkspaceId { get; set; }
+
+    /// <summary>Optional Feature parent branch for ahead/behind; see <see cref="SyncRepositoryRequest.DivergenceBaseBranch"/>.</summary>
+    [JsonPropertyName("divergenceBaseBranch")]
+    public string? DivergenceBaseBranch { get; set; }
 }

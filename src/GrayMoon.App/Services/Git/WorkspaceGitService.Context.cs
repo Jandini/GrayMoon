@@ -1,4 +1,5 @@
 using GrayMoon.Application.Features;
+using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Services.Git;
 
@@ -13,4 +14,27 @@ public sealed partial class WorkspaceGitService
         WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken)
         => _pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
+
+    /// <summary>
+    /// Per-repository Feature parent branch for divergence / PR base.
+    /// Empty dictionary for the special Workspace context (agent then uses the repo default).
+    /// </summary>
+    private async Task<IReadOnlyDictionary<int, string?>> GetDivergenceBaseBranchesByRepositoryIdAsync(
+        WorkspaceFeatureContextId contextId,
+        CancellationToken cancellationToken)
+    {
+        var info = await _contextResolver.GetRequiredAsync(contextId, cancellationToken: cancellationToken);
+        if (info.IsSpecialWorkspace)
+            return new Dictionary<int, string?>();
+
+        var rows = await (
+            from r in _dbContext.WorkspaceFeatureRepositories.AsNoTracking()
+            join l in _dbContext.WorkspaceRepositories.AsNoTracking()
+                on r.WorkspaceRepositoryId equals l.WorkspaceRepositoryId
+            where r.WorkspaceFeatureContextId == contextId.Value
+            select new { l.RepositoryId, r.ParentBranchName }
+        ).ToListAsync(cancellationToken);
+
+        return rows.ToDictionary(x => x.RepositoryId, x => x.ParentBranchName);
+    }
 }

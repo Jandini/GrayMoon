@@ -63,6 +63,13 @@ public sealed class WorkspaceCommitSyncHandler(
         {
             await connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepositoryId, cancellationToken);
             var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
+            var divergenceBaseBranch = await (
+                from r in dbContext.WorkspaceFeatureRepositories.AsNoTracking()
+                join l in dbContext.WorkspaceRepositories.AsNoTracking()
+                    on r.WorkspaceRepositoryId equals l.WorkspaceRepositoryId
+                where r.WorkspaceFeatureContextId == contextId.Value && l.RepositoryId == repositoryId
+                select r.ParentBranchName
+            ).FirstOrDefaultAsync(cancellationToken);
             var args = new
             {
                 workspaceName = workspaceFolderName,
@@ -70,7 +77,8 @@ public sealed class WorkspaceCommitSyncHandler(
                 repositoryName = repo.RepositoryName,
                 bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
                 workspaceId,
-                workspaceRoot
+                workspaceRoot,
+                divergenceBaseBranch
             };
 
             var response = await agentBridge.SendCommandAsync("CommitSyncRepository", args, cancellationToken);
@@ -138,6 +146,14 @@ public sealed class WorkspaceCommitSyncHandler(
         var total = repositoryIds.Count;
         var completedCount = 0;
 
+        var parentByRepoId = await (
+            from r in dbContext.WorkspaceFeatureRepositories.AsNoTracking()
+            join l in dbContext.WorkspaceRepositories.AsNoTracking()
+                on r.WorkspaceRepositoryId equals l.WorkspaceRepositoryId
+            where r.WorkspaceFeatureContextId == contextId.Value
+            select new { l.RepositoryId, r.ParentBranchName }
+        ).ToDictionaryAsync(x => x.RepositoryId, x => x.ParentBranchName, cancellationToken);
+
         var tasks = repositoryIds.Select(async repositoryId =>
         {
             try
@@ -158,6 +174,7 @@ public sealed class WorkspaceCommitSyncHandler(
 
                 await scopedConnectorHealth.EnsureConnectorHealthyForRepositoryAsync(repo.RepositoryId, cancellationToken);
 
+                parentByRepoId.TryGetValue(repositoryId, out var divergenceBaseBranch);
                 var args = new
                 {
                     workspaceName = workspaceFolderName,
@@ -165,7 +182,8 @@ public sealed class WorkspaceCommitSyncHandler(
                     repositoryName = repo.RepositoryName,
                     bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
                     workspaceId,
-                    workspaceRoot
+                    workspaceRoot,
+                    divergenceBaseBranch
                 };
 
                 var response = await agentBridge.SendCommandAsync("CommitSyncRepository", args, cancellationToken);

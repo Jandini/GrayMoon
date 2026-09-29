@@ -57,6 +57,8 @@ public sealed partial class WorkspaceGitService
                 repos.Select(r => r.RepositoryId), cancellationToken);
         }
 
+        var divergenceByRepoId = await GetDivergenceBaseBranchesByRepositoryIdAsync(contextId, cancellationToken);
+
         var completedCount = 0;
         var totalCount = repos.Count;
         using var semaphore = new SemaphoreSlim(_maxConcurrent);
@@ -66,6 +68,7 @@ public sealed partial class WorkspaceGitService
             await semaphore.WaitAsync(cancellationToken);
             try
             {
+                divergenceByRepoId.TryGetValue(repo.RepositoryId, out var divergenceBaseBranch);
                 var args = new
                 {
                     workspaceName = workspaceFolderName,
@@ -74,7 +77,8 @@ public sealed partial class WorkspaceGitService
                     cloneUrl = repo.CloneUrl,
                     bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
                     workspaceId,
-                    workspaceRoot
+                    workspaceRoot,
+                    divergenceBaseBranch
                 };
                 var response = await _agentBridge.SendCommandAsync("SyncRepository", args, cancellationToken);
                 var info = ParseSyncRepositoryResponse(response);
@@ -141,7 +145,16 @@ public sealed partial class WorkspaceGitService
             return (false, "Workspace not found.");
 
         var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
-        var response = await _agentBridge.SendCommandAsync("RefreshRepositoryVersion", new { workspaceName = workspaceFolderName, repositoryName = repo.RepositoryName, repositoryId = repo.RepositoryId, workspaceRoot }, cancellationToken);
+        var divergenceByRepoId = await GetDivergenceBaseBranchesByRepositoryIdAsync(contextId, cancellationToken);
+        divergenceByRepoId.TryGetValue(repo.RepositoryId, out var divergenceBaseBranch);
+        var response = await _agentBridge.SendCommandAsync("RefreshRepositoryVersion", new
+        {
+            workspaceName = workspaceFolderName,
+            repositoryName = repo.RepositoryName,
+            repositoryId = repo.RepositoryId,
+            workspaceRoot,
+            divergenceBaseBranch
+        }, cancellationToken);
         if (!response.Success)
         {
             var err = response.Error ?? "Refresh version failed.";
