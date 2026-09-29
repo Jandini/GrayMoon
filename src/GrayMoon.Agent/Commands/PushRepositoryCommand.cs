@@ -134,6 +134,9 @@ public sealed class PushRepositoryCommand(
             {
                 WorkspaceId = workspaceId,
                 RepositoryId = repositoryId,
+                // Required for Feature attribution - null path is treated as special Workspace and
+                // would mirror this worktree's branch onto the shared WorkspaceRepositoryLink.
+                RepositoryPath = repoPath,
                 Version = version,
                 Branch = versionBranch,
                 OutgoingCommits = outgoing,

@@ -34,6 +34,8 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
 
     private WorkspaceFeatureContextId? _selectedContextId;
     private bool _isFeatureContext;
+    /// <summary>Last <see cref="ContextQuery"/> value applied to grid state - detects URL context switches.</summary>
+    private int? _boundContextQuery;
     private bool _createFeatureModalVisible;
     private string? _createFeatureInitialName;
     private bool _removeFeatureModalVisible;
@@ -50,6 +52,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         var storedMode = await JSRuntime.InvokeAsync<string?>("graymoonStorageGet", SyncModeStorageKey);
         _quickFetchIsPrimary = storedMode == "quick-fetch";
         await ResolveSelectedContextAsync();
+        _boundContextQuery = ContextQuery;
         await LoadPendingRestoreScrollTopAsync();
         await LoadWorkspaceAsync();
         ApplySyncStateFromLoadedItems();
@@ -124,15 +127,51 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         _selectedContextId = info.ContextId;
         _isFeatureContext = !info.IsSpecialWorkspace;
         Interlocked.Increment(ref _contextGeneration);
+        // Drop Feature/Workspace rows immediately so the selector label and grid cannot disagree
+        // while LoadWorkspaceAsync is still queued (InvokeAsync runs after the current turn).
+        ClearGridState();
+        isInitialLoading = true;
         await SelectedFeatureContextService.SetSelectedAsync(WorkspaceId, info.ContextId);
         await InvokeAsync(async () =>
         {
             if (_disposed) return;
-            ClearGridState();
             await LoadWorkspaceAsync();
             ApplySyncStateFromLoadedItems();
             StateHasChanged();
         });
+    }
+
+    /// <summary>
+    /// Applies a URL <c>?context=</c> change that was not already handled by
+    /// <see cref="OnSelectedContextChangedAsync"/> (browser back/forward, or the selector's
+    /// <c>NavigateTo</c> after the EventCallback). Empty query means Workspace - do not revive a
+    /// stored Feature preference or the grid stays on Feature branches after switching away.
+    /// </summary>
+    private async Task SyncContextFromQueryAsync()
+    {
+        WorkspaceFeatureContextId desired;
+        try
+        {
+            if (ContextQuery is int q && q > 0)
+            {
+                var info = await FeatureContextResolver.GetRequiredAsync(new WorkspaceFeatureContextId(q), WorkspaceId);
+                desired = info.ContextId;
+            }
+            else
+            {
+                desired = await FeatureContextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(WorkspaceId);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to sync context from query for workspace {WorkspaceId}", WorkspaceId);
+            desired = await FeatureContextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(WorkspaceId);
+        }
+
+        if (_selectedContextId is { } current && current.Value == desired.Value)
+            return;
+
+        await OnSelectedContextChangedAsync(desired);
     }
 
     private Task OnRequestCreateFeatureAsync(string name)
@@ -237,19 +276,31 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     }
     protected override async Task OnParametersSetAsync()
     {
-        if (_loadedWorkspaceId == WorkspaceId || _disposed)
+        if (_disposed)
+            return;
+
+        if (_loadedWorkspaceId != WorkspaceId)
         {
+            CancelBackgroundWork();
+            await DetachVirtualScrollAsync();
+            _loadedWorkspaceId = WorkspaceId;
+            errorMessage = null;
+            hasLoadedOnce = false;
+            ClearGridState();
+            await ResolveSelectedContextAsync();
+            _boundContextQuery = ContextQuery;
+            await LoadPendingRestoreScrollTopAsync();
+            await LoadWorkspaceAsync();
+            ApplySyncStateFromLoadedItems();
             return;
         }
-        CancelBackgroundWork();
-        await DetachVirtualScrollAsync();
-        _loadedWorkspaceId = WorkspaceId;
-        errorMessage = null;
-        hasLoadedOnce = false;
-        ClearGridState();
-        await LoadPendingRestoreScrollTopAsync();
-        await LoadWorkspaceAsync();
-        ApplySyncStateFromLoadedItems();
+
+        // Same workspace: selector NavigateTo / browser history changed ?context=.
+        if (_boundContextQuery != ContextQuery)
+        {
+            _boundContextQuery = ContextQuery;
+            await SyncContextFromQueryAsync();
+        }
     }
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
