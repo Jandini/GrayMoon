@@ -1,4 +1,5 @@
 using GrayMoon.App.Services;
+using GrayMoon.App.Services.Features;
 using GrayMoon.App.Services.Queries;
 using GrayMoon.Application;
 using GrayMoon.Application.Features;
@@ -31,6 +32,11 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     [Inject] private IWorkspaceFeatureContextResolver FeatureContextResolver { get; set; } = default!;
     [Inject] private IWorkspaceSelectedFeatureContextService SelectedFeatureContextService { get; set; } = default!;
     [Inject] private IWorkspaceFeatureOperations FeatureOperations { get; set; } = default!;
+    [Inject] private WorkspaceContextNavigationService ContextNavigation { get; set; } = default!;
+
+    /// <summary>Keeps modal deep-links on the Feature currently being viewed (Workspace URLs stay bare).</summary>
+    private string BuildContextScopedUrl(string relativePathWithoutQuery)
+        => ContextNavigation.AppendContextQuery(relativePathWithoutQuery, _selectedContextId, !_isFeatureContext);
 
     private WorkspaceFeatureContextId? _selectedContextId;
     private bool _isFeatureContext;

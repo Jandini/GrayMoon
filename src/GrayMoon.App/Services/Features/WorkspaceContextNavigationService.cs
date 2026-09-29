@@ -133,7 +133,18 @@ public sealed class WorkspaceContextNavigationService(
 
     private void CanonicalizeQuery(WorkspaceFeatureContextId contextId)
     {
-        var path = new Uri(navigation.Uri).GetLeftPart(UriPartial.Path);
-        navigation.NavigateTo($"{path}?context={contextId.Value}", replace: true);
+        var uri = new Uri(navigation.Uri);
+        var query = QueryHelpers.ParseQuery(uri.Query);
+        var kept = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in query)
+        {
+            if (string.Equals(pair.Key, "context", StringComparison.OrdinalIgnoreCase))
+                continue;
+            kept[pair.Key] = pair.Value.FirstOrDefault();
+        }
+
+        kept["context"] = contextId.Value.ToString();
+        var path = uri.GetLeftPart(UriPartial.Path);
+        navigation.NavigateTo(QueryHelpers.AddQueryString(path, kept), replace: true);
     }
 }
