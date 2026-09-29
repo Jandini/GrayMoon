@@ -19,8 +19,9 @@
         <div class="modal-dialog modal-dialog-centered merge-pr-modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">
-                        Merge pull request
+                    @* Title no-wrap/ellipsis — MUST be merged with the ahead branch later. *@
+                    <h5 class="modal-title modal-title--compound">
+                        <span class="modal-title__primary">Merge pull request</span>
                         @{
                             var headerHtmlUrl = Details?.HtmlUrl ?? PrHtmlUrl;
                         }
@@ -28,11 +29,11 @@
                         {
                             @* PrHtmlUrl is known as soon as the dialog opens (from the already-polled PR badge state) -
                                no need to wait for the full Details fetch just to make this a real link. *@
-                            <a href="@headerHtmlUrl" target="_blank" rel="noopener noreferrer" class="merge-pr-header-link fw-normal fs-6 ms-1">#@(Details?.Number ?? PrNumber)</a>
+                            <a href="@headerHtmlUrl" target="_blank" rel="noopener noreferrer" class="modal-title__suffix merge-pr-header-link fw-normal fs-6">#@(Details?.Number ?? PrNumber)</a>
                         }
                         else if (PrNumber is > 0)
                         {
-                            <span class="merge-pr-header-link fw-normal fs-6 ms-1">#@PrNumber</span>
+                            <span class="modal-title__suffix merge-pr-header-link fw-normal fs-6">#@PrNumber</span>
                         }
                     </h5>
                     <button type="button" class="btn-close flex-shrink-0" aria-label="Dismiss" @onclick="OnCancel"></button>

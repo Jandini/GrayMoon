@@ -292,7 +292,7 @@ public sealed class WorkspaceFileVersionService(
     private async Task<Dictionary<string, string>> ResolveTokenValuesAsync(
         Workspace workspace,
         WorkspaceFeatureContextId contextId,
-        string workspaceRoot,
+        string? workspaceRoot,
         string workspaceFolderName,
         IEnumerable<string?> patterns,
         CancellationToken cancellationToken)
@@ -369,7 +369,13 @@ public sealed class WorkspaceFileVersionService(
             }
         }
 
-        if (commitRepos.Count > 0 && agentBridge.IsAgentConnected)
+        if (commitRepos.Count > 0 && string.IsNullOrWhiteSpace(workspaceRoot))
+        {
+            logger.LogWarning(
+                "Workspace root is not configured; skipping {Count} :commit token(s).",
+                commitRepos.Count);
+        }
+        else if (commitRepos.Count > 0 && agentBridge.IsAgentConnected)
         {
             try
             {

@@ -15,9 +15,10 @@
         <div class="modal-dialog modal-dialog-centered bulk-merge-pr-modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">
-                        Merge pull requests
-                        <span class="merge-pr-header-link fw-normal fs-6 ms-1">@LevelLabel</span>
+                    @* Title no-wrap/ellipsis — MUST be merged with the ahead branch later. *@
+                    <h5 class="modal-title modal-title--compound">
+                        <span class="modal-title__primary">Merge pull requests</span>
+                        <span class="modal-title__secondary text-muted fw-normal fs-6" title="@LevelLabel">@LevelLabel</span>
                     </h5>
                     <button type="button" class="btn-close flex-shrink-0" aria-label="Dismiss" disabled="@IsRunning" @onclick="HandleCloseClick"></button>
                 </div>

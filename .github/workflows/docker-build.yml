@@ -45,6 +45,8 @@ jobs:
           push: ${{ env.push-to-registry == 'true' }}
           build-args: |
             VERSION=${{ steps.gitversion.outputs.SemVer }}
+          # Only the git tag named "latest" is published as :latest.
+          # Every other tag is published under its version tag alone.
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/graymoon:${{ steps.gitversion.outputs.SemVer }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/graymoon:latest
+            ${{ github.event_name == 'push' && github.ref == 'refs/tags/latest' && format('{0}/graymoon:latest', secrets.DOCKERHUB_USERNAME) || '' }}

@@ -123,6 +123,13 @@ a.workspaces-breadcrumb-link:hover {
     text-decoration: underline;
 }
 
+/* Buttons are often anchors, so the link hover underline would otherwise apply.
+   Join Discussion keeps that underline. */
+a.btn:hover:not(.btn-link):not(.home-banner-discuss),
+button.btn:hover:not(.btn-link) {
+    text-decoration: none;
+}
+
 /* Buttons */
 .btn-primary,
 .btn-primary:link,
@@ -868,6 +875,9 @@ select:disabled,
 .modal-header {
     border-bottom-color: var(--border-color);
     background-color: var(--bg-tertiary);
+    /* Title no-wrap/ellipsis support — MUST be merged with the ahead branch later. */
+    min-width: 0;
+    gap: 0.75rem;
 }
 
 .modal-footer {
@@ -875,8 +885,50 @@ select:disabled,
     background-color: var(--bg-tertiary);
 }
 
+/*
+ * Dialog title no-wrap / ellipsis (including compound primary + secondary parts).
+ * MUST be merged with the ahead branch later — do not drop this when reconciling that work.
+ */
 .modal-title {
     color: var(--text-primary);
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.modal-header > .btn-close {
+    flex-shrink: 0;
+}
+
+/* Compound titles (label + repo/file/etc.): keep on one line; truncate the secondary part.
+   MUST be merged with the ahead branch later. */
+.modal-title.modal-title--compound {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: nowrap;
+    gap: 0.35rem;
+}
+
+.modal-title--compound .modal-title__primary,
+.modal-title--compound .modal-title__secondary {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.modal-title--compound .modal-title__primary {
+    flex: 0 1 auto;
+}
+
+.modal-title--compound .modal-title__secondary {
+    flex: 1 1 auto;
+}
+
+.modal-title--compound .modal-title__suffix {
+    flex-shrink: 0;
 }
 
 .modal-header.bg-warning .modal-title {
@@ -995,6 +1047,85 @@ input[list] {
     border-color: var(--border-color) !important;
 }
 
+/* Dark moon, zoomed and clipped off the left edge, sitting under the title. */
+.home-banner {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+}
+
+.home-banner-brand {
+    position: relative;
+    width: 100%;
+}
+
+.home-banner-moon {
+    position: absolute;
+    width: 68rem;
+    height: 68rem;
+    left: 10rem;
+    top: calc(100% - 10rem);
+    transform: translateX(-50%);
+    pointer-events: none;
+    z-index: 0;
+}
+
+.home-banner-brand .banner-title,
+.home-banner-brand .banner-subtitle {
+    position: relative;
+    z-index: 1;
+}
+
+.home-banner-veil {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--bg-card) 18%, transparent) 0%,
+        transparent 42%,
+        transparent 100%);
+    pointer-events: none;
+    z-index: 2;
+}
+
+.home-banner-copy {
+    position: relative;
+    z-index: 3;
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-width: 0;
+    padding-right: 1rem;
+}
+
+.home-banner-invite {
+    position: relative;
+    z-index: 3;
+    align-self: flex-end;
+    /* Banner padding is 1.5rem; other tiles use card-body padding. */
+    margin-right: calc(var(--bs-card-spacer-x, 1rem) - 1.5rem);
+    margin-bottom: calc(var(--bs-card-spacer-y, 1rem) - 1.5rem);
+    text-align: right;
+}
+
+.home-banner-discuss,
+.home-banner-discuss:link,
+.home-banner-discuss:visited,
+.home-banner-discuss:focus,
+.home-banner-discuss:active {
+    background-color: #9a9a9a;
+    border-color: #8a8a8a;
+    color: #111111 !important;
+}
+
+.home-banner-discuss:hover {
+    background-color: #adadad;
+    border-color: #9a9a9a;
+    color: #000000 !important;
+    text-decoration: underline;
+}
+
 .banner-title {
     font-family: "Cinzel", "Helvetica Neue", Helvetica, Arial, sans-serif;
     letter-spacing: 0.02em;
@@ -1010,10 +1141,10 @@ input[list] {
 }
 
 .banner-subtitle {
-    font-family: "Cormorant Garamond", "Times New Roman", serif !important;
-    letter-spacing: 0.02em;
-    text-shadow: -1px 0 #000, 1px 0 #000, 0 -1px #000, 0 1px #000;
-    font-weight: 500;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    letter-spacing: normal;
+    color: #c4c4c4;
+    font-weight: 600;
 }
 
 /* List groups */

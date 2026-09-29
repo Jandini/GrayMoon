@@ -7,7 +7,10 @@
 
 ## Install now
 
+**[Download GrayMoon Desktop 0.1.0 for Windows](https://github.com/Jandini/GrayMoon.Release/releases/download/0.1.0/GrayMoon.Desktop-stable-Setup.exe)** or install with winget:
+
 ```powershell
+# Awaiting winget package approval. Use the download link above until the package is listed.
 winget install graymoon
 ```
 
@@ -59,9 +62,7 @@ See the full tour, with real screenshots from a running instance, in the **[Gray
 
 ### GrayMoon Desktop (Windows)
 
-Prefer winget? Use [`winget install graymoon`](#install-now) above.
-
-Otherwise download the latest `Setup.exe` from **[Jandini/GrayMoon.Release](https://github.com/Jandini/GrayMoon.Release/releases)**, run the installer, and launch **GrayMoon** from the Start menu. Add a GitHub connector and create your first workspace.
+The winget package is awaiting approval. Until it is listed, download the latest `Setup.exe` from **[Jandini/GrayMoon.Release](https://github.com/Jandini/GrayMoon.Release/releases)**, run the installer, and launch **GrayMoon** from the Start menu. Add a GitHub connector and create your first workspace.
 
 Desktop checks for updates on startup from the same release repository.
 

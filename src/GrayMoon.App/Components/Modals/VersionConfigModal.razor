@@ -13,7 +13,14 @@
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Version Configuration <span class="text-muted fw-normal fs-6">@(File?.FileName ?? "")</span></h5>
+                    @* Title no-wrap/ellipsis — MUST be merged with the ahead branch later. *@
+                    <h5 class="modal-title modal-title--compound">
+                        <span class="modal-title__primary">Version Configuration</span>
+                        @if (!string.IsNullOrEmpty(File?.FileName))
+                        {
+                            <span class="modal-title__secondary text-muted fw-normal fs-6" title="@File.FileName">@File.FileName</span>
+                        }
+                    </h5>
                     <button type="button" class="btn-close" @onclick="RequestCloseAsync"></button>
                 </div>
                 <div class="modal-body">

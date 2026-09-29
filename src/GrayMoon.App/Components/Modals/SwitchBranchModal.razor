@@ -21,7 +21,14 @@
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Branch - @RepositoryName</h5>
+                    @* Title no-wrap/ellipsis — MUST be merged with the ahead branch later. *@
+                    <h5 class="modal-title modal-title--compound">
+                        <span class="modal-title__primary">Branch</span>
+                        @if (!string.IsNullOrEmpty(RepositoryName))
+                        {
+                            <span class="modal-title__secondary text-muted fw-normal fs-6" title="@RepositoryName">@RepositoryName</span>
+                        }
+                    </h5>
                     <button type="button" class="btn-close" @onclick="OnCancel" disabled="@isRefreshing"></button>
                 </div>
                 <div class="modal-body">

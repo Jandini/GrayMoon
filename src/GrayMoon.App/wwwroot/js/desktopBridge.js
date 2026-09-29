@@ -1,4 +1,4 @@
-// GrayMoon Desktop WebView2 bridge for correlated native commands (e.g. InstallHostPrerequisites).
+// GrayMoon Desktop WebView2 bridge for correlated native commands (e.g. InstallHostPrerequisites, InstallWorker).
 // Feature-detected: window.chrome.webview only exists inside the real GrayMoon Desktop host.
 (function () {
   'use strict';

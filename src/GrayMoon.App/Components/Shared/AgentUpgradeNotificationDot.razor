@@ -1,21 +1,33 @@
-@inject AgentConnectionTracker AgentConnectionTracker
+@inject HomeNavAttentionMonitor Attention
 @rendermode @(new InteractiveServerRenderMode(prerender: true))
+@implements IDisposable
 
-@if (ShowDot)
+@if (Attention.ShowDot)
 {
     <span class="nav-notification-dot"
-          title="Agent update available"
-          aria-label="Agent update available"
+          title="@Attention.Title"
+          aria-label="@Attention.Title"
           role="status"></span>
 }
 
 @code {
-    private bool ShowDot =>
-        AgentConnectionTracker.State == AgentConnectionState.VersionMismatch
-        && !AgentConnectionTracker.IsSelfUpdateInProgress;
-
     protected override void OnInitialized()
     {
-        AgentConnectionTracker.OnStateChanged(state => { _ = InvokeAsync(StateHasChanged); });
+        Attention.Changed += OnChanged;
+        if (RendererInfo.IsInteractive)
+            Attention.EnsureStarted();
     }
+
+    private void OnChanged()
+    {
+        try
+        {
+            _ = InvokeAsync(StateHasChanged);
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    public void Dispose() => Attention.Changed -= OnChanged;
 }
