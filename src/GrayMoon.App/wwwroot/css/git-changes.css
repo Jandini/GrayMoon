@@ -250,32 +250,16 @@
     color: var(--text-primary);
     border-color: var(--border-input);
     font-size: 0.84rem;
-    line-height: 1.5;
-    field-sizing: content;
-    min-height: calc(1.5em + .75rem + 2px) !important;
-    max-height: calc(12em + .75rem + 2px);
-    resize: none;
-    overflow-y: auto;
-    scrollbar-width: auto;
-    scrollbar-color: #5a5a5a var(--bg-input);
+    /* Single line; truncate placeholder/value with ellipsis — no horizontal scrollbar. */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
-.git-changes-workspace-commit__message::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-}
-
-.git-changes-workspace-commit__message::-webkit-scrollbar-track {
-    background: var(--bg-input);
-}
-
-.git-changes-workspace-commit__message::-webkit-scrollbar-thumb {
-    background: #5a5a5a;
-    border-radius: 4px;
-}
-
-.git-changes-workspace-commit__message::-webkit-scrollbar-thumb:hover {
-    background: #6a6a6a;
+.git-changes-workspace-commit__message::placeholder {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .git-changes-workspace-commit__actions {

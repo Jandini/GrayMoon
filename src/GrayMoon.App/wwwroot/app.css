@@ -511,9 +511,10 @@ select:disabled,
 .workspace-repos-header .workspace-repos-title-row .workspace-repos-subtitle {
     flex: 0 0 auto;
 }
-/* Same muted size/color as subtitle; name is only bolder. Spacing (no separator) via margin after the name. */
+/* Bolder and a step lighter than muted subtitle, but not as bright as the page title. */
 .workspace-repos-subtitle .workspace-subtitle-name {
     font-weight: 600;
+    color: var(--text-secondary);
     margin-inline-end: 0.5em;
 }
 .workspace-repos-header .workspace-repos-title-row .workspace-repos-title-spacer {

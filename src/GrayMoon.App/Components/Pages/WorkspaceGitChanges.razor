@@ -74,19 +74,19 @@
                 {
                     <div class="git-changes-workspace-commit">
                         <form autocomplete="off" @onsubmit:preventDefault="true">
-                        <textarea id="git-changes-commit-message"
-                                  @key="_commitMessageBoxKey"
-                                  class="form-control git-changes-workspace-commit__message"
-                                  rows="1"
-                                  maxlength="10000"
-                                  placeholder="Commit message (applies to all repositories below)"
-                                  title="Ctrl+Enter commits with the visible Commit button"
-                                  autocomplete="off"
-                                  autocorrect="off"
-                                  autocapitalize="off"
-                                  spellcheck="false"
-                                  value="@_workspaceCommitMessage"
-                                  @oninput="OnWorkspaceCommitMessageInput"></textarea>
+                        <input id="git-changes-commit-message"
+                               @key="_commitMessageBoxKey"
+                               type="text"
+                               class="form-control git-changes-workspace-commit__message"
+                               maxlength="10000"
+                               placeholder="Commit message (applies to all repositories below)"
+                               title="Ctrl+Enter commits with the visible Commit button"
+                               autocomplete="off"
+                               autocorrect="off"
+                               autocapitalize="off"
+                               spellcheck="false"
+                               value="@_workspaceCommitMessage"
+                               @oninput="OnWorkspaceCommitMessageInput" />
                         </form>
                         <div class="git-changes-workspace-commit__actions">
                             @{
