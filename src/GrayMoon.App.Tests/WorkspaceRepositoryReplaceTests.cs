@@ -3,6 +3,7 @@ using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
+using GrayMoon.App.Services.GitChanges;
 using GrayMoon.Common.Git;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -155,6 +156,21 @@ public sealed class WorkspaceRepositoryReplaceTests
         Assert.Empty(await verify.WorkspaceGitChangeEntries.ToListAsync());
     }
 
+    [Fact]
+    public async Task UpdateAsync_publishes_git_changes_for_all_contexts_when_repositories_are_removed()
+    {
+        await using var fx = await Fixture.CreateAsync(linkCount: 2);
+        var notifier = new RecordingGitChangesNotifier();
+        var catalog = fx.CreateWorkspaceRepository(notifier);
+
+        await catalog.UpdateAsync(fx.WorkspaceId, "test-workspace", fx.RepositoryIds, null);
+        Assert.Empty(notifier.Published);
+
+        await catalog.UpdateAsync(fx.WorkspaceId, "test-workspace", [fx.RepositoryIds[1]], null);
+
+        Assert.Equal((fx.WorkspaceId, IWorkspaceGitChangesNotifier.AllContexts), Assert.Single(notifier.Published));
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;
@@ -236,7 +252,7 @@ public sealed class WorkspaceRepositoryReplaceTests
             return new Fixture(connection, factory, db, workspace.WorkspaceId, repositoryIds, linkIds);
         }
 
-        public WorkspaceRepository CreateWorkspaceRepository()
+        public WorkspaceRepository CreateWorkspaceRepository(IWorkspaceGitChangesNotifier? notifier = null)
         {
             var workspaceService = new WorkspaceService(
                 new NoOpAgentBridge(),
@@ -248,6 +264,7 @@ public sealed class WorkspaceRepositoryReplaceTests
                 CircuitDb,
                 Factory,
                 workspaceService,
+                notifier ?? new WorkspaceGitChangesNotifier(NullLogger<WorkspaceGitChangesNotifier>.Instance),
                 NullLogger<WorkspaceRepository>.Instance);
         }
 

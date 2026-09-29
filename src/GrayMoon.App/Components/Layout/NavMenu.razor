@@ -44,7 +44,10 @@
 
                 <div class="nav-item px-3" data-nav-label="Changes">
                     <NavLink class="nav-link" href="@WorkspaceHref("changes")" Match="NavLinkMatch.All" aria-label="Changes">
-                        <i class="bi bi-git" aria-hidden="true"></i>
+                        <span class="nav-link-icon">
+                            <i class="bi bi-git" aria-hidden="true"></i>
+                            <ChangesNotificationDot WorkspaceId="workspaceId.Value" ContextId="contextId" />
+                        </span>
                         <span class="nav-link-text">Changes</span>
                     </NavLink>
                 </div>
@@ -149,6 +152,7 @@
     private bool isWorkspaceView;
     private int? workspaceId;
     private string contextQuerySuffix = "";
+    private int? contextId;
 
     protected override async Task OnInitializedAsync()
     {
@@ -177,15 +181,17 @@
         var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
 
         contextQuerySuffix = "";
+        contextId = null;
         var queryIndex = pathAndQuery.IndexOf('?', StringComparison.Ordinal);
         if (queryIndex >= 0)
         {
             var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(pathAndQuery[queryIndex..]);
             if (query.TryGetValue("context", out var values)
-                && int.TryParse(values.FirstOrDefault(), out var contextId)
-                && contextId > 0)
+                && int.TryParse(values.FirstOrDefault(), out var parsedContextId)
+                && parsedContextId > 0)
             {
-                contextQuerySuffix = $"?context={contextId}";
+                contextId = parsedContextId;
+                contextQuerySuffix = $"?context={parsedContextId}";
             }
         }
 
@@ -201,6 +207,7 @@
             isWorkspaceView = false;
             workspaceId = null;
             contextQuerySuffix = "";
+            contextId = null;
         }
 
         return InvokeAsync(StateHasChanged);

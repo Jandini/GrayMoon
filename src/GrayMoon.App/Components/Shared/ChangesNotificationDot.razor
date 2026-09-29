@@ -1,0 +1,136 @@
+@using GrayMoon.App.Services.Features
+@using GrayMoon.App.Services.GitChanges
+@using GrayMoon.Application.Features
+@inject IWorkspaceGitChangesNotifier Notifier
+@inject IWorkspaceGitChangesReadService ReadService
+@inject WorkspaceContextNavigationService ContextNavigation
+@inject ILogger<ChangesNotificationDot> Logger
+@rendermode @(new InteractiveServerRenderMode(prerender: true))
+@implements IDisposable
+
+@if (_hasChanges)
+{
+    <span class="nav-notification-dot"
+          title="@Title"
+          aria-label="@Title"
+          role="status"></span>
+}
+
+@code {
+    private const string Title = "Uncommitted changes";
+    private static readonly TimeSpan RefreshDebounce = TimeSpan.FromMilliseconds(250);
+
+    [Parameter] public int WorkspaceId { get; set; }
+
+    /// <summary>Parsed <c>?context=</c> of the current URL; null falls back to the stored selection.</summary>
+    [Parameter] public int? ContextId { get; set; }
+
+    private bool _hasChanges;
+    private int? _resolvedWorkspaceId;
+    private int? _resolvedContextQuery;
+    private WorkspaceFeatureContextId? _contextId;
+    private int _generation;
+    private int _refreshPending;
+    private bool _subscribed;
+    private bool _disposed;
+
+    protected override void OnInitialized()
+    {
+        if (RendererInfo.IsInteractive)
+        {
+            Notifier.Changed += OnGitChangesChanged;
+            _subscribed = true;
+        }
+    }
+
+    protected override Task OnParametersSetAsync()
+    {
+        if (_resolvedWorkspaceId != WorkspaceId || _resolvedContextQuery != ContextId)
+        {
+            _resolvedWorkspaceId = WorkspaceId;
+            _resolvedContextQuery = ContextId;
+            _contextId = null;
+            _hasChanges = false;
+        }
+
+        return RefreshAsync();
+    }
+
+    private void OnGitChangesChanged(int workspaceId, int contextId)
+    {
+        if (_disposed || workspaceId != WorkspaceId)
+            return;
+
+        if (contextId != IWorkspaceGitChangesNotifier.AllContexts
+            && _contextId is WorkspaceFeatureContextId current
+            && current.Value != contextId)
+            return;
+
+        if (Interlocked.Exchange(ref _refreshPending, 1) == 1)
+            return;
+
+        _ = DebouncedRefreshAsync();
+    }
+
+    private async Task DebouncedRefreshAsync()
+    {
+        try
+        {
+            await Task.Delay(RefreshDebounce);
+        }
+        finally
+        {
+            Volatile.Write(ref _refreshPending, 0);
+        }
+
+        if (_disposed)
+            return;
+
+        try
+        {
+            await InvokeAsync(RefreshAsync);
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    private async Task RefreshAsync()
+    {
+        var generation = ++_generation;
+        var workspaceId = WorkspaceId;
+        bool hasChanges;
+
+        try
+        {
+            if (_contextId is not WorkspaceFeatureContextId contextId)
+            {
+                contextId = await ContextNavigation.PeekForPageAsync(workspaceId, ContextId);
+                if (generation != _generation || _disposed)
+                    return;
+                _contextId = contextId;
+            }
+
+            hasChanges = await ReadService.HasAnyChangesAsync(workspaceId, contextId, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to refresh the Changes nav dot for workspace {WorkspaceId}", workspaceId);
+            return;
+        }
+
+        if (generation != _generation || workspaceId != WorkspaceId || _disposed || hasChanges == _hasChanges)
+            return;
+
+        _hasChanges = hasChanges;
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _generation++;
+        if (_subscribed)
+            Notifier.Changed -= OnGitChangesChanged;
+    }
+}

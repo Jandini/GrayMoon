@@ -3,6 +3,7 @@ using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
+using GrayMoon.App.Services.GitChanges;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -68,6 +69,7 @@ public sealed class WorkspaceRepositoryExcludeAiWorkflowsTests
                 CircuitDb,
                 Factory,
                 workspaceService,
+                new WorkspaceGitChangesNotifier(NullLogger<WorkspaceGitChangesNotifier>.Instance),
                 NullLogger<WorkspaceRepository>.Instance);
         }
 

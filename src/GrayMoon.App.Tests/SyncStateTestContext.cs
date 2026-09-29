@@ -5,6 +5,7 @@ using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
 using GrayMoon.App.Services.Features;
+using GrayMoon.App.Services.GitChanges;
 using GrayMoon.App.Services.Jobs;
 using GrayMoon.App.Services.Queries;
 using GrayMoon.Application.Features;
@@ -64,6 +65,7 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddDbContext<AppDbContext>(o => o.UseSqlite(connection), ServiceLifetime.Scoped);
         services.AddDbContextFactory<AppDbContext>(o => o.UseSqlite(connection), ServiceLifetime.Singleton);
 
+        services.AddSingleton<IWorkspaceGitChangesNotifier, WorkspaceGitChangesNotifier>();
         services.AddScoped<AppSettingRepository>();
         services.AddScoped<ConnectorRepository>();
         services.AddScoped<GitHubRepositoryRepository>();
