@@ -54,6 +54,20 @@ public sealed class LevelActionHighlightTests
     }
 
     [Fact]
+    public void CreatePrs_Feature_RequiresHeadMovedSinceBase_NotAheadOfMain()
+    {
+        Assert.False(PRBadge.ShowsCreateBadge(
+            false, true, pullRequest: null, defaultBranchAheadCommits: 22,
+            headCommit: "abc", featureBaseCommitSha: "abc"));
+        Assert.True(PRBadge.ShowsCreateBadge(
+            false, true, pullRequest: null, defaultBranchAheadCommits: 0,
+            headCommit: "def", featureBaseCommitSha: "abc"));
+        Assert.False(PRBadge.ShowsCreateBadge(
+            false, true, pullRequest: null, defaultBranchAheadCommits: 22,
+            headCommit: null, featureBaseCommitSha: "abc"));
+    }
+
+    [Fact]
     public void UncommittedChanges_TrueWhenCountIsAtLeastOne()
     {
         Assert.True(PRBadge.ShowsUncommittedChangesBadge(1));

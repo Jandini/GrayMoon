@@ -55,10 +55,35 @@ public static class GitHubApiErrorHelper
             {
                 var field = error.TryGetProperty("field", out var f) && f.ValueKind == JsonValueKind.String ? f.GetString() : null;
                 var code = error.TryGetProperty("code", out var c) && c.ValueKind == JsonValueKind.String ? c.GetString() : null;
-                var message = error.TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.String ? m.GetString() : null;
 
                 if (string.Equals(field, "head", StringComparison.OrdinalIgnoreCase) && string.Equals(code, "invalid", StringComparison.OrdinalIgnoreCase))
                     return true;
+            }
+        }
+        catch (JsonException)
+        {
+            /* not JSON */
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Detects GitHub's "No commits between base and head" create-PR rejection (head exists but is not ahead of base).
+    /// </summary>
+    public static bool LooksLikeNoCommitsBetween(string? jsonBody)
+    {
+        if (string.IsNullOrWhiteSpace(jsonBody))
+            return false;
+        try
+        {
+            using var doc = JsonDocument.Parse(jsonBody);
+            if (!doc.RootElement.TryGetProperty("errors", out var errors) || errors.ValueKind != JsonValueKind.Array)
+                return false;
+
+            foreach (var error in errors.EnumerateArray())
+            {
+                var message = error.TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.String ? m.GetString() : null;
                 if (!string.IsNullOrWhiteSpace(message) && message.Contains("No commits between", StringComparison.OrdinalIgnoreCase))
                     return true;
             }
@@ -246,6 +271,12 @@ public static class GitHubApiErrorHelper
 
     private static string BuildUnprocessableEntityUserMessage(string? detail, string? rawErrorContent)
     {
+        if (LooksLikeNoCommitsBetween(rawErrorContent))
+        {
+            return "GitHub rejected the pull request (422): there are no commits on the source branch that are not already on the target. "
+                   + "Pick a different target, or commit changes on the source first.";
+        }
+
         if (LooksLikeUnpushedHeadBranch(rawErrorContent))
         {
             return "GitHub could not find the head branch on the remote (422). "

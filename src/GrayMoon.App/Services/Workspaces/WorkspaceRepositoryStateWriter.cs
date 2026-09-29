@@ -215,6 +215,7 @@ public sealed class WorkspaceRepositoryStateWriter(
         {
             state.CheckedOutTag = snapshot.CheckedOutTag;
             state.BranchName = null;
+            state.HeadCommit = Blank(snapshot.HeadCommit) ? null : snapshot.HeadCommit;
             state.BranchHasUpstream = null;
             state.OutgoingCommits = null;
             state.IncomingCommits = null;
@@ -226,6 +227,7 @@ public sealed class WorkspaceRepositoryStateWriter(
         state.CheckedOutTag = null;
         state.HasNewerTag = null;
         state.BranchName = Blank(snapshot.BranchName) || snapshot.BranchName == "-" ? null : snapshot.BranchName;
+        state.HeadCommit = Blank(snapshot.HeadCommit) ? null : snapshot.HeadCommit;
     }
 
     private static void MirrorIdentityToLink(WorkspaceRepositoryLink wr, WorkspaceRepositoryContextState state)

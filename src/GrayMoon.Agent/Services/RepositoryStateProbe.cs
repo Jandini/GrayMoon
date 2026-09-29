@@ -40,6 +40,8 @@ public sealed class RepositoryStateProbe(IGitService git, ICsProjFileService csP
 
         var hasBranch = currentTag == null && !string.IsNullOrWhiteSpace(branch) && branch != "-";
 
+        var headCommit = await git.GetHeadCommitAsync(repoPath, ct);
+
         CommitCountsProbeResult counts = CommitCountsProbeResult.Unknown;
         int? defaultBehind = null;
         int? defaultAhead = null;
@@ -81,6 +83,7 @@ public sealed class RepositoryStateProbe(IGitService git, ICsProjFileService csP
         {
             BranchName = hasBranch ? branch : null,
             CheckedOutTag = currentTag,
+            HeadCommit = headCommit,
             GitVersion = gitVersion,
             DefaultBranchName = defaultBranchName,
             OutgoingCommits = counts.Outgoing,

@@ -184,9 +184,14 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
         var hasCreatablePr = await prQuery.AnyAsync(
             x => x.state != null
                 && string.IsNullOrEmpty(x.state.CheckedOutTag)
-                && (x.state.DefaultBranchAheadCommits ?? 0) > 0
                 && (x.pr == null
-                    || (x.pr.MergedAt == null && x.pr.State != "open" && x.pr.State != "closed")),
+                    || (x.pr.MergedAt == null && x.pr.State != "open" && x.pr.State != "closed"))
+                && db.WorkspaceFeatureRepositories.Any(fr =>
+                    fr.WorkspaceFeatureContextId == cid
+                    && fr.WorkspaceRepositoryId == x.state.WorkspaceRepositoryId
+                    && fr.BaseCommitSha != null
+                    && x.state.HeadCommit != null
+                    && fr.BaseCommitSha != x.state.HeadCommit),
             cancellationToken);
 
         var hasOpenPr = await prQuery.AnyAsync(
@@ -561,7 +566,9 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
                 wr.PullRequest != null ? wr.PullRequest.MergeableState : null,
                 wr.PullRequest != null ? wr.PullRequest.ChangedFiles : null,
                 wr.Repository != null && wr.Repository.Archived,
-                wr.GitChangeEntries.Count()));
+                wr.GitChangeEntries.Count(),
+                HeadCommit: null,
+                FeatureBaseCommitSha: null));
         }
 
         var cid = contextId.Value.Value;
@@ -573,7 +580,10 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
             join pr in db.WorkspaceRepositoryContextPullRequests.AsNoTracking().Where(p => p.WorkspaceFeatureContextId == cid)
                 on wr.WorkspaceRepositoryId equals pr.WorkspaceRepositoryId into prs
             from pr in prs.DefaultIfEmpty()
-            select new { wr, state, pr };
+            join fr in db.WorkspaceFeatureRepositories.AsNoTracking().Where(f => f.WorkspaceFeatureContextId == cid)
+                on wr.WorkspaceRepositoryId equals fr.WorkspaceRepositoryId into frs
+            from featureRepo in frs.DefaultIfEmpty()
+            select new { wr, state, pr, featureRepo };
 
         return joined.Select(x => new WorkspaceRepositoryLinkListItemDto(
             x.wr.WorkspaceRepositoryId,
@@ -606,7 +616,9 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
             x.pr != null ? x.pr.MergeableState : null,
             x.pr != null ? x.pr.ChangedFiles : null,
             x.wr.Repository != null && x.wr.Repository.Archived,
-            db.WorkspaceGitContextChangeEntries.Count(e => e.WorkspaceFeatureContextId == cid && e.WorkspaceRepositoryId == x.wr.WorkspaceRepositoryId)));
+            db.WorkspaceGitContextChangeEntries.Count(e => e.WorkspaceFeatureContextId == cid && e.WorkspaceRepositoryId == x.wr.WorkspaceRepositoryId),
+            HeadCommit: x.state != null ? x.state.HeadCommit : null,
+            FeatureBaseCommitSha: x.featureRepo != null ? x.featureRepo.BaseCommitSha : null));
     }
 
     private static WorkspaceRepositoryLinkListCursor ToCursor(WorkspaceRepositoryLinkListItemDto dto) =>

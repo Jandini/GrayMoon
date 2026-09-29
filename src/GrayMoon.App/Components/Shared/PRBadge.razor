@@ -86,7 +86,7 @@ else if (PullRequest != null && string.Equals(PullRequest.State, "open", StringC
         }
     </span>
 }
-else if (ShowsCreateBadge(IsOnTag, IsPrVerified, PullRequest, DefaultBranchAheadCommits))
+else if (ShowsCreateBadge(IsOnTag, IsPrVerified, PullRequest, DefaultBranchAheadCommits, HeadCommit, FeatureBaseCommitSha))
 {
     <span class="badge pr-badge pr-badge-create"
           role="button"
@@ -108,6 +108,10 @@ else
     /// <summary>Git Changes page URL. Used by the red uncommitted-count badge.</summary>
     [Parameter] public string? ChangesUrl { get; set; }
     [Parameter] public int? DefaultBranchAheadCommits { get; set; }
+    /// <summary>HEAD SHA when viewing a Feature - compared to <see cref="FeatureBaseCommitSha"/> for Create PR.</summary>
+    [Parameter] public string? HeadCommit { get; set; }
+    /// <summary>Feature creation tip SHA; when set, Create PR uses HEAD vs this tip instead of ahead-of-default.</summary>
+    [Parameter] public string? FeatureBaseCommitSha { get; set; }
     /// <summary>Deprecated. The create badge now invokes <see cref="OnCreateClick"/> instead of navigating to a URL.</summary>
     [Parameter] public string? CreatePrUrl { get; set; }
     /// <summary>Raised when the user clicks the yellow "create" badge.</summary>
@@ -129,9 +133,18 @@ else
 
     /// <summary>
     /// True when the yellow "create" badge is shown: PR state is verified, no PR already exists
-    /// (open, merged, or closed), and the branch is ahead of default.
+    /// (open, merged, or closed), and the branch can open a PR.
+    /// Workspace: ahead of the repository default branch.
+    /// Feature: HEAD has moved since Feature creation (ahead of the Feature parent tip at create),
+    /// not merely ahead of main.
     /// </summary>
-    internal static bool ShowsCreateBadge(bool isOnTag, bool isPrVerified, PullRequestInfo? pullRequest, int? defaultBranchAheadCommits)
+    internal static bool ShowsCreateBadge(
+        bool isOnTag,
+        bool isPrVerified,
+        PullRequestInfo? pullRequest,
+        int? defaultBranchAheadCommits,
+        string? headCommit = null,
+        string? featureBaseCommitSha = null)
     {
         if (isOnTag)
             return false;
@@ -143,6 +156,14 @@ else
             return false;
         if (pullRequest != null && string.Equals(pullRequest.State, "open", StringComparison.OrdinalIgnoreCase))
             return false;
+
+        if (!string.IsNullOrWhiteSpace(featureBaseCommitSha))
+        {
+            if (string.IsNullOrWhiteSpace(headCommit))
+                return false;
+            return !string.Equals(headCommit.Trim(), featureBaseCommitSha.Trim(), StringComparison.OrdinalIgnoreCase);
+        }
+
         return (defaultBranchAheadCommits ?? 0) > 0;
     }
 
