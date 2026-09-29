@@ -54,17 +54,28 @@ public sealed class LevelActionHighlightTests
     }
 
     [Fact]
-    public void CreatePrs_Feature_RequiresHeadMovedSinceBase_NotAheadOfMain()
+    public void CreatePrs_Feature_UsesAheadOfParent_NotStaleHeadVsBase()
     {
-        Assert.False(PRBadge.ShowsCreateBadge(
-            false, true, pullRequest: null, defaultBranchAheadCommits: 22,
+        // Ahead of parent (Feature divergence) is enough even if HeadCommit is missing/stale.
+        Assert.True(PRBadge.ShowsCreateBadge(
+            false, true, pullRequest: null, defaultBranchAheadCommits: 1,
+            headCommit: null, featureBaseCommitSha: "abc"));
+        Assert.True(PRBadge.ShowsCreateBadge(
+            false, true, pullRequest: null, defaultBranchAheadCommits: 1,
             headCommit: "abc", featureBaseCommitSha: "abc"));
+        // Zero ahead and HEAD still at Feature base tip -> no create.
+        Assert.False(PRBadge.ShowsCreateBadge(
+            false, true, pullRequest: null, defaultBranchAheadCommits: 0,
+            headCommit: "abc", featureBaseCommitSha: "abc"));
+        // Zero ahead but HEAD moved since create (counts not refreshed yet) -> create.
         Assert.True(PRBadge.ShowsCreateBadge(
             false, true, pullRequest: null, defaultBranchAheadCommits: 0,
             headCommit: "def", featureBaseCommitSha: "abc"));
+        // Workspace-style: no Feature base SHA, ahead of default.
+        Assert.True(PRBadge.ShowsCreateBadge(
+            false, true, pullRequest: null, defaultBranchAheadCommits: 2));
         Assert.False(PRBadge.ShowsCreateBadge(
-            false, true, pullRequest: null, defaultBranchAheadCommits: 22,
-            headCommit: null, featureBaseCommitSha: "abc"));
+            false, true, pullRequest: null, defaultBranchAheadCommits: 0));
     }
 
     [Fact]

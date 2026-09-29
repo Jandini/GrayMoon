@@ -133,10 +133,10 @@ else
 
     /// <summary>
     /// True when the yellow "create" badge is shown: PR state is verified, no PR already exists
-    /// (open, merged, or closed), and the branch can open a PR.
+    /// (open, merged, or closed), and the branch is ahead of its comparison base.
     /// Workspace: ahead of the repository default branch.
-    /// Feature: HEAD has moved since Feature creation (ahead of the Feature parent tip at create),
-    /// not merely ahead of main.
+    /// Feature: ahead of the Feature parent / PR-base branch (same <paramref name="defaultBranchAheadCommits"/>
+    /// field; Feature sync stores counts vs parent, not vs main).
     /// </summary>
     internal static bool ShowsCreateBadge(
         bool isOnTag,
@@ -157,14 +157,18 @@ else
         if (pullRequest != null && string.Equals(pullRequest.State, "open", StringComparison.OrdinalIgnoreCase))
             return false;
 
-        if (!string.IsNullOrWhiteSpace(featureBaseCommitSha))
-        {
-            if (string.IsNullOrWhiteSpace(headCommit))
-                return false;
-            return !string.Equals(headCommit.Trim(), featureBaseCommitSha.Trim(), StringComparison.OrdinalIgnoreCase);
-        }
+        // Primary signal: ahead of comparison base (parent on Feature, default on Workspace).
+        if ((defaultBranchAheadCommits ?? 0) > 0)
+            return true;
 
-        return (defaultBranchAheadCommits ?? 0) > 0;
+        // Fallback when ahead counts are missing but Feature HEAD has moved since create
+        // (e.g. commit hook has not refreshed counts yet).
+        if (!string.IsNullOrWhiteSpace(featureBaseCommitSha)
+            && !string.IsNullOrWhiteSpace(headCommit)
+            && !string.Equals(headCommit.Trim(), featureBaseCommitSha.Trim(), StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return false;
     }
 
     private async Task HandleCreateClick()

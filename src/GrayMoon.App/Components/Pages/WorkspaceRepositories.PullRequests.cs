@@ -54,15 +54,12 @@ public sealed partial class WorkspaceRepositories
             if (string.IsNullOrWhiteSpace(wr.BranchName)) continue;
             if (string.IsNullOrWhiteSpace(wr.DefaultBranchName)) continue;
             if (string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal)) continue;
-            // Feature Create PR targets the parent branch - require HEAD moved since Feature creation,
-            // not merely ahead of the repository default (main).
-            if (!string.IsNullOrWhiteSpace(wr.FeatureBaseCommitSha))
-            {
-                if (string.IsNullOrWhiteSpace(wr.HeadCommit)
-                    || string.Equals(wr.HeadCommit.Trim(), wr.FeatureBaseCommitSha.Trim(), StringComparison.OrdinalIgnoreCase))
-                    continue;
-            }
-            else if ((wr.DefaultBranchAheadCommits ?? 0) <= 0)
+            // Feature Create PR targets the parent branch - require ahead of that base
+            // (DefaultBranchAheadCommits is vs parent on Feature contexts).
+            if ((wr.DefaultBranchAheadCommits ?? 0) <= 0
+                && (string.IsNullOrWhiteSpace(wr.FeatureBaseCommitSha)
+                    || string.IsNullOrWhiteSpace(wr.HeadCommit)
+                    || string.Equals(wr.HeadCommit.Trim(), wr.FeatureBaseCommitSha.Trim(), StringComparison.OrdinalIgnoreCase)))
             {
                 continue;
             }

@@ -181,17 +181,21 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
             from pr in prs.DefaultIfEmpty()
             select new { x.state, pr };
 
+        // Same eligibility as PRBadge.ShowsCreateBadge: ahead of comparison base (Feature parent /
+        // Workspace default), not on a tag, and no open/merged/closed pull request.
         var hasCreatablePr = await prQuery.AnyAsync(
             x => x.state != null
                 && string.IsNullOrEmpty(x.state.CheckedOutTag)
                 && (x.pr == null
                     || (x.pr.MergedAt == null && x.pr.State != "open" && x.pr.State != "closed"))
-                && db.WorkspaceFeatureRepositories.Any(fr =>
-                    fr.WorkspaceFeatureContextId == cid
-                    && fr.WorkspaceRepositoryId == x.state.WorkspaceRepositoryId
-                    && fr.BaseCommitSha != null
-                    && x.state.HeadCommit != null
-                    && fr.BaseCommitSha != x.state.HeadCommit),
+                && (
+                    (x.state.DefaultBranchAheadCommits ?? 0) > 0
+                    || db.WorkspaceFeatureRepositories.Any(fr =>
+                        fr.WorkspaceFeatureContextId == cid
+                        && fr.WorkspaceRepositoryId == x.state.WorkspaceRepositoryId
+                        && fr.BaseCommitSha != null
+                        && x.state.HeadCommit != null
+                        && fr.BaseCommitSha != x.state.HeadCommit)),
             cancellationToken);
 
         var hasOpenPr = await prQuery.AnyAsync(

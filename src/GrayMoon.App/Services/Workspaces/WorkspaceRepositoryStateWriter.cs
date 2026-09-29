@@ -227,7 +227,9 @@ public sealed class WorkspaceRepositoryStateWriter(
         state.CheckedOutTag = null;
         state.HasNewerTag = null;
         state.BranchName = Blank(snapshot.BranchName) || snapshot.BranchName == "-" ? null : snapshot.BranchName;
-        state.HeadCommit = Blank(snapshot.HeadCommit) ? null : snapshot.HeadCommit;
+        // Flat hook/sync payloads often omit HeadCommit; do not wipe a known SHA in that case.
+        if (!Blank(snapshot.HeadCommit))
+            state.HeadCommit = snapshot.HeadCommit;
     }
 
     private static void MirrorIdentityToLink(WorkspaceRepositoryLink wr, WorkspaceRepositoryContextState state)
