@@ -32,6 +32,7 @@
             <div class="workspace-repos-title-row">
                 <h2 class="workspace-repos-title">Files</h2>
                 <p class="text-muted mb-0 workspace-repos-subtitle workspace-files__subtitle">
+                    <WorkspaceSubtitleName Name="@(workspace?.Name)" />
                     @if (!isLoading && files.Count > 0)
                     {
                         var fileSuffix = HasSearchFilter ? " found" : "";

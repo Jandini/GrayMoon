@@ -22,6 +22,7 @@
             <div class="workspace-repos-title-row">
                 <h2 class="workspace-repos-title">Packages</h2>
                 <p class="text-muted mb-0 workspace-repos-subtitle workspace-packages__subtitle">
+                    <WorkspaceSubtitleName Name="@(workspace?.Name)" />
                     @if (!isLoading && packages.Count > 0)
                     {
                         var pkgSuffix = HasSearchFilter ? " found" : "";

@@ -17,6 +17,11 @@
     gap: 1.1rem;
 }
 
+/* Flex gap already spaces summary items; don't stack margin from the shared subtitle name rule. */
+.git-changes-header__summary .workspace-subtitle-name {
+    margin-inline-end: 0;
+}
+
 .git-changes-header__summary .git-changes-tree__status {
     width: auto;
     min-width: 0;

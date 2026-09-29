@@ -14,6 +14,7 @@
             <div class="workspace-repos-title-row">
                 <h2 class="workspace-repos-title">Actions</h2>
                 <p class="text-muted mb-0 workspace-repos-subtitle workspace-actions__subtitle">
+                    <WorkspaceSubtitleName Name="@(workspace?.Name)" />
                     @if (!isLoading && rows.Count > 0)
                     {
                         var wfSuffix = HasSearchFilter ? " found" : "";
