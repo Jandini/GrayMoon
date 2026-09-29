@@ -247,7 +247,7 @@
     font-size: 0.84rem;
     line-height: 1.5;
     field-sizing: content;
-    min-height: calc(4.5em + .75rem + 2px) !important;
+    min-height: calc(1.5em + .75rem + 2px) !important;
     max-height: calc(12em + .75rem + 2px);
     resize: none;
     overflow-y: auto;
