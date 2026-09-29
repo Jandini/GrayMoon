@@ -199,6 +199,7 @@ try
         });
 
     builder.Services.AddScoped<GitChangesSnapshotPushHandler>();
+    builder.Services.AddSingleton<IWorkspaceGitChangesNotifier, WorkspaceGitChangesNotifier>();
     builder.Services.AddScoped<WorkspaceGitChangesSelectionMemory>();
     builder.Services.AddScoped<WorkspaceGitChangesCommitMessageMemory>();
     builder.Services.AddScoped<WorkspaceGitChangesPushAfterCommitMemory>();

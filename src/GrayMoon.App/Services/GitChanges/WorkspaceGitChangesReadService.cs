@@ -16,6 +16,12 @@ public interface IWorkspaceGitChangesReadService
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken);
+
+    /// <summary>True when any repository in the context has a staged, unstaged, or conflicted file.</summary>
+    Task<bool> HasAnyChangesAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        CancellationToken cancellationToken);
 }
 
 public sealed class WorkspaceGitChangesReadService(IDbContextFactory<AppDbContext> dbContextFactory) : IWorkspaceGitChangesReadService
@@ -102,6 +108,21 @@ public sealed class WorkspaceGitChangesReadService(IDbContextFactory<AppDbContex
             .ToList();
 
         return new WorkspaceGitChangesView { WorkspaceId = workspaceId, Repositories = repositories };
+    }
+
+    public async Task<bool> HasAnyChangesAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        CancellationToken cancellationToken)
+    {
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        return await db.WorkspaceGitContextRepositoryStatuses
+            .AnyAsync(s => s.WorkspaceFeatureContextId == contextId.Value
+                           && (s.StagedCount > 0 || s.ChangedCount > 0 || s.ConflictCount > 0)
+                           && db.WorkspaceRepositories.Any(wr =>
+                               wr.WorkspaceRepositoryId == s.WorkspaceRepositoryId && wr.WorkspaceId == workspaceId),
+                cancellationToken);
     }
 
     private async Task<WorkspaceGitChangesView> GetFromLegacyTablesAsync(int workspaceId, CancellationToken cancellationToken)

@@ -14,7 +14,9 @@ internal static class GitChangesPushHandlerTestFactory
     public static GitChangesSnapshotPushHandler Create(
         GitChangesTestDbContext ctx,
         FakeHubContext<WorkspaceSyncHub> hubContext,
-        IGitChangesLineStatsRefresh? refresh = null)
+        IGitChangesLineStatsRefresh? refresh = null,
+        IWorkspaceGitChangesNotifier? notifier = null,
+        IWorkspaceHookContextAttributor? attributor = null)
     {
         var factory = new GitChangesTestDbContext.TestDbContextFactory(ctx.Options);
         var services = new ServiceCollection();
@@ -29,8 +31,9 @@ internal static class GitChangesPushHandlerTestFactory
             hubContext,
             NullLogger<GitChangesSnapshotPushHandler>.Instance,
             refresh ?? new NoopGitChangesLineStatsRefresh(),
-            scope.ServiceProvider.GetRequiredService<IWorkspaceHookContextAttributor>(),
-            scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureContextResolver>());
+            attributor ?? scope.ServiceProvider.GetRequiredService<IWorkspaceHookContextAttributor>(),
+            scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureContextResolver>(),
+            notifier ?? new WorkspaceGitChangesNotifier(NullLogger<WorkspaceGitChangesNotifier>.Instance));
     }
 
     /// <summary>

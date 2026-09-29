@@ -55,6 +55,28 @@ public sealed class WorkspaceContextNavigationService(
         return specialInfo;
     }
 
+    /// <summary>
+    /// Same precedence as <see cref="ResolveForPageAsync"/> (valid <c>?context=</c>, then the stored
+    /// selection, then the special Workspace) without persisting the selection or rewriting the URL.
+    /// For sidebar widgets that only need to know which context a workspace link will open.
+    /// </summary>
+    public async Task<WorkspaceFeatureContextId> PeekForPageAsync(
+        int workspaceId,
+        int? contextQuery,
+        CancellationToken cancellationToken = default)
+    {
+        if (contextQuery is int q && q > 0
+            && await TryResolveOwnedAsync(new WorkspaceFeatureContextId(q), workspaceId, cancellationToken) is { } fromQuery)
+            return fromQuery.ContextId;
+
+        var preferred = await selectedContextService.GetSelectedAsync(workspaceId, cancellationToken);
+        if (preferred is WorkspaceFeatureContextId preferredId
+            && await TryResolveOwnedAsync(preferredId, workspaceId, cancellationToken) is { } fromPreference)
+            return fromPreference.ContextId;
+
+        return await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+    }
+
     private async Task<WorkspaceFeatureContextInfo?> TryResolveOwnedAsync(
         WorkspaceFeatureContextId contextId,
         int workspaceId,

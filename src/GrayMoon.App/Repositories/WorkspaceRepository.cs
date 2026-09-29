@@ -1,6 +1,7 @@
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services;
+using GrayMoon.App.Services.GitChanges;
 using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Repositories;
@@ -9,11 +10,13 @@ public sealed class WorkspaceRepository(
     AppDbContext dbContext,
     IDbContextFactory<AppDbContext> dbContextFactory,
     WorkspaceService workspaceService,
+    IWorkspaceGitChangesNotifier gitChangesNotifier,
     ILogger<WorkspaceRepository> logger)
 {
     private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
     private readonly IDbContextFactory<AppDbContext> _dbContextFactory = dbContextFactory ?? throw new ArgumentNullException(nameof(dbContextFactory));
     private readonly WorkspaceService _workspaceService = workspaceService ?? throw new ArgumentNullException(nameof(workspaceService));
+    private readonly IWorkspaceGitChangesNotifier _gitChangesNotifier = gitChangesNotifier ?? throw new ArgumentNullException(nameof(gitChangesNotifier));
     private readonly ILogger<WorkspaceRepository> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     public async Task<List<Workspace>> GetAllAsync()
@@ -386,6 +389,9 @@ public sealed class WorkspaceRepository(
         _logger.LogInformation(
             "Persistence: saved WorkspaceRepository links. Action=ReplaceRepositories, WorkspaceId={WorkspaceId}, Removed={RemovedCount}, Added={AddedCount}, RepositoryIds=[{RepositoryIds}]",
             workspaceId, toRemove.Count, toAdd.Count, string.Join(", ", validSet));
+
+        if (toRemove.Count > 0)
+            _gitChangesNotifier.Publish(workspaceId, IWorkspaceGitChangesNotifier.AllContexts);
     }
 
     private async Task<bool> NameExistsAsync(string name, int? ignoreId = null) =>

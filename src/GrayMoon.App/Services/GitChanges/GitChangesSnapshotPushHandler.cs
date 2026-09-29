@@ -19,7 +19,8 @@ public sealed class GitChangesSnapshotPushHandler(
     ILogger<GitChangesSnapshotPushHandler> logger,
     IGitChangesLineStatsRefresh lineStatsRefresh,
     IWorkspaceHookContextAttributor attributor,
-    IWorkspaceFeatureContextResolver contextResolver)
+    IWorkspaceFeatureContextResolver contextResolver,
+    IWorkspaceGitChangesNotifier notifier)
 {
     public async Task HandleAsync(GitChangesSnapshotNotification notification, CancellationToken cancellationToken)
     {
@@ -164,6 +165,8 @@ public sealed class GitChangesSnapshotPushHandler(
         }
 
         await transaction.CommitAsync(cancellationToken);
+
+        notifier.Publish(notification.WorkspaceId, contextId.Value.Value);
 
         await hubContext.Clients.All.SendAsync(
             "ContextGitChangesUpdated",

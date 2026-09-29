@@ -215,6 +215,8 @@ The Worker can push a fresh snapshot without waiting for an explicit page reques
 
 The App validates version ordering and persists through the single write queue.
 
+After a snapshot commits, `GitChangesSnapshotPushHandler` publishes to `IWorkspaceGitChangesNotifier`, the in-process singleton fan-out for persisted snapshot changes, next to the `ContextGitChangesUpdated` SignalR broadcast. Unlinking repositories from a Workspace publishes too, with the all-contexts sentinel. Circuit-side consumers such as the Changes nav dot subscribe to it instead of opening their own hub connection.
+
 ---
 
 ## 10. Git Changes activity tracking

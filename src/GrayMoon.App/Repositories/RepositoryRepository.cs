@@ -1,12 +1,17 @@
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
+using GrayMoon.App.Services.GitChanges;
 using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Repositories;
 
-public sealed class GitHubRepositoryRepository(AppDbContext dbContext, ILogger<GitHubRepositoryRepository> logger)
+public sealed class GitHubRepositoryRepository(
+    AppDbContext dbContext,
+    IWorkspaceGitChangesNotifier gitChangesNotifier,
+    ILogger<GitHubRepositoryRepository> logger)
 {
     private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+    private readonly IWorkspaceGitChangesNotifier _gitChangesNotifier = gitChangesNotifier ?? throw new ArgumentNullException(nameof(gitChangesNotifier));
     private readonly ILogger<GitHubRepositoryRepository> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     public async Task<List<GitHubRepositoryEntry>> GetAllEntriesAsync()
@@ -282,6 +287,7 @@ public sealed class GitHubRepositoryRepository(AppDbContext dbContext, ILogger<G
             .Select(r => r.RepositoryId)
             .ToList();
 
+        List<int> affectedWorkspaceIds = [];
         if (toDeleteIds.Count > 0)
         {
             foreach (var rid in toDeleteIds)
@@ -291,10 +297,12 @@ public sealed class GitHubRepositoryRepository(AppDbContext dbContext, ILogger<G
                     existing.First(r => r.RepositoryId == rid).RepositoryName);
 
             // Delete dependent rows first so FK constraint is not violated.
-            var wrlIdsToRemove = await _dbContext.WorkspaceRepositories
+            var linksToRemove = await _dbContext.WorkspaceRepositories
                 .Where(wr => toDeleteIds.Contains(wr.RepositoryId))
-                .Select(wr => wr.WorkspaceRepositoryId)
+                .Select(wr => new { wr.WorkspaceRepositoryId, wr.WorkspaceId })
                 .ToListAsync();
+            var wrlIdsToRemove = linksToRemove.Select(l => l.WorkspaceRepositoryId).ToList();
+            affectedWorkspaceIds = linksToRemove.Select(l => l.WorkspaceId).Distinct().ToList();
 
             await WorkspaceRepositoryLinkCleanup.DeleteDependentsAsync(_dbContext, wrlIdsToRemove, toDeleteIds);
 
@@ -308,6 +316,9 @@ public sealed class GitHubRepositoryRepository(AppDbContext dbContext, ILogger<G
         }
 
         await transaction.CommitAsync();
+
+        foreach (var workspaceId in affectedWorkspaceIds)
+            _gitChangesNotifier.Publish(workspaceId, IWorkspaceGitChangesNotifier.AllContexts);
 
         _logger.LogInformation(
             "MergeRepositories: Complete. Updated={Updated}, Inserted={Inserted}, Deleted={Deleted}, Renames={Renames}",
