@@ -120,8 +120,12 @@
     [Parameter] public WorkspaceFeatureContextId? SelectedContextId { get; set; }
     [Parameter] public EventCallback<WorkspaceFeatureContextId> SelectedContextIdChanged { get; set; }
 
-    /// <summary>Disables the Feature context selector while a scan or page job is in flight - switching
-    /// context mid-mutation would otherwise race the in-flight operation's own reload.</summary>
+    /// <summary>
+    /// Disables the Feature context selector while THIS page's own overlay mutation job is running
+    /// (commit / bulk stage / etc.). Do not bind scans or workspace-wide busy (Repositories Push
+    /// Updated) here - those are read-only / other-page work and must not lock Feature switching.
+    /// See <c>WorkspaceGitChanges.IsOwnPageJobRunning</c> vs <c>IsJobRunning</c> / <c>IsScanRunning</c>.
+    /// </summary>
     [Parameter] public bool IsContextSwitchDisabled { get; set; }
 
     [Parameter] public string FilterQuery { get; set; } = string.Empty;

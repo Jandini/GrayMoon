@@ -17,7 +17,7 @@
                            WorkspaceName="@(_workspace?.Name)"
                            SelectedContextId="_selectedContextId"
                            SelectedContextIdChanged="OnSelectedContextChangedAsync"
-                           IsContextSwitchDisabled="@IsAnyScanRunning"
+                           IsContextSwitchDisabled="@IsOwnPageJobRunning"
                            FilterQuery="@_filterQuery"
                            FilterQueryChanged="OnFilterChanged"
                            IsFilterDisabled="@(_view == null)"

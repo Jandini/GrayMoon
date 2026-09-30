@@ -242,7 +242,8 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             return;
         }
 
-        if (IsAnyScanRunning)
+        // Own overlay job or an in-flight scan - not workspace-wide IsBusy (Push Updated elsewhere).
+        if (IsLocalGitChangesWorkRunning)
         {
             ToastService.Show("Another Git Changes operation is already running.");
             return;
@@ -787,6 +788,11 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
     private async Task OnSelectedContextChangedAsync(WorkspaceFeatureContextId contextId)
     {
+        // Scans keep a captured context id; abort so a warm-up/Refresh for the previous context
+        // cannot keep writing snapshots after the user switched. Page overlay mutations stay
+        // blocked via IsOwnPageJobRunning on the selector instead (RequireSelectedContextId
+        // mid-commit would retarget writes).
+        AbortScan();
         _selectedContextId = contextId;
         _loadedContextQuery = contextId.Value;
         StartInitialLoadJob();

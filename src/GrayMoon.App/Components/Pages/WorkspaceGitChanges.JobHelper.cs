@@ -25,9 +25,39 @@ public sealed partial class WorkspaceGitChanges
     /// </summary>
     private string ScanJobKey => WorkspaceJobKeys.GitChangesScanKey(WorkspaceId);
 
+    /// <summary>
+    /// True only when THIS page's overlay mutation job is actually running under <see cref="PageJobKey"/>
+    /// (commit, bulk stage/unstage/discard, etc.).
+    /// Uses <see cref="IBackgroundJobService.GetJob"/> so a Repositories Push Updated / Sync on the same
+    /// workspace (different overlay key) does NOT count.
+    /// Feature-selector disable binds here - not to <see cref="IsJobRunning"/>.
+    /// </summary>
+    private bool IsOwnPageJobRunning =>
+        JobService.GetJob(PageJobKey) is { State: BackgroundJobState.Running };
+
+    /// <summary>
+    /// True when any process-wide workspace mutation is in flight for this workspace: this page's own
+    /// overlay job OR a Repositories Push/Update/Sync/etc. (via <see cref="IBackgroundJobService.IsRunning"/>
+    /// falling through to <c>IWorkspaceOperationRunner.IsBusy</c>).
+    /// Use this to block starting another mutating action (commit buttons, stage-all, discard-all).
+    /// Do NOT use this to disable the Feature selector - that falsely locks the selector while Push
+    /// Updated runs on Repositories even when Changes is idle / showing "No changes".
+    /// </summary>
     private bool IsJobRunning => JobService.IsRunning(PageJobKey);
+
+    /// <summary>
+    /// True while a Git Changes status scan (<c>:scan</c> key) is running - warm-up, empty-state
+    /// Refresh, or header Refresh. Scans are read-only git-status work; they do not disable the
+    /// Feature selector (switching aborts the scan instead - see <see cref="OnSelectedContextChangedAsync"/>).
+    /// </summary>
     private bool IsScanRunning => JobService.IsRunning(ScanJobKey);
-    private bool IsAnyScanRunning => IsJobRunning || IsScanRunning;
+
+    /// <summary>
+    /// Local Changes work owned by this page: own overlay mutation OR a status scan.
+    /// Used for refresh coalescing and line-stats warm-up gating - never for Feature-selector disable
+    /// (that is <see cref="IsOwnPageJobRunning"/> only).
+    /// </summary>
+    private bool IsLocalGitChangesWorkRunning => IsOwnPageJobRunning || IsScanRunning;
 
     private string? ScanStatus =>
         JobService.GetJob(ScanJobKey) is { State: BackgroundJobState.Running } job
@@ -89,6 +119,8 @@ public sealed partial class WorkspaceGitChanges
     /// Survives page navigation (circuit-scoped BackgroundJobService); the empty-state UI
     /// and the header's scan indicator both bind to IsScanRunning / ScanStatus when the page is
     /// mounted, so the panel is never fully hidden behind a rescan.
+    /// Context id is captured when the job body starts so a later Feature switch cannot retarget
+    /// an in-flight scan (the switch aborts the scan separately).
     /// </summary>
     private void StartScanJob(string label)
     {
@@ -96,7 +128,9 @@ public sealed partial class WorkspaceGitChanges
         {
             try
             {
-                await Scanner.ScanWorkspaceAsync(WorkspaceId, RequireSelectedContextId(), ct, progress =>
+                // Capture once - do not re-read _selectedContextId mid-scan.
+                var contextId = RequireSelectedContextId();
+                await Scanner.ScanWorkspaceAsync(WorkspaceId, contextId, ct, progress =>
                     job.ReportProgress($"Refreshing {progress.Completed} of {progress.Total} repositories..."), includeLineStats: true);
 
                 await InvokeAsync(async () =>
@@ -141,4 +175,3 @@ public sealed partial class WorkspaceGitChanges
         });
     }
 }
-
