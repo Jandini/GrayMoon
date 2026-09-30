@@ -257,6 +257,7 @@ public sealed class SyncStateTestContext : IAsyncDisposable
 public sealed class FakeAgentBridge : IAgentBridge
 {
     private readonly Dictionary<string, Func<object, AgentCommandResponse>> _handlers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _callsLock = new();
 
     public bool IsAgentConnected { get; set; } = true;
     public List<(string Command, object Args)> Calls { get; } = [];
@@ -269,7 +270,8 @@ public sealed class FakeAgentBridge : IAgentBridge
 
     public Task<AgentCommandResponse> SendCommandAsync(string command, object args, CancellationToken cancellationToken = default)
     {
-        Calls.Add((command, args));
+        lock (_callsLock)
+            Calls.Add((command, args));
         if (_handlers.TryGetValue(command, out var handler))
             return Task.FromResult(handler(args));
         return Task.FromResult(new AgentCommandResponse(false, null, $"No canned response for '{command}'."));

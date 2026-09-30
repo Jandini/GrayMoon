@@ -321,6 +321,77 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
     }
 
     [Fact]
+    public async Task Remove_cleans_all_repositories_and_issues_per_repo_agent_commands()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var featureContextId = await SeedRemovableFeatureWithTwoReposAsync(ctx);
+
+        ctx.AgentBridge.Respond(AgentHubMethods.RemoveGitWorktree, new { success = true });
+        ctx.AgentBridge.Respond("DeleteBranch", new { success = true });
+        ctx.AgentBridge.Respond("SyncRepository", SyncResponse(branch: "main", incoming: 1));
+        ctx.AgentBridge.Respond("CheckFileVersions", new { success = true, files = Array.Empty<object>() });
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var result = await ops.RemoveFeatureAsync(
+            featureContextId,
+            new RemoveFeatureOptions
+            {
+                AllowDiscardUncommitted = true,
+                AllowForceDeleteLocalBranches = true,
+            });
+
+        Assert.True(result.Success, result.Error);
+        Assert.Equal(2, ctx.AgentBridge.Calls.Count(c => c.Command == AgentHubMethods.RemoveGitWorktree));
+        Assert.Equal(2, ctx.AgentBridge.Calls.Count(c => c.Command == "DeleteBranch"));
+        Assert.Contains(ctx.AgentBridge.Calls, c => c.Command == "SyncRepository");
+        AssertNoWorkspaceMutationCommands(ctx.AgentBridge);
+        await AssertFeatureGoneAsync(ctx, featureContextId);
+    }
+
+    [Fact]
+    public async Task Remove_partial_worktree_failure_still_cleans_successful_repos_and_keeps_Feature()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var featureContextId = await SeedRemovableFeatureWithTwoReposAsync(ctx);
+
+        var removeAttempts = 0;
+        ctx.AgentBridge.Respond(AgentHubMethods.RemoveGitWorktree, _ =>
+        {
+            var attempt = Interlocked.Increment(ref removeAttempts);
+            if (attempt == 1)
+                return new AgentCommandResponse(false, null, "Permission denied on first repo");
+            return new AgentCommandResponse(true, new { success = true }, null);
+        });
+        ctx.AgentBridge.Respond("DeleteBranch", new { success = true });
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var result = await ops.RemoveFeatureAsync(
+            featureContextId,
+            new RemoveFeatureOptions
+            {
+                AllowDiscardUncommitted = true,
+                AllowForceDeleteLocalBranches = true,
+            });
+
+        Assert.False(result.Success);
+        Assert.Equal(2, ctx.AgentBridge.Calls.Count(c => c.Command == AgentHubMethods.RemoveGitWorktree));
+        // Successful repo still deletes its Feature branch; failed repo skips DeleteBranch.
+        Assert.Equal(1, ctx.AgentBridge.Calls.Count(c => c.Command == "DeleteBranch"));
+        Assert.DoesNotContain(ctx.AgentBridge.Calls, c => c.Command == "SyncRepository");
+
+        await using var read = ctx.CreateScope();
+        var db = read.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.True(await db.WorkspaceFeatureContexts.AnyAsync(c => c.WorkspaceFeatureContextId == featureContextId.Value));
+        var feature = await db.WorkspaceFeatures.SingleAsync(f => f.Name == "feat-refresh" && f.WorkspaceId == ctx.WorkspaceId);
+        Assert.Equal(WorkspaceFeatureLifecycleState.NeedsRepair, feature.LifecycleState);
+        Assert.Equal(1, await db.WorkspaceFeatureRepositories.CountAsync(r =>
+            r.WorkspaceFeatureContextId == featureContextId.Value
+            && r.State == WorkspaceFeatureRepositoryState.NeedsRepair));
+    }
+
+    [Fact]
     public async Task Analyze_dirty_Feature_worktree_is_not_automatically_safe()
     {
         // F
@@ -619,6 +690,61 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
         await db.SaveChangesAsync();
 
         return new WorkspaceFeatureContextId(context.WorkspaceFeatureContextId);
+    }
+
+    private static async Task<WorkspaceFeatureContextId> SeedRemovableFeatureWithTwoReposAsync(
+        SyncStateTestContext ctx,
+        string? parentBranchName = null)
+    {
+        var featureContextId = await SeedRemovableFeatureAsync(ctx, parentBranchName);
+
+        await using var scope = ctx.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var connectorId = await db.Repositories
+            .Where(r => r.RepositoryId == ctx.RepositoryId)
+            .Select(r => r.ConnectorId)
+            .SingleAsync();
+
+        var secondRepo = new Repository
+        {
+            ConnectorId = connectorId,
+            RepositoryName = "graymoon-web",
+            OrgName = "acme",
+            Visibility = "Public",
+            CloneUrl = "https://github.com/acme/graymoon-web.git",
+        };
+        db.Repositories.Add(secondRepo);
+        await db.SaveChangesAsync();
+
+        var secondLink = new WorkspaceRepositoryLink
+        {
+            WorkspaceId = ctx.WorkspaceId,
+            RepositoryId = secondRepo.RepositoryId,
+            GitVersion = "1.0.0",
+            BranchName = "main",
+            DefaultBranchName = "main",
+            OutgoingCommits = 0,
+            IncomingCommits = 0,
+            BranchHasUpstream = true,
+            SyncStatus = RepoSyncStatus.InSync,
+            RepositoryType = ProjectType.Library,
+        };
+        db.WorkspaceRepositories.Add(secondLink);
+        await db.SaveChangesAsync();
+
+        db.WorkspaceFeatureRepositories.Add(new WorkspaceFeatureRepository
+        {
+            WorkspaceFeatureContextId = featureContextId.Value,
+            WorkspaceRepositoryId = secondLink.WorkspaceRepositoryId,
+            WorktreePath = @"C:\gm-test-root\.graymoon\test-ws\features\feat-refresh\graymoon-web",
+            State = WorkspaceFeatureRepositoryState.Ready,
+            BaseCommitSha = "def456",
+            ParentBranchName = parentBranchName,
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        return featureContextId;
     }
 
     private static async Task AssertFeatureGoneAsync(SyncStateTestContext ctx, WorkspaceFeatureContextId featureContextId)

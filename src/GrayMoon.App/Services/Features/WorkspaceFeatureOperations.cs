@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -15,6 +16,7 @@ using GrayMoon.Application.Features;
 using GrayMoon.Common.Git;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services.Features;
 
@@ -27,11 +29,14 @@ public sealed class WorkspaceFeatureOperations(
     IWorkspaceSelectedFeatureContextService selectedContextService,
     IAgentBridge agentBridge,
     WorkspaceService workspaceService,
+    IOptions<WorkspaceOptions> workspaceOptions,
     ILogger<WorkspaceFeatureOperations> logger) : IWorkspaceFeatureOperations
 {
     private static readonly Regex BranchNamePattern = new(
         @"^(?!.*\.\.)(?!/)(?!.*/$)(?!.*//)(?!.*[@{])[^\s~^:?*\[\\]+$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private int MaxParallel => Math.Max(1, workspaceOptions.Value.MaxParallelOperations);
 
     public async Task<CreateFeatureResult> CreateFeatureAsync(
         int workspaceId,
@@ -169,7 +174,9 @@ public sealed class WorkspaceFeatureOperations(
 
         progress?.Report(new OperationProgress("Creating worktrees..."));
         var anyFailure = 0;
-        using var gate = new SemaphoreSlim(Math.Max(2, Environment.ProcessorCount));
+        var createCompleted = 0;
+        var createTotal = pendingRows.Count;
+        using var gate = new SemaphoreSlim(MaxParallel);
         var tasks = pendingRows.Select(async row =>
         {
             await gate.WaitAsync(cancellationToken);
@@ -222,6 +229,8 @@ public sealed class WorkspaceFeatureOperations(
             }
             finally
             {
+                var done = Interlocked.Increment(ref createCompleted);
+                progress?.Report(new OperationProgress($"Creating worktrees… {done}/{createTotal}"));
                 gate.Release();
             }
         });
@@ -297,41 +306,54 @@ public sealed class WorkspaceFeatureOperations(
             logger.LogWarning(ex, "Could not resolve Feature workspace paths for remove analysis.");
         }
 
-        var plans = new List<RemoveFeatureRepositoryPlan>();
-        foreach (var row in rows)
+        var planSlots = new RemoveFeatureRepositoryPlan[rows.Count];
+        using (var gate = new SemaphoreSlim(MaxParallel))
         {
-            var state = states.FirstOrDefault(s => s.WorkspaceRepositoryId == row.WorkspaceRepositoryId);
-            var pr = prs.FirstOrDefault(p => p.WorkspaceRepositoryId == row.WorkspaceRepositoryId);
-            var exists = Directory.Exists(row.WorktreePath);
-            var live = await ProbeFeatureWorktreeLiveStatusAsync(
-                featureWorkspaceRoot,
-                featureWorkspaceFolder,
-                info.WorkspaceId,
-                row,
-                exists,
-                cancellationToken);
-
-            plans.Add(new RemoveFeatureRepositoryPlan
+            var probeTasks = rows.Select(async (row, index) =>
             {
-                WorkspaceRepositoryId = row.WorkspaceRepositoryId,
-                RepositoryName = row.WorkspaceRepository?.Repository?.RepositoryName ?? "",
-                WorktreePath = row.WorktreePath,
-                WorktreeExists = exists,
-                BranchName = state?.BranchName ?? info.FeatureName,
-                HeadCommit = live.HeadCommit ?? state?.HeadCommit,
-                HasUncommittedChanges = live.HasUncommittedChanges,
-                HasStagedChanges = live.HasStagedChanges,
-                HasConflicts = live.HasConflicts,
-                LiveStatusEstablished = live.LiveStatusEstablished,
-                OutgoingCommits = state?.OutgoingCommits,
-                HasUpstream = state?.BranchHasUpstream == true,
-                PullRequestNumber = pr?.PullRequestNumber,
-                PullRequestState = pr?.State,
-                PullRequestMerged = pr?.MergedAt is not null,
-                Warning = ComposeRemoveWarning(row, live)
+                await gate.WaitAsync(cancellationToken);
+                try
+                {
+                    var state = states.FirstOrDefault(s => s.WorkspaceRepositoryId == row.WorkspaceRepositoryId);
+                    var pr = prs.FirstOrDefault(p => p.WorkspaceRepositoryId == row.WorkspaceRepositoryId);
+                    var exists = Directory.Exists(row.WorktreePath);
+                    var live = await ProbeFeatureWorktreeLiveStatusAsync(
+                        featureWorkspaceRoot,
+                        featureWorkspaceFolder,
+                        info.WorkspaceId,
+                        row,
+                        exists,
+                        cancellationToken);
+
+                    planSlots[index] = new RemoveFeatureRepositoryPlan
+                    {
+                        WorkspaceRepositoryId = row.WorkspaceRepositoryId,
+                        RepositoryName = row.WorkspaceRepository?.Repository?.RepositoryName ?? "",
+                        WorktreePath = row.WorktreePath,
+                        WorktreeExists = exists,
+                        BranchName = state?.BranchName ?? info.FeatureName,
+                        HeadCommit = live.HeadCommit ?? state?.HeadCommit,
+                        HasUncommittedChanges = live.HasUncommittedChanges,
+                        HasStagedChanges = live.HasStagedChanges,
+                        HasConflicts = live.HasConflicts,
+                        LiveStatusEstablished = live.LiveStatusEstablished,
+                        OutgoingCommits = state?.OutgoingCommits,
+                        HasUpstream = state?.BranchHasUpstream == true,
+                        PullRequestNumber = pr?.PullRequestNumber,
+                        PullRequestState = pr?.State,
+                        PullRequestMerged = pr?.MergedAt is not null,
+                        Warning = ComposeRemoveWarning(row, live)
+                    };
+                }
+                finally
+                {
+                    gate.Release();
+                }
             });
+            await Task.WhenAll(probeTasks);
         }
 
+        var plans = planSlots.ToList();
         var classification = Classify(plans);
         var safe = IsAutomaticallySafe(classification, plans);
 
@@ -425,90 +447,129 @@ public sealed class WorkspaceFeatureOperations(
         var linkByWrId = links.ToDictionary(l => l.WorkspaceRepositoryId);
         var repositoryIds = links.Select(l => l.RepositoryId).Distinct().ToList();
 
-        foreach (var row in rows)
+        progress?.Report(new OperationProgress("Removing worktrees..."));
+        var errorsByWrId = new ConcurrentDictionary<int, string>();
+        var removeCompleted = 0;
+        var removeTotal = rows.Count;
+        string? workspaceRoot = null;
+        string? workspaceFolderName = null;
+        try
         {
-            progress?.Report(new OperationProgress($"Removing worktree {row.WorktreePath}..."));
-            var mainPath = await pathResolver.GetRepositoryPathAsync(
-                specialContextId, row.WorkspaceRepositoryId, cancellationToken);
-            // Force worktree remove only when the user authorized discarding dirty Feature files.
-            // AllowForceDeleteLocalBranches does not imply discard permission.
-            var force = options.AllowDiscardUncommitted;
-            var response = await agentBridge.SendCommandAsync(
-                AgentHubMethods.RemoveGitWorktree,
-                new { mainRepositoryPath = mainPath, worktreePath = row.WorktreePath, force },
-                cancellationToken);
-            if (!response.Success)
-            {
-                logger.LogWarning(
-                    "RemoveGitWorktree failed for {Path}: {Error}",
-                    row.WorktreePath, response.Error);
-                row.State = WorkspaceFeatureRepositoryState.NeedsRepair;
-                row.LastError = response.Error;
-                feature.LifecycleState = WorkspaceFeatureLifecycleState.NeedsRepair;
-                feature.LastError = response.Error;
-                feature.UpdatedAt = DateTime.UtcNow;
-                await db.SaveChangesAsync(cancellationToken);
-                // Do not continue into branch delete or the Workspace refresh, and do not report
-                // success: the UI would navigate back to Workspace while the stored branch is still
-                // the Feature. The worktree is still registered, so the Feature stays for repair.
-                return OperationResult.Fail(
-                    string.IsNullOrWhiteSpace(response.Error)
-                        ? $"Failed to remove worktree {row.WorktreePath}."
-                        : response.Error);
-            }
+            (workspaceRoot, workspaceFolderName) =
+                await pathResolver.GetAgentWorkspaceArgsAsync(specialContextId, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not resolve Workspace agent paths for Feature branch delete.");
+        }
 
-            // §27.8: after worktree remove, delete the Feature branch from the main repository.
-            var branchName = info.FeatureName;
-            if (!string.IsNullOrWhiteSpace(branchName)
-                && linkByWrId.TryGetValue(row.WorkspaceRepositoryId, out var link)
-                && !string.IsNullOrWhiteSpace(link.Repository?.RepositoryName))
+        using (var gate = new SemaphoreSlim(MaxParallel))
+        {
+            var removeTasks = rows.Select(async row =>
             {
-                var repoName = link.Repository!.RepositoryName;
-                progress?.Report(new OperationProgress($"Deleting local branch {branchName}..."));
-                var (workspaceRoot, workspaceFolderName) =
-                    await pathResolver.GetAgentWorkspaceArgsAsync(specialContextId, cancellationToken);
-                var deleteLocal = await agentBridge.SendCommandAsync(
-                    "DeleteBranch",
-                    new
-                    {
-                        workspaceName = workspaceFolderName,
-                        repositoryName = repoName,
-                        branchName,
-                        isRemote = false,
-                        force = options.AllowForceDeleteLocalBranches,
-                        workspaceRoot
-                    },
-                    cancellationToken);
-                if (!deleteLocal.Success)
+                await gate.WaitAsync(cancellationToken);
+                try
                 {
-                    logger.LogWarning(
-                        "Delete local Feature branch {Branch} failed for {Repo}: {Error}",
-                        branchName, repoName, deleteLocal.Error);
-                }
-
-                if (options.DeleteRemoteBranches)
-                {
-                    progress?.Report(new OperationProgress($"Deleting remote branch {branchName}..."));
-                    var deleteRemote = await agentBridge.SendCommandAsync(
-                        "DeleteBranch",
-                        new
-                        {
-                            workspaceName = workspaceFolderName,
-                            repositoryName = repoName,
-                            branchName,
-                            isRemote = true,
-                            force = false,
-                            workspaceRoot
-                        },
+                    var mainPath = await pathResolver.GetRepositoryPathAsync(
+                        specialContextId, row.WorkspaceRepositoryId, cancellationToken);
+                    // Force worktree remove only when the user authorized discarding dirty Feature files.
+                    // AllowForceDeleteLocalBranches does not imply discard permission.
+                    var force = options.AllowDiscardUncommitted;
+                    var response = await agentBridge.SendCommandAsync(
+                        AgentHubMethods.RemoveGitWorktree,
+                        new { mainRepositoryPath = mainPath, worktreePath = row.WorktreePath, force },
                         cancellationToken);
-                    if (!deleteRemote.Success)
+                    if (!response.Success)
                     {
                         logger.LogWarning(
-                            "Delete remote Feature branch {Branch} failed for {Repo}: {Error}",
-                            branchName, repoName, deleteRemote.Error);
+                            "RemoveGitWorktree failed for {Path}: {Error}",
+                            row.WorktreePath, response.Error);
+                        errorsByWrId[row.WorkspaceRepositoryId] = string.IsNullOrWhiteSpace(response.Error)
+                            ? $"Failed to remove worktree {row.WorktreePath}."
+                            : response.Error;
+                        return;
+                    }
+
+                    // §27.8: after worktree remove, delete the Feature branch from the main repository.
+                    var branchName = info.FeatureName;
+                    if (!string.IsNullOrWhiteSpace(branchName)
+                        && linkByWrId.TryGetValue(row.WorkspaceRepositoryId, out var link)
+                        && !string.IsNullOrWhiteSpace(link.Repository?.RepositoryName)
+                        && !string.IsNullOrWhiteSpace(workspaceRoot)
+                        && !string.IsNullOrWhiteSpace(workspaceFolderName))
+                    {
+                        var repoName = link.Repository!.RepositoryName;
+                        var deleteLocal = await agentBridge.SendCommandAsync(
+                            "DeleteBranch",
+                            new
+                            {
+                                workspaceName = workspaceFolderName,
+                                repositoryName = repoName,
+                                branchName,
+                                isRemote = false,
+                                force = options.AllowForceDeleteLocalBranches,
+                                workspaceRoot
+                            },
+                            cancellationToken);
+                        if (!deleteLocal.Success)
+                        {
+                            logger.LogWarning(
+                                "Delete local Feature branch {Branch} failed for {Repo}: {Error}",
+                                branchName, repoName, deleteLocal.Error);
+                        }
+
+                        if (options.DeleteRemoteBranches)
+                        {
+                            var deleteRemote = await agentBridge.SendCommandAsync(
+                                "DeleteBranch",
+                                new
+                                {
+                                    workspaceName = workspaceFolderName,
+                                    repositoryName = repoName,
+                                    branchName,
+                                    isRemote = true,
+                                    force = false,
+                                    workspaceRoot
+                                },
+                                cancellationToken);
+                            if (!deleteRemote.Success)
+                            {
+                                logger.LogWarning(
+                                    "Delete remote Feature branch {Branch} failed for {Repo}: {Error}",
+                                    branchName, repoName, deleteRemote.Error);
+                            }
+                        }
                     }
                 }
+                finally
+                {
+                    var done = Interlocked.Increment(ref removeCompleted);
+                    progress?.Report(new OperationProgress($"Removing worktrees… {done}/{removeTotal}"));
+                    gate.Release();
+                }
+            });
+            await Task.WhenAll(removeTasks);
+        }
+
+        if (!errorsByWrId.IsEmpty)
+        {
+            // Agent work ran in parallel; apply EF updates sequentially (DbContext is not thread-safe).
+            // Do not continue into Workspace refresh or report success: the UI would navigate back while
+            // the Feature still owns failed worktrees. Keep metadata for retry (§27.8).
+            foreach (var row in rows)
+            {
+                if (!errorsByWrId.TryGetValue(row.WorkspaceRepositoryId, out var error))
+                    continue;
+                row.State = WorkspaceFeatureRepositoryState.NeedsRepair;
+                row.LastError = error;
             }
+
+            var firstError = errorsByWrId.Values.First();
+            feature.LifecycleState = WorkspaceFeatureLifecycleState.NeedsRepair;
+            feature.LastError = firstError;
+            feature.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(cancellationToken);
+            return OperationResult.Fail(firstError);
         }
 
         // Refresh special Workspace snapshot before dropping Feature rows so the grid is not stale
