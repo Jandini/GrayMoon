@@ -32,12 +32,23 @@
                         </div>
                         <div class="mb-3">
                             <label class="form-label" for="create-feature-base">Based on</label>
-                            <select id="create-feature-base" class="form-select" disabled>
-                                <option selected>Current Workspace</option>
-                            </select>
+                            <div id="create-feature-base" class="form-control" aria-disabled="true" tabindex="-1">
+                                Current Workspace
+                                @if (!string.IsNullOrWhiteSpace(WorkspaceBranchName))
+                                {
+                                    <small class="text-muted fw-normal ms-1">@WorkspaceBranchName</small>
+                                }
+                            </div>
                         </div>
-                        <div class="gm-callout gm-callout--info mb-0" role="note">
-                            The Feature starts from the current committed state. Uncommitted changes in Workspace are not copied and remain in Workspace.
+                        <div class="form-text text-muted mb-0">
+                            @if (!string.IsNullOrWhiteSpace(WorkspaceBranchName))
+                            {
+                                <text>The Feature starts from the current committed state of <code style="font-size: 1em;">@WorkspaceBranchName</code>. Uncommitted changes in Workspace are not copied and remain in Workspace.</text>
+                            }
+                            else
+                            {
+                                <text>The Feature starts from the current committed state. Uncommitted changes in Workspace are not copied and remain in Workspace.</text>
+                            }
                         </div>
                     </div>
                     <div class="modal-footer">
@@ -58,6 +69,8 @@
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public int WorkspaceId { get; set; }
     [Parameter] public string? InitialName { get; set; }
+    /// <summary>Unified Current Workspace branch name when every Workspace repo shares one; otherwise null.</summary>
+    [Parameter] public string? WorkspaceBranchName { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
     [Parameter] public EventCallback<CreateFeatureResult> OnCreated { get; set; }
 

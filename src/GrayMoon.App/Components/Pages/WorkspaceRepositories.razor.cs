@@ -44,6 +44,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     private int? _boundContextQuery;
     private bool _createFeatureModalVisible;
     private string? _createFeatureInitialName;
+    private string? _createFeatureWorkspaceBranch;
     private bool _removeFeatureModalVisible;
     private WorkspaceFeatureContextId? _removeFeatureContextId;
 
@@ -164,11 +165,27 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         await OnSelectedContextChangedAsync(desired);
     }
 
-    private Task OnRequestCreateFeatureAsync(string name)
+    private async Task OnRequestCreateFeatureAsync(string name)
     {
         _createFeatureInitialName = name;
+        _createFeatureWorkspaceBranch = await ResolveCurrentWorkspaceBranchNameAsync();
         _createFeatureModalVisible = true;
-        return Task.CompletedTask;
+    }
+
+    /// <summary>Unified branch across special Workspace repos (Features base on Current Workspace, not the viewed Feature).</summary>
+    private async Task<string?> ResolveCurrentWorkspaceBranchNameAsync()
+    {
+        try
+        {
+            var snapshots = await LinkListQueryService.GetAllSnapshotsAsync(WorkspaceId, null, isSpecialWorkspace: true);
+            var links = snapshots.Select(WorkspaceRepositoryLinkListMapper.ToLink).ToList();
+            return GetUnifiedWorkspaceCurrentBranch(links);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Could not resolve Current Workspace branch for Create Feature modal");
+            return null;
+        }
     }
 
     private Task OnRemoveFeatureAsync()
