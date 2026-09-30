@@ -25,6 +25,7 @@
                                     OnRequestRemoveFeature="OnRequestRemoveFeatureFromSelectorAsync"
                                     OnRemoveFeature="OnRemoveFeatureAsync"
                                     RepositoriesCount="@(_headerState?.TotalCount ?? 0)"
+                                    CountReady="@(hasLoadedOnce && !isInitialLoading)"
                                     HasFilter="@HasSearchFilter"
                                     FilteredCount="@(totalCount ?? 0)"
                                     SearchTerm="@searchTerm"
@@ -80,7 +81,7 @@
             <div class="page-error-callout repo-error-line" role="alert">@errorMessage</div>
         }
     </div>
-    @if (workspace != null)
+    @if (workspace != null && hasLoadedOnce && !isInitialLoading)
     {
         <div class="grid-page-body">
             <div class="card page-card mb-4">
@@ -114,15 +115,7 @@
                             </tr>
                         </thead>
                         <tbody @ref="_tbodyRef" class="repositories-virtual-tbody">
-                            @if (isInitialLoading && _slots.Count == 0)
-                            {
-                                <tr>
-                                    <td colspan="@TableColSpan" class="text-center text-muted py-4">
-                                        Loading repositories...
-                                    </td>
-                                </tr>
-                            }
-                            else if (hasLoadedOnce && (_headerState?.TotalCount ?? 0) == 0 && !HasSearchFilter)
+                            @if ((_headerState?.TotalCount ?? 0) == 0 && !HasSearchFilter)
                             {
                                 <tr>
                                     <td colspan="@TableColSpan" class="text-center text-muted py-4">
