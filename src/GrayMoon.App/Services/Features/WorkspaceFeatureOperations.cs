@@ -64,8 +64,8 @@ public sealed class WorkspaceFeatureOperations(
                 try
                 {
                     using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, cancellationToken);
-                    progress?.Report(new OperationProgress(op.DisplayMessage));
-                    var result = await CreateFeatureCoreAsync(workspaceId, name, progress, linked.Token);
+                    var overlayProgress = BindOverlayProgress(op, progress);
+                    var result = await CreateFeatureCoreAsync(workspaceId, name, overlayProgress, linked.Token);
                     tcs.TrySetResult(result);
                 }
                 catch (Exception ex)
@@ -113,7 +113,6 @@ public sealed class WorkspaceFeatureOperations(
             .Cast<string>()
             .ToList();
 
-        progress?.Report(new OperationProgress("Reading Workspace HEAD commits..."));
         var snapshot = await GetHeadSnapshotAsync(workspace, repoNames, cancellationToken);
         if (snapshot.Commits.Count != repoNames.Count)
             return FailCreate("HeadCommitsIncomplete", "Could not resolve HEAD for every Workspace repository.");
@@ -172,7 +171,6 @@ public sealed class WorkspaceFeatureOperations(
 
         await db.SaveChangesAsync(cancellationToken);
 
-        progress?.Report(new OperationProgress("Creating worktrees..."));
         var anyFailure = 0;
         var createCompleted = 0;
         var createTotal = pendingRows.Count;
@@ -230,7 +228,10 @@ public sealed class WorkspaceFeatureOperations(
             finally
             {
                 var done = Interlocked.Increment(ref createCompleted);
-                progress?.Report(new OperationProgress($"Creating worktrees… {done}/{createTotal}"));
+                progress.Report(
+                    $"Created feature in {done} of {createTotal} repos",
+                    done,
+                    createTotal);
                 gate.Release();
             }
         });
@@ -401,8 +402,8 @@ public sealed class WorkspaceFeatureOperations(
                 try
                 {
                     using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, cancellationToken);
-                    progress?.Report(new OperationProgress(op.DisplayMessage));
-                    var outcome = await RemoveFeatureCoreAsync(featureContextId, info, options, progress, linked.Token);
+                    var overlayProgress = BindOverlayProgress(op, progress);
+                    var outcome = await RemoveFeatureCoreAsync(featureContextId, info, options, overlayProgress, linked.Token);
                     tcs.TrySetResult(outcome);
                 }
                 catch (Exception ex)
@@ -447,7 +448,6 @@ public sealed class WorkspaceFeatureOperations(
         var linkByWrId = links.ToDictionary(l => l.WorkspaceRepositoryId);
         var repositoryIds = links.Select(l => l.RepositoryId).Distinct().ToList();
 
-        progress?.Report(new OperationProgress("Removing worktrees..."));
         var errorsByWrId = new ConcurrentDictionary<int, string>();
         var removeCompleted = 0;
         var removeTotal = rows.Count;
@@ -544,7 +544,10 @@ public sealed class WorkspaceFeatureOperations(
                 finally
                 {
                     var done = Interlocked.Increment(ref removeCompleted);
-                    progress?.Report(new OperationProgress($"Removing worktrees… {done}/{removeTotal}"));
+                    progress.Report(
+                        $"Removed feature from {done} of {removeTotal} repos",
+                        done,
+                        removeTotal);
                     gate.Release();
                 }
             });
@@ -1097,6 +1100,19 @@ public sealed class WorkspaceFeatureOperations(
     private static bool IsPrMergedOrNeverCreated(RemoveFeatureRepositoryPlan p) =>
         p.PullRequestMerged == true
         || (p.PullRequestNumber is null or 0 && string.IsNullOrWhiteSpace(p.PullRequestState));
+
+    /// <summary>
+    /// Forwards progress to the structural overlay operation (so BackgroundJobOverlay updates)
+    /// and to any caller-supplied progress sink.
+    /// </summary>
+    private static IProgress<OperationProgress> BindOverlayProgress(
+        IWorkspaceLockedOperation op,
+        IProgress<OperationProgress>? progress)
+        => new Progress<OperationProgress>(p =>
+        {
+            op.ReportProgress(p.Message);
+            progress?.Report(p);
+        });
 
     private static CreateFeatureResult FailCreate(string condition, string error) => new()
     {
