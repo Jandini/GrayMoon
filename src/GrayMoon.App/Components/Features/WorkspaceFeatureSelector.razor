@@ -104,26 +104,26 @@
                     <ul class="dropdown-menu show shadow workspace-feature-selector__submenu" role="menu">
                         @if (_toolAvailability?.Cursor == true)
                         {
-                            <li><button type="button" class="dropdown-item" role="menuitem" @onclick='() => LaunchAsync("openInCursor")'>Cursor</button></li>
+                            @LaunchToolItem("openInCursor", "Cursor")
                         }
                         @if (_toolAvailability?.ClaudeCli == true)
                         {
-                            <li><button type="button" class="dropdown-item" role="menuitem" @onclick='() => LaunchAsync("openInClaudeCli")'>Claude CLI</button></li>
+                            @LaunchToolItem("openInClaudeCli", "Claude CLI")
                         }
                         @if (_toolAvailability?.VsCode == true)
                         {
-                            <li><button type="button" class="dropdown-item" role="menuitem" @onclick='() => LaunchAsync("openInVsCode")'>VS Code</button></li>
+                            @LaunchToolItem("openInVsCode", "VS Code")
                         }
                         @if (_toolAvailability?.VisualStudio == true)
                         {
-                            <li><button type="button" class="dropdown-item" role="menuitem" @onclick='() => LaunchAsync("openInVisualStudio")'>Visual Studio</button></li>
+                            @LaunchToolItem("openInVisualStudio", "Visual Studio")
                         }
                         @if (HasAnyIdeAvailable)
                         {
                             <li><hr class="dropdown-divider branch-menu-divider" /></li>
                         }
-                        <li><button type="button" class="dropdown-item" role="menuitem" @onclick='() => LaunchAsync("openInTerminal")'>Terminal</button></li>
-                        <li><button type="button" class="dropdown-item" role="menuitem" @onclick='() => LaunchAsync("showInExplorer")'>Explorer</button></li>
+                        @LaunchToolItem("openInTerminal", "Terminal")
+                        @LaunchToolItem("showInExplorer", "Explorer")
                     </ul>
                 </li>
             }
@@ -142,6 +142,7 @@
     [Parameter] public string? WorkspaceName { get; set; }
 
     private readonly List<WorkspaceFeatureContextInfo> _options = [];
+    private readonly List<NativeLaunchRepositoryPath> _repositories = [];
     private bool _open;
     private bool _loaded;
     private bool _desktopAvailable;
@@ -150,6 +151,42 @@
 
     private bool HasAnyIdeAvailable =>
         _toolAvailability is { } t && (t.Cursor || t.ClaudeCli || t.VsCode || t.VisualStudio);
+
+    private RenderFragment LaunchToolItem(string method, string label) => __builder =>
+    {
+        <li class="workspace-feature-selector__launch-row">
+            <button type="button"
+                    class="dropdown-item workspace-feature-selector__launch-item"
+                    role="menuitem"
+                    @onclick="() => LaunchAsync(method)">
+                @label
+            </button>
+            @if (_repositories.Count > 0)
+            {
+                <div class="workspace-feature-selector__repo-flyout"
+                     title="Open a specific repository">
+                    <span class="workspace-feature-selector__repo-chevron" aria-hidden="true">
+                        <i class="bi bi-chevron-right"></i>
+                    </span>
+                    <ul class="dropdown-menu show shadow workspace-feature-selector__repo-submenu" role="menu">
+                        @foreach (var repo in _repositories)
+                        {
+                            var repoPath = repo.Path;
+                            <li>
+                                <button type="button"
+                                        class="dropdown-item"
+                                        role="menuitem"
+                                        title="@repoPath"
+                                        @onclick="() => LaunchAsync(method, repoPath)">
+                                    @repo.RepositoryName
+                                </button>
+                            </li>
+                        }
+                    </ul>
+                </div>
+            }
+        </li>
+    };
 
     private sealed class ToolAvailabilityDto
     {
@@ -232,7 +269,10 @@
             // elsewhere (or by an operation that finished since the last load) is reflected immediately.
             await ReloadAsync();
             if (_desktopAvailable)
+            {
                 await RefreshToolAvailabilityAsync();
+                await RefreshLaunchRepositoriesAsync();
+            }
         }
     }
 
@@ -250,16 +290,45 @@
         option.IsSpecialWorkspace
         || string.Equals(option.LifecycleState, "Ready", StringComparison.OrdinalIgnoreCase);
 
-    private async Task LaunchAsync(string method)
+    private async Task RefreshLaunchRepositoriesAsync()
+    {
+        _repositories.Clear();
+        if (SelectedContextId is null)
+            return;
+
+        try
+        {
+            var paths = await NativeLaunch.ResolveContextLaunchPathsAsync(SelectedContextId.Value);
+            if (paths is null)
+                return;
+
+            _repositories.AddRange(paths.Repositories
+                .Where(r => !string.IsNullOrWhiteSpace(r.Path))
+                .OrderBy(r => r.RepositoryName, StringComparer.OrdinalIgnoreCase));
+        }
+        catch
+        {
+            // Desktop bridge / path resolution optional.
+        }
+    }
+
+    private async Task LaunchAsync(string method, string? repositoryPath = null)
     {
         if (SelectedContextId is null)
             return;
-        var paths = await NativeLaunch.ResolveContextLaunchPathsAsync(SelectedContextId.Value);
-        if (paths is null || string.IsNullOrWhiteSpace(paths.ContextRoot))
-            return;
+
+        string? path = repositoryPath;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            var paths = await NativeLaunch.ResolveContextLaunchPathsAsync(SelectedContextId.Value);
+            if (paths is null || string.IsNullOrWhiteSpace(paths.ContextRoot))
+                return;
+            path = paths.ContextRoot;
+        }
+
         try
         {
-            await JS.InvokeAsync<bool>($"graymoonDesktop.{method}", paths.ContextRoot);
+            await JS.InvokeAsync<bool>($"graymoonDesktop.{method}", path);
         }
         catch
         {
