@@ -72,7 +72,11 @@ public sealed class WorkspaceContextPathResolver(
                     cancellationToken);
 
             if (featureRepo is not null && !string.IsNullOrWhiteSpace(featureRepo.WorktreePath))
-                return featureRepo.WorktreePath.TrimEnd('\\', '/');
+            {
+                // Agent/git often persist worktree paths with forward slashes (e.g. C:/Users/...).
+                // Normalize so native hosts (especially explorer.exe) receive Windows-shaped paths.
+                return featureRepo.WorktreePath.Replace('/', '\\').TrimEnd('\\');
+            }
         }
 
         var contextRoot = await GetContextRootAsync(contextId, cancellationToken);
