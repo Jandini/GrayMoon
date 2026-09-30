@@ -90,6 +90,16 @@
     white-space: nowrap;
 }
 
+.workspace-feature-selector__label-placeholder {
+    display: block;
+    width: 7.5rem;
+    max-width: 100%;
+    height: 0.7em;
+    margin: 0.15em 0;
+    border-radius: 0.2rem;
+    background: color-mix(in srgb, var(--text-primary) 18%, transparent);
+}
+
 /* Fixed slot at the end of the trigger so the chevron does not move when the "+" button is added
    beside it. This width is part of the trigger, not a stand-in for the "+" button. */
 .workspace-feature-selector__caret-zone {

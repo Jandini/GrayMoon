@@ -181,7 +181,7 @@ public sealed partial class WorkspaceRepositories
             WorkspaceId, levelKey, _effectiveSearch, _selectedContextId, !_isFeatureContext);
     private WorkspaceRepositoryLink? FindLink(IReadOnlyList<WorkspaceRepositoryLink> links, int repositoryId) =>
         links.FirstOrDefault(w => w.RepositoryId == repositoryId);
-    private void ClearGridState()
+    private void ClearGridState(bool clearHeaderState = true)
     {
         _slots.Clear();
         _linkByRepoId.Clear();
@@ -193,7 +193,10 @@ public sealed partial class WorkspaceRepositories
         _topSpacerPx = 0;
         _bottomSpacerPx = 0;
         totalCount = null;
-        _headerState = null;
+        // Keep header action flags (Create PR / Branch / …) during context reload so the primary
+        // button does not flash to a different label while the new header state is in flight.
+        if (clearHeaderState)
+            _headerState = null;
         _tooltipLoadedRepoIds.Clear();
         _tooltipLoadInFlight.Clear();
         _mismatchedDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<DependencyMismatchLine>>();

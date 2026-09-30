@@ -15,7 +15,17 @@
             aria-haspopup="menu"
             @onclick="ToggleDropdownAsync"
             @onclick:stopPropagation>
-        <span class="workspace-feature-selector__label">@SelectedLabel</span>
+        <span class="workspace-feature-selector__label">
+            @if (ShowLabelPlaceholder)
+            {
+                <span class="workspace-feature-selector__label-placeholder" aria-hidden="true"></span>
+                <span class="visually-hidden">Loading</span>
+            }
+            else
+            {
+                @SelectedLabel
+            }
+        </span>
         <span class="workspace-feature-selector__caret-zone">
             <span class="workspace-feature-selector__caret" aria-hidden="true"></span>
         </span>
@@ -196,13 +206,27 @@
         public bool ClaudeCli { get; set; }
     }
 
+    private bool ShowLabelPlaceholder
+    {
+        get
+        {
+            var selected = _options.FirstOrDefault(o => IsSelected(o));
+            if (selected is null)
+                return string.IsNullOrWhiteSpace(WorkspaceName);
+            // Special-workspace label is the real workspace name — never flash the generic "Workspace" word.
+            if (selected.IsSpecialWorkspace)
+                return string.IsNullOrWhiteSpace(WorkspaceName);
+            return string.IsNullOrWhiteSpace(selected.FeatureName);
+        }
+    }
+
     private string SelectedLabel
     {
         get
         {
             var selected = _options.FirstOrDefault(o => IsSelected(o));
             if (selected is null)
-                return string.IsNullOrWhiteSpace(WorkspaceName) ? "Context" : WorkspaceName!;
+                return WorkspaceName?.Trim() ?? string.Empty;
             return DisplayName(selected);
         }
     }
@@ -283,8 +307,8 @@
 
     private string DisplayName(WorkspaceFeatureContextInfo option) =>
         option.IsSpecialWorkspace
-            ? (string.IsNullOrWhiteSpace(WorkspaceName) ? "Workspace" : WorkspaceName!)
-            : (option.FeatureName ?? "Feature");
+            ? (WorkspaceName?.Trim() ?? string.Empty)
+            : (option.FeatureName?.Trim() ?? string.Empty);
 
     private static bool CanSelect(WorkspaceFeatureContextInfo option) =>
         option.IsSpecialWorkspace
@@ -339,8 +363,10 @@
 
     private async Task ReloadAsync()
     {
-        _options.Clear();
+        // Fetch before clearing so a mid-reload render cannot flash the empty-label placeholder
+        // (or the old "Context" fallback) while the list is in flight.
         var all = await ContextResolver.ListForWorkspaceAsync(WorkspaceId);
+        _options.Clear();
         _options.AddRange(all.Where(c => c.IsSpecialWorkspace || string.Equals(c.LifecycleState, "Ready", StringComparison.OrdinalIgnoreCase)
                                                                || string.Equals(c.LifecycleState, "NeedsRepair", StringComparison.OrdinalIgnoreCase)));
     }

@@ -20,9 +20,6 @@ public sealed partial class WorkspaceRepositories
                 return;
             }
 
-            // Paint workspace name / feature selector before the heavier grid query so the header
-            // does not sit on the generic "Context" fallback while rows load.
-            await InvokeAsync(StateHasChanged);
             await ResetAndLoadFromTopAsync();
         }
         catch (Exception ex)
@@ -72,7 +69,7 @@ public sealed partial class WorkspaceRepositories
                 return;
             }
             var token = _queryLoader.BeginQueryCycle(out generation);
-            ClearGridState();
+            ClearGridState(clearHeaderState: false);
             isInitialLoading = true;
             _virtualScrollAttached = false;
             _attachInitialScrollTop = 0;

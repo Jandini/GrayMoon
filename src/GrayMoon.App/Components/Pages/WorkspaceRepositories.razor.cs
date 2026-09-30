@@ -50,32 +50,12 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
 
     private const string SyncModeStorageKey = "graymoon:sync-mode";
     private bool _quickFetchIsPrimary;
+    private bool _prPollingStarted;
 
-    /// <summary>
-    /// When true, the first grid load runs after the initial render so thead + workspace name
-    /// paint before the heavier repository index/hydrate query (no initial LoadingOverlay).
-    /// </summary>
-    private bool _pendingInitialGridLoad;
-
-    protected override async Task OnInitializedAsync()
+    protected override void OnInitialized()
     {
         AgentQueueStateService.OnQueueStateChanged(OnQueueStateChanged);
         JobService.Changed += OnJobServiceChanged;
-        _loadedWorkspaceId = WorkspaceId;
-        var storedMode = await JSRuntime.InvokeAsync<string?>("graymoonStorageGet", SyncModeStorageKey);
-        _quickFetchIsPrimary = storedMode == "quick-fetch";
-        await ResolveSelectedContextAsync();
-        _boundContextQuery = BoundContextQueryFromSelection();
-        await LoadPendingRestoreScrollTopAsync();
-        isInitialLoading = true;
-        errorMessage = null;
-        _backgroundWorkCts = new CancellationTokenSource();
-        await LoadWorkspaceHeaderAsync();
-        _pendingInitialGridLoad = workspace != null;
-        if (workspace == null)
-        {
-            isInitialLoading = false;
-        }
     }
 
     private async Task ResolveSelectedContextAsync()
@@ -129,11 +109,12 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
 
         _selectedContextId = info.ContextId;
         _isFeatureContext = !info.IsSpecialWorkspace;
+        _boundContextQuery = BoundContextQueryFromSelection();
         Interlocked.Increment(ref _contextGeneration);
         // Drop Feature/Workspace rows immediately so the selector label and grid cannot disagree
         // while LoadWorkspaceAsync is still queued (InvokeAsync runs after the current turn).
-        _pendingInitialGridLoad = false;
-        ClearGridState();
+        // Keep header action flags so Branch/Create PR does not flash during the reload.
+        ClearGridState(clearHeaderState: false);
         isInitialLoading = true;
         await SelectedFeatureContextService.SetSelectedAsync(WorkspaceId, info.ContextId);
         await InvokeAsync(async () =>
@@ -289,64 +270,106 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         }
     }
 
+    private async Task LoadClientPreferencesAsync()
+    {
+        try
+        {
+            var storedMode = await JSRuntime.InvokeAsync<string?>("graymoonStorageGet", SyncModeStorageKey);
+            _quickFetchIsPrimary = storedMode == "quick-fetch";
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
     private async Task SetSyncModeAsync(bool quickFetch)
     {
         _quickFetchIsPrimary = quickFetch;
         await JSRuntime.InvokeVoidAsync("graymoonStorageSet", SyncModeStorageKey, quickFetch ? "quick-fetch" : "sync");
     }
+
     protected override async Task OnParametersSetAsync()
     {
         if (_disposed)
             return;
 
+        // Await context + header + grid before first paint (prerender is off) so the header chrome
+        // and column layout appear once in their final state — no Branch↔Create PR or column jump.
+        var contextChanged = _boundContextQuery != ContextQuery;
+        if (_loadedWorkspaceId == WorkspaceId && workspace != null && hasLoadedOnce && !contextChanged)
+            return;
+
         if (_loadedWorkspaceId != WorkspaceId)
         {
-            CancelBackgroundWork();
-            await DetachVirtualScrollAsync();
-            _pendingInitialGridLoad = false;
+            if (_loadedWorkspaceId != 0)
+            {
+                CancelBackgroundWork();
+                await DetachVirtualScrollAsync();
+                StopPrPollingLoop();
+                _prPollingStarted = false;
+            }
+
             _loadedWorkspaceId = WorkspaceId;
             errorMessage = null;
             hasLoadedOnce = false;
+            // Drop the previous workspace name so the selector shows a placeholder until the new
+            // header is read — never the generic "Workspace" fallback.
+            workspace = null;
             ClearGridState();
-            await ResolveSelectedContextAsync();
-            _boundContextQuery = BoundContextQueryFromSelection();
-            await LoadPendingRestoreScrollTopAsync();
-            await LoadWorkspaceAsync();
-            ApplySyncStateFromLoadedItems();
-            return;
         }
 
-        // Same workspace: selector NavigateTo / browser history changed ?context=.
-        if (_boundContextQuery != ContextQuery)
+        if (contextChanged && workspace != null && hasLoadedOnce)
         {
             _boundContextQuery = ContextQuery;
             await SyncContextFromQueryAsync();
+            return;
         }
+
+        // Header first so WorkspaceName is ready before the feature selector resolves its options.
+        await LoadWorkspaceHeaderAsync();
+        await ResolveSelectedContextAsync();
+        _boundContextQuery = BoundContextQueryFromSelection();
+        await LoadClientPreferencesAsync();
+        await LoadPendingRestoreScrollTopAsync();
+        if (workspace == null)
+        {
+            isInitialLoading = false;
+            return;
+        }
+
+        try
+        {
+            isInitialLoading = true;
+            errorMessage = null;
+            CancelBackgroundWork();
+            _backgroundWorkCts = new CancellationTokenSource();
+            await ResetAndLoadFromTopAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading workspace {WorkspaceId}", WorkspaceId);
+            SetPageError("Failed to load workspace. Please try again later.");
+            ClearGridState();
+        }
+        finally
+        {
+            isInitialLoading = false;
+        }
+
+        ApplySyncStateFromLoadedItems();
     }
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         await OnAfterRenderRealtimeAsync(firstRender);
-        if (_pendingInitialGridLoad && !_disposed)
-        {
-            _pendingInitialGridLoad = false;
-            try
-            {
-                await ResetAndLoadFromTopAsync();
-                ApplySyncStateFromLoadedItems();
-                StartPrPollingLoop();
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError(ex, "Error loading workspace {WorkspaceId}", WorkspaceId);
-                SetPageError("Failed to load workspace. Please try again later.");
-                ClearGridState();
-                isInitialLoading = false;
-            }
 
-            if (!_disposed)
-            {
-                await InvokeAsync(StateHasChanged);
-            }
+        if (!_prPollingStarted && hasLoadedOnce && !_disposed)
+        {
+            _prPollingStarted = true;
+            StartPrPollingLoop();
         }
 
         if (!isInitialLoading && _slots.Count > 0 && !_virtualScrollAttached && !_disposed)
