@@ -58,7 +58,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         var storedMode = await JSRuntime.InvokeAsync<string?>("graymoonStorageGet", SyncModeStorageKey);
         _quickFetchIsPrimary = storedMode == "quick-fetch";
         await ResolveSelectedContextAsync();
-        _boundContextQuery = ContextQuery;
+        _boundContextQuery = BoundContextQueryFromSelection();
         await LoadPendingRestoreScrollTopAsync();
         await LoadWorkspaceAsync();
         ApplySyncStateFromLoadedItems();
@@ -69,32 +69,9 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     {
         try
         {
-            if (ContextQuery is int q && q > 0)
-            {
-                var info = await FeatureContextResolver.GetRequiredAsync(new WorkspaceFeatureContextId(q), WorkspaceId);
-                _selectedContextId = info.ContextId;
-                _isFeatureContext = !info.IsSpecialWorkspace;
-                await SelectedFeatureContextService.SetSelectedAsync(WorkspaceId, info.ContextId);
-                return;
-            }
-
-            var preferred = await SelectedFeatureContextService.GetSelectedAsync(WorkspaceId);
-            if (preferred is WorkspaceFeatureContextId preferredId)
-            {
-                var info = await FeatureContextResolver.GetRequiredAsync(preferredId, WorkspaceId);
-                _selectedContextId = info.ContextId;
-                _isFeatureContext = !info.IsSpecialWorkspace;
-                if (_isFeatureContext)
-                {
-                    var path = new Uri(NavigationManager.Uri).GetLeftPart(UriPartial.Path);
-                    NavigationManager.NavigateTo($"{path}?context={preferredId.Value}", replace: true);
-                }
-                return;
-            }
-
-            var special = await FeatureContextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(WorkspaceId);
-            _selectedContextId = special;
-            _isFeatureContext = false;
+            var info = await ContextNavigation.ResolveForPageAsync(WorkspaceId, ContextQuery);
+            _selectedContextId = info.ContextId;
+            _isFeatureContext = !info.IsSpecialWorkspace;
         }
         catch (Exception ex)
         {
@@ -104,6 +81,13 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
             _isFeatureContext = false;
         }
     }
+
+    /// <summary>
+    /// Query value that matches the resolved context (Feature id, or null for Workspace) so a
+    /// follow-up <see cref="NavigateTo"/> canonicalize does not look like a user context switch.
+    /// </summary>
+    private int? BoundContextQueryFromSelection()
+        => _isFeatureContext ? _selectedContextId?.Value : null;
 
     private WorkspaceFeatureContextId RequireSelectedContextId()
         => _selectedContextId
@@ -294,7 +278,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
             hasLoadedOnce = false;
             ClearGridState();
             await ResolveSelectedContextAsync();
-            _boundContextQuery = ContextQuery;
+            _boundContextQuery = BoundContextQueryFromSelection();
             await LoadPendingRestoreScrollTopAsync();
             await LoadWorkspaceAsync();
             ApplySyncStateFromLoadedItems();

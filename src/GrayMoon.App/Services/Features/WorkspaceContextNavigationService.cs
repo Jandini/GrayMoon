@@ -120,6 +120,20 @@ public sealed class WorkspaceContextNavigationService(
         return $"{relativePathWithoutQuery}{sep}context={contextId.Value.Value}";
     }
 
+    /// <summary>
+    /// Entry href for opening a workspace page using the persisted navigation preference
+    /// (Feature <c>?context=</c> when last selected; bare path for the special Workspace).
+    /// </summary>
+    public async Task<string> BuildWorkspaceEntryHrefAsync(
+        int workspaceId,
+        string relativePathWithoutQuery,
+        CancellationToken cancellationToken = default)
+    {
+        var contextId = await PeekForPageAsync(workspaceId, contextQuery: null, cancellationToken);
+        var info = await contextResolver.GetRequiredAsync(contextId, workspaceId, cancellationToken);
+        return AppendContextQuery(relativePathWithoutQuery, contextId, info.IsSpecialWorkspace);
+    }
+
     public string CurrentContextQuerySuffix()
     {
         var uri = new Uri(navigation.Uri);

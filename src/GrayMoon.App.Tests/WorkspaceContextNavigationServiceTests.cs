@@ -71,6 +71,34 @@ public sealed class WorkspaceContextNavigationServiceTests
             service.AppendContextQuery("/workspaces/19/changes?q=repo:api", new WorkspaceFeatureContextId(33), isSpecialWorkspace: true));
     }
 
+    [Fact]
+    public async Task BuildWorkspaceEntryHref_includes_preferred_feature_context()
+    {
+        var service = new WorkspaceContextNavigationService(
+            new FakeResolver(),
+            new FakeSelected(new WorkspaceFeatureContextId(34)),
+            new TestNavigationManager("http://localhost/workspaces"),
+            NullLogger<WorkspaceContextNavigationService>.Instance);
+
+        var href = await service.BuildWorkspaceEntryHrefAsync(19, "workspaces/19");
+
+        Assert.Equal("workspaces/19?context=34", href);
+    }
+
+    [Fact]
+    public async Task BuildWorkspaceEntryHref_omits_query_for_special_workspace()
+    {
+        var service = new WorkspaceContextNavigationService(
+            new FakeResolver(),
+            new FakeSelected(new WorkspaceFeatureContextId(33)),
+            new TestNavigationManager("http://localhost/workspaces"),
+            NullLogger<WorkspaceContextNavigationService>.Instance);
+
+        var href = await service.BuildWorkspaceEntryHrefAsync(19, "workspaces/19");
+
+        Assert.Equal("workspaces/19", href);
+    }
+
     private sealed class TestNavigationManager : NavigationManager
     {
         public TestNavigationManager(string uri) => Initialize("http://localhost/", uri);
