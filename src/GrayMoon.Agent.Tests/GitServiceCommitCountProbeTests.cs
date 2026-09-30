@@ -104,6 +104,83 @@ public sealed class GitServiceCommitCountProbeTests : IDisposable
         Assert.Equal("main", name);
     }
 
+    [Fact]
+    public async Task Probe_no_upstream_with_divergence_base_at_parent_tip_reports_zero_outgoing()
+    {
+        _repo.CommitInitial();
+        _repo.RunGit("checkout", "-b", "feature");
+        await _git.SetDivergenceBaseBranchAsync(_repo.RepositoryPath, "main", CancellationToken.None);
+
+        var probe = await _git.ProbeCommitCountsAsync(_repo.RepositoryPath, "feature", "origin/main", CancellationToken.None);
+
+        Assert.True(probe.CountsProbed);
+        Assert.False(probe.HasUpstream);
+        Assert.Equal(0, probe.Outgoing);
+        Assert.Null(probe.Incoming);
+    }
+
+    [Fact]
+    public async Task Probe_no_upstream_with_divergence_base_counts_only_feature_commits()
+    {
+        _repo.CommitInitial();
+        _repo.RunGit("checkout", "-b", "feature");
+        await _git.SetDivergenceBaseBranchAsync(_repo.RepositoryPath, "main", CancellationToken.None);
+        _repo.WriteFile("feature.txt", "feature work\n");
+        _repo.RunGit("add", "--all");
+        _repo.RunGit("commit", "-m", "feature commit");
+
+        var probe = await _git.ProbeCommitCountsAsync(_repo.RepositoryPath, "feature", "origin/main", CancellationToken.None);
+
+        Assert.True(probe.CountsProbed);
+        Assert.False(probe.HasUpstream);
+        Assert.Equal(1, probe.Outgoing);
+        Assert.Null(probe.Incoming);
+    }
+
+    [Fact]
+    public async Task Probe_no_upstream_with_divergence_base_ignores_parent_ahead_of_origin_main()
+    {
+        _repo.CommitInitial();
+        var initial = _repo.RunGit("rev-parse", "HEAD").Stdout.Trim();
+        _repo.RunGit("update-ref", "refs/remotes/origin/main", initial);
+        // Parent (main) moves ahead of origin/main before the Feature is cut.
+        _repo.WriteFile("parent.txt", "parent work\n");
+        _repo.RunGit("add", "--all");
+        _repo.RunGit("commit", "-m", "parent ahead of origin/main");
+        _repo.WriteFile("parent2.txt", "more parent\n");
+        _repo.RunGit("add", "--all");
+        _repo.RunGit("commit", "-m", "parent still ahead");
+        _repo.RunGit("checkout", "-b", "feature");
+        await _git.SetDivergenceBaseBranchAsync(_repo.RepositoryPath, "main", CancellationToken.None);
+
+        var probe = await _git.ProbeCommitCountsAsync(_repo.RepositoryPath, "feature", "origin/main", CancellationToken.None);
+
+        Assert.True(probe.CountsProbed);
+        Assert.False(probe.HasUpstream);
+        Assert.Equal(0, probe.Outgoing);
+        // Without divergence base this would have been 2 (origin/main..HEAD).
+        Assert.Null(probe.Incoming);
+    }
+
+    [Fact]
+    public async Task Probe_no_upstream_without_divergence_base_still_counts_vs_default()
+    {
+        _repo.CommitInitial();
+        var head = _repo.RunGit("rev-parse", "HEAD").Stdout.Trim();
+        _repo.RunGit("update-ref", "refs/remotes/origin/main", head);
+        _repo.RunGit("checkout", "-b", "workspace-branch");
+        _repo.WriteFile("extra.txt", "ahead\n");
+        _repo.RunGit("add", "--all");
+        _repo.RunGit("commit", "-m", "ahead of origin/main");
+
+        var probe = await _git.ProbeCommitCountsAsync(_repo.RepositoryPath, "workspace-branch", "origin/main", CancellationToken.None);
+
+        Assert.True(probe.CountsProbed);
+        Assert.False(probe.HasUpstream);
+        Assert.Equal(1, probe.Outgoing);
+        Assert.Null(probe.Incoming);
+    }
+
     private static void AssertNoSingleRevisionFatal(List<CommandLineStreamEvent> events)
     {
         Assert.DoesNotContain(events, e => e.Text.Contains("Needed a single revision", StringComparison.OrdinalIgnoreCase));

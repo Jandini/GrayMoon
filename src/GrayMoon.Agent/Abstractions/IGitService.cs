@@ -34,7 +34,13 @@ public interface IGitService
     /// instead of fetching all remote branches and tags. Returns (success, errorMessage).
     /// </summary>
     Task<(bool Success, string? ErrorMessage)> FetchMinimalAsync(string repoPath, string branchName, string? defaultBranchOriginRef, string? bearerToken, CancellationToken ct, bool skipUpstreamCheck = false);
-    /// <summary>Returns (outgoing count, incoming count, hasUpstream) for the current branch vs origin/branchName. When the branch has no upstream, returns (null, null) or (aheadOfDefault, null) and hasUpstream false. When <paramref name="defaultBranchOriginRef"/> is provided and branch has no upstream, uses it instead of resolving default again.</summary>
+    /// <summary>
+    /// Returns (outgoing count, incoming count, hasUpstream) for the current branch vs its upstream.
+    /// When the branch has no upstream (or the remote upstream ref is missing): if the worktree has a
+    /// Feature divergence base, outgoing is ahead of that local parent branch; otherwise outgoing is
+    /// ahead of <paramref name="defaultBranchOriginRef"/> / the default origin branch. Incoming is null
+    /// and hasUpstream is false in those cases.
+    /// </summary>
     Task<(int? Outgoing, int? Incoming, bool HasUpstream)> GetCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct, bool skipUpstreamCheck = false);
     /// <summary>Same work as <see cref="GetCommitCountsAsync"/> but also reports whether the counts and the upstream flag could be determined at all, so callers can leave persisted values alone instead of overwriting them with nulls after a failed git command.</summary>
     Task<CommitCountsProbeResult> ProbeCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct, bool skipUpstreamCheck = false);

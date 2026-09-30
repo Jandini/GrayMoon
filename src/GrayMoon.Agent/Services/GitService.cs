@@ -402,22 +402,22 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         var upstreamRef = skipUpstreamCheck ? null : await GetUpstreamRefAsync(repoPath, branchName, ct);
         if (string.IsNullOrWhiteSpace(upstreamRef))
         {
-            var defaultBranch = defaultBranchOriginRef ?? await GetDefaultBranchAsync(repoPath, ct);
-            return await CountAheadOfDefaultAsync(repoPath, branchName, defaultBranch, upstreamProbed, sw, "no upstream", ct);
+            var compareRef = await ResolveNoUpstreamCompareRefAsync(repoPath, defaultBranchOriginRef, ct);
+            return await CountAheadOfCompareRefAsync(repoPath, branchName, compareRef, upstreamProbed, sw, "no upstream", ct);
         }
 
         var originBranch = upstreamRef!;
 
         if (!await RefExistsAsync(repoPath, originBranch, ct))
         {
-            var defaultBranch = defaultBranchOriginRef ?? await GetDefaultBranchAsync(repoPath, ct);
-            if (defaultBranch == null)
+            var compareRef = await ResolveNoUpstreamCompareRefAsync(repoPath, defaultBranchOriginRef, ct);
+            if (compareRef == null)
             {
-                logger.LogDebug("Configured upstream for {Branch}, but remote {OriginBranch} not found and no default branch for {RepoPath}, skipping commit counts", branchName, originBranch, repoPath);
+                logger.LogDebug("Configured upstream for {Branch}, but remote {OriginBranch} not found and no compare ref for {RepoPath}, skipping commit counts", branchName, originBranch, repoPath);
                 return new CommitCountsProbeResult(null, null, false, CountsProbed: false, UpstreamProbed: upstreamProbed);
             }
 
-            return await CountAheadOfDefaultAsync(repoPath, branchName, defaultBranch, upstreamProbed, sw, "missing remote upstream", ct);
+            return await CountAheadOfCompareRefAsync(repoPath, branchName, compareRef, upstreamProbed, sw, "missing remote upstream", ct);
         }
 
         // Single atomic call: left=incoming (in originBranch not HEAD), right=outgoing (in HEAD not originBranch).
@@ -1100,40 +1100,63 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return exit == 0;
     }
 
-    private async Task<CommitCountsProbeResult> CountAheadOfDefaultAsync(
+    /// <summary>
+    /// When a branch has no usable upstream, Features count ahead of the local parent
+    /// (<c>graymoon-divergence-base</c>) so a tip that still matches the parent reports 0.
+    /// Workspace branches without a divergence base keep the default-branch fallback.
+    /// </summary>
+    private async Task<string?> ResolveNoUpstreamCompareRefAsync(
+        string repoPath,
+        string? defaultBranchOriginRef,
+        CancellationToken ct)
+    {
+        var divergenceBase = await GetDivergenceBaseBranchAsync(repoPath, ct);
+        if (!string.IsNullOrWhiteSpace(divergenceBase))
+        {
+            var local = divergenceBase.Trim();
+            if (local.StartsWith("origin/", StringComparison.OrdinalIgnoreCase))
+                local = local["origin/".Length..];
+            if (await RefExistsAsync(repoPath, local, ct))
+                return local;
+        }
+
+        return defaultBranchOriginRef ?? await GetDefaultBranchAsync(repoPath, ct);
+    }
+
+    private async Task<CommitCountsProbeResult> CountAheadOfCompareRefAsync(
         string repoPath,
         string branchName,
-        string? defaultBranch,
+        string? compareRef,
         bool upstreamProbed,
         Stopwatch sw,
         string reason,
         CancellationToken ct)
     {
-        if (defaultBranch == null)
+        if (compareRef == null)
         {
-            logger.LogDebug("No default branch found for {RepoPath} ({Reason}), skipping commit counts for {Branch}", repoPath, reason, branchName);
+            logger.LogDebug("No compare ref found for {RepoPath} ({Reason}), skipping commit counts for {Branch}", repoPath, reason, branchName);
             return new CommitCountsProbeResult(null, null, false, CountsProbed: false, UpstreamProbed: upstreamProbed);
         }
 
-        // defaultBranch may be stale (resolved earlier, or not yet fetched) and simply not exist locally -
+        // compareRef may be stale (resolved earlier, or not yet fetched) and simply not exist locally -
         // that is an expected, already-handled miss here, not a real command failure, so it must not be
         // mirrored to the overlay as a red stderr line (see RefExistsAsync for the same policy).
         var (exitDefault, stdoutDefault, stderrDefault) = await runner.RunAsync(
             "git",
-            $"rev-list --count {defaultBranch}..HEAD",
+            $"rev-list --count {compareRef}..HEAD",
             repoPath,
             ct,
             streamStderrAsStdout: true,
             mirrorFailureOutputAsStderr: false);
         if (exitDefault != 0)
         {
-            logger.LogWarning("Git rev-list (outgoing vs default branch) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitDefault, stdoutDefault, stderrDefault);
+            logger.LogWarning("Git rev-list (outgoing vs {CompareRef}) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", compareRef, repoPath, exitDefault, stdoutDefault, stderrDefault);
             return new CommitCountsProbeResult(null, null, false, CountsProbed: false, UpstreamProbed: upstreamProbed);
         }
 
         var aheadCount = int.TryParse((stdoutDefault ?? "").Trim(), out var ahead) ? ahead : (int?)null;
         sw.Stop();
-        logger.LogDebug("GetCommitCounts (vs default branch, {Reason}) completed in {ElapsedMs}ms for {RepoPath}", reason, sw.ElapsedMilliseconds, repoPath);
+        logger.LogDebug("GetCommitCounts (vs {CompareRef}, {Reason}) completed in {ElapsedMs}ms for {RepoPath}", compareRef, reason, sw.ElapsedMilliseconds, repoPath);
         return new CommitCountsProbeResult(aheadCount, null, false, CountsProbed: true, UpstreamProbed: upstreamProbed);
     }
 
