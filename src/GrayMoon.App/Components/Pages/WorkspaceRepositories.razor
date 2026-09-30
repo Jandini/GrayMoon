@@ -25,6 +25,7 @@
                                     OnRequestRemoveFeature="OnRequestRemoveFeatureFromSelectorAsync"
                                     OnRemoveFeature="OnRemoveFeatureAsync"
                                     RepositoriesCount="@(_headerState?.TotalCount ?? 0)"
+                                    CountReady="@(hasLoadedOnce && !isInitialLoading)"
                                     HasFilter="@HasSearchFilter"
                                     FilteredCount="@(totalCount ?? 0)"
                                     SearchTerm="@searchTerm"
@@ -80,7 +81,7 @@
             <div class="page-error-callout repo-error-line" role="alert">@errorMessage</div>
         }
     </div>
-    @if (workspace != null)
+    @if (workspace != null && hasLoadedOnce && !isInitialLoading)
     {
         <div class="grid-page-body">
             <div class="card page-card mb-4">
@@ -114,15 +115,7 @@
                             </tr>
                         </thead>
                         <tbody @ref="_tbodyRef" class="repositories-virtual-tbody">
-                            @if (isInitialLoading && _slots.Count == 0)
-                            {
-                                <tr>
-                                    <td colspan="@TableColSpan" class="text-center text-muted py-4">
-                                        Loading workspace...
-                                    </td>
-                                </tr>
-                            }
-                            else if (hasLoadedOnce && (_headerState?.TotalCount ?? 0) == 0 && !HasSearchFilter)
+                            @if ((_headerState?.TotalCount ?? 0) == 0 && !HasSearchFilter)
                             {
                                 <tr>
                                     <td colspan="@TableColSpan" class="text-center text-muted py-4">
@@ -440,10 +433,9 @@
                OnProceed="@OnUndoPushProceedAsync"
                OnCancel="@CloseUndoPushModal" />
 
-@if (isInitialLoading && !hasLoadedOnce)
-{
-    <LoadingOverlay IsVisible="true" PageScoped="true" Message="Loading workspace..." ShowCommandTerminal="false" />
-}
+@* Initial open uses thead + in-grid "Loading repositories..." (no overlay).
+   Push/Sync/etc. keep using BackgroundJobOverlay's terminal LoadingOverlay.
+   Fetch-repositories keeps its own overlay below. *@
 @if (ShowRepositoriesFetchOverlay)
 {
     <LoadingOverlay IsVisible="true" Message="@RepositoriesFetchOverlayMessage" ShowCommandTerminal="false"

@@ -7,7 +7,7 @@
         <h2 class="workspace-repos-title">Repositories</h2>
         <p class="text-muted mb-0 workspace-repos-subtitle">
             <WorkspaceSubtitleName Name="@WorkspaceName" />
-            @if (RepositoriesCount > 0)
+            @if (CountReady && RepositoriesCount > 0)
             {
                 var suffix = HasFilter ? " found" : "";
                 var count = HasFilter ? FilteredCount : RepositoriesCount;
@@ -15,7 +15,7 @@
                     @($"{count} {(count == 1 ? "repository" : "repositories")}{suffix}")
                 </span>
             }
-            else if (WorkspaceName != null)
+            else if (CountReady && WorkspaceName != null)
             {
                 <span class="repositories-count-link" @onclick="@(() => OnShowRepositories.InvokeAsync())" @onclick:preventDefault>0 repositories</span>
             }
@@ -390,6 +390,8 @@
     [Parameter] public EventCallback<WorkspaceFeatureContextId> OnRequestRemoveFeature { get; set; }
     [Parameter] public EventCallback OnRemoveFeature { get; set; }
     [Parameter] public int RepositoriesCount { get; set; }
+    /// <summary>False while the repository list is still loading — avoids flashing "0 repositories" before header state arrives.</summary>
+    [Parameter] public bool CountReady { get; set; }
     [Parameter] public bool HasFilter { get; set; }
     [Parameter] public int FilteredCount { get; set; }
     [Parameter] public string? SearchTerm { get; set; }

@@ -87,13 +87,13 @@ public sealed partial class WorkspaceRepositories
     /// <summary>True when either the repos page or the floating notification panel has a job for this workspace.</summary>
     private bool IsBackgroundJobRunning => IsJobRunning || JobService.IsRunning(WorkspacePanelJobKey);
     /// <summary>
-    /// True when a loading overlay is actually on this page. <see cref="IsJobRunning"/> is also true
+    /// True when a loading overlay is actually on this page. Initial grid load no longer uses an overlay
+    /// (thead stays visible with an in-grid message). <see cref="IsJobRunning"/> is also true
     /// for a mutation started on another workspace route (e.g. a Changes commit), and
     /// BackgroundJobOverlay only attaches on the originating path - so that flag must not hide the header spinner here.
     /// </summary>
     private bool IsPageOverlayVisible =>
-        (isInitialLoading && !hasLoadedOnce)
-        || ShowRepositoriesFetchOverlay
+        ShowRepositoriesFetchOverlay
         || JobService.GetJob(PageJobKey) is { State: BackgroundJobState.Running };
     private bool _pendingRefreshAfterJob;
     private int AgentTasksPendingCount => AgentQueueStateService.GetPendingCountForWorkspace(WorkspaceId);
@@ -181,7 +181,7 @@ public sealed partial class WorkspaceRepositories
             WorkspaceId, levelKey, _effectiveSearch, _selectedContextId, !_isFeatureContext);
     private WorkspaceRepositoryLink? FindLink(IReadOnlyList<WorkspaceRepositoryLink> links, int repositoryId) =>
         links.FirstOrDefault(w => w.RepositoryId == repositoryId);
-    private void ClearGridState()
+    private void ClearGridState(bool clearHeaderState = true)
     {
         _slots.Clear();
         _linkByRepoId.Clear();
@@ -193,7 +193,10 @@ public sealed partial class WorkspaceRepositories
         _topSpacerPx = 0;
         _bottomSpacerPx = 0;
         totalCount = null;
-        _headerState = null;
+        // Keep header action flags (Create PR / Branch / …) during context reload so the primary
+        // button does not flash to a different label while the new header state is in flight.
+        if (clearHeaderState)
+            _headerState = null;
         _tooltipLoadedRepoIds.Clear();
         _tooltipLoadInFlight.Clear();
         _mismatchedDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<DependencyMismatchLine>>();

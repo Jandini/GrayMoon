@@ -15,6 +15,11 @@ public sealed partial class WorkspaceRepositories
             CancelBackgroundWork();
             _backgroundWorkCts = new CancellationTokenSource();
             await LoadWorkspaceHeaderAsync();
+            if (workspace == null)
+            {
+                return;
+            }
+
             await ResetAndLoadFromTopAsync();
         }
         catch (Exception ex)
@@ -64,7 +69,7 @@ public sealed partial class WorkspaceRepositories
                 return;
             }
             var token = _queryLoader.BeginQueryCycle(out generation);
-            ClearGridState();
+            ClearGridState(clearHeaderState: false);
             isInitialLoading = true;
             _virtualScrollAttached = false;
             _attachInitialScrollTop = 0;
