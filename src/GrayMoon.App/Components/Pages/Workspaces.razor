@@ -19,6 +19,8 @@
 @inject IAgentBridge AgentBridge
 @inject AgentConnectionTracker AgentConnectionTracker
 @inject ILogger<Workspaces> Logger
+@inject WorkspaceContextNavigationService ContextNavigation
+@using GrayMoon.App.Services.Features
 
 <PageTitle>Workspaces - GrayMoon</PageTitle>
 
@@ -127,7 +129,7 @@
                                                     }
                                                 </button>
                                                 <NavLink class="link-primary text-decoration-none"
-                                                         href="@($"workspaces/{workspace.WorkspaceId}")">
+                                                         href="@WorkspaceEntryHref(workspace.WorkspaceId)">
                                                     <strong>@workspace.Name</strong>
                                                 </NavLink>
                                                 @if (workspace.IsDefault)
@@ -232,6 +234,7 @@
 
 @code {
     private List<WorkspaceModel>? workspaces;
+    private Dictionary<int, string> workspaceEntryHrefs = new();
     private string searchTerm = string.Empty;
     private int repositoriesModalRefreshGeneration;
     private string? errorMessage;
@@ -347,19 +350,39 @@
             await WorkspaceService.GetRootPathAsync();
     }
 
+    private string WorkspaceEntryHref(int workspaceId)
+        => workspaceEntryHrefs.TryGetValue(workspaceId, out var href)
+            ? href
+            : $"workspaces/{workspaceId}";
+
     private async Task LoadWorkspacesAsync()
     {
         try
         {
             errorMessage = null;
             workspaces = await WorkspaceRepository.GetAllAsync();
+            await LoadWorkspaceEntryHrefsAsync(workspaces);
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error loading workspaces");
             errorMessage = "Failed to load workspaces. Please try again later.";
             workspaces = new List<WorkspaceModel>();
+            workspaceEntryHrefs = new();
         }
+    }
+
+    private async Task LoadWorkspaceEntryHrefsAsync(IReadOnlyList<WorkspaceModel> items)
+    {
+        var hrefs = new Dictionary<int, string>(items.Count);
+        foreach (var workspace in items)
+        {
+            hrefs[workspace.WorkspaceId] = await ContextNavigation.BuildWorkspaceEntryHrefAsync(
+                workspace.WorkspaceId,
+                $"workspaces/{workspace.WorkspaceId}");
+        }
+
+        workspaceEntryHrefs = hrefs;
     }
 
     private async Task ShowCreateModalAsync()

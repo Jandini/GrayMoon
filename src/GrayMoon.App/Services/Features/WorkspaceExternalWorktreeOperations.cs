@@ -119,7 +119,7 @@ public sealed class WorkspaceExternalWorktreeOperations(
         {
             // Feature-owned paths must never be force-removed via this API.
             if (string.Equals(plan.Error, FeatureOwnedError, StringComparison.Ordinal))
-                return OperationResult.Fail(plan.Error);
+                return OperationResult.Fail(FeatureOwnedError);
 
             // Stray / uninspectable worktrees: allow an explicitly authorized force remove.
             if (!options.AllowForceRemoveDirty)

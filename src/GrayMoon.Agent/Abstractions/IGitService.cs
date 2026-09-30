@@ -77,6 +77,18 @@ public interface IGitService
     Task<string?> GetCheckedOutTagAsync(string repoPath, CancellationToken ct);
     /// <summary>Gets the default branch origin ref (e.g., "origin/main") for passing to GetCommitCountsAsync/GetCommitCountsVsDefaultAsync to avoid resolving twice.</summary>
     Task<string?> GetDefaultBranchOriginRefAsync(string repoPath, CancellationToken ct);
+    /// <summary>
+    /// Builds <c>origin/&lt;branch&gt;</c> for an ahead/behind comparison base. Returns null when
+    /// <paramref name="branchName"/> is null/whitespace. Accepts a name already prefixed with <c>origin/</c>.
+    /// </summary>
+    string? ToOriginBranchRef(string? branchName);
+    /// <summary>
+    /// Persists or clears the worktree-local divergence base branch (Feature PR parent). Stored under the
+    /// worktree-specific git dir so linked Feature worktrees do not share Workspace state. Pass null/empty to clear.
+    /// </summary>
+    Task SetDivergenceBaseBranchAsync(string repoPath, string? divergenceBaseBranch, CancellationToken ct);
+    /// <summary>Reads the worktree-local divergence base branch name, or null when unset (hooks then use default).</summary>
+    Task<string?> GetDivergenceBaseBranchAsync(string repoPath, CancellationToken ct);
     /// <summary>Stages the given paths (relative to repo root) and creates a commit with the given message. Returns (success, committed, errorMessage). When <paramref name="skipHooks"/> is true, hooks are disabled for add and commit (orchestrated flows such as dependency update that persist state themselves).</summary>
     Task<(bool Success, bool Committed, string? ErrorMessage)> StageAndCommitAsync(string repoPath, IReadOnlyList<string> pathsToStage, string commitMessage, CancellationToken ct, bool skipHooks = false);
     /// <summary>Resets the current branch to origin/<paramref name="branchName"/>. When <paramref name="keepChanges"/> is true uses --mixed (changes remain in working tree); otherwise --hard. If the remote branch does not exist, pushes it upstream first using <paramref name="bearerToken"/>. Returns (success, errorMessage).</summary>

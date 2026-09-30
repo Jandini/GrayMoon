@@ -42,8 +42,10 @@ public sealed class FetchCommitsCommand(IGitService git) : ICommandHandler<Fetch
             if (!string.IsNullOrWhiteSpace(branch))
             {
                 var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, cancellationToken);
+                await git.SetDivergenceBaseBranchAsync(repoPath, request.DivergenceBaseBranch, cancellationToken);
+                var divergenceRef = git.ToOriginBranchRef(request.DivergenceBaseBranch) ?? defaultRef;
                 var countsTask = git.GetCommitCountsAsync(repoPath, branch, defaultRef, cancellationToken);
-                var vsDefaultTask = git.GetCommitCountsVsDefaultAsync(repoPath, defaultRef, cancellationToken);
+                var vsDefaultTask = git.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, cancellationToken);
                 await Task.WhenAll(countsTask, vsDefaultTask);
                 (outgoing, incoming, var upstream) = await countsTask;
                 (defaultBehind, defaultAhead, _) = await vsDefaultTask;

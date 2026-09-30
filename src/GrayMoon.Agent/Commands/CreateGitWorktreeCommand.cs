@@ -21,6 +21,12 @@ public sealed class CreateGitWorktreeCommand(IGitService git)
             baseCommitSha,
             cancellationToken);
 
+        if (success)
+        {
+            var pathForMeta = worktree?.WorktreePath ?? worktreePath;
+            await git.SetDivergenceBaseBranchAsync(pathForMeta, request.DivergenceBaseBranch, cancellationToken);
+        }
+
         return new CreateGitWorktreeResponse
         {
             Success = success,

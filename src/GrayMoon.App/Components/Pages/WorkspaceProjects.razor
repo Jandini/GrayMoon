@@ -21,6 +21,7 @@
             <div class="workspace-repos-title-row">
                 <h2 class="workspace-repos-title">Projects</h2>
                 <p class="text-muted mb-0 workspace-repos-subtitle workspace-projects__subtitle">
+                    <WorkspaceSubtitleName Name="@(workspace?.Name)" />
                     @if (hasLoadedOnce && !isInitialLoading)
                     {
                         var projSuffix = HasSearchFilter ? " found" : "";

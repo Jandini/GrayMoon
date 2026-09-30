@@ -41,6 +41,8 @@ public sealed class CommitSyncRepositoryCommand(IGitService git, GitRemoteIntegr
             };
         }
 
+        await git.SetDivergenceBaseBranchAsync(repoPath, request.DivergenceBaseBranch, cancellationToken);
+
         var integrate = await remoteIntegrate.IntegrateAsync(repoPath, bearerToken, cancellationToken);
         if (!integrate.Success)
         {

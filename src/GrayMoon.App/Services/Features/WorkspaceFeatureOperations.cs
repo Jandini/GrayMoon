@@ -185,7 +185,8 @@ public sealed class WorkspaceFeatureOperations(
                         mainRepositoryPath = mainPath,
                         worktreePath = row.WorktreePath,
                         branchName = name,
-                        baseCommitSha = row.BaseCommitSha
+                        baseCommitSha = row.BaseCommitSha,
+                        divergenceBaseBranch = row.ParentBranchName
                     },
                     cancellationToken);
 
@@ -705,27 +706,37 @@ public sealed class WorkspaceFeatureOperations(
             .Where(s => s.WorkspaceFeatureContextId == specialId.Value)
             .ToDictionaryAsync(s => s.WorkspaceRepositoryId, cancellationToken);
 
+        var baseShaByLinkId = await db.WorkspaceFeatureRepositories
+            .AsNoTracking()
+            .Where(r => r.WorkspaceFeatureContextId == contextId.Value)
+            .ToDictionaryAsync(r => r.WorkspaceRepositoryId, r => r.BaseCommitSha, cancellationToken);
+
         // Workspace grid SyncStatus / GitVersion come from the link for the special context
         // (Project() reads wr.SyncStatus). Feature grids read context state instead, so seed from
         // the link as the source of truth — special-state SyncStatus can lag and left new Features all-red.
         foreach (var link in links)
         {
             specialStates.TryGetValue(link.WorkspaceRepositoryId, out var src);
+            baseShaByLinkId.TryGetValue(link.WorkspaceRepositoryId, out var baseSha);
             db.WorkspaceRepositoryContextStates.Add(new WorkspaceRepositoryContextState
             {
                 WorkspaceFeatureContextId = contextId.Value,
                 WorkspaceRepositoryId = link.WorkspaceRepositoryId,
                 BranchName = featureBranch,
                 CheckedOutTag = src?.CheckedOutTag ?? link.CheckedOutTag,
-                HeadCommit = src?.HeadCommit,
+                // Feature HEAD starts at the creation tip - Create PR uses HeadCommit != BaseCommitSha
+                // (ahead of Feature parent), not DefaultBranchAhead vs main.
+                HeadCommit = baseSha ?? src?.HeadCommit,
                 HasNewerTag = src?.HasNewerTag ?? link.HasNewerTag,
                 GitVersion = src?.GitVersion ?? link.GitVersion,
                 Projects = src?.Projects ?? link.Projects,
                 RepositoryType = src?.RepositoryType ?? link.RepositoryType,
                 OutgoingCommits = 0,
                 IncomingCommits = src?.IncomingCommits ?? link.IncomingCommits,
-                DefaultBranchBehindCommits = src?.DefaultBranchBehindCommits ?? link.DefaultBranchBehindCommits,
-                DefaultBranchAheadCommits = src?.DefaultBranchAheadCommits ?? link.DefaultBranchAheadCommits,
+                // Feature divergence is vs ParentBranchName (PR base), not vs main. At create,
+                // HEAD == BaseCommitSha so the Feature is neither ahead nor behind its parent tip.
+                DefaultBranchBehindCommits = 0,
+                DefaultBranchAheadCommits = 0,
                 BranchHasUpstream = false,
                 SyncStatus = link.SyncStatus,
                 DependencyLevel = src?.DependencyLevel ?? link.DependencyLevel,

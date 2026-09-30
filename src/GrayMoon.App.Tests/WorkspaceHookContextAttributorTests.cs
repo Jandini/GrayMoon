@@ -103,4 +103,96 @@ public sealed class WorkspaceHookContextAttributorTests
         Assert.NotEqual("9.9.9", link.GitVersion);
         Assert.DoesNotContain(ctx.Broadcasts, b => b.Method == "WorkspaceSynced");
     }
+
+    [Fact]
+    public async Task Feature_worktree_path_does_not_overwrite_Workspace_link_branch()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await ctx.MutateLinkAsync(l => l.BranchName = "worktree");
+
+        await using var scope = ctx.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var handler = scope.ServiceProvider.GetRequiredService<SyncCommandHandler>();
+
+        var feature = new WorkspaceFeature
+        {
+            WorkspaceId = ctx.WorkspaceId,
+            Name = "feat-pollute",
+            LifecycleState = WorkspaceFeatureLifecycleState.Ready,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.WorkspaceFeatures.Add(feature);
+        await db.SaveChangesAsync();
+
+        var featureContext = new WorkspaceFeatureContext
+        {
+            WorkspaceId = ctx.WorkspaceId,
+            Kind = WorkspaceFeatureContextKind.Feature,
+            WorkspaceFeatureId = feature.WorkspaceFeatureId,
+            CreatedAt = DateTime.UtcNow
+        };
+        db.WorkspaceFeatureContexts.Add(featureContext);
+        await db.SaveChangesAsync();
+
+        const string worktreePath = @"C:\gm-features\feat-pollute\api";
+        db.WorkspaceFeatureRepositories.Add(new WorkspaceFeatureRepository
+        {
+            WorkspaceFeatureContextId = featureContext.WorkspaceFeatureContextId,
+            WorkspaceRepositoryId = ctx.WorkspaceRepositoryId,
+            WorktreePath = worktreePath,
+            BaseCommitSha = "abc123",
+            CreatedAt = DateTime.UtcNow,
+            State = WorkspaceFeatureRepositoryState.Ready
+        });
+        await db.SaveChangesAsync();
+
+        await handler.HandleAsync(new Abstractions.Notifications.RepositorySyncNotification
+        {
+            WorkspaceId = ctx.WorkspaceId,
+            RepositoryId = ctx.RepositoryId,
+            RepositoryPath = worktreePath,
+            Version = "9.9.9-feat",
+            Branch = "feat-pollute",
+            OutgoingCommits = 1,
+            IncomingCommits = 0,
+            HasUpstream = true,
+        });
+
+        var link = await ctx.ReadLinkAsync();
+        Assert.Equal("worktree", link.BranchName);
+        Assert.NotEqual("9.9.9-feat", link.GitVersion);
+
+        var state = await db.WorkspaceRepositoryContextStates.AsNoTracking()
+            .FirstOrDefaultAsync(s =>
+                s.WorkspaceFeatureContextId == featureContext.WorkspaceFeatureContextId
+                && s.WorkspaceRepositoryId == ctx.WorkspaceRepositoryId);
+        Assert.NotNull(state);
+        Assert.Equal("feat-pollute", state!.BranchName);
+        Assert.Equal("9.9.9-feat", state.GitVersion);
+    }
+
+    [Fact]
+    public async Task Null_path_sync_still_writes_special_Workspace_link()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await using var scope = ctx.CreateScope();
+        var handler = scope.ServiceProvider.GetRequiredService<SyncCommandHandler>();
+
+        await handler.HandleAsync(new Abstractions.Notifications.RepositorySyncNotification
+        {
+            WorkspaceId = ctx.WorkspaceId,
+            RepositoryId = ctx.RepositoryId,
+            RepositoryPath = null,
+            Version = "3.0.0",
+            Branch = "main",
+            OutgoingCommits = 0,
+            IncomingCommits = 0,
+            HasUpstream = true,
+        });
+
+        var link = await ctx.ReadLinkAsync();
+        Assert.Equal("main", link.BranchName);
+        Assert.Equal("3.0.0", link.GitVersion);
+    }
 }

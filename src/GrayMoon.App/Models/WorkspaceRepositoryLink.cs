@@ -103,6 +103,18 @@ public class WorkspaceRepositoryLink
     [NotMapped]
     public int UncommittedChangedFileCount { get; set; }
 
+    /// <summary>HEAD SHA for the viewed context. Not a link column - filled from context state for Feature Create PR.</summary>
+    [NotMapped]
+    public string? HeadCommit { get; set; }
+
+    /// <summary>Feature creation tip SHA when viewing a Feature. Not a link column.</summary>
+    [NotMapped]
+    public string? FeatureBaseCommitSha { get; set; }
+
+    /// <summary>Feature parent / PR-base branch when viewing a Feature. Not a link column.</summary>
+    [NotMapped]
+    public string? ParentBranchName { get; set; }
+
     /// <summary>Persisted Git Changes file rows for this workspace-repo link. Navigation only.</summary>
     public ICollection<WorkspaceGitChangeEntry> GitChangeEntries { get; set; } = new List<WorkspaceGitChangeEntry>();
 
@@ -144,6 +156,9 @@ public class WorkspaceRepositoryLink
         Action = Action,
         GitStatus = GitStatus,
         UncommittedChangedFileCount = UncommittedChangedFileCount,
+        HeadCommit = HeadCommit,
+        FeatureBaseCommitSha = FeatureBaseCommitSha,
+        ParentBranchName = ParentBranchName,
         GitChangeEntries = GitChangeEntries,
     };
 }

@@ -5,9 +5,25 @@
 const viewers = new Map();
 let mermaidReadyPromise = null;
 
+function configureMermaid(api) {
+    api.initialize({
+        startOnLoad: false,
+        theme: 'dark',
+        securityLevel: 'strict',
+        // Otherwise parse failures inject Mermaid's bomb SVG into document.body
+        // and leave it there after we catch and show our own caption.
+        suppressErrorRendering: true,
+    });
+}
+
 function ensureMermaidLoaded() {
     const existingApi = resolveMermaidApi();
     if (existingApi) {
+        try {
+            configureMermaid(existingApi);
+        } catch {
+            /* ignore - keep using whatever config is already active */
+        }
         return Promise.resolve(existingApi);
     }
 
@@ -18,11 +34,7 @@ function ensureMermaidLoaded() {
     mermaidReadyPromise = new Promise((resolve, reject) => {
         const finishOk = (api) => {
             try {
-                api.initialize({
-                    startOnLoad: false,
-                    theme: 'dark',
-                    securityLevel: 'strict',
-                });
+                configureMermaid(api);
             } catch (err) {
                 mermaidReadyPromise = null;
                 reject(err);
@@ -120,6 +132,20 @@ function resolveMermaidApi() {
     }
 
     return api;
+}
+
+/** Mermaid.render creates temporary #id / #d{id} nodes; remove leftovers after render returns.
+ * Must run before assigning the returned SVG into the page - that SVG reuses the same id. */
+function cleanupMermaidScratch(id) {
+    if (!id) {
+        return;
+    }
+    try {
+        document.getElementById(id)?.remove();
+        document.getElementById(`d${id}`)?.remove();
+    } catch {
+        /* ignore */
+    }
 }
 
 function collectChangeNodes(root) {
@@ -469,7 +495,14 @@ async function openMermaidLightbox(source, title) {
 
     try {
         const id = `gm-mermaid-lb-${Math.random().toString(36).slice(2)}`;
-        const { svg } = await mermaid.render(id, source);
+        let svg;
+        try {
+            ({ svg } = await mermaid.render(id, source));
+        } finally {
+            // Strip Mermaid's temporary nodes before we insert the returned SVG
+            // (the SVG string reuses the same id - cleaning after insert removes the diagram).
+            cleanupMermaidScratch(id);
+        }
         host.innerHTML = svg;
         attachPanZoom(stage, content, {
             showExpand: false,
@@ -521,6 +554,8 @@ async function renderMermaidIn(root) {
         return;
     }
 
+    // Each fence is independent: a parse/render failure replaces only that frame with
+    // an error caption + source fallback; later diagrams still render.
     for (const node of nodes) {
         const source = node.textContent ?? '';
         const title = findPrecedingHeadingTitle(node);
@@ -543,7 +578,14 @@ async function renderMermaidIn(root) {
 
         try {
             const id = `gm-mermaid-${Math.random().toString(36).slice(2)}`;
-            const { svg } = await mermaid.render(id, source);
+            let svg;
+            try {
+                ({ svg } = await mermaid.render(id, source));
+            } finally {
+                // Strip Mermaid's temporary nodes before we insert the returned SVG
+                // (the SVG string reuses the same id - cleaning after insert removes the diagram).
+                cleanupMermaidScratch(id);
+            }
             host.innerHTML = svg;
             sizeMermaidFrame(wrap);
             attachPanZoom(wrap, content, {
@@ -646,15 +688,19 @@ export function goToNextChange(elementId) {
         return;
     }
 
-    const nodes = collectChangeNodes(entry.el);
+    const nodes = collectChangeNodes(entry.el).filter((n) => n.isConnected);
     if (nodes.length === 0) {
         return;
     }
 
     entry.changeIndex = (entry.changeIndex + 1) % nodes.length;
     const node = nodes[entry.changeIndex];
-    node.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    flashChange(node);
+    try {
+        node.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        flashChange(node);
+    } catch {
+        /* ignore - preview must stay usable even if a change node is odd */
+    }
 }
 
 export function goToPreviousChange(elementId) {
@@ -663,15 +709,19 @@ export function goToPreviousChange(elementId) {
         return;
     }
 
-    const nodes = collectChangeNodes(entry.el);
+    const nodes = collectChangeNodes(entry.el).filter((n) => n.isConnected);
     if (nodes.length === 0) {
         return;
     }
 
     entry.changeIndex = entry.changeIndex <= 0 ? nodes.length - 1 : entry.changeIndex - 1;
     const node = nodes[entry.changeIndex];
-    node.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    flashChange(node);
+    try {
+        node.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        flashChange(node);
+    } catch {
+        /* ignore - preview must stay usable even if a change node is odd */
+    }
 }
 
 export function dispose(elementId) {

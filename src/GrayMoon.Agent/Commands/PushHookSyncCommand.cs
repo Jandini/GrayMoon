@@ -105,7 +105,9 @@ public sealed class PushHookSyncCommand(IGitService git, ICsProjFileService csPr
                 }
 
                 // Push done (outgoing == 0 or null) or max attempts reached - send final notification
-                var (defaultBehind, defaultAhead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, defaultRef, CancellationToken.None);
+                var divergenceRef = git.ToOriginBranchRef(await git.GetDivergenceBaseBranchAsync(repoPath, CancellationToken.None))
+                    ?? defaultRef;
+                var (defaultBehind, defaultAhead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, CancellationToken.None);
                 var (versionResult, _) = await git.GetVersionAsync(repoPath, CancellationToken.None);
                 var finalVersion = versionResult?.InformationalVersion ?? "-";
                 var finalBranch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? branch;

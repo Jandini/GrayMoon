@@ -80,19 +80,26 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
             if (version != "-" && branch != "-")
                 await git.WriteSyncHooksAsync(repoPath, workspaceId, repositoryId, cancellationToken);
 
-            // Resolve default branch once; run commit counts and vs-default in parallel when we have a branch.
+            // Resolve default branch once; run commit counts and divergence in parallel when we have a branch.
+            // Divergence may be vs Feature parent (request / persisted) rather than the repository default.
             var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, cancellationToken);
+            await git.SetDivergenceBaseBranchAsync(repoPath, request.DivergenceBaseBranch, cancellationToken);
+            var divergenceRef = git.ToOriginBranchRef(request.DivergenceBaseBranch) ?? defaultRef;
             int? defaultBehind = null;
             int? defaultAhead = null;
-            string? defaultBranch = null;
+            string? defaultBranch = defaultRef != null
+                ? (defaultRef.StartsWith("origin/", StringComparison.Ordinal)
+                    ? defaultRef["origin/".Length..]
+                    : defaultRef)
+                : null;
 
             if (branch != "-")
             {
                 var countsTask = git.ProbeCommitCountsAsync(repoPath, branch, defaultRef, cancellationToken);
-                var vsDefaultTask = git.GetCommitCountsVsDefaultAsync(repoPath, defaultRef, cancellationToken);
+                var vsDefaultTask = git.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, cancellationToken);
                 await Task.WhenAll(countsTask, vsDefaultTask);
                 var counts = await countsTask;
-                (defaultBehind, defaultAhead, defaultBranch) = await vsDefaultTask;
+                (defaultBehind, defaultAhead, _) = await vsDefaultTask;
                 outgoingCommits = counts.Outgoing;
                 incomingCommits = counts.Incoming;
                 // Sync is the flow users reach for when a row looks wrong, so it has to report the upstream
@@ -100,9 +107,9 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
                 hasUpstream = counts.HasUpstream;
                 upstreamProbed = counts.UpstreamProbed;
             }
-            else if (defaultRef != null)
+            else if (divergenceRef != null)
             {
-                (defaultBehind, defaultAhead, defaultBranch) = await git.GetCommitCountsVsDefaultAsync(repoPath, defaultRef, cancellationToken);
+                (defaultBehind, defaultAhead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, cancellationToken);
             }
 
             // Branch lists from local refs (no extra network after fetch)

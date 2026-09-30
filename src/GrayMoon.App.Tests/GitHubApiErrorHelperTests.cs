@@ -45,7 +45,7 @@ public sealed class GitHubApiErrorHelperTests
     }
 
     [Fact]
-    public void FormatFriendlyGitHubHttpError_NoCommitsBetween_ReportsUnpushedBranchNotRateLimit()
+    public void FormatFriendlyGitHubHttpError_NoCommitsBetween_ReportsEmptyDiffNotUnpushed()
     {
         using var response = new HttpResponseMessage(HttpStatusCode.UnprocessableEntity);
         response.Headers.Add("X-RateLimit-Remaining", "4998");
@@ -55,7 +55,8 @@ public sealed class GitHubApiErrorHelperTests
         var friendly = GitHubApiErrorHelper.FormatFriendlyGitHubHttpError(ex);
 
         Assert.DoesNotContain("GitHub will allow API requests again", friendly);
-        Assert.Contains("Push your local commits first", friendly);
+        Assert.DoesNotContain("Push your local commits first", friendly);
+        Assert.Contains("no commits on the source branch", friendly, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]
@@ -115,9 +116,15 @@ public sealed class GitHubApiErrorHelperTests
     }
 
     [Fact]
-    public void LooksLikeUnpushedHeadBranch_DetectsNoCommitsBetweenMessage()
+    public void LooksLikeUnpushedHeadBranch_DoesNotTreatNoCommitsBetweenAsUnpushed()
     {
-        Assert.True(GitHubApiErrorHelper.LooksLikeUnpushedHeadBranch(NoCommitsBetweenBody));
+        Assert.False(GitHubApiErrorHelper.LooksLikeUnpushedHeadBranch(NoCommitsBetweenBody));
+    }
+
+    [Fact]
+    public void LooksLikeNoCommitsBetween_DetectsMessage()
+    {
+        Assert.True(GitHubApiErrorHelper.LooksLikeNoCommitsBetween(NoCommitsBetweenBody));
     }
 
     [Fact]

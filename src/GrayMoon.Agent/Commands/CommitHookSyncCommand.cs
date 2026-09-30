@@ -37,10 +37,12 @@ public sealed class CommitHookSyncCommand(IGitService git, ICsProjFileService cs
         if (branch != "-")
         {
             var defaultRef = await git.GetDefaultBranchOriginRefAsync(payload.RepositoryPath, cancellationToken);
+            var divergenceRef = git.ToOriginBranchRef(await git.GetDivergenceBaseBranchAsync(payload.RepositoryPath, cancellationToken))
+                ?? defaultRef;
             var (o, i, _) = await git.GetCommitCountsAsync(payload.RepositoryPath, branch, defaultRef, cancellationToken);
             outgoing = o;
             incoming = i;
-            var (db, da, _) = await git.GetCommitCountsVsDefaultAsync(payload.RepositoryPath, defaultRef, cancellationToken);
+            var (db, da, _) = await git.GetCommitCountsVsDefaultAsync(payload.RepositoryPath, divergenceRef, cancellationToken);
             defaultBehind = db;
             defaultAhead = da;
         }

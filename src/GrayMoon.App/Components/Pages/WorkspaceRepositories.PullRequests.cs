@@ -54,7 +54,15 @@ public sealed partial class WorkspaceRepositories
             if (string.IsNullOrWhiteSpace(wr.BranchName)) continue;
             if (string.IsNullOrWhiteSpace(wr.DefaultBranchName)) continue;
             if (string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal)) continue;
-            if ((wr.DefaultBranchAheadCommits ?? 0) <= 0) continue;
+            // Feature Create PR targets the parent branch - require ahead of that base
+            // (DefaultBranchAheadCommits is vs parent on Feature contexts).
+            if ((wr.DefaultBranchAheadCommits ?? 0) <= 0
+                && (string.IsNullOrWhiteSpace(wr.FeatureBaseCommitSha)
+                    || string.IsNullOrWhiteSpace(wr.HeadCommit)
+                    || string.Equals(wr.HeadCommit.Trim(), wr.FeatureBaseCommitSha.Trim(), StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
             if (!RepositoryUrlHelper.TryParseGitHubOwnerRepo(repo.CloneUrl, out var owner, out var repoName) || owner == null || repoName == null)
                 continue;
 
@@ -369,7 +377,13 @@ public sealed partial class WorkspaceRepositories
         foreach (var wr in group)
         {
             var verified = prByRepositoryId.TryGetValue(wr.RepositoryId, out var pr);
-            if (PRBadge.ShowsCreateBadge(wr.IsOnTag, verified, pr, wr.DefaultBranchAheadCommits))
+            if (PRBadge.ShowsCreateBadge(
+                    wr.IsOnTag,
+                    verified,
+                    pr,
+                    wr.DefaultBranchAheadCommits,
+                    wr.HeadCommit,
+                    wr.FeatureBaseCommitSha))
                 return true;
         }
         return false;

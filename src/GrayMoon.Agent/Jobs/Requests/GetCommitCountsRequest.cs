@@ -9,4 +9,8 @@ public sealed class GetCommitCountsRequest : WorkspaceCommandRequest
 
     [JsonPropertyName("repositoryName")]
     public string? RepositoryName { get; set; }
+
+    /// <summary>Optional Feature parent branch for ahead/behind; see <see cref="SyncRepositoryRequest.DivergenceBaseBranch"/>.</summary>
+    [JsonPropertyName("divergenceBaseBranch")]
+    public string? DivergenceBaseBranch { get; set; }
 }

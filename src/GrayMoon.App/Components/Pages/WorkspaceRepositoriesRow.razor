@@ -1,7 +1,10 @@
 @using GrayMoon.App.Models
 @using GrayMoon.App.Services
+@using GrayMoon.App.Services.Features
 @using GrayMoon.App.Components.Shared
+@using GrayMoon.Application.Features
 @using Microsoft.AspNetCore.Components.Web
+@inject WorkspaceContextNavigationService ContextNavigation
 
 @if (Link?.Repository != null)
 {
@@ -106,6 +109,7 @@
                                     BranchName="@Link.BranchName"
                                     RepositoryUrl="@RepositoryUrlHelper.GetRepositoryUrl(repo.CloneUrl)"
                                     DefaultBranchName="@Link.DefaultBranchName"
+                                    ComparisonBaseBranchName="@Link.ParentBranchName"
                                     IsOnTag="@Link.IsOnTag"
                                     IsPrMergeBlocked="@(PrInfo != null
                                         && string.Equals(PrInfo.State, "open", StringComparison.OrdinalIgnoreCase)
@@ -115,8 +119,10 @@
                 <span class="metrics-block metrics-pr text-nowrap">
                     <PRBadge PullRequest="@PrInfo"
                             UncommittedChangedFileCount="@Link.UncommittedChangedFileCount"
-                            ChangesUrl="@($"/workspaces/{WorkspaceId}/changes?q={Uri.EscapeDataString($"repo:{repo.RepositoryName}")}")"
+                            ChangesUrl="@ContextNavigation.AppendContextQuery($"/workspaces/{WorkspaceId}/changes?q={Uri.EscapeDataString($"repo:{repo.RepositoryName}")}", SelectedContextId, IsSpecialWorkspace)"
                             DefaultBranchAheadCommits="@Link.DefaultBranchAheadCommits"
+                            HeadCommit="@Link.HeadCommit"
+                            FeatureBaseCommitSha="@Link.FeatureBaseCommitSha"
                             IsPrVerified="@IsPrVerified"
                             IsOnTag="@Link.IsOnTag"
                             HasNewerTag="@(Link.HasNewerTag == true)"
@@ -417,6 +423,10 @@
 
 @code {
     [Parameter] public int WorkspaceId { get; set; }
+    /// <summary>Current Feature/Workspace context so the uncommitted-changes badge keeps the user on the same context.</summary>
+    [Parameter] public WorkspaceFeatureContextId? SelectedContextId { get; set; }
+    /// <summary>When true, omit <c>?context=</c> (Workspace is the default URL form).</summary>
+    [Parameter] public bool IsSpecialWorkspace { get; set; } = true;
     /// <summary>Absolute-index stripe class (virtual-row-odd / virtual-row-even) so striping stays stable while scrolling.</summary>
     [Parameter] public string? RowCssClass { get; set; }
     [Parameter] public WorkspaceRepositoryLink? Link { get; set; }

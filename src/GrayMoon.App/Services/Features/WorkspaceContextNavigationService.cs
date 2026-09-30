@@ -120,6 +120,20 @@ public sealed class WorkspaceContextNavigationService(
         return $"{relativePathWithoutQuery}{sep}context={contextId.Value.Value}";
     }
 
+    /// <summary>
+    /// Entry href for opening a workspace page using the persisted navigation preference
+    /// (Feature <c>?context=</c> when last selected; bare path for the special Workspace).
+    /// </summary>
+    public async Task<string> BuildWorkspaceEntryHrefAsync(
+        int workspaceId,
+        string relativePathWithoutQuery,
+        CancellationToken cancellationToken = default)
+    {
+        var contextId = await PeekForPageAsync(workspaceId, contextQuery: null, cancellationToken);
+        var info = await contextResolver.GetRequiredAsync(contextId, workspaceId, cancellationToken);
+        return AppendContextQuery(relativePathWithoutQuery, contextId, info.IsSpecialWorkspace);
+    }
+
     public string CurrentContextQuerySuffix()
     {
         var uri = new Uri(navigation.Uri);
@@ -133,7 +147,18 @@ public sealed class WorkspaceContextNavigationService(
 
     private void CanonicalizeQuery(WorkspaceFeatureContextId contextId)
     {
-        var path = new Uri(navigation.Uri).GetLeftPart(UriPartial.Path);
-        navigation.NavigateTo($"{path}?context={contextId.Value}", replace: true);
+        var uri = new Uri(navigation.Uri);
+        var query = QueryHelpers.ParseQuery(uri.Query);
+        var kept = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in query)
+        {
+            if (string.Equals(pair.Key, "context", StringComparison.OrdinalIgnoreCase))
+                continue;
+            kept[pair.Key] = pair.Value.FirstOrDefault();
+        }
+
+        kept["context"] = contextId.Value.ToString();
+        var path = uri.GetLeftPart(UriPartial.Path);
+        navigation.NavigateTo(QueryHelpers.AddQueryString(path, kept), replace: true);
     }
 }

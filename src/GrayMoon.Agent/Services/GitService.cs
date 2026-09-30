@@ -963,6 +963,74 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
     public Task<string?> GetDefaultBranchOriginRefAsync(string repoPath, CancellationToken ct)
         => GetDefaultBranchAsync(repoPath, ct);
 
+    public string? ToOriginBranchRef(string? branchName)
+    {
+        if (string.IsNullOrWhiteSpace(branchName))
+            return null;
+        var trimmed = branchName.Trim();
+        if (trimmed.StartsWith("origin/", StringComparison.OrdinalIgnoreCase))
+            return trimmed;
+        return $"origin/{trimmed}";
+    }
+
+    public async Task SetDivergenceBaseBranchAsync(string repoPath, string? divergenceBaseBranch, CancellationToken ct)
+    {
+        var path = await ResolveDivergenceBaseFilePathAsync(repoPath, ct);
+        if (path is null)
+            return;
+
+        if (string.IsNullOrWhiteSpace(divergenceBaseBranch))
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+            return;
+        }
+
+        var name = divergenceBaseBranch.Trim();
+        if (name.StartsWith("origin/", StringComparison.OrdinalIgnoreCase))
+            name = name["origin/".Length..];
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await File.WriteAllTextAsync(path, name + "\n", ct);
+    }
+
+    public async Task<string?> GetDivergenceBaseBranchAsync(string repoPath, CancellationToken ct)
+    {
+        var path = await ResolveDivergenceBaseFilePathAsync(repoPath, ct);
+        if (path is null || !File.Exists(path))
+            return null;
+
+        var text = (await File.ReadAllTextAsync(path, ct)).Trim();
+        return string.IsNullOrWhiteSpace(text) ? null : text;
+    }
+
+    /// <summary>
+    /// Worktree-private file (not the common git dir) so Feature worktrees keep their own parent-branch base.
+    /// </summary>
+    private async Task<string?> ResolveDivergenceBaseFilePathAsync(string repoPath, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
+            return null;
+
+        var (exitCode, stdout, _) = await runner.RunAsync(
+            "git",
+            "rev-parse --git-dir",
+            repoPath,
+            ct,
+            streamStderrAsStdout: true,
+            mirrorFailureOutputAsStderr: false,
+            intent: GitLockIntent.Read);
+
+        if (exitCode != 0 || string.IsNullOrWhiteSpace(stdout))
+            return null;
+
+        var gitDir = stdout.Trim();
+        var fullGitDir = Path.IsPathRooted(gitDir)
+            ? gitDir
+            : Path.GetFullPath(Path.Combine(repoPath, gitDir));
+
+        return Path.Combine(fullGitDir, "graymoon-divergence-base");
+    }
+
     private async Task<string?> GetDefaultBranchAsync(string repoPath, CancellationToken ct)
     {
         var (exitHead, stdoutHead, _) = await runner.RunAsync(
