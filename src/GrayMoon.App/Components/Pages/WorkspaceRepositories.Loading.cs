@@ -15,6 +15,14 @@ public sealed partial class WorkspaceRepositories
             CancelBackgroundWork();
             _backgroundWorkCts = new CancellationTokenSource();
             await LoadWorkspaceHeaderAsync();
+            if (workspace == null)
+            {
+                return;
+            }
+
+            // Paint workspace name / feature selector before the heavier grid query so the header
+            // does not sit on the generic "Context" fallback while rows load.
+            await InvokeAsync(StateHasChanged);
             await ResetAndLoadFromTopAsync();
         }
         catch (Exception ex)

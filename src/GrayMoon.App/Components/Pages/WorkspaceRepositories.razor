@@ -118,7 +118,7 @@
                             {
                                 <tr>
                                     <td colspan="@TableColSpan" class="text-center text-muted py-4">
-                                        Loading workspace...
+                                        Loading repositories...
                                     </td>
                                 </tr>
                             }
@@ -440,10 +440,9 @@
                OnProceed="@OnUndoPushProceedAsync"
                OnCancel="@CloseUndoPushModal" />
 
-@if (isInitialLoading && !hasLoadedOnce)
-{
-    <LoadingOverlay IsVisible="true" PageScoped="true" Message="Loading workspace..." ShowCommandTerminal="false" />
-}
+@* Initial open uses thead + in-grid "Loading repositories..." (no overlay).
+   Push/Sync/etc. keep using BackgroundJobOverlay's terminal LoadingOverlay.
+   Fetch-repositories keeps its own overlay below. *@
 @if (ShowRepositoriesFetchOverlay)
 {
     <LoadingOverlay IsVisible="true" Message="@RepositoriesFetchOverlayMessage" ShowCommandTerminal="false"

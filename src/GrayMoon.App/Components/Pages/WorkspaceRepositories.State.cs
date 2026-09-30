@@ -87,13 +87,13 @@ public sealed partial class WorkspaceRepositories
     /// <summary>True when either the repos page or the floating notification panel has a job for this workspace.</summary>
     private bool IsBackgroundJobRunning => IsJobRunning || JobService.IsRunning(WorkspacePanelJobKey);
     /// <summary>
-    /// True when a loading overlay is actually on this page. <see cref="IsJobRunning"/> is also true
+    /// True when a loading overlay is actually on this page. Initial grid load no longer uses an overlay
+    /// (thead stays visible with an in-grid message). <see cref="IsJobRunning"/> is also true
     /// for a mutation started on another workspace route (e.g. a Changes commit), and
     /// BackgroundJobOverlay only attaches on the originating path - so that flag must not hide the header spinner here.
     /// </summary>
     private bool IsPageOverlayVisible =>
-        (isInitialLoading && !hasLoadedOnce)
-        || ShowRepositoriesFetchOverlay
+        ShowRepositoriesFetchOverlay
         || JobService.GetJob(PageJobKey) is { State: BackgroundJobState.Running };
     private bool _pendingRefreshAfterJob;
     private int AgentTasksPendingCount => AgentQueueStateService.GetPendingCountForWorkspace(WorkspaceId);

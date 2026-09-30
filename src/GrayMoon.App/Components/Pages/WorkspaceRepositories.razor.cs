@@ -51,6 +51,12 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     private const string SyncModeStorageKey = "graymoon:sync-mode";
     private bool _quickFetchIsPrimary;
 
+    /// <summary>
+    /// When true, the first grid load runs after the initial render so thead + workspace name
+    /// paint before the heavier repository index/hydrate query (no initial LoadingOverlay).
+    /// </summary>
+    private bool _pendingInitialGridLoad;
+
     protected override async Task OnInitializedAsync()
     {
         AgentQueueStateService.OnQueueStateChanged(OnQueueStateChanged);
@@ -61,9 +67,15 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         await ResolveSelectedContextAsync();
         _boundContextQuery = BoundContextQueryFromSelection();
         await LoadPendingRestoreScrollTopAsync();
-        await LoadWorkspaceAsync();
-        ApplySyncStateFromLoadedItems();
-        StartPrPollingLoop();
+        isInitialLoading = true;
+        errorMessage = null;
+        _backgroundWorkCts = new CancellationTokenSource();
+        await LoadWorkspaceHeaderAsync();
+        _pendingInitialGridLoad = workspace != null;
+        if (workspace == null)
+        {
+            isInitialLoading = false;
+        }
     }
 
     private async Task ResolveSelectedContextAsync()
@@ -120,6 +132,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         Interlocked.Increment(ref _contextGeneration);
         // Drop Feature/Workspace rows immediately so the selector label and grid cannot disagree
         // while LoadWorkspaceAsync is still queued (InvokeAsync runs after the current turn).
+        _pendingInitialGridLoad = false;
         ClearGridState();
         isInitialLoading = true;
         await SelectedFeatureContextService.SetSelectedAsync(WorkspaceId, info.ContextId);
@@ -290,6 +303,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         {
             CancelBackgroundWork();
             await DetachVirtualScrollAsync();
+            _pendingInitialGridLoad = false;
             _loadedWorkspaceId = WorkspaceId;
             errorMessage = null;
             hasLoadedOnce = false;
@@ -312,6 +326,29 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         await OnAfterRenderRealtimeAsync(firstRender);
+        if (_pendingInitialGridLoad && !_disposed)
+        {
+            _pendingInitialGridLoad = false;
+            try
+            {
+                await ResetAndLoadFromTopAsync();
+                ApplySyncStateFromLoadedItems();
+                StartPrPollingLoop();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error loading workspace {WorkspaceId}", WorkspaceId);
+                SetPageError("Failed to load workspace. Please try again later.");
+                ClearGridState();
+                isInitialLoading = false;
+            }
+
+            if (!_disposed)
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+
         if (!isInitialLoading && _slots.Count > 0 && !_virtualScrollAttached && !_disposed)
         {
             await AttachVirtualScrollAsync();
