@@ -772,6 +772,12 @@ public sealed class WorkspaceFeatureOperations(
             .Where(r => r.WorkspaceFeatureContextId == contextId.Value)
             .ToDictionaryAsync(r => r.WorkspaceRepositoryId, r => r.BaseCommitSha, cancellationToken);
 
+        // Worktree create can trigger SyncCommand attribution into this Feature context before seed runs,
+        // so upsert against any rows Sync already wrote (UNIQUE on context+repo / context+repo+name).
+        var existingStates = await db.WorkspaceRepositoryContextStates
+            .Where(s => s.WorkspaceFeatureContextId == contextId.Value)
+            .ToDictionaryAsync(s => s.WorkspaceRepositoryId, cancellationToken);
+
         // Workspace grid SyncStatus / GitVersion come from the link for the special context
         // (Project() reads wr.SyncStatus). Feature grids read context state instead, so seed from
         // the link as the source of truth — special-state SyncStatus can lag and left new Features all-red.
@@ -779,6 +785,32 @@ public sealed class WorkspaceFeatureOperations(
         {
             specialStates.TryGetValue(link.WorkspaceRepositoryId, out var src);
             baseShaByLinkId.TryGetValue(link.WorkspaceRepositoryId, out var baseSha);
+            if (existingStates.TryGetValue(link.WorkspaceRepositoryId, out var existing))
+            {
+                existing.BranchName = featureBranch;
+                existing.CheckedOutTag = src?.CheckedOutTag ?? link.CheckedOutTag;
+                existing.HeadCommit = baseSha ?? src?.HeadCommit;
+                existing.HasNewerTag = src?.HasNewerTag ?? link.HasNewerTag;
+                existing.GitVersion = src?.GitVersion ?? link.GitVersion;
+                existing.Projects = src?.Projects ?? link.Projects;
+                existing.RepositoryType = src?.RepositoryType ?? link.RepositoryType;
+                existing.OutgoingCommits = 0;
+                existing.IncomingCommits = src?.IncomingCommits ?? link.IncomingCommits;
+                existing.DefaultBranchBehindCommits = 0;
+                existing.DefaultBranchAheadCommits = 0;
+                existing.BranchHasUpstream = false;
+                existing.SyncStatus = link.SyncStatus;
+                existing.DependencyLevel = src?.DependencyLevel ?? link.DependencyLevel;
+                existing.Dependencies = src?.Dependencies ?? link.Dependencies;
+                existing.UnmatchedDeps = src?.UnmatchedDeps ?? link.UnmatchedDeps;
+                existing.OutOfDateFileLines = src?.OutOfDateFileLines ?? link.OutOfDateFileLines;
+                existing.OutOfDateFileRepos = src?.OutOfDateFileRepos ?? link.OutOfDateFileRepos;
+                existing.TotalFileConfigRepos = src?.TotalFileConfigRepos ?? link.TotalFileConfigRepos;
+                existing.HasSelfFileVersionToken = src?.HasSelfFileVersionToken ?? link.HasSelfFileVersionToken;
+                existing.TotalFileLines = src?.TotalFileLines ?? link.TotalFileLines;
+                continue;
+            }
+
             db.WorkspaceRepositoryContextStates.Add(new WorkspaceRepositoryContextState
             {
                 WorkspaceFeatureContextId = contextId.Value,
@@ -816,9 +848,38 @@ public sealed class WorkspaceFeatureOperations(
             .Where(p => p.WorkspaceId == workspaceId && p.WorkspaceFeatureContextId == specialId.Value)
             .ToListAsync(cancellationToken);
 
-        var projectIdMap = new Dictionary<int, WorkspaceProject>();
-        foreach (var src in specialProjects)
+        // Generated/virtual packages are workspace-global (special context only). Cloning them into
+        // Feature contexts duplicates (RepositoryId, PackageId) and breaks SyncGeneratedPackageDependenciesAsync.
+        var generatedSpecialIds = specialProjects.Where(p => p.IsGenerated).Select(p => p.ProjectId).ToHashSet();
+        var realSpecialProjects = specialProjects.Where(p => !p.IsGenerated).ToList();
+
+        var existingFeatureProjects = await db.WorkspaceProjects
+            .Where(p => p.WorkspaceId == workspaceId
+                        && p.WorkspaceFeatureContextId == contextId.Value
+                        && !p.IsGenerated)
+            .ToListAsync(cancellationToken);
+        var existingByRepoAndName = new Dictionary<(int RepositoryId, string Name), WorkspaceProject>();
+        foreach (var p in existingFeatureProjects)
         {
+            var key = (p.RepositoryId, p.ProjectName.Trim().ToLowerInvariant());
+            existingByRepoAndName.TryAdd(key, p);
+        }
+
+        // projectIdMap: special real ProjectId -> Feature-context project (cloned or Sync-preexisting).
+        var projectIdMap = new Dictionary<int, WorkspaceProject>();
+        foreach (var src in realSpecialProjects)
+        {
+            var key = (src.RepositoryId, src.ProjectName.Trim().ToLowerInvariant());
+            if (existingByRepoAndName.TryGetValue(key, out var existing))
+            {
+                existing.ProjectType = src.ProjectType;
+                existing.ProjectFilePath = src.ProjectFilePath;
+                existing.TargetFramework = src.TargetFramework;
+                existing.PackageId = src.PackageId;
+                projectIdMap[src.ProjectId] = existing;
+                continue;
+            }
+
             var clone = new WorkspaceProject
             {
                 WorkspaceId = workspaceId,
@@ -829,31 +890,70 @@ public sealed class WorkspaceFeatureOperations(
                 ProjectFilePath = src.ProjectFilePath,
                 TargetFramework = src.TargetFramework,
                 PackageId = src.PackageId,
-                IsGenerated = src.IsGenerated
+                IsGenerated = false
             };
             db.WorkspaceProjects.Add(clone);
             projectIdMap[src.ProjectId] = clone;
+        }
+
+        // Drop any Feature-scoped generated copies Sync/legacy seed may have written.
+        var featureScopedGenerated = await db.WorkspaceProjects
+            .Where(p => p.WorkspaceId == workspaceId
+                        && p.WorkspaceFeatureContextId == contextId.Value
+                        && p.IsGenerated)
+            .ToListAsync(cancellationToken);
+        if (featureScopedGenerated.Count > 0)
+        {
+            var orphanIds = featureScopedGenerated.Select(p => p.ProjectId).ToHashSet();
+            var orphanEdges = await db.ProjectDependencies
+                .Where(d => orphanIds.Contains(d.DependentProjectId) || orphanIds.Contains(d.ReferencedProjectId))
+                .ToListAsync(cancellationToken);
+            if (orphanEdges.Count > 0)
+                db.ProjectDependencies.RemoveRange(orphanEdges);
+            db.WorkspaceProjects.RemoveRange(featureScopedGenerated);
         }
 
         await db.SaveChangesAsync(cancellationToken);
 
         if (projectIdMap.Count > 0)
         {
-            var srcIds = projectIdMap.Keys.ToList();
+            var srcIds = projectIdMap.Keys.Concat(generatedSpecialIds).ToList();
             var deps = await db.ProjectDependencies
                 .AsNoTracking()
                 .Where(d => srcIds.Contains(d.DependentProjectId) || srcIds.Contains(d.ReferencedProjectId))
                 .ToListAsync(cancellationToken);
+
+            var featureProjectIds = projectIdMap.Values.Select(p => p.ProjectId).ToList();
+            var existingEdgeKeys = await db.ProjectDependencies
+                .AsNoTracking()
+                .Where(d => featureProjectIds.Contains(d.DependentProjectId))
+                .Select(d => new { d.DependentProjectId, d.ReferencedProjectId })
+                .ToListAsync(cancellationToken);
+            var existingEdgeSet = existingEdgeKeys
+                .Select(e => (e.DependentProjectId, e.ReferencedProjectId))
+                .ToHashSet();
+
             foreach (var dep in deps)
             {
                 if (!projectIdMap.TryGetValue(dep.DependentProjectId, out var depClone))
                     continue;
-                if (!projectIdMap.TryGetValue(dep.ReferencedProjectId, out var refClone))
+
+                int referencedId;
+                if (projectIdMap.TryGetValue(dep.ReferencedProjectId, out var refClone))
+                    referencedId = refClone.ProjectId;
+                else if (generatedSpecialIds.Contains(dep.ReferencedProjectId))
+                    referencedId = dep.ReferencedProjectId; // shared workspace-global generated row
+                else
                     continue;
+
+                var edgeKey = (depClone.ProjectId, referencedId);
+                if (!existingEdgeSet.Add(edgeKey))
+                    continue;
+
                 db.ProjectDependencies.Add(new ProjectDependency
                 {
                     DependentProjectId = depClone.ProjectId,
-                    ReferencedProjectId = refClone.ProjectId,
+                    ReferencedProjectId = referencedId,
                     Version = dep.Version
                 });
             }
