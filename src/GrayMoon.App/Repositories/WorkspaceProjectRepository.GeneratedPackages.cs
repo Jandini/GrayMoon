@@ -13,6 +13,8 @@ public sealed partial class WorkspaceProjectRepository
     /// edge from the consumer's real project to it - so dependency-level computation, push-plan package waiting,
     /// and restore treat it exactly like a physical package reference. Removes generated rows/edges that no longer
     /// correspond to any entry in <paramref name="resolved"/> (e.g. a version config was removed or edited).
+    /// Generated rows are workspace-global (owned by the special Workspace context) - Feature contexts must not
+    /// carry their own copies; callers that seed Feature projections should skip <see cref="WorkspaceProject.IsGenerated"/>.
     /// Does not recompute dependency levels; callers should follow with <see cref="RecomputeAndPersistRepositoryDependencyStatsAsync"/>.
     /// </summary>
     public async Task SyncGeneratedPackageDependenciesAsync(
@@ -38,24 +40,70 @@ public sealed partial class WorkspaceProjectRepository
             })
             .ToList();
 
+        var specialContextId = await ResolveSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+
         var existingGenerated = await dbContext.WorkspaceProjects
             .Where(p => p.WorkspaceId == workspaceId && p.IsGenerated)
             .ToListAsync(cancellationToken);
+
+        // Feature-seed used to clone generated rows into Feature contexts. Those copies break the
+        // workspace-global (RepositoryId, PackageId) key and must be removed so sync can proceed.
+        var featureScopedGenerated = existingGenerated
+            .Where(p => p.WorkspaceFeatureContextId != specialContextId)
+            .ToList();
+        if (featureScopedGenerated.Count > 0)
+        {
+            var orphanIds = featureScopedGenerated.Select(p => p.ProjectId).ToHashSet();
+            var orphanEdges = await dbContext.ProjectDependencies
+                .Where(d => orphanIds.Contains(d.DependentProjectId) || orphanIds.Contains(d.ReferencedProjectId))
+                .ToListAsync(cancellationToken);
+            if (orphanEdges.Count > 0)
+                dbContext.ProjectDependencies.RemoveRange(orphanEdges);
+            dbContext.WorkspaceProjects.RemoveRange(featureScopedGenerated);
+            logger.LogInformation(
+                "Persistence: WorkspaceProjects (generated). Action=RemoveFeatureScoped, WorkspaceId={WorkspaceId}, Count={Count}",
+                workspaceId, featureScopedGenerated.Count);
+            existingGenerated = existingGenerated
+                .Where(p => p.WorkspaceFeatureContextId == specialContextId)
+                .ToList();
+        }
 
         var desiredGeneratedKeys = distinctResolved
             .Select(r => (r.ProducerRepositoryId, r.PackageName))
             .Distinct()
             .ToHashSet();
 
-        var generatedByKey = existingGenerated
-            .ToDictionary(p => (p.RepositoryId, PackageName: p.PackageId?.Trim() ?? ""), p => p);
+        // Deduplicate defensively: legacy/partial writes can leave multiple special-context rows for the same key.
+        var generatedByKey = new Dictionary<(int RepositoryId, string PackageName), WorkspaceProject>();
+        foreach (var group in existingGenerated.GroupBy(p => (p.RepositoryId, PackageName: p.PackageId?.Trim() ?? "")))
+        {
+            var keep = group.First();
+            var extras = group.Skip(1).ToList();
+            if (extras.Count > 0)
+            {
+                var extraIds = extras.Select(p => p.ProjectId).ToHashSet();
+                var extraEdges = await dbContext.ProjectDependencies
+                    .Where(d => extraIds.Contains(d.DependentProjectId) || extraIds.Contains(d.ReferencedProjectId))
+                    .ToListAsync(cancellationToken);
+                if (extraEdges.Count > 0)
+                    dbContext.ProjectDependencies.RemoveRange(extraEdges);
+                dbContext.WorkspaceProjects.RemoveRange(extras);
+                logger.LogWarning(
+                    "Persistence: WorkspaceProjects (generated). Action=Deduplicate, WorkspaceId={WorkspaceId}, Key={RepositoryId}/{PackageName}, Removed={Count}",
+                    workspaceId, group.Key.RepositoryId, group.Key.PackageName, extras.Count);
+            }
+            generatedByKey[group.Key] = keep;
+        }
 
-        var toRemoveGenerated = existingGenerated
-            .Where(p => !desiredGeneratedKeys.Contains((p.RepositoryId, p.PackageId?.Trim() ?? "")))
+        var toRemoveGenerated = generatedByKey
+            .Where(kv => !desiredGeneratedKeys.Contains(kv.Key))
+            .Select(kv => kv.Value)
             .ToList();
         if (toRemoveGenerated.Count > 0)
         {
             dbContext.WorkspaceProjects.RemoveRange(toRemoveGenerated);
+            foreach (var p in toRemoveGenerated)
+                generatedByKey.Remove((p.RepositoryId, p.PackageId?.Trim() ?? ""));
             logger.LogDebug("Persistence: WorkspaceProjects (generated). Action=Remove, WorkspaceId={WorkspaceId}, Count={Count}", workspaceId, toRemoveGenerated.Count);
         }
 
@@ -65,6 +113,7 @@ public sealed partial class WorkspaceProjectRepository
             var newProject = new WorkspaceProject
             {
                 WorkspaceId = workspaceId,
+                WorkspaceFeatureContextId = specialContextId,
                 RepositoryId = key.ProducerRepositoryId,
                 ProjectName = key.PackageName,
                 ProjectType = ProjectType.Package,
@@ -78,6 +127,7 @@ public sealed partial class WorkspaceProjectRepository
         }
 
         // Save now so newly-added generated projects get real ProjectIds before edges reference them.
+        // Also flushes feature-scoped orphan removals / dedupe removals.
         await dbContext.SaveChangesAsync(cancellationToken);
 
         var realProjects = await dbContext.WorkspaceProjects
@@ -86,15 +136,16 @@ public sealed partial class WorkspaceProjectRepository
         var realByRepoAndPath = realProjects
             .Where(p => !string.IsNullOrWhiteSpace(p.ProjectFilePath))
             .GroupBy(p => (p.RepositoryId, ProjectFilePath: NormalizeRepoRelativePath(p.ProjectFilePath)))
-            .ToDictionary(g => g.Key, g => g.First());
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<WorkspaceProject>)g.ToList());
 
         var desiredEdges = new Dictionary<(int DependentProjectId, int ReferencedProjectId), string?>();
         foreach (var r in distinctResolved)
         {
-            if (!realByRepoAndPath.TryGetValue((r.ConsumerRepositoryId, NormalizeRepoRelativePath(r.ConsumerProjectFilePath)), out var consumerProject)) continue;
+            if (!realByRepoAndPath.TryGetValue((r.ConsumerRepositoryId, NormalizeRepoRelativePath(r.ConsumerProjectFilePath)), out var consumers)) continue;
             if (!generatedByKey.TryGetValue((r.ProducerRepositoryId, r.PackageName), out var generatedProject)) continue;
             var version = string.IsNullOrWhiteSpace(r.Version) ? null : r.Version.Trim();
-            desiredEdges[(consumerProject.ProjectId, generatedProject.ProjectId)] = version;
+            foreach (var consumerProject in consumers)
+                desiredEdges[(consumerProject.ProjectId, generatedProject.ProjectId)] = version;
         }
 
         var generatedProjectIds = generatedByKey.Values.Select(p => p.ProjectId).ToHashSet();
@@ -113,7 +164,8 @@ public sealed partial class WorkspaceProjectRepository
 
         var existingByKey = existingGeneratedEdges
             .Where(e => desiredEdgeKeys.Contains((e.DependentProjectId, e.ReferencedProjectId)))
-            .ToDictionary(e => (e.DependentProjectId, e.ReferencedProjectId));
+            .GroupBy(e => (e.DependentProjectId, e.ReferencedProjectId))
+            .ToDictionary(g => g.Key, g => g.First());
         var addedEdges = 0;
         var updatedEdges = 0;
         foreach (var (key, version) in desiredEdges)

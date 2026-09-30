@@ -77,7 +77,7 @@ public sealed partial class WorkspaceProjectRepository(
             .ToListAsync(cancellationToken);
     }
 
-    /// <summary>Gets all projects for repositories linked to the given workspace, scoped to a single Feature context so a Feature's project graph never mixes with the Workspace's (or another Feature's) rows for the same repo/path. Generated/virtual package rows (<see cref="WorkspaceProject.IsGenerated"/>) are not yet context-scoped upstream (see <see cref="SyncGeneratedPackageDependenciesAsync"/>) so they are always included.</summary>
+    /// <summary>Gets all projects for repositories linked to the given workspace, scoped to a single Feature context so a Feature's project graph never mixes with the Workspace's (or another Feature's) rows for the same repo/path. Generated/virtual package rows (<see cref="WorkspaceProject.IsGenerated"/>) are workspace-global (owned by the special Workspace context) so they are always included via <c>IsGenerated</c>.</summary>
     public async Task<List<WorkspaceProject>> GetByWorkspaceIdAsync(int workspaceId, int workspaceFeatureContextId, CancellationToken cancellationToken = default)
     {
         return await dbContext.WorkspaceProjects
