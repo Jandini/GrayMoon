@@ -406,6 +406,76 @@ public sealed class RemoveWorktreeResidueTests : IDisposable
         Assert.Equal("keep me\n".ReplaceLineEndings(), (await File.ReadAllTextAsync(targetFile)).ReplaceLineEndings());
     }
 
+    // ---- D5: locked worktrees -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Locked_worktree_is_removed_when_unlock_is_true()
+    {
+        var mainPath = Path.Combine(_root, "main8");
+        Directory.CreateDirectory(mainPath);
+        await InitGitWithCommitAsync(mainPath);
+        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+
+        var worktreePath = Path.Combine(_root, "features", "locked-unlock-feat", "main8");
+        var created = await _create.ExecuteAsync(new CreateGitWorktreeRequest
+        {
+            MainRepositoryPath = mainPath,
+            WorktreePath = worktreePath,
+            BranchName = "locked-unlock-feat",
+            BaseCommitSha = head,
+        });
+        Assert.True(created.Success, created.ErrorMessage);
+        await RunGitAsync(mainPath, $"worktree lock --reason testing \"{worktreePath}\"");
+
+        var result = await _remove.ExecuteAsync(new RemoveGitWorktreeRequest
+        {
+            MainRepositoryPath = mainPath,
+            WorktreePath = worktreePath,
+            Unlock = true,
+        });
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.False(Directory.Exists(worktreePath));
+        var (listOk, worktrees, _, _) = await _git.ListWorktreesAsync(mainPath, CancellationToken.None);
+        Assert.True(listOk);
+        Assert.DoesNotContain(worktrees, w => string.Equals(
+            Path.GetFullPath(w.WorktreePath ?? ""), Path.GetFullPath(worktreePath), StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Locked_worktree_remove_fails_without_unlock_and_stays_locked()
+    {
+        var mainPath = Path.Combine(_root, "main9");
+        Directory.CreateDirectory(mainPath);
+        await InitGitWithCommitAsync(mainPath);
+        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+
+        var worktreePath = Path.Combine(_root, "features", "locked-no-unlock-feat", "main9");
+        var created = await _create.ExecuteAsync(new CreateGitWorktreeRequest
+        {
+            MainRepositoryPath = mainPath,
+            WorktreePath = worktreePath,
+            BranchName = "locked-no-unlock-feat",
+            BaseCommitSha = head,
+        });
+        Assert.True(created.Success, created.ErrorMessage);
+        await RunGitAsync(mainPath, $"worktree lock --reason testing \"{worktreePath}\"");
+
+        var result = await _remove.ExecuteAsync(new RemoveGitWorktreeRequest
+        {
+            MainRepositoryPath = mainPath,
+            WorktreePath = worktreePath,
+        });
+
+        Assert.False(result.Success);
+        Assert.True(Directory.Exists(worktreePath));
+        var (listOk, worktrees, _, _) = await _git.ListWorktreesAsync(mainPath, CancellationToken.None);
+        Assert.True(listOk);
+        var still = worktrees.Single(w => string.Equals(
+            Path.GetFullPath(w.WorktreePath ?? ""), Path.GetFullPath(worktreePath), StringComparison.OrdinalIgnoreCase));
+        Assert.True(still.IsLocked);
+    }
+
     // ---- Worker compatibility -----------------------------------------------------------------------
 
     [Fact]
@@ -420,6 +490,7 @@ public sealed class RemoveWorktreeResidueTests : IDisposable
         Assert.True(request.Force);
         Assert.Null(request.FeatureRootPath);
         Assert.Null(request.FeatureStorageRoot);
+        Assert.False(request.Unlock);
     }
 
     [Fact]

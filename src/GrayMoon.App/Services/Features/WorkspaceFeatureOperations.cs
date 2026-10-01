@@ -398,6 +398,8 @@ public sealed class WorkspaceFeatureOperations(
                         PullRequestNumber = pr?.PullRequestNumber,
                         PullRequestState = pr?.State,
                         PullRequestMerged = pr?.MergedAt is not null,
+                        IsLocked = disk.IsLocked,
+                        LockReason = disk.LockReason,
                         Warning = ComposeRemoveWarning(row, live, disk)
                     };
                 }
@@ -448,7 +450,8 @@ public sealed class WorkspaceFeatureOperations(
 
         if (!plan.IsAutomaticallySafe
             && !options.AllowDiscardUncommitted
-            && !options.AllowForceDeleteLocalBranches)
+            && !options.AllowForceDeleteLocalBranches
+            && !options.AllowUnlockWorktrees)
         {
             return OperationResult.Fail(
                 "Feature removal is not automatically safe; authorize discard/force options explicitly.");
@@ -577,7 +580,8 @@ public sealed class WorkspaceFeatureOperations(
                             worktreePath = row.WorktreePath,
                             force,
                             featureRootPath,
-                            featureStorageRoot
+                            featureStorageRoot,
+                            unlock = options.AllowUnlockWorktrees
                         },
                         cancellationToken);
                     if (!response.Success)
@@ -954,7 +958,9 @@ public sealed class WorkspaceFeatureOperations(
             && p.OutgoingCommits == 0
             && !p.HasUncommittedChanges
             && !p.HasStagedChanges
-            && !p.HasConflicts);
+            && !p.HasConflicts
+            // A locked worktree (D5) must be explained and unlocked with consent, never removed silently.
+            && !p.IsLocked);
 
     /// <summary>
     /// Disk facts for one Feature worktree, from the Agent's InspectWorktree command. The App never
@@ -991,7 +997,8 @@ public sealed class WorkspaceFeatureOperations(
                 return WorktreeDiskStatus.Unknown(unknownReason);
 
             return WorktreeDiskStatus.Known(
-                payload.Exists, payload.IsDirty, payload.HasUpstream, payload.AheadOfUpstream, payload.AheadOfDefault);
+                payload.Exists, payload.IsDirty, payload.HasUpstream, payload.AheadOfUpstream, payload.AheadOfDefault,
+                payload.IsLocked, payload.LockReason);
         }
         catch (Exception ex)
         {

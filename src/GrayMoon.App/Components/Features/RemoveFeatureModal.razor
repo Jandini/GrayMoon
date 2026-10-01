@@ -95,6 +95,21 @@
                                 </div>
                             }
                         }
+                        @if (!AnyRepoStatusUnknown && ShowUnlockCheckbox)
+                        {
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" id="allow-unlock" @bind="_allowUnlock" disabled="@_analyzing" />
+                                <label class="form-check-label" for="allow-unlock">
+                                    Unlock and remove @LockedRepositories.Count locked worktree@(LockedRepositories.Count == 1 ? "" : "s")
+                                </label>
+                            </div>
+                            <ul class="list-unstyled mb-2 ms-4">
+                                @foreach (var repo in LockedRepositories)
+                                {
+                                    <li class="text-muted small">@repo.RepositoryName@(string.IsNullOrWhiteSpace(repo.LockReason) ? "" : $": {repo.LockReason}")</li>
+                                }
+                            </ul>
+                        }
                     }
                 </div>
                 <div class="modal-footer">
@@ -106,7 +121,7 @@
                     {
                         <button type="button" class="btn btn-outline-secondary" @onclick="Cancel" disabled="@_analyzing">Cancel</button>
                         <button type="button" class="btn btn-danger" @onclick="RemoveAsync"
-                                disabled="@(_analyzing || _plan is null || !CanRemove(AnyRepoStatusUnknown, ShowDiscardCheckbox, _allowDiscard, ShowForceCheckbox, _allowForce))">
+                                disabled="@(_analyzing || _plan is null || !CanRemove(AnyRepoStatusUnknown, ShowDiscardCheckbox, _allowDiscard, ShowForceCheckbox, _allowForce, ShowUnlockCheckbox, _allowUnlock))">
                             Remove Feature
                         </button>
                     }
@@ -131,6 +146,7 @@
     private bool _removing;
     private bool _allowDiscard;
     private bool _allowForce;
+    private bool _allowUnlock;
     private int? _analyzedFor;
 
     /// <summary>Plain-language summary of a successful Remove Feature report (D2).</summary>
@@ -190,11 +206,20 @@
     /// <summary>Shown only when at least one repository actually has unmerged commits ahead of the default branch (D3, fixes U-17).</summary>
     private bool ShowForceCheckbox => BranchesNotInDefaultRepositories.Count > 0;
 
+    /// <summary>Repositories reported locked (<c>git worktree lock</c>) by the Agent (D5). Drives the unlock checkbox.</summary>
+    private IReadOnlyList<RemoveFeatureRepositoryPlan> LockedRepositories =>
+        _plan?.Repositories.Where(HasLockedWorktree).ToList() ?? [];
+
+    /// <summary>Shown only when at least one repository is actually locked (D5). An old Worker never reports a lock, so no checkbox appears.</summary>
+    private bool ShowUnlockCheckbox => LockedRepositories.Count > 0;
+
     internal static bool IsRepositoryDirty(RemoveFeatureRepositoryPlan repo) =>
         repo.HasUncommittedChanges || repo.HasStagedChanges || repo.HasConflicts;
 
     internal static bool HasUnmergedBranchAheadOfDefault(RemoveFeatureRepositoryPlan repo) =>
         (repo.AheadOfDefault ?? 0) > 0 && repo.PullRequestMerged != true;
+
+    internal static bool HasLockedWorktree(RemoveFeatureRepositoryPlan repo) => repo.IsLocked;
 
     /// <summary>
     /// Remove is enabled only when every checkbox the dialog actually shows has been ticked, and never
@@ -206,13 +231,17 @@
         bool showDiscardCheckbox,
         bool allowDiscard,
         bool showForceCheckbox,
-        bool allowForce)
+        bool allowForce,
+        bool showUnlockCheckbox,
+        bool allowUnlock)
     {
         if (anyRepoStatusUnknown)
             return false;
         if (showDiscardCheckbox && !allowDiscard)
             return false;
         if (showForceCheckbox && !allowForce)
+            return false;
+        if (showUnlockCheckbox && !allowUnlock)
             return false;
         return true;
     }
@@ -369,7 +398,8 @@
                 new RemoveFeatureOptions
                 {
                     AllowDiscardUncommitted = _allowDiscard,
-                    AllowForceDeleteLocalBranches = _allowForce
+                    AllowForceDeleteLocalBranches = _allowForce,
+                    AllowUnlockWorktrees = _allowUnlock
                 });
             if (!result.Success)
             {

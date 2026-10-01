@@ -144,6 +144,9 @@ public interface IGitService
     /// When <paramref name="featureRootPath"/> becomes empty afterward, it is removed too.
     /// Without <paramref name="featureRootPath"/> and <paramref name="featureStorageRoot"/>, no
     /// residue is deleted, matching today's behaviour for an old caller.
+    /// When <paramref name="unlock"/> is true, runs <c>git worktree unlock</c> before the remove, so a
+    /// locked worktree (<c>git worktree lock</c>) can be removed (D5). Defaults to false, matching
+    /// today's behaviour for an old caller.
     /// </summary>
     Task<(bool Success, bool AlreadyRemoved, string? ErrorCode, string? ErrorMessage, WorktreeResidueResult Residue)> RemoveWorktreeAsync(
         string mainRepositoryPath,
@@ -151,7 +154,8 @@ public interface IGitService
         bool force,
         CancellationToken ct,
         string? featureRootPath = null,
-        string? featureStorageRoot = null);
+        string? featureStorageRoot = null,
+        bool unlock = false);
 
     /// <summary>
     /// Reports everything removal needs to know about one worktree, checked live: registration,

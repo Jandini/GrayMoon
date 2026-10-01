@@ -11,6 +11,14 @@ internal sealed class InspectWorktreeAgentResponse
     [JsonPropertyName("exists")]
     public bool Exists { get; set; }
 
+    /// <summary>True when the worktree is locked (<c>git worktree lock</c>). False (default) on an older Worker that does not report this (D5).</summary>
+    [JsonPropertyName("isLocked")]
+    public bool IsLocked { get; set; }
+
+    /// <summary>Optional lock reason when <see cref="IsLocked"/> is true.</summary>
+    [JsonPropertyName("lockReason")]
+    public string? LockReason { get; set; }
+
     [JsonPropertyName("isDirty")]
     public bool? IsDirty { get; set; }
 

@@ -18,7 +18,8 @@ public sealed class RemoveGitWorktreeCommand(IGitService git)
             force: request.Force,
             cancellationToken,
             featureRootPath: request.FeatureRootPath,
-            featureStorageRoot: request.FeatureStorageRoot);
+            featureStorageRoot: request.FeatureStorageRoot,
+            unlock: request.Unlock);
 
         return new RemoveGitWorktreeResponse
         {

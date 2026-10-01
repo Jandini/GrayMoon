@@ -14,10 +14,14 @@ internal readonly record struct WorktreeDiskStatus(
     bool? HasUpstream,
     int? AheadOfUpstream,
     int? AheadOfDefault,
-    string? UnknownReason)
+    string? UnknownReason,
+    bool IsLocked = false,
+    string? LockReason = null)
 {
     public static WorktreeDiskStatus Unknown(string reason) => new(true, false, null, null, null, null, reason);
 
-    public static WorktreeDiskStatus Known(bool exists, bool? isDirty, bool? hasUpstream, int? aheadOfUpstream, int? aheadOfDefault) =>
-        new(false, exists, isDirty, hasUpstream, aheadOfUpstream, aheadOfDefault, null);
+    public static WorktreeDiskStatus Known(
+        bool exists, bool? isDirty, bool? hasUpstream, int? aheadOfUpstream, int? aheadOfDefault,
+        bool isLocked = false, string? lockReason = null) =>
+        new(false, exists, isDirty, hasUpstream, aheadOfUpstream, aheadOfDefault, null, isLocked, lockReason);
 }

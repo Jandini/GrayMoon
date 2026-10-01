@@ -1501,7 +1501,8 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         bool force,
         CancellationToken ct,
         string? featureRootPath = null,
-        string? featureStorageRoot = null)
+        string? featureStorageRoot = null,
+        bool unlock = false)
     {
         if (string.IsNullOrWhiteSpace(mainRepositoryPath) || !Directory.Exists(mainRepositoryPath))
             return (false, false, "RepositoryNotFound", "Repository not found.", WorktreeResidueResult.None);
@@ -1536,6 +1537,22 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         if (primary != null && GitWorktreeOccupancy.PathsEqual(primary.WorktreePath, canonicalWorktreePath))
         {
             return (false, false, "CannotRemovePrimary", "Cannot remove the primary repository worktree.", WorktreeResidueResult.None);
+        }
+
+        // D5: unlock is only authorized after explicit consent, surfaced in the Remove dialog when
+        // InspectWorktree reports the worktree as locked. A failed unlock (for example it was not
+        // actually locked) is logged and the remove below is attempted anyway, so git reports the
+        // real reason for any remaining failure.
+        if (unlock)
+        {
+            var (unlockExitCode, unlockStdout, unlockStderr) = await runner.RunAsync(
+                "git", new[] { "worktree", "unlock", canonicalWorktreePath }, mainRepositoryPath, null, ct);
+            if (unlockExitCode != 0)
+            {
+                logger.LogWarning(
+                    "git worktree unlock failed for {WorktreePath}: {Error}",
+                    canonicalWorktreePath, CombineOutput(unlockStdout, unlockStderr));
+            }
         }
 
         var args = force

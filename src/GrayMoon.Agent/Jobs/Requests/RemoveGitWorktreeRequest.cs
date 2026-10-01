@@ -27,6 +27,14 @@ public sealed class RemoveGitWorktreeRequest
     public string? FeatureRootPath { get; set; }
 
     /// <summary>
+    /// Optional, defaults to false. When true, runs <c>git worktree unlock</c> before the remove, so a
+    /// locked worktree (<c>git worktree lock</c>) can be removed. Must only be set after explicit
+    /// authorization. An old App never sends this; behaviour is then unchanged (D5).
+    /// </summary>
+    [JsonPropertyName("unlock")]
+    public bool Unlock { get; set; }
+
+    /// <summary>
     /// Optional: the Workspace's persisted Feature storage root, ending in <c>&lt;Workspace&gt;\features</c>.
     /// Required, together with <see cref="FeatureRootPath"/>, before any leftover worktree files are deleted;
     /// without it, leftover files are only reported. An old App that does not send this gets today's

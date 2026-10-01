@@ -204,6 +204,90 @@ public sealed class RemoveFeatureReportTests
     }
 
     [Fact]
+    public async Task Locked_worktree_reported_by_InspectWorktree_appears_in_the_plan()
+    {
+        // D5: a locked worktree (git worktree lock) is explained in the plan rather than only
+        // surfacing as a raw Git error from a later remove attempt.
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var featureContextId = await SeedRemovableFeatureAsync(ctx);
+
+        ctx.AgentBridge.Respond(AgentHubMethods.InspectWorktree, new
+        {
+            exists = true,
+            isLocked = true,
+            lockReason = "testing",
+            isDirty = false,
+            hasUpstream = true,
+            aheadOfUpstream = 0,
+            aheadOfDefault = 0,
+        });
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var plan = await ops.AnalyzeRemoveFeatureAsync(featureContextId);
+
+        Assert.True(plan.Success, plan.Error);
+        var repo = Assert.Single(plan.Repositories);
+        Assert.True(repo.IsLocked);
+        Assert.Equal("testing", repo.LockReason);
+        Assert.False(plan.IsAutomaticallySafe);
+    }
+
+    [Fact]
+    public async Task Old_worker_InspectWorktree_response_without_isLocked_field_is_not_locked()
+    {
+        // D5: an old Worker's response shape has no isLocked/lockReason fields at all; this must
+        // deserialize to "not locked" rather than throwing or being treated as locked.
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var featureContextId = await SeedRemovableFeatureAsync(ctx);
+
+        ctx.AgentBridge.Respond(AgentHubMethods.InspectWorktree, CleanInspectWorktree());
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var plan = await ops.AnalyzeRemoveFeatureAsync(featureContextId);
+
+        Assert.True(plan.Success, plan.Error);
+        var repo = Assert.Single(plan.Repositories);
+        Assert.False(repo.IsLocked);
+        Assert.Null(repo.LockReason);
+    }
+
+    [Fact]
+    public async Task RemoveFeatureAsync_forwards_AllowUnlockWorktrees_as_unlock_on_the_RemoveGitWorktree_command()
+    {
+        // D5: the App never unlocks a worktree itself (it never touches the developer's disk); it
+        // only forwards the user's consent to the Agent, which runs git worktree unlock.
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var featureContextId = await SeedRemovableFeatureAsync(ctx);
+
+        ctx.AgentBridge.Respond(AgentHubMethods.InspectWorktree, new
+        {
+            exists = true,
+            isLocked = true,
+            lockReason = "testing",
+            isDirty = false,
+            hasUpstream = true,
+            aheadOfUpstream = 0,
+            aheadOfDefault = 0,
+        });
+        ctx.AgentBridge.Respond(AgentHubMethods.RemoveGitWorktree, new { success = true });
+        ctx.AgentBridge.Respond("DeleteBranch", new { success = true });
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var result = await ops.RemoveFeatureAsync(
+            featureContextId,
+            new RemoveFeatureOptions { AllowUnlockWorktrees = true });
+
+        Assert.True(result.Success, result.Error);
+        var call = Assert.Single(ctx.AgentBridge.Calls, c => c.Command == AgentHubMethods.RemoveGitWorktree);
+        var unlockProp = call.Args.GetType().GetProperty("unlock");
+        Assert.NotNull(unlockProp);
+        Assert.Equal(true, unlockProp!.GetValue(call.Args));
+    }
+
+    [Fact]
     public async Task Failed_remove_restarts_the_Feature_context_monitoring()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();

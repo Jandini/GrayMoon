@@ -53,6 +53,8 @@ public sealed class RemoveFeatureOptions
     public bool AllowDiscardUncommitted { get; init; }
     public bool AllowForceDeleteLocalBranches { get; init; }
     public bool DeleteRemoteBranches { get; init; }
+    /// <summary>True when the user authorized unlocking locked worktrees before removal (D5).</summary>
+    public bool AllowUnlockWorktrees { get; init; }
 }
 
 public sealed class RemoveFeaturePlan
@@ -107,5 +109,9 @@ public sealed class RemoveFeatureRepositoryPlan
     public int? PullRequestNumber { get; init; }
     public string? PullRequestState { get; init; }
     public bool? PullRequestMerged { get; init; }
+    /// <summary>True when the worktree is locked (<c>git worktree lock</c>), live from the Agent. False on an older Worker that does not report this (D5).</summary>
+    public bool IsLocked { get; init; }
+    /// <summary>Optional lock reason when <see cref="IsLocked"/> is true.</summary>
+    public string? LockReason { get; init; }
     public string? Warning { get; init; }
 }

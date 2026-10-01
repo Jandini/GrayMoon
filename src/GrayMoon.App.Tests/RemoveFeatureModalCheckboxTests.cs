@@ -17,7 +17,9 @@ public sealed class RemoveFeatureModalCheckboxTests
         bool hasStagedChanges = false,
         bool hasConflicts = false,
         int? aheadOfDefault = 0,
-        bool? pullRequestMerged = null) => new()
+        bool? pullRequestMerged = null,
+        bool isLocked = false,
+        string? lockReason = null) => new()
     {
         RepositoryName = name,
         WorktreeExists = true,
@@ -27,6 +29,8 @@ public sealed class RemoveFeatureModalCheckboxTests
         HasConflicts = hasConflicts,
         AheadOfDefault = aheadOfDefault,
         PullRequestMerged = pullRequestMerged,
+        IsLocked = isLocked,
+        LockReason = lockReason,
     };
 
     [Fact]
@@ -101,28 +105,51 @@ public sealed class RemoveFeatureModalCheckboxTests
         Assert.False(RemoveFeatureModal.HasUnmergedBranchAheadOfDefault(repo));
     }
 
+    [Fact]
+    public void HasLockedWorktree_true_when_locked()
+    {
+        var repo = MakeRepo(isLocked: true, lockReason: "testing");
+
+        Assert.True(RemoveFeatureModal.HasLockedWorktree(repo));
+    }
+
+    [Fact]
+    public void HasLockedWorktree_false_when_not_locked()
+    {
+        var repo = MakeRepo();
+
+        Assert.False(RemoveFeatureModal.HasLockedWorktree(repo));
+    }
+
     [Theory]
-    [InlineData(false, false, false, false, false, true)]  // nothing shown, nothing ticked -> allowed
-    [InlineData(false, true, true, false, false, true)]    // discard shown and ticked -> allowed
-    [InlineData(false, true, false, false, false, false)]  // discard shown, not ticked -> blocked
-    [InlineData(false, false, false, true, true, true)]    // force shown and ticked -> allowed
-    [InlineData(false, false, false, true, false, false)]  // force shown, not ticked -> blocked
-    [InlineData(false, true, true, true, true, true)]      // both shown and both ticked -> allowed
-    [InlineData(false, true, true, true, false, false)]    // both shown, only discard ticked -> blocked
-    [InlineData(false, true, false, true, true, false)]    // both shown, only force ticked -> blocked
-    [InlineData(false, true, false, true, false, false)]   // both shown, neither ticked -> blocked
-    [InlineData(true, false, false, false, false, false)]  // Unknown disk state always blocks, regardless of checkboxes
-    [InlineData(true, true, true, true, true, false)]      // Unknown disk state blocks even if every shown checkbox is ticked
+    [InlineData(false, false, false, false, false, false, false, true)]  // nothing shown, nothing ticked -> allowed
+    [InlineData(false, true, true, false, false, false, false, true)]    // discard shown and ticked -> allowed
+    [InlineData(false, true, false, false, false, false, false, false)]  // discard shown, not ticked -> blocked
+    [InlineData(false, false, false, true, true, false, false, true)]    // force shown and ticked -> allowed
+    [InlineData(false, false, false, true, false, false, false, false)]  // force shown, not ticked -> blocked
+    [InlineData(false, true, true, true, true, false, false, true)]      // both shown and both ticked -> allowed
+    [InlineData(false, true, true, true, false, false, false, false)]    // both shown, only discard ticked -> blocked
+    [InlineData(false, true, false, true, true, false, false, false)]    // both shown, only force ticked -> blocked
+    [InlineData(false, true, false, true, false, false, false, false)]   // both shown, neither ticked -> blocked
+    [InlineData(true, false, false, false, false, false, false, false)]  // Unknown disk state always blocks, regardless of checkboxes
+    [InlineData(true, true, true, true, true, true, true, false)]        // Unknown disk state blocks even if every shown checkbox is ticked
+    [InlineData(false, false, false, false, false, true, true, true)]    // unlock shown and ticked -> allowed (D5)
+    [InlineData(false, false, false, false, false, true, false, false)]  // unlock shown, not ticked -> blocked (D5)
+    [InlineData(false, true, true, true, true, true, true, true)]        // discard, force and unlock all shown and ticked -> allowed (D5)
+    [InlineData(false, true, true, true, true, true, false, false)]      // discard and force ticked, unlock not ticked -> blocked (D5)
     public void CanRemove_matches_expected_combinations(
         bool anyRepoStatusUnknown,
         bool showDiscardCheckbox,
         bool allowDiscard,
         bool showForceCheckbox,
         bool allowForce,
+        bool showUnlockCheckbox,
+        bool allowUnlock,
         bool expected)
     {
         var actual = RemoveFeatureModal.CanRemove(
-            anyRepoStatusUnknown, showDiscardCheckbox, allowDiscard, showForceCheckbox, allowForce);
+            anyRepoStatusUnknown, showDiscardCheckbox, allowDiscard, showForceCheckbox, allowForce,
+            showUnlockCheckbox, allowUnlock);
 
         Assert.Equal(expected, actual);
     }
