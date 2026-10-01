@@ -414,9 +414,11 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
         Assert.True(await db.WorkspaceFeatureContexts.AnyAsync(c => c.WorkspaceFeatureContextId == featureContextId.Value));
         var feature = await db.WorkspaceFeatures.SingleAsync(f => f.Name == "feat-refresh" && f.WorkspaceId == ctx.WorkspaceId);
         Assert.Equal(WorkspaceFeatureLifecycleState.NeedsRepair, feature.LifecycleState);
-        Assert.Equal(1, await db.WorkspaceFeatureRepositories.CountAsync(r =>
+        // D2: a failed repo row stays Removing with its error in LastError, not row-level NeedsRepair.
+        var failedRow = await db.WorkspaceFeatureRepositories.SingleAsync(r =>
             r.WorkspaceFeatureContextId == featureContextId.Value
-            && r.State == WorkspaceFeatureRepositoryState.NeedsRepair));
+            && r.State == WorkspaceFeatureRepositoryState.Removing);
+        Assert.Contains("Permission denied", failedRow.LastError);
     }
 
     [Fact]

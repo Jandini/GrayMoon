@@ -10,14 +10,29 @@
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">Remove Feature</h5>
-                    <button type="button" class="btn-close" aria-label="Close" @onclick="Cancel" disabled="@_analyzing"></button>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="@(_report is null ? Cancel : Done)" disabled="@_analyzing"></button>
                 </div>
                 <div class="modal-body">
                     @if (!string.IsNullOrEmpty(_error))
                     {
                         <div class="gm-callout gm-callout--error mb-3" role="alert">@_error</div>
                     }
-                    @if (_plan is null)
+                    @if (_report is not null)
+                    {
+                        <div class="gm-callout gm-callout--success mb-3" role="alert">@ReportHeadline</div>
+                        @if (ReportWarnings.Count > 0)
+                        {
+                            <ul class="list-unstyled mb-0">
+                                @foreach (var warning in ReportWarnings)
+                                {
+                                    <li class="mb-2">
+                                        <div class="text-muted small">@warning</div>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    }
+                    else if (_plan is null)
                     {
                         <p class="mb-0 text-muted">Checking what will happen if this Feature is removed…</p>
                     }
@@ -70,11 +85,18 @@
                     }
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-outline-secondary" @onclick="Cancel" disabled="@_analyzing">Cancel</button>
-                    <button type="button" class="btn btn-danger" @onclick="RemoveAsync"
-                            disabled="@(_analyzing || _plan is null || AnyRepoStatusUnknown || (!_plan.IsAutomaticallySafe && !_allowDiscard && !_allowForce))">
-                        Remove Feature
-                    </button>
+                    @if (_report is not null)
+                    {
+                        <button type="button" class="btn btn-primary" @onclick="Done">Done</button>
+                    }
+                    else
+                    {
+                        <button type="button" class="btn btn-outline-secondary" @onclick="Cancel" disabled="@_analyzing">Cancel</button>
+                        <button type="button" class="btn btn-danger" @onclick="RemoveAsync"
+                                disabled="@(_analyzing || _plan is null || AnyRepoStatusUnknown || (!_plan.IsAutomaticallySafe && !_allowDiscard && !_allowForce))">
+                            Remove Feature
+                        </button>
+                    }
                 </div>
             </div>
         </div>
@@ -90,12 +112,53 @@
     [Parameter] public EventCallback OnRemoved { get; set; }
 
     private RemoveFeaturePlan? _plan;
+    private IReadOnlyList<RemoveFeatureRepositoryReport>? _report;
     private string? _error;
     private bool _analyzing;
     private bool _removing;
     private bool _allowDiscard;
     private bool _allowForce;
     private int? _analyzedFor;
+
+    /// <summary>Plain-language summary of a successful Remove Feature report (D2).</summary>
+    private string ReportHeadline
+    {
+        get
+        {
+            var worktreeCount = _report?.Count(r => r.WorktreeRemoved) ?? 0;
+            var branchCount = _report?.Count(r => r.BranchOutcome == RemoveFeatureBranchOutcome.Deleted) ?? 0;
+            return $"Removed {worktreeCount} worktree{(worktreeCount == 1 ? "" : "s")}, "
+                + $"{branchCount} local branch{(branchCount == 1 ? "" : "es")}.";
+        }
+    }
+
+    /// <summary>One line per repository that was not fully cleaned up: kept/failed branch, or leftover files.</summary>
+    private IReadOnlyList<string> ReportWarnings
+    {
+        get
+        {
+            if (_report is null)
+                return [];
+
+            var warnings = new List<string>();
+            foreach (var repo in _report)
+            {
+                if (repo.BranchOutcome == RemoveFeatureBranchOutcome.KeptUnmerged)
+                    warnings.Add($"{repo.RepositoryName}: local branch kept (has commits not in the default branch).");
+                else if (repo.BranchOutcome == RemoveFeatureBranchOutcome.Failed)
+                    warnings.Add($"{repo.RepositoryName}: local branch delete failed. {repo.BranchMessage}".TrimEnd());
+
+                if (repo.ResidueRemaining)
+                {
+                    var fileWord = repo.ResidueFileCount == 1 ? "file" : "files";
+                    warnings.Add(
+                        $"{repo.RepositoryName}: {repo.ResidueFileCount} leftover {fileWord} could not be removed. {repo.ResidueMessage}".TrimEnd());
+                }
+            }
+
+            return warnings;
+        }
+    }
 
     /// <summary>True when the Agent could not confirm disk state for one or more repositories. Remove is disabled in that case.</summary>
     private bool AnyRepoStatusUnknown => _plan?.Repositories.Any(r => r.WorktreeStatusUnknown) == true;
@@ -262,7 +325,8 @@
             }
             _plan = null;
             _analyzedFor = null;
-            await OnRemoved.InvokeAsync();
+            // Show the removal report (D2) instead of closing immediately; Done finishes the flow.
+            _report = result.RemoveFeatureReport ?? [];
         }
         catch (Exception ex)
         {
@@ -280,5 +344,11 @@
         _plan = null;
         _analyzedFor = null;
         return OnCancel.InvokeAsync();
+    }
+
+    private async Task Done()
+    {
+        _report = null;
+        await OnRemoved.InvokeAsync();
     }
 }

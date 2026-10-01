@@ -66,6 +66,7 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddDbContextFactory<AppDbContext>(o => o.UseSqlite(connection), ServiceLifetime.Singleton);
 
         services.AddSingleton<IWorkspaceGitChangesNotifier, WorkspaceGitChangesNotifier>();
+        services.AddSingleton<IWorkspaceGitChangesMonitoringPause, WorkspaceGitChangesMonitoringPause>();
         services.AddScoped<AppSettingRepository>();
         services.AddScoped<ConnectorRepository>();
         services.AddScoped<GitHubRepositoryRepository>();

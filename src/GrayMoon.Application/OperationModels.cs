@@ -8,6 +8,13 @@ public sealed record OperationResult(
     IReadOnlyDictionary<int, string>? RepoErrors = null,
     IReadOnlyDictionary<int, string>? LevelErrors = null)
 {
+    /// <summary>
+    /// Per-repository outcome of a successful Remove Feature (D2): worktree removed, local branch
+    /// outcome and leftover-files report. Null for every other operation that returns this type, and
+    /// for a Remove Feature that did not succeed (the error path already reports via <see cref="Error"/>).
+    /// </summary>
+    public IReadOnlyList<RemoveFeatureRepositoryReport>? RemoveFeatureReport { get; init; }
+
     public static OperationResult Ok(
         IReadOnlyDictionary<int, string>? repoErrors = null,
         IReadOnlyDictionary<int, string>? levelErrors = null)
@@ -19,6 +26,31 @@ public sealed record OperationResult(
         IReadOnlyDictionary<int, string>? levelErrors = null)
         => new(false, error, repoErrors, levelErrors);
 }
+
+/// <summary>Outcome of the local Feature branch delete for one repository, in a Remove Feature report (D2).</summary>
+public enum RemoveFeatureBranchOutcome
+{
+    /// <summary>Tag-pinned repository; this Feature never had a branch to delete.</summary>
+    NotApplicable = 0,
+    Deleted = 1,
+    /// <summary>Delete was refused because the branch has commits not on the default branch and force was not authorized.</summary>
+    KeptUnmerged = 2,
+    Failed = 3
+}
+
+/// <summary>
+/// One repository's outcome from a successful Remove Feature, for the report shown to the user (D2).
+/// </summary>
+public sealed record RemoveFeatureRepositoryReport(
+    int WorkspaceRepositoryId,
+    string RepositoryName,
+    bool WorktreeRemoved,
+    RemoveFeatureBranchOutcome BranchOutcome,
+    string? BranchMessage,
+    bool ResidueRemaining,
+    int ResidueFileCount,
+    IReadOnlyList<string>? ResidueSampleFiles,
+    string? ResidueMessage);
 
 /// <summary>
 /// Result of a dependency-update run. <see cref="Success"/> is false when any repo or workspace-level

@@ -204,6 +204,7 @@ try
     builder.Services.AddScoped<WorkspaceGitChangesCommitMessageMemory>();
     builder.Services.AddScoped<WorkspaceGitChangesPushAfterCommitMemory>();
     builder.Services.AddSingleton<IWorkspaceGitChangesActivityTracker, WorkspaceGitChangesActivityTracker>();
+    builder.Services.AddSingleton<IWorkspaceGitChangesMonitoringPause, WorkspaceGitChangesMonitoringPause>();
     builder.Services.AddSingleton<IGitChangesWorkspaceScanner, GitChangesWorkspaceScanner>();
     builder.Services.AddSingleton<IGitChangesLineStatsRefresh, GitChangesLineStatsRefresh>();
     builder.Services.AddScoped<IWorkspaceGitChangesActivation, WorkspaceGitChangesActivation>();

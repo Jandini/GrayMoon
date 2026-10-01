@@ -30,6 +30,7 @@ public sealed class WorkspaceFeatureOperations(
     IAgentBridge agentBridge,
     WorkspaceService workspaceService,
     WorkspacePullRequestService workspacePullRequestService,
+    IWorkspaceGitChangesMonitoringPause gitChangesMonitoringPause,
     IOptions<WorkspaceOptions> workspaceOptions,
     ILogger<WorkspaceFeatureOperations> logger) : IWorkspaceFeatureOperations
 {
@@ -305,7 +306,9 @@ public sealed class WorkspaceFeatureOperations(
         var rows = await db.WorkspaceFeatureRepositories
             .AsNoTracking()
             .Include(r => r.WorkspaceRepository)!.ThenInclude(l => l!.Repository)
-            .Where(r => r.WorkspaceFeatureContextId == featureContextId.Value)
+            // A Removed row's worktree is already unregistered; never analysed as if still live (D2).
+            .Where(r => r.WorkspaceFeatureContextId == featureContextId.Value
+                && r.State != WorkspaceFeatureRepositoryState.Removed)
             .ToListAsync(cancellationToken);
 
         var states = await db.WorkspaceRepositoryContextStates
@@ -488,17 +491,28 @@ public sealed class WorkspaceFeatureOperations(
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken)
     {
+        // D2: the periodic Git Changes sweep must never scan this context's worktrees while they are
+        // being deleted below. Disposed in every case (success, failure, cancellation) so monitoring
+        // always resumes; the special Workspace context is never paused, so its own sweep is unaffected.
+        using var monitoringPause = gitChangesMonitoringPause.Pause(featureContextId.Value);
+
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var feature = await db.WorkspaceFeatures
             .FirstAsync(f => f.WorkspaceFeatureId == info.WorkspaceFeatureId, cancellationToken);
-        feature.LifecycleState = WorkspaceFeatureLifecycleState.Removing;
-        feature.UpdatedAt = DateTime.UtcNow;
-        await db.SaveChangesAsync(cancellationToken);
 
         var specialContextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(info.WorkspaceId, cancellationToken);
+        // Rows already Removed (a prior partial remove) are left alone here; only the still-live rows
+        // move to Removing. Skipping them keeps a retry from re-asking the Agent about an already gone worktree.
         var rows = await db.WorkspaceFeatureRepositories
-            .Where(r => r.WorkspaceFeatureContextId == featureContextId.Value)
+            .Where(r => r.WorkspaceFeatureContextId == featureContextId.Value
+                && r.State != WorkspaceFeatureRepositoryState.Removed)
             .ToListAsync(cancellationToken);
+
+        feature.LifecycleState = WorkspaceFeatureLifecycleState.Removing;
+        feature.UpdatedAt = DateTime.UtcNow;
+        foreach (var row in rows)
+            row.State = WorkspaceFeatureRepositoryState.Removing;
+        await db.SaveChangesAsync(cancellationToken);
 
         var wrIds = rows.Select(r => r.WorkspaceRepositoryId).ToList();
         var links = await db.WorkspaceRepositories
@@ -510,6 +524,7 @@ public sealed class WorkspaceFeatureOperations(
         var repositoryIds = links.Select(l => l.RepositoryId).Distinct().ToList();
 
         var errorsByWrId = new ConcurrentDictionary<int, string>();
+        var reportByWrId = new ConcurrentDictionary<int, RemoveFeatureRepositoryReport>();
         var removeCompleted = 0;
         var removeTotal = rows.Count;
         string? workspaceRoot = null;
@@ -524,6 +539,20 @@ public sealed class WorkspaceFeatureOperations(
             logger.LogWarning(ex, "Could not resolve Workspace agent paths for Feature branch delete.");
         }
 
+        // D1's Agent-side residue cleanup only deletes files when both of these are set; an old App
+        // (or a resolution failure here) leaves them null, matching the old, report-only behaviour.
+        string? featureRootPath = null;
+        string? featureStorageRoot = null;
+        try
+        {
+            featureRootPath = await pathResolver.GetContextRootAsync(featureContextId, cancellationToken);
+            (featureStorageRoot, _) = await pathResolver.GetAgentWorkspaceArgsAsync(featureContextId, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not resolve Feature storage paths for worktree residue cleanup.");
+        }
+
         using (var gate = new SemaphoreSlim(MaxParallel))
         {
             var removeTasks = rows.Select(async row =>
@@ -531,6 +560,10 @@ public sealed class WorkspaceFeatureOperations(
                 await gate.WaitAsync(cancellationToken);
                 try
                 {
+                    var repoName = linkByWrId.TryGetValue(row.WorkspaceRepositoryId, out var reportLink)
+                        ? reportLink.Repository?.RepositoryName ?? ""
+                        : "";
+
                     var mainPath = await pathResolver.GetRepositoryPathAsync(
                         specialContextId, row.WorkspaceRepositoryId, cancellationToken);
                     // Force worktree remove only when the user authorized discarding dirty Feature files.
@@ -538,7 +571,14 @@ public sealed class WorkspaceFeatureOperations(
                     var force = options.AllowDiscardUncommitted;
                     var response = await agentBridge.SendCommandAsync(
                         AgentHubMethods.RemoveGitWorktree,
-                        new { mainRepositoryPath = mainPath, worktreePath = row.WorktreePath, force },
+                        new
+                        {
+                            mainRepositoryPath = mainPath,
+                            worktreePath = row.WorktreePath,
+                            force,
+                            featureRootPath,
+                            featureStorageRoot
+                        },
                         cancellationToken);
                     if (!response.Success)
                     {
@@ -551,16 +591,45 @@ public sealed class WorkspaceFeatureOperations(
                         return;
                     }
 
+                    var worktreeResult = AgentResponseJson.DeserializeAgentResponse<RemoveGitWorktreeResult>(response.Data);
+
+                    // The worktree is unregistered now, regardless of any kept branch or leftover files
+                    // below; persist this row's progress at once with its own short-lived context, so a
+                    // crash before the whole Feature finishes still keeps already-removed repos removed.
+                    await using (var rowDb = await dbContextFactory.CreateDbContextAsync(cancellationToken))
+                    {
+                        var trackedRow = await rowDb.WorkspaceFeatureRepositories.FirstAsync(
+                            r => r.WorkspaceFeatureRepositoryId == row.WorkspaceFeatureRepositoryId, cancellationToken);
+                        trackedRow.State = WorkspaceFeatureRepositoryState.Removed;
+                        trackedRow.LastError = null;
+                        await rowDb.SaveChangesAsync(cancellationToken);
+                    }
+
                     // §27.8: after worktree remove, delete the Feature branch from the main repository.
                     // Tag-pinned repositories never got a Feature branch; a same-named branch there is not ours.
                     var branchName = row.PinnedTag == null ? info.FeatureName : null;
-                    if (!string.IsNullOrWhiteSpace(branchName)
-                        && linkByWrId.TryGetValue(row.WorkspaceRepositoryId, out var link)
-                        && !string.IsNullOrWhiteSpace(link.Repository?.RepositoryName)
-                        && !string.IsNullOrWhiteSpace(workspaceRoot)
-                        && !string.IsNullOrWhiteSpace(workspaceFolderName))
+                    RemoveFeatureBranchOutcome branchOutcome;
+                    string? branchMessage;
+                    if (string.IsNullOrWhiteSpace(branchName))
                     {
-                        var repoName = link.Repository!.RepositoryName;
+                        branchOutcome = RemoveFeatureBranchOutcome.NotApplicable;
+                        branchMessage = null;
+                    }
+                    else if (!linkByWrId.TryGetValue(row.WorkspaceRepositoryId, out var link)
+                        || string.IsNullOrWhiteSpace(link.Repository?.RepositoryName)
+                        || string.IsNullOrWhiteSpace(workspaceRoot)
+                        || string.IsNullOrWhiteSpace(workspaceFolderName))
+                    {
+                        // Never silently skipped: the repository's local branch may still exist, so this
+                        // is reported in the removal report rather than only logged (D2).
+                        branchOutcome = RemoveFeatureBranchOutcome.Failed;
+                        branchMessage = "Could not resolve repository details to delete the local branch.";
+                        logger.LogWarning(
+                            "Could not resolve repository details to delete local Feature branch {Branch} for WorkspaceRepository {WorkspaceRepositoryId}.",
+                            branchName, row.WorkspaceRepositoryId);
+                    }
+                    else
+                    {
                         var deleteLocal = await agentBridge.SendCommandAsync(
                             "DeleteBranch",
                             new
@@ -573,8 +642,21 @@ public sealed class WorkspaceFeatureOperations(
                                 workspaceRoot
                             },
                             cancellationToken);
-                        if (!deleteLocal.Success)
+                        if (deleteLocal.Success)
                         {
+                            branchOutcome = RemoveFeatureBranchOutcome.Deleted;
+                            branchMessage = null;
+                        }
+                        else
+                        {
+                            branchMessage = string.IsNullOrWhiteSpace(deleteLocal.Error)
+                                ? "Local branch delete failed."
+                                : deleteLocal.Error;
+                            // A non-force delete is refused by Git only for unmerged commits; a force
+                            // delete that still fails is a real failure, not an expected refusal.
+                            branchOutcome = options.AllowForceDeleteLocalBranches
+                                ? RemoveFeatureBranchOutcome.Failed
+                                : RemoveFeatureBranchOutcome.KeptUnmerged;
                             logger.LogWarning(
                                 "Delete local Feature branch {Branch} failed for {Repo}: {Error}",
                                 branchName, repoName, deleteLocal.Error);
@@ -602,6 +684,17 @@ public sealed class WorkspaceFeatureOperations(
                             }
                         }
                     }
+
+                    reportByWrId[row.WorkspaceRepositoryId] = new RemoveFeatureRepositoryReport(
+                        row.WorkspaceRepositoryId,
+                        repoName,
+                        WorktreeRemoved: true,
+                        branchOutcome,
+                        branchMessage,
+                        worktreeResult?.ResidueRemaining ?? false,
+                        worktreeResult?.ResidueFileCount ?? 0,
+                        worktreeResult?.ResidueSampleFiles,
+                        worktreeResult?.ResidueMessage);
                 }
                 finally
                 {
@@ -621,11 +714,12 @@ public sealed class WorkspaceFeatureOperations(
             // Agent work ran in parallel; apply EF updates sequentially (DbContext is not thread-safe).
             // Do not continue into Workspace refresh or report success: the UI would navigate back while
             // the Feature still owns failed worktrees. Keep metadata for retry (§27.8).
+            // A failed row stays Removing with its error in LastError (D2 step 0): row-level NeedsRepair
+            // is reserved for the sync-time "worktree missing" case, not a failed Remove.
             foreach (var row in rows)
             {
                 if (!errorsByWrId.TryGetValue(row.WorkspaceRepositoryId, out var error))
                     continue;
-                row.State = WorkspaceFeatureRepositoryState.NeedsRepair;
                 row.LastError = error;
             }
 
@@ -651,7 +745,18 @@ public sealed class WorkspaceFeatureOperations(
         if (selected?.Value == featureContextId.Value)
             await selectedContextService.SetSelectedAsync(info.WorkspaceId, specialContextId, cancellationToken);
 
-        db.WorkspaceFeatureRepositories.RemoveRange(rows);
+        // Deletes every row for this context, including any already-Removed row from an earlier
+        // partial remove that was excluded from `rows` above - the whole Feature is gone now.
+        await db.WorkspaceFeatureRepositories
+            .Where(r => r.WorkspaceFeatureContextId == featureContextId.Value)
+            .ExecuteDeleteAsync(cancellationToken);
+
+        // ExecuteDeleteAsync bypasses the change tracker, so `rows` (still tracked as Unchanged
+        // children of `context`) must be detached here. Otherwise removing `context` below makes EF
+        // cascade-delete these already-gone rows again, and that second delete affects 0 rows.
+        foreach (var row in rows)
+            db.Entry(row).State = EntityState.Detached;
+
         var context = await db.WorkspaceFeatureContexts
             .FirstAsync(c => c.WorkspaceFeatureContextId == featureContextId.Value, cancellationToken);
 
@@ -664,7 +769,26 @@ public sealed class WorkspaceFeatureOperations(
         db.WorkspaceFeatureContexts.Remove(context);
         db.WorkspaceFeatures.Remove(feature);
         await db.SaveChangesAsync(cancellationToken);
-        return OperationResult.Ok();
+
+        var report = rows
+            .Select(r => reportByWrId.TryGetValue(r.WorkspaceRepositoryId, out var entry) ? entry : null)
+            .Where(entry => entry is not null)
+            .Select(entry => entry!)
+            .ToList();
+        return OperationResult.Ok() with { RemoveFeatureReport = report };
+    }
+
+    /// <summary>
+    /// App-side shape of the Agent's RemoveGitWorktree response (GrayMoon.Agent.Jobs.Response is not
+    /// referenced here), used only to read the residue fields added for the Remove report (D1/D2).
+    /// </summary>
+    private sealed class RemoveGitWorktreeResult
+    {
+        public bool Success { get; set; }
+        public bool ResidueRemaining { get; set; }
+        public int ResidueFileCount { get; set; }
+        public List<string>? ResidueSampleFiles { get; set; }
+        public string? ResidueMessage { get; set; }
     }
 
     /// <summary>

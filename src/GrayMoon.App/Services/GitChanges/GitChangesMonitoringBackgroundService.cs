@@ -23,6 +23,7 @@ public sealed class GitChangesMonitoringBackgroundService(
     IServiceScopeFactory scopeFactory,
     IGitChangesWorkspaceScanner scanner,
     IWorkspaceGitChangesActivityTracker activityTracker,
+    IWorkspaceGitChangesMonitoringPause monitoringPause,
     AgentConnectionTracker connectionTracker,
     IOptions<GitChangesOptions> gitChangesOptions,
     ILogger<GitChangesMonitoringBackgroundService> logger) : BackgroundService
@@ -126,6 +127,13 @@ public sealed class GitChangesMonitoringBackgroundService(
                 foreach (var ctx in contexts)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+
+                    // D2: a Feature context being removed is paused here so the sweep never asks the
+                    // Agent to scan a worktree that Remove Feature is deleting at the same time. The
+                    // special Workspace context is never paused, so its own monitoring is unaffected.
+                    if (monitoringPause.IsPaused(ctx.ContextId.Value))
+                        continue;
+
                     await scanner.ScanWorkspaceAsync(workspaceId, ctx.ContextId, cancellationToken);
                 }
             }
