@@ -70,6 +70,8 @@ Brand-new databases are created from the EF model.
 
 Existing databases use guarded, idempotent migration logic in the application migration layer.
 
+At startup `Program.cs` calls `EnsureCreated()` and then `Migrations.RunAllAsync`. The migration methods live in `src/GrayMoon.App/Migrations.cs` and its partial `src/GrayMoon.App/Migrations.Features.cs` (Feature context schema plus the special Workspace context backfill, which runs on every startup). There are no EF Core generated migrations.
+
 Repository conventions require migrations for schema changes even during active development.
 
 New columns should be nullable or have safe defaults so existing databases remain upgradeable.
@@ -136,7 +138,11 @@ RepositoryType
 
 It also owns one-to-one or one-to-many current projections such as PR, Actions, Git status, and Git change entries.
 
-This "membership plus current checkout state" combination is a key current-state assumption.
+This "membership plus current checkout state" combination is a key assumption for the special Workspace context.
+
+Worktree-backed Features do not write these columns. Each Feature context stores the same checkout projection in `WorkspaceRepositoryContextStates` (section 22). The special Workspace context dual-writes: the link columns stay authoritative for legacy readers and a context state row is kept in step.
+
+`WorkspaceRepositoryLink` also has `[NotMapped]` overlay fields (`HeadCommit`, `FeatureBaseCommitSha`, `ParentBranchName`) and `WithBranchOverride(...)`, which context-aware readers use to project a Feature's state onto a link-shaped object without persisting it.
 
 ---
 
@@ -152,10 +158,13 @@ RootPath
 LastSyncedAt
 IsInSync
 ExcludeAiWorkflows
+ManagedFeatureStorageRoot
 Repositories
 ```
 
 `RootPath` is per Workspace.
+
+`ManagedFeatureStorageRoot` is set the first time a Feature is created (`{FeatureStorageRootPath}\{WorkspaceName}\features`) and is not relocated afterwards, so existing worktrees keep their paths when the Settings value changes.
 
 `LastSyncedAt` and `IsInSync` describe the Workspace's current persisted synchronization state.
 
@@ -186,13 +195,15 @@ Synthetic detached-head placeholders are explicitly filtered out and must never 
 
 ## 6. Project persistence
 
-`WorkspaceProjects` stores projects discovered in Workspace repositories.
+`WorkspaceProjects` stores projects discovered in Workspace repositories, per Feature context.
 
-Current uniqueness:
+Current uniqueness (`IX_WorkspaceProjects_Context_Repo_Name`):
 
 ```text
-WorkspaceId + RepositoryId + ProjectName
+WorkspaceFeatureContextId + RepositoryId + ProjectName
 ```
+
+`WorkspaceId + RepositoryId + ProjectName` remains as a non-unique index (`IX_WorkspaceProjects_Workspace_Repo_Name`). Each Feature gets its own copy of the physical project rows and their `ProjectDependencies` edges when it is created; generated projects stay on the special Workspace context.
 
 Project fields include:
 
@@ -307,6 +318,7 @@ Typical data includes:
 
 ```text
 WorkspaceId
+WorkspaceFeatureContextId
 RepositoryId
 FilePath
 FileName
@@ -315,13 +327,17 @@ CurrentValue
 ExpectedValue
 ```
 
+Unique: `WorkspaceFeatureContextId + RepositoryId + FilePath + TokenName`.
+
 This table supports diagnostics and dependency badge computation.
+
+`WorkspaceFile` and `WorkspaceFileVersionConfig` are shared by all contexts of a Workspace. Per-context file presence (`IsMissingOnDisk`, `LastCheckedAt`) is stored in `WorkspaceFileContextStates`.
 
 ---
 
 ## 11. Pull request projection
 
-`WorkspaceRepositoryPullRequests` is currently one-to-one with `WorkspaceRepositoryId`.
+`WorkspaceRepositoryPullRequests` is one-to-one with `WorkspaceRepositoryId` and serves the special Workspace context. Per-context PR state lives in `WorkspaceRepositoryContextPullRequests` (unique `WorkspaceFeatureContextId + WorkspaceRepositoryId`).
 
 Persisted fields include:
 
@@ -344,7 +360,7 @@ The service refreshes the projection for the current branch and clears/reconcile
 
 ## 12. Actions projection
 
-`WorkspaceRepositoryActions` is currently one-to-one with `WorkspaceRepositoryId`.
+`WorkspaceRepositoryActions` is one-to-one with `WorkspaceRepositoryId` and serves the special Workspace context. Per-context Actions state lives in `WorkspaceRepositoryContextActions` (unique `WorkspaceFeatureContextId + WorkspaceRepositoryId`).
 
 It stores:
 
@@ -379,10 +395,12 @@ HeadCommit
 detached/unborn flags
 merge/rebase/cherry-pick state
 staged/changed/conflict counts
-insertions/deletions
+insertions/deletions (working tree and staged)
 scan/persist timestamps
 last error
 ```
+
+Feature contexts use `WorkspaceGitContextRepositoryStatuses` (unique `WorkspaceFeatureContextId + WorkspaceRepositoryId`) and `WorkspaceGitContextChangeEntries` with the same shape. The special Workspace context writes both the legacy tables and the context tables.
 
 ### WorkspaceGitChangeEntry
 
@@ -472,6 +490,20 @@ last selections
 other application settings
 ```
 
+Keys are defined in `AppSettingRepository`:
+
+```text
+WorkspaceRootPath
+FeatureStorageRootPath   (Feature worktree root; empty means {userprofile}\.graymoon from the Worker)
+Terminal.ShowByDefault
+Terminal.TransparentBackdrop
+Terminal.ColorScheme
+Sidebar.Collapsed
+TopBar.Show
+```
+
+The last selected Feature context per Workspace is stored in `WorkspaceSelectedFeatureContexts`, not in Settings.
+
 A Workspace-specific persisted value should take precedence over a global default where the domain supports per-Workspace configuration.
 
 ---
@@ -547,4 +579,100 @@ When adding persisted state:
 6. preserve backward-compatible migration;
 7. index the fields used by Workspace list/query services;
 8. do not create multiple competing sources of truth;
-9. keep large page reads in query services rather than navigation-heavy EF graphs.
+9. keep large page reads in query services rather than navigation-heavy EF graphs;
+10. decide whether the state is Workspace-wide (membership, configuration) or per Feature context (anything observed from a checkout), and key per-context rows by `WorkspaceFeatureContextId`.
+
+---
+
+## 22. Feature contexts and worktree persistence
+
+Entity configuration is in `src/GrayMoon.App/Data/AppDbContext.Features.cs`; entities are in `src/GrayMoon.App/Models/Features/`.
+
+```mermaid
+flowchart TB
+  W["Workspace"]
+  SC["WorkspaceFeatureContext<br/>Kind = Workspace (one per Workspace)"]
+  F["WorkspaceFeature"]
+  FC["WorkspaceFeatureContext<br/>Kind = Feature"]
+  FR["WorkspaceFeatureRepository<br/>(one worktree per member repository)"]
+  CS["Per-context projections<br/>state, PR, Actions, Git Changes,<br/>projects, file status"]
+  SEL["WorkspaceSelectedFeatureContext"]
+
+  W --> SC
+  W --> F
+  F --> FC
+  FC --> FR
+  SC --> CS
+  FC --> CS
+  W --> SEL
+```
+
+### WorkspaceFeatures
+
+Unique: `WorkspaceId + Name`.
+
+```text
+Name
+LifecycleState   Creating | Ready | Removing | NeedsRepair
+BaseKind         CurrentWorkspace (only value used today)
+BaseWorkspaceFeatureId
+CreatedAt / UpdatedAt
+LastError
+```
+
+### WorkspaceFeatureContexts
+
+The execution identity for every context-scoped operation (`WorkspaceFeatureContextId` in `GrayMoon.Application.Features`).
+
+```text
+WorkspaceId
+Kind             Workspace (0) | Feature (1)
+WorkspaceFeatureId   (null for the special Workspace context)
+LastSyncedAt / IsInSync
+```
+
+A filtered unique index (`IX_WorkspaceFeatureContexts_Workspace_KindWorkspace`) guarantees one special Workspace context per Workspace. The startup migration backfills it for existing Workspaces.
+
+### WorkspaceFeatureRepositories
+
+Unique: `WorkspaceFeatureContextId + WorkspaceRepositoryId`.
+
+```text
+WorktreePath       {ManagedFeatureStorageRoot}\{FeatureName}\{RepositoryName}
+BaseCommitSha      HEAD of the Workspace checkout when the Feature was created
+ParentBranchName   Workspace branch at creation (null when on a tag or detached)
+PinnedTag          tag the Workspace checkout was on, if any (worktree is detached)
+State              Pending | Ready | NeedsRepair
+LastError
+```
+
+### Per-context projections
+
+All are unique on `WorkspaceFeatureContextId + WorkspaceRepositoryId` (or `+ FileId`):
+
+```text
+WorkspaceRepositoryContextStates       checkout projection (same fields as the link, plus HeadCommit)
+WorkspaceRepositoryContextPullRequests
+WorkspaceRepositoryContextActions
+WorkspaceGitContextRepositoryStatuses
+WorkspaceGitContextChangeEntries       (non-unique index)
+WorkspaceFileContextStates
+```
+
+`WorkspaceProjects` and `WorkspaceFileLineStatuses` carry a nullable `WorkspaceFeatureContextId` column instead of a separate table.
+
+### WorkspaceSelectedFeatureContexts
+
+Primary key `WorkspaceId`. It remembers which context the user last viewed. It is a navigation preference only; operations always take an explicit `WorkspaceFeatureContextId`.
+
+### What stays Workspace-wide
+
+```text
+WorkspaceRepositories membership
+RepositoryBranches inventory
+WorkspaceRepositoryCustomDependencies
+WorkspaceFiles / WorkspaceFileVersionConfigs
+generated WorkspaceProjects
+```
+
+Membership changes are refused while a Workspace has Features.

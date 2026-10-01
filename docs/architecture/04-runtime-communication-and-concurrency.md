@@ -41,12 +41,14 @@ Current architecture:
 flowchart LR
   In["Incoming commands"] --> Route{"route by name"}
   Route -->|"most mutations"| Main["main pool"]
-  Route -->|"GetGitChangeStatus"| Read["read/status pool"]
+  Route -->|"GetGitChangeStatus, ListGitWorktrees"| Read["read/status pool"]
   Route -->|"GetGitFileDiff"| Diff["diff pool"]
   Main -.-> Cap["bounded concurrency"]
   Read -.-> Cap
   Diff -.-> Cap
 ```
+
+Routing is by command name in `SignalRConnectionHostedService` (`ReadOnlyCommands`, `DiffCommands`); everything else goes to the main pool. Defaults: main `ProcessorCount * 2`, read 8, diff 4 (`AgentOptions`).
 
 This isolation matters.
 
@@ -58,11 +60,20 @@ Do not collapse these pools into one queue without a deliberate performance rede
 
 ## 3. App-side operation locking
 
-GrayMoon currently treats Workspace mutations as exclusive.
+`WorkspaceOperationRunner` is the process-wide mutation coordinator. It implements both `IWorkspaceOperationRunner` and the hierarchical `IWorkspaceOperationLock`.
 
-`WorkspaceOperationRunner` is the process-wide mutation coordinator.
+The lock has two levels:
 
-A second conflicting Workspace mutation should not start while another mutation is active.
+```text
+structural (TryStartStructural)   whole Workspace; refused while any context mutation runs
+context    (TryStartContext)      one per WorkspaceFeatureContextId; refused while a structural one runs
+```
+
+Mutations in different contexts (the special Workspace and Feature A, or Feature A and Feature B) can run concurrently. A second mutation in the same context does not start; the caller attaches to the running one.
+
+Create Feature and Remove Feature are structural (`create-feature`, `remove-feature`). The legacy `TryStart` entry point is treated as structural.
+
+`BackgroundJobService` picks the level from the job key: keys shaped `/workspaces/{id}/ctx/{contextId}/...` (`WorkspaceJobKeys.ContextOverlayKey`) take a context lock; other `/workspaces/{id}...` keys take the structural lock.
 
 This protects multi-step orchestration from overlapping writes and Git operations.
 
@@ -155,6 +166,19 @@ sequenceDiagram
 
 Hook notification failure must not break the Git operation that triggered the hook.
 
+### Context attribution
+
+Feature worktrees share the hooks directory of the main checkout, so the hook script also sends `repositoryPath` (`git rev-parse --show-toplevel`). `WorkspaceHookContextAttributor` matches that path against the special Workspace checkout and the Feature worktree paths:
+
+```text
+matches the Workspace checkout   -> special Workspace context
+matches one Feature worktree     -> that Feature context
+unknown or ambiguous path        -> notification skipped (never defaulted to the Workspace)
+no path (hook from older Worker) -> special Workspace context
+```
+
+`CreateGitWorktree` rewrites the hooks of the main checkout before `git worktree add`, so the `post-checkout` hook fired by the new worktree is attributed correctly.
+
 ---
 
 ## 8. Hook types
@@ -243,9 +267,11 @@ When the snapshot returns:
 flowchart LR
   A["Agent snapshot"] --> B["App write queue"]
   B --> C["SQLite"]
-  C --> D["GitChangesUpdated broadcast"]
+  C --> D["ContextGitChangesUpdated broadcast"]
   D --> E["page re-reads"]
 ```
+
+`GitChangesSnapshotPushHandler` resolves the context from the reported repository path, writes the context tables, and broadcasts `ContextGitChangesUpdated(workspaceId, contextId, repositoryId)`. For the special Workspace context it also writes the legacy tables and broadcasts `GitChangesUpdated(workspaceId, repositoryId)`.
 
 The UI remains projection-driven.
 
@@ -340,6 +366,20 @@ updates UI
 ```
 
 This avoids sending large domain graphs through browser broadcast events.
+
+Current `WorkspaceSyncHub` events:
+
+```text
+ContextRepositorySynced(workspaceId, contextId, repositoryId)
+ContextSynced(workspaceId, contextId)
+ContextGitChangesUpdated(workspaceId, contextId, repositoryId)
+RepositorySynced(workspaceId, repositoryId)       legacy
+WorkspaceSynced(workspaceId)                      legacy
+GitChangesUpdated(workspaceId, repositoryId)      legacy, special Workspace only
+RepositoryError(workspaceId, repositoryId, message)
+```
+
+The hook path (`SyncCommandHandler`) sends the legacy `RepositorySynced` / `WorkspaceSynced` only for the special Workspace context. Many mutation paths (for example `WorkspaceStateRecomputeScope.CompleteAsync` and branch operations) still send `WorkspaceSynced` regardless of context, so context-aware listeners must filter by the selected context and treat `WorkspaceSynced` as a coarse invalidation.
 
 ---
 

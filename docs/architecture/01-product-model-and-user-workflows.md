@@ -53,7 +53,35 @@ version-file patterns
 workspace-level settings
 ```
 
-Today, every Workspace repository has one normal physical checkout under the Workspace root.
+Every Workspace repository has one main physical checkout under the Workspace root. A Workspace can additionally have Features, each with its own worktree checkout of every member repository.
+
+### Feature
+
+A Feature is a named, isolated working context inside a Workspace. Creating one runs `git worktree add` for every Workspace repository, on a new branch named after the Feature, starting from the commit the Workspace checkout is on. Worktrees live under `{Feature storage root}\{WorkspaceName}\features\{FeatureName}\{RepositoryName}`.
+
+A Feature lets a developer (or an AI agent) work on a cross-repository change without touching the main Workspace checkouts, and lets several such changes proceed side by side.
+
+Feature lifecycle states:
+
+```text
+Creating -> Ready
+Creating -> NeedsRepair   (any repository failed)
+Ready    -> Removing -> (deleted)
+Removing -> NeedsRepair   (any worktree or branch removal failed)
+```
+
+NeedsRepair Features stay visible in the context selector so they can be inspected and removed again.
+
+### Context
+
+Every Workspace page shows one context at a time:
+
+```text
+Workspace   the special context backed by the main checkouts (one per Workspace)
+Feature     a context backed by that Feature's worktrees
+```
+
+The context is selected in the selector at the top of each Workspace page and is carried in the URL as `?context=<id>`. Internally it is a `WorkspaceFeatureContextId`, and every context-scoped operation receives it explicitly.
 
 ### Repository
 
@@ -103,7 +131,7 @@ Operations that must respect dependency order process one level before the next.
 
 It creates a branch across the intended Workspace repositories, optionally updates dependencies, commits generated changes, and can continue into synchronized push.
 
-It replaced the older product term "New Feature". It is not a worktree Feature.
+It replaced the older product term "New Feature". It is not a worktree Feature: it works on the main Workspace checkouts and is only offered in the special Workspace context.
 
 ### Return to Default
 
@@ -124,20 +152,22 @@ The UI and unattended/REST path use the same analysis.
 
 ## 3. Main application navigation
 
-At the global level GrayMoon provides areas such as:
+At the global level GrayMoon provides:
 
 ```text
+Home
 Workspaces
+Repositories   (all repositories known from connectors, /repositories)
 Connectors
-Worker
+Worker         (/agent)
 Settings
 ```
 
-Inside a Workspace the main navigation is:
+Inside a Workspace the main navigation is (with Home above it):
 
 ```text
-Repositories
-Changes
+Repositories   (/workspaces/{id})
+Changes        (a red dot appears when the selected context has uncommitted work)
 Projects
 Packages
 Files
@@ -617,7 +647,7 @@ This is how an IDE or command-line Git operation can update GrayMoon without the
 
 ## 20. Return to Default
 
-Return to Default is a cleanup workflow for the current Workspace checkout.
+Return to Default is a cleanup workflow for the main Workspace checkouts. It is hidden in a Feature context; a Feature is cleaned up with Remove Feature instead.
 
 The shared preflight analyzes:
 
@@ -659,3 +689,32 @@ A common GrayMoon workflow is:
 ```
 
 GrayMoon's product value is the coordination between these steps, not any single Git command in isolation.
+
+---
+
+## 22. Feature workflow
+
+A Feature runs the same flow in isolated worktrees:
+
+```text
+1. Open Workspace (special context), make sure it is on the commit to start from
+2. "+" in the context selector -> New Feature -> name (also the branch name)
+3. GrayMoon creates one worktree per repository and selects the new Feature
+4. Open the Feature in an IDE or terminal (Desktop "Open in..." flyout, or the paths directly)
+5. Work, commit, update dependencies, push from the Feature context as usual
+6. Create PR (the PR targets the branch the Workspace was on when the Feature was created)
+7. Merge
+8. Remove Feature ("-" in the selector or Feature menu -> Remove Feature)
+```
+
+Remove Feature analyzes every worktree first. If anything would be lost (uncommitted changes, unpushed commits), the user must explicitly consent before GrayMoon runs `git worktree remove` and deletes the local branch. Remote branches are not deleted. The main Workspace checkouts are refreshed but never switched or pulled.
+
+Constraints:
+
+```text
+Feature name must be a valid branch name that does not already exist in any Workspace repository
+repositories on a tag get a detached worktree at that tag
+uncommitted Workspace changes are not carried into the Feature
+Workspace repository membership cannot be changed while Features exist
+the Branch-menu actions Prepare Workspace, New Branch, Switch Branch and Return to Default are Workspace-only
+```

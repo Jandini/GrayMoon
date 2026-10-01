@@ -73,7 +73,7 @@ package registry services
 
 ```text
 see Worker presence/status
-install Worker
+install Worker (download/install scripts on the Worker page; one-click install from Desktop)
 run as service
 receive version/update state
 cancel commands where supported
@@ -192,17 +192,26 @@ broadcast Workspace sync
 
 ## 6. Branch menu
 
-Current main Workspace Branch menu:
+Branch menu in the special Workspace context:
 
 ```text
 Prepare Workspace
 New Branch
 Switch Branch
-Create PRs
+Create PR
 Return to Default
 ```
 
-The menu controls the current single-checkout Workspace.
+The menu controls the Workspace's main checkouts.
+
+In a Feature context the primary button reads **Feature** and the menu only offers:
+
+```text
+Create PR
+Remove Feature
+```
+
+The primary button label changes to **Create PR** when at least one repository has a creatable PR, and to **Remove** in a Feature context with no creatable or open PR (`WorkspaceRepositoriesHeader.razor`). The level header hides Return to Default in a Feature context.
 
 ### New Branch
 
@@ -212,9 +221,9 @@ Creates the selected branch across repositories.
 
 Computes compatible/common branches and performs coordinated checkout.
 
-### Create PRs
+### Create PR
 
-Starts multi-repository PR creation.
+Starts multi-repository PR creation. In a Feature context, a repository is creatable when its worktree HEAD differs from the Feature's base commit, and the PR targets the Feature's parent branch.
 
 ### Return to Default
 
@@ -782,16 +791,95 @@ Pages may layer domain-specific predicates over the shared parser.
 
 When running in Desktop mode, GrayMoon may provide native actions such as opening a repository folder or external URL.
 
+The context selector also shows an **Open in...** flyout for the selected context: Cursor, Claude CLI, VS Code, and Visual Studio (each only when Desktop detects it), Terminal, and Explorer, with a per-repository sub-flyout. The App resolves the paths (`IWorkspaceNativeLaunchService`); Desktop only launches the tool.
+
 The web/container application remains fully functional without Desktop.
 
 ---
 
 ## 31. Current intentional limitations
 
-Current GrayMoon does **not** yet provide worktree-backed Feature contexts.
-
-A Workspace has one checkout per repository.
-
 There is no MCP server.
 
+Feature limitations in the current code:
+
+```text
+Features can only be based on the current Workspace (no "default branches" or "from another Feature" base)
+Workspace repository membership cannot change while Features exist
+REST endpoints always act on the special Workspace context
+Remove Feature never deletes remote branches from the UI
+```
+
 Those are future architecture projects and must not be described as current product behavior in this documentation.
+
+---
+
+## 32. Features (worktree contexts)
+
+### User sees
+
+The context selector at the top of every Workspace page lists **Workspace** plus each Feature that is Ready or NeedsRepair. The selected context is in the URL (`?context=<id>`) and is remembered per Workspace.
+
+Workspace pages read the selected context's own persisted state (checkout projection, Git Changes, projects, file status, PRs, Actions). Generated packages stay global to the Workspace.
+
+### User can
+
+```text
+create a Feature ("+" in the selector, New Feature dialog)
+switch between Workspace and Features
+remove a Feature ("-" in the selector or the Feature menu)
+open the Feature in a native tool (Desktop only)
+work in the Feature with the normal Workspace pages
+```
+
+### New Feature
+
+The dialog asks for a Feature name, which is also the branch name. "Based on" is fixed to **Current Workspace**.
+
+Creation:
+
+```text
+validate the name as a branch name
+reject a name that is already a branch in any repository or an existing Feature
+record HEAD of every Workspace repository
+git worktree add, in parallel, to {ManagedFeatureStorageRoot}\{FeatureName}\{RepositoryName}
+  on a new branch from that commit, or detached when the repository is on a tag
+copy the Workspace's checkout projection and projects into the new context
+select the new Feature
+```
+
+Uncommitted Workspace changes are not copied. If any repository fails, the Feature is kept in **NeedsRepair** with the error.
+
+### Remove Feature
+
+The dialog first analyzes each worktree (live Git status probe) and reports it as completed, abandoned, active, or needs repair. When the result is not automatically safe, the user must tick at least one of:
+
+```text
+discard uncommitted changes
+delete the local branch even if it has unpushed commits
+```
+
+Removal runs `git worktree remove` and deletes the local Feature branch per repository, then refreshes the special Workspace context without checking out, switching branch, or pulling. Any failure leaves the Feature in NeedsRepair with its metadata kept.
+
+### Branch ownership
+
+Switch Branch marks branches that are checked out by a Feature or another worktree, and refuses to delete a Feature-owned branch (use Remove Feature instead).
+
+### Settings
+
+**Feature storage root** on the Settings page (`FeatureStorageRootPath`). When empty, GrayMoon uses `{userprofile}\.graymoon` as reported by the Worker and saves it on first Feature creation. Existing Features keep the root recorded when the Workspace's first Feature was created.
+
+Divergence badges in a Feature are computed against the Feature's parent branch, not the default branch.
+
+### Implementation
+
+```text
+WorkspaceContextBar / WorkspaceFeatureSelector
+CreateFeatureModal / RemoveFeatureModal
+IWorkspaceFeatureOperations -> WorkspaceFeatureOperations
+IWorkspaceFeatureContextResolver
+WorkspaceService.ResolveFeatureStorageRootPathAsync
+WorkspaceBranchOccupancyService
+IWorkspaceExternalWorktreeOperations
+Worker GetHeadCommits / CreateGitWorktree / RemoveGitWorktree / ListGitWorktrees
+```
