@@ -274,7 +274,7 @@ try
         ConnectorHelpers.InitializeTokenProtector(tokenProtector);
 
         dbContext.Database.EnsureCreated();
-        await Migrations.RunAllAsync(dbContext);
+        await Migrations.RunAllAsync(dbContext, app.Logger);
 
         await dbContext.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;");
         await dbContext.Database.ExecuteSqlRawAsync("PRAGMA busy_timeout=5000;");
@@ -333,6 +333,11 @@ try
 
     await app.RunAsync();
     return 0;
+}
+catch (DatabaseMigrationException dbEx)
+{
+    Log.Fatal(dbEx, "Database migration failed at startup: {Message}", dbEx.Message);
+    return 1;
 }
 catch (Exception ex)
 {

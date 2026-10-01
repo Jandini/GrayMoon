@@ -2,6 +2,8 @@ using System.Data.Common;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace GrayMoon.App;
 
@@ -11,8 +13,9 @@ public static partial class Migrations
     /// Additive WorkspaceFeatureContext schema + special-Workspace backfill for existing databases.
     /// EnsureCreated() covers brand-new databases from the current model; this patches older files.
     /// </summary>
-    public static async Task MigrateWorkspaceFeatureContextSchemaAsync(AppDbContext dbContext)
+    public static async Task MigrateWorkspaceFeatureContextSchemaAsync(AppDbContext dbContext, ILogger? logger = null)
     {
+        logger ??= NullLogger.Instance;
         try
         {
             var conn = dbContext.Database.GetDbConnection();
@@ -28,9 +31,10 @@ public static partial class Migrations
             await EnsureProjectAndFileLineContextColumnsAsync(conn);
             await BackfillSpecialWorkspaceContextsAsync(dbContext);
         }
-        catch
+        catch (Exception ex)
         {
             // Fresh DB: EnsureCreated already created the Feature tables from the model.
+            logger.LogError(ex, "Legacy migration step MigrateWorkspaceFeatureContextSchemaAsync failed; continuing startup.");
         }
     }
 
@@ -327,11 +331,15 @@ public static partial class Migrations
                 .Where(l => l.WorkspaceId == workspace.WorkspaceId)
                 .ToListAsync();
 
+            var existingStateRepoIds = new HashSet<int>(await dbContext.WorkspaceRepositoryContextStates
+                .AsNoTracking()
+                .Where(s => s.WorkspaceFeatureContextId == context.WorkspaceFeatureContextId)
+                .Select(s => s.WorkspaceRepositoryId)
+                .ToListAsync());
+
             foreach (var link in links)
             {
-                var exists = await dbContext.WorkspaceRepositoryContextStates
-                    .AnyAsync(s => s.WorkspaceFeatureContextId == context.WorkspaceFeatureContextId && s.WorkspaceRepositoryId == link.WorkspaceRepositoryId);
-                if (exists)
+                if (existingStateRepoIds.Contains(link.WorkspaceRepositoryId))
                     continue;
 
                 dbContext.WorkspaceRepositoryContextStates.Add(new WorkspaceRepositoryContextState
@@ -406,11 +414,15 @@ public static partial class Migrations
             .Select(f => new { f.FileId, f.IsMissingOnDisk })
             .ToListAsync();
 
+        var existingFileIds = new HashSet<int>(await dbContext.WorkspaceFileContextStates
+            .AsNoTracking()
+            .Where(s => s.WorkspaceFeatureContextId == contextId)
+            .Select(s => s.FileId)
+            .ToListAsync());
+
         foreach (var file in files)
         {
-            var exists = await dbContext.WorkspaceFileContextStates
-                .AnyAsync(s => s.WorkspaceFeatureContextId == contextId && s.FileId == file.FileId);
-            if (exists)
+            if (existingFileIds.Contains(file.FileId))
                 continue;
 
             dbContext.WorkspaceFileContextStates.Add(new WorkspaceFileContextState
@@ -433,11 +445,15 @@ public static partial class Migrations
             where link.WorkspaceId == workspaceId
             select pr).ToListAsync();
 
+        var existingRepoIds = new HashSet<int>(await dbContext.WorkspaceRepositoryContextPullRequests
+            .AsNoTracking()
+            .Where(x => x.WorkspaceFeatureContextId == contextId)
+            .Select(x => x.WorkspaceRepositoryId)
+            .ToListAsync());
+
         foreach (var pr in rows)
         {
-            var exists = await dbContext.WorkspaceRepositoryContextPullRequests
-                .AnyAsync(x => x.WorkspaceFeatureContextId == contextId && x.WorkspaceRepositoryId == pr.WorkspaceRepositoryId);
-            if (exists)
+            if (existingRepoIds.Contains(pr.WorkspaceRepositoryId))
                 continue;
 
             dbContext.WorkspaceRepositoryContextPullRequests.Add(new WorkspaceRepositoryContextPullRequest
@@ -466,11 +482,15 @@ public static partial class Migrations
             where link.WorkspaceId == workspaceId
             select a).ToListAsync();
 
+        var existingRepoIds = new HashSet<int>(await dbContext.WorkspaceRepositoryContextActions
+            .AsNoTracking()
+            .Where(x => x.WorkspaceFeatureContextId == contextId)
+            .Select(x => x.WorkspaceRepositoryId)
+            .ToListAsync());
+
         foreach (var a in rows)
         {
-            var exists = await dbContext.WorkspaceRepositoryContextActions
-                .AnyAsync(x => x.WorkspaceFeatureContextId == contextId && x.WorkspaceRepositoryId == a.WorkspaceRepositoryId);
-            if (exists)
+            if (existingRepoIds.Contains(a.WorkspaceRepositoryId))
                 continue;
 
             dbContext.WorkspaceRepositoryContextActions.Add(new WorkspaceRepositoryContextAction
@@ -500,11 +520,21 @@ public static partial class Migrations
             where link.WorkspaceId == workspaceId
             select s).ToListAsync();
 
+        var existingStatusRepoIds = new HashSet<int>(await dbContext.WorkspaceGitContextRepositoryStatuses
+            .AsNoTracking()
+            .Where(x => x.WorkspaceFeatureContextId == contextId)
+            .Select(x => x.WorkspaceRepositoryId)
+            .ToListAsync());
+
+        var existingEntryRepoIds = new HashSet<int>(await dbContext.WorkspaceGitContextChangeEntries
+            .AsNoTracking()
+            .Where(e => e.WorkspaceFeatureContextId == contextId)
+            .Select(e => e.WorkspaceRepositoryId)
+            .ToListAsync());
+
         foreach (var s in statuses)
         {
-            var exists = await dbContext.WorkspaceGitContextRepositoryStatuses
-                .AnyAsync(x => x.WorkspaceFeatureContextId == contextId && x.WorkspaceRepositoryId == s.WorkspaceRepositoryId);
-            if (!exists)
+            if (!existingStatusRepoIds.Contains(s.WorkspaceRepositoryId))
             {
                 dbContext.WorkspaceGitContextRepositoryStatuses.Add(new WorkspaceGitContextRepositoryStatus
                 {
@@ -532,9 +562,7 @@ public static partial class Migrations
                 });
             }
 
-            var entryExists = await dbContext.WorkspaceGitContextChangeEntries
-                .AnyAsync(e => e.WorkspaceFeatureContextId == contextId && e.WorkspaceRepositoryId == s.WorkspaceRepositoryId);
-            if (entryExists)
+            if (existingEntryRepoIds.Contains(s.WorkspaceRepositoryId))
                 continue;
 
             var entries = await dbContext.WorkspaceGitChangeEntries.AsNoTracking()
