@@ -417,7 +417,7 @@
                 graph = null;
                 return;
             }
-            graph = await WorkspaceProjectRepository.GetRepositoryDependencyGraphAsync(WorkspaceId);
+            graph = await WorkspaceProjectRepository.GetRepositoryDependencyGraphAsync(WorkspaceId, _selectedContextId);
         }
         catch (Exception ex)
         {

@@ -36,7 +36,19 @@
                                 </li>
                             }
                         </ul>
-                        @if (!_plan.IsAutomaticallySafe)
+                        @if (AnyRepoStatusUnknown)
+                        {
+                            <div class="gm-callout gm-callout--warning mb-3" role="alert">
+                                Could not check this repository. Make sure the Worker is running, then try again.
+                            </div>
+                        }
+                        @if (_plan.PullRequestStatusUnknown)
+                        {
+                            <div class="gm-callout gm-callout--warning mb-3" role="alert">
+                                Could not check pull requests. GitHub may be offline or rate limited.
+                            </div>
+                        }
+                        @if (!AnyRepoStatusUnknown && !_plan.IsAutomaticallySafe)
                         {
                             <div class="gm-callout gm-callout--warning mb-3" role="alert">
                                 Some work in this Feature hasn't been safely saved yet (see above). Removing it now
@@ -60,7 +72,7 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-outline-secondary" @onclick="Cancel" disabled="@_analyzing">Cancel</button>
                     <button type="button" class="btn btn-danger" @onclick="RemoveAsync"
-                            disabled="@(_analyzing || _plan is null || (!_plan.IsAutomaticallySafe && !_allowDiscard && !_allowForce))">
+                            disabled="@(_analyzing || _plan is null || AnyRepoStatusUnknown || (!_plan.IsAutomaticallySafe && !_allowDiscard && !_allowForce))">
                         Remove Feature
                     </button>
                 </div>
@@ -85,19 +97,39 @@
     private bool _allowForce;
     private int? _analyzedFor;
 
+    /// <summary>True when the Agent could not confirm disk state for one or more repositories. Remove is disabled in that case.</summary>
+    private bool AnyRepoStatusUnknown => _plan?.Repositories.Any(r => r.WorktreeStatusUnknown) == true;
+
+    /// <summary>
+    /// True when a repository has live commits ahead of its default branch but no pull request opened
+    /// for them yet, so the generic Active headline would be misleading ("hasn't been merged" implies
+    /// one exists to merge).
+    /// </summary>
+    private bool HasOutgoingCommitsWithoutPullRequest =>
+        _plan?.Repositories.Any(r => (r.AheadOfDefault ?? 0) > 0 && r.PullRequestNumber is null or 0) == true;
+
     /// <summary>Plain-language summary of the Feature's completion state, replacing the raw enum name in the UI.</summary>
-    private string StatusHeadline => _plan?.Classification switch
+    private string StatusHeadline
     {
-        RemoveFeatureClassification.Completed =>
-            "This Feature is finished (pull request merged, or never opened), so it's safe to remove.",
-        RemoveFeatureClassification.Abandoned =>
-            "This Feature's pull request was closed without merging. Removing it will permanently delete this work.",
-        RemoveFeatureClassification.Active =>
-            "This Feature still has work that hasn't been merged yet. Removing it now will discard that work.",
-        RemoveFeatureClassification.NeedsRepair =>
-            "GrayMoon couldn't confirm the state of one or more repositories for this Feature. Review the details below before removing it.",
-        _ => "Review the details below before removing this Feature."
-    };
+        get
+        {
+            if (_plan?.Classification == RemoveFeatureClassification.Active && HasOutgoingCommitsWithoutPullRequest)
+                return "Some repositories have commits that are not in a pull request yet.";
+
+            return _plan?.Classification switch
+            {
+                RemoveFeatureClassification.Completed =>
+                    "This Feature is finished (pull request merged, or never opened), so it's safe to remove.",
+                RemoveFeatureClassification.Abandoned =>
+                    "This Feature's pull request was closed without merging. Removing it will permanently delete this work.",
+                RemoveFeatureClassification.Active =>
+                    "This Feature still has work that hasn't been merged yet. Removing it now will discard that work.",
+                RemoveFeatureClassification.NeedsRepair =>
+                    "GrayMoon couldn't confirm the state of one or more repositories for this Feature. Review the details below before removing it.",
+                _ => "Review the details below before removing this Feature."
+            };
+        }
+    }
 
     private string CalloutClass => _plan?.Classification switch
     {
@@ -112,7 +144,11 @@
     {
         var parts = new List<string>();
 
-        if (!repo.WorktreeExists)
+        if (repo.WorktreeStatusUnknown)
+        {
+            // The trailing Warning check below already adds the explanation for this repository.
+        }
+        else if (!repo.WorktreeExists)
         {
             parts.Add("Folder is already missing on disk");
         }

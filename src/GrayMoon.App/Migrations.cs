@@ -31,8 +31,10 @@ public static partial class Migrations
     /// Ordered strict (post-versioning) migration steps. Each unit that adds one appends a new entry here with
     /// the next free version number; never edit another unit's entry.
     /// </summary>
-    internal static readonly IReadOnlyList<(int Version, string Name, Func<AppDbContext, Task> Action)> StrictSteps =
-        Array.Empty<(int Version, string Name, Func<AppDbContext, Task> Action)>();
+    internal static readonly IReadOnlyList<(int Version, string Name, Func<AppDbContext, Task> Action)> StrictSteps = new (int Version, string Name, Func<AppDbContext, Task> Action)[]
+    {
+        (2, "B2 orphan cleanup and WorkspaceProjects foreign key", dbContext => MigrateFeatureContextOrphanCleanupAndWorkspaceProjectsForeignKeyAsync(dbContext)),
+    };
 
     public static async Task RunAllAsync(AppDbContext dbContext, ILogger? logger = null)
     {

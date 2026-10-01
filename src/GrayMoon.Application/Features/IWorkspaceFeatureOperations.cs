@@ -62,6 +62,12 @@ public sealed class RemoveFeaturePlan
     public RemoveFeatureClassification Classification { get; init; }
     public IReadOnlyList<RemoveFeatureRepositoryPlan> Repositories { get; init; } = [];
     public bool IsAutomaticallySafe { get; init; }
+    /// <summary>
+    /// True when the live pull request refresh for this Feature's repos could not be completed
+    /// (offline, rate limit). Not automatically safe in that case, but Remove is not disabled for it;
+    /// only Unknown disk state (<see cref="RemoveFeatureRepositoryPlan.WorktreeStatusUnknown"/>) does that.
+    /// </summary>
+    public bool PullRequestStatusUnknown { get; init; }
     public string Summary { get; init; } = "";
 }
 
@@ -79,6 +85,11 @@ public sealed class RemoveFeatureRepositoryPlan
     public string RepositoryName { get; init; } = "";
     public string? WorktreePath { get; init; }
     public bool WorktreeExists { get; init; }
+    /// <summary>
+    /// True when the Agent could not confirm the worktree's disk state (not connected, old Worker,
+    /// or InspectWorktree failed). Unknown is distinct from Missing: the folder may still exist.
+    /// </summary>
+    public bool WorktreeStatusUnknown { get; init; }
     public string? BranchName { get; init; }
     public string? HeadCommit { get; init; }
     public bool HasUncommittedChanges { get; init; }
@@ -91,6 +102,8 @@ public sealed class RemoveFeatureRepositoryPlan
     public bool LiveStatusEstablished { get; init; }
     public int? OutgoingCommits { get; init; }
     public bool HasUpstream { get; init; }
+    /// <summary>Commits on HEAD not on the default branch, live from the Agent. Null means unknown, never treated as zero.</summary>
+    public int? AheadOfDefault { get; init; }
     public int? PullRequestNumber { get; init; }
     public string? PullRequestState { get; init; }
     public bool? PullRequestMerged { get; init; }

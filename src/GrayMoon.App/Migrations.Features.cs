@@ -652,4 +652,228 @@ public static partial class Migrations
             await ExecuteNonQueryAsync(conn, $"""DROP INDEX IF EXISTS "{name.Replace("\"", "\"\"")}" """);
         }
     }
+
+    /// <summary>
+    /// B2 strict step. Deletes rows left behind when a Feature (and its WorkspaceFeatureContexts row) was
+    /// removed before the explicit project-data delete in B1 existed, then brings WorkspaceProjects up to the
+    /// same WorkspaceFeatureContextId foreign key a fresh EnsureCreated() database has.
+    ///
+    /// WorkspaceFileLineStatuses gets orphan cleanup only, not a foreign key rebuild: that entity has no
+    /// navigation property and no Fluent API configuration for WorkspaceFeatureContextId in AppDbContext at
+    /// all, so a fresh database has no foreign key on that column either. Adding one here would not match a
+    /// fresh database's shape, which is what the schema-parity test checks.
+    /// </summary>
+    public static async Task MigrateFeatureContextOrphanCleanupAndWorkspaceProjectsForeignKeyAsync(AppDbContext dbContext, ILogger? logger = null)
+    {
+        logger ??= NullLogger.Instance;
+
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync();
+
+        var deletedDependencies = await DeleteOrphanProjectDependenciesAsync(conn);
+        var deletedProjects = await DeleteOrphanContextRowsAsync(conn, "WorkspaceProjects");
+        var deletedFileLineStatuses = await DeleteOrphanContextRowsAsync(conn, "WorkspaceFileLineStatuses");
+
+        logger.LogInformation(
+            "Orphan cleanup removed {ProjectDependencyCount} ProjectDependencies, {WorkspaceProjectCount} " +
+            "WorkspaceProjects and {WorkspaceFileLineStatusCount} WorkspaceFileLineStatuses rows whose " +
+            "WorkspaceFeatureContextId no longer references an existing WorkspaceFeatureContexts row.",
+            deletedDependencies, deletedProjects, deletedFileLineStatuses);
+
+        await RebuildWorkspaceProjectsForeignKeyAsync(conn, logger);
+    }
+
+    /// <summary>
+    /// Deletes rows of <paramref name="tableName"/> whose WorkspaceFeatureContextId is set but no longer
+    /// matches a row in WorkspaceFeatureContexts. Rows with a null WorkspaceFeatureContextId are never touched.
+    /// </summary>
+    private static async Task<int> DeleteOrphanContextRowsAsync(DbConnection conn, string tableName)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"""
+            DELETE FROM "{tableName}"
+            WHERE "WorkspaceFeatureContextId" IS NOT NULL
+              AND "WorkspaceFeatureContextId" NOT IN (SELECT "WorkspaceFeatureContextId" FROM "WorkspaceFeatureContexts")
+            """;
+        return await cmd.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>
+    /// ProjectDependencies has no WorkspaceFeatureContextId column of its own; a dependency row is orphaned
+    /// when either project it links is orphaned (see <see cref="DeleteOrphanContextRowsAsync"/>). Runs before
+    /// the WorkspaceProjects cleanup so the orphan projects are still present to identify their dependencies.
+    /// </summary>
+    private static async Task<int> DeleteOrphanProjectDependenciesAsync(DbConnection conn)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            DELETE FROM "ProjectDependencies"
+            WHERE "DependentProjectId" IN (
+                    SELECT "ProjectId" FROM "WorkspaceProjects"
+                    WHERE "WorkspaceFeatureContextId" IS NOT NULL
+                      AND "WorkspaceFeatureContextId" NOT IN (SELECT "WorkspaceFeatureContextId" FROM "WorkspaceFeatureContexts")
+                )
+               OR "ReferencedProjectId" IN (
+                    SELECT "ProjectId" FROM "WorkspaceProjects"
+                    WHERE "WorkspaceFeatureContextId" IS NOT NULL
+                      AND "WorkspaceFeatureContextId" NOT IN (SELECT "WorkspaceFeatureContextId" FROM "WorkspaceFeatureContexts")
+                )
+            """;
+        return await cmd.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>
+    /// Rebuilds WorkspaceProjects with the exact column list and foreign key constraints EF produces for a
+    /// fresh EnsureCreated() database (captured by reading sqlite_master.sql for a fresh database in a test).
+    /// SQLite cannot add a constraint to an existing table, so this creates a new table with the constraint,
+    /// copies rows (keeping their Id, since ProjectDependencies references WorkspaceProjects by Id), drops the
+    /// old table and renames the new one into place. A no-op once the foreign key already exists.
+    ///
+    /// ProjectDependencies has its own ON DELETE CASCADE foreign keys to WorkspaceProjects.ProjectId. SQLite
+    /// fires those cascade actions for every row of the parent table when the parent table itself is dropped
+    /// while the child's foreign key still targets it by name (this applies even inside a transaction, since
+    /// SQLite's PRAGMA foreign_keys cannot be turned off while one is open, which Migrations.RunStrictStepAsync
+    /// already has open by the time this method runs). Dropping WorkspaceProjects directly would silently wipe
+    /// every ProjectDependencies row. To avoid that, ProjectDependencies is retargeted to the new table first
+    /// (its own temporary rebuild, pointing at "WorkspaceProjects_new"), so no live foreign key still points at
+    /// the old "WorkspaceProjects" table at the moment it is dropped; the final rename then lets SQLite's
+    /// automatic foreign-key-text rewrite on RENAME point ProjectDependencies back at "WorkspaceProjects".
+    /// </summary>
+    private static async Task RebuildWorkspaceProjectsForeignKeyAsync(DbConnection conn, ILogger logger)
+    {
+        if (await HasForeignKeyToFeatureContextsAsync(conn, "WorkspaceProjects"))
+            return;
+
+        // Captured before the tables are dropped, so the same indexes can be recreated afterwards; DROP TABLE
+        // removes every index defined on it.
+        var workspaceProjectsIndexes = await ReadIndexDefinitionsAsync(conn, "WorkspaceProjects");
+        var projectDependenciesIndexes = await ReadIndexDefinitionsAsync(conn, "ProjectDependencies");
+
+        await ExecuteNonQueryAsync(conn, """
+            CREATE TABLE "WorkspaceProjects_new" (
+                "ProjectId" INTEGER NOT NULL CONSTRAINT "PK_WorkspaceProjects" PRIMARY KEY AUTOINCREMENT,
+                "WorkspaceId" INTEGER NOT NULL,
+                "WorkspaceFeatureContextId" INTEGER NULL,
+                "RepositoryId" INTEGER NOT NULL,
+                "ProjectName" TEXT NOT NULL,
+                "ProjectType" INTEGER NOT NULL,
+                "ProjectFilePath" TEXT NOT NULL,
+                "TargetFramework" TEXT NOT NULL,
+                "PackageId" TEXT NULL,
+                "IsGenerated" INTEGER NOT NULL,
+                "MatchedConnectorId" INTEGER NULL,
+                CONSTRAINT "FK_WorkspaceProjects_Connectors_MatchedConnectorId" FOREIGN KEY ("MatchedConnectorId") REFERENCES "Connectors" ("ConnectorId") ON DELETE SET NULL,
+                CONSTRAINT "FK_WorkspaceProjects_Repositories_RepositoryId" FOREIGN KEY ("RepositoryId") REFERENCES "Repositories" ("RepositoryId") ON DELETE CASCADE,
+                CONSTRAINT "FK_WorkspaceProjects_WorkspaceFeatureContexts_WorkspaceFeatureContextId" FOREIGN KEY ("WorkspaceFeatureContextId") REFERENCES "WorkspaceFeatureContexts" ("WorkspaceFeatureContextId") ON DELETE CASCADE,
+                CONSTRAINT "FK_WorkspaceProjects_Workspaces_WorkspaceId" FOREIGN KEY ("WorkspaceId") REFERENCES "Workspaces" ("WorkspaceId") ON DELETE CASCADE
+            );
+            """);
+
+        await ExecuteNonQueryAsync(conn, """
+            INSERT INTO "WorkspaceProjects_new"
+                ("ProjectId", "WorkspaceId", "WorkspaceFeatureContextId", "RepositoryId", "ProjectName", "ProjectType",
+                 "ProjectFilePath", "TargetFramework", "PackageId", "IsGenerated", "MatchedConnectorId")
+            SELECT "ProjectId", "WorkspaceId", "WorkspaceFeatureContextId", "RepositoryId", "ProjectName", "ProjectType",
+                   "ProjectFilePath", "TargetFramework", "PackageId", "IsGenerated", "MatchedConnectorId"
+            FROM "WorkspaceProjects";
+            """);
+
+        await AssertSameRowsAndIdsAsync(conn, "WorkspaceProjects", "WorkspaceProjects_new", "ProjectId");
+
+        // Retarget ProjectDependencies at WorkspaceProjects_new before the old WorkspaceProjects table is
+        // dropped, so SQLite finds no live foreign key pointing at it and does not cascade-delete these rows.
+        await ExecuteNonQueryAsync(conn, """
+            CREATE TABLE "ProjectDependencies_new" (
+                "ProjectDependencyId" INTEGER NOT NULL CONSTRAINT "PK_ProjectDependencies" PRIMARY KEY AUTOINCREMENT,
+                "DependentProjectId" INTEGER NOT NULL,
+                "ReferencedProjectId" INTEGER NOT NULL,
+                "Version" TEXT NULL,
+                CONSTRAINT "FK_ProjectDependencies_WorkspaceProjects_DependentProjectId" FOREIGN KEY ("DependentProjectId") REFERENCES "WorkspaceProjects_new" ("ProjectId") ON DELETE CASCADE,
+                CONSTRAINT "FK_ProjectDependencies_WorkspaceProjects_ReferencedProjectId" FOREIGN KEY ("ReferencedProjectId") REFERENCES "WorkspaceProjects_new" ("ProjectId") ON DELETE CASCADE
+            );
+            """);
+
+        await ExecuteNonQueryAsync(conn, """
+            INSERT INTO "ProjectDependencies_new" ("ProjectDependencyId", "DependentProjectId", "ReferencedProjectId", "Version")
+            SELECT "ProjectDependencyId", "DependentProjectId", "ReferencedProjectId", "Version"
+            FROM "ProjectDependencies";
+            """);
+
+        await AssertSameRowsAndIdsAsync(conn, "ProjectDependencies", "ProjectDependencies_new", "ProjectDependencyId");
+
+        await ExecuteNonQueryAsync(conn, """DROP TABLE "ProjectDependencies";""");
+        await ExecuteNonQueryAsync(conn, """ALTER TABLE "ProjectDependencies_new" RENAME TO "ProjectDependencies";""");
+
+        // Safe now: the live ProjectDependencies table's foreign keys target "WorkspaceProjects_new", not this
+        // table, so dropping it fires no cascade.
+        await ExecuteNonQueryAsync(conn, """DROP TABLE "WorkspaceProjects";""");
+
+        // SQLite rewrites other tables' foreign key definitions that reference the renamed table, so
+        // ProjectDependencies ends up targeting "WorkspaceProjects" again automatically.
+        await ExecuteNonQueryAsync(conn, """ALTER TABLE "WorkspaceProjects_new" RENAME TO "WorkspaceProjects";""");
+
+        foreach (var indexSql in workspaceProjectsIndexes)
+            await ExecuteNonQueryAsync(conn, indexSql);
+        foreach (var indexSql in projectDependenciesIndexes)
+            await ExecuteNonQueryAsync(conn, indexSql);
+
+        await AssertNoForeignKeyViolationsAsync(conn, "WorkspaceProjects");
+        await AssertNoForeignKeyViolationsAsync(conn, "ProjectDependencies");
+
+        logger.LogInformation("Rebuilt WorkspaceProjects with the WorkspaceFeatureContextId foreign key to match a fresh database.");
+    }
+
+    private static async Task<List<string>> ReadIndexDefinitionsAsync(DbConnection conn, string tableName)
+    {
+        var definitions = new List<string>();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = '{tableName}' AND sql IS NOT NULL";
+        await using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+            definitions.Add(reader.GetString(0));
+        return definitions;
+    }
+
+    private static async Task AssertSameRowsAndIdsAsync(DbConnection conn, string oldTableName, string newTableName, string idColumn)
+    {
+        var oldCount = await ScalarIntAsync(conn, $"SELECT COUNT(*) FROM \"{oldTableName}\"");
+        var oldIdSum = await ScalarLongAsync(conn, $"SELECT COALESCE(SUM(\"{idColumn}\"), 0) FROM \"{oldTableName}\"");
+        var newCount = await ScalarIntAsync(conn, $"SELECT COUNT(*) FROM \"{newTableName}\"");
+        var newIdSum = await ScalarLongAsync(conn, $"SELECT COALESCE(SUM(\"{idColumn}\"), 0) FROM \"{newTableName}\"");
+        if (oldCount != newCount || oldIdSum != newIdSum)
+        {
+            throw new InvalidOperationException(
+                $"{oldTableName} rebuild row mismatch: old table has {oldCount} rows (id sum {oldIdSum}), " +
+                $"new table has {newCount} rows (id sum {newIdSum}).");
+        }
+    }
+
+    private static async Task AssertNoForeignKeyViolationsAsync(DbConnection conn, string tableName)
+    {
+        var violationCount = await ScalarIntAsync(conn, $"SELECT COUNT(*) FROM pragma_foreign_key_check('{tableName}')");
+        if (violationCount > 0)
+            throw new InvalidOperationException($"{tableName} rebuild left {violationCount} foreign key violation(s) behind.");
+    }
+
+    private static async Task<bool> HasForeignKeyToFeatureContextsAsync(DbConnection conn, string tableName)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"SELECT COUNT(*) FROM pragma_foreign_key_list('{tableName}') WHERE \"table\" = 'WorkspaceFeatureContexts'";
+        return Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+    }
+
+    private static async Task<int> ScalarIntAsync(DbConnection conn, string sql)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        return Convert.ToInt32(await cmd.ExecuteScalarAsync());
+    }
+
+    private static async Task<long> ScalarLongAsync(DbConnection conn, string sql)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        return Convert.ToInt64(await cmd.ExecuteScalarAsync());
+    }
 }

@@ -29,6 +29,7 @@ public sealed class WorkspaceFeatureOperations(
     IWorkspaceSelectedFeatureContextService selectedContextService,
     IAgentBridge agentBridge,
     WorkspaceService workspaceService,
+    WorkspacePullRequestService workspacePullRequestService,
     IOptions<WorkspaceOptions> workspaceOptions,
     ILogger<WorkspaceFeatureOperations> logger) : IWorkspaceFeatureOperations
 {
@@ -298,6 +299,8 @@ public sealed class WorkspaceFeatureOperations(
         if (info.IsSpecialWorkspace)
             return new RemoveFeaturePlan { Success = false, Error = "Cannot remove the special Workspace context." };
 
+        var specialContextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(info.WorkspaceId, cancellationToken);
+
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var rows = await db.WorkspaceFeatureRepositories
             .AsNoTracking()
@@ -305,14 +308,38 @@ public sealed class WorkspaceFeatureOperations(
             .Where(r => r.WorkspaceFeatureContextId == featureContextId.Value)
             .ToListAsync(cancellationToken);
 
-        var prs = await db.WorkspaceRepositoryContextPullRequests
-            .AsNoTracking()
-            .Where(p => p.WorkspaceFeatureContextId == featureContextId.Value)
-            .ToListAsync(cancellationToken);
-
         var states = await db.WorkspaceRepositoryContextStates
             .AsNoTracking()
             .Where(s => s.WorkspaceFeatureContextId == featureContextId.Value)
+            .ToListAsync(cancellationToken);
+
+        // Refresh PR state live for this Feature's own repos (never the shared Workspace link or
+        // legacy PR row - see §17) before classifying, so "Completed" reflects today's GitHub state
+        // rather than a stale cached row. A failed refresh for any repo makes PR state Unknown for
+        // the whole analysis; it is never silently treated as "no pull request".
+        var branchByRepositoryId = rows
+            .Where(r => r.WorkspaceRepository != null)
+            .ToDictionary(
+                r => r.WorkspaceRepository!.RepositoryId,
+                r => states.FirstOrDefault(s => s.WorkspaceRepositoryId == r.WorkspaceRepositoryId)?.BranchName
+                    ?? (r.PinnedTag == null ? info.FeatureName : null));
+
+        var pullRequestStatusUnknown = false;
+        try
+        {
+            var outcomes = await workspacePullRequestService.RefreshContextPullRequestsAsync(
+                info.WorkspaceId, featureContextId.Value, branchByRepositoryId, force: false, cancellationToken);
+            pullRequestStatusUnknown = outcomes.Values.Any(o => o == PullRequestRefreshOutcome.Failed);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Pull request refresh failed for Feature remove analysis.");
+            pullRequestStatusUnknown = true;
+        }
+
+        var prs = await db.WorkspaceRepositoryContextPullRequests
+            .AsNoTracking()
+            .Where(p => p.WorkspaceFeatureContextId == featureContextId.Value)
             .ToListAsync(cancellationToken);
 
         string? featureWorkspaceRoot = null;
@@ -337,13 +364,16 @@ public sealed class WorkspaceFeatureOperations(
                 {
                     var state = states.FirstOrDefault(s => s.WorkspaceRepositoryId == row.WorkspaceRepositoryId);
                     var pr = prs.FirstOrDefault(p => p.WorkspaceRepositoryId == row.WorkspaceRepositoryId);
-                    var exists = Directory.Exists(row.WorktreePath);
+                    var mainPath = await pathResolver.GetRepositoryPathAsync(
+                        specialContextId, row.WorkspaceRepositoryId, cancellationToken);
+                    var disk = await InspectWorktreeDiskStatusAsync(
+                        mainPath, row.WorktreePath, row.WorkspaceRepository?.DefaultBranchName, cancellationToken);
                     var live = await ProbeFeatureWorktreeLiveStatusAsync(
                         featureWorkspaceRoot,
                         featureWorkspaceFolder,
                         info.WorkspaceId,
                         row,
-                        exists,
+                        disk.Exists,
                         cancellationToken);
 
                     planSlots[index] = new RemoveFeatureRepositoryPlan
@@ -351,19 +381,21 @@ public sealed class WorkspaceFeatureOperations(
                         WorkspaceRepositoryId = row.WorkspaceRepositoryId,
                         RepositoryName = row.WorkspaceRepository?.Repository?.RepositoryName ?? "",
                         WorktreePath = row.WorktreePath,
-                        WorktreeExists = exists,
+                        WorktreeExists = disk.Exists,
+                        WorktreeStatusUnknown = disk.StatusUnknown,
                         BranchName = state?.BranchName ?? (row.PinnedTag == null ? info.FeatureName : null),
                         HeadCommit = live.HeadCommit ?? state?.HeadCommit,
                         HasUncommittedChanges = live.HasUncommittedChanges,
                         HasStagedChanges = live.HasStagedChanges,
                         HasConflicts = live.HasConflicts,
                         LiveStatusEstablished = live.LiveStatusEstablished,
-                        OutgoingCommits = state?.OutgoingCommits,
-                        HasUpstream = state?.BranchHasUpstream == true,
+                        OutgoingCommits = disk.StatusUnknown ? null : disk.AheadOfUpstream,
+                        HasUpstream = disk.HasUpstream == true,
+                        AheadOfDefault = disk.StatusUnknown ? null : disk.AheadOfDefault,
                         PullRequestNumber = pr?.PullRequestNumber,
                         PullRequestState = pr?.State,
                         PullRequestMerged = pr?.MergedAt is not null,
-                        Warning = ComposeRemoveWarning(row, live)
+                        Warning = ComposeRemoveWarning(row, live, disk)
                     };
                 }
                 finally
@@ -376,7 +408,7 @@ public sealed class WorkspaceFeatureOperations(
 
         var plans = planSlots.ToList();
         var classification = Classify(plans);
-        var safe = IsAutomaticallySafe(classification, plans);
+        var safe = IsAutomaticallySafe(classification, pullRequestStatusUnknown, plans);
 
         return new RemoveFeaturePlan
         {
@@ -384,6 +416,7 @@ public sealed class WorkspaceFeatureOperations(
             Classification = classification,
             Repositories = plans,
             IsAutomaticallySafe = safe,
+            PullRequestStatusUnknown = pullRequestStatusUnknown,
             Summary = $"{plans.Count} repositories; classification={classification}"
         };
     }
@@ -401,6 +434,14 @@ public sealed class WorkspaceFeatureOperations(
         var plan = await AnalyzeRemoveFeatureAsync(featureContextId, cancellationToken);
         if (!plan.Success)
             return OperationResult.Fail(plan.Error ?? "Analyze failed.");
+
+        // Unknown disk state (Agent unreachable, or InspectWorktree failed) can hide real dirty work,
+        // so Remove is refused here regardless of discard/force authorization - see A2 rule.
+        if (plan.Repositories.Any(r => r.WorktreeStatusUnknown))
+        {
+            return OperationResult.Fail(
+                "Could not check one or more repositories. Make sure the Worker is running, then try again.");
+        }
 
         if (!plan.IsAutomaticallySafe
             && !options.AllowDiscardUncommitted
@@ -613,10 +654,49 @@ public sealed class WorkspaceFeatureOperations(
         db.WorkspaceFeatureRepositories.RemoveRange(rows);
         var context = await db.WorkspaceFeatureContexts
             .FirstAsync(c => c.WorkspaceFeatureContextId == featureContextId.Value, cancellationToken);
+
+        // Feature-context-scoped data (WorkspaceProjects, their dependencies, file-line statuses) is
+        // owned solely by this context and must be dropped with it. Never run this for the special
+        // Workspace context: those rows are shared and have no context id to isolate them.
+        if (context.Kind == WorkspaceFeatureContextKind.Feature)
+            await DeleteContextScopedProjectDataAsync(db, featureContextId.Value, cancellationToken);
+
         db.WorkspaceFeatureContexts.Remove(context);
         db.WorkspaceFeatures.Remove(feature);
         await db.SaveChangesAsync(cancellationToken);
         return OperationResult.Ok();
+    }
+
+    /// <summary>
+    /// Deletes this Feature context's WorkspaceProjects, their ProjectDependencies and its
+    /// WorkspaceFileLineStatuses. Caller guarantees <paramref name="featureContextId"/> is a Feature
+    /// context, never the special Workspace context.
+    /// </summary>
+    private static async Task DeleteContextScopedProjectDataAsync(
+        AppDbContext db,
+        int featureContextId,
+        CancellationToken cancellationToken)
+    {
+        var contextProjectIds = await db.WorkspaceProjects
+            .Where(p => p.WorkspaceFeatureContextId == featureContextId)
+            .Select(p => p.ProjectId)
+            .ToListAsync(cancellationToken);
+
+        if (contextProjectIds.Count > 0)
+        {
+            await db.ProjectDependencies
+                .Where(d => contextProjectIds.Contains(d.DependentProjectId)
+                    || contextProjectIds.Contains(d.ReferencedProjectId))
+                .ExecuteDeleteAsync(cancellationToken);
+
+            await db.WorkspaceProjects
+                .Where(p => p.WorkspaceFeatureContextId == featureContextId)
+                .ExecuteDeleteAsync(cancellationToken);
+        }
+
+        await db.WorkspaceFileLineStatuses
+            .Where(s => s.WorkspaceFeatureContextId == featureContextId)
+            .ExecuteDeleteAsync(cancellationToken);
     }
 
     /// <summary>
@@ -725,25 +805,76 @@ public sealed class WorkspaceFeatureOperations(
         }
     }
 
-    private static string? ComposeRemoveWarning(WorkspaceFeatureRepository row, FeatureWorktreeLiveStatus live)
+    private static string? ComposeRemoveWarning(WorkspaceFeatureRepository row, FeatureWorktreeLiveStatus live, WorktreeDiskStatus disk)
     {
         if (row.State == WorkspaceFeatureRepositoryState.NeedsRepair && !string.IsNullOrWhiteSpace(row.LastError))
             return row.LastError;
-        if (!live.LiveStatusEstablished && Directory.Exists(row.WorktreePath))
+        if (disk.StatusUnknown)
+            return disk.UnknownReason ?? "Could not check this repository. Make sure the Worker is running, then try again.";
+        if (!live.LiveStatusEstablished && disk.Exists)
             return "Live worktree status could not be established";
         return null;
     }
 
     private static bool IsAutomaticallySafe(
         RemoveFeatureClassification classification,
+        bool pullRequestStatusUnknown,
         IReadOnlyList<RemoveFeatureRepositoryPlan> plans) =>
         classification is RemoveFeatureClassification.Completed
+        && !pullRequestStatusUnknown
         && plans.All(p =>
-            p.LiveStatusEstablished
-            && (p.OutgoingCommits ?? 0) == 0
+            !p.WorktreeStatusUnknown
+            && p.LiveStatusEstablished
+            // A null OutgoingCommits count (Agent unreachable, or no upstream to compare against) is
+            // unknown, never treated as zero commits pending.
+            && p.OutgoingCommits == 0
             && !p.HasUncommittedChanges
             && !p.HasStagedChanges
             && !p.HasConflicts);
+
+    /// <summary>
+    /// Disk facts for one Feature worktree, from the Agent's InspectWorktree command. The App never
+    /// reads repository or worktree paths from local disk directly (it can run in Docker, where those
+    /// paths do not exist). Any failure to reach the Agent or parse its response is Unknown, never
+    /// treated as Missing.
+    /// </summary>
+    private async Task<WorktreeDiskStatus> InspectWorktreeDiskStatusAsync(
+        string? mainRepositoryPath,
+        string? worktreePath,
+        string? defaultBranch,
+        CancellationToken cancellationToken)
+    {
+        const string unknownReason = "Could not check this repository. Make sure the Worker is running, then try again.";
+
+        if (string.IsNullOrWhiteSpace(mainRepositoryPath)
+            || string.IsNullOrWhiteSpace(worktreePath)
+            || !agentBridge.IsAgentConnected)
+        {
+            return WorktreeDiskStatus.Unknown(unknownReason);
+        }
+
+        try
+        {
+            var response = await agentBridge.SendCommandAsync(
+                AgentHubMethods.InspectWorktree,
+                new { mainRepositoryPath, worktreePath, defaultBranch },
+                cancellationToken);
+            if (!response.Success)
+                return WorktreeDiskStatus.Unknown(unknownReason);
+
+            var payload = AgentResponseJson.DeserializeAgentResponse<InspectWorktreeAgentResponse>(response.Data);
+            if (payload is null || !string.IsNullOrWhiteSpace(payload.Error))
+                return WorktreeDiskStatus.Unknown(unknownReason);
+
+            return WorktreeDiskStatus.Known(
+                payload.Exists, payload.IsDirty, payload.HasUpstream, payload.AheadOfUpstream, payload.AheadOfDefault);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "InspectWorktree failed for {Path}", worktreePath);
+            return WorktreeDiskStatus.Unknown(unknownReason);
+        }
+    }
 
     private readonly record struct FeatureWorktreeLiveStatus(
         bool LiveStatusEstablished,
@@ -1125,12 +1256,14 @@ public sealed class WorkspaceFeatureOperations(
     }
 
     /// <summary>
-    /// True when the repo's PR is merged, or no PR was ever opened (null/empty number and state).
-    /// Fresh Features with zero commits fall into the latter bucket.
+    /// True when the repo's PR is merged, or it has no commits beyond the default branch and no PR was
+    /// ever opened (null/empty number and state). A repo with live commits ahead of default but no PR
+    /// yet is not in this bucket - it still has work pending a pull request. A null AheadOfDefault
+    /// (unknown) is never treated as zero.
     /// </summary>
     private static bool IsPrMergedOrNeverCreated(RemoveFeatureRepositoryPlan p) =>
         p.PullRequestMerged == true
-        || (p.PullRequestNumber is null or 0 && string.IsNullOrWhiteSpace(p.PullRequestState));
+        || (p.AheadOfDefault == 0 && p.PullRequestNumber is null or 0 && string.IsNullOrWhiteSpace(p.PullRequestState));
 
     /// <summary>
     /// Forwards progress to the structural overlay operation (so BackgroundJobOverlay updates)

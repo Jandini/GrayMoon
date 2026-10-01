@@ -76,8 +76,11 @@ public sealed class WorkspaceExternalWorktreeOperations(
                 match = GitWorktreeOccupancy.FindByPath(payload?.Worktrees, worktreePath);
             }
 
-            var exists = Directory.Exists(worktreePath);
-            var dirty = false; // Agent-side dirty probe deferred; force path still requires explicit auth.
+            var disk = await InspectWorktreeDiskStatusAsync(mainPath, worktreePath, cancellationToken);
+            // Unknown disk state keeps today's non-forced behaviour (Git itself refuses a dirty
+            // removal without --force); only an explicit force request is blocked for Unknown.
+            var exists = disk.StatusUnknown ? match != null : (disk.Exists || match != null);
+            var dirty = !disk.StatusUnknown && disk.IsDirty == true;
             return new ExternalWorktreeCleanupPlan
             {
                 Success = true,
@@ -85,8 +88,9 @@ public sealed class WorkspaceExternalWorktreeOperations(
                 BranchName = match?.BranchName,
                 WorktreePath = worktreePath,
                 HeadCommit = match?.HeadSha,
-                WorktreeExists = exists || match != null,
+                WorktreeExists = exists,
                 IsDirty = dirty,
+                WorktreeStatusUnknown = disk.StatusUnknown,
                 CanRemoveNormally = exists && !dirty,
                 RequiresForce = dirty,
                 Summary = exists
@@ -124,6 +128,12 @@ public sealed class WorkspaceExternalWorktreeOperations(
             // Stray / uninspectable worktrees: allow an explicitly authorized force remove.
             if (!options.AllowForceRemoveDirty)
                 return OperationResult.Fail(plan.Error ?? "Analyze failed.");
+        }
+        else if (plan.WorktreeStatusUnknown && options.AllowForceRemoveDirty)
+        {
+            // Cannot confirm this worktree is actually dirty, so an explicit force request is
+            // refused rather than blindly discarding work. Non-forced removal below is unaffected.
+            return OperationResult.Fail("Update the Worker to use this.");
         }
         else if (plan.RequiresForce && !options.AllowForceRemoveDirty)
         {
@@ -171,6 +181,54 @@ public sealed class WorkspaceExternalWorktreeOperations(
 
         return await tcs.Task.WaitAsync(cancellationToken);
     }
+
+    /// <summary>
+    /// Disk facts for one external worktree, from the Agent's InspectWorktree command. The App never
+    /// reads repository or worktree paths from local disk directly (it can run in Docker, where those
+    /// paths do not exist). Any failure to reach the Agent, an old Worker, or a parse failure is
+    /// Unknown, never treated as Missing or clean.
+    /// </summary>
+    private async Task<WorktreeDiskStatus> InspectWorktreeDiskStatusAsync(
+        string? mainRepositoryPath,
+        string? worktreePath,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(mainRepositoryPath)
+            || string.IsNullOrWhiteSpace(worktreePath)
+            || !agentBridge.IsAgentConnected)
+        {
+            return WorktreeDiskStatus.Unknown("Could not check this repository. Make sure the Worker is running, then try again.");
+        }
+
+        try
+        {
+            var response = await agentBridge.SendCommandAsync(
+                AgentHubMethods.InspectWorktree,
+                new { mainRepositoryPath, worktreePath },
+                cancellationToken);
+            if (!response.Success)
+            {
+                var reason = IsUnknownCommandError(response.Error)
+                    ? "Update the Worker to use this."
+                    : "Could not check this repository. Make sure the Worker is running, then try again.";
+                return WorktreeDiskStatus.Unknown(reason);
+            }
+
+            var payload = AgentResponseJson.DeserializeAgentResponse<InspectWorktreeAgentResponse>(response.Data);
+            if (payload is null || !string.IsNullOrWhiteSpace(payload.Error))
+                return WorktreeDiskStatus.Unknown("Could not check this repository. Make sure the Worker is running, then try again.");
+
+            return WorktreeDiskStatus.Known(payload.Exists, payload.IsDirty, payload.HasUpstream, payload.AheadOfUpstream, payload.AheadOfDefault);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "InspectWorktree failed for {Path}", worktreePath);
+            return WorktreeDiskStatus.Unknown("Could not check this repository. Make sure the Worker is running, then try again.");
+        }
+    }
+
+    private static bool IsUnknownCommandError(string? error) =>
+        !string.IsNullOrWhiteSpace(error) && error.Contains("Unknown command", StringComparison.OrdinalIgnoreCase);
 
     private sealed class ListWorktreesAgentResponse
     {

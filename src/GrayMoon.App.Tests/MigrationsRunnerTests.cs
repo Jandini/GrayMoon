@@ -17,16 +17,21 @@ public class MigrationsRunnerTests
         await db.Database.EnsureCreatedAsync();
 
         // Fresh db already has the current schema from EnsureCreated; the legacy baseline step must be a
-        // tolerant no-op here, not throw.
+        // tolerant no-op here, not throw. The highest version is LegacyBaselineVersion once no strict steps
+        // are registered yet, and the highest strict step version once units like B2 add one.
+        var highestExpectedVersion = Math.Max(
+            Migrations.LegacyBaselineVersion,
+            Migrations.StrictSteps.Count == 0 ? 0 : Migrations.StrictSteps.Max(s => s.Version));
+
         await Migrations.RunAllAsync(db, NullLogger.Instance);
 
         var versionAfterFirst = await GetUserVersionAsync(connection);
-        Assert.Equal(Migrations.LegacyBaselineVersion, versionAfterFirst);
+        Assert.Equal(highestExpectedVersion, versionAfterFirst);
 
         await Migrations.RunAllAsync(db, NullLogger.Instance);
 
         var versionAfterSecond = await GetUserVersionAsync(connection);
-        Assert.Equal(Migrations.LegacyBaselineVersion, versionAfterSecond);
+        Assert.Equal(highestExpectedVersion, versionAfterSecond);
     }
 
     [Fact]

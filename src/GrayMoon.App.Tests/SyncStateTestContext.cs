@@ -81,6 +81,7 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddScoped<IWorkspaceSelectedFeatureContextService, WorkspaceSelectedFeatureContextService>();
         services.AddScoped<IWorkspaceHookContextAttributor, WorkspaceHookContextAttributor>();
         services.AddScoped<IWorkspaceFeatureOperations, WorkspaceFeatureOperations>();
+        services.AddScoped<IWorkspaceExternalWorktreeOperations, WorkspaceExternalWorktreeOperations>();
         services.AddSingleton<IWorkspaceOperationRunner, WorkspaceOperationRunner>();
         services.AddSingleton<IWorkspaceOperationLock>(sp => (IWorkspaceOperationLock)sp.GetRequiredService<IWorkspaceOperationRunner>());
         services.AddScoped<GitHubService>();

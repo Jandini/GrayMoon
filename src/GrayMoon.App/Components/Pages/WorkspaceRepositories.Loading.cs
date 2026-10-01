@@ -490,8 +490,8 @@ public sealed partial class WorkspaceRepositories
             var projectRepo = scope.ServiceProvider.GetRequiredService<WorkspaceProjectRepository>();
             var fileVersionService = scope.ServiceProvider.GetRequiredService<WorkspaceFileVersionService>();
             var customDepRepo = scope.ServiceProvider.GetRequiredService<WorkspaceRepositoryCustomDependencyRepository>();
-            var mismatched = await projectRepo.GetMismatchedDependencyLinesForRepoAsync(WorkspaceId, repositoryId);
-            var allDeps = await projectRepo.GetPackageDependencyLinesForRepoAsync(WorkspaceId, repositoryId);
+            var mismatched = await projectRepo.GetMismatchedDependencyLinesForRepoAsync(WorkspaceId, repositoryId, _selectedContextId);
+            var allDeps = await projectRepo.GetPackageDependencyLinesForRepoAsync(WorkspaceId, repositoryId, _selectedContextId);
             var mismatchedFiles = await fileVersionService.GetMismatchedFileVersionLinesForRepoAsync(WorkspaceId, RequireSelectedContextId(), repositoryId);
             var fileStatuses = await fileVersionService.GetFileLineStatusForRepoAsync(WorkspaceId, RequireSelectedContextId(), repositoryId);
             var linkListQuery = scope.ServiceProvider.GetRequiredService<IWorkspaceRepositoryLinkListQueryService>();

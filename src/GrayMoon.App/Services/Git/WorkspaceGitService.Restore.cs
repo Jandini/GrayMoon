@@ -69,7 +69,7 @@ public sealed partial class WorkspaceGitService
             .Select(l => l.RepositoryId)
             .ToHashSet();
 
-        var projects = await _workspaceProjectRepository.GetByWorkspaceIdAsync(workspaceId);
+        var projects = await _workspaceProjectRepository.GetByWorkspaceIdAsync(workspaceId, (WorkspaceFeatureContextId?)contextId);
         var repoGroups = projects
             .Where(p => p.Repository != null
                         && !string.IsNullOrWhiteSpace(p.ProjectFilePath)
@@ -110,7 +110,7 @@ public sealed partial class WorkspaceGitService
             .Select(l => l.RepositoryId)
             .ToHashSet();
 
-        var projects = await _workspaceProjectRepository.GetByWorkspaceIdAsync(workspaceId);
+        var projects = await _workspaceProjectRepository.GetByWorkspaceIdAsync(workspaceId, (WorkspaceFeatureContextId?)contextId);
         var repoGroups = projects
             .Where(p => p.Repository != null
                         && !string.IsNullOrWhiteSpace(p.ProjectFilePath)
