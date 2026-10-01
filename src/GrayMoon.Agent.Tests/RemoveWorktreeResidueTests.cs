@@ -211,18 +211,52 @@ public sealed class RemoveWorktreeResidueTests : IDisposable
         });
         Assert.True(created.Success, created.ErrorMessage);
 
-        var lockedFilePath = Path.Combine(worktreePath, "locked.bin");
+        // The file to be locked lives in its own subfolder so that, on the Linux branch below, only
+        // that subfolder's write permission is removed; README.md and the .git file next to it in
+        // worktreePath must still be deletable, matching the single-residue-file assertion below.
+        var lockedDir = Path.Combine(worktreePath, "locked-dir");
+        Directory.CreateDirectory(lockedDir);
+        var lockedFilePath = Path.Combine(lockedDir, "locked.bin");
         await File.WriteAllTextAsync(lockedFilePath, "locked\n");
-        using var openHandle = new FileStream(lockedFilePath, FileMode.Open, FileAccess.Read, FileShare.None);
 
-        var result = await _remove.ExecuteAsync(new RemoveGitWorktreeRequest
+        RemoveGitWorktreeResponse result;
+        if (OperatingSystem.IsWindows())
         {
-            MainRepositoryPath = mainPath,
-            WorktreePath = worktreePath,
-            Force = true,
-            FeatureRootPath = featureRoot,
-            FeatureStorageRoot = storageRoot,
-        });
+            // Windows blocks deleting a file while another handle still has it open.
+            using var openHandle = new FileStream(lockedFilePath, FileMode.Open, FileAccess.Read, FileShare.None);
+            result = await _remove.ExecuteAsync(new RemoveGitWorktreeRequest
+            {
+                MainRepositoryPath = mainPath,
+                WorktreePath = worktreePath,
+                Force = true,
+                FeatureRootPath = featureRoot,
+                FeatureStorageRoot = storageRoot,
+            });
+        }
+        else
+        {
+            // Linux lets a process unlink a file it still has open (the inode survives until the last
+            // handle closes), so an open handle proves nothing there. Unix instead requires write
+            // access on the containing directory to remove an entry from it, so removing the write
+            // bit on lockedDir produces a genuine, equivalent "cannot delete this" failure.
+            var originalMode = File.GetUnixFileMode(lockedDir);
+            File.SetUnixFileMode(lockedDir, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+            try
+            {
+                result = await _remove.ExecuteAsync(new RemoveGitWorktreeRequest
+                {
+                    MainRepositoryPath = mainPath,
+                    WorktreePath = worktreePath,
+                    Force = true,
+                    FeatureRootPath = featureRoot,
+                    FeatureStorageRoot = storageRoot,
+                });
+            }
+            finally
+            {
+                File.SetUnixFileMode(lockedDir, originalMode);
+            }
+        }
 
         // Git unregisters the worktree even when it cannot finish deleting the folder on disk; the
         // call is still reported as a successful remove, with the leftover file called out honestly.
@@ -449,19 +483,30 @@ public sealed class RemoveWorktreeResidueTests : IDisposable
 
     private static async Task CreateJunctionAsync(string linkPath, string targetPath)
     {
-        var psi = new System.Diagnostics.ProcessStartInfo
+        if (OperatingSystem.IsWindows())
         {
-            FileName = "cmd.exe",
-            Arguments = $"/c mklink /J \"{linkPath}\" \"{targetPath}\"",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-        using var p = System.Diagnostics.Process.Start(psi) ?? throw new InvalidOperationException("Failed to start cmd");
-        await p.WaitForExitAsync();
-        if (p.ExitCode != 0)
-            throw new InvalidOperationException($"mklink /J failed: {await p.StandardError.ReadToEndAsync()}");
+            // NTFS junctions have no managed .NET API; mklink /J is the standard way to create one.
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = $"/c mklink /J \"{linkPath}\" \"{targetPath}\"",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            using var p = System.Diagnostics.Process.Start(psi) ?? throw new InvalidOperationException("Failed to start cmd");
+            await p.WaitForExitAsync();
+            if (p.ExitCode != 0)
+                throw new InvalidOperationException($"mklink /J failed: {await p.StandardError.ReadToEndAsync()}");
+            return;
+        }
+
+        // Linux has no junction concept, only symlinks. A directory symlink exercises the exact same
+        // GitService code path as a Windows junction: both are reported with FileAttributes.ReparsePoint,
+        // and the residue walk skips the link itself without entering it on either platform.
+        Directory.CreateSymbolicLink(linkPath, targetPath);
+        await Task.CompletedTask;
     }
 
     private static async Task InitGitWithCommitAsync(string repoPath)
