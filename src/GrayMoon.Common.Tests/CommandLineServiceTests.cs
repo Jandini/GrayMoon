@@ -134,20 +134,20 @@ public sealed class CommandLineServiceTests
         var stdin = new byte[262_144];
         Array.Fill(stdin, (byte)'Y');
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-        var sw = Stopwatch.StartNew();
+        // Wait on the actual condition (the process completes instead of deadlocking) with a
+        // generous upper bound, rather than asserting a tight wall-clock time that is flaky
+        // under CPU load from parallel test assemblies.
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(35));
         var result = await service.RunAsync(
             fileName,
             arguments,
             stdinBytes: stdin,
             cancellationToken: cts.Token,
-            timeout: TimeSpan.FromSeconds(15));
-        sw.Stop();
+            timeout: TimeSpan.FromSeconds(30));
 
         Assert.Equal(0, result.ExitCode);
         Assert.NotNull(result.Stdout);
         Assert.True(result.Stdout.Length >= 200_000, $"Expected large stdout, got {result.Stdout?.Length ?? 0} chars.");
-        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(15), $"Expected no pipe deadlock, took {sw.Elapsed}.");
     }
 
     [Fact]
@@ -157,20 +157,20 @@ public sealed class CommandLineServiceTests
         var (fileName, arguments) = TestProcess.WriteLargeStdoutThenDrainStdinAsArgumentsString();
         var stdin = new string('Y', 262_144);
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-        var sw = Stopwatch.StartNew();
+        // Wait on the actual condition (the process completes instead of deadlocking) with a
+        // generous upper bound, rather than asserting a tight wall-clock time that is flaky
+        // under CPU load from parallel test assemblies.
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(35));
         var result = await service.RunAsync(
             fileName,
             arguments,
             stdin: stdin,
             cancellationToken: cts.Token,
-            timeout: TimeSpan.FromSeconds(15));
-        sw.Stop();
+            timeout: TimeSpan.FromSeconds(30));
 
         Assert.Equal(0, result.ExitCode);
         Assert.NotNull(result.Stdout);
         Assert.True(result.Stdout.Length >= 200_000, $"Expected large stdout, got {result.Stdout?.Length ?? 0} chars.");
-        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(15), $"Expected no pipe deadlock, took {sw.Elapsed}.");
     }
 
     /// <summary>

@@ -180,7 +180,7 @@ Lanes: **0** foundation, **A** Agent truth, **B** data integrity, **C** lifecycl
 
 | Order | Unit | Title | Lane | Depends on | Size | Status | Owner | Notes |
 |---|---|---|---|---|---|---|---|---|
-| 1 | U0-1 | Baseline and housekeeping | 0 | - | S | TODO | | |
+| 1 | U0-1 | Baseline and housekeeping | 0 | - | S | DONE | Claude Sonnet 5 (2026-10-01) | Baseline: build 1 warning (CS8619), Common.Tests 179/179, App.Tests 444/444, Agent.Tests 165/165. After fix: build 0 warnings; Common.Tests 179/179, App.Tests 444/444, Agent.Tests 165/165 x3 runs. Flaky pipe test was actually in Common.Tests/CommandLineServiceTests.cs (T1), not Agent.Tests; ran that test class 3x too, all green. |
 | 2 | U0-2 | Safe migration runner | 0 | U0-1 | M | TODO | | Migration |
 | 3 | U0-3 | Golden 0.1.0 upgrade test | 0 | U0-2 | S | TODO | | |
 | 4 | GATE-1 | Upgrade your real database | gate | U0-3 | - | WAITING | | |
@@ -1237,6 +1237,7 @@ Agents append one line per session: `YYYY-MM-DD <unit> <status> <agent> - <one s
 - 2026-10-01 A6: the commit message is now part of the required final message, with format rules (one per repository, imperative summary ending with the unit id, `none` when nothing changed).
 - 2026-10-01 A6: the final message now lists 2 to 5 owner checks with expected results, plus a Workspace check, to run before the next unit.
 - 2026-10-01 follow-up review of all docs against the code. New units: B5 (connector refresh and delete keep Feature repositories), B6 (Edit Workspace partial save; rename blocked while Features exist), D5 (locked worktrees in Remove), E4 (refuse Create Feature on a non-Windows Worker). Changed units: C2 reports untracked worktrees and skips removed rows; D2 adds `Removing`/`Removed` row states; C4 refuses create-style repair for a remove-incomplete Feature and seeds the whole Feature once; C3 and C5 show "Removal incomplete" and Continue removal; E1 adds a `git check-ref-format` parity test; F2 never puts the secret in the install script, adds pairing and sticky enforcement; F3 adds Origin checks for the hubs; D1 guard 5 wording aligned with `08`; B2 foreign-key column name fixed. New decisions DEC-7 (Linux Worker) and DEC-8 (checklist items moved to v1.1). Dependencies: C4 on D2, G3 on B5 and B6, GATE-2 on B3 and D5, GATE-4 on B5, B6 and E4. GATE-2 step 5b, GATE-3 step 7, GATE-4 steps 4, 5, 8 and 9 added or extended. Risks R-B5, R-B6, R-C2c, R-C4b, R-D2b, R-D5, R-E4, R-F2c, R-F3d in `08`.
+- 2026-10-01 U0-1 DONE Claude Sonnet 5 - fixed the CS8619 warning in `WorkspaceGitService.Context.cs` by typing the dictionary projection as `string?`; deleted `test-agent.txt`, `test-app.txt`, `test-common.txt` and added a `test-*.txt` rule to `.gitignore`; made the two PowerShell pipe-deadlock tests in `GrayMoon.Common.Tests/CommandLineServiceTests.cs` (the test named in Ref T1; the Touches list said Agent.Tests, which has no such test) deterministic by raising their timeout to 30s and dropping the flaky wall-clock assertion in favour of asserting completion and output size.
 
 ---
 
@@ -1252,6 +1253,7 @@ Known non-worktree items from `05-general-code-and-ux-review.md`, deliberately n
 - [review] Git option injection through string-built arguments, PAT in argv (05 S5, S6) - v1.1.
 - [review] REST API cannot target a Feature context (05 R5) - document in R1, implement v1.1.
 - [07] GrayMoon's own commits and pulls run with `skipHooks: true` (`GitService.GetHooksConfigPrefix`, used by `DependencyUpdateOrchestrator`), so they bypass the team's `pre-commit` hooks too - owner decision, not changed in v1.
+- [U0-1] Plan text (Touches list and A4 commands note) says the flaky PowerShell pipe test is in `GrayMoon.Agent.Tests`; `rg -n "Pipe" GrayMoon/src/GrayMoon.Agent.Tests` finds nothing there. The test matching Ref T1 (and the known-flaky description) is actually `RunAsync_ArgumentListOverload_DoesNotDeadlock_...` and `RunAsync_StringStdinOverload_DoesNotDeadlock_...` in `GrayMoon.Common.Tests/CommandLineServiceTests.cs`. Fixed it there since Ref T1 is unambiguous; worth correcting the plan text itself later - v1.1, low.
 - [08] Enforce the Worker secret by default (`Security:RequireWorkerSecret = true`) - v1.1, after users have reinstalled the Worker.
 - [07] Hook chaining for repos with their own hooks or `core.hooksPath` (DEC-3 = chain) - v1.1.
 - [09] Create PR and Push for a Feature repo that is off its Feature branch (I4 shows it) probably act on the checked-out branch, not the Feature branch; not verified - v1.1, check before deciding.
