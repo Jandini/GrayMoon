@@ -35,6 +35,13 @@ public sealed class WorkspaceFeatureRepository
     [MaxLength(200)]
     public string? ParentBranchName { get; set; }
 
+    /// <summary>
+    /// Tag the special Workspace had checked out when this Feature repository was created. When set, the
+    /// worktree is detached at that tag and has no Feature branch - never create, push or delete one here.
+    /// </summary>
+    [MaxLength(200)]
+    public string? PinnedTag { get; set; }
+
     public DateTime CreatedAt { get; set; }
 
     public WorkspaceFeatureRepositoryState State { get; set; } = WorkspaceFeatureRepositoryState.Pending;

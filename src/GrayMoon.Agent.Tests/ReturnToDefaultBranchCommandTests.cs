@@ -76,6 +76,7 @@ public sealed class ReturnToDefaultBranchCommandTests
         public Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, bool nonNormalize, string? commitSha, CancellationToken ct) => throw new NotImplementedException();
         public Task<string?> GetCurrentBranchNameAsync(string repoPath, CancellationToken ct) => throw new NotImplementedException();
         public Task<string?> GetHeadCommitAsync(string repoPath, CancellationToken ct) => throw new NotImplementedException();
+        public Task<IReadOnlyList<string>> FindBranchCollisionsAsync(string repoPath, string branchName, CancellationToken ct) => throw new NotImplementedException();
         public Task<string?> RevParseAsync(string repoPath, string rev, CancellationToken ct) => throw new NotImplementedException();
         public Task<string?> GetRemoteOriginUrlAsync(string repoPath, CancellationToken ct) => throw new NotImplementedException();
         public Task<(bool Success, string? ErrorMessage)> FetchMinimalAsync(string repoPath, string branchName, string? defaultBranchOriginRef, string? bearerToken, CancellationToken ct, bool skipUpstreamCheck = false) => throw new NotImplementedException();
@@ -103,7 +104,7 @@ public sealed class ReturnToDefaultBranchCommandTests
         public string[] GetDirectories(string path) => throw new NotImplementedException();
         public Task WriteSyncHooksAsync(string repoPath, int workspaceId, int repositoryId, CancellationToken ct) => throw new NotImplementedException();
         public Task<(bool Success, IReadOnlyList<GitWorktreeInfo> Worktrees, string? ErrorCode, string? ErrorMessage)> ListWorktreesAsync(string mainRepositoryPath, CancellationToken ct) => throw new NotImplementedException();
-        public Task<(bool Success, GitWorktreeInfo? Worktree, bool AlreadyExisted, string? ErrorCode, string? ErrorMessage)> CreateWorktreeAsync(string mainRepositoryPath, string worktreePath, string branchName, string baseCommitSha, CancellationToken ct) => throw new NotImplementedException();
+        public Task<(bool Success, GitWorktreeInfo? Worktree, bool AlreadyExisted, string? ErrorCode, string? ErrorMessage)> CreateWorktreeAsync(string mainRepositoryPath, string worktreePath, string? branchName, string baseCommitSha, CancellationToken ct) => throw new NotImplementedException();
         public Task<(bool Success, bool AlreadyRemoved, string? ErrorCode, string? ErrorMessage)> RemoveWorktreeAsync(string mainRepositoryPath, string worktreePath, bool force, CancellationToken ct) => throw new NotImplementedException();
     }
 }

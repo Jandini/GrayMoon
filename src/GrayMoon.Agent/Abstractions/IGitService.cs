@@ -24,6 +24,12 @@ public interface IGitService
     Task<string?> GetCurrentBranchNameAsync(string repoPath, CancellationToken ct);
     /// <summary>Returns the full SHA of HEAD via <c>git rev-parse HEAD</c>, or null when the repo is missing/unborn or the command fails.</summary>
     Task<string?> GetHeadCommitAsync(string repoPath, CancellationToken ct);
+    /// <summary>
+    /// Returns short names of local (<c>refs/heads/&lt;name&gt;</c>) and remote-tracking (<c>refs/remotes/*/&lt;name&gt;</c>)
+    /// refs that collide with <paramref name="branchName"/>, including refs nested under it (e.g. <c>name/sub</c>).
+    /// Empty when none exist or the repository cannot be read.
+    /// </summary>
+    Task<IReadOnlyList<string>> FindBranchCollisionsAsync(string repoPath, string branchName, CancellationToken ct);
     /// <summary>Returns the full SHA for <paramref name="rev"/> via <c>git rev-parse</c> (e.g. <c>origin/main</c>), or null on failure.</summary>
     Task<string?> RevParseAsync(string repoPath, string rev, CancellationToken ct);
     Task<string?> GetRemoteOriginUrlAsync(string repoPath, CancellationToken ct);
@@ -116,13 +122,15 @@ public interface IGitService
         CancellationToken ct);
 
     /// <summary>
-    /// Creates a linked worktree with a new branch from <paramref name="baseCommitSha"/> (offline-safe).
-    /// Never passes <c>--force</c>. Idempotent when the expected path already has the expected branch.
+    /// Creates a linked worktree with a new branch from <paramref name="baseCommitSha"/> (offline-safe), or a
+    /// detached worktree at that commit when <paramref name="branchName"/> is null.
+    /// Never passes <c>--force</c>. Idempotent when the expected path already has the expected branch
+    /// (or, when detached, is already detached at <paramref name="baseCommitSha"/>).
     /// </summary>
     Task<(bool Success, GitWorktreeInfo? Worktree, bool AlreadyExisted, string? ErrorCode, string? ErrorMessage)> CreateWorktreeAsync(
         string mainRepositoryPath,
         string worktreePath,
-        string branchName,
+        string? branchName,
         string baseCommitSha,
         CancellationToken ct);
 

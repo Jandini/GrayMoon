@@ -77,7 +77,9 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
                 branch = "-";
             }
 
-            if (version != "-" && branch != "-")
+            // Tag checkouts need current hooks too: hooks are shared with linked Feature worktrees, and a
+            // stale static-path hook attributes every Feature worktree event to the special Workspace.
+            if (version != "-" && (branch != "-" || currentTag != null))
                 await git.WriteSyncHooksAsync(repoPath, workspaceId, repositoryId, cancellationToken);
 
             // Resolve default branch once; run commit counts and divergence in parallel when we have a branch.

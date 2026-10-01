@@ -205,6 +205,26 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return string.IsNullOrWhiteSpace(sha) ? null : sha;
     }
 
+    public async Task<IReadOnlyList<string>> FindBranchCollisionsAsync(string repoPath, string branchName, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
+            return [];
+
+        var name = branchName.Trim();
+        var (exitCode, stdout, _) = await runner.RunAsync(
+            "git",
+            ["for-each-ref", "--format=%(refname:short)", $"refs/heads/{name}", $"refs/remotes/*/{name}"],
+            repoPath,
+            null,
+            ct);
+        if (exitCode != 0)
+            return [];
+
+        return (stdout ?? "")
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+    }
+
     public async Task<string?> RevParseAsync(string repoPath, string rev, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(rev))
@@ -1364,7 +1384,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
     public async Task<(bool Success, GitWorktreeInfo? Worktree, bool AlreadyExisted, string? ErrorCode, string? ErrorMessage)> CreateWorktreeAsync(
         string mainRepositoryPath,
         string worktreePath,
-        string branchName,
+        string? branchName,
         string baseCommitSha,
         CancellationToken ct)
     {
@@ -1372,8 +1392,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             return (false, null, false, "RepositoryNotFound", "Repository not found.");
         if (string.IsNullOrWhiteSpace(worktreePath))
             return (false, null, false, "InvalidWorktreePath", "worktreePath is required.");
-        if (string.IsNullOrWhiteSpace(branchName))
-            return (false, null, false, "InvalidBranchName", "branchName is required.");
+        var detach = string.IsNullOrWhiteSpace(branchName);
         if (string.IsNullOrWhiteSpace(baseCommitSha))
             return (false, null, false, "InvalidBaseCommit", "baseCommitSha is required.");
 
@@ -1394,11 +1413,15 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         var existingAtPath = GitWorktreeOccupancy.FindByPath(worktrees, canonicalWorktreePath);
         if (existingAtPath != null)
         {
-            if (GitWorktreeOccupancy.MatchesExpected(existingAtPath, branchName))
+            var matches = detach
+                ? existingAtPath.IsDetached
+                  && string.Equals(existingAtPath.HeadSha, baseCommitSha, StringComparison.OrdinalIgnoreCase)
+                : GitWorktreeOccupancy.MatchesExpected(existingAtPath, branchName);
+            if (matches)
             {
                 logger.LogInformation(
-                    "Worktree already exists at {WorktreePath} on branch {Branch}; treating create as idempotent success.",
-                    canonicalWorktreePath, branchName);
+                    "Worktree already exists at {WorktreePath} on {Branch}; treating create as idempotent success.",
+                    canonicalWorktreePath, branchName ?? "(detached)");
                 return (true, existingAtPath, true, null, null);
             }
 
@@ -1406,7 +1429,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
                 $"Path already hosts a worktree on branch '{existingAtPath.BranchName ?? "(detached)"}'.");
         }
 
-        var branchOccupied = GitWorktreeOccupancy.FindByBranch(worktrees, branchName);
+        var branchOccupied = detach ? null : GitWorktreeOccupancy.FindByBranch(worktrees, branchName);
         if (branchOccupied != null)
         {
             return (false, branchOccupied, false, "BranchOccupied",
@@ -1427,9 +1450,12 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         }
 
         // Offline-safe: start from local commit SHA; never --force for normal creation.
+        string[] addArgs = detach
+            ? ["worktree", "add", "--detach", canonicalWorktreePath, baseCommitSha]
+            : ["worktree", "add", "-b", branchName!, canonicalWorktreePath, baseCommitSha];
         var (exitCode, stdout, stderr) = await runner.RunAsync(
             "git",
-            ["worktree", "add", "-b", branchName, canonicalWorktreePath, baseCommitSha],
+            addArgs,
             mainRepositoryPath,
             null,
             ct);

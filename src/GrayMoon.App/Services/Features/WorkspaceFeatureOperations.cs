@@ -113,9 +113,21 @@ public sealed class WorkspaceFeatureOperations(
             .Cast<string>()
             .ToList();
 
-        var snapshot = await GetHeadSnapshotAsync(workspace, repoNames, cancellationToken);
+        var snapshot = await GetHeadSnapshotAsync(workspace, repoNames, name, cancellationToken);
         if (snapshot.Commits.Count != repoNames.Count)
             return FailCreate("HeadCommitsIncomplete", "Could not resolve HEAD for every Workspace repository.");
+
+        if (snapshot.BranchCollisions.Count > 0)
+        {
+            var details = snapshot.BranchCollisions
+                .OrderBy(c => c.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(c => $"{c.Key} ({string.Join(", ", c.Value)})");
+            return FailCreate(
+                "BranchExists",
+                $"Branch '{name}' already exists in {snapshot.BranchCollisions.Count} of {repoNames.Count} repositories: "
+                + string.Join("; ", details)
+                + ". Choose a different Feature name or delete those branches first.");
+        }
 
         var now = DateTime.UtcNow;
         var feature = new WorkspaceFeature
@@ -154,6 +166,10 @@ public sealed class WorkspaceFeatureOperations(
             snapshot.Branches.TryGetValue(repoName, out var parentBranch);
             parentBranch = string.IsNullOrWhiteSpace(parentBranch) ? null : parentBranch.Trim();
 
+            // Repositories on a tag stay on that tag in the Feature: detached worktree, no Feature branch.
+            snapshot.Tags.TryGetValue(repoName, out var pinnedTag);
+            pinnedTag = string.IsNullOrWhiteSpace(pinnedTag) ? null : pinnedTag.Trim();
+
             var worktreePath = await pathResolver.GetRepositoryPathAsync(contextId, link.WorkspaceRepositoryId, cancellationToken);
             var row = new WorkspaceFeatureRepository
             {
@@ -161,7 +177,8 @@ public sealed class WorkspaceFeatureOperations(
                 WorkspaceRepositoryId = link.WorkspaceRepositoryId,
                 WorktreePath = worktreePath,
                 BaseCommitSha = sha,
-                ParentBranchName = parentBranch,
+                ParentBranchName = pinnedTag == null ? parentBranch : null,
+                PinnedTag = pinnedTag,
                 CreatedAt = now,
                 State = WorkspaceFeatureRepositoryState.Pending
             };
@@ -189,9 +206,12 @@ public sealed class WorkspaceFeatureOperations(
                     {
                         mainRepositoryPath = mainPath,
                         worktreePath = row.WorktreePath,
-                        branchName = name,
+                        branchName = row.PinnedTag == null ? name : null,
+                        detach = row.PinnedTag != null,
                         baseCommitSha = row.BaseCommitSha,
-                        divergenceBaseBranch = row.ParentBranchName
+                        divergenceBaseBranch = row.ParentBranchName,
+                        workspaceId,
+                        repositoryId = link.RepositoryId
                     },
                     cancellationToken);
 
@@ -332,7 +352,7 @@ public sealed class WorkspaceFeatureOperations(
                         RepositoryName = row.WorkspaceRepository?.Repository?.RepositoryName ?? "",
                         WorktreePath = row.WorktreePath,
                         WorktreeExists = exists,
-                        BranchName = state?.BranchName ?? info.FeatureName,
+                        BranchName = state?.BranchName ?? (row.PinnedTag == null ? info.FeatureName : null),
                         HeadCommit = live.HeadCommit ?? state?.HeadCommit,
                         HasUncommittedChanges = live.HasUncommittedChanges,
                         HasStagedChanges = live.HasStagedChanges,
@@ -491,7 +511,8 @@ public sealed class WorkspaceFeatureOperations(
                     }
 
                     // §27.8: after worktree remove, delete the Feature branch from the main repository.
-                    var branchName = info.FeatureName;
+                    // Tag-pinned repositories never got a Feature branch; a same-named branch there is not ours.
+                    var branchName = row.PinnedTag == null ? info.FeatureName : null;
                     if (!string.IsNullOrWhiteSpace(branchName)
                         && linkByWrId.TryGetValue(row.WorkspaceRepositoryId, out var link)
                         && !string.IsNullOrWhiteSpace(link.Repository?.RepositoryName)
@@ -770,10 +791,10 @@ public sealed class WorkspaceFeatureOperations(
             .Where(s => s.WorkspaceFeatureContextId == specialId.Value)
             .ToDictionaryAsync(s => s.WorkspaceRepositoryId, cancellationToken);
 
-        var baseShaByLinkId = await db.WorkspaceFeatureRepositories
+        var featureRowsByLinkId = await db.WorkspaceFeatureRepositories
             .AsNoTracking()
             .Where(r => r.WorkspaceFeatureContextId == contextId.Value)
-            .ToDictionaryAsync(r => r.WorkspaceRepositoryId, r => r.BaseCommitSha, cancellationToken);
+            .ToDictionaryAsync(r => r.WorkspaceRepositoryId, r => new { r.BaseCommitSha, r.PinnedTag }, cancellationToken);
 
         // Worktree create can trigger SyncCommand attribution into this Feature context before seed runs,
         // so upsert against any rows Sync already wrote (UNIQUE on context+repo / context+repo+name).
@@ -787,21 +808,25 @@ public sealed class WorkspaceFeatureOperations(
         foreach (var link in links)
         {
             specialStates.TryGetValue(link.WorkspaceRepositoryId, out var src);
-            baseShaByLinkId.TryGetValue(link.WorkspaceRepositoryId, out var baseSha);
+            featureRowsByLinkId.TryGetValue(link.WorkspaceRepositoryId, out var featureRow);
+            var baseSha = featureRow?.BaseCommitSha;
+            // Tag-pinned repositories mirror the Workspace tag identity (detached, no branch, no counts).
+            var pinnedTag = featureRow?.PinnedTag;
+            var onTag = pinnedTag != null;
             if (existingStates.TryGetValue(link.WorkspaceRepositoryId, out var existing))
             {
-                existing.BranchName = featureBranch;
-                existing.CheckedOutTag = src?.CheckedOutTag ?? link.CheckedOutTag;
+                existing.BranchName = onTag ? null : featureBranch;
+                existing.CheckedOutTag = pinnedTag;
                 existing.HeadCommit = baseSha ?? src?.HeadCommit;
-                existing.HasNewerTag = src?.HasNewerTag ?? link.HasNewerTag;
+                existing.HasNewerTag = onTag ? src?.HasNewerTag ?? link.HasNewerTag : null;
                 existing.GitVersion = src?.GitVersion ?? link.GitVersion;
                 existing.Projects = src?.Projects ?? link.Projects;
                 existing.RepositoryType = src?.RepositoryType ?? link.RepositoryType;
-                existing.OutgoingCommits = 0;
-                existing.IncomingCommits = src?.IncomingCommits ?? link.IncomingCommits;
-                existing.DefaultBranchBehindCommits = 0;
-                existing.DefaultBranchAheadCommits = 0;
-                existing.BranchHasUpstream = false;
+                existing.OutgoingCommits = onTag ? null : 0;
+                existing.IncomingCommits = onTag ? null : src?.IncomingCommits ?? link.IncomingCommits;
+                existing.DefaultBranchBehindCommits = onTag ? null : 0;
+                existing.DefaultBranchAheadCommits = onTag ? null : 0;
+                existing.BranchHasUpstream = onTag ? null : false;
                 existing.SyncStatus = link.SyncStatus;
                 existing.DependencyLevel = src?.DependencyLevel ?? link.DependencyLevel;
                 existing.Dependencies = src?.Dependencies ?? link.Dependencies;
@@ -818,22 +843,22 @@ public sealed class WorkspaceFeatureOperations(
             {
                 WorkspaceFeatureContextId = contextId.Value,
                 WorkspaceRepositoryId = link.WorkspaceRepositoryId,
-                BranchName = featureBranch,
-                CheckedOutTag = src?.CheckedOutTag ?? link.CheckedOutTag,
+                BranchName = onTag ? null : featureBranch,
+                CheckedOutTag = pinnedTag,
                 // Feature HEAD starts at the creation tip - Create PR uses HeadCommit != BaseCommitSha
                 // (ahead of Feature parent), not DefaultBranchAhead vs main.
                 HeadCommit = baseSha ?? src?.HeadCommit,
-                HasNewerTag = src?.HasNewerTag ?? link.HasNewerTag,
+                HasNewerTag = onTag ? src?.HasNewerTag ?? link.HasNewerTag : null,
                 GitVersion = src?.GitVersion ?? link.GitVersion,
                 Projects = src?.Projects ?? link.Projects,
                 RepositoryType = src?.RepositoryType ?? link.RepositoryType,
-                OutgoingCommits = 0,
-                IncomingCommits = src?.IncomingCommits ?? link.IncomingCommits,
+                OutgoingCommits = onTag ? null : 0,
+                IncomingCommits = onTag ? null : src?.IncomingCommits ?? link.IncomingCommits,
                 // Feature divergence is vs ParentBranchName (PR base), not vs main. At create,
                 // HEAD == BaseCommitSha so the Feature is neither ahead nor behind its parent tip.
-                DefaultBranchBehindCommits = 0,
-                DefaultBranchAheadCommits = 0,
-                BranchHasUpstream = false,
+                DefaultBranchBehindCommits = onTag ? null : 0,
+                DefaultBranchAheadCommits = onTag ? null : 0,
+                BranchHasUpstream = onTag ? null : false,
                 SyncStatus = link.SyncStatus,
                 DependencyLevel = src?.DependencyLevel ?? link.DependencyLevel,
                 Dependencies = src?.Dependencies ?? link.Dependencies,
@@ -1010,13 +1035,16 @@ public sealed class WorkspaceFeatureOperations(
         return rows.ToDictionary(x => x.RepositoryId, x => x.ParentBranchName);
     }
 
-    private async Task<(Dictionary<string, string> Commits, Dictionary<string, string> Branches)> GetHeadSnapshotAsync(
+    private async Task<(Dictionary<string, string> Commits, Dictionary<string, string> Branches, Dictionary<string, string> Tags, Dictionary<string, List<string>> BranchCollisions)> GetHeadSnapshotAsync(
         Workspace workspace,
         IReadOnlyList<string> repositoryNames,
+        string collisionBranchName,
         CancellationToken cancellationToken)
     {
         var emptyCommits = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var emptyBranches = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var emptyTags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var emptyCollisions = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         var root = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
         var response = await agentBridge.SendCommandAsync(
             AgentHubMethods.GetHeadCommits,
@@ -1025,17 +1053,20 @@ public sealed class WorkspaceFeatureOperations(
                 workspaceId = workspace.WorkspaceId,
                 workspaceName = workspace.Name,
                 workspaceRoot = root,
-                repositoryNames
+                repositoryNames,
+                collisionBranchName
             },
             cancellationToken);
 
         if (!response.Success)
-            return (emptyCommits, emptyBranches);
+            return (emptyCommits, emptyBranches, emptyTags, emptyCollisions);
 
         var payload = AgentResponseJson.DeserializeAgentResponse<GetHeadCommitsAgentResponse>(response.Data);
         return (
             payload?.Commits ?? emptyCommits,
-            payload?.Branches ?? emptyBranches);
+            payload?.Branches ?? emptyBranches,
+            payload?.Tags ?? emptyTags,
+            payload?.BranchCollisions ?? emptyCollisions);
     }
 
     private async Task EnsureManagedFeatureStorageRootAsync(Workspace workspace, CancellationToken cancellationToken)
@@ -1128,6 +1159,12 @@ public sealed class WorkspaceFeatureOperations(
 
         [JsonPropertyName("branches")]
         public Dictionary<string, string>? Branches { get; set; }
+
+        [JsonPropertyName("tags")]
+        public Dictionary<string, string>? Tags { get; set; }
+
+        [JsonPropertyName("branchCollisions")]
+        public Dictionary<string, List<string>>? BranchCollisions { get; set; }
     }
 
     private sealed class CreateGitWorktreeAgentResponse

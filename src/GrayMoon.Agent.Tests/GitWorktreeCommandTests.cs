@@ -130,6 +130,57 @@ public sealed class GitWorktreeCommandTests : IDisposable
     }
 
     [Fact]
+    public async Task Create_detached_stays_on_tag_without_creating_branch()
+    {
+        var mainPath = Path.Combine(_root, "main6");
+        Directory.CreateDirectory(mainPath);
+        await InitGitWithCommitAsync(mainPath);
+        await RunGitAsync(mainPath, "tag 1.0.0");
+        await RunGitAsync(mainPath, "checkout -q --detach 1.0.0");
+        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+
+        var worktreePath = Path.Combine(_root, "features", "feat-tag", "main6");
+        var request = new CreateGitWorktreeRequest
+        {
+            MainRepositoryPath = mainPath,
+            WorktreePath = worktreePath,
+            BranchName = "feat-tag",
+            Detach = true,
+            BaseCommitSha = head,
+        };
+        var created = await _create.ExecuteAsync(request);
+        Assert.True(created.Success, created.ErrorMessage);
+        Assert.Null(created.BranchName);
+        Assert.Equal("1.0.0", await _git.GetCheckedOutTagAsync(created.WorktreePath!, CancellationToken.None));
+        Assert.Empty(await _git.FindBranchCollisionsAsync(mainPath, "feat-tag", CancellationToken.None));
+
+        var again = await _create.ExecuteAsync(request);
+        Assert.True(again.Success, again.ErrorMessage);
+        Assert.True(again.AlreadyExisted);
+    }
+
+    [Fact]
+    public async Task FindBranchCollisions_reports_local_remote_and_nested_refs()
+    {
+        var mainPath = Path.Combine(_root, "main5");
+        Directory.CreateDirectory(mainPath);
+        await InitGitWithCommitAsync(mainPath);
+
+        Assert.Empty(await _git.FindBranchCollisionsAsync(mainPath, "feat-x", CancellationToken.None));
+
+        await RunGitAsync(mainPath, "branch feat-x");
+        await RunGitAsync(mainPath, "update-ref refs/remotes/origin/feat-x HEAD");
+        await RunGitAsync(mainPath, "branch feat-y/sub");
+        await RunGitAsync(mainPath, "branch feat-xy");
+
+        var collisions = await _git.FindBranchCollisionsAsync(mainPath, "feat-x", CancellationToken.None);
+        Assert.Equal(["feat-x", "origin/feat-x"], collisions.Order(StringComparer.Ordinal));
+
+        var nested = await _git.FindBranchCollisionsAsync(mainPath, "feat-y", CancellationToken.None);
+        Assert.Equal(["feat-y/sub"], nested);
+    }
+
+    [Fact]
     public async Task Remove_without_force_fails_when_dirty()
     {
         var mainPath = Path.Combine(_root, "main3");
