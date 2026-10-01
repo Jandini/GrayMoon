@@ -95,6 +95,13 @@
                         <button type="button" class="btn-close" aria-label="Close" @onclick="() => renamedRepositories = null"></button>
                     </div>
                 }
+                @if (keptForFeatures?.Count > 0)
+                {
+                    <div class="alert alert-warning alert-dismissible fade show rounded-0 mb-0 border-0 border-bottom" role="alert">
+                        @($"{keptForFeatures.Count} repositories are no longer returned by the provider but are kept because Features use them. Remove those Features to finish.")
+                        <button type="button" class="btn-close" aria-label="Close" @onclick="() => keptForFeatures = null"></button>
+                    </div>
+                }
                 <div class="card-body p-0">
                     <div class="table-responsive">
                         <table class="table table-hover mb-0 repositories-table resizable-columns virtual-scroll-table">

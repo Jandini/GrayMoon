@@ -12,13 +12,29 @@ public sealed partial class WorkspaceProjectRepository(
     WorkspaceRepositoryCustomDependencyRepository customDependencyRepository,
     ILogger<WorkspaceProjectRepository> logger)
 {
-    /// <summary>Gets projects that have a PackageId (NuGet packages) for repositories linked to the given workspace.</summary>
+    /// <summary>Gets projects that have a PackageId (NuGet packages) for repositories linked to the given workspace, across every Feature context. Prefer the context-scoped overload for anything the user views while a Feature is selected.</summary>
     public async Task<List<WorkspaceProject>> GetPackagesByWorkspaceIdAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
         return await dbContext.WorkspaceProjects
             .AsNoTracking()
             .Include(p => p.MatchedConnector)
             .Where(p => p.WorkspaceId == workspaceId && p.PackageId != null && p.PackageId != "")
+            .OrderBy(p => p.PackageId)
+            .ThenBy(p => p.TargetFramework)
+            .ToListAsync(cancellationToken);
+    }
+
+    /// <summary>Gets packages scoped to a single Feature context, same fallback rule as <see cref="GetByWorkspaceIdAsync(int, int, CancellationToken)"/>: a real package is included only for that context (or legacy null-context rows for the special Workspace), while generated/virtual package rows (<see cref="WorkspaceProject.IsGenerated"/>) are workspace-global and always included.</summary>
+    public async Task<List<WorkspaceProject>> GetPackagesByWorkspaceIdAsync(int workspaceId, int workspaceFeatureContextId, CancellationToken cancellationToken = default)
+    {
+        var isSpecialWorkspace = await IsSpecialWorkspaceContextAsync(workspaceFeatureContextId, cancellationToken);
+        return await dbContext.WorkspaceProjects
+            .AsNoTracking()
+            .Include(p => p.MatchedConnector)
+            .Where(p => p.WorkspaceId == workspaceId && p.PackageId != null && p.PackageId != "" && (
+                p.IsGenerated
+                || p.WorkspaceFeatureContextId == workspaceFeatureContextId
+                || (isSpecialWorkspace && p.WorkspaceFeatureContextId == null)))
             .OrderBy(p => p.PackageId)
             .ThenBy(p => p.TargetFramework)
             .ToListAsync(cancellationToken);

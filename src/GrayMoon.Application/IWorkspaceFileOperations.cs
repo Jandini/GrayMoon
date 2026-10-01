@@ -23,7 +23,7 @@ public sealed class AddWorkspaceFileRequest
 
 public interface IWorkspaceFileOperations
 {
-    Task<List<WorkspaceFileDto>?> ListAsync(int workspaceId, CancellationToken cancellationToken);
+    Task<List<WorkspaceFileDto>?> ListAsync(int workspaceId, WorkspaceFeatureContextId contextId, CancellationToken cancellationToken);
 
     Task<(bool Found, int Added)> AddAsync(int workspaceId, IReadOnlyList<AddWorkspaceFileRequest> items, CancellationToken cancellationToken);
 

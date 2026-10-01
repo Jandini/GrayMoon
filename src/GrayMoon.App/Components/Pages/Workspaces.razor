@@ -21,6 +21,9 @@
 @inject ILogger<Workspaces> Logger
 @inject WorkspaceContextNavigationService ContextNavigation
 @using GrayMoon.App.Services.Features
+@using GrayMoon.Application
+@using GrayMoon.Application.Features
+@inject IWorkspaceFeatureOperations FeatureOperations
 
 <PageTitle>Workspaces - GrayMoon</PageTitle>
 
@@ -174,7 +177,8 @@
                WorkspacePath="@GetWorkspacePath()"
                DirectoryAlreadyExists="@directoryExists"
                ExistingRepositoryCount="@existingRepositoryCount"
-               IsNameDisabled="false"
+               IsNameDisabled="@(editingWorkspaceId != null && editingWorkspaceHasFeatures)"
+               NameDisabledHint="@(editingWorkspaceHasFeatures ? "Rename and root changes are not possible while Features exist. Remove Features first." : null)"
                IsSaving="@isSaving"
                IsCheckingDirectory="@isLoadingDirectoryInfo"
                ErrorMessage="@editorErrorMessage"
@@ -301,6 +305,7 @@
     private string editorTitle = "Add Workspace";
     private int? editingWorkspaceId;
     private string? editingWorkspaceRootPath;
+    private bool editingWorkspaceHasFeatures;
     private HashSet<int> editingWorkspaceRepositoryIds = new();
     private WorkspaceModel? workspaceToDelete;
     private HashSet<int> selectedRepositoryIds = new();
@@ -389,6 +394,7 @@
     {
         editingWorkspaceId = null;
         editingWorkspaceRootPath = null;
+        editingWorkspaceHasFeatures = false;
         editorTitle = "Add Workspace";
         workspaceName = string.Empty;
         directoryExists = false;
@@ -425,6 +431,10 @@
         editingWorkspaceRepositoryIds = workspace.Repositories
             .Select(link => link.RepositoryId)
             .ToHashSet();
+
+        var features = await FeatureOperations.ListFeaturesAsync(workspaceId);
+        editingWorkspaceHasFeatures = features.Count > 0;
+
         showEditorModal = true;
         await LoadDirectoryInfoAsync();
     }

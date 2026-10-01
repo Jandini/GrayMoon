@@ -6,6 +6,7 @@ using GrayMoon.App.Services;
 using GrayMoon.App.Services.Application;
 using GrayMoon.App.Services.GitChanges;
 using GrayMoon.Application;
+using GrayMoon.Application.Features;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -85,7 +86,7 @@ public sealed class WorkspaceFacadeOperationsTests
             null!,
             null!);
 
-        Assert.Null(await operations.ListAsync(999, CancellationToken.None));
+        Assert.Null(await operations.ListAsync(999, new WorkspaceFeatureContextId(1), CancellationToken.None));
     }
 
     [Fact]

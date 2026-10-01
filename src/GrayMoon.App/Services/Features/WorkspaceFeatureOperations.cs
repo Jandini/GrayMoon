@@ -894,16 +894,6 @@ public sealed class WorkspaceFeatureOperations(
         return all.Where(c => !c.IsSpecialWorkspace).ToList();
     }
 
-    public async Task EnsureNoFeaturesBeforeMembershipChangeAsync(int workspaceId, CancellationToken cancellationToken = default)
-    {
-        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        if (await db.WorkspaceFeatures.AnyAsync(f => f.WorkspaceId == workspaceId, cancellationToken))
-        {
-            throw new InvalidOperationException(
-                "Cannot add or remove Workspace repositories while Features exist. Remove Features first (or use a full transactional fan-out).");
-        }
-    }
-
     private async Task SeedInitialFeatureProjectionsAsync(
         AppDbContext db,
         int workspaceId,
