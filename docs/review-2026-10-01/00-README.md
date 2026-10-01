@@ -13,6 +13,7 @@ This folder is a full review of GrayMoon and GrayMoon.Desktop, focused on closin
 | [07-appendix-why-lane-g-hooks.md](07-appendix-why-lane-g-hooks.md) | Why the plan fixes Git hooks in v1: what the hooks do, how they destroy user hooks and miss `core.hooksPath` repos, and what G1 changes |
 | [08-plan-regression-risk-review.md](08-plan-regression-risk-review.md) | Risk register for the plan: what each unit could break in standard Workspace workflows, the mitigation written into `06`, and the Workspace smoke test |
 | [09-switch-branch-in-feature-analysis.md](09-switch-branch-in-feature-analysis.md) | Is the per-repository Switch Branch dialog helpful and safe while a Feature is selected? Findings SB-1 to SB-8, options, chosen v1 behaviour (option B), planned as lane I (I1 to I4) in `06` |
+| [10-plan-in-plain-words.md](10-plan-in-plain-words.md) | For the owner, not for AI agents: every step of `06` in plain words, what changes and what you will notice as a user |
 
 ## Verdict
 
