@@ -42,7 +42,7 @@
                             @StatusHeadline
                         </div>
                         <p class="mb-2 fw-semibold">This will remove the following from your computer:</p>
-                        <ul class="list-unstyled mb-3">
+                        <ul class="list-unstyled mb-2">
                             @foreach (var repo in _plan.Repositories)
                             {
                                 <li class="mb-2">
@@ -51,6 +51,7 @@
                                 </li>
                             }
                         </ul>
+                        <p class="text-muted small mb-3">Local branches are deleted. Remote branches are kept.</p>
                         @if (AnyRepoStatusUnknown)
                         {
                             <div class="gm-callout gm-callout--warning mb-3" role="alert">
@@ -63,24 +64,36 @@
                                 Could not check pull requests. GitHub may be offline or rate limited.
                             </div>
                         }
-                        @if (!AnyRepoStatusUnknown && !_plan.IsAutomaticallySafe)
+                        @if (!AnyRepoStatusUnknown && (ShowDiscardCheckbox || ShowForceCheckbox))
                         {
                             <div class="gm-callout gm-callout--warning mb-3" role="alert">
                                 Some work in this Feature hasn't been safely saved yet (see above). Removing it now
                                 will permanently delete that work. Confirm below to continue anyway.
                             </div>
-                            <div class="form-check mb-2">
-                                <input class="form-check-input" type="checkbox" id="allow-discard" @bind="_allowDiscard" disabled="@_analyzing" />
-                                <label class="form-check-label" for="allow-discard">
-                                    Yes, permanently discard any uncommitted changes in these repositories
-                                </label>
-                            </div>
-                            <div class="form-check mb-2">
-                                <input class="form-check-input" type="checkbox" id="allow-force" @bind="_allowForce" disabled="@_analyzing" />
-                                <label class="form-check-label" for="allow-force">
-                                    Yes, delete the local branch even if it still has commits that were never pushed
-                                </label>
-                            </div>
+                            @if (ShowDiscardCheckbox)
+                            {
+                                <div class="form-check mb-1">
+                                    <input class="form-check-input" type="checkbox" id="allow-discard" @bind="_allowDiscard" disabled="@_analyzing" />
+                                    <label class="form-check-label" for="allow-discard">
+                                        Permanently discard uncommitted changes in @DirtyRepositories.Count repositor@(DirtyRepositories.Count == 1 ? "y" : "ies")
+                                    </label>
+                                </div>
+                                <ul class="list-unstyled mb-2 ms-4">
+                                    @foreach (var repo in DirtyRepositories)
+                                    {
+                                        <li class="text-muted small">@repo.RepositoryName</li>
+                                    }
+                                </ul>
+                            }
+                            @if (ShowForceCheckbox)
+                            {
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" id="allow-force" @bind="_allowForce" disabled="@_analyzing" />
+                                    <label class="form-check-label" for="allow-force">
+                                        Delete local branches that have commits not in the default branch (@BranchesNotInDefaultRepositories.Count)
+                                    </label>
+                                </div>
+                            }
                         }
                     }
                 </div>
@@ -93,7 +106,7 @@
                     {
                         <button type="button" class="btn btn-outline-secondary" @onclick="Cancel" disabled="@_analyzing">Cancel</button>
                         <button type="button" class="btn btn-danger" @onclick="RemoveAsync"
-                                disabled="@(_analyzing || _plan is null || AnyRepoStatusUnknown || (!_plan.IsAutomaticallySafe && !_allowDiscard && !_allowForce))">
+                                disabled="@(_analyzing || _plan is null || !CanRemove(AnyRepoStatusUnknown, ShowDiscardCheckbox, _allowDiscard, ShowForceCheckbox, _allowForce))">
                             Remove Feature
                         </button>
                     }
@@ -162,6 +175,47 @@
 
     /// <summary>True when the Agent could not confirm disk state for one or more repositories. Remove is disabled in that case.</summary>
     private bool AnyRepoStatusUnknown => _plan?.Repositories.Any(r => r.WorktreeStatusUnknown) == true;
+
+    /// <summary>Repositories with uncommitted, staged or conflicting changes (D3). Drives the discard checkbox.</summary>
+    private IReadOnlyList<RemoveFeatureRepositoryPlan> DirtyRepositories =>
+        _plan?.Repositories.Where(IsRepositoryDirty).ToList() ?? [];
+
+    /// <summary>Shown only when at least one repository is actually dirty (D3, fixes U-17).</summary>
+    private bool ShowDiscardCheckbox => DirtyRepositories.Count > 0;
+
+    /// <summary>Repositories with live commits ahead of the default branch and no merged pull request (D3). Drives the force-delete-branch checkbox.</summary>
+    private IReadOnlyList<RemoveFeatureRepositoryPlan> BranchesNotInDefaultRepositories =>
+        _plan?.Repositories.Where(HasUnmergedBranchAheadOfDefault).ToList() ?? [];
+
+    /// <summary>Shown only when at least one repository actually has unmerged commits ahead of the default branch (D3, fixes U-17).</summary>
+    private bool ShowForceCheckbox => BranchesNotInDefaultRepositories.Count > 0;
+
+    internal static bool IsRepositoryDirty(RemoveFeatureRepositoryPlan repo) =>
+        repo.HasUncommittedChanges || repo.HasStagedChanges || repo.HasConflicts;
+
+    internal static bool HasUnmergedBranchAheadOfDefault(RemoveFeatureRepositoryPlan repo) =>
+        (repo.AheadOfDefault ?? 0) > 0 && repo.PullRequestMerged != true;
+
+    /// <summary>
+    /// Remove is enabled only when every checkbox the dialog actually shows has been ticked, and never
+    /// while any repository's disk state is Unknown (A2). A checkbox that is not shown because its own
+    /// risk does not apply never blocks Remove (D3, fixes U-17).
+    /// </summary>
+    internal static bool CanRemove(
+        bool anyRepoStatusUnknown,
+        bool showDiscardCheckbox,
+        bool allowDiscard,
+        bool showForceCheckbox,
+        bool allowForce)
+    {
+        if (anyRepoStatusUnknown)
+            return false;
+        if (showDiscardCheckbox && !allowDiscard)
+            return false;
+        if (showForceCheckbox && !allowForce)
+            return false;
+        return true;
+    }
 
     /// <summary>
     /// True when a repository has live commits ahead of its default branch but no pull request opened
