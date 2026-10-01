@@ -48,7 +48,8 @@ public sealed class CommandDispatcher(
     ICommandHandler<ListGitWorktreesRequest, ListGitWorktreesResponse> listGitWorktreesCommand,
     ICommandHandler<CreateGitWorktreeRequest, CreateGitWorktreeResponse> createGitWorktreeCommand,
     ICommandHandler<RemoveGitWorktreeRequest, RemoveGitWorktreeResponse> removeGitWorktreeCommand,
-    ICommandHandler<GetGitVersionAtDefaultTipRequest, GetGitVersionAtDefaultTipResponse> getGitVersionAtDefaultTipCommand) : ICommandDispatcher
+    ICommandHandler<GetGitVersionAtDefaultTipRequest, GetGitVersionAtDefaultTipResponse> getGitVersionAtDefaultTipCommand,
+    ICommandHandler<InspectWorktreeRequest, InspectWorktreeResponse> inspectWorktreeCommand) : ICommandDispatcher
     {
     private readonly IReadOnlyDictionary<string, Func<object, CancellationToken, Task<object?>>> _executors = new Dictionary<string, Func<object, CancellationToken, Task<object?>>>(StringComparer.Ordinal)
     {
@@ -95,6 +96,7 @@ public sealed class CommandDispatcher(
         [AgentHubMethods.ListGitWorktrees] = async (req, ct) => await listGitWorktreesCommand.ExecuteAsync((ListGitWorktreesRequest)req, ct),
         [AgentHubMethods.CreateGitWorktree] = async (req, ct) => await createGitWorktreeCommand.ExecuteAsync((CreateGitWorktreeRequest)req, ct),
         [AgentHubMethods.RemoveGitWorktree] = async (req, ct) => await removeGitWorktreeCommand.ExecuteAsync((RemoveGitWorktreeRequest)req, ct),
+        [AgentHubMethods.InspectWorktree] = async (req, ct) => await inspectWorktreeCommand.ExecuteAsync((InspectWorktreeRequest)req, ct),
     };
 
     public Task<object?> ExecuteAsync(string commandName, object request, CancellationToken cancellationToken = default)

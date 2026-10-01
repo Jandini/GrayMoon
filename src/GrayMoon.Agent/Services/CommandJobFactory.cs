@@ -118,6 +118,8 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid CreateGitWorktree args"),
             AgentHubMethods.RemoveGitWorktree => JsonSerializer.Deserialize<RemoveGitWorktreeRequest>(json, options)
                 ?? throw new ArgumentException("Invalid RemoveGitWorktree args"),
+            AgentHubMethods.InspectWorktree => JsonSerializer.Deserialize<InspectWorktreeRequest>(json, options)
+                ?? throw new ArgumentException("Invalid InspectWorktree args"),
             _ => throw new NotSupportedException($"Unknown command: {command}")
         };
     }

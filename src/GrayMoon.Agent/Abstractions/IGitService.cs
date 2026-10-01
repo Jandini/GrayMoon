@@ -143,4 +143,15 @@ public interface IGitService
         string worktreePath,
         bool force,
         CancellationToken ct);
+
+    /// <summary>
+    /// Reports everything removal needs to know about one worktree, checked live: registration,
+    /// existence, lock state, dirty state, and commit counts vs upstream and the default branch.
+    /// Returns facts only (no exception) even when the worktree folder does not exist.
+    /// </summary>
+    Task<WorktreeInspectionResult> InspectWorktreeAsync(
+        string mainRepositoryPath,
+        string worktreePath,
+        string? defaultBranch,
+        CancellationToken ct);
 }

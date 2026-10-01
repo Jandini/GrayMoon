@@ -106,5 +106,6 @@ public sealed class ReturnToDefaultBranchCommandTests
         public Task<(bool Success, IReadOnlyList<GitWorktreeInfo> Worktrees, string? ErrorCode, string? ErrorMessage)> ListWorktreesAsync(string mainRepositoryPath, CancellationToken ct) => throw new NotImplementedException();
         public Task<(bool Success, GitWorktreeInfo? Worktree, bool AlreadyExisted, string? ErrorCode, string? ErrorMessage)> CreateWorktreeAsync(string mainRepositoryPath, string worktreePath, string? branchName, string baseCommitSha, CancellationToken ct) => throw new NotImplementedException();
         public Task<(bool Success, bool AlreadyRemoved, string? ErrorCode, string? ErrorMessage)> RemoveWorktreeAsync(string mainRepositoryPath, string worktreePath, bool force, CancellationToken ct) => throw new NotImplementedException();
+        public Task<GrayMoon.Agent.Models.WorktreeInspectionResult> InspectWorktreeAsync(string mainRepositoryPath, string worktreePath, string? defaultBranch, CancellationToken ct) => throw new NotImplementedException();
     }
 }

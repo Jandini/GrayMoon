@@ -1553,6 +1553,179 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return (true, false, null, null);
     }
 
+    public async Task<WorktreeInspectionResult> InspectWorktreeAsync(
+        string mainRepositoryPath,
+        string worktreePath,
+        string? defaultBranch,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(mainRepositoryPath) || !Directory.Exists(mainRepositoryPath))
+            return new WorktreeInspectionResult(false, false, false, null, null, null, null, null, null, null, null, null, null, null, null, "Repository not found.");
+        if (string.IsNullOrWhiteSpace(worktreePath))
+            return new WorktreeInspectionResult(false, false, false, null, null, null, null, null, null, null, null, null, null, null, null, "worktreePath is required.");
+
+        string canonicalWorktreePath;
+        try
+        {
+            canonicalWorktreePath = Path.GetFullPath(worktreePath);
+        }
+        catch (Exception ex)
+        {
+            return new WorktreeInspectionResult(false, false, false, null, null, null, null, null, null, null, null, null, null, null, null, ex.Message);
+        }
+
+        var (listOk, worktrees, _, listError) = await ListWorktreesAsync(mainRepositoryPath, ct);
+        if (!listOk)
+            return new WorktreeInspectionResult(false, false, false, null, null, null, null, null, null, null, null, null, null, null, null, listError ?? "Failed to list worktrees.");
+
+        var registered = GitWorktreeOccupancy.FindByPath(worktrees, canonicalWorktreePath);
+        var isRegistered = registered != null;
+        var isLocked = registered?.IsLocked ?? false;
+        var lockReason = registered?.LockReason;
+
+        if (!Directory.Exists(canonicalWorktreePath))
+        {
+            return new WorktreeInspectionResult(isRegistered, false, isLocked, lockReason, null, null, null, null, null, null, null, null, null, null, null, null);
+        }
+
+        var headSha = await GetHeadCommitAsync(canonicalWorktreePath, ct);
+        var branch = await GetCurrentBranchNameAsync(canonicalWorktreePath, ct);
+
+        var (statusOk, staged, unstaged, untracked, conflicts, statusError) = await ProbeWorktreeStatusAsync(canonicalWorktreePath, ct);
+        bool? isDirty = statusOk ? staged + unstaged + untracked + conflicts > 0 : null;
+
+        bool? hasUpstream = null;
+        int? aheadOfUpstream = null;
+        int? behindUpstream = null;
+        if (!string.IsNullOrWhiteSpace(branch))
+        {
+            var (upstreamKnown, ahead, behind) = await ProbeUpstreamCountsAsync(canonicalWorktreePath, branch, ct);
+            hasUpstream = upstreamKnown;
+            aheadOfUpstream = ahead;
+            behindUpstream = behind;
+        }
+
+        var aheadOfDefault = await ProbeAheadOfDefaultAsync(canonicalWorktreePath, defaultBranch, ct);
+
+        return new WorktreeInspectionResult(
+            isRegistered,
+            true,
+            isLocked,
+            lockReason,
+            headSha,
+            branch,
+            isDirty,
+            statusOk ? staged : null,
+            statusOk ? unstaged : null,
+            statusOk ? untracked : null,
+            statusOk ? conflicts : null,
+            hasUpstream,
+            aheadOfUpstream,
+            behindUpstream,
+            aheadOfDefault,
+            statusOk ? null : statusError);
+    }
+
+    private async Task<(bool Success, int Staged, int Unstaged, int Untracked, int Conflicts, string? Error)> ProbeWorktreeStatusAsync(
+        string repoPath,
+        CancellationToken ct)
+    {
+        var (exitCode, stdout, stderr) = await runner.RunAsync(
+            "git",
+            "--no-optional-locks status --porcelain=v1",
+            repoPath,
+            ct,
+            streamStderrAsStdout: true,
+            mirrorFailureOutputAsStderr: false,
+            intent: GitLockIntent.Read);
+        if (exitCode != 0)
+            return (false, 0, 0, 0, 0, CombineOutput(stdout, stderr) ?? "git status failed");
+
+        var staged = 0;
+        var unstaged = 0;
+        var untracked = 0;
+        var conflicts = 0;
+        foreach (var line in (stdout ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (line.Length < 2)
+                continue;
+            var x = line[0];
+            var y = line[1];
+            if (x == '?' && y == '?')
+            {
+                untracked++;
+                continue;
+            }
+            if (IsUnmergedStatusCode(x, y))
+            {
+                conflicts++;
+                continue;
+            }
+            if (x != ' ')
+                staged++;
+            if (y != ' ')
+                unstaged++;
+        }
+
+        return (true, staged, unstaged, untracked, conflicts, null);
+    }
+
+    private static bool IsUnmergedStatusCode(char x, char y)
+        => x == 'U' || y == 'U' || (x == 'A' && y == 'A') || (x == 'D' && y == 'D');
+
+    /// <summary>Ahead/behind strictly against the branch's configured upstream; no fallback to the default branch
+    /// or a Feature divergence base, unlike <see cref="ProbeCommitCountsAsync"/>, so the InspectWorktree caller
+    /// gets a clean null when there is no upstream instead of a value computed against something else.</summary>
+    private async Task<(bool HasUpstream, int? Ahead, int? Behind)> ProbeUpstreamCountsAsync(
+        string repoPath,
+        string branchName,
+        CancellationToken ct)
+    {
+        var upstreamRef = await GetUpstreamRefAsync(repoPath, branchName, ct);
+        if (string.IsNullOrWhiteSpace(upstreamRef) || !await RefExistsAsync(repoPath, upstreamRef, ct))
+            return (false, null, null);
+
+        var (exitCode, stdout, stderr) = await runner.RunAsync(
+            "git",
+            $"rev-list --left-right --count {upstreamRef}...HEAD",
+            repoPath,
+            ct,
+            streamStderrAsStdout: true,
+            mirrorFailureOutputAsStderr: false);
+        if (exitCode != 0)
+        {
+            logger.LogWarning("Git rev-list --left-right (InspectWorktree upstream counts) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
+            return (true, null, null);
+        }
+
+        var parts = (stdout ?? "").Trim().Split('\t', StringSplitOptions.RemoveEmptyEntries);
+        var behind = parts.Length >= 1 && int.TryParse(parts[0], out var b) ? b : (int?)null;
+        var ahead = parts.Length >= 2 && int.TryParse(parts[1], out var a) ? a : (int?)null;
+        return (true, ahead, behind);
+    }
+
+    private async Task<int?> ProbeAheadOfDefaultAsync(string repoPath, string? defaultBranch, CancellationToken ct)
+    {
+        var defaultRef = ToOriginBranchRef(defaultBranch);
+        if (defaultRef == null || !await RefExistsAsync(repoPath, defaultRef, ct))
+            return null;
+
+        var (exitCode, stdout, stderr) = await runner.RunAsync(
+            "git",
+            $"rev-list --count {defaultRef}..HEAD",
+            repoPath,
+            ct,
+            streamStderrAsStdout: true,
+            mirrorFailureOutputAsStderr: false);
+        if (exitCode != 0)
+        {
+            logger.LogWarning("Git rev-list (InspectWorktree ahead of default) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
+            return null;
+        }
+
+        return int.TryParse((stdout ?? "").Trim(), out var count) ? count : (int?)null;
+    }
+
     private static void WriteHookFile(string path, string content, Encoding encoding)
     {
         var normalized = content.Replace("\r\n", "\n").Replace("\r", "\n");
