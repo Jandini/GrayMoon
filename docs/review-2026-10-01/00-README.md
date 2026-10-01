@@ -9,12 +9,13 @@ This folder is a full review of GrayMoon and GrayMoon.Desktop, focused on closin
 | [03-worktree-ux-review.md](03-worktree-ux-review.md) | User flows (create, switch, changes, sync, PR, remove, recovery) and UX findings U-1 to U-20 |
 | [04-worktree-v1-release-roadmap.md](04-worktree-v1-release-roadmap.md) | Detailed P0, P1 and P2 items and the release-readiness checklist |
 | [05-general-code-and-ux-review.md](05-general-code-and-ux-review.md) | Everything outside Features: architecture, security, reliability, tests, Desktop, UX, enhancement ideas, and a backlog |
+| [06-worktree-release-implementation-plan.md](06-worktree-release-implementation-plan.md) | **Live implementation plan.** Give this single file to an AI agent: it contains the agent's working rules, owner decisions, a status tracker, testable units grouped into parallel lanes, and manual test gates |
 
 ## Verdict
 
 The core design is strong. It has a strict App/Worker split, persistence-first UI, a lock that can cover the whole workspace or a single context, careful process execution, and good tests that run against real git and SQLite. All 788 tests pass. Every item from the 2026-09-21 code review has been fixed.
 
-Worktree Features are **not ready to release**. The happy path works. The gaps are in the paths users will hit in the first week: removing a Feature in Docker, a create that fails part-way, a crash mid-operation, locked files on Windows, and upgrading an existing 0.1.0 database. Separately, the app has no authentication anywhere and serves decrypted tokens over HTTP. That is not specific to worktrees, but it should not ship in another public build.
+Worktree Features are **not ready to release**. The happy path works. The gaps are in the paths users will hit in the first week: removing a Feature in Docker, a create that fails part-way, a crash mid-operation, locked files on Windows, and upgrading an existing 0.1.0 database. Separately, any local program or web page can read decrypted tokens and trigger actions over the local HTTP port. GrayMoon is a desktop dev tool and needs no user login, but it does need local hardening. That is not specific to worktrees, but it should not ship in another public build.
 
 ## The five things that matter most
 
@@ -22,7 +23,7 @@ Worktree Features are **not ready to release**. The happy path works. The gaps a
 2. **Remove leaves data behind in the database and on disk.** On the review machine, about 85% of `WorkspaceProjects` rows belong to removed Features. There are also about 18 leftover `features\<name>` folders and 5 orphaned remote branches. Some queries scope only by `WorkspaceId` and read these leftover rows.
 3. **There is no way out of a failed or interrupted Feature.** `Creating` and `Removing` Features are hidden from the selector but still hold their name. `NeedsRepair` has no retry or rollback. Nothing reconciles these states at startup.
 4. **The first real schema upgrade fails silently.** `Migrations.Features.cs:14-35` swallows every error in `catch { }`, with no transaction, version number or backup. No test upgrades a real 0.1.0 database.
-5. **The security baseline is missing.** No authentication exists anywhere in `src` (there is no `AddAuthentication` or `RequireAuthorization`). `GET /repos/{id}/connector` returns decrypted PATs. The fallback encryption key is derived from a constant in the source, and Desktop never sets its own key. Body-less `POST /push` can be triggered from any web page.
+5. **Local hardening is missing.** No user login is needed for a desktop dev tool, but nothing stops other local programs or web pages either. `GET /repos/{id}/connector` returns decrypted PATs to any caller, although only the Worker needs it. The fallback encryption key is derived from a constant in the source, and Desktop never sets its own key. Body-less `POST /push` can be triggered from any web page.
 
 ## Combined roadmap to close worktrees v1
 
@@ -38,7 +39,7 @@ Effort sizes: **S** is a day or less, **M** is 2 to 3 days, **L** is about a wee
 | B4 | Repair and rollback for `NeedsRepair`, with a panel showing each repo's error and offering Retry, Roll back and Remove. | 04 P0-4, 02 F-4 | M (after B3) |
 | B5 | Honest removal: stop watchers, retry around locked files, clean up leftover and empty folders, and show a report for each repo. | 04 P0-5, 02 F-5 | M |
 | B6 | Transactional, logged migrations that stop startup on failure and back up the DB first, plus a golden upgrade test from a 0.1.0 database. Absorbs 04 P1-6. | 05 R1, R2, A3 | M |
-| B7 | Security minimum: remove or protect the connector-token endpoint, use a per-install key or Data Protection and re-encrypt existing tokens, restrict `AllowedHosts` to loopback, and require a custom header and `Origin` check on mutating endpoints. | 05 S1, S2, S3 | S to M |
+| B7 | Local security, no login: require a Worker secret for the connector-token endpoint and the Worker hub, use a per-install key or Data Protection and re-encrypt existing tokens, restrict `AllowedHosts` to loopback, and require a custom header and `Origin` check on mutating endpoints. | 05 S1, S2, S3 | S to M |
 
 B1, B2, B3, B6 and B7 are independent and can run in parallel.
 
