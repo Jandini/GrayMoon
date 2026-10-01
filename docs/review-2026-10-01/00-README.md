@@ -10,6 +10,8 @@ This folder is a full review of GrayMoon and GrayMoon.Desktop, focused on closin
 | [04-worktree-v1-release-roadmap.md](04-worktree-v1-release-roadmap.md) | Detailed P0, P1 and P2 items and the release-readiness checklist |
 | [05-general-code-and-ux-review.md](05-general-code-and-ux-review.md) | Everything outside Features: architecture, security, reliability, tests, Desktop, UX, enhancement ideas, and a backlog |
 | [06-worktree-release-implementation-plan.md](06-worktree-release-implementation-plan.md) | **Live implementation plan.** Give this single file to an AI agent: it contains the agent's working rules, owner decisions, a status tracker, testable units grouped into parallel lanes, and manual test gates |
+| [07-appendix-why-lane-g-hooks.md](07-appendix-why-lane-g-hooks.md) | Why the plan fixes Git hooks in v1: what the hooks do, how they destroy user hooks and miss `core.hooksPath` repos, and what G1 changes |
+| [08-plan-regression-risk-review.md](08-plan-regression-risk-review.md) | Risk register for the plan: what each unit could break in standard Workspace workflows, the mitigation written into `06`, and the Workspace smoke test |
 
 ## Verdict
 
