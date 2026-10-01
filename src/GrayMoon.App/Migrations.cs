@@ -3,6 +3,7 @@ using System.Data.Common;
 using GrayMoon.App.Data;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -88,7 +89,16 @@ public static partial class Migrations
         try
         {
             await action(dbContext);
-            await dbContext.Database.ExecuteSqlRawAsync($"PRAGMA user_version = {version};");
+            // Not ExecuteSqlRawAsync: SQLite's PRAGMA grammar does not accept a bound parameter for the
+            // value, so this goes through a plain ADO.NET command (enlisted in the same transaction) instead
+            // of an EF Core raw-SQL API. version is an internal int, never user input.
+            var conn = dbContext.Database.GetDbConnection();
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = transaction.GetDbTransaction();
+                cmd.CommandText = $"PRAGMA user_version = {version};";
+                await cmd.ExecuteNonQueryAsync();
+            }
             await transaction.CommitAsync();
         }
         catch (Exception ex)
