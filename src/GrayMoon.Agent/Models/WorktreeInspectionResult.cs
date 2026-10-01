@@ -21,6 +21,11 @@ namespace GrayMoon.Agent.Models;
 /// <param name="BehindUpstream">Commits on the upstream not on HEAD; null when there is no upstream.</param>
 /// <param name="AheadOfDefault">Commits on HEAD not on <c>origin/&lt;defaultBranch&gt;</c>; null when that ref is missing.</param>
 /// <param name="Error">Null on success; otherwise a short description of what could not be determined.</param>
+/// <param name="FeatureBranchExists">True when the requested Feature branch exists; null when none was requested (09 SB-2, plan unit I1).</param>
+/// <param name="FeatureBranchSha">HEAD commit SHA of the Feature branch; null when it does not exist or none was requested.</param>
+/// <param name="FeatureBranchAheadOfDefault">Commits on the Feature branch not on <c>origin/&lt;defaultBranch&gt;</c>; null when the Feature branch or that ref is missing, or none was requested.</param>
+/// <param name="FeatureBranchHasUpstream">True when the Feature branch has a configured upstream; null when it does not exist or none was requested.</param>
+/// <param name="FeatureBranchAheadOfUpstream">Commits on the Feature branch not on its upstream; null when there is no upstream, the branch is missing, or none was requested.</param>
 public sealed record WorktreeInspectionResult(
     bool IsRegistered,
     bool Exists,
@@ -37,4 +42,9 @@ public sealed record WorktreeInspectionResult(
     int? AheadOfUpstream,
     int? BehindUpstream,
     int? AheadOfDefault,
-    string? Error);
+    string? Error,
+    bool? FeatureBranchExists = null,
+    string? FeatureBranchSha = null,
+    int? FeatureBranchAheadOfDefault = null,
+    bool? FeatureBranchHasUpstream = null,
+    int? FeatureBranchAheadOfUpstream = null);

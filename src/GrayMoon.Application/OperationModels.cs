@@ -50,7 +50,13 @@ public sealed record RemoveFeatureRepositoryReport(
     bool ResidueRemaining,
     int ResidueFileCount,
     IReadOnlyList<string>? ResidueSampleFiles,
-    string? ResidueMessage);
+    string? ResidueMessage,
+    /// <summary>
+    /// When the worktree was not on its Feature branch at remove time (09 SB-2), the branch (or
+    /// "(detached commit)") that was actually kept; the Feature branch named by
+    /// <see cref="BranchOutcome"/> is what was deleted. Null when there was no drift.
+    /// </summary>
+    string? KeptBranchName = null);
 
 /// <summary>
 /// Result of a dependency-update run. <see cref="Success"/> is false when any repo or workspace-level

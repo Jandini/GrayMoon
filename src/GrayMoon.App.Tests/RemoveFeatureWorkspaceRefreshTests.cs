@@ -1,4 +1,5 @@
 using GrayMoon.Abstractions.Agent;
+using GrayMoon.App.Components.Features;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services.GitHub;
@@ -21,18 +22,30 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
     /// keep their original "nothing pending" meaning now that OutgoingCommits/AheadOfDefault come live
     /// from this response instead of a cached database value.
     /// </summary>
+    /// <summary>
+    /// "feat-refresh" matches every Feature name seeded in this file; the worktree is never drifted
+    /// here (09 SB-2 drift is covered separately), so the Feature-branch fields default to mirror the
+    /// checked-out branch's own ahead/upstream counts, exactly what a real, non-drifted InspectWorktree
+    /// response would report.
+    /// </summary>
     private static object CleanInspectWorktree(
         bool exists = true,
         bool? isDirty = false,
         bool? hasUpstream = true,
         int? aheadOfUpstream = 0,
-        int? aheadOfDefault = 0) => new
+        int? aheadOfDefault = 0,
+        string? branch = "feat-refresh") => new
     {
         exists,
         isDirty,
         hasUpstream,
         aheadOfUpstream,
         aheadOfDefault,
+        branch,
+        featureBranchExists = true,
+        featureBranchAheadOfDefault = aheadOfDefault,
+        featureBranchHasUpstream = hasUpstream,
+        featureBranchAheadOfUpstream = aheadOfUpstream,
     };
 
     private static object SyncResponse(string branch = "main", int incoming = 4) => new
@@ -761,6 +774,135 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
         Assert.True(plan.Success, plan.Error);
         Assert.True(plan.PullRequestStatusUnknown);
         Assert.False(plan.IsAutomaticallySafe);
+    }
+
+    // ---- 09 SB-2: analysis must judge the Feature branch, not the current checkout -----------------
+
+    [Fact]
+    public async Task Analyze_drift_with_unmerged_Feature_branch_is_not_safe_and_describes_the_kept_branch()
+    {
+        // The worktree has been switched to "side" in a terminal; the Feature branch itself still has
+        // 2 commits not on default. The analysis must judge the Feature branch, not "side".
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var worktreePath = @"C:\gm-test-root\.graymoon\test-ws\features\feat-refresh\graymoon-api";
+        var featureContextId = await SeedFeatureWithWorktreeNoPrAsync(ctx, worktreePath);
+
+        ctx.AgentBridge.Respond(AgentHubMethods.InspectWorktree, new
+        {
+            exists = true,
+            isDirty = false,
+            branch = "side",
+            hasUpstream = true,
+            aheadOfUpstream = 0,
+            aheadOfDefault = 0,
+            featureBranchExists = true,
+            featureBranchAheadOfDefault = 2,
+            featureBranchHasUpstream = false,
+            featureBranchAheadOfUpstream = (int?)null,
+        });
+        ctx.AgentBridge.Respond("GetGitChangeStatus", CleanGitChangeStatus());
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var plan = await ops.AnalyzeRemoveFeatureAsync(featureContextId);
+
+        Assert.True(plan.Success, plan.Error);
+        var repo = Assert.Single(plan.Repositories);
+        Assert.True(repo.IsOffFeatureBranch);
+        Assert.Equal("side", repo.CheckedOutBranch);
+        Assert.Equal("feat-refresh", repo.FeatureBranchName);
+        Assert.Equal(2, repo.EffectiveAheadOfDefault);
+        Assert.Equal(RemoveFeatureClassification.Active, plan.Classification);
+        Assert.False(plan.IsAutomaticallySafe);
+    }
+
+    [Fact]
+    public async Task Analyze_drift_with_merged_Feature_branch_is_still_automatically_safe()
+    {
+        // Drifted to "side", but the Feature branch's own pull request is merged, so it is still safe.
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var worktreePath = @"C:\gm-test-root\.graymoon\test-ws\features\feat-refresh\graymoon-api";
+        var featureContextId = await SeedMergedFeatureWithWorktreeAsync(ctx, worktreePath);
+
+        ctx.AgentBridge.Respond(AgentHubMethods.InspectWorktree, new
+        {
+            exists = true,
+            isDirty = false,
+            branch = "side",
+            hasUpstream = true,
+            aheadOfUpstream = 0,
+            aheadOfDefault = 0,
+            featureBranchExists = true,
+            featureBranchAheadOfDefault = 0,
+            featureBranchHasUpstream = true,
+            featureBranchAheadOfUpstream = 0,
+        });
+        ctx.AgentBridge.Respond("GetGitChangeStatus", CleanGitChangeStatus());
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var plan = await ops.AnalyzeRemoveFeatureAsync(featureContextId);
+
+        Assert.True(plan.Success, plan.Error);
+        var repo = Assert.Single(plan.Repositories);
+        Assert.True(repo.IsOffFeatureBranch);
+        Assert.Equal(RemoveFeatureClassification.Completed, plan.Classification);
+        Assert.True(plan.IsAutomaticallySafe);
+    }
+
+    [Fact]
+    public async Task Analyze_old_Worker_without_Feature_branch_fields_is_not_safe_and_force_not_offered()
+    {
+        // An older Worker does not know about featureBranch at all: the facts are Unknown, never
+        // treated as zero, and the force-delete checkbox must not be offered for this repository.
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var worktreePath = @"C:\gm-test-root\.graymoon\test-ws\features\feat-refresh\graymoon-api";
+        var featureContextId = await SeedMergedFeatureWithWorktreeAsync(ctx, worktreePath);
+
+        ctx.AgentBridge.Respond(AgentHubMethods.InspectWorktree, new
+        {
+            exists = true,
+            isDirty = false,
+            hasUpstream = true,
+            aheadOfUpstream = 0,
+            aheadOfDefault = 0,
+        });
+        ctx.AgentBridge.Respond("GetGitChangeStatus", CleanGitChangeStatus());
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var plan = await ops.AnalyzeRemoveFeatureAsync(featureContextId);
+
+        Assert.True(plan.Success, plan.Error);
+        var repo = Assert.Single(plan.Repositories);
+        Assert.Null(repo.FeatureBranchAheadOfDefault);
+        Assert.Null(repo.EffectiveAheadOfDefault);
+        Assert.False(plan.IsAutomaticallySafe);
+        Assert.False(RemoveFeatureModal.HasUnmergedBranchAheadOfDefault(repo));
+    }
+
+    [Fact]
+    public async Task Analyze_not_drifted_repository_produces_the_same_plan_as_before()
+    {
+        // Characterization (A4 step 0): a repository that has not drifted (checked out on its own
+        // Feature branch) must classify and judge safety exactly as it did before this unit.
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var worktreePath = @"C:\gm-test-root\.graymoon\test-ws\features\feat-refresh\graymoon-api";
+        var featureContextId = await SeedMergedFeatureWithWorktreeAsync(ctx, worktreePath);
+
+        ctx.AgentBridge.Respond(AgentHubMethods.InspectWorktree, CleanInspectWorktree());
+        ctx.AgentBridge.Respond("GetGitChangeStatus", CleanGitChangeStatus());
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var plan = await ops.AnalyzeRemoveFeatureAsync(featureContextId);
+
+        Assert.True(plan.Success, plan.Error);
+        var repo = Assert.Single(plan.Repositories);
+        Assert.False(repo.IsOffFeatureBranch);
+        Assert.Equal("feat-refresh", repo.CheckedOutBranch);
+        Assert.Equal(RemoveFeatureClassification.Completed, plan.Classification);
+        Assert.True(plan.IsAutomaticallySafe);
     }
 
     private static async Task<WorkspaceFeatureContextId> SeedFeatureWithWorktreeNoPrAsync(

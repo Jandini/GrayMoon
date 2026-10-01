@@ -369,8 +369,12 @@ public sealed class WorkspaceFeatureOperations(
                     var pr = prs.FirstOrDefault(p => p.WorkspaceRepositoryId == row.WorkspaceRepositoryId);
                     var mainPath = await pathResolver.GetRepositoryPathAsync(
                         specialContextId, row.WorkspaceRepositoryId, cancellationToken);
+                    // The Feature branch itself, not whatever happens to be checked out right now
+                    // (09 SB-2): Remove always deletes this name, so the analysis must judge it, even
+                    // when the worktree has drifted to another branch or a detached commit.
+                    var featureBranchName = row.PinnedTag == null ? info.FeatureName : null;
                     var disk = await InspectWorktreeDiskStatusAsync(
-                        mainPath, row.WorktreePath, row.WorkspaceRepository?.DefaultBranchName, cancellationToken);
+                        mainPath, row.WorktreePath, row.WorkspaceRepository?.DefaultBranchName, featureBranchName, cancellationToken);
                     var live = await ProbeFeatureWorktreeLiveStatusAsync(
                         featureWorkspaceRoot,
                         featureWorkspaceFolder,
@@ -378,6 +382,13 @@ public sealed class WorkspaceFeatureOperations(
                         row,
                         disk.Exists,
                         cancellationToken);
+
+                    // The live current branch, from the Agent; null when detached or when disk status
+                    // is itself Unknown (09 SB-2). Drift is judged against this, never against the
+                    // cached database state, which can be stale.
+                    var checkedOutBranch = disk.StatusUnknown ? null : disk.Branch;
+                    var isOffFeatureBranch = featureBranchName != null
+                        && !string.Equals(checkedOutBranch, featureBranchName, StringComparison.Ordinal);
 
                     planSlots[index] = new RemoveFeatureRepositoryPlan
                     {
@@ -400,7 +411,14 @@ public sealed class WorkspaceFeatureOperations(
                         PullRequestMerged = pr?.MergedAt is not null,
                         IsLocked = disk.IsLocked,
                         LockReason = disk.LockReason,
-                        Warning = ComposeRemoveWarning(row, live, disk)
+                        Warning = ComposeRemoveWarning(row, live, disk),
+                        FeatureBranchName = featureBranchName,
+                        CheckedOutBranch = checkedOutBranch,
+                        IsOffFeatureBranch = isOffFeatureBranch,
+                        FeatureBranchExists = disk.StatusUnknown ? null : disk.FeatureBranchExists,
+                        FeatureBranchAheadOfDefault = disk.StatusUnknown ? null : disk.FeatureBranchAheadOfDefault,
+                        FeatureBranchHasUpstream = disk.StatusUnknown ? null : disk.FeatureBranchHasUpstream,
+                        FeatureBranchAheadOfUpstream = disk.StatusUnknown ? null : disk.FeatureBranchAheadOfUpstream
                     };
                 }
                 finally
@@ -470,7 +488,7 @@ public sealed class WorkspaceFeatureOperations(
                 {
                     using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, cancellationToken);
                     var overlayProgress = BindOverlayProgress(op, progress);
-                    var outcome = await RemoveFeatureCoreAsync(featureContextId, info, options, overlayProgress, linked.Token);
+                    var outcome = await RemoveFeatureCoreAsync(featureContextId, info, options, plan, overlayProgress, linked.Token);
                     tcs.TrySetResult(outcome);
                 }
                 catch (Exception ex)
@@ -491,9 +509,15 @@ public sealed class WorkspaceFeatureOperations(
         WorkspaceFeatureContextId featureContextId,
         WorkspaceFeatureContextInfo info,
         RemoveFeatureOptions options,
+        RemoveFeaturePlan plan,
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken)
     {
+        // Drift (09 SB-2), from the plan already analysed just before this ran: which branch, if any,
+        // the worktree was actually on instead of its Feature branch. Looked up by WorkspaceRepositoryId
+        // below so the removal report can name the kept branch instead of only deleting silently.
+        var driftByWrId = plan.Repositories.ToDictionary(r => r.WorkspaceRepositoryId, r => r);
+
         // D2: the periodic Git Changes sweep must never scan this context's worktrees while they are
         // being deleted below. Disposed in every case (success, failure, cancellation) so monitoring
         // always resumes; the special Workspace context is never paused, so its own sweep is unaffected.
@@ -689,6 +713,14 @@ public sealed class WorkspaceFeatureOperations(
                         }
                     }
 
+                    // 09 SB-2: when the worktree was not on its Feature branch, name the branch that was
+                    // actually kept (or "(detached commit)" when there was none) so the report never
+                    // only says "removed" while leaving an unmerged branch silently behind.
+                    var keptBranchName = driftByWrId.TryGetValue(row.WorkspaceRepositoryId, out var driftPlan)
+                        && driftPlan.IsOffFeatureBranch
+                        ? driftPlan.CheckedOutBranch ?? "(detached commit)"
+                        : null;
+
                     reportByWrId[row.WorkspaceRepositoryId] = new RemoveFeatureRepositoryReport(
                         row.WorkspaceRepositoryId,
                         repoName,
@@ -698,7 +730,8 @@ public sealed class WorkspaceFeatureOperations(
                         worktreeResult?.ResidueRemaining ?? false,
                         worktreeResult?.ResidueFileCount ?? 0,
                         worktreeResult?.ResidueSampleFiles,
-                        worktreeResult?.ResidueMessage);
+                        worktreeResult?.ResidueMessage,
+                        keptBranchName);
                 }
                 finally
                 {
@@ -953,9 +986,11 @@ public sealed class WorkspaceFeatureOperations(
         && plans.All(p =>
             !p.WorktreeStatusUnknown
             && p.LiveStatusEstablished
-            // A null OutgoingCommits count (Agent unreachable, or no upstream to compare against) is
+            // The branch Remove actually deletes is the Feature branch, not whatever is checked out
+            // right now (09 SB-2); EffectiveOutgoingCommits reads the Feature branch's own count for a
+            // non-pinned repo. A null count (Agent unreachable, no upstream, or an older Worker) is
             // unknown, never treated as zero commits pending.
-            && p.OutgoingCommits == 0
+            && p.EffectiveOutgoingCommits == 0
             && !p.HasUncommittedChanges
             && !p.HasStagedChanges
             && !p.HasConflicts
@@ -972,6 +1007,7 @@ public sealed class WorkspaceFeatureOperations(
         string? mainRepositoryPath,
         string? worktreePath,
         string? defaultBranch,
+        string? featureBranch,
         CancellationToken cancellationToken)
     {
         const string unknownReason = "Could not check this repository. Make sure the Worker is running, then try again.";
@@ -987,7 +1023,7 @@ public sealed class WorkspaceFeatureOperations(
         {
             var response = await agentBridge.SendCommandAsync(
                 AgentHubMethods.InspectWorktree,
-                new { mainRepositoryPath, worktreePath, defaultBranch },
+                new { mainRepositoryPath, worktreePath, defaultBranch, featureBranch },
                 cancellationToken);
             if (!response.Success)
                 return WorktreeDiskStatus.Unknown(unknownReason);
@@ -998,7 +1034,9 @@ public sealed class WorkspaceFeatureOperations(
 
             return WorktreeDiskStatus.Known(
                 payload.Exists, payload.IsDirty, payload.HasUpstream, payload.AheadOfUpstream, payload.AheadOfDefault,
-                payload.IsLocked, payload.LockReason);
+                payload.IsLocked, payload.LockReason, payload.Branch,
+                payload.FeatureBranchExists, payload.FeatureBranchAheadOfDefault,
+                payload.FeatureBranchHasUpstream, payload.FeatureBranchAheadOfUpstream);
         }
         catch (Exception ex)
         {
@@ -1379,12 +1417,13 @@ public sealed class WorkspaceFeatureOperations(
     /// <summary>
     /// True when the repo's PR is merged, or it has no commits beyond the default branch and no PR was
     /// ever opened (null/empty number and state). A repo with live commits ahead of default but no PR
-    /// yet is not in this bucket - it still has work pending a pull request. A null AheadOfDefault
-    /// (unknown) is never treated as zero.
+    /// yet is not in this bucket - it still has work pending a pull request. EffectiveAheadOfDefault
+    /// reads the Feature branch's own count for a non-pinned repo (09 SB-2), never the checked-out
+    /// branch; a null count (unknown) is never treated as zero.
     /// </summary>
     private static bool IsPrMergedOrNeverCreated(RemoveFeatureRepositoryPlan p) =>
         p.PullRequestMerged == true
-        || (p.AheadOfDefault == 0 && p.PullRequestNumber is null or 0 && string.IsNullOrWhiteSpace(p.PullRequestState));
+        || (p.EffectiveAheadOfDefault == 0 && p.PullRequestNumber is null or 0 && string.IsNullOrWhiteSpace(p.PullRequestState));
 
     /// <summary>
     /// Forwards progress to the structural overlay operation (so BackgroundJobOverlay updates)

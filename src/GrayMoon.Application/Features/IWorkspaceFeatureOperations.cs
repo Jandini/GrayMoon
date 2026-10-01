@@ -114,4 +114,48 @@ public sealed class RemoveFeatureRepositoryPlan
     /// <summary>Optional lock reason when <see cref="IsLocked"/> is true.</summary>
     public string? LockReason { get; init; }
     public string? Warning { get; init; }
+
+    /// <summary>
+    /// The branch Remove actually deletes for this repository: the Feature's own name, or null for a
+    /// tag-pinned repository (no branch is ever deleted for it). Set regardless of what the worktree
+    /// is currently checked out to (09 SB-2).
+    /// </summary>
+    public string? FeatureBranchName { get; init; }
+
+    /// <summary>Live current branch short name from the Agent; null when detached or unknown.</summary>
+    public string? CheckedOutBranch { get; init; }
+
+    /// <summary>
+    /// True for a non-pinned repository whose <see cref="CheckedOutBranch"/> differs from
+    /// <see cref="FeatureBranchName"/> (ordinal comparison; a null <see cref="CheckedOutBranch"/>
+    /// counts as different). Always false for a tag-pinned repository (09 SB-2).
+    /// </summary>
+    public bool IsOffFeatureBranch { get; init; }
+
+    /// <summary>True when <see cref="FeatureBranchName"/> exists as a ref, live from the Agent. Null when there is no Feature branch to check, or unknown (older Worker).</summary>
+    public bool? FeatureBranchExists { get; init; }
+
+    /// <summary>Commits on the Feature branch not on the default branch, live from the Agent. Null means unknown, never treated as zero (09 SB-2).</summary>
+    public int? FeatureBranchAheadOfDefault { get; init; }
+
+    /// <summary>True when the Feature branch has a configured upstream, live from the Agent. Null when unknown.</summary>
+    public bool? FeatureBranchHasUpstream { get; init; }
+
+    /// <summary>Commits on the Feature branch not on its upstream, live from the Agent. Null when unknown.</summary>
+    public int? FeatureBranchAheadOfUpstream { get; init; }
+
+    /// <summary>
+    /// Commits ahead of the default branch for whichever branch Remove will actually delete: the
+    /// Feature branch for a non-pinned repository (even when the worktree has drifted to another
+    /// branch), or this repository's own <see cref="AheadOfDefault"/> when there is no Feature branch
+    /// to judge (a tag-pinned repository, or a plan built without setting <see cref="FeatureBranchName"/>).
+    /// Null means unknown, never zero (09 SB-2).
+    /// </summary>
+    public int? EffectiveAheadOfDefault => FeatureBranchName is null ? AheadOfDefault : FeatureBranchAheadOfDefault;
+
+    /// <summary>
+    /// Commits not on its upstream for whichever branch Remove will actually delete, with the same
+    /// fallback rule as <see cref="EffectiveAheadOfDefault"/> (09 SB-2).
+    /// </summary>
+    public int? EffectiveOutgoingCommits => FeatureBranchName is null ? OutgoingCommits : FeatureBranchAheadOfUpstream;
 }

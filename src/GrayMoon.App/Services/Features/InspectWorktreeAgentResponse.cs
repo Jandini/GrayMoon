@@ -11,6 +11,10 @@ internal sealed class InspectWorktreeAgentResponse
     [JsonPropertyName("exists")]
     public bool Exists { get; set; }
 
+    /// <summary>Current branch short name, or null when HEAD is detached or the Agent did not report it (09 SB-2).</summary>
+    [JsonPropertyName("branch")]
+    public string? Branch { get; set; }
+
     /// <summary>True when the worktree is locked (<c>git worktree lock</c>). False (default) on an older Worker that does not report this (D5).</summary>
     [JsonPropertyName("isLocked")]
     public bool IsLocked { get; set; }
@@ -37,4 +41,20 @@ internal sealed class InspectWorktreeAgentResponse
     /// <summary>Null on success; otherwise a short description of what could not be determined.</summary>
     [JsonPropertyName("error")]
     public string? Error { get; set; }
+
+    /// <summary>True when the requested Feature branch exists. Null when none was requested, or the Agent is older than this unit (09 SB-2).</summary>
+    [JsonPropertyName("featureBranchExists")]
+    public bool? FeatureBranchExists { get; set; }
+
+    /// <summary>Commits on the Feature branch not on the default branch. Null when the Feature branch or that ref is missing, none was requested, or an older Agent.</summary>
+    [JsonPropertyName("featureBranchAheadOfDefault")]
+    public int? FeatureBranchAheadOfDefault { get; set; }
+
+    /// <summary>True when the Feature branch has a configured upstream. Null when it does not exist, none was requested, or an older Agent.</summary>
+    [JsonPropertyName("featureBranchHasUpstream")]
+    public bool? FeatureBranchHasUpstream { get; set; }
+
+    /// <summary>Commits on the Feature branch not on its upstream. Null when there is no upstream, the branch is missing, none was requested, or an older Agent.</summary>
+    [JsonPropertyName("featureBranchAheadOfUpstream")]
+    public int? FeatureBranchAheadOfUpstream { get; set; }
 }

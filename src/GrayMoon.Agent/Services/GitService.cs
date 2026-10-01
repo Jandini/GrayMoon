@@ -1875,6 +1875,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         string mainRepositoryPath,
         string worktreePath,
         string? defaultBranch,
+        string? featureBranch,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(mainRepositoryPath) || !Directory.Exists(mainRepositoryPath))
@@ -1925,6 +1926,26 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
 
         var aheadOfDefault = await ProbeAheadOfDefaultAsync(canonicalWorktreePath, defaultBranch, ct);
 
+        bool? featureBranchExists = null;
+        string? featureBranchSha = null;
+        int? featureBranchAheadOfDefault = null;
+        bool? featureBranchHasUpstream = null;
+        int? featureBranchAheadOfUpstream = null;
+        if (!string.IsNullOrWhiteSpace(featureBranch))
+        {
+            featureBranchSha = await GetRevisionShaAsync(canonicalWorktreePath, $"refs/heads/{featureBranch}", ct);
+            featureBranchExists = featureBranchSha != null;
+            if (featureBranchExists == true)
+            {
+                featureBranchAheadOfDefault = await ProbeAheadOfDefaultForRefAsync(
+                    canonicalWorktreePath, defaultBranch, $"refs/heads/{featureBranch}", ct);
+                var (featureUpstreamKnown, featureAhead) = await ProbeFeatureBranchUpstreamCountAsync(
+                    canonicalWorktreePath, featureBranch, ct);
+                featureBranchHasUpstream = featureUpstreamKnown;
+                featureBranchAheadOfUpstream = featureAhead;
+            }
+        }
+
         return new WorktreeInspectionResult(
             isRegistered,
             true,
@@ -1941,7 +1962,87 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             aheadOfUpstream,
             behindUpstream,
             aheadOfDefault,
-            statusOk ? null : statusError);
+            statusOk ? null : statusError,
+            featureBranchExists,
+            featureBranchSha,
+            featureBranchAheadOfDefault,
+            featureBranchHasUpstream,
+            featureBranchAheadOfUpstream);
+    }
+
+    /// <summary>
+    /// Like <see cref="ProbeAheadOfDefaultAsync"/> but against an arbitrary ref instead of always
+    /// HEAD, so a Feature branch can be judged without checking it out (09 SB-2, plan unit I1).
+    /// </summary>
+    private async Task<int?> ProbeAheadOfDefaultForRefAsync(string repoPath, string? defaultBranch, string compareRef, CancellationToken ct)
+    {
+        var defaultRef = ToOriginBranchRef(defaultBranch);
+        if (defaultRef == null || !await RefExistsAsync(repoPath, defaultRef, ct))
+            return null;
+
+        var (exitCode, stdout, stderr) = await runner.RunAsync(
+            "git",
+            $"rev-list --count {defaultRef}..{compareRef}",
+            repoPath,
+            ct,
+            streamStderrAsStdout: true,
+            mirrorFailureOutputAsStderr: false);
+        if (exitCode != 0)
+        {
+            logger.LogWarning("Git rev-list (InspectWorktree Feature branch ahead of default) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
+            return null;
+        }
+
+        return int.TryParse((stdout ?? "").Trim(), out var count) ? count : (int?)null;
+    }
+
+    /// <summary>
+    /// Like <see cref="ProbeUpstreamCountsAsync"/> but for an arbitrary local branch instead of
+    /// always HEAD, so a Feature branch's upstream state can be judged without checking it out
+    /// (09 SB-2, plan unit I1). Behind-count is not needed by any caller, so it is not computed.
+    /// </summary>
+    private async Task<(bool HasUpstream, int? Ahead)> ProbeFeatureBranchUpstreamCountAsync(string repoPath, string branchName, CancellationToken ct)
+    {
+        var upstreamRef = await GetUpstreamRefAsync(repoPath, branchName, ct);
+        if (string.IsNullOrWhiteSpace(upstreamRef) || !await RefExistsAsync(repoPath, upstreamRef, ct))
+            return (false, null);
+
+        var (exitCode, stdout, stderr) = await runner.RunAsync(
+            "git",
+            $"rev-list --left-right --count {upstreamRef}...refs/heads/{branchName}",
+            repoPath,
+            ct,
+            streamStderrAsStdout: true,
+            mirrorFailureOutputAsStderr: false);
+        if (exitCode != 0)
+        {
+            logger.LogWarning("Git rev-list --left-right (InspectWorktree Feature branch upstream count) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
+            return (true, null);
+        }
+
+        var parts = (stdout ?? "").Trim().Split('\t', StringSplitOptions.RemoveEmptyEntries);
+        var ahead = parts.Length >= 2 && int.TryParse(parts[1], out var a) ? a : (int?)null;
+        return (true, ahead);
+    }
+
+    /// <summary>
+    /// SHA of a revision if it exists, or null. Uses <c>rev-parse --verify --quiet</c> so a missing
+    /// ref is a silent non-zero exit instead of a visible Git error (same reasoning as <see cref="RefExistsAsync"/>).
+    /// </summary>
+    private async Task<string?> GetRevisionShaAsync(string repoPath, string revision, CancellationToken ct)
+    {
+        var (exitCode, stdout, _) = await runner.RunAsync(
+            "git",
+            $"rev-parse --verify --quiet {revision}",
+            repoPath,
+            ct,
+            streamStderrAsStdout: true,
+            mirrorFailureOutputAsStderr: false);
+        if (exitCode != 0)
+            return null;
+
+        var sha = (stdout ?? "").Trim();
+        return string.IsNullOrWhiteSpace(sha) ? null : sha;
     }
 
     private async Task<(bool Success, int Staged, int Unstaged, int Untracked, int Conflicts, string? Error)> ProbeWorktreeStatusAsync(

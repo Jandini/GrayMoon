@@ -160,11 +160,15 @@ public interface IGitService
     /// <summary>
     /// Reports everything removal needs to know about one worktree, checked live: registration,
     /// existence, lock state, dirty state, and commit counts vs upstream and the default branch.
-    /// Returns facts only (no exception) even when the worktree folder does not exist.
+    /// Returns facts only (no exception) even when the worktree folder does not exist. When
+    /// <paramref name="featureBranch"/> is set, the result also reports that branch's own facts
+    /// (<c>refs/heads/&lt;featureBranch&gt;</c>), computed from refs without checking anything out
+    /// (09 SB-2, plan unit I1); null leaves the Feature-branch fields null and nothing else changes.
     /// </summary>
     Task<WorktreeInspectionResult> InspectWorktreeAsync(
         string mainRepositoryPath,
         string worktreePath,
         string? defaultBranch,
+        string? featureBranch,
         CancellationToken ct);
 }

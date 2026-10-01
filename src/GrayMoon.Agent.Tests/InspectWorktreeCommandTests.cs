@@ -1,5 +1,7 @@
+using System.Text.Json;
 using GrayMoon.Agent.Commands;
 using GrayMoon.Agent.Jobs.Requests;
+using GrayMoon.Agent.Jobs.Response;
 using GrayMoon.Agent.Services;
 using GrayMoon.Common;
 using GrayMoon.Common.Git;
@@ -255,6 +257,141 @@ public sealed class InspectWorktreeCommandTests : IDisposable
         Assert.Null(result.AheadOfUpstream);
         Assert.Null(result.BehindUpstream);
         Assert.Equal(2, result.AheadOfDefault);
+    }
+
+    // ---- Feature branch facts (09 SB-2, plan unit I1) --------------------------------------------
+
+    [Fact]
+    public async Task Feature_branch_ahead_of_default_is_reported_while_worktree_is_on_another_branch()
+    {
+        var mainPath = Path.Combine(_root, "main8");
+        Directory.CreateDirectory(mainPath);
+        await InitGitWithCommitAsync(mainPath);
+        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+        await RunGitAsync(mainPath, "update-ref refs/remotes/origin/main main");
+
+        var worktreePath = Path.Combine(_root, "features", "drift", "main8");
+        await _create.ExecuteAsync(new CreateGitWorktreeRequest
+        {
+            MainRepositoryPath = mainPath,
+            WorktreePath = worktreePath,
+            BranchName = "my-feature",
+            BaseCommitSha = head,
+        });
+        await File.WriteAllTextAsync(Path.Combine(worktreePath, "a.txt"), "1\n");
+        await RunGitAsync(worktreePath, "add a.txt");
+        await RunGitAsync(worktreePath, "commit -m commit-a");
+        await File.WriteAllTextAsync(Path.Combine(worktreePath, "b.txt"), "2\n");
+        await RunGitAsync(worktreePath, "add b.txt");
+        await RunGitAsync(worktreePath, "commit -m commit-b");
+        // Drift: switch the worktree to another branch, leaving "my-feature" behind.
+        await RunGitAsync(worktreePath, "checkout -b side");
+
+        var result = await _inspect.ExecuteAsync(new InspectWorktreeRequest
+        {
+            MainRepositoryPath = mainPath,
+            WorktreePath = worktreePath,
+            DefaultBranch = "main",
+            FeatureBranch = "my-feature",
+        });
+
+        Assert.Equal("side", result.Branch);
+        Assert.True(result.FeatureBranchExists);
+        Assert.Equal(2, result.FeatureBranchAheadOfDefault);
+        Assert.False(result.FeatureBranchHasUpstream);
+        Assert.Null(result.FeatureBranchAheadOfUpstream);
+    }
+
+    [Fact]
+    public async Task Missing_Feature_branch_reports_FeatureBranchExists_false()
+    {
+        var mainPath = Path.Combine(_root, "main9");
+        Directory.CreateDirectory(mainPath);
+        await InitGitWithCommitAsync(mainPath);
+        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+
+        var worktreePath = Path.Combine(_root, "features", "gone-feat", "main9");
+        await _create.ExecuteAsync(new CreateGitWorktreeRequest
+        {
+            MainRepositoryPath = mainPath,
+            WorktreePath = worktreePath,
+            BranchName = "worktree-branch",
+            BaseCommitSha = head,
+        });
+
+        var result = await _inspect.ExecuteAsync(new InspectWorktreeRequest
+        {
+            MainRepositoryPath = mainPath,
+            WorktreePath = worktreePath,
+            DefaultBranch = "main",
+            FeatureBranch = "never-created-feature",
+        });
+
+        Assert.False(result.FeatureBranchExists);
+        Assert.Null(result.FeatureBranchSha);
+        Assert.Null(result.FeatureBranchAheadOfDefault);
+        Assert.Null(result.FeatureBranchHasUpstream);
+        Assert.Null(result.FeatureBranchAheadOfUpstream);
+    }
+
+    [Fact]
+    public async Task No_FeatureBranch_in_request_leaves_all_Feature_branch_fields_null()
+    {
+        var mainPath = Path.Combine(_root, "main10");
+        Directory.CreateDirectory(mainPath);
+        await InitGitWithCommitAsync(mainPath);
+        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+
+        var worktreePath = Path.Combine(_root, "features", "no-feature-branch", "main10");
+        await _create.ExecuteAsync(new CreateGitWorktreeRequest
+        {
+            MainRepositoryPath = mainPath,
+            WorktreePath = worktreePath,
+            BranchName = "my-feature2",
+            BaseCommitSha = head,
+        });
+
+        var result = await _inspect.ExecuteAsync(new InspectWorktreeRequest
+        {
+            MainRepositoryPath = mainPath,
+            WorktreePath = worktreePath,
+            DefaultBranch = "main",
+        });
+
+        Assert.Null(result.FeatureBranchExists);
+        Assert.Null(result.FeatureBranchSha);
+        Assert.Null(result.FeatureBranchAheadOfDefault);
+        Assert.Null(result.FeatureBranchHasUpstream);
+        Assert.Null(result.FeatureBranchAheadOfUpstream);
+    }
+
+    [Fact]
+    public void Old_app_request_json_without_featureBranch_still_deserializes()
+    {
+        const string oldShapeJson = """{"mainRepositoryPath":"C:\\repo","worktreePath":"C:\\repo\\wt","defaultBranch":"main"}""";
+
+        var request = JsonSerializer.Deserialize<InspectWorktreeRequest>(oldShapeJson, AgentJsonOptions.SerializerOptions);
+
+        Assert.NotNull(request);
+        Assert.Equal("main", request!.DefaultBranch);
+        Assert.Null(request.FeatureBranch);
+    }
+
+    [Fact]
+    public void Old_worker_response_json_without_featureBranch_fields_still_deserializes()
+    {
+        const string oldShapeJson = """{"isRegistered":true,"exists":true,"branch":"main"}""";
+
+        var response = JsonSerializer.Deserialize<InspectWorktreeResponse>(oldShapeJson, AgentJsonOptions.SerializerOptions);
+
+        Assert.NotNull(response);
+        Assert.True(response!.Exists);
+        Assert.Equal("main", response.Branch);
+        Assert.Null(response.FeatureBranchExists);
+        Assert.Null(response.FeatureBranchSha);
+        Assert.Null(response.FeatureBranchAheadOfDefault);
+        Assert.Null(response.FeatureBranchHasUpstream);
+        Assert.Null(response.FeatureBranchAheadOfUpstream);
     }
 
     private static async Task InitGitWithCommitAsync(string repoPath)

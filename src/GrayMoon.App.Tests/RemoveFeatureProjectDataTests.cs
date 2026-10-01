@@ -21,6 +21,13 @@ public sealed class RemoveFeatureProjectDataTests
         hasUpstream = true,
         aheadOfUpstream = 0,
         aheadOfDefault = 0,
+        // Both tests in this file remove only the "feat-remove" context (never "feat-keep", which is
+        // never analysed or removed here), so the checked-out branch matches it, not drifted.
+        branch = "feat-remove",
+        featureBranchExists = true,
+        featureBranchAheadOfDefault = 0,
+        featureBranchHasUpstream = true,
+        featureBranchAheadOfUpstream = 0,
     };
 
     private static object SyncResponse() => new

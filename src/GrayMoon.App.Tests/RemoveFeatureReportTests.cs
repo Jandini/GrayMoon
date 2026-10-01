@@ -23,6 +23,11 @@ public sealed class RemoveFeatureReportTests
         hasUpstream = true,
         aheadOfUpstream = 0,
         aheadOfDefault = 0,
+        branch = "feat-refresh",
+        featureBranchExists = true,
+        featureBranchAheadOfDefault = 0,
+        featureBranchHasUpstream = true,
+        featureBranchAheadOfUpstream = 0,
     };
 
     [Fact]
@@ -87,6 +92,47 @@ public sealed class RemoveFeatureReportTests
         Assert.Equal(2, repo.ResidueFileCount);
         Assert.Contains("build.log", repo.ResidueSampleFiles!);
         Assert.Contains("could not be deleted", repo.ResidueMessage);
+    }
+
+    [Fact]
+    public async Task Drifted_repository_reports_the_checked_out_branch_as_kept_and_still_deletes_the_Feature_branch()
+    {
+        // 09 SB-2: the worktree was switched to "side" instead of its Feature branch. Remove still
+        // deletes the Feature branch (same as before); the report must say "side" was kept, not just
+        // "removed", so the owner is not left believing the worktree's actual branch was deleted too.
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var featureContextId = await SeedRemovableFeatureAsync(ctx);
+
+        ctx.AgentBridge.Respond(AgentHubMethods.InspectWorktree, new
+        {
+            exists = true,
+            isDirty = false,
+            branch = "side",
+            hasUpstream = true,
+            aheadOfUpstream = 0,
+            aheadOfDefault = 0,
+            featureBranchExists = true,
+            featureBranchAheadOfDefault = 1,
+            featureBranchHasUpstream = false,
+            featureBranchAheadOfUpstream = (int?)null,
+        });
+        ctx.AgentBridge.Respond(AgentHubMethods.RemoveGitWorktree, new { success = true });
+        ctx.AgentBridge.Respond("DeleteBranch", new { success = true });
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var result = await ops.RemoveFeatureAsync(
+            featureContextId,
+            new RemoveFeatureOptions { AllowDiscardUncommitted = true, AllowForceDeleteLocalBranches = true });
+
+        Assert.True(result.Success, result.Error);
+        var repo = Assert.Single(result.RemoveFeatureReport!);
+        Assert.True(repo.WorktreeRemoved);
+        Assert.Equal(RemoveFeatureBranchOutcome.Deleted, repo.BranchOutcome);
+        Assert.Equal("side", repo.KeptBranchName);
+        Assert.Contains(
+            ctx.AgentBridge.Calls,
+            c => c.Command == "DeleteBranch" && c.Args.GetType().GetProperty("branchName")!.GetValue(c.Args) as string == "feat-refresh");
     }
 
     [Fact]
@@ -217,9 +263,14 @@ public sealed class RemoveFeatureReportTests
             isLocked = true,
             lockReason = "testing",
             isDirty = false,
+            branch = "feat-refresh",
             hasUpstream = true,
             aheadOfUpstream = 0,
             aheadOfDefault = 0,
+            featureBranchExists = true,
+            featureBranchAheadOfDefault = 0,
+            featureBranchHasUpstream = true,
+            featureBranchAheadOfUpstream = 0,
         });
 
         await using var scope = ctx.CreateScope();
@@ -267,9 +318,14 @@ public sealed class RemoveFeatureReportTests
             isLocked = true,
             lockReason = "testing",
             isDirty = false,
+            branch = "feat-refresh",
             hasUpstream = true,
             aheadOfUpstream = 0,
             aheadOfDefault = 0,
+            featureBranchExists = true,
+            featureBranchAheadOfDefault = 0,
+            featureBranchHasUpstream = true,
+            featureBranchAheadOfUpstream = 0,
         });
         ctx.AgentBridge.Respond(AgentHubMethods.RemoveGitWorktree, new { success = true });
         ctx.AgentBridge.Respond("DeleteBranch", new { success = true });

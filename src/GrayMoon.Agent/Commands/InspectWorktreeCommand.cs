@@ -12,7 +12,7 @@ public sealed class InspectWorktreeCommand(IGitService git)
         var mainPath = request.MainRepositoryPath ?? throw new ArgumentException("mainRepositoryPath required");
         var worktreePath = request.WorktreePath ?? throw new ArgumentException("worktreePath required");
 
-        var result = await git.InspectWorktreeAsync(mainPath, worktreePath, request.DefaultBranch, cancellationToken);
+        var result = await git.InspectWorktreeAsync(mainPath, worktreePath, request.DefaultBranch, request.FeatureBranch, cancellationToken);
 
         return new InspectWorktreeResponse
         {
@@ -32,6 +32,11 @@ public sealed class InspectWorktreeCommand(IGitService git)
             BehindUpstream = result.BehindUpstream,
             AheadOfDefault = result.AheadOfDefault,
             Error = result.Error,
+            FeatureBranchExists = result.FeatureBranchExists,
+            FeatureBranchSha = result.FeatureBranchSha,
+            FeatureBranchAheadOfDefault = result.FeatureBranchAheadOfDefault,
+            FeatureBranchHasUpstream = result.FeatureBranchHasUpstream,
+            FeatureBranchAheadOfUpstream = result.FeatureBranchAheadOfUpstream,
         };
     }
 }

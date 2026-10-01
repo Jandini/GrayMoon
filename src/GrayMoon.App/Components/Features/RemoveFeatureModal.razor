@@ -87,12 +87,19 @@
                             }
                             @if (ShowForceCheckbox)
                             {
-                                <div class="form-check mb-2">
+                                <div class="form-check mb-1">
                                     <input class="form-check-input" type="checkbox" id="allow-force" @bind="_allowForce" disabled="@_analyzing" />
                                     <label class="form-check-label" for="allow-force">
-                                        Delete local branches that have commits not in the default branch (@BranchesNotInDefaultRepositories.Count)
+                                        Delete local Feature branches that have commits not in the default branch (@BranchesNotInDefaultRepositories.Count)
                                     </label>
                                 </div>
+                                <ul class="list-unstyled mb-2 ms-4">
+                                    @foreach (var repo in BranchesNotInDefaultRepositories)
+                                    {
+                                        var count = repo.EffectiveAheadOfDefault ?? 0;
+                                        <li class="text-muted small">@repo.RepositoryName: @(repo.FeatureBranchName ?? repo.BranchName) (@count commit@(count == 1 ? "" : "s"))</li>
+                                    }
+                                </ul>
                             }
                         }
                         @if (!AnyRepoStatusUnknown && ShowUnlockCheckbox)
@@ -177,6 +184,11 @@
                 else if (repo.BranchOutcome == RemoveFeatureBranchOutcome.Failed)
                     warnings.Add($"{repo.RepositoryName}: local branch delete failed. {repo.BranchMessage}".TrimEnd());
 
+                // 09 SB-2: the worktree was on another branch (or a detached commit) instead of its
+                // Feature branch; that branch was never deleted and is still in the Workspace.
+                if (!string.IsNullOrWhiteSpace(repo.KeptBranchName))
+                    warnings.Add($"{repo.RepositoryName}: {repo.KeptBranchName} kept (this repository was not on its Feature branch).");
+
                 if (repo.ResidueRemaining)
                 {
                     var fileWord = repo.ResidueFileCount == 1 ? "file" : "files";
@@ -217,7 +229,7 @@
         repo.HasUncommittedChanges || repo.HasStagedChanges || repo.HasConflicts;
 
     internal static bool HasUnmergedBranchAheadOfDefault(RemoveFeatureRepositoryPlan repo) =>
-        (repo.AheadOfDefault ?? 0) > 0 && repo.PullRequestMerged != true;
+        (repo.EffectiveAheadOfDefault ?? 0) > 0 && repo.PullRequestMerged != true;
 
     internal static bool HasLockedWorktree(RemoveFeatureRepositoryPlan repo) => repo.IsLocked;
 
@@ -289,6 +301,20 @@
     private static string DescribeRepository(RemoveFeatureRepositoryPlan repo)
     {
         var parts = new List<string>();
+
+        // 09 SB-2: tell the owner exactly which branch is kept and which is deleted, before anything
+        // about worktree or commit state, since this changes what "safe to remove" means below.
+        if (repo.IsOffFeatureBranch)
+        {
+            var current = string.IsNullOrWhiteSpace(repo.CheckedOutBranch) ? "a detached commit" : $"`{repo.CheckedOutBranch}`";
+            parts.Add(
+                $"This repository is on {current}, not on its Feature branch `{repo.FeatureBranchName}`. " +
+                $"{current} is kept; `{repo.FeatureBranchName}` is deleted.");
+        }
+        else if (repo.FeatureBranchName is not null && repo.FeatureBranchExists == false)
+        {
+            parts.Add("The Feature branch is already gone; nothing to delete.");
+        }
 
         if (repo.WorktreeStatusUnknown)
         {

@@ -71,4 +71,28 @@ public sealed class InspectWorktreeResponse
     /// <summary>Null on success; otherwise a short description of what could not be determined.</summary>
     [JsonPropertyName("error")]
     public string? Error { get; set; }
+
+    /// <summary>
+    /// True when <c>refs/heads/&lt;featureBranch&gt;</c> exists, from the request's optional
+    /// <see cref="GrayMoon.Agent.Jobs.Requests.InspectWorktreeRequest.FeatureBranch"/>. Null when that
+    /// request field was not set (09 SB-2, plan unit I1).
+    /// </summary>
+    [JsonPropertyName("featureBranchExists")]
+    public bool? FeatureBranchExists { get; set; }
+
+    /// <summary>HEAD commit SHA of the Feature branch; null when it does not exist or was not requested.</summary>
+    [JsonPropertyName("featureBranchSha")]
+    public string? FeatureBranchSha { get; set; }
+
+    /// <summary>Commits on the Feature branch not on <c>origin/&lt;defaultBranch&gt;</c>; null when the Feature branch or that ref is missing, or it was not requested.</summary>
+    [JsonPropertyName("featureBranchAheadOfDefault")]
+    public int? FeatureBranchAheadOfDefault { get; set; }
+
+    /// <summary>True when the Feature branch has a configured upstream; null when it does not exist or was not requested.</summary>
+    [JsonPropertyName("featureBranchHasUpstream")]
+    public bool? FeatureBranchHasUpstream { get; set; }
+
+    /// <summary>Commits on the Feature branch not on its upstream; null when there is no upstream, the branch is missing, or it was not requested.</summary>
+    [JsonPropertyName("featureBranchAheadOfUpstream")]
+    public int? FeatureBranchAheadOfUpstream { get; set; }
 }
