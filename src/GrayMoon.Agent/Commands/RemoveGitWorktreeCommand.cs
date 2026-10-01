@@ -12,11 +12,13 @@ public sealed class RemoveGitWorktreeCommand(IGitService git)
         var mainPath = request.MainRepositoryPath ?? throw new ArgumentException("mainRepositoryPath required");
         var worktreePath = request.WorktreePath ?? throw new ArgumentException("worktreePath required");
 
-        var (success, alreadyRemoved, errorCode, errorMessage) = await git.RemoveWorktreeAsync(
+        var (success, alreadyRemoved, errorCode, errorMessage, residue) = await git.RemoveWorktreeAsync(
             mainPath,
             worktreePath,
             force: request.Force,
-            cancellationToken);
+            cancellationToken,
+            featureRootPath: request.FeatureRootPath,
+            featureStorageRoot: request.FeatureStorageRoot);
 
         return new RemoveGitWorktreeResponse
         {
@@ -24,6 +26,10 @@ public sealed class RemoveGitWorktreeCommand(IGitService git)
             AlreadyRemoved = alreadyRemoved,
             ErrorCode = errorCode,
             ErrorMessage = errorMessage,
+            ResidueRemaining = residue.ResidueRemaining,
+            ResidueFileCount = residue.ResidueFileCount,
+            ResidueSampleFiles = residue.ResidueSampleFiles.Count > 0 ? [.. residue.ResidueSampleFiles] : null,
+            ResidueMessage = residue.ResidueMessage,
         };
     }
 }

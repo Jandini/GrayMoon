@@ -137,12 +137,21 @@ public interface IGitService
     /// <summary>
     /// Removes a linked worktree. When <paramref name="force"/> is false uses a clean remove;
     /// force is only for callers that have already authorized discard of dirty state.
+    /// After the Git-level remove (or when the path was already unregistered), if the worktree
+    /// folder still has files, deletes them with a custom walk (retries, reparse-point-safe) only
+    /// when every safety guard passes for <paramref name="featureRootPath"/> and
+    /// <paramref name="featureStorageRoot"/>; otherwise the leftover is only reported.
+    /// When <paramref name="featureRootPath"/> becomes empty afterward, it is removed too.
+    /// Without <paramref name="featureRootPath"/> and <paramref name="featureStorageRoot"/>, no
+    /// residue is deleted, matching today's behaviour for an old caller.
     /// </summary>
-    Task<(bool Success, bool AlreadyRemoved, string? ErrorCode, string? ErrorMessage)> RemoveWorktreeAsync(
+    Task<(bool Success, bool AlreadyRemoved, string? ErrorCode, string? ErrorMessage, WorktreeResidueResult Residue)> RemoveWorktreeAsync(
         string mainRepositoryPath,
         string worktreePath,
         bool force,
-        CancellationToken ct);
+        CancellationToken ct,
+        string? featureRootPath = null,
+        string? featureStorageRoot = null);
 
     /// <summary>
     /// Reports everything removal needs to know about one worktree, checked live: registration,

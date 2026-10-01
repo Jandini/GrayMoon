@@ -1436,7 +1436,15 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
                 $"Branch '{branchName}' is already checked out at '{branchOccupied.WorktreePath}'.");
         }
 
-        if (Directory.Exists(canonicalWorktreePath) || File.Exists(canonicalWorktreePath))
+        if (File.Exists(canonicalWorktreePath))
+        {
+            return (false, null, false, "PathExists",
+                $"Worktree path already exists on disk: {canonicalWorktreePath}");
+        }
+
+        // An existing, empty folder is allowed (D1): residue cleanup can legitimately leave an empty
+        // worktree folder behind, and git worktree add works fine with an empty target directory.
+        if (Directory.Exists(canonicalWorktreePath) && Directory.EnumerateFileSystemEntries(canonicalWorktreePath).Any())
         {
             return (false, null, false, "PathExists",
                 $"Worktree path already exists on disk: {canonicalWorktreePath}");
@@ -1487,16 +1495,18 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return (true, created, false, null, null);
     }
 
-    public async Task<(bool Success, bool AlreadyRemoved, string? ErrorCode, string? ErrorMessage)> RemoveWorktreeAsync(
+    public async Task<(bool Success, bool AlreadyRemoved, string? ErrorCode, string? ErrorMessage, WorktreeResidueResult Residue)> RemoveWorktreeAsync(
         string mainRepositoryPath,
         string worktreePath,
         bool force,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? featureRootPath = null,
+        string? featureStorageRoot = null)
     {
         if (string.IsNullOrWhiteSpace(mainRepositoryPath) || !Directory.Exists(mainRepositoryPath))
-            return (false, false, "RepositoryNotFound", "Repository not found.");
+            return (false, false, "RepositoryNotFound", "Repository not found.", WorktreeResidueResult.None);
         if (string.IsNullOrWhiteSpace(worktreePath))
-            return (false, false, "InvalidWorktreePath", "worktreePath is required.");
+            return (false, false, "InvalidWorktreePath", "worktreePath is required.", WorktreeResidueResult.None);
 
         string canonicalWorktreePath;
         try
@@ -1505,25 +1515,27 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         }
         catch (Exception ex)
         {
-            return (false, false, "InvalidWorktreePath", ex.Message);
+            return (false, false, "InvalidWorktreePath", ex.Message, WorktreeResidueResult.None);
         }
 
         var (listOk, worktrees, listCode, listError) = await ListWorktreesAsync(mainRepositoryPath, ct);
         if (!listOk)
-            return (false, false, listCode, listError);
+            return (false, false, listCode, listError, WorktreeResidueResult.None);
 
         var existing = GitWorktreeOccupancy.FindByPath(worktrees, canonicalWorktreePath);
         if (existing == null)
         {
             logger.LogInformation("Worktree {WorktreePath} already absent from inventory; treating remove as success.", canonicalWorktreePath);
-            return (true, true, null, null);
+            var residueWhenAlreadyGone = await RemoveWorktreeResidueAsync(
+                mainRepositoryPath, canonicalWorktreePath, featureRootPath, featureStorageRoot, isRegisteredWorktree: false, ct);
+            return (true, true, null, null, residueWhenAlreadyGone);
         }
 
         // Never remove the main (first / primary) worktree via this primitive.
         var primary = worktrees.FirstOrDefault(w => !w.IsBare && !string.IsNullOrWhiteSpace(w.WorktreePath));
         if (primary != null && GitWorktreeOccupancy.PathsEqual(primary.WorktreePath, canonicalWorktreePath))
         {
-            return (false, false, "CannotRemovePrimary", "Cannot remove the primary repository worktree.");
+            return (false, false, "CannotRemovePrimary", "Cannot remove the primary repository worktree.", WorktreeResidueResult.None);
         }
 
         var args = force
@@ -1531,26 +1543,315 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             : new[] { "worktree", "remove", canonicalWorktreePath };
 
         var (exitCode, stdout, stderr) = await runner.RunAsync("git", args, mainRepositoryPath, null, ct);
-        if (exitCode != 0)
-        {
-            var error = CombineOutput(stdout, stderr) ?? "git worktree remove failed";
-            logger.LogError(
-                "Git worktree remove failed for {RepoPath}. Path={WorktreePath}, Force={Force}, ExitCode={ExitCode}",
-                mainRepositoryPath, canonicalWorktreePath, force, exitCode);
-            return (false, false, "GitFailed", error);
-        }
+        var gitError = exitCode != 0 ? CombineOutput(stdout, stderr) ?? "git worktree remove failed" : null;
 
         var (verifyOk, after, verifyCode, verifyError) = await ListWorktreesAsync(mainRepositoryPath, ct);
         if (!verifyOk)
-            return (false, false, verifyCode, verifyError);
+        {
+            if (gitError != null)
+                return (false, false, "GitFailed", gitError, WorktreeResidueResult.None);
+            return (false, false, verifyCode, verifyError, WorktreeResidueResult.None);
+        }
 
         if (GitWorktreeOccupancy.FindByPath(after, canonicalWorktreePath) != null)
         {
-            return (false, false, "VerifyFailed", "Worktree remove reported success but path is still listed.");
+            // Still registered: git genuinely refused (for example dirty without force).
+            logger.LogError(
+                "Git worktree remove failed for {RepoPath}. Path={WorktreePath}, Force={Force}, ExitCode={ExitCode}",
+                mainRepositoryPath, canonicalWorktreePath, force, exitCode);
+            return gitError != null
+                ? (false, false, "GitFailed", gitError, WorktreeResidueResult.None)
+                : (false, false, "VerifyFailed", "Worktree remove reported success but path is still listed.", WorktreeResidueResult.None);
         }
 
-        logger.LogInformation("Git worktree removed for {RepoPath}. Path={WorktreePath}, Force={Force}", mainRepositoryPath, canonicalWorktreePath, force);
-        return (true, false, null, null);
+        // Git unregistered the worktree either way. On Windows, deleting the directory itself can fail
+        // (for example a file still open elsewhere) even though git already removed its own bookkeeping;
+        // residue cleanup below retries the folder and reports the truth instead of a bare git error.
+        if (gitError != null)
+        {
+            logger.LogWarning(
+                "Git worktree remove exited {ExitCode} for {WorktreePath} but the worktree is unregistered; checking for leftover files. {Error}",
+                exitCode, canonicalWorktreePath, gitError);
+        }
+        else
+        {
+            logger.LogInformation("Git worktree removed for {RepoPath}. Path={WorktreePath}, Force={Force}", mainRepositoryPath, canonicalWorktreePath, force);
+        }
+
+        var residue = await RemoveWorktreeResidueAsync(
+            mainRepositoryPath, canonicalWorktreePath, featureRootPath, featureStorageRoot, isRegisteredWorktree: false, ct);
+        return (true, false, null, null, residue);
+    }
+
+    /// <summary>
+    /// After Git's own worktree removal, deletes any leftover files in <paramref name="worktreePath"/> with a
+    /// custom walk (retries, reparse-point-safe) when every safety guard in
+    /// <see cref="ValidateResidueRemovalGuards"/> passes, and reports anything left when it does not or when
+    /// deletion could not finish (for example a file still open elsewhere). When <paramref name="featureRootPath"/>
+    /// becomes empty afterward, it is removed too. Without <paramref name="featureRootPath"/> or
+    /// <paramref name="featureStorageRoot"/>, nothing is deleted and only today's folder state is reported.
+    /// </summary>
+    private async Task<WorktreeResidueResult> RemoveWorktreeResidueAsync(
+        string mainRepositoryPath,
+        string worktreePath,
+        string? featureRootPath,
+        string? featureStorageRoot,
+        bool isRegisteredWorktree,
+        CancellationToken ct)
+    {
+        var guardFailure = ValidateResidueRemovalGuards(worktreePath, mainRepositoryPath, featureRootPath, featureStorageRoot, isRegisteredWorktree);
+
+        if (!Directory.Exists(worktreePath))
+        {
+            if (guardFailure == null)
+                TryRemoveEmptyFeatureRoot(featureRootPath);
+            return WorktreeResidueResult.None;
+        }
+
+        if (guardFailure != null)
+        {
+            logger.LogWarning("Worktree residue cleanup skipped for {WorktreePath}: {Guard}", worktreePath, guardFailure);
+            var (skippedCount, skippedSample) = ScanResidueFiles(worktreePath);
+            return new WorktreeResidueResult(true, skippedCount, skippedSample, guardFailure);
+        }
+
+        await DeleteFolderRecursivelyWithRetryAsync(worktreePath, ct);
+
+        if (Directory.Exists(worktreePath))
+        {
+            try
+            {
+                if (!Directory.EnumerateFileSystemEntries(worktreePath).Any())
+                    Directory.Delete(worktreePath, false);
+            }
+            catch
+            {
+                // Best effort; the residue scan below reports the true state either way.
+            }
+        }
+
+        if (Directory.Exists(worktreePath))
+        {
+            var (remainingCount, remainingSample) = ScanResidueFiles(worktreePath);
+            var message = remainingCount > 0
+                ? "Some files could not be deleted. They may still be open in another program."
+                : "The worktree folder could not be removed.";
+            logger.LogWarning("Worktree residue remains at {WorktreePath}: {Count} file(s). {Message}", worktreePath, remainingCount, message);
+            return new WorktreeResidueResult(true, remainingCount, remainingSample, message);
+        }
+
+        TryRemoveEmptyFeatureRoot(featureRootPath);
+        return WorktreeResidueResult.None;
+    }
+
+    /// <summary>
+    /// Deletes <paramref name="featureRootPath"/> only when it exists and is empty. A reparse point at
+    /// this level is never treated as empty content and is left alone (should not occur for a Feature root).
+    /// </summary>
+    private void TryRemoveEmptyFeatureRoot(string? featureRootPath)
+    {
+        if (string.IsNullOrWhiteSpace(featureRootPath) || !Directory.Exists(featureRootPath))
+            return;
+
+        try
+        {
+            if (!Directory.EnumerateFileSystemEntries(featureRootPath).Any())
+            {
+                Directory.Delete(featureRootPath, false);
+                logger.LogInformation("Removed empty Feature root folder {FeatureRootPath}.", featureRootPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not remove Feature root folder {FeatureRootPath}.", featureRootPath);
+        }
+    }
+
+    private static readonly char[] PathSeparators = [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar];
+    private static readonly int[] ResidueDeleteRetryDelaysMs = [200, 400, 800, 1600, 3200];
+
+    /// <summary>
+    /// Checks every safety guard before any residue deletion is allowed. Returns null when all guards pass,
+    /// or a short description of the first guard that failed. Pure (no deletion); callers must still check
+    /// disk state separately. Depth is checked before the Feature-root relationship so a path that is both
+    /// too shallow and outside the root is reported as too shallow, matching the dedicated test for that guard.
+    /// </summary>
+    internal static string? ValidateResidueRemovalGuards(
+        string worktreePath,
+        string mainRepositoryPath,
+        string? featureRootPath,
+        string? featureStorageRoot,
+        bool isRegisteredWorktree)
+    {
+        if (string.IsNullOrWhiteSpace(featureStorageRoot) || string.IsNullOrWhiteSpace(featureRootPath))
+            return "No Feature storage root was provided; residue was only reported, not removed.";
+
+        string normalizedWorktreePath;
+        string normalizedMainRepositoryPath;
+        string normalizedFeatureRootPath;
+        string normalizedFeatureStorageRoot;
+        try
+        {
+            normalizedWorktreePath = NormalizeResiduePath(worktreePath);
+            normalizedMainRepositoryPath = NormalizeResiduePath(mainRepositoryPath);
+            normalizedFeatureRootPath = NormalizeResiduePath(featureRootPath);
+            normalizedFeatureStorageRoot = NormalizeResiduePath(featureStorageRoot);
+        }
+        catch (Exception ex)
+        {
+            return $"Could not resolve the Feature storage paths: {ex.Message}";
+        }
+
+        // Guard: at least 2 levels below featureStorageRoot (features\<FeatureName>\<Repo>).
+        var relativeToStorageRoot = Path.GetRelativePath(normalizedFeatureStorageRoot, normalizedWorktreePath);
+        var escapesStorageRoot = relativeToStorageRoot.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relativeToStorageRoot);
+        if (!escapesStorageRoot)
+        {
+            var depthSegments = relativeToStorageRoot.Split(PathSeparators, StringSplitOptions.RemoveEmptyEntries);
+            if (depthSegments.Length < 2)
+                return "Worktree path is too shallow under the Feature storage root.";
+        }
+
+        // Guard: worktreePath is strictly under featureStorageRoot\<FeatureName>\, and featureRootPath
+        // equals featureStorageRoot\<FeatureName>. Worktrees under the legacy drive-root path fail here.
+        var featureRootParent = Path.GetDirectoryName(normalizedFeatureRootPath);
+        if (!string.Equals(featureRootParent, normalizedFeatureStorageRoot, StringComparison.OrdinalIgnoreCase)
+            || !IsStrictlyUnderResiduePath(normalizedWorktreePath, normalizedFeatureRootPath))
+        {
+            return "Worktree path is not under this Feature's storage root.";
+        }
+
+        // Guard: never the primary repository checkout, and never a path that contains it.
+        if (string.Equals(normalizedWorktreePath, normalizedMainRepositoryPath, StringComparison.OrdinalIgnoreCase)
+            || IsStrictlyUnderResiduePath(normalizedMainRepositoryPath, normalizedWorktreePath))
+        {
+            return "Worktree path is or contains the primary repository checkout.";
+        }
+
+        // Guard: must not currently be a registered worktree.
+        if (isRegisteredWorktree)
+            return "Path is still a registered Git worktree.";
+
+        // Guard: a real repository has a .git directory at its top level; a linked worktree does not.
+        if (Directory.Exists(Path.Combine(normalizedWorktreePath, ".git")))
+            return "Path contains a .git directory and looks like a real repository, not a linked worktree.";
+
+        return null;
+    }
+
+    private static string NormalizeResiduePath(string path) =>
+        Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+    private static bool IsStrictlyUnderResiduePath(string path, string potentialAncestor)
+    {
+        var prefix = potentialAncestor + Path.DirectorySeparatorChar;
+        return path.Length > prefix.Length && path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Counts files under <paramref name="folderPath"/> (never entering a reparse point) and samples up to 5 relative paths. No deletion.</summary>
+    private static (int Count, List<string> Sample) ScanResidueFiles(string folderPath)
+    {
+        var count = 0;
+        var sample = new List<string>();
+        VisitResidueEntries(folderPath, entry =>
+        {
+            count++;
+            if (sample.Count < 5)
+                sample.Add(Path.GetRelativePath(folderPath, entry.FullName));
+        });
+        return (count, sample);
+    }
+
+    private static void VisitResidueEntries(string folderPath, Action<FileSystemInfo> onFileOrLink)
+    {
+        IEnumerable<FileSystemInfo> entries;
+        try
+        {
+            entries = new DirectoryInfo(folderPath).EnumerateFileSystemInfos();
+        }
+        catch
+        {
+            return;
+        }
+
+        foreach (var entry in entries)
+        {
+            var isReparsePoint = entry.Attributes.HasFlag(FileAttributes.ReparsePoint);
+            if (entry is DirectoryInfo && !isReparsePoint)
+            {
+                VisitResidueEntries(entry.FullName, onFileOrLink);
+                continue;
+            }
+
+            // A file, or a reparse point (junction/symlink): never enter the link, only count/report it.
+            onFileOrLink(entry);
+        }
+    }
+
+    /// <summary>
+    /// Deletes everything under <paramref name="folderPath"/> with a custom walk (never
+    /// <c>Directory.Delete(path, true)</c>): clears read-only attributes, deletes reparse points
+    /// (junctions/symlinks) as the link itself without entering them, and retries each entry up to 5
+    /// times (200, 400, 800, 1600, 3200 ms) on <see cref="IOException"/> or
+    /// <see cref="UnauthorizedAccessException"/> (for example a file still open in another program).
+    /// Leaves whatever it could not delete in place; the caller reports that as residue.
+    /// </summary>
+    private static async Task DeleteFolderRecursivelyWithRetryAsync(string folderPath, CancellationToken ct)
+    {
+        List<FileSystemInfo> entries;
+        try
+        {
+            entries = new DirectoryInfo(folderPath).EnumerateFileSystemInfos().ToList();
+        }
+        catch
+        {
+            return;
+        }
+
+        foreach (var entry in entries)
+        {
+            ct.ThrowIfCancellationRequested();
+            var isReparsePoint = entry.Attributes.HasFlag(FileAttributes.ReparsePoint);
+            if (entry is DirectoryInfo && !isReparsePoint)
+                await DeleteFolderRecursivelyWithRetryAsync(entry.FullName, ct);
+
+            await DeleteResidueEntryWithRetryAsync(entry, ct);
+        }
+    }
+
+    private static async Task DeleteResidueEntryWithRetryAsync(FileSystemInfo entry, CancellationToken ct)
+    {
+        for (var attempt = 0; attempt <= ResidueDeleteRetryDelaysMs.Length; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                if (entry.Attributes.HasFlag(FileAttributes.ReadOnly))
+                    entry.Attributes &= ~FileAttributes.ReadOnly;
+
+                if (entry is DirectoryInfo directory)
+                {
+                    // Delete the entry itself only (reparse point: the link; otherwise an already-emptied directory).
+                    directory.Delete(false);
+                }
+                else
+                {
+                    entry.Delete();
+                }
+
+                return;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                if (attempt == ResidueDeleteRetryDelaysMs.Length)
+                    return;
+                await Task.Delay(ResidueDeleteRetryDelaysMs[attempt], ct);
+            }
+            catch
+            {
+                return;
+            }
+        }
     }
 
     public async Task<WorktreeInspectionResult> InspectWorktreeAsync(
