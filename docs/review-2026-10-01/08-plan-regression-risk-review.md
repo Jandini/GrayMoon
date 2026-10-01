@@ -14,7 +14,7 @@ These are the flows a Workspace-only user relies on today. They are the scope of
 | W2 | Connectors work: tokens decrypt, GitHub calls succeed | F1 |
 | W3 | Sync (single repo and all) updates versions, branches and ahead/behind | G1 (hooks written during Sync), B4 |
 | W4 | Live updates after commit, checkout, pull or push outside GrayMoon | G1 |
-| W5 | Branch: switch all, create, switch single, Return to Default | B4 (bulk switch), A2 (external-worktree cleanup in Switch Branch) |
+| W5 | Branch: switch all, create, switch single, Return to Default | B4 (bulk switch), A2 (external-worktree cleanup in Switch Branch), I2 (occupancy), I3 (service guard) |
 | W5b | Edit Workspace (add or remove repositories), Delete Workspace, connector refresh and delete | G3 (unhook after removal, Feature guard on delete) |
 | W6 | Git Changes: view, stage, commit, discard | D2 (watcher stop) |
 | W7 | Update Dependencies, Push (with levels), Undo Push, Prepare | B3, B4 (push plan) |
@@ -124,6 +124,16 @@ Correction to the first version of `06`: F3 said the hook scripts post to `/api/
 | R-G3b | G3 | Wrong targets: repositories that stay in the Workspace are unhooked, so their live updates stop. (L/H) | W4 | Targets are only the rows being deleted (`toRemove`, the deleted Workspace's links, the dropped connector repositories), collected before the transaction. A test asserts no call for repositories that stay. Sync re-hooks any repository anyway. |
 | R-G3c | G3 | The new "Remove the Features first" guard on Workspace delete surprises users who could delete before. (M/L) | Delete Workspace | Intended fix (deleting with Features orphaned worktrees on disk); same rule already applies to editing membership. Clear message plus Desktop README bullet. |
 | R-G4 | G4 | Self-heal unhooks a repository that is still in use: a transient DB failure looks like "not found", or the repo was re-added a moment ago. (L/H) | W4 | Unhook only when a fresh query **succeeds** and finds no link; never on query errors. A re-added repo has a link, so it is never touched. G2's `workspaceId` check is the second safety net. At most once per path per hour. |
+
+### Lane I
+
+| ID | Unit | Risk | Workspace impact | Mitigation |
+|---|---|---|---|---|
+| R-I1 | I1 | The changed analysis misjudges Features that never drifted, or an old Worker without the new fields blocks Remove. (M/M) | none (Remove is Feature-only); A2 external cleanup in W5 | Characterization test: a non-drifted Feature gives the same plan as before. Old Worker: Feature-branch facts are Unknown, force delete is not offered, Remove stays enabled. External-worktree cleanup never sends `featureBranch`. |
+| R-I2 | I2 | The occupancy change unblocks a branch for the Workspace view, so the Workspace could try to check out a Feature's branch. (L/M) | W5 | `FeatureOwn` is emitted only when the row's context equals the viewing context, which is never the case for the Workspace. A characterization test pins the Workspace badges. The upgrade-badge occupancy fix (SB-8) is a named bug fix. |
+| R-I3a | I3 | The service guard refuses a Workspace checkout, create or Return to Default, for example because the special context is misclassified. (L/High) | W5, W11 | The guard returns "allowed" for Kind 0 before any Feature query. Characterization tests for the three methods on the special Workspace, plus one REST route test. WORKSPACE-SMOKE step 4. |
+| R-I3b | I3 | Feature create or repair goes through the guarded methods and is refused. (L/High) | none | The agent confirms with `rg` that create and repair use `CreateGitWorktree`, and stops if not. C4 tests stay green. |
+| R-I4 | I4 | The drift badge slows grid refresh with per-row queries, or appears in the Workspace. (L/L) | grid refresh | Feature repo rows are loaded once per selection; there are no Agent calls. The expected branch is null for the Workspace, so no badge appears there. |
 
 ### Lane H and R
 

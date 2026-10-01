@@ -12,6 +12,7 @@ This folder is a full review of GrayMoon and GrayMoon.Desktop, focused on closin
 | [06-worktree-release-implementation-plan.md](06-worktree-release-implementation-plan.md) | **Live implementation plan.** Give this single file to an AI agent: it contains the agent's working rules, owner decisions, a status tracker, testable units grouped into parallel lanes, and manual test gates |
 | [07-appendix-why-lane-g-hooks.md](07-appendix-why-lane-g-hooks.md) | Why the plan fixes Git hooks in v1: what the hooks do, how they destroy user hooks and miss `core.hooksPath` repos, and what G1 changes |
 | [08-plan-regression-risk-review.md](08-plan-regression-risk-review.md) | Risk register for the plan: what each unit could break in standard Workspace workflows, the mitigation written into `06`, and the Workspace smoke test |
+| [09-switch-branch-in-feature-analysis.md](09-switch-branch-in-feature-analysis.md) | Is the per-repository Switch Branch dialog helpful and safe while a Feature is selected? Findings SB-1 to SB-8, options, chosen v1 behaviour (option B), planned as lane I (I1 to I4) in `06` |
 
 ## Verdict
 
@@ -42,6 +43,7 @@ Effort sizes: **S** is a day or less, **M** is 2 to 3 days, **L** is about a wee
 | B5 | Honest removal: stop watchers, retry around locked files, clean up leftover and empty folders, and show a report for each repo. | 04 P0-5, 02 F-5 | M |
 | B6 | Transactional, logged migrations that stop startup on failure and back up the DB first, plus a golden upgrade test from a 0.1.0 database. Absorbs 04 P1-6. | 05 R1, R2, A3 | M |
 | B7 | Local security, no login: require a Worker secret for the connector-token endpoint and the Worker hub, use a per-install key or Data Protection and re-encrypt existing tokens, restrict `AllowedHosts` to loopback, and require a custom header and `Origin` check on mutating endpoints. | 05 S1, S2, S3 | S to M |
+| B8 | Branch rules inside a Feature. Remove judges the Feature branch it deletes. The Switch Branch dialog and the services allow only the Feature branch, or a tag for tag-pinned repos. "Return to Feature branch" is available, and the grid shows when a repo is off its Feature branch. | 09 SB-1 to SB-8; `06` lane I | M |
 
 B1, B2, B3, B6 and B7 are independent and can run in parallel.
 

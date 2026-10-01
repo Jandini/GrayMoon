@@ -31,6 +31,7 @@ You are not a reviewer here. Do not redesign, do not "also fix" nearby things, d
    - `05-general-code-and-ux-review.md` (A-n, S-n, R-n, D-n findings)
    - `07-appendix-why-lane-g-hooks.md` (background for G1)
    - `08-plan-regression-risk-review.md` (R-..., X-... risk IDs behind each Regression guard)
+   - `09-switch-branch-in-feature-analysis.md` (SB-n findings, background for lane I)
    Read only the referenced section, not the whole doc.
 
 ## A3. Rules that always apply
@@ -98,23 +99,56 @@ When a unit is done and the **next** tracker row is a `USER TEST GATE`, set the 
 
 ## A6. Your final message for each session
 
-Use exactly this shape:
+Use exactly this shape, **including the commit message**, every session in which you changed any file, even when the unit is BLOCKED:
 
-```
+````
 Unit: <id> <title> - <DONE | BLOCKED | READY FOR USER TEST>
 What changed: <one or two sentences>
 Tests: <new tests added>; <project>: <passed>/<total>
 Files: <list>
 Next: <next unit id, or the gate the owner must run, or the question you need answered>
+
+Owner checks before the next unit:
+1. <action in GrayMoon or a terminal> - Expected: <what the owner should see>
+2. ...
+Workspace check: <one quick check that the standard Workspace still works where this unit touched shared code, or "not needed (Feature-only change)">
+
+Commit message (GrayMoon):
+```
+<Imperative summary line, at most 72 characters, ending with the unit id, e.g. "Block branch checkout off the Feature branch (I3)">
+
+<Optional body: 1 to 4 short lines saying what changed for the user and why. No file lists, no test counts.>
 ```
 
-Then the commit message block(s).
+Commit message (GrayMoon.Desktop):
+```
+<Same rules; only when files in GrayMoon.Desktop changed, otherwise leave this block out>
+```
+````
+
+Owner check rules:
+- **List 2 to 5 manual checks** that prove this unit works on the owner's machine, each with a concrete expected result. Use real names, for example "Create Feature `check-i2`", not "create a Feature". The checks must take under 10 minutes in total.
+- **Cover the unit's behaviour, not its tests.** Do not ask the owner to run `dotnet test`; you already did.
+- **Add the Workspace check line.** When the unit's Regression guard names Workspace code, give one quick check from WORKSPACE-SMOKE that exercises it (for example "Workspace: switch one repo to a branch and back"). Otherwise write `not needed (Feature-only change)`.
+- **Say what is needed first:** a running Worker, a Worker reinstall (Agent changes), an App restart (migrations), or a rebuild of Desktop.
+- **When the next tracker row is a gate,** keep these checks short and point to the gate script you print below them (A5).
+- **When the unit is BLOCKED or nothing changed,** write `Owner checks: none`.
+- **The owner replies OK, or with the failing check.** A failing check means the unit goes back to `IN PROGRESS` in the next session; do not start the next unit.
+
+Commit message rules:
+- **One message per repository you changed.** The owner commits each repository separately.
+- **The summary line starts with an imperative verb** (`Add`, `Fix`, `Block`, `Remove`...). It describes the behaviour, not the files, and ends with the unit id in parentheses.
+- **The message covers only this session's changes.** That includes the edits to this plan file (tracker, changelog), so do not mention them separately.
+- **Format:** plain ASCII hyphens, with no em or en dashes and no emojis.
+- **If nothing changed** (for example, you only answered a question or stopped at a decision), write `Commit message: none (no files changed)`.
+- **You never run `git commit` yourself** (rule 1).
 
 ## A7. Working in parallel (several agents)
 
 - Lanes (Part C) are designed so agents in different lanes touch mostly different files. **One agent per lane at a time.**
 - **Each parallel agent works in its own checkout** (for example a GrayMoon Feature worktree created by the owner). Two agents must never edit the same working folder at the same time.
 - Hot file: `GrayMoon/src/GrayMoon.App/Services/Features/WorkspaceFeatureOperations.cs` is touched by lanes A, B, C, D and H. Keep your edits to the methods your unit names. Do not reformat, reorder or rename anything else in that file, so the owner can merge lanes cleanly.
+- Lane I also touches shared code: I1 edits `AnalyzeRemoveFeatureAsync` in that hot file and the A1 `InspectWorktree` files, so it starts only after lanes A and D are merged. `WorkspaceBranchOccupancyService.cs` is edited by I2 only; B4 only calls it.
 - Shared migration file: `GrayMoon/src/GrayMoon.App/Migrations.Features.cs`. Only units marked "Migration" edit it, and each adds a **new, separate step method**. Never edit another unit's step.
 - **Merging lanes (owner, or an agent the owner asks):** merge one lane at a time into the main checkout. After each merge run the build, all test projects and `WORKSPACE-SMOKE` (Part D) before merging the next lane. Gates are always run on the merged tree, never on a single lane's checkout.
 
@@ -139,7 +173,7 @@ Write the answer in the `Answer` column and change `OPEN` to `DECIDED`. The `Def
 
 Status values: `TODO`, `IN PROGRESS`, `BLOCKED`, `DONE`, and for gates `WAITING`, `READY FOR USER TEST`, `PASSED`, `FAILED`.
 
-Lanes: **0** foundation, **A** Agent truth, **B** data integrity, **C** lifecycle and recovery, **D** honest removal, **E** names and UX, **F** local security, **G** hooks, **H** logging, **R** release.
+Lanes: **0** foundation, **A** Agent truth, **B** data integrity, **C** lifecycle and recovery, **D** honest removal, **E** names and UX, **F** local security, **G** hooks, **I** branch rules inside a Feature, **H** logging, **R** release.
 
 | Order | Unit | Title | Lane | Depends on | Size | Status | Owner | Notes |
 |---|---|---|---|---|---|---|---|---|
@@ -162,7 +196,8 @@ Lanes: **0** foundation, **A** Agent truth, **B** data integrity, **C** lifecycl
 | 17 | D1 | Agent removes worktree residue and reports what is left | D | GATE-1 | M | TODO | | |
 | 18 | D2 | App removal report and no swallowed branch failures | D | D1 | M | TODO | | |
 | 19 | D3 | Remove dialog: checkboxes that match the situation | D | D2, A2 | S | TODO | | |
-| 20 | GATE-2 | Remove and analysis | gate | A3, B2, D3 | - | WAITING | | |
+| 19a | I1 | Remove analysis judges the Feature branch, not the current checkout | I | A3, D3 | M | TODO | | Data-loss fix (09 SB-2); after lanes A and D are merged |
+| 20 | GATE-2 | Remove and analysis | gate | A3, B2, D3, I1 | - | WAITING | | |
 | 21 | GATE-3 | Failure and recovery | gate | C5 | - | WAITING | | |
 | 22 | E1 | Feature name validation | E | GATE-1 | M | TODO | | Migration (index) |
 | 23 | E2 | Header primary button rule | E | - | S | TODO | | |
@@ -174,16 +209,19 @@ Lanes: **0** foundation, **A** Agent truth, **B** data integrity, **C** lifecycl
 | 28a | G2 | Worker `UnhookRepository` command | G | G1 | S | TODO | | |
 | 28b | G3 | Unhook when repositories leave a Workspace; block Workspace delete while Features exist | G | G2 | M | TODO | | |
 | 28c | G4 | Self-heal stale hooks from pings | G | G2 | S | TODO | | Deferrable to v1.1 if time is short |
+| 28d | I2 | Own Feature branch is checkable; "Return to Feature branch" | I | GATE-1 | S | TODO | | |
+| 28e | I3 | Feature-aware Switch Branch dialog and service rules | I | I2 | M | TODO | | |
+| 28f | I4 | Show drift in the grid | I | I2, C2 | S | TODO | | |
 | 29 | H1 | Structured logging for Feature operations | H | C4, D2 | S | TODO | | |
 | 30 | D4 | Safe remote branch deletion (only if DEC-2 = Yes) | D | D2, F2 | M | TODO | | |
-| 31 | GATE-4 | Names, header, security, hooks, Desktop | gate | E1, E2, E3, F3, F2, G1, G3, G4 | - | WAITING | | |
+| 31 | GATE-4 | Names, header, security, hooks, Desktop | gate | E1, E2, E3, F3, F2, G1, G3, G4, I3, I4 | - | WAITING | | |
 | 32 | R1 | Docs: user guide, troubleshooting, changelog, mark old designs superseded | R | GATE-4 | M | TODO | | |
 | 33 | R2 | Features kill switch | R | DEC-6 | S | TODO | | |
 | 34 | R3 | GitVersion parity check | R | GATE-1 | S | TODO | | |
 | 35 | R4 | Release regression suite and checklist | R | all above | M | TODO | | |
 | 36 | GATE-5 | Release candidate sign-off | gate | R4 | - | WAITING | | |
 
-**What can run in parallel after GATE-1:** lanes A, B, C, D, E, F, G each have one agent. Lane H waits for C4 and D2. E2, E3 and F3 have no dependencies and can be done at any time, even before GATE-1.
+**What can run in parallel after GATE-1:** lanes A, B, C, D, E, F, G, I each have one agent. Lane H waits for C4 and D2. In lane I, I2 can start right after GATE-1 and I3 follows it; I1 waits for A3 and D3, and I4 waits for C2. E2, E3 and F3 have no dependencies and can be done at any time, even before GATE-1.
 
 ---
 
@@ -429,10 +467,10 @@ Reply with PASSED, or with what you saw.
 - **Touches:** new `App/Services/Features/WorkspaceFeatureReconciler.cs` (+ interface), registration in `Program.cs`, a hook from the Agent-connected event, tests.
 - **Steps:**
   1. `ReconcileAsync(CancellationToken)`: for each Feature in `Creating` or `Removing` that has no running structural operation in `WorkspaceOperationRunner`, set `NeedsRepair` and `LastError = "Interrupted while creating"` or `"Interrupted while removing"`.
-  2. For each Feature, call `ListGitWorktrees` once per main repository; a repo row in `Ready` whose worktree is not registered **and** whose folder `InspectWorktree` (A1) reports as missing becomes `NeedsRepair` with `LastError = "Worktree is missing"`. If either call fails or the Worker lacks `InspectWorktree`, change nothing for that repo. A repo row in `Pending` or `NeedsRepair` whose worktree **is** registered on the expected branch becomes `Ready`.
+  2. For each Feature, call `ListGitWorktrees` once per main repository; a repo row in `Ready` whose worktree is not registered **and** whose folder `InspectWorktree` (A1) reports as missing becomes `NeedsRepair` with `LastError = "Worktree is missing"`. If either call fails or the Worker lacks `InspectWorktree`, change nothing for that repo. A repo row in `Pending` or `NeedsRepair` whose worktree **is** registered at the expected path becomes `Ready`. Compare the path only, never the branch: a repo moved off its Feature branch is drift (shown by I4), not breakage.
   3. Run it once at startup when the Worker first connects, and again on every Worker reconnect. Never run two reconciles at once (use a `SemaphoreSlim(1)`); skip workspaces that have a structural operation running.
   4. Use `IDbContextFactory`.
-- **Tests to add:** stuck `Creating` becomes `NeedsRepair`; a running operation is left alone; Ready repo with unregistered worktree becomes NeedsRepair; Pending repo with registered worktree becomes Ready; Worker not connected -> no changes, no exception; `ListGitWorktrees` fails -> no changes; two reconnects within 60 s -> one reconcile.
+- **Tests to add:** stuck `Creating` becomes `NeedsRepair`; a running operation is left alone; Ready repo with unregistered worktree becomes NeedsRepair; Ready repo registered at its path but on another branch stays Ready; Pending repo with registered worktree becomes Ready; Worker not connected -> no changes, no exception; `ListGitWorktrees` fails -> no changes; two reconnects within 60 s -> one reconcile.
 - **Done when:** tests pass.
 - **Regression guard (R-C2a, R-C2b):** the reconciler only reads and writes Feature rows (context `Kind` 1) and never deletes anything. It takes no structural lock, runs at most 4 Worker calls at a time, skips workspaces with a running operation, and runs at most once per 60 s, so Workspace Sync at startup is not delayed. A test asserts the special Workspace context's rows are byte-identical after a reconcile. C2 depends on A1 for `InspectWorktree`.
 
@@ -579,13 +617,16 @@ Desktop setup (always):
 4. Locked files: create gate2-b, open a file from one worktree in a program that locks it (or run dotnet build there and keep the process alive). Remove.
    Expected: report lists leftover files for that repo; after closing the program, the folder can be deleted; creating gate2-b again works.
 5. Clean Feature: create gate2-c, change nothing, Remove. Expected: no checkboxes, safe headline, clean report.
-6. Database: after these steps, the Dependencies page and Restore in the Workspace show only Workspace projects (no duplicates).
+6. Off the Feature branch: create gate2-d. In one repo's Feature folder commit once (no push), then run git switch -c side in a terminal.
+   Open Remove. Expected: that repo says it is on "side" and "side" is kept; the unmerged-branch checkbox names gate2-d with 1 commit.
+   Tick it and Remove. Expected: the report says gate2-d deleted and side kept; git branch in the Workspace folder still lists side.
+7. Database: after these steps, the Dependencies page and Restore in the Workspace show only Workspace projects (no duplicates).
 Docker setup (skip if DEC-1 = No):
-7. Run the App in Docker with the Worker on the host. Repeat step 1. Expected: identical result to Desktop; no repo shows "Folder is already missing".
-8. Stop the Worker and open Remove. Expected: "Could not check this repository", Remove disabled, no discard option.
+8. Run the App in Docker with the Worker on the host. Repeat step 1. Expected: identical result to Desktop; no repo shows "Folder is already missing".
+9. Stop the Worker and open Remove. Expected: "Could not check this repository", Remove disabled, no discard option.
 Workspace regression:
-9. In the Workspace, open Switch Branch for a repo whose target branch is held by a stray worktree (create one with git worktree add outside GrayMoon). Expected: cleanup offered and works as before.
-10. Run WORKSPACE-SMOKE.
+10. In the Workspace, open Switch Branch for a repo whose target branch is held by a stray worktree (create one with git worktree add outside GrayMoon). Expected: cleanup offered and works as before.
+11. Run WORKSPACE-SMOKE.
 Reply with PASSED, or with the failing step and what you saw.
 ```
 
@@ -772,6 +813,194 @@ GrayMoon is a local developer tool with no user accounts, and that stays. These 
 
 ---
 
+## Lane I - Branch rules inside a Feature
+
+Background: `09-switch-branch-in-feature-analysis.md` (findings SB-1 to SB-8, chosen option B).
+
+**The rule this lane enforces:**
+- A Feature keeps every repository that is not tag-pinned on the branch named after the Feature.
+- A tag-pinned repository (`WorkspaceFeatureRepository.PinnedTag != null`) stays detached at a tag.
+
+**What the lane changes:**
+- The per-repository Switch Branch dialog and the branch services follow the rule.
+- The user always has a way back when a repository drifts off its branch, whether through the dialog or a terminal.
+- Remove judges the branch it actually deletes.
+
+The Workspace's dialog and services stay unchanged.
+
+### I1 Remove analysis judges the Feature branch, not the current checkout
+
+- **Goal:** Remove Feature's analysis, checkboxes and force delete describe the branch Remove actually deletes (the Feature branch), also when the worktree is on another branch or detached.
+- **Ref:** 09 SB-2, F-9.
+- **Read first:**
+  - `FeatureOps` `AnalyzeRemoveFeatureAsync`: the line `BranchName = state?.BranchName ?? ...` and the `OutgoingCommits` and `HasUpstream` lines.
+  - `FeatureOps` `RemoveFeatureCoreAsync`: `var branchName = row.PinnedTag == null ? info.FeatureName : null;` and `force = options.AllowForceDeleteLocalBranches`.
+  - The A1 `InspectWorktree` request and response DTOs, and `GitService.InspectWorktreeAsync`.
+  - `RemoveFeatureModal.razor` and the D3 enable-rule helper.
+  - The plan types (`rg -n "class RemoveFeatureRepositoryPlan|class RemoveFeaturePlan" GrayMoon/src`).
+- **Touches:**
+  - The `InspectWorktree` DTOs and `GitService.InspectWorktreeAsync` (additive only).
+  - `FeatureOps` `AnalyzeRemoveFeatureAsync` only.
+  - The plan types.
+  - `RemoveFeatureModal.razor`, and the "kept" lines of the D2 report.
+  - Tests, and a Desktop README bullet.
+- **Steps:**
+  1. **Agent:** `InspectWorktree` gets an optional request field `featureBranch`. When it is set, the response adds these nullable fields, computed from refs without checking anything out:
+     - `featureBranchExists`
+     - `featureBranchSha`
+     - `featureBranchAheadOfDefault`: commits on `refs/heads/<featureBranch>` that are not on `origin/<defaultBranch>`; null when that ref is missing.
+     - `featureBranchHasUpstream`
+     - `featureBranchAheadOfUpstream`
+
+     When `featureBranch` is not set, these fields are null and nothing else changes.
+  2. **Plan fields:** in `AnalyzeRemoveFeatureAsync`, send `featureBranch = info.FeatureName` for rows that are not tag-pinned. Each repository's plan gets:
+     - `FeatureBranchName`
+     - `CheckedOutBranch`: the live `branch` from `InspectWorktree`; null when detached.
+     - `IsOffFeatureBranch`: true for a non-pinned repo whose `CheckedOutBranch` differs from `FeatureBranchName` (ordinal comparison, null counts as different).
+  3. **Classification:** "automatically safe", the "Completed" rule and the D3 unmerged-branch checkbox use the Feature-branch fields (`featureBranchAheadOfDefault`, `featureBranchHasUpstream`, `featureBranchAheadOfUpstream`), not the checked-out branch. Checks for uncommitted changes stay on the worktree, as today.
+  4. **Drift text:** when `IsOffFeatureBranch` is true, the dialog says for that repository: "This repository is on `<X>` (or a detached commit), not on its Feature branch `<name>`. `<X>` is kept; `<name>` is deleted." The D2 report lists `<X>` as kept. When `featureBranchExists` is false: "The Feature branch is already gone; nothing to delete."
+  5. **Force checkbox:** the label of the "delete even if not merged" checkbox lists the Feature branches it applies to, with their unmerged commit counts.
+  6. **Old Worker** (Feature-branch fields null): the facts are Unknown. The repo is not automatically safe, and the force-delete option is **not** offered for it. The delete is then non-force, so Git refuses an unmerged branch and D2 reports it as kept. Remove stays enabled, as with unknown PR state in A3.
+- **Tests to add:**
+  - **Agent.Tests (real git):**
+    - The Feature branch has 2 commits not on default while the worktree is on `side`: `featureBranchAheadOfDefault = 2` and `branch = side`.
+    - The Feature branch is missing: `featureBranchExists = false`.
+    - No `featureBranch` in the request: all new fields are null.
+    - The old response shape still deserializes.
+  - **App.Tests:**
+    - Drift plus an unmerged Feature branch: not safe, the checkbox lists the Feature branch with count 2, and the plan names `side` as kept.
+    - Drift with a merged Feature branch: safe.
+    - Old Worker: force not offered.
+    - A repo that has not drifted produces the same plan as before (characterization test first, A4 step 0).
+- **Done when:** tests pass. No path deletes a branch that the dialog did not describe.
+- **Regression guard (R-I1):**
+  - Remove is Feature-only.
+  - A2's external-worktree cleanup (Workspace Switch Branch) never sends `featureBranch` and is unchanged.
+  - The Agent fields are additive, per rule 13.
+  - Tag-pinned rows are unchanged (no branch is deleted for them).
+- **Out of scope:** deleting `<X>`, and changing what Remove deletes.
+
+### I2 Own Feature branch is checkable; "Return to Feature branch"
+
+- **Goal:** In a Feature, the user can always put a repository back on its Feature branch from the dialog.
+- **Ref:** 09 SB-1, SB-8.
+- **Read first:**
+  - `App/Services/Features/WorkspaceBranchOccupancyService.cs`: `GetBadgesForRepositoryAsync` (its second loop, commented "Feature branches owned in DB but not currently listed"), `BranchOccupancyKind` and `BranchOccupancyBadge`.
+  - `App/Components/Modals/SwitchBranchModal.razor`: `IsCheckoutDisabled`, `LoadOccupancyAsync`, `RequestFeatureCleanup` and the `[Parameter]` list.
+  - `App/Components/Pages/WorkspaceRepositories.Branches.cs`: `ShowSwitchBranchModal` and `ShowSwitchBranchModalOnTagsTab`.
+  - The existing occupancy tests (`rg -l "WorkspaceBranchOccupancyService|GitWorktreeOccupancy" GrayMoon/src/*.Tests`).
+- **Touches:**
+  - The occupancy service, `SwitchBranchModal.razor`, `WorkspaceRepositories.Branches.cs`, and the page markup that renders `SwitchBranchModal` (to pass the new parameter).
+  - New `App/Services/Features/FeatureBranchPolicy.cs`.
+  - Tests, and a Desktop README bullet.
+- **Steps:**
+  1. **Policy helper:** new static helper `FeatureBranchPolicy`, pure with no I/O:
+     - `ExpectedBranch(string featureName, string? pinnedTag)` returns `featureName` when `pinnedTag` is null, otherwise null.
+     - `IsOffFeatureBranch(string? expectedBranch, string? currentBranch)` returns true when `expectedBranch` is not null and `currentBranch` differs (ordinal), including a null `currentBranch` (detached).
+  2. **Occupancy:** add `BranchOccupancyKind.FeatureOwn`. In the second loop, when `row.WorkspaceFeatureContextId` equals `viewingContextId`, emit `FeatureOwn` with `AllowCheckout = true`, `RequiresFeatureCleanup = false` and `ContextId = null`. Rows of other Features and the first loop stay unchanged.
+  3. **Badge:** the modal gets a new parameter `FeatureBranchName` (string?, the expected branch from step 1; null in the Workspace and for pinned repos). The `FeatureOwn` badge reads "This Feature". Delete is not offered on the `FeatureOwn` row, because deleting the Feature branch is Remove's job.
+  4. **Warning and button:** when `IsFeatureContext` is true and `FeatureBranchPolicy.IsOffFeatureBranch(FeatureBranchName, CurrentBranch)` is true, the modal shows the warning "This repository is not on its Feature branch `<name>`." It also shows a "Return to Feature branch" button that calls the existing `OnCheckoutBranch(repositoryId, FeatureBranchName, false)`. If Git refuses (for example because of uncommitted changes), show Git's message the way checkout errors are shown today.
+  5. **Page:**
+     - Pass `FeatureBranchName`, computed from the selected Feature's name and the repo's `PinnedTag`. Find where the page holds them with `rg -n "PinnedTag" GrayMoon/src/GrayMoon.App/Components/Pages`, and load them once per Feature selection, not per row.
+     - Fix SB-8: `ShowSwitchBranchModalOnTagsTab` sets `WorkspaceRepositoryId` (and `CurrentBranch`) the same way `ShowSwitchBranchModal` does.
+- **Tests to add:**
+  - Viewing Feature A, with A's branch not in the worktree list: `FeatureOwn`, `AllowCheckout = true`.
+  - Feature B's branch while viewing A: `Feature` and blocked, as today.
+  - Viewing the Workspace: both A's and B's branches are `Feature` and blocked, as today.
+  - Table tests for `FeatureBranchPolicy`.
+- **Done when:** tests pass, and the Desktop README bullet is added.
+- **Regression guard (R-I2):**
+  - Do A4 step 0 first: a characterization test of `GetBadgesForRepositoryAsync` for the special Workspace context with two Features, whose output stays identical after the change.
+  - The Workspace dialog always gets `FeatureBranchName = null`, so the warning and the button never render there.
+  - The SB-8 fix is a named bug fix that also affects the Workspace: badges now appear on the upgrade-badge path, and Git refused those checkouts anyway.
+- **Out of scope:** blocking other checkouts (I3), and the grid badge (I4).
+
+### I3 Feature-aware Switch Branch dialog and service rules
+
+- **Goal:** In a Feature, the dialog and the branch services allow only actions that keep the rule true:
+  - view, filter and fetch;
+  - delete, with a warning;
+  - return to the Feature branch;
+  - change the tag of a tag-pinned repository.
+- **Ref:** 09 SB-3, SB-4, SB-5, SB-7 and section 7; F-16; 04 P2-10.
+- **Read first:**
+  - `SwitchBranchModal.razor`: the tabs, `IsCheckoutDisabled`, the `RequestDeleteBranch` confirmation text, the New Branch tab (including its "branch exists, check out instead" path) and the Return to Default button.
+  - `App/Services/Application/WorkspaceBranchOperations.cs`: `CheckoutAsync`, `CreateBranchAsync` and `ReturnToDefaultAsync`.
+  - `App/Services/Orchestration/WorkspaceBranchHandler.cs`: `CheckoutBranchForWorkspaceAsync`.
+  - `BranchHttpOutcome`.
+  - How a context id resolves to a Feature (`rg -n "Kind" GrayMoon/src/GrayMoon.App/Services/Features/*Context*`).
+  - `FeatureBranchPolicy` (from I2).
+- **Touches:**
+  - `SwitchBranchModal.razor`.
+  - `WorkspaceBranchOperations.cs` (the start of the three methods named above only), and `WorkspaceBranchHandler.CheckoutBranchForWorkspaceAsync` (its start only).
+  - New `App/Services/Features/FeatureBranchGuard.cs` (with an interface and DI registration), and `FeatureBranchPolicy`.
+  - Tests, and a Desktop README bullet.
+- **Steps:**
+  1. **Policy:** add `FeatureBranchPolicy.Evaluate(FeatureBranchAction action, string? expectedBranch, string? pinnedTag, string? target, bool isTag)`. It returns null when the action is allowed, or the user message. Rules for a Feature context:
+     - Check out a branch: allowed only when `target` equals the expected branch. `CheckoutAsync` already strips `origin/`, so call the guard after that line.
+     - Check out a tag: allowed only when `pinnedTag` is not null. Message: "Tags can be checked out only in repositories pinned to a tag. Use the Workspace to check out a tag."
+     - Create a branch: never allowed. Message: "A Feature keeps every repository on its Feature branch. To work on another branch, create another Feature or use the Workspace."
+     - Return to Default: never allowed. Message: "Return to Default is a Workspace action."
+     - Fetch, delete, set upstream and Update Branch from Default: always allowed, and not routed through the policy.
+  2. **Guard:** `FeatureBranchGuard.CheckAsync(contextId, repositoryId, action, target, isTag, cancellationToken)`.
+     - It loads the context with `IDbContextFactory`.
+     - For the special Workspace (Kind 0), or a context that is not found, it returns "allowed" **without any further query**.
+     - For a Feature, it loads the Feature name and the repo row's `PinnedTag`, then calls `Evaluate`.
+  3. **Wiring:**
+     - Before wiring, confirm with `rg` that Feature create (`CreateFeatureCoreAsync`) and repair (C4) do not call these three methods; they use `CreateGitWorktree`. If they do, stop and ask.
+     - Call the guard at the start of `CheckoutAsync`, `CreateBranchAsync` and `ReturnToDefaultAsync`.
+     - On refusal, return `BranchHttpOutcome.BadRequest(message)`. If an existing conflict-style outcome fits better, reuse it; do not add a new status.
+     - In `CheckoutBranchForWorkspaceAsync` (bulk), refuse the whole call for a Feature context with the create-branch message. The header already hides bulk actions in Features, so this is defence only.
+  4. **Pinned tag upgrade:** when `CheckoutAsync` succeeds with `isTag` in a Feature for a pinned repo, set that repo's `WorkspaceFeatureRepository.PinnedTag` to the new tag.
+  5. **Dialog**, only when `IsFeatureContext` is true:
+     - Hide the New Branch tab. If `InitialTab` is `newbranch`, fall back to `local`.
+     - Locals and Remotes: checkout is disabled for every branch except the Feature branch, which I2 keeps checkable. The tooltip is the message from step 1. The modal calls the same `FeatureBranchPolicy.Evaluate`, so the UI and the service give the same answer. Add a `PinnedTag` parameter for that.
+     - Tags: checkout is enabled only when `PinnedTag` is not null; otherwise it is disabled, with the tag message as tooltip.
+     - The delete confirmation gets the line "Branches are shared by the Workspace and every Feature of this repository. Deleting it removes it everywhere."
+     - Return to Default stays hidden.
+- **Tests to add:**
+  - **`Evaluate` table tests:**
+    - Checking out the expected branch is allowed; any other branch is refused.
+    - A tag is allowed for a pinned repo and refused otherwise.
+    - Create and Return to Default are refused.
+  - **Guard:**
+    - Special context: allowed, with no Feature query (count queries or use a context that has no Feature tables seeded).
+    - Feature context: refused for a disallowed action.
+  - **Service:**
+    - `CheckoutAsync` in a Feature to another branch returns the refusal, and the fake Agent bridge records **zero** calls.
+    - `CreateBranchAsync` and `ReturnToDefaultAsync` in a Feature behave the same way.
+    - A pinned tag upgrade updates `PinnedTag`.
+- **Done when:** tests pass. `rg -n "FeatureBranchGuard" GrayMoon/src/GrayMoon.App/Services/Application/WorkspaceBranchOperations.cs` shows three calls. The Desktop README bullet is added.
+- **Regression guard (R-I3a, R-I3b):**
+  - Do A4 step 0 first for `CheckoutAsync`, `CreateBranchAsync` and `ReturnToDefaultAsync` on the special Workspace: one test each, asserting the Agent is called with the same arguments as today.
+  - For the special Workspace, the guard returns before any Feature query.
+  - Every dialog change sits inside an `IsFeatureContext` branch.
+  - REST routes call these methods with the Workspace context (05 R5), so they keep working. Add one test that the checkout route still succeeds for a Workspace repo.
+  - WORKSPACE-SMOKE step 4 at the gate.
+- **Out of scope:** multi-branch Features (09 option C), and changes to Update Branch from Default.
+
+### I4 Show drift in the grid
+
+- **Goal:** When a Feature repository is not on its Feature branch, for any reason including a terminal checkout, the grid says so and offers the way back. Drift never makes a Feature "Needs attention".
+- **Ref:** 09 SB-6.
+- **Read first:**
+  - The grid branch cell (`rg -n "OnBranchClick" GrayMoon/src/GrayMoon.App/Components`).
+  - Where the page gets each row's `BranchName` for a Feature context.
+  - `FeatureBranchPolicy` (I2).
+  - `WorkspaceFeatureReconciler` (C2).
+- **Touches:** the grid branch cell component, the page code that builds rows, the reconciler tests (and its branch comparison, only if there is one), and a Desktop README bullet.
+- **Steps:**
+  1. **Compute drift:** for a Feature context, compute per repository `expected = FeatureBranchPolicy.ExpectedBranch(featureName, pinnedTag)` and `IsOffFeatureBranch(expected, branchName)`. Use data the page already loads, plus the Feature's repo rows (with `PinnedTag`) loaded once per Feature selection. No new Agent calls. Put the mapping in a small pure method (for example `ComputeOffFeatureBranchRepos`) so it can be unit-tested.
+  2. **Badge:** a drifted row shows a warning badge "Off Feature branch" next to the branch, with the tooltip "This repository is on `<X>`, not on `<name>`. Click to return." Clicking opens the Switch Branch dialog, where I2's "Return to Feature branch" button is shown.
+  3. **Reconciler (C2):** add a test that a Ready repo registered at its path but on another branch stays Ready. If C2's code compares the branch, change it to compare the path only (C2 step 2).
+- **Tests to add:** mapping tests for drifted, not drifted, tag-pinned, and the Workspace context (expected is null, so nothing is flagged), plus the reconciler test.
+- **Done when:** tests pass; the owner checks it at GATE-4 step 7.
+- **Regression guard (R-I4):**
+  - The badge renders only for Feature contexts, because the expected branch is null for the Workspace.
+  - No extra Agent calls per refresh.
+  - The reconciler never changes state because of the branch.
+- **Out of scope:** returning automatically on Sync (09 question 2: warning only).
+
 ## Lane H - Logging
 
 ### H1 Structured logging for Feature operations
@@ -807,7 +1036,14 @@ GATE-4
    Tick them again, Sync. Expected: hooks are back and a terminal commit updates the grid.
    Stop the Worker, untick a repo, save, start the Worker. Expected: the removal succeeded with a warning in the log. Commit in that repo: the first ping removes the hooks (Information log line); later commits are quiet.
    Delete a test Workspace that has a Feature. Expected: refused with "Remove the Features first". Remove the Feature, delete the Workspace. Expected: its repos are unhooked; a repo folder you deleted by hand beforehand only produces a warning.
-7. Run WORKSPACE-SMOKE.
+7. Branch rules in a Feature: create Feature gate4-b and open a repo's branch dialog.
+   Expected: no New Branch tab, no Return to Default; other branches cannot be checked out and the tooltip explains why; tags cannot be checked out unless the repo is pinned to a tag.
+   Delete a throwaway branch from inside the Feature. Expected: the confirmation says branches are shared by the Workspace and all Features.
+   In a terminal, in that repo's Feature folder, run git switch -c side. Expected: within seconds the grid shows "Off Feature branch".
+   Click it and press "Return to Feature branch". Expected: the repo is back on gate4-b and the badge is gone.
+   Tag-pinned repo (if you have one): in the Feature, open its upgrade badge and check out a newer tag. Expected: works; the repo stays on the tag.
+   In the Workspace, open a repo's upgrade badge, then the Locals tab. Expected: branches held by a Feature now show the Feature badge (missing on this path before); everything else as before.
+8. Run WORKSPACE-SMOKE.
 Reply with PASSED, or the failing step and what you saw.
 ```
 
@@ -899,6 +1135,9 @@ Agents append one line per session: `YYYY-MM-DD <unit> <status> <agent> - <one s
 - 2026-10-01 plan created from review documents 00-05.
 - 2026-10-01 added Workspace regression guards to every unit, rules 13-14, A4 step 0 and WORKSPACE-SMOKE from `08-plan-regression-risk-review.md`. Design changes: legacy migrations stay tolerant (U0-2), the Worker secret is not enforced in v1 (F2), `AllowedHosts` is unchanged for Docker and the header check applies only to requests with an `Origin` (F3), NeedsRepair opens read-only (C3), Unknown PR state warns instead of blocking (A3), D1 delete guards and junction handling, G1 reuses the existing hook marker. F3 no longer claims hooks post to `/api/sync`. C2 now depends on A1.
 - 2026-10-01 added G2 (Worker `UnhookRepository`), G3 (unhook when repositories leave a Workspace, block Workspace delete while Features exist) and G4 (self-heal stale hooks); background in `07` section 6, risks R-G2 to R-G4 in `08`. GATE-4 now depends on G3 and G4.
+- 2026-10-01 added lane I from `09-switch-branch-in-feature-analysis.md` (option B): I1 (Remove judges the Feature branch), I2 (own Feature branch checkable, Return to Feature branch, upgrade-badge occupancy fix), I3 (Feature-aware Switch Branch dialog and service guard), I4 (drift badge). C2 now compares the worktree path only. GATE-2 gets step 6 and depends on I1; GATE-4 gets step 7 and depends on I3 and I4. Risks R-I1 to R-I4 in `08`.
+- 2026-10-01 A6: the commit message is now part of the required final message, with format rules (one per repository, imperative summary ending with the unit id, `none` when nothing changed).
+- 2026-10-01 A6: the final message now lists 2 to 5 owner checks with expected results, plus a Workspace check, to run before the next unit.
 
 ---
 
@@ -916,3 +1155,5 @@ Known non-worktree items from `05-general-code-and-ux-review.md`, deliberately n
 - [07] GrayMoon's own commits and pulls run with `skipHooks: true` (`GitService.GetHooksConfigPrefix`, used by `DependencyUpdateOrchestrator`), so they bypass the team's `pre-commit` hooks too - owner decision, not changed in v1.
 - [08] Enforce the Worker secret by default (`Security:RequireWorkerSecret = true`) - v1.1, after users have reinstalled the Worker.
 - [07] Hook chaining for repos with their own hooks or `core.hooksPath` (DEC-3 = chain) - v1.1.
+- [09] Create PR and Push for a Feature repo that is off its Feature branch (I4 shows it) probably act on the checked-out branch, not the Feature branch; not verified - v1.1, check before deciding.
+- [09] Multi-branch Features (stacked branches inside a Feature, 09 option C) - later, needs a design.
