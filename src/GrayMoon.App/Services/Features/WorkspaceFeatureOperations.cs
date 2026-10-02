@@ -147,6 +147,14 @@ public sealed class WorkspaceFeatureOperations(
             };
         }
 
+        // Build worktree paths from the already-persisted storage root. Do not call pathResolver
+        // inside the intent transaction: it opens a second AppDbContext and deadlocks SQLite
+        // against this write (and against WorkspaceGitChangesWriteQueue).
+        if (string.IsNullOrWhiteSpace(workspace.ManagedFeatureStorageRoot))
+            throw new InvalidOperationException(
+                "Feature storage root is not configured. Set it on the Settings page (or connect the Agent so the host user profile can be used as the default).");
+        var featureRootPath = CombineWindowsPath(workspace.ManagedFeatureStorageRoot, name);
+
         var now = DateTime.UtcNow;
         var feature = new WorkspaceFeature
         {
@@ -196,12 +204,11 @@ public sealed class WorkspaceFeatureOperations(
                     snapshot.Tags.TryGetValue(repoName, out var pinnedTag);
                     pinnedTag = string.IsNullOrWhiteSpace(pinnedTag) ? null : pinnedTag.Trim();
 
-                    var worktreePath = await pathResolver.GetRepositoryPathAsync(contextId, link.WorkspaceRepositoryId, cancellationToken);
                     var row = new WorkspaceFeatureRepository
                     {
                         WorkspaceFeatureContextId = context.WorkspaceFeatureContextId,
                         WorkspaceRepositoryId = link.WorkspaceRepositoryId,
-                        WorktreePath = worktreePath,
+                        WorktreePath = CombineWindowsPath(featureRootPath, repoName),
                         BaseCommitSha = sha,
                         ParentBranchName = pinnedTag == null ? parentBranch : null,
                         PinnedTag = pinnedTag,
@@ -1551,6 +1558,16 @@ public sealed class WorkspaceFeatureOperations(
         if (!normalized.AsSpan(3).StartsWith(".graymoon", StringComparison.OrdinalIgnoreCase))
             return false;
         return normalized.Length == 12 || normalized[12] == '\\';
+    }
+
+    /// <summary>Agent-facing Windows-shaped path join (matches <see cref="WorkspaceContextPathResolver"/>).</summary>
+    private static string CombineWindowsPath(params string[] parts)
+    {
+        var cleaned = parts
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Select(p => p.Replace('/', '\\').Trim('\\'))
+            .ToArray();
+        return string.Join('\\', cleaned);
     }
 
     private static RemoveFeatureClassification Classify(IReadOnlyList<RemoveFeatureRepositoryPlan> plans)

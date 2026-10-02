@@ -1,9 +1,9 @@
 using GrayMoon.Abstractions.Agent;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
-using GrayMoon.App.Services.Features;
 using GrayMoon.Application.Features;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace GrayMoon.App.Tests;
@@ -52,14 +52,8 @@ public sealed class CreateFeatureIntentAtomicityTests
     [Fact]
     public async Task Exception_while_saving_repo_rows_writes_no_Feature_or_context_row()
     {
-        await using var ctx = await SyncStateTestContext.CreateAsync(configureServices: services =>
-        {
-            services.AddScoped<IWorkspaceContextPathResolver>(sp =>
-            {
-                var inner = ActivatorUtilities.CreateInstance<WorkspaceContextPathResolver>(sp);
-                return new ThrowingFeaturePathResolver(inner);
-            });
-        });
+        await using var ctx = await SyncStateTestContext.CreateAsync(configureDb: o =>
+            o.AddInterceptors(new ThrowOnFeatureRepositoryInsertInterceptor()));
 
         ctx.AgentBridge.Respond(AgentHubMethods.GetHeadCommits, new
         {
@@ -83,43 +77,85 @@ public sealed class CreateFeatureIntentAtomicityTests
 
         Assert.False(result.Success);
         Assert.Equal("Exception", result.Condition);
-        Assert.Contains("Simulated path resolution failure", result.Error, StringComparison.Ordinal);
+        Assert.Contains("Simulated save failure", result.Error, StringComparison.Ordinal);
 
         await using var read = ctx.CreateScope();
         var db = read.ServiceProvider.GetRequiredService<AppDbContext>();
         Assert.False(await db.WorkspaceFeatures.AnyAsync(f =>
             f.WorkspaceId == ctx.WorkspaceId && f.Name == "feature/save-rollback"));
         Assert.False(await db.WorkspaceFeatureContexts.AnyAsync(c =>
-            c.WorkspaceId == ctx.WorkspaceId
-            && c.Kind == WorkspaceFeatureContextKind.Feature
-            && c.WorkspaceFeature != null
-            && c.WorkspaceFeature.Name == "feature/save-rollback"));
+            c.WorkspaceId == ctx.WorkspaceId && c.Kind == WorkspaceFeatureContextKind.Feature));
         Assert.False(await db.WorkspaceFeatureRepositories.AnyAsync());
     }
 
-    /// <summary>Throws on the first Feature-context path resolve (Pending-row build), not Workspace paths.</summary>
-    private sealed class ThrowingFeaturePathResolver(IWorkspaceContextPathResolver inner) : IWorkspaceContextPathResolver
+    [Fact]
+    public async Task Create_builds_Pending_worktree_paths_from_storage_root()
     {
-        private int _featurePathCalls;
+        await using var ctx = await SyncStateTestContext.CreateAsync();
 
-        public Task<string> GetContextRootAsync(WorkspaceFeatureContextId contextId, CancellationToken cancellationToken = default)
-            => inner.GetContextRootAsync(contextId, cancellationToken);
-
-        public Task<string> GetRepositoryPathAsync(
-            WorkspaceFeatureContextId contextId,
-            int workspaceRepositoryId,
-            CancellationToken cancellationToken = default)
+        ctx.AgentBridge.Respond(AgentHubMethods.GetHeadCommits, new
         {
-            // Intent phase resolves Feature Pending paths before CreateGitWorktree; throw on that first call.
-            if (Interlocked.Increment(ref _featurePathCalls) == 1)
-                throw new InvalidOperationException("Simulated path resolution failure.");
+            commits = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["graymoon-api"] = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            },
+            branches = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["graymoon-api"] = "develop",
+            },
+        });
+        // Echo success without overriding WorktreePath so the intent-built path stays on the row.
+        ctx.AgentBridge.Respond(AgentHubMethods.CreateGitWorktree, new { success = true });
 
-            return inner.GetRepositoryPathAsync(contextId, workspaceRepositoryId, cancellationToken);
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var result = await ops.CreateFeatureAsync(
+            ctx.WorkspaceId,
+            "feature/path-shape",
+            WorkspaceFeatureBaseKindApplication.CurrentWorkspace);
+
+        Assert.True(result.Success, result.Error);
+
+        const string expected =
+            @"C:\Users\test\.graymoon\test-ws\features\feature\path-shape\graymoon-api";
+
+        var createCall = Assert.Single(ctx.AgentBridge.Calls, c => c.Command == AgentHubMethods.CreateGitWorktree);
+        var args = System.Text.Json.JsonSerializer.SerializeToElement(createCall.Args);
+        Assert.Equal(expected, args.GetProperty("worktreePath").GetString());
+
+        await using var read = ctx.CreateScope();
+        var db = read.ServiceProvider.GetRequiredService<AppDbContext>();
+        var row = await db.WorkspaceFeatureRepositories
+            .AsNoTracking()
+            .SingleAsync(r => r.WorkspaceFeatureContextId == result.ContextId!.Value.Value);
+        Assert.Equal(expected, row.WorktreePath);
+    }
+
+    /// <summary>Fails the SaveChanges that inserts Pending Feature repository rows (inside the C1 transaction).</summary>
+    private sealed class ThrowOnFeatureRepositoryInsertInterceptor : SaveChangesInterceptor
+    {
+        public override InterceptionResult<int> SavingChanges(DbContextEventData eventData, InterceptionResult<int> result)
+        {
+            ThrowIfAddingFeatureRepositories(eventData.Context);
+            return result;
         }
 
-        public Task<(string AgentWorkspaceRoot, string AgentWorkspaceFolderName)> GetAgentWorkspaceArgsAsync(
-            WorkspaceFeatureContextId contextId,
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
             CancellationToken cancellationToken = default)
-            => inner.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
+        {
+            ThrowIfAddingFeatureRepositories(eventData.Context);
+            return ValueTask.FromResult(result);
+        }
+
+        private static void ThrowIfAddingFeatureRepositories(DbContext? db)
+        {
+            if (db?.ChangeTracker.Entries<WorkspaceFeatureRepository>()
+                    .Any(e => e.State == EntityState.Added) == true)
+            {
+                throw new InvalidOperationException("Simulated save failure.");
+            }
+        }
     }
 }

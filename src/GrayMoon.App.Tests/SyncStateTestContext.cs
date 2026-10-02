@@ -45,7 +45,8 @@ public sealed class SyncStateTestContext : IAsyncDisposable
 
     public static async Task<SyncStateTestContext> CreateAsync(
         string? userToken = null,
-        Action<IServiceCollection>? configureServices = null)
+        Action<IServiceCollection>? configureServices = null,
+        Action<DbContextOptionsBuilder>? configureDb = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -64,8 +65,14 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddSingleton<IAgentBridge>(agentBridge);
         services.AddSingleton<IHubContext<WorkspaceSyncHub>>(hubContext);
 
-        services.AddDbContext<AppDbContext>(o => o.UseSqlite(connection), ServiceLifetime.Scoped);
-        services.AddDbContextFactory<AppDbContext>(o => o.UseSqlite(connection), ServiceLifetime.Singleton);
+        void ConfigureDb(DbContextOptionsBuilder o)
+        {
+            o.UseSqlite(connection);
+            configureDb?.Invoke(o);
+        }
+
+        services.AddDbContext<AppDbContext>(ConfigureDb, ServiceLifetime.Scoped);
+        services.AddDbContextFactory<AppDbContext>(ConfigureDb, ServiceLifetime.Singleton);
 
         services.AddSingleton<IWorkspaceGitChangesNotifier, WorkspaceGitChangesNotifier>();
         services.AddSingleton<IWorkspaceGitChangesMonitoringPause, WorkspaceGitChangesMonitoringPause>();
