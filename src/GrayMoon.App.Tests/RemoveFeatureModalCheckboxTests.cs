@@ -20,7 +20,9 @@ public sealed class RemoveFeatureModalCheckboxTests
         int? aheadOfDefault = 0,
         bool? pullRequestMerged = null,
         bool isLocked = false,
-        string? lockReason = null) => new()
+        string? lockReason = null,
+        bool hasUpstream = false,
+        int? outgoingCommits = 0) => new()
     {
         RepositoryName = name,
         WorktreeExists = true,
@@ -32,6 +34,8 @@ public sealed class RemoveFeatureModalCheckboxTests
         PullRequestMerged = pullRequestMerged,
         IsLocked = isLocked,
         LockReason = lockReason,
+        HasUpstream = hasUpstream,
+        OutgoingCommits = outgoingCommits,
     };
 
     [Fact]
@@ -276,5 +280,120 @@ public sealed class RemoveFeatureModalCheckboxTests
         };
 
         Assert.False(RemoveFeatureModal.HasLocalFeatureBranchToDelete(gone));
+    }
+
+    [Fact]
+    public void BuildRepositoryStatusGroups_summarizes_identical_no_pull_request_status()
+    {
+        var repos = new[]
+        {
+            MakeRepo(name: "MezzoRecovery", hasUpstream: true),
+            MakeRepo(name: "MezzoRecovery.Agent", hasUpstream: true),
+            MakeRepo(name: "MezzoRecovery.App", hasUpstream: true),
+        };
+
+        var groups = RemoveFeatureModal.BuildRepositoryStatusGroups(repos);
+
+        Assert.Single(groups);
+        Assert.Equal(RemoveFeatureModal.NoPullRequestStatusMessage, groups[0].Message);
+        Assert.Equal(3, groups[0].Count);
+        Assert.True(RemoveFeatureModal.ShouldSummarizeStatusGroup(groups[0]));
+        Assert.Equal(
+            "All 3 repositories have no pull request opened for this branch.",
+            RemoveFeatureModal.FormatStatusGroupSummary(
+                groups[0].Message, groups[0].Count, allRepositoriesShareThisStatus: true));
+    }
+
+    [Fact]
+    public void BuildRepositoryStatusGroups_mixed_clean_and_no_pull_request_yields_group_summaries()
+    {
+        var repos = new[]
+        {
+            MakeRepo(name: "pushed-a", hasUpstream: true),
+            MakeRepo(name: "pushed-b", hasUpstream: true),
+            MakeRepo(name: "clean-a"),
+            MakeRepo(name: "clean-b"),
+            MakeRepo(name: "clean-c"),
+        };
+
+        var groups = RemoveFeatureModal.BuildRepositoryStatusGroups(repos);
+
+        Assert.Equal(2, groups.Count);
+        Assert.Equal(RemoveFeatureModal.NoPullRequestStatusMessage, groups[0].Message);
+        Assert.Equal(2, groups[0].Count);
+        Assert.Equal(RemoveFeatureModal.NothingPendingStatusMessage, groups[1].Message);
+        Assert.Equal(3, groups[1].Count);
+        Assert.True(RemoveFeatureModal.ShouldSummarizeStatusGroup(groups[0]));
+        Assert.True(RemoveFeatureModal.ShouldSummarizeStatusGroup(groups[1]));
+        Assert.Equal(
+            "2 repositories have no pull request opened for this branch.",
+            RemoveFeatureModal.FormatStatusGroupSummary(
+                groups[0].Message, groups[0].Count, allRepositoriesShareThisStatus: false));
+        Assert.Equal(
+            "3 other repositories are up to date with nothing pending.",
+            RemoveFeatureModal.FormatStatusGroupSummary(
+                groups[1].Message, groups[1].Count, allRepositoriesShareThisStatus: false));
+    }
+
+    [Fact]
+    public void BuildRepositoryStatusGroups_keeps_unique_status_as_detail_and_summarizes_clean()
+    {
+        var repos = new[]
+        {
+            MakeRepo(name: "dirty", hasUncommittedChanges: true),
+            MakeRepo(name: "clean-a"),
+            MakeRepo(name: "clean-b"),
+        };
+
+        var groups = RemoveFeatureModal.BuildRepositoryStatusGroups(repos);
+
+        Assert.Equal(2, groups.Count);
+        Assert.False(RemoveFeatureModal.ShouldSummarizeStatusGroup(groups[0]));
+        Assert.Equal("dirty", groups[0].Repositories[0].RepositoryName);
+        Assert.Equal("Has uncommitted changes", groups[0].Message);
+        Assert.True(RemoveFeatureModal.ShouldSummarizeStatusGroup(groups[1]));
+        Assert.Equal(
+            "2 other repositories are up to date with nothing pending.",
+            RemoveFeatureModal.FormatStatusGroupSummary(
+                groups[1].Message, groups[1].Count, allRepositoriesShareThisStatus: false));
+    }
+
+    [Fact]
+    public void BuildRepositoryStatusGroups_keeps_per_repo_detail_when_commit_counts_differ()
+    {
+        var repos = new[]
+        {
+            MakeRepo(name: "one-out", outgoingCommits: 1),
+            MakeRepo(name: "two-out", outgoingCommits: 2),
+        };
+
+        var groups = RemoveFeatureModal.BuildRepositoryStatusGroups(repos);
+
+        Assert.Equal(2, groups.Count);
+        Assert.All(groups, g => Assert.False(RemoveFeatureModal.ShouldSummarizeStatusGroup(g)));
+        Assert.Equal("1 commit not pushed to the remote", groups[0].Message);
+        Assert.Equal("2 commits not pushed to the remote", groups[1].Message);
+    }
+
+    [Fact]
+    public void ShouldSummarizeStatusGroup_true_for_single_clean_repo()
+    {
+        var group = new RemoveFeatureModal.RepositoryStatusGroup(
+            RemoveFeatureModal.NothingPendingStatusMessage,
+            Count: 1,
+            [MakeRepo(name: "clean")]);
+
+        Assert.True(RemoveFeatureModal.ShouldSummarizeStatusGroup(group));
+    }
+
+    [Fact]
+    public void FormatStatusGroupSummary_other_clean_when_mixed_with_summaries_only()
+    {
+        var text = RemoveFeatureModal.FormatStatusGroupSummary(
+            RemoveFeatureModal.NothingPendingStatusMessage,
+            count: 1,
+            allRepositoriesShareThisStatus: false);
+
+        Assert.Equal("1 other repository is up to date with nothing pending.", text);
     }
 }
