@@ -203,12 +203,14 @@
     display: block;
 }
 
+/* No overflow/max-height clipping here: this list hosts a 3rd-level Features flyout
+   (.workspace-feature-selector__ws-chevron-flyout, positioned via left: 100%) for every row that
+   has Features. Any non-"visible" overflow-x/overflow-y on this element clips that flyout
+   completely (even once it's open and populated), which is why it used to render but never show.
+   Keep this menu unclipped; it is the one place in this component a 3rd level needs room. */
 .workspace-feature-selector__switch-submenu {
     min-width: 12rem;
     max-width: 18rem;
-    max-height: calc(12 * 2rem);
-    overflow-x: hidden;
-    overflow-y: auto;
 }
 
 .workspace-feature-selector__ws-flyout {
