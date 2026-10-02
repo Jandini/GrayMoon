@@ -43,7 +43,9 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         HubContext = hubContext;
     }
 
-    public static async Task<SyncStateTestContext> CreateAsync(string? userToken = null)
+    public static async Task<SyncStateTestContext> CreateAsync(
+        string? userToken = null,
+        Action<IServiceCollection>? configureServices = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -103,6 +105,9 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddScoped<SyncCommandHandler>();
         services.AddScoped<WorkspaceBranchUpdateHandler>();
         services.AddScoped<IWorkspaceBranchOperations, WorkspaceBranchOperations>();
+
+        // Last registration wins for GetRequiredService; tests can replace path resolution, etc.
+        configureServices?.Invoke(services);
 
         var provider = services.BuildServiceProvider();
 

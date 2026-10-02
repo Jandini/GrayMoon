@@ -119,6 +119,14 @@ public sealed class WorkspaceFeatureOperations(
         if (snapshot.Commits.Count != repoNames.Count)
             return FailCreate("HeadCommitsIncomplete", "Could not resolve HEAD for every Workspace repository.");
 
+        // Validate every repo HEAD before writing any Feature rows (C1).
+        foreach (var link in links)
+        {
+            var repoName = link.Repository!.RepositoryName;
+            if (!snapshot.Commits.TryGetValue(repoName, out var sha) || string.IsNullOrWhiteSpace(sha))
+                return FailCreate("HeadCommitsIncomplete", $"Missing HEAD for repository '{repoName}'.");
+        }
+
         if (snapshot.BranchCollisions.Count > 0)
         {
             var collisions = snapshot.BranchCollisions
@@ -149,54 +157,70 @@ public sealed class WorkspaceFeatureOperations(
             CreatedAt = now,
             UpdatedAt = now
         };
-        db.WorkspaceFeatures.Add(feature);
-        await db.SaveChangesAsync(cancellationToken);
 
-        var context = new WorkspaceFeatureContext
-        {
-            WorkspaceId = workspaceId,
-            Kind = WorkspaceFeatureContextKind.Feature,
-            WorkspaceFeatureId = feature.WorkspaceFeatureId,
-            CreatedAt = now,
-            IsInSync = false
-        };
-        db.WorkspaceFeatureContexts.Add(context);
-        await db.SaveChangesAsync(cancellationToken);
-
-        var contextId = new WorkspaceFeatureContextId(context.WorkspaceFeatureContextId);
+        WorkspaceFeatureContext context;
+        WorkspaceFeatureContextId contextId;
         var pendingRows = new List<WorkspaceFeatureRepository>();
-        foreach (var link in links)
+
+        // Feature + context + Pending rows commit together or not at all (C1).
+        await using (var transaction = await db.Database.BeginTransactionAsync(cancellationToken))
         {
-            var repoName = link.Repository!.RepositoryName;
-            if (!snapshot.Commits.TryGetValue(repoName, out var sha) || string.IsNullOrWhiteSpace(sha))
-                return FailCreate("HeadCommitsIncomplete", $"Missing HEAD for repository '{repoName}'.");
-
-            // Parent branch from the same agent snapshot as BaseCommitSha. Detached HEAD -> null
-            // (do not invent a name from mutable Workspace link state).
-            snapshot.Branches.TryGetValue(repoName, out var parentBranch);
-            parentBranch = string.IsNullOrWhiteSpace(parentBranch) ? null : parentBranch.Trim();
-
-            // Repositories on a tag stay on that tag in the Feature: detached worktree, no Feature branch.
-            snapshot.Tags.TryGetValue(repoName, out var pinnedTag);
-            pinnedTag = string.IsNullOrWhiteSpace(pinnedTag) ? null : pinnedTag.Trim();
-
-            var worktreePath = await pathResolver.GetRepositoryPathAsync(contextId, link.WorkspaceRepositoryId, cancellationToken);
-            var row = new WorkspaceFeatureRepository
+            try
             {
-                WorkspaceFeatureContextId = context.WorkspaceFeatureContextId,
-                WorkspaceRepositoryId = link.WorkspaceRepositoryId,
-                WorktreePath = worktreePath,
-                BaseCommitSha = sha,
-                ParentBranchName = pinnedTag == null ? parentBranch : null,
-                PinnedTag = pinnedTag,
-                CreatedAt = now,
-                State = WorkspaceFeatureRepositoryState.Pending
-            };
-            db.WorkspaceFeatureRepositories.Add(row);
-            pendingRows.Add(row);
-        }
+                db.WorkspaceFeatures.Add(feature);
+                await db.SaveChangesAsync(cancellationToken);
 
-        await db.SaveChangesAsync(cancellationToken);
+                context = new WorkspaceFeatureContext
+                {
+                    WorkspaceId = workspaceId,
+                    Kind = WorkspaceFeatureContextKind.Feature,
+                    WorkspaceFeatureId = feature.WorkspaceFeatureId,
+                    CreatedAt = now,
+                    IsInSync = false
+                };
+                db.WorkspaceFeatureContexts.Add(context);
+                await db.SaveChangesAsync(cancellationToken);
+
+                contextId = new WorkspaceFeatureContextId(context.WorkspaceFeatureContextId);
+                foreach (var link in links)
+                {
+                    var repoName = link.Repository!.RepositoryName;
+                    var sha = snapshot.Commits[repoName];
+
+                    // Parent branch from the same agent snapshot as BaseCommitSha. Detached HEAD -> null
+                    // (do not invent a name from mutable Workspace link state).
+                    snapshot.Branches.TryGetValue(repoName, out var parentBranch);
+                    parentBranch = string.IsNullOrWhiteSpace(parentBranch) ? null : parentBranch.Trim();
+
+                    // Repositories on a tag stay on that tag in the Feature: detached worktree, no Feature branch.
+                    snapshot.Tags.TryGetValue(repoName, out var pinnedTag);
+                    pinnedTag = string.IsNullOrWhiteSpace(pinnedTag) ? null : pinnedTag.Trim();
+
+                    var worktreePath = await pathResolver.GetRepositoryPathAsync(contextId, link.WorkspaceRepositoryId, cancellationToken);
+                    var row = new WorkspaceFeatureRepository
+                    {
+                        WorkspaceFeatureContextId = context.WorkspaceFeatureContextId,
+                        WorkspaceRepositoryId = link.WorkspaceRepositoryId,
+                        WorktreePath = worktreePath,
+                        BaseCommitSha = sha,
+                        ParentBranchName = pinnedTag == null ? parentBranch : null,
+                        PinnedTag = pinnedTag,
+                        CreatedAt = now,
+                        State = WorkspaceFeatureRepositoryState.Pending
+                    };
+                    db.WorkspaceFeatureRepositories.Add(row);
+                    pendingRows.Add(row);
+                }
+
+                await db.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                throw;
+            }
+        }
 
         var anyFailure = 0;
         var createCompleted = 0;
