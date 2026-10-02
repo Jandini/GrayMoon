@@ -10,14 +10,30 @@
         <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: 1085;"
              @onkeydown="HandleKeyDown"
              @ref="_modalElement">
-            <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-dialog modal-dialog-centered @(HasBranchCollisions ? "modal-lg" : null)">
                 <div class="modal-content">
                     <div class="modal-header">
                         <h5 class="modal-title">New Feature <small class="text-muted fw-normal">worktree</small></h5>
                         <button type="button" class="btn-close" aria-label="Close" @onclick="Cancel"></button>
                     </div>
                     <div class="modal-body">
-                        @if (!string.IsNullOrEmpty(_error))
+                        @if (HasBranchCollisions)
+                        {
+                            <div class="gm-callout gm-callout--error mb-3" role="alert">
+                                <div class="fw-semibold">@BranchExistsSummary</div>
+                            </div>
+                            <ul class="list-unstyled mb-2 create-feature-collision-list">
+                                @foreach (var collision in _branchCollisions!)
+                                {
+                                    <li class="mb-2">
+                                        <strong>@collision.RepositoryName</strong>
+                                        <div class="text-muted small">@string.Join(", ", collision.Refs)</div>
+                                    </li>
+                                }
+                            </ul>
+                            <p class="text-muted small mb-3">Choose a different Feature name, or delete those branches first.</p>
+                        }
+                        else if (!string.IsNullOrEmpty(_error))
                         {
                             <div class="gm-callout gm-callout--error mb-3" role="alert">@_error</div>
                         }
@@ -78,9 +94,25 @@
     private ElementReference _nameInput;
     private string _name = "";
     private string? _error;
+    private IReadOnlyList<CreateFeatureBranchCollision>? _branchCollisions;
+    private int _totalRepositoryCount;
     private bool _busy;
     private bool _wasVisible;
     private bool _focusPending;
+
+    private bool HasBranchCollisions => _branchCollisions is { Count: > 0 };
+
+    private string BranchExistsSummary =>
+        FormatBranchExistsSummary(_name.Trim(), _branchCollisions?.Count ?? 0, _totalRepositoryCount);
+
+    /// <summary>Short "X of Y" summary for BranchExists without the concatenated Error string (E5).</summary>
+    internal static string FormatBranchExistsSummary(string featureName, int collisionCount, int totalRepositoryCount)
+    {
+        var name = string.IsNullOrWhiteSpace(featureName) ? "this name" : $"'{featureName.Trim()}'";
+        if (totalRepositoryCount <= 0)
+            return $"Branch {name} already exists in {collisionCount} repositories";
+        return $"Branch {name} already exists in {collisionCount} of {totalRepositoryCount} repositories";
+    }
 
     protected override void OnParametersSet()
     {
@@ -88,6 +120,8 @@
         {
             _name = InitialName?.Trim() ?? "";
             _error = null;
+            _branchCollisions = null;
+            _totalRepositoryCount = 0;
             _focusPending = true;
         }
 
@@ -114,6 +148,8 @@
     {
         _busy = true;
         _error = null;
+        _branchCollisions = null;
+        _totalRepositoryCount = 0;
         try
         {
             var result = await FeatureOperations.CreateFeatureAsync(
@@ -122,6 +158,15 @@
                 WorkspaceFeatureBaseKindApplication.CurrentWorkspace);
             if (!result.Success)
             {
+                if (string.Equals(result.Condition, "BranchExists", StringComparison.Ordinal)
+                    && result.BranchCollisions is { Count: > 0 })
+                {
+                    _branchCollisions = result.BranchCollisions;
+                    _totalRepositoryCount = result.TotalRepositoryCount ?? result.BranchCollisions.Count;
+                    _error = null;
+                    return;
+                }
+
                 _error = result.Error ?? result.Condition ?? "Feature creation failed.";
                 return;
             }

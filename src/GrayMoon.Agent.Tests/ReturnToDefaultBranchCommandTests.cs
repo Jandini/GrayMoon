@@ -54,7 +54,7 @@ public sealed class ReturnToDefaultBranchCommandTests
         public Task<string?> GetDefaultBranchNameAsync(string repoPath, CancellationToken ct) => Task.FromResult<string?>("main");
 
         public Task<(bool Success, string? ErrorMessage)> DeleteBranchAsync(
-            string repoPath, string branchName, bool isRemote, bool force, CancellationToken ct, bool skipHooks = false, string? bearerToken = null)
+            string repoPath, string branchName, bool isRemote, bool force, CancellationToken ct, bool skipHooks = false, string? bearerToken = null, string? expectedSha = null)
         {
             DeleteCalls.Add(new DeleteCall(branchName, isRemote, force, skipHooks, bearerToken));
             return Task.FromResult<(bool, string?)>((true, null));

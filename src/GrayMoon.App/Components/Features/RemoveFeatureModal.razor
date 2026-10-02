@@ -44,20 +44,63 @@
                     }
                     else if (_plan.Success)
                     {
-                        <div class="gm-callout @CalloutClass mb-3" role="alert">
-                            @StatusHeadline
-                        </div>
+                        @if (UseNeutralStatusText)
+                        {
+                            <p class="mb-3">@StatusHeadline</p>
+                        }
+                        else
+                        {
+                            <div class="gm-callout @CalloutClass mb-3" role="alert">
+                                @StatusHeadline
+                            </div>
+                        }
                         <p class="mb-2 fw-semibold">This will remove the following from your computer:</p>
-                        <ul class="list-unstyled mb-2">
-                            @foreach (var repo in _plan.Repositories)
+                        @if (AllRepositoriesNothingPending)
+                        {
+                            <p class="text-muted small mb-2">@AllCleanSummaryText</p>
+                        }
+                        else
+                        {
+                            <ul class="list-unstyled mb-2 remove-feature-repo-list">
+                                @foreach (var repo in RepositoriesRequiringDetail)
+                                {
+                                    <li class="mb-2">
+                                        <strong>@repo.RepositoryName</strong>
+                                        <div class="text-muted small">@DescribeRepository(repo)</div>
+                                    </li>
+                                }
+                            </ul>
+                            @if (CleanRepositoryCount > 0)
                             {
-                                <li class="mb-2">
-                                    <strong>@repo.RepositoryName</strong>
-                                    <div class="text-muted small">@DescribeRepository(repo)</div>
-                                </li>
+                                <p class="text-muted small mb-2">
+                                    @(CleanRepositoryCount == 1
+                                        ? "1 other repository is up to date with nothing pending."
+                                        : $"{CleanRepositoryCount} other repositories are up to date with nothing pending.")
+                                </p>
                             }
-                        </ul>
-                        <p class="text-muted small mb-3">Local branches are deleted. Remote branches are kept.</p>
+                        }
+                        @if (ShowDeleteLocalBranchesCheckbox)
+                        {
+                            <div class="form-check mb-1">
+                                <input class="form-check-input" type="checkbox" id="delete-local-branches" @bind="_deleteLocalBranches" disabled="@_analyzing" />
+                                <label class="form-check-label" for="delete-local-branches">
+                                    Delete local Feature branches
+                                </label>
+                            </div>
+                        }
+                        @if (ShowDeleteRemoteBranchesCheckbox)
+                        {
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" id="delete-remote-branches" @bind="_deleteRemoteBranches" disabled="@_analyzing" />
+                                <label class="form-check-label" for="delete-remote-branches">
+                                    Delete remote Feature branches
+                                </label>
+                            </div>
+                        }
+                        else if (ShowNoRemoteBranchesNote)
+                        {
+                            <p class="text-muted small mb-2">No remote Feature branches to delete (this Feature was never pushed).</p>
+                        }
                         @if (AnyRepoStatusUnknown)
                         {
                             <div class="gm-callout gm-callout--warning mb-3" role="alert">
@@ -133,7 +176,7 @@
                     else
                     {
                         <button type="button" class="btn btn-outline-secondary" @onclick="Cancel" disabled="@_analyzing">Cancel</button>
-                        <button type="button" class="btn btn-danger" @onclick="RemoveAsync"
+                        <button type="button" class="@RemoveCtaClass" @onclick="RemoveAsync"
                                 disabled="@(_analyzing || _plan is null || !CanRemove(AnyRepoStatusUnknown, ShowDiscardCheckbox, _allowDiscard, ShowForceCheckbox, _allowForce, ShowUnlockCheckbox, _allowUnlock))">
                             Remove Feature
                         </button>
@@ -165,6 +208,8 @@
     private bool _allowDiscard;
     private bool _allowForce;
     private bool _allowUnlock;
+    private bool _deleteLocalBranches = true;
+    private bool _deleteRemoteBranches;
     private int? _analyzedFor;
     private int? _appliedInitialPlanFor;
 
@@ -179,7 +224,13 @@
 
         foreach (var repo in report)
         {
-            if (repo.BranchOutcome is RemoveFeatureBranchOutcome.KeptUnmerged or RemoveFeatureBranchOutcome.Failed)
+            if (repo.BranchOutcome is RemoveFeatureBranchOutcome.KeptUnmerged
+                or RemoveFeatureBranchOutcome.Failed
+                or RemoveFeatureBranchOutcome.Kept)
+                return true;
+            if (repo.RemoteBranchOutcome is RemoveFeatureRemoteBranchOutcome.Failed
+                or RemoveFeatureRemoteBranchOutcome.RefusedLease
+                or RemoveFeatureRemoteBranchOutcome.Kept)
                 return true;
             if (repo.ResidueRemaining)
                 return true;
@@ -203,8 +254,17 @@
             {
                 if (repo.BranchOutcome == RemoveFeatureBranchOutcome.KeptUnmerged)
                     warnings.Add($"{repo.RepositoryName}: local branch kept (has commits not in the default branch).");
+                else if (repo.BranchOutcome == RemoveFeatureBranchOutcome.Kept)
+                    warnings.Add($"{repo.RepositoryName}: local Feature branch kept.");
                 else if (repo.BranchOutcome == RemoveFeatureBranchOutcome.Failed)
                     warnings.Add($"{repo.RepositoryName}: local branch delete failed. {repo.BranchMessage}".TrimEnd());
+
+                if (repo.RemoteBranchOutcome == RemoveFeatureRemoteBranchOutcome.Kept)
+                    warnings.Add($"{repo.RepositoryName}: remote Feature branch kept.");
+                else if (repo.RemoteBranchOutcome == RemoveFeatureRemoteBranchOutcome.RefusedLease)
+                    warnings.Add($"{repo.RepositoryName}: remote branch kept (tip no longer matches this Feature). {repo.RemoteBranchMessage}".TrimEnd());
+                else if (repo.RemoteBranchOutcome == RemoveFeatureRemoteBranchOutcome.Failed)
+                    warnings.Add($"{repo.RepositoryName}: remote branch delete failed. {repo.RemoteBranchMessage}".TrimEnd());
 
                 // 09 SB-2: the worktree was on another branch (or a detached commit) instead of its
                 // Feature branch; that branch was never deleted and is still in the Workspace.
@@ -247,6 +307,40 @@
     /// <summary>Shown only when at least one repository is actually locked (D5). An old Worker never reports a lock, so no checkbox appears.</summary>
     private bool ShowUnlockCheckbox => LockedRepositories.Count > 0;
 
+    private bool ShowDeleteLocalBranchesCheckbox =>
+        _plan?.Repositories.Any(HasLocalFeatureBranchToDelete) == true;
+
+    private bool ShowDeleteRemoteBranchesCheckbox =>
+        _plan?.Repositories.Any(HasRemoteFeatureBranchToDelete) == true;
+
+    private bool ShowNoRemoteBranchesNote =>
+        ShowDeleteLocalBranchesCheckbox && !ShowDeleteRemoteBranchesCheckbox;
+
+    private bool AllRepositoriesNothingPending =>
+        _plan is { Repositories.Count: > 0 }
+        && _plan.Repositories.All(IsRepositoryNothingPending);
+
+    private IReadOnlyList<RemoveFeatureRepositoryPlan> RepositoriesRequiringDetail =>
+        _plan?.Repositories.Where(r => !IsRepositoryNothingPending(r)).ToList() ?? [];
+
+    private int CleanRepositoryCount =>
+        _plan?.Repositories.Count(IsRepositoryNothingPending) ?? 0;
+
+    private string AllCleanSummaryText =>
+        _plan is null || _plan.Repositories.Count == 0
+            ? "All repositories are up to date with nothing pending."
+            : _plan.Repositories.Count == 1
+                ? "All 1 repository is up to date with nothing pending."
+                : $"All {_plan.Repositories.Count} repositories are up to date with nothing pending.";
+
+    private bool UseNeutralStatusText =>
+        _plan?.Classification == RemoveFeatureClassification.Completed;
+
+    private string RemoveCtaClass =>
+        _plan is not null && !RemoveCtaIsDestructive(_plan)
+            ? "btn remove-feature-btn-safe"
+            : "btn btn-danger";
+
     internal static bool IsRepositoryDirty(RemoveFeatureRepositoryPlan repo) =>
         repo.HasUncommittedChanges || repo.HasStagedChanges || repo.HasConflicts;
 
@@ -255,10 +349,53 @@
 
     internal static bool HasLockedWorktree(RemoveFeatureRepositoryPlan repo) => repo.IsLocked;
 
+    internal static bool HasLocalFeatureBranchToDelete(RemoveFeatureRepositoryPlan repo) =>
+        repo.FeatureBranchName is not null && repo.FeatureBranchExists != false;
+
+    internal static bool HasRemoteFeatureBranchToDelete(RemoveFeatureRepositoryPlan repo) =>
+        repo.FeatureBranchName is not null && repo.FeatureBranchHasUpstream == true;
+
+    /// <summary>
+    /// True when <see cref="DescribeRepository"/> would only say "Up to date with nothing pending" (D6).
+    /// </summary>
+    internal static bool IsRepositoryNothingPending(RemoveFeatureRepositoryPlan repo)
+    {
+        if (repo.IsOffFeatureBranch)
+            return false;
+        if (repo.FeatureBranchName is not null && repo.FeatureBranchExists == false)
+            return false;
+        if (repo.WorktreeStatusUnknown)
+            return false;
+        if (!repo.WorktreeExists)
+            return false;
+        if (!repo.LiveStatusEstablished)
+            return false;
+        if (repo.HasConflicts || repo.HasStagedChanges || repo.HasUncommittedChanges)
+            return false;
+        if (repo.OutgoingCommits is int outgoing && outgoing > 0)
+            return false;
+        if ((repo.EffectiveAheadOfDefault ?? 0) > 0 && repo.PullRequestMerged != true)
+            return false;
+        if (repo.PullRequestNumber is int)
+            return false;
+        if (repo.HasUpstream)
+            return false;
+        if (!string.IsNullOrEmpty(repo.Warning))
+            return false;
+        return true;
+    }
+
+    /// <summary>
+    /// Green Remove CTA when removal is automatically safe; red when dropping unfinished work (D6).
+    /// </summary>
+    internal static bool RemoveCtaIsDestructive(RemoveFeaturePlan plan) =>
+        !plan.IsAutomaticallySafe;
+
     /// <summary>
     /// Remove is enabled only when every checkbox the dialog actually shows has been ticked, and never
     /// while any repository's disk state is Unknown (A2). A checkbox that is not shown because its own
-    /// risk does not apply never blocks Remove (D3, fixes U-17).
+    /// risk does not apply never blocks Remove (D3, fixes U-17). Local/remote cleanup checkboxes (D4)
+    /// are intent controls and do not gate Remove.
     /// </summary>
     internal static bool CanRemove(
         bool anyRepoStatusUnknown,
@@ -288,6 +425,10 @@
     private bool HasOutgoingCommitsWithoutPullRequest =>
         _plan?.Repositories.Any(r => (r.AheadOfDefault ?? 0) > 0 && r.PullRequestNumber is null or 0) == true;
 
+    private bool AllPullRequestsMerged =>
+        _plan?.Repositories.Any(r => r.PullRequestNumber is > 0) == true
+        && _plan.Repositories.Where(r => r.PullRequestNumber is > 0).All(r => r.PullRequestMerged == true);
+
     /// <summary>Plain-language summary of the Feature's completion state, replacing the raw enum name in the UI.</summary>
     private string StatusHeadline
     {
@@ -298,8 +439,10 @@
 
             return _plan?.Classification switch
             {
+                RemoveFeatureClassification.Completed when AllPullRequestsMerged =>
+                    "This feature's pull requests are merged. It is safe to remove.",
                 RemoveFeatureClassification.Completed =>
-                    "This Feature is finished (pull request merged, or never opened), so it's safe to remove.",
+                    "This feature is finished and safe to remove.",
                 RemoveFeatureClassification.Abandoned =>
                     "This Feature's pull request was closed without merging. Removing it will permanently delete this work.",
                 RemoveFeatureClassification.Active =>
@@ -313,7 +456,6 @@
 
     private string CalloutClass => _plan?.Classification switch
     {
-        RemoveFeatureClassification.Completed => "gm-callout--success",
         RemoveFeatureClassification.Abandoned => "gm-callout--warning",
         RemoveFeatureClassification.NeedsRepair => "gm-callout--warning",
         _ => "gm-callout--info"
@@ -396,7 +538,7 @@
             return;
 
         // After a successful remove the Feature context is gone. Never re-analyze while showing the
-        // warnings report (or while the structural overlay is covering the page) — that would surface
+        // warnings report (or while the structural overlay is covering the page) - that would surface
         // "WorkspaceFeatureContext N was not found" next to the removal outcome.
         if (_removing || _report is not null)
             return;
@@ -434,6 +576,8 @@
         _allowDiscard = false;
         _allowForce = false;
         _allowUnlock = false;
+        _deleteLocalBranches = plan.Repositories.Any(HasLocalFeatureBranchToDelete);
+        _deleteRemoteBranches = plan.Repositories.Any(HasRemoteFeatureBranchToDelete);
         _error = plan.Success ? null : plan.Error;
     }
 
@@ -450,6 +594,11 @@
         {
             _plan = await FeatureOperations.AnalyzeRemoveFeatureAsync(FeatureContextId.Value);
             _analyzedFor = FeatureContextId.Value.Value;
+            if (_plan.Success)
+            {
+                _deleteLocalBranches = _plan.Repositories.Any(HasLocalFeatureBranchToDelete);
+                _deleteRemoteBranches = _plan.Repositories.Any(HasRemoteFeatureBranchToDelete);
+            }
             if (!_plan.Success && string.IsNullOrEmpty(_error))
                 _error = _plan.Error;
         }
@@ -477,11 +626,13 @@
                     AllowDiscardUncommitted = _allowDiscard,
                     AllowForceDeleteLocalBranches = _allowForce,
                     AllowUnlockWorktrees = _allowUnlock,
+                    DeleteLocalBranches = _deleteLocalBranches,
+                    DeleteRemoteBranches = _deleteRemoteBranches,
                     AnalyzedPlan = _plan
                 });
             if (!result.Success)
             {
-                // Hard failure: error only — never pair with a green/success report.
+                // Hard failure: error only - never pair with a green/success report.
                 _report = null;
                 _error = result.Error ?? "Remove Feature failed.";
                 await RefreshPlanAsync();
@@ -497,7 +648,7 @@
                 return;
             }
 
-            // Success with warnings the user must acknowledge — warnings dialog only (no success headline).
+            // Success with warnings the user must acknowledge - warnings dialog only (no success headline).
             _plan = null;
             _analyzedFor = null;
             _error = null;
@@ -524,6 +675,8 @@
         _allowDiscard = false;
         _allowForce = false;
         _allowUnlock = false;
+        _deleteLocalBranches = true;
+        _deleteRemoteBranches = false;
         _error = null;
     }
 

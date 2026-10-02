@@ -813,7 +813,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return (true, null);
     }
 
-    public async Task<(bool Success, string? ErrorMessage)> DeleteBranchAsync(string repoPath, string branchName, bool isRemote, bool force, CancellationToken ct, bool skipHooks = false, string? bearerToken = null)
+    public async Task<(bool Success, string? ErrorMessage)> DeleteBranchAsync(string repoPath, string branchName, bool isRemote, bool force, CancellationToken ct, bool skipHooks = false, string? bearerToken = null, string? expectedSha = null)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
             return (false, "Invalid repository path or branch name");
@@ -825,7 +825,69 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
                 name = name.Substring("origin/".Length);
             if (string.IsNullOrWhiteSpace(name))
                 return (false, "Invalid branch name");
+
+            var defaultBranch = await GetDefaultBranchNameAsync(repoPath, ct);
+            if (!string.IsNullOrWhiteSpace(defaultBranch)
+                && name.Equals(defaultBranch.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                logger.LogWarning("Refusing to delete default branch {Branch} in {RepoPath}", name, repoPath);
+                return (false, "Cannot delete the repository default branch.");
+            }
+
             var hooksPrefix = GetHooksConfigPrefix(skipHooks);
+
+            // Lease-based delete (D4): fetch so the lease compares against the current remote tip, then
+            // push a delete that refuses when origin/<name> is no longer at expectedSha.
+            if (!string.IsNullOrWhiteSpace(expectedSha))
+            {
+                // Always fetch this branch's remote tip (plus default when known) so the lease compares
+                // against current origin state, even when the local branch has no upstream configured.
+                var (fetchOk, fetchErr) = await FetchMinimalAsync(
+                    repoPath, name, $"origin/{name}", bearerToken, ct, skipUpstreamCheck: true);
+                if (!fetchOk)
+                {
+                    logger.LogWarning(
+                        "Fetch before lease remote delete failed for {RepoPath}. Branch={Branch}, Error={Error}",
+                        repoPath, name, fetchErr);
+                    return (false, string.IsNullOrWhiteSpace(fetchErr)
+                        ? "Could not fetch remote before deleting the branch."
+                        : fetchErr);
+                }
+
+                var leaseSpec = $"refs/heads/{name}:{expectedSha.Trim()}";
+                var leaseArgs = string.IsNullOrWhiteSpace(bearerToken)
+                    ? $"{hooksPrefix}push --force-with-lease={leaseSpec} origin :{name}"
+                    : $"{BuildAuthHeaderArgs(bearerToken)} {hooksPrefix}push --force-with-lease={leaseSpec} origin :{name}";
+                var (leaseExit, leaseStdout, leaseStderr) = await runner.PushPipeline.ExecuteAsync(
+                    async cancellationToken => await runner.RunAsync("git", leaseArgs, repoPath, cancellationToken),
+                    ct);
+                if (leaseExit != 0)
+                {
+                    var combined = CombineOutput(leaseStdout, leaseStderr) ?? "";
+                    if (IsRemoteBranchAlreadyDeleted(combined))
+                    {
+                        logger.LogInformation("Git remote branch already deleted for {RepoPath}. Branch={Branch}", repoPath, name);
+                        return (true, null);
+                    }
+
+                    if (IsForceWithLeaseRejected(combined))
+                    {
+                        logger.LogWarning(
+                            "Git force-with-lease remote delete refused for {RepoPath}. Branch={Branch}",
+                            repoPath, name);
+                        return (false, "Remote branch tip no longer matches this Feature. Someone else may have pushed; remote branch was kept.");
+                    }
+
+                    logger.LogWarning(
+                        "Git force-with-lease remote delete failed for {RepoPath}. Branch={Branch}, ExitCode={ExitCode}",
+                        repoPath, name, leaseExit);
+                    return (false, combined);
+                }
+
+                logger.LogInformation("Git remote branch deleted with lease for {RepoPath}. Branch={Branch}", repoPath, name);
+                return (true, null);
+            }
+
             var args = string.IsNullOrWhiteSpace(bearerToken)
                 ? $"{hooksPrefix}push origin --delete {name}"
                 : $"{BuildAuthHeaderArgs(bearerToken)} {hooksPrefix}push origin --delete {name}";
@@ -2307,4 +2369,13 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         => output.Contains("remote ref does not exist", StringComparison.OrdinalIgnoreCase)
         || (output.Contains("unable to delete", StringComparison.OrdinalIgnoreCase)
             && output.Contains("does not exist", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>True when git refused a force-with-lease push because the remote tip moved (D4).</summary>
+    private static bool IsForceWithLeaseRejected(string output)
+        => output.Contains("stale info", StringComparison.OrdinalIgnoreCase)
+        || output.Contains("rejected", StringComparison.OrdinalIgnoreCase)
+            && output.Contains("force-with-lease", StringComparison.OrdinalIgnoreCase)
+        || (output.Contains("failed to push some refs", StringComparison.OrdinalIgnoreCase)
+            && (output.Contains("force-with-lease", StringComparison.OrdinalIgnoreCase)
+                || output.Contains("but expected", StringComparison.OrdinalIgnoreCase)));
 }

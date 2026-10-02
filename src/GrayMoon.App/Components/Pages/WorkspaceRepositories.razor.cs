@@ -220,12 +220,20 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         if (IsJobRunning)
             return;
 
-        JobService.StartJob(PageJobKey, "Checking Feature removal...", async (job, ct) =>
+        JobService.StartJob(PageJobKey, "Checking feature status...", async (job, ct) =>
         {
             try
             {
+                var progress = new Progress<OperationProgress>(p =>
+                {
+                    if (p.Completed is int done && p.Total is int total && total > 0)
+                        job.ReportProgress($"Checked {done} of {total}");
+                    else if (!string.IsNullOrWhiteSpace(p.Message))
+                        job.ReportProgress(p.Message);
+                });
+
                 var plan = await ScopedExecutor.ExecuteAsync<IWorkspaceFeatureOperations, RemoveFeaturePlan>(
-                    svc => svc.AnalyzeRemoveFeatureAsync(contextId, ct));
+                    svc => svc.AnalyzeRemoveFeatureAsync(contextId, ct, progress));
 
                 if (!plan.Success)
                 {
@@ -244,7 +252,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
             }
             catch (OperationCanceledException)
             {
-                SafeInvoke(() => ToastService.Show("Feature removal check cancelled."));
+                SafeInvoke(() => ToastService.Show("Feature status check cancelled."));
                 throw;
             }
             catch (Exception ex)

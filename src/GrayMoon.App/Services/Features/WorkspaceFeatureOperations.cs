@@ -121,14 +121,22 @@ public sealed class WorkspaceFeatureOperations(
 
         if (snapshot.BranchCollisions.Count > 0)
         {
-            var details = snapshot.BranchCollisions
+            var collisions = snapshot.BranchCollisions
                 .OrderBy(c => c.Key, StringComparer.OrdinalIgnoreCase)
-                .Select(c => $"{c.Key} ({string.Join(", ", c.Value)})");
-            return FailCreate(
-                "BranchExists",
-                $"Branch '{name}' already exists in {snapshot.BranchCollisions.Count} of {repoNames.Count} repositories: "
-                + string.Join("; ", details)
-                + ". Choose a different Feature name or delete those branches first.");
+                .Select(c => new CreateFeatureBranchCollision
+                {
+                    RepositoryName = c.Key,
+                    Refs = c.Value
+                })
+                .ToList();
+            return new CreateFeatureResult
+            {
+                Success = false,
+                Condition = "BranchExists",
+                Error = $"Branch '{name}' already exists in {collisions.Count} of {repoNames.Count} repositories.",
+                BranchCollisions = collisions,
+                TotalRepositoryCount = repoNames.Count
+            };
         }
 
         var now = DateTime.UtcNow;
@@ -251,7 +259,7 @@ public sealed class WorkspaceFeatureOperations(
             {
                 var done = Interlocked.Increment(ref createCompleted);
                 progress.Report(
-                    $"Created feature in {done} of {createTotal} repos",
+                    $"Created feature in {done} of {createTotal} repositories",
                     done,
                     createTotal);
                 gate.Release();
@@ -294,7 +302,8 @@ public sealed class WorkspaceFeatureOperations(
 
     public async Task<RemoveFeaturePlan> AnalyzeRemoveFeatureAsync(
         WorkspaceFeatureContextId featureContextId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IProgress<OperationProgress>? progress = null)
     {
         var info = await contextResolver.GetRequiredAsync(featureContextId, cancellationToken: cancellationToken);
         if (info.IsSpecialWorkspace)
@@ -344,6 +353,8 @@ public sealed class WorkspaceFeatureOperations(
             .ToListAsync(cancellationToken);
 
         var planSlots = new RemoveFeatureRepositoryPlan[rows.Count];
+        var probeCompleted = 0;
+        var probeTotal = rows.Count;
         using (var gate = new SemaphoreSlim(MaxParallel))
         {
             var probeTasks = rows.Select(async (row, index) =>
@@ -404,11 +415,14 @@ public sealed class WorkspaceFeatureOperations(
                         FeatureBranchExists = disk.StatusUnknown ? null : disk.FeatureBranchExists,
                         FeatureBranchAheadOfDefault = disk.StatusUnknown ? null : disk.FeatureBranchAheadOfDefault,
                         FeatureBranchHasUpstream = disk.StatusUnknown ? null : disk.FeatureBranchHasUpstream,
-                        FeatureBranchAheadOfUpstream = disk.StatusUnknown ? null : disk.FeatureBranchAheadOfUpstream
+                        FeatureBranchAheadOfUpstream = disk.StatusUnknown ? null : disk.FeatureBranchAheadOfUpstream,
+                        FeatureBranchSha = disk.StatusUnknown ? null : disk.FeatureBranchSha
                     };
                 }
                 finally
                 {
+                    var done = Interlocked.Increment(ref probeCompleted);
+                    progress.Report($"Checked {done} of {probeTotal}", done, probeTotal);
                     gate.Release();
                 }
             });
@@ -597,7 +611,7 @@ public sealed class WorkspaceFeatureOperations(
         var wrIds = rows.Select(r => r.WorkspaceRepositoryId).ToList();
         var links = await db.WorkspaceRepositories
             .AsNoTracking()
-            .Include(l => l.Repository)
+            .Include(l => l.Repository)!.ThenInclude(r => r!.Connector)
             .Where(l => wrIds.Contains(l.WorkspaceRepositoryId))
             .ToListAsync(cancellationToken);
         var linkByWrId = links.ToDictionary(l => l.WorkspaceRepositoryId);
@@ -686,11 +700,17 @@ public sealed class WorkspaceFeatureOperations(
                         await rowDb.SaveChangesAsync(cancellationToken);
                     }
 
-                    // §27.8: after worktree remove, delete the Feature branch from the main repository.
-                    // Tag-pinned repositories never got a Feature branch; a same-named branch there is not ours.
+                    // §27.8 / D4: after worktree remove, optionally delete the Feature branch locally
+                    // and/or remotely from the main repository. Tag-pinned repositories never got a
+                    // Feature branch; a same-named branch there is not ours.
                     var branchName = row.PinnedTag == null ? info.FeatureName : null;
+                    var planRow = driftByWrId.GetValueOrDefault(row.WorkspaceRepositoryId);
+                    var hasRemoteUpstream = planRow?.FeatureBranchHasUpstream == true;
                     RemoveFeatureBranchOutcome branchOutcome;
                     string? branchMessage;
+                    var remoteOutcome = RemoveFeatureRemoteBranchOutcome.NotApplicable;
+                    string? remoteMessage = null;
+
                     if (string.IsNullOrWhiteSpace(branchName))
                     {
                         branchOutcome = RemoveFeatureBranchOutcome.NotApplicable;
@@ -708,6 +728,11 @@ public sealed class WorkspaceFeatureOperations(
                         logger.LogWarning(
                             "Could not resolve repository details to delete local Feature branch {Branch} for WorkspaceRepository {WorkspaceRepositoryId}.",
                             branchName, row.WorkspaceRepositoryId);
+                    }
+                    else if (!options.DeleteLocalBranches)
+                    {
+                        branchOutcome = RemoveFeatureBranchOutcome.Kept;
+                        branchMessage = "Local Feature branch kept (delete not selected).";
                     }
                     else
                     {
@@ -742,26 +767,78 @@ public sealed class WorkspaceFeatureOperations(
                                 "Delete local Feature branch {Branch} failed for {Repo}: {Error}",
                                 branchName, repoName, deleteLocal.Error);
                         }
+                    }
 
-                        if (options.DeleteRemoteBranches)
+                    if (!string.IsNullOrWhiteSpace(branchName) && hasRemoteUpstream)
+                    {
+                        if (!options.DeleteRemoteBranches)
                         {
-                            var deleteRemote = await agentBridge.SendCommandAsync(
-                                "DeleteBranch",
-                                new
-                                {
-                                    workspaceName = workspaceFolderName,
-                                    repositoryName = repoName,
-                                    branchName,
-                                    isRemote = true,
-                                    force = false,
-                                    workspaceRoot
-                                },
-                                cancellationToken);
-                            if (!deleteRemote.Success)
+                            remoteOutcome = RemoveFeatureRemoteBranchOutcome.Kept;
+                            remoteMessage = "Remote Feature branch kept (delete not selected).";
+                        }
+                        else if (!linkByWrId.TryGetValue(row.WorkspaceRepositoryId, out var remoteLink)
+                            || string.IsNullOrWhiteSpace(remoteLink.Repository?.RepositoryName)
+                            || string.IsNullOrWhiteSpace(workspaceRoot)
+                            || string.IsNullOrWhiteSpace(workspaceFolderName))
+                        {
+                            remoteOutcome = RemoveFeatureRemoteBranchOutcome.Failed;
+                            remoteMessage = "Could not resolve repository details to delete the remote branch.";
+                        }
+                        else
+                        {
+                            var defaultBranch = remoteLink.DefaultBranchName;
+                            if (!string.IsNullOrWhiteSpace(defaultBranch)
+                                && branchName.Equals(defaultBranch.Trim(), StringComparison.OrdinalIgnoreCase))
                             {
-                                logger.LogWarning(
-                                    "Delete remote Feature branch {Branch} failed for {Repo}: {Error}",
-                                    branchName, repoName, deleteRemote.Error);
+                                remoteOutcome = RemoveFeatureRemoteBranchOutcome.Failed;
+                                remoteMessage = "Refused to delete the repository default branch.";
+                            }
+                            else
+                            {
+                                var expectedSha = planRow?.FeatureBranchSha;
+                                if (string.IsNullOrWhiteSpace(expectedSha))
+                                {
+                                    remoteOutcome = RemoveFeatureRemoteBranchOutcome.Failed;
+                                    remoteMessage = "Could not confirm the Feature branch tip for a safe remote delete.";
+                                }
+                                else
+                                {
+                                    var bearerToken = ConnectorHelpers.UnprotectToken(
+                                        remoteLink.Repository?.Connector?.UserToken);
+                                    var deleteRemote = await agentBridge.SendCommandAsync(
+                                        "DeleteBranch",
+                                        new
+                                        {
+                                            workspaceName = workspaceFolderName,
+                                            repositoryName = repoName,
+                                            branchName,
+                                            isRemote = true,
+                                            force = false,
+                                            bearerToken,
+                                            expectedSha,
+                                            workspaceRoot
+                                        },
+                                        cancellationToken);
+                                    if (deleteRemote.Success)
+                                    {
+                                        remoteOutcome = RemoveFeatureRemoteBranchOutcome.Deleted;
+                                        remoteMessage = null;
+                                    }
+                                    else
+                                    {
+                                        var err = string.IsNullOrWhiteSpace(deleteRemote.Error)
+                                            ? "Remote branch delete failed."
+                                            : deleteRemote.Error;
+                                        remoteOutcome = err.Contains("no longer matches", StringComparison.OrdinalIgnoreCase)
+                                            || err.Contains("lease", StringComparison.OrdinalIgnoreCase)
+                                            ? RemoveFeatureRemoteBranchOutcome.RefusedLease
+                                            : RemoveFeatureRemoteBranchOutcome.Failed;
+                                        remoteMessage = err;
+                                        logger.LogWarning(
+                                            "Delete remote Feature branch {Branch} failed for {Repo}: {Error}",
+                                            branchName, repoName, deleteRemote.Error);
+                                    }
+                                }
                             }
                         }
                     }
@@ -769,9 +846,8 @@ public sealed class WorkspaceFeatureOperations(
                     // 09 SB-2: when the worktree was not on its Feature branch, name the branch that was
                     // actually kept (or "(detached commit)" when there was none) so the report never
                     // only says "removed" while leaving an unmerged branch silently behind.
-                    var keptBranchName = driftByWrId.TryGetValue(row.WorkspaceRepositoryId, out var driftPlan)
-                        && driftPlan.IsOffFeatureBranch
-                        ? driftPlan.CheckedOutBranch ?? "(detached commit)"
+                    var keptBranchName = planRow is { IsOffFeatureBranch: true }
+                        ? planRow.CheckedOutBranch ?? "(detached commit)"
                         : null;
 
                     reportByWrId[row.WorkspaceRepositoryId] = new RemoveFeatureRepositoryReport(
@@ -784,13 +860,15 @@ public sealed class WorkspaceFeatureOperations(
                         worktreeResult?.ResidueFileCount ?? 0,
                         worktreeResult?.ResidueSampleFiles,
                         worktreeResult?.ResidueMessage,
-                        keptBranchName);
+                        keptBranchName,
+                        remoteOutcome,
+                        remoteMessage);
                 }
                 finally
                 {
                     var done = Interlocked.Increment(ref removeCompleted);
                     progress.Report(
-                        $"Removed feature from {done} of {removeTotal} repos",
+                        $"Removed feature from {done} of {removeTotal} repositories",
                         done,
                         removeTotal);
                     gate.Release();
@@ -1089,7 +1167,8 @@ public sealed class WorkspaceFeatureOperations(
                 payload.Exists, payload.IsDirty, payload.HasUpstream, payload.AheadOfUpstream, payload.AheadOfDefault,
                 payload.IsLocked, payload.LockReason, payload.Branch,
                 payload.FeatureBranchExists, payload.FeatureBranchAheadOfDefault,
-                payload.FeatureBranchHasUpstream, payload.FeatureBranchAheadOfUpstream);
+                payload.FeatureBranchHasUpstream, payload.FeatureBranchAheadOfUpstream,
+                payload.FeatureBranchSha);
         }
         catch (Exception ex)
         {

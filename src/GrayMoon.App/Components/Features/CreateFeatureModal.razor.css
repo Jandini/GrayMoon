@@ -1,0 +1,6 @@
+.create-feature-collision-list {
+    max-height: min(40vh, 70%);
+    overflow-y: auto;
+    margin-bottom: 0.5rem;
+    padding-right: 0.25rem;
+}

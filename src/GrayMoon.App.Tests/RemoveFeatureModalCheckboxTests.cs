@@ -203,4 +203,78 @@ public sealed class RemoveFeatureModalCheckboxTests
         Assert.False(RemoveFeatureModal.HasReportWarnings(null));
         Assert.False(RemoveFeatureModal.HasReportWarnings([]));
     }
+
+    [Fact]
+    public void IsRepositoryNothingPending_true_for_clean_repo()
+    {
+        Assert.True(RemoveFeatureModal.IsRepositoryNothingPending(MakeRepo()));
+    }
+
+    [Fact]
+    public void IsRepositoryNothingPending_false_when_dirty_or_ahead()
+    {
+        Assert.False(RemoveFeatureModal.IsRepositoryNothingPending(MakeRepo(hasUncommittedChanges: true)));
+        Assert.False(RemoveFeatureModal.IsRepositoryNothingPending(MakeRepo(aheadOfDefault: 2)));
+    }
+
+    [Fact]
+    public void RemoveCtaIsDestructive_false_when_automatically_safe()
+    {
+        var plan = new RemoveFeaturePlan
+        {
+            Success = true,
+            Classification = RemoveFeatureClassification.Completed,
+            IsAutomaticallySafe = true,
+            Repositories = [MakeRepo()]
+        };
+
+        Assert.False(RemoveFeatureModal.RemoveCtaIsDestructive(plan));
+    }
+
+    [Fact]
+    public void RemoveCtaIsDestructive_true_when_not_automatically_safe()
+    {
+        var plan = new RemoveFeaturePlan
+        {
+            Success = true,
+            Classification = RemoveFeatureClassification.Active,
+            IsAutomaticallySafe = false,
+            Repositories = [MakeRepo(aheadOfDefault: 1)]
+        };
+
+        Assert.True(RemoveFeatureModal.RemoveCtaIsDestructive(plan));
+    }
+
+    [Fact]
+    public void HasRemoteFeatureBranchToDelete_requires_upstream()
+    {
+        var withUpstream = new RemoveFeatureRepositoryPlan
+        {
+            RepositoryName = "repo",
+            FeatureBranchName = "feat",
+            FeatureBranchHasUpstream = true
+        };
+        var without = new RemoveFeatureRepositoryPlan
+        {
+            RepositoryName = "repo",
+            FeatureBranchName = "feat",
+            FeatureBranchHasUpstream = false
+        };
+
+        Assert.True(RemoveFeatureModal.HasRemoteFeatureBranchToDelete(withUpstream));
+        Assert.False(RemoveFeatureModal.HasRemoteFeatureBranchToDelete(without));
+    }
+
+    [Fact]
+    public void HasLocalFeatureBranchToDelete_false_when_branch_already_gone()
+    {
+        var gone = new RemoveFeatureRepositoryPlan
+        {
+            RepositoryName = "repo",
+            FeatureBranchName = "feat",
+            FeatureBranchExists = false
+        };
+
+        Assert.False(RemoveFeatureModal.HasLocalFeatureBranchToDelete(gone));
+    }
 }

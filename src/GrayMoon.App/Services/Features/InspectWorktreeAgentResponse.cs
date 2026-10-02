@@ -46,6 +46,10 @@ internal sealed class InspectWorktreeAgentResponse
     [JsonPropertyName("featureBranchExists")]
     public bool? FeatureBranchExists { get; set; }
 
+    /// <summary>SHA of the Feature branch tip. Null when missing, none was requested, or an older Agent (D4).</summary>
+    [JsonPropertyName("featureBranchSha")]
+    public string? FeatureBranchSha { get; set; }
+
     /// <summary>Commits on the Feature branch not on the default branch. Null when the Feature branch or that ref is missing, none was requested, or an older Agent.</summary>
     [JsonPropertyName("featureBranchAheadOfDefault")]
     public int? FeatureBranchAheadOfDefault { get; set; }

@@ -35,7 +35,22 @@ public enum RemoveFeatureBranchOutcome
     Deleted = 1,
     /// <summary>Delete was refused because the branch has commits not on the default branch and force was not authorized.</summary>
     KeptUnmerged = 2,
-    Failed = 3
+    Failed = 3,
+    /// <summary>User left "Delete local Feature branches" unticked (D4).</summary>
+    Kept = 4
+}
+
+/// <summary>Outcome of the remote Feature branch delete for one repository, in a Remove Feature report (D4).</summary>
+public enum RemoveFeatureRemoteBranchOutcome
+{
+    /// <summary>No remote Feature branch, or remote delete was not requested for this repository.</summary>
+    NotApplicable = 0,
+    Deleted = 1,
+    /// <summary>User left "Delete remote Feature branches" unticked.</summary>
+    Kept = 2,
+    /// <summary>Remote tip no longer matched the Feature's local tip (lease refused).</summary>
+    RefusedLease = 3,
+    Failed = 4
 }
 
 /// <summary>
@@ -56,7 +71,9 @@ public sealed record RemoveFeatureRepositoryReport(
     /// "(detached commit)") that was actually kept; the Feature branch named by
     /// <see cref="BranchOutcome"/> is what was deleted. Null when there was no drift.
     /// </summary>
-    string? KeptBranchName = null);
+    string? KeptBranchName = null,
+    RemoveFeatureRemoteBranchOutcome RemoteBranchOutcome = RemoveFeatureRemoteBranchOutcome.NotApplicable,
+    string? RemoteBranchMessage = null);
 
 /// <summary>
 /// Result of a dependency-update run. <see cref="Success"/> is false when any repo or workspace-level

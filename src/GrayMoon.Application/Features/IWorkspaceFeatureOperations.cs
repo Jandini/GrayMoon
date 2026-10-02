@@ -13,7 +13,8 @@ public interface IWorkspaceFeatureOperations
 
     Task<RemoveFeaturePlan> AnalyzeRemoveFeatureAsync(
         WorkspaceFeatureContextId featureContextId,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        IProgress<OperationProgress>? progress = null);
 
     Task<OperationResult> RemoveFeatureAsync(
         WorkspaceFeatureContextId featureContextId,
@@ -46,12 +47,29 @@ public sealed class CreateFeatureResult
     public string? Condition { get; init; }
     public WorkspaceFeatureContextId? ContextId { get; init; }
     public int? WorkspaceFeatureId { get; init; }
+    /// <summary>
+    /// When <see cref="Condition"/> is <c>BranchExists</c>, the repositories (and refs) that already
+    /// have the requested Feature name. Null for every other condition.
+    /// </summary>
+    public IReadOnlyList<CreateFeatureBranchCollision>? BranchCollisions { get; init; }
+    /// <summary>Total Workspace repositories considered when checking collisions; null when not a BranchExists failure.</summary>
+    public int? TotalRepositoryCount { get; init; }
+}
+
+/// <summary>One repository where the requested Feature branch name already exists (E5).</summary>
+public sealed class CreateFeatureBranchCollision
+{
+    public string RepositoryName { get; init; } = "";
+    public IReadOnlyList<string> Refs { get; init; } = [];
 }
 
 public sealed class RemoveFeatureOptions
 {
     public bool AllowDiscardUncommitted { get; init; }
     public bool AllowForceDeleteLocalBranches { get; init; }
+    /// <summary>When true (default), delete local Feature branches after removing worktrees (D4).</summary>
+    public bool DeleteLocalBranches { get; init; } = true;
+    /// <summary>When true, delete remote Feature branches with a lease (D4). Default false; the dialog sets this when remotes exist.</summary>
     public bool DeleteRemoteBranches { get; init; }
     /// <summary>True when the user authorized unlocking locked worktrees before removal (D5).</summary>
     public bool AllowUnlockWorktrees { get; init; }
@@ -148,6 +166,9 @@ public sealed class RemoveFeatureRepositoryPlan
 
     /// <summary>Commits on the Feature branch not on its upstream, live from the Agent. Null when unknown.</summary>
     public int? FeatureBranchAheadOfUpstream { get; init; }
+
+    /// <summary>SHA of the Feature branch tip, live from the Agent. Used for lease-based remote delete (D4). Null when unknown or missing.</summary>
+    public string? FeatureBranchSha { get; init; }
 
     /// <summary>
     /// Commits ahead of the default branch for whichever branch Remove will actually delete: the
