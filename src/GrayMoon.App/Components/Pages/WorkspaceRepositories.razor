@@ -74,7 +74,8 @@
                             OnCreated="OnFeatureCreatedAsync" />
         <RemoveFeatureModal IsVisible="_removeFeatureModalVisible"
                             FeatureContextId="_removeFeatureContextId"
-                            OnCancel="() => _removeFeatureModalVisible = false"
+                            InitialPlan="_removeFeaturePlan"
+                            OnCancel="OnRemoveFeatureCancelAsync"
                             OnRemoved="OnFeatureRemovedAsync" />
         @if (errorMessage != null)
         {

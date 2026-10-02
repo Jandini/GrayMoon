@@ -34,7 +34,8 @@
                     }
                     else if (_plan is null)
                     {
-                        <p class="mb-0 text-muted">Checking what will happen if this Feature is removed…</p>
+                        @* Fallback only: normal open preloads the plan via the page LoadingOverlay. *@
+                        <p class="mb-0 text-muted">@( _analyzing ? "Refreshing removal details…" : "No removal plan is available." )</p>
                     }
                     else if (_plan.Success)
                     {
@@ -143,6 +144,11 @@
 @code {
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public WorkspaceFeatureContextId? FeatureContextId { get; set; }
+    /// <summary>
+    /// Pre-analyzed plan from the page LoadingOverlay job. When set, the dialog skips its own
+    /// "Checking..." analyze on open and shows this plan immediately.
+    /// </summary>
+    [Parameter] public RemoveFeaturePlan? InitialPlan { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
     [Parameter] public EventCallback OnRemoved { get; set; }
 
@@ -155,6 +161,7 @@
     private bool _allowForce;
     private bool _allowUnlock;
     private int? _analyzedFor;
+    private int? _appliedInitialPlanFor;
 
     /// <summary>Plain-language summary of a successful Remove Feature report (D2).</summary>
     private string ReportHeadline
@@ -372,9 +379,20 @@
     {
         if (!IsVisible || FeatureContextId is null)
             return;
+
+        // Page already ran analyze under LoadingOverlay; show that plan immediately (no in-dialog check).
+        if (InitialPlan is not null
+            && _appliedInitialPlanFor != FeatureContextId.Value.Value)
+        {
+            ApplyPlan(InitialPlan);
+            _appliedInitialPlanFor = FeatureContextId.Value.Value;
+            return;
+        }
+
         if (_analyzedFor == FeatureContextId.Value.Value && _plan is not null)
             return;
 
+        // Fallback when opened without a preloaded plan (should not happen from Repositories).
         _analyzing = true;
         _error = null;
         try
@@ -385,6 +403,17 @@
         {
             _analyzing = false;
         }
+    }
+
+    private void ApplyPlan(RemoveFeaturePlan plan)
+    {
+        _plan = plan;
+        _analyzedFor = FeatureContextId?.Value;
+        _report = null;
+        _allowDiscard = false;
+        _allowForce = false;
+        _allowUnlock = false;
+        _error = plan.Success ? null : plan.Error;
     }
 
     /// <summary>
@@ -453,12 +482,18 @@
     {
         _plan = null;
         _analyzedFor = null;
+        _appliedInitialPlanFor = null;
+        _report = null;
+        _allowDiscard = false;
+        _allowForce = false;
+        _allowUnlock = false;
         return OnCancel.InvokeAsync();
     }
 
     private async Task Done()
     {
         _report = null;
+        _appliedInitialPlanFor = null;
         await OnRemoved.InvokeAsync();
     }
 }

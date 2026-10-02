@@ -47,6 +47,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     private string? _createFeatureWorkspaceBranch;
     private bool _removeFeatureModalVisible;
     private WorkspaceFeatureContextId? _removeFeatureContextId;
+    private RemoveFeaturePlan? _removeFeaturePlan;
 
     private const string SyncModeStorageKey = "graymoon:sync-mode";
     private bool _quickFetchIsPrimary;
@@ -185,10 +186,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     private Task OnRemoveFeatureAsync()
     {
         if (_isFeatureContext && _selectedContextId is WorkspaceFeatureContextId ctx)
-        {
-            _removeFeatureContextId = ctx;
-            _removeFeatureModalVisible = true;
-        }
+            BeginRemoveFeatureAnalysis(ctx);
         return Task.CompletedTask;
     }
 
@@ -198,8 +196,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     /// </summary>
     private Task OnRequestRemoveFeatureFromSelectorAsync(WorkspaceFeatureContextId contextId)
     {
-        _removeFeatureContextId = contextId;
-        _removeFeatureModalVisible = true;
+        BeginRemoveFeatureAnalysis(contextId);
         return Task.CompletedTask;
     }
 
@@ -210,8 +207,60 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     /// </summary>
     private Task OnRequestFeatureCleanupFromBranchModalAsync(WorkspaceFeatureContextId featureContextId)
     {
-        _removeFeatureContextId = featureContextId;
-        _removeFeatureModalVisible = true;
+        BeginRemoveFeatureAnalysis(featureContextId);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Runs remove analysis under the page LoadingOverlay/terminal, then opens the confirmation dialog
+    /// with the finished plan (no in-dialog "Checking..." spinner).
+    /// </summary>
+    private void BeginRemoveFeatureAnalysis(WorkspaceFeatureContextId contextId)
+    {
+        if (IsJobRunning)
+            return;
+
+        JobService.StartJob(PageJobKey, "Checking Feature removal...", async (job, ct) =>
+        {
+            try
+            {
+                var plan = await ScopedExecutor.ExecuteAsync<IWorkspaceFeatureOperations, RemoveFeaturePlan>(
+                    svc => svc.AnalyzeRemoveFeatureAsync(contextId, ct));
+
+                if (!plan.Success)
+                {
+                    SafeInvoke(() => ToastService.ShowError(plan.Error ?? "Failed to prepare Feature removal."));
+                    return;
+                }
+
+                await InvokeAsync(() =>
+                {
+                    if (_disposed) return;
+                    _removeFeatureContextId = contextId;
+                    _removeFeaturePlan = plan;
+                    _removeFeatureModalVisible = true;
+                    StateHasChanged();
+                });
+            }
+            catch (OperationCanceledException)
+            {
+                SafeInvoke(() => ToastService.Show("Feature removal check cancelled."));
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error analyzing Feature removal for context {ContextId}", contextId.Value);
+                SafeInvoke(() => ToastService.ShowError("Failed to prepare Feature removal."));
+                throw;
+            }
+        });
+    }
+
+    private Task OnRemoveFeatureCancelAsync()
+    {
+        _removeFeatureModalVisible = false;
+        _removeFeaturePlan = null;
+        _removeFeatureContextId = null;
         return Task.CompletedTask;
     }
 
@@ -240,6 +289,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
             && _selectedContextId is { } selectedId
             && removedId.Value == selectedId.Value;
         _removeFeatureContextId = null;
+        _removeFeaturePlan = null;
 
         if (removedCurrentContext)
         {

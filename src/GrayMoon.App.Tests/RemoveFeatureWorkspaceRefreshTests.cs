@@ -480,6 +480,32 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
     }
 
     [Fact]
+    public async Task Remove_with_empty_options_succeeds_when_not_auto_safe_only_because_live_status_failed()
+    {
+        // GetGitChangeStatus failed: not automatically safe, but dirty flags stay false so the dialog
+        // shows no discard checkbox and enables Remove. The server must not demand authorization.
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var worktreePath = @"C:\gm-test-root\.graymoon\test-ws\features\feat-refresh\graymoon-api";
+        var featureContextId = await SeedMergedFeatureWithWorktreeAsync(ctx, worktreePath);
+        ctx.AgentBridge.Respond(AgentHubMethods.InspectWorktree, CleanInspectWorktree());
+        ctx.AgentBridge.Respond("GetGitChangeStatus", data: null, success: false, error: "status failed");
+        ctx.AgentBridge.Respond(AgentHubMethods.RemoveGitWorktree, new { success = true });
+        ctx.AgentBridge.Respond("DeleteBranch", new { success = true });
+        ctx.AgentBridge.Respond("SyncRepository", SyncResponse());
+        ctx.AgentBridge.Respond("CheckFileVersions", new { success = true, files = Array.Empty<object>() });
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var plan = await ops.AnalyzeRemoveFeatureAsync(featureContextId);
+        Assert.False(plan.IsAutomaticallySafe);
+        Assert.False(Assert.Single(plan.Repositories).LiveStatusEstablished);
+
+        var result = await ops.RemoveFeatureAsync(featureContextId, new RemoveFeatureOptions());
+        Assert.True(result.Success, result.Error);
+        await AssertFeatureGoneAsync(ctx, featureContextId);
+    }
+
+    [Fact]
     public async Task Analyze_clean_completed_Feature_is_automatically_safe()
     {
         // J
@@ -774,6 +800,164 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
         Assert.True(plan.Success, plan.Error);
         Assert.True(plan.PullRequestStatusUnknown);
         Assert.False(plan.IsAutomaticallySafe);
+    }
+
+    [Fact]
+    public async Task Remove_with_empty_options_succeeds_when_not_auto_safe_only_because_PR_status_is_unknown()
+    {
+        // D3 gate fix: PullRequestStatusUnknown makes IsAutomaticallySafe false, but no discard/force/
+        // unlock checkbox applies. The dialog enables Remove; the server must not demand authorization.
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var worktreePath = @"C:\gm-test-root\.graymoon\test-ws\features\feat-refresh\graymoon-api";
+        var featureContextId = await SeedMergedFeatureWithWorktreeAsync(ctx, worktreePath);
+
+        await using (var pauseScope = ctx.CreateScope())
+        {
+            var rateLimitTracker = pauseScope.ServiceProvider.GetRequiredService<IGitHubRateLimitTracker>();
+            rateLimitTracker.PauseUntil("github-prod", DateTimeOffset.UtcNow.AddMinutes(5));
+        }
+
+        ctx.AgentBridge.Respond(AgentHubMethods.InspectWorktree, CleanInspectWorktree());
+        ctx.AgentBridge.Respond("GetGitChangeStatus", CleanGitChangeStatus());
+        ctx.AgentBridge.Respond(AgentHubMethods.RemoveGitWorktree, new { success = true });
+        ctx.AgentBridge.Respond("DeleteBranch", new { success = true });
+        ctx.AgentBridge.Respond("SyncRepository", SyncResponse());
+        ctx.AgentBridge.Respond("CheckFileVersions", new { success = true, files = Array.Empty<object>() });
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var plan = await ops.AnalyzeRemoveFeatureAsync(featureContextId);
+        Assert.True(plan.PullRequestStatusUnknown);
+        Assert.False(plan.IsAutomaticallySafe);
+
+        var result = await ops.RemoveFeatureAsync(featureContextId, new RemoveFeatureOptions());
+        Assert.True(result.Success, result.Error);
+        await AssertFeatureGoneAsync(ctx, featureContextId);
+    }
+
+    [Fact]
+    public async Task Remove_with_empty_options_succeeds_when_not_auto_safe_only_because_outgoing_is_unknown()
+    {
+        // Null EffectiveOutgoingCommits (older Worker / unknown ahead-of-upstream) is not automatically
+        // safe, but no discard/force checkbox applies when AheadOfDefault is also unknown/zero.
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var worktreePath = @"C:\gm-test-root\.graymoon\test-ws\features\feat-refresh\graymoon-api";
+        var featureContextId = await SeedMergedFeatureWithWorktreeAsync(ctx, worktreePath);
+
+        ctx.AgentBridge.Respond(AgentHubMethods.InspectWorktree, CleanInspectWorktree(aheadOfUpstream: null));
+        ctx.AgentBridge.Respond("GetGitChangeStatus", CleanGitChangeStatus());
+        ctx.AgentBridge.Respond(AgentHubMethods.RemoveGitWorktree, new { success = true });
+        ctx.AgentBridge.Respond("DeleteBranch", new { success = true });
+        ctx.AgentBridge.Respond("SyncRepository", SyncResponse());
+        ctx.AgentBridge.Respond("CheckFileVersions", new { success = true, files = Array.Empty<object>() });
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var plan = await ops.AnalyzeRemoveFeatureAsync(featureContextId);
+        Assert.False(plan.IsAutomaticallySafe);
+        Assert.Null(Assert.Single(plan.Repositories).OutgoingCommits);
+
+        var result = await ops.RemoveFeatureAsync(featureContextId, new RemoveFeatureOptions());
+        Assert.True(result.Success, result.Error);
+        await AssertFeatureGoneAsync(ctx, featureContextId);
+    }
+
+    [Fact]
+    public async Task Remove_with_empty_options_succeeds_for_abandoned_Feature_that_is_clean()
+    {
+        // Abandoned (closed without merge) is never automatically safe. When the worktree is clean and
+        // AheadOfDefault is 0, no checkbox is shown; Remove must still succeed without authorization.
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var worktreePath = @"C:\gm-test-root\.graymoon\test-ws\features\feat-refresh\graymoon-api";
+        var featureContextId = await SeedRemovableFeatureAsync(ctx);
+
+        // Token-less GitHub in this harness would refresh the closed-unmerged row away to "no PR"
+        // (Completed). Pause it so Abandoned is what the server actually sees.
+        await using (var pauseScope = ctx.CreateScope())
+        {
+            var rateLimitTracker = pauseScope.ServiceProvider.GetRequiredService<IGitHubRateLimitTracker>();
+            rateLimitTracker.PauseUntil("github-prod", DateTimeOffset.UtcNow.AddMinutes(5));
+        }
+
+        await using (var scope = ctx.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var row = await db.WorkspaceFeatureRepositories.SingleAsync(r => r.WorkspaceFeatureContextId == featureContextId.Value);
+            row.WorktreePath = worktreePath;
+            db.WorkspaceRepositoryContextStates.Add(new WorkspaceRepositoryContextState
+            {
+                WorkspaceFeatureContextId = featureContextId.Value,
+                WorkspaceRepositoryId = ctx.WorkspaceRepositoryId,
+                BranchName = "feat-refresh",
+                OutgoingCommits = 0,
+                BranchHasUpstream = true,
+            });
+            db.WorkspaceRepositoryContextPullRequests.Add(new WorkspaceRepositoryContextPullRequest
+            {
+                WorkspaceFeatureContextId = featureContextId.Value,
+                WorkspaceRepositoryId = ctx.WorkspaceRepositoryId,
+                PullRequestNumber = 7,
+                State = "closed",
+                MergedAt = null,
+                LastCheckedAt = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        ctx.AgentBridge.Respond(AgentHubMethods.InspectWorktree, CleanInspectWorktree());
+        ctx.AgentBridge.Respond("GetGitChangeStatus", CleanGitChangeStatus());
+        ctx.AgentBridge.Respond(AgentHubMethods.RemoveGitWorktree, new { success = true });
+        ctx.AgentBridge.Respond("DeleteBranch", new { success = true });
+        ctx.AgentBridge.Respond("SyncRepository", SyncResponse());
+        ctx.AgentBridge.Respond("CheckFileVersions", new { success = true, files = Array.Empty<object>() });
+
+        await using var read = ctx.CreateScope();
+        var ops = read.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var plan = await ops.AnalyzeRemoveFeatureAsync(featureContextId);
+        Assert.Equal(RemoveFeatureClassification.Abandoned, plan.Classification);
+        Assert.False(plan.IsAutomaticallySafe);
+
+        var result = await ops.RemoveFeatureAsync(featureContextId, new RemoveFeatureOptions());
+        Assert.True(result.Success, result.Error);
+        await AssertFeatureGoneAsync(ctx, featureContextId);
+    }
+
+    [Fact]
+    public async Task Remove_refuses_dirty_worktree_without_discard_authorization()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var worktreePath = @"C:\gm-test-root\.graymoon\test-ws\features\feat-refresh\graymoon-api";
+        var featureContextId = await SeedMergedFeatureWithWorktreeAsync(ctx, worktreePath);
+
+        ctx.AgentBridge.Respond(AgentHubMethods.InspectWorktree, CleanInspectWorktree(isDirty: true));
+        ctx.AgentBridge.Respond("GetGitChangeStatus", DirtyGitChangeStatus(uncommitted: true));
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var result = await ops.RemoveFeatureAsync(featureContextId, new RemoveFeatureOptions());
+
+        Assert.False(result.Success);
+        Assert.Contains("uncommitted changes", result.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(ctx.AgentBridge.Calls, c => c.Command == AgentHubMethods.RemoveGitWorktree);
+    }
+
+    [Fact]
+    public async Task Remove_refuses_unmerged_branch_without_force_authorization()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var worktreePath = @"C:\gm-test-root\.graymoon\test-ws\features\feat-refresh\graymoon-api";
+        var featureContextId = await SeedFeatureWithWorktreeNoPrAsync(ctx, worktreePath);
+
+        ctx.AgentBridge.Respond(AgentHubMethods.InspectWorktree, CleanInspectWorktree(aheadOfUpstream: 2, aheadOfDefault: 2));
+        ctx.AgentBridge.Respond("GetGitChangeStatus", CleanGitChangeStatus());
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var result = await ops.RemoveFeatureAsync(featureContextId, new RemoveFeatureOptions());
+
+        Assert.False(result.Success);
+        Assert.Contains("force-deleting", result.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(ctx.AgentBridge.Calls, c => c.Command == AgentHubMethods.RemoveGitWorktree);
     }
 
     // ---- 09 SB-2: analysis must judge the Feature branch, not the current checkout -----------------

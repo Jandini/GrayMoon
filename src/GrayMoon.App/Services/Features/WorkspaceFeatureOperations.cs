@@ -466,13 +466,33 @@ public sealed class WorkspaceFeatureOperations(
                 "Could not check one or more repositories. Make sure the Worker is running, then try again.");
         }
 
-        if (!plan.IsAutomaticallySafe
-            && !options.AllowDiscardUncommitted
-            && !options.AllowForceDeleteLocalBranches
-            && !options.AllowUnlockWorktrees)
+        // D3: require each authorization only when that risk is actually present (same rules as the
+        // Remove dialog checkboxes). Classification / PR-unknown / null outgoing / NeedsRepair alone
+        // make IsAutomaticallySafe false but do not need discard/force/unlock - Remove stays allowed
+        // (A3, I1). The old "any not-safe plan needs some authorization flag" gate rejected those
+        // cases even when the dialog correctly enabled Remove with no checkboxes shown.
+        var needsDiscard = plan.Repositories.Any(r =>
+            r.HasUncommittedChanges || r.HasStagedChanges || r.HasConflicts);
+        var needsForce = plan.Repositories.Any(r =>
+            (r.EffectiveAheadOfDefault ?? 0) > 0 && r.PullRequestMerged != true);
+        var needsUnlock = plan.Repositories.Any(r => r.IsLocked);
+
+        if (needsDiscard && !options.AllowDiscardUncommitted)
         {
             return OperationResult.Fail(
-                "Feature removal is not automatically safe; authorize discard/force options explicitly.");
+                "This Feature has uncommitted changes; authorize discarding them explicitly.");
+        }
+
+        if (needsForce && !options.AllowForceDeleteLocalBranches)
+        {
+            return OperationResult.Fail(
+                "This Feature has local branches with commits not in the default branch; authorize force-deleting them explicitly.");
+        }
+
+        if (needsUnlock && !options.AllowUnlockWorktrees)
+        {
+            return OperationResult.Fail(
+                "This Feature has locked worktrees; authorize unlocking them explicitly.");
         }
 
         var tcs = new TaskCompletionSource<OperationResult>(TaskCreationOptions.RunContinuationsAsynchronously);
