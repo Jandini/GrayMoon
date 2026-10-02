@@ -61,21 +61,26 @@
                         }
                         else
                         {
-                            <ul class="list-unstyled mb-2 remove-feature-repo-list">
-                                @foreach (var repo in RepositoriesRequiringDetail)
-                                {
-                                    <li class="mb-2">
-                                        <strong>@repo.RepositoryName</strong>
-                                        <div class="text-muted small">@DescribeRepository(repo)</div>
-                                    </li>
-                                }
-                            </ul>
-                            @if (CleanRepositoryCount > 0)
+                            @if (DetailStatusGroups.Count > 0)
+                            {
+                                <ul class="list-unstyled mb-2 remove-feature-repo-list">
+                                    @foreach (var group in DetailStatusGroups)
+                                    {
+                                        var repo = group.Repositories[0];
+                                        <li class="mb-2">
+                                            <strong>@repo.RepositoryName</strong>
+                                            <div class="text-muted small">@group.Message</div>
+                                        </li>
+                                    }
+                                </ul>
+                            }
+                            @foreach (var group in SummaryStatusGroups)
                             {
                                 <p class="text-muted small mb-2">
-                                    @(CleanRepositoryCount == 1
-                                        ? "1 other repository is up to date with nothing pending."
-                                        : $"{CleanRepositoryCount} other repositories are up to date with nothing pending.")
+                                    @FormatStatusGroupSummary(
+                                        group.Message,
+                                        group.Count,
+                                        allRepositoriesShareThisStatus: RepositoryStatusGroups.Count == 1)
                                 </p>
                             }
                         }
@@ -320,11 +325,18 @@
         _plan is { Repositories.Count: > 0 }
         && _plan.Repositories.All(IsRepositoryNothingPending);
 
-    private IReadOnlyList<RemoveFeatureRepositoryPlan> RepositoriesRequiringDetail =>
-        _plan?.Repositories.Where(r => !IsRepositoryNothingPending(r)).ToList() ?? [];
+    private IReadOnlyList<RepositoryStatusGroup> RepositoryStatusGroups =>
+        _plan is null ? [] : BuildRepositoryStatusGroups(_plan.Repositories);
 
-    private int CleanRepositoryCount =>
-        _plan?.Repositories.Count(IsRepositoryNothingPending) ?? 0;
+    private IReadOnlyList<RepositoryStatusGroup> DetailStatusGroups =>
+        RepositoryStatusGroups.Where(g => !ShouldSummarizeStatusGroup(g)).ToList();
+
+    private IReadOnlyList<RepositoryStatusGroup> SummaryStatusGroups =>
+        RepositoryStatusGroups
+            .Where(ShouldSummarizeStatusGroup)
+            // Keep the clean/"other" line after non-clean summaries so "other" reads correctly.
+            .OrderBy(g => string.Equals(g.Message, NothingPendingStatusMessage, StringComparison.Ordinal) ? 1 : 0)
+            .ToList();
 
     private string AllCleanSummaryText =>
         _plan is null || _plan.Repositories.Count == 0
@@ -332,6 +344,111 @@
             : _plan.Repositories.Count == 1
                 ? "All 1 repository is up to date with nothing pending."
                 : $"All {_plan.Repositories.Count} repositories are up to date with nothing pending.";
+
+    /// <summary>
+    /// One group of repositories that share an identical <see cref="DescribeRepository"/> message.
+    /// </summary>
+    internal sealed record RepositoryStatusGroup(
+        string Message,
+        int Count,
+        IReadOnlyList<RemoveFeatureRepositoryPlan> Repositories);
+
+    /// <summary>
+    /// Groups repositories by identical status message, preserving first-seen order (D6 follow-up).
+    /// Identical statuses are summarized; unique ones stay as per-repo detail.
+    /// </summary>
+    internal static IReadOnlyList<RepositoryStatusGroup> BuildRepositoryStatusGroups(
+        IReadOnlyList<RemoveFeatureRepositoryPlan> repositories)
+    {
+        if (repositories.Count == 0)
+            return [];
+
+        var groups = new List<RepositoryStatusGroup>();
+        var indexByMessage = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        foreach (var repo in repositories)
+        {
+            var message = DescribeRepository(repo);
+            if (indexByMessage.TryGetValue(message, out var index))
+            {
+                var existing = groups[index];
+                var repos = existing.Repositories.ToList();
+                repos.Add(repo);
+                groups[index] = existing with { Count = repos.Count, Repositories = repos };
+            }
+            else
+            {
+                indexByMessage[message] = groups.Count;
+                groups.Add(new RepositoryStatusGroup(message, 1, [repo]));
+            }
+        }
+
+        return groups;
+    }
+
+    /// <summary>
+    /// True when a status group should collapse to one summary line instead of listing each repository.
+    /// Identical statuses (count &gt; 1) always summarize; the clean/"nothing pending" group also
+    /// always summarizes so mixed plans keep the "N other repositories are up to date…" voice.
+    /// </summary>
+    internal static bool ShouldSummarizeStatusGroup(RepositoryStatusGroup group) =>
+        group.Count > 1
+        || string.Equals(group.Message, NothingPendingStatusMessage, StringComparison.Ordinal);
+
+    /// <summary>
+    /// Copy for a collapsed identical-status group. Matches the all-clean / "other clean" voice.
+    /// </summary>
+    internal static string FormatStatusGroupSummary(
+        string message,
+        int count,
+        bool allRepositoriesShareThisStatus)
+    {
+        if (count <= 0)
+            return message;
+
+        if (string.Equals(message, NothingPendingStatusMessage, StringComparison.Ordinal))
+        {
+            if (allRepositoriesShareThisStatus)
+            {
+                return count == 1
+                    ? "All 1 repository is up to date with nothing pending."
+                    : $"All {count} repositories are up to date with nothing pending.";
+            }
+
+            // Mixed plan: always "other", whether the remaining statuses are detail rows or summaries.
+            return count == 1
+                ? "1 other repository is up to date with nothing pending."
+                : $"{count} other repositories are up to date with nothing pending.";
+        }
+
+        if (string.Equals(message, NoPullRequestStatusMessage, StringComparison.Ordinal))
+        {
+            if (allRepositoriesShareThisStatus)
+            {
+                return count == 1
+                    ? "1 repository has no pull request opened for this branch."
+                    : $"All {count} repositories have no pull request opened for this branch.";
+            }
+
+            return count == 1
+                ? "1 repository has no pull request opened for this branch."
+                : $"{count} repositories have no pull request opened for this branch.";
+        }
+
+        if (allRepositoriesShareThisStatus)
+        {
+            return count == 1
+                ? message
+                : $"All {count} repositories: {message}.";
+        }
+
+        return count == 1
+            ? message
+            : $"{count} repositories: {message}.";
+    }
+
+    internal const string NothingPendingStatusMessage = "Up to date with nothing pending";
+    internal const string NoPullRequestStatusMessage = "No pull request has been opened for this branch";
 
     private bool UseNeutralStatusText =>
         _plan?.Classification == RemoveFeatureClassification.Completed;
@@ -462,7 +579,7 @@
     };
 
     /// <summary>Plain-language, per-repository summary replacing raw field dumps like "worktree present; 3 outgoing".</summary>
-    private static string DescribeRepository(RemoveFeatureRepositoryPlan repo)
+    internal static string DescribeRepository(RemoveFeatureRepositoryPlan repo)
     {
         var parts = new List<string>();
 
@@ -516,7 +633,7 @@
         }
         else if (repo.HasUpstream)
         {
-            parts.Add("No pull request has been opened for this branch");
+            parts.Add(NoPullRequestStatusMessage);
         }
 
         if (!string.IsNullOrEmpty(repo.Warning))
@@ -526,7 +643,7 @@
 
         if (parts.Count == 0)
         {
-            parts.Add("Up to date with nothing pending");
+            parts.Add(NothingPendingStatusMessage);
         }
 
         return string.Join(" · ", parts);
