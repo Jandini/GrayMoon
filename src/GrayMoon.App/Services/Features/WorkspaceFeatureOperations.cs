@@ -327,35 +327,21 @@ public sealed class WorkspaceFeatureOperations(
                 r => states.FirstOrDefault(s => s.WorkspaceRepositoryId == r.WorkspaceRepositoryId)?.BranchName
                     ?? (r.PinnedTag == null ? info.FeatureName : null));
 
-        var pullRequestStatusUnknown = false;
-        try
-        {
-            var outcomes = await workspacePullRequestService.RefreshContextPullRequestsAsync(
-                info.WorkspaceId, featureContextId.Value, branchByRepositoryId, force: false, cancellationToken);
-            pullRequestStatusUnknown = outcomes.Values.Any(o => o == PullRequestRefreshOutcome.Failed);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Pull request refresh failed for Feature remove analysis.");
-            pullRequestStatusUnknown = true;
-        }
+        // PR refresh (GitHub) and Feature workspace path resolution are independent; run together
+        // so the Checking overlay does not wait for them sequentially.
+        var pullRequestRefreshTask = RefreshPullRequestsForRemoveAnalysisAsync(
+            info.WorkspaceId, featureContextId.Value, branchByRepositoryId, cancellationToken);
+        var pathArgsTask = ResolveFeatureWorkspaceArgsForRemoveAnalysisAsync(
+            featureContextId, cancellationToken);
+        await Task.WhenAll(pullRequestRefreshTask, pathArgsTask);
+
+        var pullRequestStatusUnknown = await pullRequestRefreshTask;
+        var (featureWorkspaceRoot, featureWorkspaceFolder) = await pathArgsTask;
 
         var prs = await db.WorkspaceRepositoryContextPullRequests
             .AsNoTracking()
             .Where(p => p.WorkspaceFeatureContextId == featureContextId.Value)
             .ToListAsync(cancellationToken);
-
-        string? featureWorkspaceRoot = null;
-        string? featureWorkspaceFolder = null;
-        try
-        {
-            (featureWorkspaceRoot, featureWorkspaceFolder) =
-                await pathResolver.GetAgentWorkspaceArgsAsync(featureContextId, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Could not resolve Feature workspace paths for remove analysis.");
-        }
 
         var planSlots = new RemoveFeatureRepositoryPlan[rows.Count];
         using (var gate = new SemaphoreSlim(MaxParallel))
@@ -444,6 +430,40 @@ public sealed class WorkspaceFeatureOperations(
         };
     }
 
+    private async Task<bool> RefreshPullRequestsForRemoveAnalysisAsync(
+        int workspaceId,
+        int featureContextId,
+        IReadOnlyDictionary<int, string?> branchByRepositoryId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var outcomes = await workspacePullRequestService.RefreshContextPullRequestsAsync(
+                workspaceId, featureContextId, branchByRepositoryId, force: false, cancellationToken);
+            return outcomes.Values.Any(o => o == PullRequestRefreshOutcome.Failed);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Pull request refresh failed for Feature remove analysis.");
+            return true;
+        }
+    }
+
+    private async Task<(string? Root, string? Folder)> ResolveFeatureWorkspaceArgsForRemoveAnalysisAsync(
+        WorkspaceFeatureContextId featureContextId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await pathResolver.GetAgentWorkspaceArgsAsync(featureContextId, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not resolve Feature workspace paths for remove analysis.");
+            return (null, null);
+        }
+    }
+
     public async Task<OperationResult> RemoveFeatureAsync(
         WorkspaceFeatureContextId featureContextId,
         RemoveFeatureOptions options,
@@ -454,47 +474,8 @@ public sealed class WorkspaceFeatureOperations(
         if (info.IsSpecialWorkspace)
             return OperationResult.Fail("Cannot remove the special Workspace context.");
 
-        var plan = await AnalyzeRemoveFeatureAsync(featureContextId, cancellationToken);
-        if (!plan.Success)
-            return OperationResult.Fail(plan.Error ?? "Analyze failed.");
-
-        // Unknown disk state (Agent unreachable, or InspectWorktree failed) can hide real dirty work,
-        // so Remove is refused here regardless of discard/force authorization - see A2 rule.
-        if (plan.Repositories.Any(r => r.WorktreeStatusUnknown))
-        {
-            return OperationResult.Fail(
-                "Could not check one or more repositories. Make sure the Worker is running, then try again.");
-        }
-
-        // D3: require each authorization only when that risk is actually present (same rules as the
-        // Remove dialog checkboxes). Classification / PR-unknown / null outgoing / NeedsRepair alone
-        // make IsAutomaticallySafe false but do not need discard/force/unlock - Remove stays allowed
-        // (A3, I1). The old "any not-safe plan needs some authorization flag" gate rejected those
-        // cases even when the dialog correctly enabled Remove with no checkboxes shown.
-        var needsDiscard = plan.Repositories.Any(r =>
-            r.HasUncommittedChanges || r.HasStagedChanges || r.HasConflicts);
-        var needsForce = plan.Repositories.Any(r =>
-            (r.EffectiveAheadOfDefault ?? 0) > 0 && r.PullRequestMerged != true);
-        var needsUnlock = plan.Repositories.Any(r => r.IsLocked);
-
-        if (needsDiscard && !options.AllowDiscardUncommitted)
-        {
-            return OperationResult.Fail(
-                "This Feature has uncommitted changes; authorize discarding them explicitly.");
-        }
-
-        if (needsForce && !options.AllowForceDeleteLocalBranches)
-        {
-            return OperationResult.Fail(
-                "This Feature has local branches with commits not in the default branch; authorize force-deleting them explicitly.");
-        }
-
-        if (needsUnlock && !options.AllowUnlockWorktrees)
-        {
-            return OperationResult.Fail(
-                "This Feature has locked worktrees; authorize unlocking them explicitly.");
-        }
-
+        // Start the structural overlay immediately so the confirmation dialog does not sit idle while
+        // analyze (or auth validation) runs. Prefer the plan already shown in the dialog when present.
         var tcs = new TaskCompletionSource<OperationResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         var overlayKey = WorkspaceJobKeys.RepositoriesOverlayKey(info.WorkspaceId);
         var started = operationLock.TryStartStructural(
@@ -508,7 +489,59 @@ public sealed class WorkspaceFeatureOperations(
                 {
                     using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, cancellationToken);
                     var overlayProgress = BindOverlayProgress(op, progress);
-                    var outcome = await RemoveFeatureCoreAsync(featureContextId, info, options, plan, overlayProgress, linked.Token);
+
+                    var plan = options.AnalyzedPlan is { Success: true } preAnalyzed
+                        ? preAnalyzed
+                        : await AnalyzeRemoveFeatureAsync(featureContextId, linked.Token);
+                    if (!plan.Success)
+                    {
+                        tcs.TrySetResult(OperationResult.Fail(plan.Error ?? "Analyze failed."));
+                        return;
+                    }
+
+                    // Unknown disk state (Agent unreachable, or InspectWorktree failed) can hide real dirty work,
+                    // so Remove is refused here regardless of discard/force authorization - see A2 rule.
+                    if (plan.Repositories.Any(r => r.WorktreeStatusUnknown))
+                    {
+                        tcs.TrySetResult(OperationResult.Fail(
+                            "Could not check one or more repositories. Make sure the Worker is running, then try again."));
+                        return;
+                    }
+
+                    // D3: require each authorization only when that risk is actually present (same rules as the
+                    // Remove dialog checkboxes). Classification / PR-unknown / null outgoing / NeedsRepair alone
+                    // make IsAutomaticallySafe false but do not need discard/force/unlock - Remove stays allowed
+                    // (A3, I1). The old "any not-safe plan needs some authorization flag" gate rejected those
+                    // cases even when the dialog correctly enabled Remove with no checkboxes shown.
+                    var needsDiscard = plan.Repositories.Any(r =>
+                        r.HasUncommittedChanges || r.HasStagedChanges || r.HasConflicts);
+                    var needsForce = plan.Repositories.Any(r =>
+                        (r.EffectiveAheadOfDefault ?? 0) > 0 && r.PullRequestMerged != true);
+                    var needsUnlock = plan.Repositories.Any(r => r.IsLocked);
+
+                    if (needsDiscard && !options.AllowDiscardUncommitted)
+                    {
+                        tcs.TrySetResult(OperationResult.Fail(
+                            "This Feature has uncommitted changes; authorize discarding them explicitly."));
+                        return;
+                    }
+
+                    if (needsForce && !options.AllowForceDeleteLocalBranches)
+                    {
+                        tcs.TrySetResult(OperationResult.Fail(
+                            "This Feature has local branches with commits not in the default branch; authorize force-deleting them explicitly."));
+                        return;
+                    }
+
+                    if (needsUnlock && !options.AllowUnlockWorktrees)
+                    {
+                        tcs.TrySetResult(OperationResult.Fail(
+                            "This Feature has locked worktrees; authorize unlocking them explicitly."));
+                        return;
+                    }
+
+                    var outcome = await RemoveFeatureCoreAsync(
+                        featureContextId, info, options, plan, overlayProgress, linked.Token);
                     tcs.TrySetResult(outcome);
                 }
                 catch (Exception ex)

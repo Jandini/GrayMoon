@@ -55,6 +55,11 @@ public sealed class RemoveFeatureOptions
     public bool DeleteRemoteBranches { get; init; }
     /// <summary>True when the user authorized unlocking locked worktrees before removal (D5).</summary>
     public bool AllowUnlockWorktrees { get; init; }
+    /// <summary>
+    /// Plan already shown in the Remove dialog. When set and successful, Remove skips a second
+    /// analyze so the structural overlay can start immediately after the user clicks Remove.
+    /// </summary>
+    public RemoveFeaturePlan? AnalyzedPlan { get; init; }
 }
 
 public sealed class RemoveFeaturePlan

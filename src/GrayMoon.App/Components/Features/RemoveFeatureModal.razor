@@ -17,9 +17,11 @@
                     {
                         <div class="gm-callout gm-callout--error mb-3" role="alert">@_error</div>
                     }
-                    @if (_report is not null)
+                    @if (_report is not null && string.IsNullOrEmpty(_error))
                     {
-                        <div class="gm-callout gm-callout--success mb-3" role="alert">@ReportHeadline</div>
+                        <div class="gm-callout gm-callout--warning mb-3" role="alert">
+                            Feature removed with warnings.
+                        </div>
                         @if (ReportWarnings.Count > 0)
                         {
                             <ul class="list-unstyled mb-0">
@@ -35,7 +37,10 @@
                     else if (_plan is null)
                     {
                         @* Fallback only: normal open preloads the plan via the page LoadingOverlay. *@
-                        <p class="mb-0 text-muted">@( _analyzing ? "Refreshing removal details…" : "No removal plan is available." )</p>
+                        @if (string.IsNullOrEmpty(_error))
+                        {
+                            <p class="mb-0 text-muted">@( _analyzing ? "Refreshing removal details…" : "No removal plan is available." )</p>
+                        }
                     }
                     else if (_plan.Success)
                     {
@@ -163,16 +168,26 @@
     private int? _analyzedFor;
     private int? _appliedInitialPlanFor;
 
-    /// <summary>Plain-language summary of a successful Remove Feature report (D2).</summary>
-    private string ReportHeadline
+    /// <summary>
+    /// True when a successful remove left something the user should acknowledge: kept/failed branch,
+    /// leftover files, or a branch kept because the worktree was off its Feature branch.
+    /// </summary>
+    internal static bool HasReportWarnings(IReadOnlyList<RemoveFeatureRepositoryReport>? report)
     {
-        get
+        if (report is null || report.Count == 0)
+            return false;
+
+        foreach (var repo in report)
         {
-            var worktreeCount = _report?.Count(r => r.WorktreeRemoved) ?? 0;
-            var branchCount = _report?.Count(r => r.BranchOutcome == RemoveFeatureBranchOutcome.Deleted) ?? 0;
-            return $"Removed {worktreeCount} worktree{(worktreeCount == 1 ? "" : "s")}, "
-                + $"{branchCount} local branch{(branchCount == 1 ? "" : "es")}.";
+            if (repo.BranchOutcome is RemoveFeatureBranchOutcome.KeptUnmerged or RemoveFeatureBranchOutcome.Failed)
+                return true;
+            if (repo.ResidueRemaining)
+                return true;
+            if (!string.IsNullOrWhiteSpace(repo.KeptBranchName))
+                return true;
         }
+
+        return false;
     }
 
     /// <summary>One line per repository that was not fully cleaned up: kept/failed branch, or leftover files.</summary>
@@ -380,6 +395,12 @@
         if (!IsVisible || FeatureContextId is null)
             return;
 
+        // After a successful remove the Feature context is gone. Never re-analyze while showing the
+        // warnings report (or while the structural overlay is covering the page) — that would surface
+        // "WorkspaceFeatureContext N was not found" next to the removal outcome.
+        if (_removing || _report is not null)
+            return;
+
         // Page already ran analyze under LoadingOverlay; show that plan immediately (no in-dialog check).
         if (InitialPlan is not null
             && _appliedInitialPlanFor != FeatureContextId.Value.Value)
@@ -446,6 +467,7 @@
             return;
         _removing = true;
         _error = null;
+        _report = null;
         try
         {
             var result = await FeatureOperations.RemoveFeatureAsync(
@@ -454,22 +476,37 @@
                 {
                     AllowDiscardUncommitted = _allowDiscard,
                     AllowForceDeleteLocalBranches = _allowForce,
-                    AllowUnlockWorktrees = _allowUnlock
+                    AllowUnlockWorktrees = _allowUnlock,
+                    AnalyzedPlan = _plan
                 });
             if (!result.Success)
             {
+                // Hard failure: error only — never pair with a green/success report.
+                _report = null;
                 _error = result.Error ?? "Remove Feature failed.";
                 await RefreshPlanAsync();
                 return;
             }
+
+            var report = result.RemoveFeatureReport ?? [];
+            if (!HasReportWarnings(report))
+            {
+                // Clean success: close immediately; page shows a toast via OnRemoved.
+                ResetDialogState();
+                await OnRemoved.InvokeAsync();
+                return;
+            }
+
+            // Success with warnings the user must acknowledge — warnings dialog only (no success headline).
             _plan = null;
             _analyzedFor = null;
-            // Show the removal report (D2) instead of closing immediately; Done finishes the flow.
-            _report = result.RemoveFeatureReport ?? [];
+            _error = null;
+            _report = report;
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Remove Feature failed");
+            _report = null;
             _error = ex.Message;
         }
         finally
@@ -478,7 +515,7 @@
         }
     }
 
-    private Task Cancel()
+    private void ResetDialogState()
     {
         _plan = null;
         _analyzedFor = null;
@@ -487,13 +524,18 @@
         _allowDiscard = false;
         _allowForce = false;
         _allowUnlock = false;
+        _error = null;
+    }
+
+    private Task Cancel()
+    {
+        ResetDialogState();
         return OnCancel.InvokeAsync();
     }
 
     private async Task Done()
     {
-        _report = null;
-        _appliedInitialPlanFor = null;
+        ResetDialogState();
         await OnRemoved.InvokeAsync();
     }
 }

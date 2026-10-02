@@ -293,11 +293,20 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
 
         if (removedCurrentContext)
         {
-            var special = await FeatureContextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(WorkspaceId);
-            await SelectedFeatureContextService.SetSelectedAsync(WorkspaceId, special);
-            await OnSelectedContextChangedAsync(special);
-            var path = new Uri(NavigationManager.Uri).GetLeftPart(UriPartial.Path);
-            NavigationManager.NavigateTo(path, replace: true);
+            try
+            {
+                var special = await FeatureContextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(WorkspaceId);
+                await SelectedFeatureContextService.SetSelectedAsync(WorkspaceId, special);
+                await OnSelectedContextChangedAsync(special);
+                var path = new Uri(NavigationManager.Uri).GetLeftPart(UriPartial.Path);
+                NavigationManager.NavigateTo(path, replace: true);
+            }
+            catch (InvalidOperationException ex) when (ex.Message.Contains("was not found", StringComparison.Ordinal))
+            {
+                // The Feature context is already gone after a successful remove; a follow-up load that
+                // still targets it must not surface as a remove-dialog error.
+                Logger.LogDebug(ex, "Post-remove navigation ignored expected missing Feature context.");
+            }
         }
         ToastService.Show("Feature removed.");
     }

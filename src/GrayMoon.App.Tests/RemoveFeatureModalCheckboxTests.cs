@@ -1,4 +1,5 @@
 using GrayMoon.App.Components.Features;
+using GrayMoon.Application;
 using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Tests;
@@ -152,5 +153,54 @@ public sealed class RemoveFeatureModalCheckboxTests
             showUnlockCheckbox, allowUnlock);
 
         Assert.Equal(expected, actual);
+    }
+
+    [Fact]
+    public void HasReportWarnings_false_for_clean_report()
+    {
+        IReadOnlyList<RemoveFeatureRepositoryReport> report =
+        [
+            new(1, "repo", WorktreeRemoved: true, RemoveFeatureBranchOutcome.Deleted, null,
+                ResidueRemaining: false, ResidueFileCount: 0, null, null)
+        ];
+
+        Assert.False(RemoveFeatureModal.HasReportWarnings(report));
+    }
+
+    [Fact]
+    public void HasReportWarnings_true_for_kept_unmerged_branch()
+    {
+        IReadOnlyList<RemoveFeatureRepositoryReport> report =
+        [
+            new(1, "repo", WorktreeRemoved: true, RemoveFeatureBranchOutcome.KeptUnmerged, "not fully merged",
+                ResidueRemaining: false, ResidueFileCount: 0, null, null)
+        ];
+
+        Assert.True(RemoveFeatureModal.HasReportWarnings(report));
+    }
+
+    [Fact]
+    public void HasReportWarnings_true_for_residue_or_kept_branch_name()
+    {
+        IReadOnlyList<RemoveFeatureRepositoryReport> residue =
+        [
+            new(1, "repo", WorktreeRemoved: true, RemoveFeatureBranchOutcome.Deleted, null,
+                ResidueRemaining: true, ResidueFileCount: 1, ["a.lock"], "still open")
+        ];
+        IReadOnlyList<RemoveFeatureRepositoryReport> keptBranch =
+        [
+            new(1, "repo", WorktreeRemoved: true, RemoveFeatureBranchOutcome.Deleted, null,
+                ResidueRemaining: false, ResidueFileCount: 0, null, null, KeptBranchName: "side")
+        ];
+
+        Assert.True(RemoveFeatureModal.HasReportWarnings(residue));
+        Assert.True(RemoveFeatureModal.HasReportWarnings(keptBranch));
+    }
+
+    [Fact]
+    public void HasReportWarnings_false_for_null_or_empty()
+    {
+        Assert.False(RemoveFeatureModal.HasReportWarnings(null));
+        Assert.False(RemoveFeatureModal.HasReportWarnings([]));
     }
 }
