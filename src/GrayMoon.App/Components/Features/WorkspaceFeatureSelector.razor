@@ -188,6 +188,7 @@
     private readonly List<WorkspaceCatalogItem> _otherSwitchWorkspaces = [];
     private readonly Dictionary<int, List<WorkspaceFeatureContextInfo>> _featuresByWorkspace = new();
     private readonly HashSet<int> _featuresLoading = [];
+    private readonly Dictionary<int, int> _featureCountByWorkspace = new();
     private bool _open;
     private bool _loaded;
     private bool _desktopAvailable;
@@ -200,45 +201,67 @@
 
     private RenderFragment SwitchWorkspaceRow(WorkspaceCatalogItem ws) => __builder =>
     {
+        // The chevron reflects the Feature *count* fetched up front (in one batched query) when
+        // the Switch Workspace menu opened — so it is accurate immediately, with no per-row flicker
+        // or hover delay before it appears. The *detail* list (names, lifecycle state) is still
+        // fetched lazily, per workspace, only once the user actually hovers the chevron — so we
+        // never pull every workspace's full Feature list up front.
+        var hasFeatures = _featureCountByWorkspace.TryGetValue(ws.WorkspaceId, out var count) && count > 0;
         var features = GetCachedFeatures(ws.WorkspaceId);
-        var showChevron = features is null || features.Count > 0;
-        <li class="workspace-feature-selector__ws-flyout"
-            @onmouseenter="() => EnsureFeaturesForWorkspaceAsync(ws.WorkspaceId)">
+        <li class="workspace-feature-selector__ws-flyout">
             <button type="button"
-                    class="dropdown-item workspace-feature-selector__flyout-item"
+                    class="dropdown-item workspace-feature-selector__ws-name-btn"
                     role="menuitem"
                     @onclick="() => SwitchToWorkspace(ws.WorkspaceId)"
                     @onclick:stopPropagation>
-                <span class="workspace-feature-selector__ws-name">@ws.Name</span>
-                @if (showChevron)
-                {
-                    <i class="bi bi-chevron-right" aria-hidden="true"></i>
-                }
+                @ws.Name
             </button>
-            @if (features is { Count: > 0 })
+            @if (hasFeatures)
             {
-                <ul class="dropdown-menu show shadow workspace-feature-selector__submenu workspace-feature-selector__ws-features-submenu"
-                    role="menu">
-                    @foreach (var feature in features)
-                    {
-                        var featureOption = feature;
-                        <li>
-                            <button type="button"
-                                    class="dropdown-item"
-                                    role="menuitem"
-                                    disabled="@(!CanSelect(featureOption))"
-                                    title="@FeatureTitle(featureOption)"
-                                    @onclick="() => SwitchToWorkspaceFeatureAsync(ws.WorkspaceId, featureOption)"
-                                    @onclick:stopPropagation>
-                                @(featureOption.FeatureName?.Trim() ?? string.Empty)
-                                @if (!string.IsNullOrEmpty(featureOption.LifecycleState) && featureOption.LifecycleState != "Ready")
-                                {
-                                    <span class="text-muted small"> (@featureOption.LifecycleState)</span>
-                                }
-                            </button>
-                        </li>
-                    }
-                </ul>
+                @* Rendered unconditionally (not only once the detail list has loaded) so the hover
+                   target exists in the DOM from the very first paint — hovering it is what triggers
+                   the lazy detail lookup, and the submenu opens on *this* element's :hover, so the
+                   two can never race against each other. *@
+                <div class="workspace-feature-selector__ws-chevron-flyout"
+                     title="Features"
+                     @onmouseenter="() => EnsureFeaturesForWorkspaceAsync(ws.WorkspaceId)">
+                    <span class="workspace-feature-selector__repo-chevron" aria-hidden="true">
+                        <i class="bi bi-chevron-right"></i>
+                    </span>
+                    <ul class="dropdown-menu show shadow workspace-feature-selector__submenu workspace-feature-selector__ws-features-submenu"
+                        role="menu">
+                        @if (features is null)
+                        {
+                            <li><span class="dropdown-item disabled text-muted">Loading...</span></li>
+                        }
+                        else if (features.Count == 0)
+                        {
+                            <li><span class="dropdown-item disabled text-muted">No features</span></li>
+                        }
+                        else
+                        {
+                            @foreach (var feature in features)
+                            {
+                                var featureOption = feature;
+                                <li>
+                                    <button type="button"
+                                            class="dropdown-item"
+                                            role="menuitem"
+                                            disabled="@(!CanSelect(featureOption))"
+                                            title="@FeatureTitle(featureOption)"
+                                            @onclick="() => SwitchToWorkspaceFeatureAsync(ws.WorkspaceId, featureOption)"
+                                            @onclick:stopPropagation>
+                                        @(featureOption.FeatureName?.Trim() ?? string.Empty)
+                                        @if (!string.IsNullOrEmpty(featureOption.LifecycleState) && featureOption.LifecycleState != "Ready")
+                                        {
+                                            <span class="text-muted small"> (@featureOption.LifecycleState)</span>
+                                        }
+                                    </button>
+                                </li>
+                            }
+                        }
+                    </ul>
+                </div>
             }
         </li>
     };
@@ -448,6 +471,25 @@
         // Fresh open: drop per-workspace feature caches so lists stay current.
         _featuresByWorkspace.Clear();
         _featuresLoading.Clear();
+        _featureCountByWorkspace.Clear();
+
+        // One batched count query for every workspace in the menu, so every row's chevron is
+        // accurate from the very first paint. This is still cheap/dynamic in spirit — it is just a
+        // count, not the Feature details — and the actual detail list per workspace is only fetched
+        // lazily (see EnsureFeaturesForWorkspaceAsync), on hover.
+        try
+        {
+            var ids = _recentSwitchWorkspaces.Concat(_otherSwitchWorkspaces)
+                .Select(w => w.WorkspaceId)
+                .ToList();
+            var counts = await ContextResolver.GetFeatureCountsAsync(ids);
+            foreach (var (workspaceId, count) in counts)
+                _featureCountByWorkspace[workspaceId] = count;
+        }
+        catch
+        {
+            _featureCountByWorkspace.Clear();
+        }
     }
 
     private async Task EnsureFeaturesForWorkspaceAsync(int workspaceId)

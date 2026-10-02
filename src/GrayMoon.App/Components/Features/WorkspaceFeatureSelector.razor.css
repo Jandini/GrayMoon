@@ -215,19 +215,32 @@
     position: relative;
 }
 
-.workspace-feature-selector__ws-flyout > .workspace-feature-selector__flyout-item {
-    gap: 0.5rem;
+/* Reserve room for the chevron zone on the right regardless of whether it is currently rendered,
+   so the row does not reflow/shift once the feature lookup resolves. */
+.workspace-feature-selector__ws-flyout > .workspace-feature-selector__ws-name-btn {
+    padding-right: 2.25rem;
 }
 
-.workspace-feature-selector__ws-name {
-    flex: 1 1 auto;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
+/* Fixed zone on the right edge of the row — mirrors .workspace-feature-selector__repo-flyout.
+   Only rendered when an eager, batched count fetched when the menu opened says the workspace has
+   Features, so the chevron appears immediately (no per-row hover delay) and means "this workspace
+   has Features". Hovering/focusing *this zone* (not the whole row) is what triggers the lazy
+   detail lookup and reveals the Features flyout, keeping a click on the row free to switch
+   workspace directly. */
+.workspace-feature-selector__ws-chevron-flyout {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 2.25rem;
+    height: 100%;
+    color: var(--text-muted);
 }
 
-.workspace-feature-selector__ws-flyout:hover > .workspace-feature-selector__submenu,
-.workspace-feature-selector__ws-flyout:focus-within > .workspace-feature-selector__submenu {
+.workspace-feature-selector__ws-chevron-flyout:hover > .workspace-feature-selector__submenu,
+.workspace-feature-selector__ws-chevron-flyout:focus-within > .workspace-feature-selector__submenu {
     display: block;
 }
 

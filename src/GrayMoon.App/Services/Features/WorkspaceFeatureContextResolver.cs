@@ -82,6 +82,26 @@ public sealed class WorkspaceFeatureContextResolver(IDbContextFactory<AppDbConte
             .ToList();
     }
 
+    public async Task<IReadOnlyDictionary<int, int>> GetFeatureCountsAsync(IReadOnlyCollection<int> workspaceIds, CancellationToken cancellationToken = default)
+    {
+        if (workspaceIds.Count == 0)
+            return new Dictionary<int, int>();
+
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var counts = await db.WorkspaceFeatureContexts
+            .AsNoTracking()
+            .Where(c => workspaceIds.Contains(c.WorkspaceId)
+                        && c.Kind != WorkspaceFeatureContextKind.Workspace
+                        && c.WorkspaceFeature != null
+                        && (c.WorkspaceFeature.LifecycleState == WorkspaceFeatureLifecycleState.Ready
+                            || c.WorkspaceFeature.LifecycleState == WorkspaceFeatureLifecycleState.NeedsRepair))
+            .GroupBy(c => c.WorkspaceId)
+            .Select(g => new { WorkspaceId = g.Key, Count = g.Count() })
+            .ToListAsync(cancellationToken);
+
+        return counts.ToDictionary(x => x.WorkspaceId, x => x.Count);
+    }
+
     private static WorkspaceFeatureContextInfo ToInfo(WorkspaceFeatureContext row) => new()
     {
         ContextId = new WorkspaceFeatureContextId(row.WorkspaceFeatureContextId),
