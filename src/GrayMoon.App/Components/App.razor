@@ -129,8 +129,7 @@
                 body: JSON.stringify({ value: collapsed })
             }).catch(function () { });
         };
-        // Collapsed sidebar nav hints (tooltips). Recent workspaces popup lives on the Feature
-        // selector's Switch Workspace icon (see second IIFE below).
+        // Collapsed sidebar nav hints (tooltips).
         (function () {
             var tip = null;
             var hideTimer = null;
@@ -191,13 +190,11 @@
             });
         })();
 
-        // Recent workspaces: hover Switch Workspace in the Feature selector dropdown.
+        // Recent workspaces MRU (sessionStorage). Used by WorkspaceFeatureSelector to bubble
+        // recent entries to the top of the Switch Workspace submenu — no hover popup UI here.
         (function () {
             var STORAGE_KEY = 'gm.recentWorkspaces';
-            var menu = null;
-            var hideTimer = null;
             var visited = []; // [{id, name, url}]; most recent first
-            var SWITCH_SEL = '[data-gm-switch-workspace]';
 
             try {
                 var raw = sessionStorage.getItem(STORAGE_KEY);
@@ -211,19 +208,6 @@
 
             function persist() {
                 try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(visited)); } catch (e) { /* ignore */ }
-            }
-
-            function clearTimer() {
-                if (hideTimer !== null) { clearTimeout(hideTimer); hideTimer = null; }
-            }
-            function hideMenu() { if (menu) menu.classList.remove('gm-gh-dropdown--visible'); }
-            function scheduleHide() {
-                clearTimer();
-                hideTimer = setTimeout(function () { hideMenu(); }, 180);
-            }
-
-            function escapeHtml(s) {
-                return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
             }
 
             function recordCurrentWorkspace() {
@@ -242,105 +226,15 @@
                 persist();
             }
 
-            function ensureMenu() {
-                if (!menu) {
-                    menu = document.createElement('div');
-                    menu.className = 'gm-gh-dropdown';
-                    menu.setAttribute('data-gm-recent-workspaces', '');
-                    menu.addEventListener('mouseenter', clearTimer);
-                    menu.addEventListener('mouseleave', scheduleHide);
-                    menu.addEventListener('click', function () {
-                        clearTimer();
-                        hideMenu();
-                    });
-                    document.body.appendChild(menu);
-                }
-                return menu;
-            }
-
-            function currentWorkspaceId() {
-                var path = (location.pathname || '').replace(/^\//, '');
-                var m = path.match(/^workspaces\/(\d+)/i);
-                return m ? parseInt(m[1], 10) : null;
-            }
-
-            function otherRecent() {
-                var currentId = currentWorkspaceId();
-                return visited.filter(function (w) { return w.id !== currentId; });
-            }
-
-            // Recent-only: land on the same workspace sub-page the switch was triggered from.
-            function hrefForRecentWorkspace(targetWsId) {
-                var path = (location.pathname || '').replace(/^\//, '');
-                var m = path.match(/^workspaces\/(\d+)(\/.*)?$/i);
-                var suffix = (m && m[2]) ? m[2] : '';
-                var q = '';
-                if (location.search) {
-                    try {
-                        var params = new URLSearchParams(location.search);
-                        params.delete('context');
-                        var qs = params.toString();
-                        if (qs) q = '?' + qs;
-                    } catch (e) { /* ignore */ }
-                }
-                return '/workspaces/' + targetWsId + suffix + q;
-            }
-
-            function buildMenu(others) {
-                var m = ensureMenu();
-                m.innerHTML = '';
-                for (var i = 0; i < others.length; i++) {
-                    var w = others[i];
-                    var row = document.createElement('a');
-                    row.className = 'gm-gh-dropdown-item';
-                    row.href = hrefForRecentWorkspace(w.id);
-                    row.innerHTML = '<i class="bi bi-clock-history" aria-hidden="true"></i><span>' + escapeHtml(w.name) + '</span>';
-                    m.appendChild(row);
-                }
-            }
-
-            function positionMenu(anchor) {
-                if (!menu || !anchor) return;
-                var r = anchor.getBoundingClientRect();
-                menu.style.left = Math.round(r.right + 8) + 'px';
-                menu.style.top = Math.round(r.top) + 'px';
-            }
-
-            function showMenu(anchor) {
-                recordCurrentWorkspace();
-                var others = otherRecent();
-                if (others.length === 0) {
-                    hideMenu();
-                    return;
-                }
-                buildMenu(others);
-                positionMenu(anchor);
-                ensureMenu().classList.add('gm-gh-dropdown--visible');
-                clearTimer();
-            }
-
-            document.addEventListener('mouseover', function (e) {
-                var btn = e.target.closest(SWITCH_SEL);
-                if (!btn) return;
-                showMenu(btn);
-            });
-            document.addEventListener('mouseout', function (e) {
-                var btn = e.target.closest(SWITCH_SEL);
-                if (!btn) return;
-                var related = e.relatedTarget;
-                if (related && (btn.contains(related) || (menu && menu.contains(related)))) return;
-                scheduleHide();
-            });
-            // Click navigates to Workspaces list — dismiss the hover popup immediately.
-            document.addEventListener('click', function (e) {
-                if (!e.target.closest(SWITCH_SEL)) return;
-                clearTimer();
-                hideMenu();
-            }, true);
-
             // Keep MRU fresh as the user navigates workspace pages (Blazor soft nav).
             setInterval(recordCurrentWorkspace, 2000);
             recordCurrentWorkspace();
+
+            window.gmRecentWorkspaces = {
+                list: function () { return visited.slice(); },
+                ids: function () { return visited.map(function (w) { return w.id; }); },
+                record: recordCurrentWorkspace
+            };
         })();
         document.body.addEventListener('click', (e) => {
             const el = e.target.closest('.dependency-level-count-link') || e.target.closest('.dependency-level-pr-link');
