@@ -122,17 +122,12 @@
                             </button>
                         </li>
                     }
+                    @* Status and repair is reachable only through the "Repair" primary button (replaces Sync)
+                       while the Feature actually NeedsRepair - never from this menu, so a healthy Feature
+                       never exposes Roll back / Remove-via-repair. *@
                     @if (IsFeatureContext)
                     {
                         <li><hr class="dropdown-divider branch-menu-divider" /></li>
-                        <li>
-                            <button class="dropdown-item" type="button"
-                                    role="menuitem"
-                                    @onclick="HandleFeatureStatusClick"
-                                    disabled="@(IsSyncing || IsUpdating || IsPushing)">
-                                Status and repair
-                            </button>
-                        </li>
                         <li>
                             <button class="dropdown-item" type="button"
                                     role="menuitem"
@@ -656,12 +651,6 @@
     {
         CloseBranchMenu();
         await OnReturnToDefault.InvokeAsync();
-    }
-
-    private async Task HandleFeatureStatusClick()
-    {
-        CloseBranchMenu();
-        await OnShowFeatureStatus.InvokeAsync();
     }
 
     private async Task HandleRemoveFeatureClick()

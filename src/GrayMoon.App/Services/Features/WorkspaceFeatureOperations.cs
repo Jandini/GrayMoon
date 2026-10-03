@@ -1280,6 +1280,13 @@ public sealed class WorkspaceFeatureOperations(
             repositories);
     }
 
+    /// <summary>
+    /// Friendlier text than the raw "A task was canceled."/"The operation was canceled." messages .NET's
+    /// task cancellation produces, for when the user presses the overlay's Abort button mid Repair/Roll back.
+    /// </summary>
+    private static string DescribeOperationFailure(Exception ex, string actionVerb) =>
+        ex is OperationCanceledException ? $"{actionVerb} was cancelled." : ex.Message;
+
     public async Task<RepairFeatureResult> RepairFeatureAsync(
         WorkspaceFeatureContextId featureContextId,
         IProgress<OperationProgress>? progress = null,
@@ -1308,7 +1315,7 @@ public sealed class WorkspaceFeatureOperations(
                 }
                 catch (Exception ex)
                 {
-                    tcs.TrySetResult(new RepairFeatureResult(false, ex.Message, []));
+                    tcs.TrySetResult(new RepairFeatureResult(false, DescribeOperationFailure(ex, "Repair"), []));
                     throw;
                 }
             },
@@ -1332,10 +1339,11 @@ public sealed class WorkspaceFeatureOperations(
         if (await IsRemoveIncompleteAsync(featureContextId, cancellationToken))
             return new RollbackFeatureResult(false, "This Feature was being removed. Use Continue removal.", []);
 
-        var dirtyRefuse = await CollectDirtyReposForRollbackAsync(featureContextId, info, cancellationToken);
-        if (dirtyRefuse is not null)
-            return dirtyRefuse;
-
+        // The dirty check (CollectDirtyReposForRollbackAsync) asks the Agent for live disk status per
+        // repository, one at a time - for a Feature with many repositories this can take a few seconds
+        // with nothing on screen if run before the structural lock starts (TryStartStructural raises the
+        // page's BackgroundJobOverlay synchronously, before returning). Running it as the first step inside
+        // the lock instead means "Rolling back feature..." is already showing by the time it runs.
         var tcs = new TaskCompletionSource<RollbackFeatureResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         var started = operationLock.TryStartStructural(
             info.WorkspaceId,
@@ -1347,12 +1355,19 @@ public sealed class WorkspaceFeatureOperations(
                 try
                 {
                     using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, cancellationToken);
+                    var dirtyRefuse = await CollectDirtyReposForRollbackAsync(featureContextId, info, linked.Token);
+                    if (dirtyRefuse is not null)
+                    {
+                        tcs.TrySetResult(dirtyRefuse);
+                        return;
+                    }
+
                     var result = await RollbackFeatureCoreAsync(featureContextId, info, BindOverlayProgress(op, progress), linked.Token);
                     tcs.TrySetResult(result);
                 }
                 catch (Exception ex)
                 {
-                    tcs.TrySetResult(new RollbackFeatureResult(false, ex.Message, []));
+                    tcs.TrySetResult(new RollbackFeatureResult(false, DescribeOperationFailure(ex, "Roll back"), []));
                     throw;
                 }
             },

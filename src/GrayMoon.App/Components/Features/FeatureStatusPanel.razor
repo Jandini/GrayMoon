@@ -5,15 +5,13 @@
 @if (IsVisible && FeatureContextId is { } contextId)
 {
     @*
-        Own LoadingOverlay (not page-scoped, same as Repositories.razor/WorkspaceFiles.razor's fetch/update
-        overlays) shows "Repairing feature..."/"Rolling back feature..." the instant the button is clicked -
-        does not wait for the page's BackgroundJobOverlay to notice the structural operation has started.
-        z-index 9999 (LoadingOverlay's default) also covers this dialog, which additionally drops its own
-        z-index below the page's BackgroundJobOverlay (.loading-overlay--page, z-index: 100) while _busy, so
-        that overlay (once it does catch up) keeps covering the dialog too. Same pattern as SwitchBranchModal/
-        MergePullRequestModal.
+        z-index drops below the page's BackgroundJobOverlay (.loading-overlay--page, z-index: 100) while
+        _busy (Retry/Roll back) so that overlay - which already shows "Repairing feature..."/"Rolling back
+        feature..." - visually covers this still-mounted dialog instead of the dialog sticking out above it
+        during the delay. Same pattern as SwitchBranchModal/MergePullRequestModal. Deliberately does NOT also
+        render its own LoadingOverlay here - that duplicated the page's overlay (two spinners/messages on top
+        of each other) instead of replacing it.
     *@
-    <LoadingOverlay IsVisible="@_busy" Message="@_busyMessage" ShowCommandTerminal="false" />
     <div class="modal fade show d-block" tabindex="-1" style="background: rgba(0,0,0,.45); z-index: @(_busy ? 50 : 1055);" @onkeydown="HandleKeyDown" @ref="_modalElement" @onclick="CloseAsync">
         <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable" @onclick:stopPropagation>
             <div class="modal-content">
@@ -35,7 +33,7 @@
                     }
                     @if (!string.IsNullOrWhiteSpace(_actionError))
                     {
-                        <div class="alert alert-danger py-2" role="alert">@_actionError</div>
+                        <div class="gm-callout gm-callout--error mb-3" role="alert">@_actionError</div>
                     }
                     @if (_actionResults is { Count: > 0 } actionResults)
                     {
@@ -92,7 +90,7 @@
                         </ul>
                         @if (commonRowError is not null)
                         {
-                            <div class="alert alert-danger py-2 mt-2 mb-0" role="alert">@commonRowError</div>
+                            <div class="gm-callout gm-callout--error mt-2 mb-0" role="alert">@commonRowError</div>
                         }
                     }
                 </div>
@@ -127,7 +125,6 @@
     private ElementReference _modalElement;
     private bool _loading;
     private bool _busy;
-    private string? _busyMessage;
     private bool _isRemoveIncomplete;
     private string? _featureName;
     private string? _featureError;
@@ -182,7 +179,6 @@
         if (FeatureContextId is not { } contextId)
             return;
         _busy = true;
-        _busyMessage = "Repairing feature...";
         _actionError = null;
         try
         {
@@ -202,7 +198,6 @@
         finally
         {
             _busy = false;
-            _busyMessage = null;
         }
     }
 
@@ -211,7 +206,6 @@
         if (FeatureContextId is not { } contextId)
             return;
         _busy = true;
-        _busyMessage = "Rolling back feature...";
         _actionError = null;
         try
         {
@@ -234,7 +228,6 @@
         finally
         {
             _busy = false;
-            _busyMessage = null;
         }
     }
 
