@@ -57,7 +57,13 @@
                     @onclick="HandleBranchPrimaryClick"
                     @onclick:stopPropagation
                     disabled="@BranchActionsDisabled">
-                @(HasCreatablePr ? "Create PR" : (ShowRemoveFeaturePrimary ? "Remove" : (IsFeatureContext ? "Feature" : "Branch")))
+                @(PrimaryAction switch
+                {
+                    HeaderPrimaryAction.CreatePr => "Create PR",
+                    HeaderPrimaryAction.Remove => "Remove",
+                    HeaderPrimaryAction.Feature => "Feature",
+                    _ => "Branch",
+                })
             </button>
             <button type="button"
                     class="btn btn-outline-secondary dropdown-toggle dropdown-toggle-split"
@@ -418,6 +424,8 @@
     [Parameter] public bool HasCreatablePr { get; set; }
     /// <summary>True when at least one repository has an open pull request. Combined with Feature context to decide whether the primary control shows Remove.</summary>
     [Parameter] public bool HasOpenPr { get; set; }
+    /// <summary>True when the Feature has at least one PR, every PR is merged or closed, and no repo has commits outside a PR (E2). Ignored for the Workspace.</summary>
+    [Parameter] public bool AllFeaturePrsCompleted { get; set; }
     [Parameter] public bool IsPushRecommended { get; set; }
     [Parameter] public bool HasIncomingCommits { get; set; }
     [Parameter] public bool? IsOutOfSync { get; set; }
@@ -476,11 +484,44 @@
         IsReadOnlyContext || WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0;
 
     /// <summary>
-    /// Feature context with nothing creatable and no open PRs (merged, never-created, or abandoned closed).
-    /// Primary control becomes "Remove" and opens the existing Remove Feature flow.
+    /// The header's primary button always shows the next useful action (E2):
+    /// Create PR (if creatable) &gt; Remove (if the Feature's PRs are all merged or closed) &gt; Feature / Branch.
+    /// A fresh Feature with no commits and no PR shows "Feature", never "Remove".
     /// </summary>
-    private bool ShowRemoveFeaturePrimary =>
-        IsFeatureContext && !HasCreatablePr && !HasOpenPr;
+    internal enum HeaderPrimaryAction
+    {
+        CreatePr,
+        Remove,
+        Feature,
+        Branch,
+    }
+
+    /// <summary>
+    /// Pure rule for <see cref="HeaderPrimaryAction"/>. <paramref name="allFeaturePrsCompleted"/> is only
+    /// consulted for a Feature context; the Workspace never shows "Remove" (R-E2).
+    /// </summary>
+    internal static HeaderPrimaryAction DeterminePrimaryAction(
+        bool isFeatureContext,
+        bool hasCreatablePr,
+        bool allFeaturePrsCompleted)
+    {
+        if (hasCreatablePr)
+        {
+            return HeaderPrimaryAction.CreatePr;
+        }
+
+        if (!isFeatureContext)
+        {
+            return HeaderPrimaryAction.Branch;
+        }
+
+        return allFeaturePrsCompleted ? HeaderPrimaryAction.Remove : HeaderPrimaryAction.Feature;
+    }
+
+    private HeaderPrimaryAction PrimaryAction =>
+        DeterminePrimaryAction(IsFeatureContext, HasCreatablePr, AllFeaturePrsCompleted);
+
+    private bool ShowRemoveFeaturePrimary => PrimaryAction == HeaderPrimaryAction.Remove;
 
     private void ToggleBranchMenu()
     {

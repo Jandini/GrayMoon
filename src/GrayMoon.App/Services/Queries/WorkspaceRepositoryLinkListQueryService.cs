@@ -204,6 +204,14 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
                 && x.pr.State == "open",
             cancellationToken);
 
+        // E2: at least one pull request exists for this Feature, every one of them is merged or closed
+        // (hasOpenPr is false), and no repository has commits that are not covered by a pull request
+        // (hasCreatablePr is false).
+        var hasAnyPr = await prQuery.AnyAsync(
+            x => x.pr != null && x.pr.PullRequestNumber != null,
+            cancellationToken);
+        var allFeaturePrsCompleted = hasAnyPr && !hasOpenPr && !hasCreatablePr;
+
         return new WorkspaceRepositoryHeaderStateDto(
             totalCount,
             hasUnmatchedDependencies,
@@ -213,7 +221,8 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
             isOutOfSync,
             lowestLevelNeedingWork,
             hasCreatablePr,
-            hasOpenPr);
+            hasOpenPr,
+            allFeaturePrsCompleted);
     }
 
     public async Task<IReadOnlyList<WorkspaceRepositoryLinkIndexEntry>> GetIndexAsync(

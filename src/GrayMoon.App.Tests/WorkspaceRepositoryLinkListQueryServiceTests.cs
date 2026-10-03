@@ -373,4 +373,128 @@ public class WorkspaceRepositoryLinkListQueryServiceTests
             Assert.True(header.IsPushRecommended);
         }
     }
+
+    // E2: AllFeaturePrsCompleted drives the header's "Remove" primary action and must only be true once
+    // every repository's pull request is merged or closed and no repository has commits outside a PR.
+
+    [Fact]
+    public async Task AllFeaturePrsCompleted_false_for_special_Workspace()
+    {
+        var (ctx, workspaceId) = await ListQueryTestContext.CreateWithWorkspaceLinksAsync(5);
+        await using (ctx)
+        {
+            var header = await ctx.WorkspaceRepoLinkQuery.GetHeaderStateAsync(workspaceId);
+            Assert.False(header.AllFeaturePrsCompleted);
+        }
+    }
+
+    [Fact]
+    public async Task AllFeaturePrsCompleted_false_with_no_pull_request_at_all()
+    {
+        var (ctx, workspaceId) = await ListQueryTestContext.CreateWithWorkspaceLinksAsync(3);
+        await using (ctx)
+        {
+            var contextId = await CreateFeatureContextAsync(ctx.DbContext, workspaceId, "feature-no-pr");
+
+            var header = await ctx.WorkspaceRepoLinkQuery.GetHeaderStateAsync(
+                workspaceId, contextId, isSpecialWorkspace: false);
+
+            Assert.False(header.HasCreatablePr);
+            Assert.False(header.HasOpenPr);
+            Assert.False(header.AllFeaturePrsCompleted);
+        }
+    }
+
+    [Fact]
+    public async Task AllFeaturePrsCompleted_true_when_only_pr_is_merged()
+    {
+        var (ctx, workspaceId) = await ListQueryTestContext.CreateWithWorkspaceLinksAsync(3);
+        await using (ctx)
+        {
+            var contextId = await CreateFeatureContextAsync(ctx.DbContext, workspaceId, "feature-merged");
+            var link = await ctx.DbContext.WorkspaceRepositories.AsNoTracking()
+                .FirstAsync(wr => wr.WorkspaceId == workspaceId);
+
+            ctx.DbContext.WorkspaceRepositoryContextPullRequests.Add(new WorkspaceRepositoryContextPullRequest
+            {
+                WorkspaceFeatureContextId = contextId.Value,
+                WorkspaceRepositoryId = link.WorkspaceRepositoryId,
+                PullRequestNumber = 42,
+                State = "closed",
+                MergedAt = DateTimeOffset.UtcNow,
+            });
+            await ctx.DbContext.SaveChangesAsync();
+
+            var header = await ctx.WorkspaceRepoLinkQuery.GetHeaderStateAsync(
+                workspaceId, contextId, isSpecialWorkspace: false);
+
+            Assert.False(header.HasCreatablePr);
+            Assert.False(header.HasOpenPr);
+            Assert.True(header.AllFeaturePrsCompleted);
+        }
+    }
+
+    [Fact]
+    public async Task AllFeaturePrsCompleted_false_when_a_pr_is_still_open()
+    {
+        var (ctx, workspaceId) = await ListQueryTestContext.CreateWithWorkspaceLinksAsync(3);
+        await using (ctx)
+        {
+            var contextId = await CreateFeatureContextAsync(ctx.DbContext, workspaceId, "feature-open");
+            var link = await ctx.DbContext.WorkspaceRepositories.AsNoTracking()
+                .FirstAsync(wr => wr.WorkspaceId == workspaceId);
+
+            ctx.DbContext.WorkspaceRepositoryContextPullRequests.Add(new WorkspaceRepositoryContextPullRequest
+            {
+                WorkspaceFeatureContextId = contextId.Value,
+                WorkspaceRepositoryId = link.WorkspaceRepositoryId,
+                PullRequestNumber = 7,
+                State = "open",
+            });
+            await ctx.DbContext.SaveChangesAsync();
+
+            var header = await ctx.WorkspaceRepoLinkQuery.GetHeaderStateAsync(
+                workspaceId, contextId, isSpecialWorkspace: false);
+
+            Assert.True(header.HasOpenPr);
+            Assert.False(header.AllFeaturePrsCompleted);
+        }
+    }
+
+    [Fact]
+    public async Task AllFeaturePrsCompleted_false_when_another_repo_has_commits_outside_a_pr()
+    {
+        var (ctx, workspaceId) = await ListQueryTestContext.CreateWithWorkspaceLinksAsync(3);
+        await using (ctx)
+        {
+            var contextId = await CreateFeatureContextAsync(ctx.DbContext, workspaceId, "feature-mixed");
+            var links = await ctx.DbContext.WorkspaceRepositories.AsNoTracking()
+                .Where(wr => wr.WorkspaceId == workspaceId)
+                .ToListAsync();
+            var mergedRepo = links[0];
+            var creatableRepo = links[1];
+
+            ctx.DbContext.WorkspaceRepositoryContextPullRequests.Add(new WorkspaceRepositoryContextPullRequest
+            {
+                WorkspaceFeatureContextId = contextId.Value,
+                WorkspaceRepositoryId = mergedRepo.WorkspaceRepositoryId,
+                PullRequestNumber = 1,
+                State = "closed",
+                MergedAt = DateTimeOffset.UtcNow,
+            });
+            ctx.DbContext.WorkspaceRepositoryContextStates.Add(new WorkspaceRepositoryContextState
+            {
+                WorkspaceFeatureContextId = contextId.Value,
+                WorkspaceRepositoryId = creatableRepo.WorkspaceRepositoryId,
+                DefaultBranchAheadCommits = 3,
+            });
+            await ctx.DbContext.SaveChangesAsync();
+
+            var header = await ctx.WorkspaceRepoLinkQuery.GetHeaderStateAsync(
+                workspaceId, contextId, isSpecialWorkspace: false);
+
+            Assert.True(header.HasCreatablePr);
+            Assert.False(header.AllFeaturePrsCompleted);
+        }
+    }
 }
