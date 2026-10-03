@@ -131,6 +131,51 @@ public sealed class CreateFeatureIntentAtomicityTests
         Assert.Equal(expected, row.WorktreePath);
     }
 
+    [Fact]
+    public async Task Exception_after_transaction_commit_marks_Feature_NeedsRepair_instead_of_stuck_Creating()
+    {
+        // Feature + context + Pending rows commit fine (same as the happy path); the per-repository
+        // CreateGitWorktree write that follows then throws, simulating e.g. the user pressing the
+        // overlay's Abort button mid Create (or any other unhandled exception) after that DB state
+        // already exists. The Feature must come back as NeedsRepair - not left stuck at Creating with
+        // no way for the Feature selector to open or remove it (CanSelect/ShowRemoveAction both key off
+        // LifecycleState).
+        await using var ctx = await SyncStateTestContext.CreateAsync(configureDb: o =>
+            o.AddInterceptors(new ThrowOnFeatureRepositoryModifyInterceptor()));
+
+        ctx.AgentBridge.Respond(AgentHubMethods.GetHeadCommits, new
+        {
+            commits = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["graymoon-api"] = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            },
+            branches = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["graymoon-api"] = "develop",
+            },
+        });
+        ctx.AgentBridge.Respond(AgentHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:\wt" });
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var result = await ops.CreateFeatureAsync(
+            ctx.WorkspaceId,
+            "feature/aborted-create",
+            WorkspaceFeatureBaseKindApplication.CurrentWorkspace);
+
+        Assert.False(result.Success);
+        Assert.Equal("NeedsRepair", result.Condition);
+        Assert.NotNull(result.ContextId);
+
+        await using var read = ctx.CreateScope();
+        var db = read.ServiceProvider.GetRequiredService<AppDbContext>();
+        var feature = await db.WorkspaceFeatures
+            .AsNoTracking()
+            .SingleAsync(f => f.WorkspaceId == ctx.WorkspaceId && f.Name == "feature/aborted-create");
+        Assert.Equal(WorkspaceFeatureLifecycleState.NeedsRepair, feature.LifecycleState);
+        Assert.False(string.IsNullOrWhiteSpace(feature.LastError));
+    }
+
     /// <summary>Fails the SaveChanges that inserts Pending Feature repository rows (inside the C1 transaction).</summary>
     private sealed class ThrowOnFeatureRepositoryInsertInterceptor : SaveChangesInterceptor
     {
@@ -155,6 +200,38 @@ public sealed class CreateFeatureIntentAtomicityTests
                     .Any(e => e.State == EntityState.Added) == true)
             {
                 throw new InvalidOperationException("Simulated save failure.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Fails the SaveChanges that writes a Feature repository row's post-worktree-creation state
+    /// (Ready/NeedsRepair) - i.e. after the C1 transaction already committed Feature + context + Pending
+    /// rows, simulating an exception (such as a cancelled Abort) partway through Create.
+    /// </summary>
+    private sealed class ThrowOnFeatureRepositoryModifyInterceptor : SaveChangesInterceptor
+    {
+        public override InterceptionResult<int> SavingChanges(DbContextEventData eventData, InterceptionResult<int> result)
+        {
+            ThrowIfModifyingFeatureRepositories(eventData.Context);
+            return result;
+        }
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfModifyingFeatureRepositories(eventData.Context);
+            return ValueTask.FromResult(result);
+        }
+
+        private static void ThrowIfModifyingFeatureRepositories(DbContext? db)
+        {
+            if (db?.ChangeTracker.Entries<WorkspaceFeatureRepository>()
+                    .Any(e => e.State == EntityState.Modified) == true)
+            {
+                throw new InvalidOperationException("Simulated abort mid worktree creation.");
             }
         }
     }

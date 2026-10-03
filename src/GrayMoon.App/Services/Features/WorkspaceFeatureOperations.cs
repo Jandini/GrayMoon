@@ -229,113 +229,143 @@ public sealed class WorkspaceFeatureOperations(
             }
         }
 
-        var anyFailure = 0;
-        var createCompleted = 0;
-        var createTotal = pendingRows.Count;
-        using var gate = new SemaphoreSlim(MaxParallel);
-        var tasks = pendingRows.Select(async row =>
+        // From here on, the Feature + context + Pending rows already committed above are real DB state -
+        // any exception (including the user pressing the overlay's Abort button, which cancels
+        // cancellationToken) must not leave LifecycleState stuck at Creating forever with no way for the
+        // Feature selector to open or remove it. Treat it exactly like a partial per-repo failure: mark
+        // NeedsRepair and hand back a NeedsRepair result so CreateFeatureModal opens Status and repair
+        // (Retry re-attempts the still-Pending repos; Roll back/Remove clean up).
+        try
         {
-            await gate.WaitAsync(cancellationToken);
-            try
+            var anyFailure = 0;
+            var createCompleted = 0;
+            var createTotal = pendingRows.Count;
+            using var gate = new SemaphoreSlim(MaxParallel);
+            var tasks = pendingRows.Select(async row =>
             {
-                var link = links.First(l => l.WorkspaceRepositoryId == row.WorkspaceRepositoryId);
-                var mainPath = await pathResolver.GetRepositoryPathAsync(
-                    specialContextId, link.WorkspaceRepositoryId, cancellationToken);
-                var response = await agentBridge.SendCommandAsync(
-                    AgentHubMethods.CreateGitWorktree,
-                    new
-                    {
-                        mainRepositoryPath = mainPath,
-                        worktreePath = row.WorktreePath,
-                        branchName = row.PinnedTag == null ? name : null,
-                        detach = row.PinnedTag != null,
-                        baseCommitSha = row.BaseCommitSha,
-                        divergenceBaseBranch = row.ParentBranchName,
-                        workspaceId,
-                        repositoryId = link.RepositoryId
-                    },
-                    cancellationToken);
-
-                await using var writeDb = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-                var tracked = await writeDb.WorkspaceFeatureRepositories
-                    .FirstAsync(r => r.WorkspaceFeatureRepositoryId == row.WorkspaceFeatureRepositoryId, cancellationToken);
-
-                if (!response.Success)
+                await gate.WaitAsync(cancellationToken);
+                try
                 {
-                    tracked.State = WorkspaceFeatureRepositoryState.NeedsRepair;
-                    tracked.LastError = response.Error ?? "CreateGitWorktree failed.";
-                    Interlocked.Exchange(ref anyFailure, 1);
-                }
-                else
-                {
-                    var payload = AgentResponseJson.DeserializeAgentResponse<CreateGitWorktreeAgentResponse>(response.Data);
-                    if (payload is null || !payload.Success)
+                    var link = links.First(l => l.WorkspaceRepositoryId == row.WorkspaceRepositoryId);
+                    var mainPath = await pathResolver.GetRepositoryPathAsync(
+                        specialContextId, link.WorkspaceRepositoryId, cancellationToken);
+                    var response = await agentBridge.SendCommandAsync(
+                        AgentHubMethods.CreateGitWorktree,
+                        new
+                        {
+                            mainRepositoryPath = mainPath,
+                            worktreePath = row.WorktreePath,
+                            branchName = row.PinnedTag == null ? name : null,
+                            detach = row.PinnedTag != null,
+                            baseCommitSha = row.BaseCommitSha,
+                            divergenceBaseBranch = row.ParentBranchName,
+                            workspaceId,
+                            repositoryId = link.RepositoryId
+                        },
+                        cancellationToken);
+
+                    await using var writeDb = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+                    var tracked = await writeDb.WorkspaceFeatureRepositories
+                        .FirstAsync(r => r.WorkspaceFeatureRepositoryId == row.WorkspaceFeatureRepositoryId, cancellationToken);
+
+                    if (!response.Success)
                     {
                         tracked.State = WorkspaceFeatureRepositoryState.NeedsRepair;
-                        tracked.LastError = payload?.ErrorMessage ?? "CreateGitWorktree returned no payload.";
+                        tracked.LastError = response.Error ?? "CreateGitWorktree failed.";
                         Interlocked.Exchange(ref anyFailure, 1);
                     }
                     else
                     {
-                        if (!string.IsNullOrWhiteSpace(payload.WorktreePath))
-                            tracked.WorktreePath = payload.WorktreePath;
-                        tracked.State = WorkspaceFeatureRepositoryState.Ready;
-                        tracked.LastError = null;
+                        var payload = AgentResponseJson.DeserializeAgentResponse<CreateGitWorktreeAgentResponse>(response.Data);
+                        if (payload is null || !payload.Success)
+                        {
+                            tracked.State = WorkspaceFeatureRepositoryState.NeedsRepair;
+                            tracked.LastError = payload?.ErrorMessage ?? "CreateGitWorktree returned no payload.";
+                            Interlocked.Exchange(ref anyFailure, 1);
+                        }
+                        else
+                        {
+                            if (!string.IsNullOrWhiteSpace(payload.WorktreePath))
+                                tracked.WorktreePath = payload.WorktreePath;
+                            tracked.State = WorkspaceFeatureRepositoryState.Ready;
+                            tracked.LastError = null;
+                        }
                     }
+
+                    await writeDb.SaveChangesAsync(cancellationToken);
+                }
+                finally
+                {
+                    var done = Interlocked.Increment(ref createCompleted);
+                    progress.Report(
+                        $"Created feature in {done} of {createTotal} repositories",
+                        done,
+                        createTotal);
+                    gate.Release();
+                }
+            });
+
+            await Task.WhenAll(tasks);
+
+            await using (var finalizeDb = await dbContextFactory.CreateDbContextAsync(cancellationToken))
+            {
+                var trackedFeature = await finalizeDb.WorkspaceFeatures
+                    .FirstAsync(f => f.WorkspaceFeatureId == feature.WorkspaceFeatureId, cancellationToken);
+                if (anyFailure != 0)
+                {
+                    trackedFeature.LifecycleState = WorkspaceFeatureLifecycleState.NeedsRepair;
+                    trackedFeature.LastError = "One or more worktrees failed to create.";
+                    trackedFeature.UpdatedAt = DateTime.UtcNow;
+                    await finalizeDb.SaveChangesAsync(cancellationToken);
+                    return new CreateFeatureResult
+                    {
+                        Success = false,
+                        Condition = "NeedsRepair",
+                        Error = trackedFeature.LastError,
+                        ContextId = contextId,
+                        WorkspaceFeatureId = feature.WorkspaceFeatureId
+                    };
                 }
 
-                await writeDb.SaveChangesAsync(cancellationToken);
-            }
-            finally
-            {
-                var done = Interlocked.Increment(ref createCompleted);
-                progress.Report(
-                    $"Created feature in {done} of {createTotal} repositories",
-                    done,
-                    createTotal);
-                gate.Release();
-            }
-        });
+                progress?.Report(new OperationProgress("Seeding Feature projections..."));
+                await SeedInitialFeatureProjectionsAsync(finalizeDb, workspaceId, contextId, name, cancellationToken);
 
-        await Task.WhenAll(tasks);
-
-        await using (var finalizeDb = await dbContextFactory.CreateDbContextAsync(cancellationToken))
-        {
-            var trackedFeature = await finalizeDb.WorkspaceFeatures
-                .FirstAsync(f => f.WorkspaceFeatureId == feature.WorkspaceFeatureId, cancellationToken);
-            if (anyFailure != 0)
-            {
-                trackedFeature.LifecycleState = WorkspaceFeatureLifecycleState.NeedsRepair;
-                trackedFeature.LastError = "One or more worktrees failed to create.";
+                trackedFeature.LifecycleState = WorkspaceFeatureLifecycleState.Ready;
+                trackedFeature.LastError = null;
                 trackedFeature.UpdatedAt = DateTime.UtcNow;
                 await finalizeDb.SaveChangesAsync(cancellationToken);
-                return new CreateFeatureResult
-                {
-                    Success = false,
-                    Condition = "NeedsRepair",
-                    Error = trackedFeature.LastError,
-                    ContextId = contextId,
-                    WorkspaceFeatureId = feature.WorkspaceFeatureId
-                };
             }
 
-            progress?.Report(new OperationProgress("Seeding Feature projections..."));
-            await SeedInitialFeatureProjectionsAsync(finalizeDb, workspaceId, contextId, name, cancellationToken);
-
-            trackedFeature.LifecycleState = WorkspaceFeatureLifecycleState.Ready;
-            trackedFeature.LastError = null;
-            trackedFeature.UpdatedAt = DateTime.UtcNow;
-            await finalizeDb.SaveChangesAsync(cancellationToken);
+            await selectedContextService.SetSelectedAsync(workspaceId, contextId, cancellationToken);
+            progress?.Report(new OperationProgress($"Feature '{name}' is ready."));
+            return new CreateFeatureResult
+            {
+                Success = true,
+                ContextId = contextId,
+                WorkspaceFeatureId = feature.WorkspaceFeatureId
+            };
         }
-
-        await selectedContextService.SetSelectedAsync(workspaceId, contextId, cancellationToken);
-        progress?.Report(new OperationProgress($"Feature '{name}' is ready."));
-        return new CreateFeatureResult
+        catch (Exception ex)
         {
-            Success = true,
-            ContextId = contextId,
-            WorkspaceFeatureId = feature.WorkspaceFeatureId
-        };
+            // Use CancellationToken.None: cancellationToken is very likely the thing that just got
+            // cancelled (Abort), and this write must still land so the Feature does not stay stuck.
+            await using var failDb = await dbContextFactory.CreateDbContextAsync(CancellationToken.None);
+            var trackedFeature = await failDb.WorkspaceFeatures
+                .FirstAsync(f => f.WorkspaceFeatureId == feature.WorkspaceFeatureId, CancellationToken.None);
+            trackedFeature.LifecycleState = WorkspaceFeatureLifecycleState.NeedsRepair;
+            trackedFeature.LastError = DescribeOperationFailure(ex, "Create feature");
+            trackedFeature.UpdatedAt = DateTime.UtcNow;
+            await failDb.SaveChangesAsync(CancellationToken.None);
+
+            return new CreateFeatureResult
+            {
+                Success = false,
+                Condition = "NeedsRepair",
+                Error = trackedFeature.LastError,
+                ContextId = contextId,
+                WorkspaceFeatureId = feature.WorkspaceFeatureId
+            };
+        }
     }
 
     public async Task<RemoveFeaturePlan> AnalyzeRemoveFeatureAsync(
@@ -1528,28 +1558,46 @@ public sealed class WorkspaceFeatureOperations(
             .Where(l => wrIds.Contains(l.WorkspaceRepositoryId))
             .ToDictionaryAsync(l => l.WorkspaceRepositoryId, cancellationToken);
 
-        var dirty = new List<FeatureRepairRepositoryResult>();
-        foreach (var row in rows)
+        // One InspectWorktree Agent round trip per repository - run them concurrently (same
+        // SemaphoreSlim(MaxParallel) pattern as RepairFeatureCoreAsync/RollbackFeatureCoreAsync) instead
+        // of one at a time, so this pre-check does not itself become the slow part of Roll back for a
+        // Feature with many repositories. Ordered by WrId afterwards (ConcurrentBag has no ordering of
+        // its own) so the result list is deterministic regardless of which repository's Agent call
+        // happens to finish first.
+        var dirty = new ConcurrentBag<(int WrId, FeatureRepairRepositoryResult Result)>();
+        using (var gate = new SemaphoreSlim(MaxParallel))
         {
-            var repoName = links.TryGetValue(row.WorkspaceRepositoryId, out var link)
-                ? link.Repository?.RepositoryName ?? ""
-                : "";
-            var mainPath = await pathResolver.GetRepositoryPathAsync(specialContextId, row.WorkspaceRepositoryId, cancellationToken);
-            var disk = await InspectWorktreeDiskStatusAsync(mainPath, row.WorktreePath, null, null, cancellationToken);
-            if (!disk.StatusUnknown && disk.IsDirty == true)
+            var tasks = rows.Select(async row =>
             {
-                dirty.Add(new FeatureRepairRepositoryResult(
-                    repoName, FeatureRepositoryOperationOutcome.Failed, "Has uncommitted changes."));
-            }
+                await gate.WaitAsync(cancellationToken);
+                try
+                {
+                    var repoName = links.TryGetValue(row.WorkspaceRepositoryId, out var link)
+                        ? link.Repository?.RepositoryName ?? ""
+                        : "";
+                    var mainPath = await pathResolver.GetRepositoryPathAsync(specialContextId, row.WorkspaceRepositoryId, cancellationToken);
+                    var disk = await InspectWorktreeDiskStatusAsync(mainPath, row.WorktreePath, null, null, cancellationToken);
+                    if (!disk.StatusUnknown && disk.IsDirty == true)
+                    {
+                        dirty.Add((row.WorkspaceRepositoryId, new FeatureRepairRepositoryResult(
+                            repoName, FeatureRepositoryOperationOutcome.Failed, "Has uncommitted changes.")));
+                    }
+                }
+                finally
+                {
+                    gate.Release();
+                }
+            });
+            await Task.WhenAll(tasks);
         }
 
-        if (dirty.Count == 0)
+        if (dirty.IsEmpty)
             return null;
 
         return new RollbackFeatureResult(
             false,
             "One or more repositories have uncommitted changes. Commit or discard them before roll back.",
-            dirty);
+            dirty.OrderBy(d => d.WrId).Select(d => d.Result).ToList());
     }
 
     private async Task<RollbackFeatureResult> RollbackFeatureCoreAsync(

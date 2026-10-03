@@ -25,9 +25,9 @@
                             <ul class="list-unstyled mb-2 create-feature-collision-list">
                                 @foreach (var collision in _branchCollisions!)
                                 {
-                                    <li class="mb-2">
+                                    <li class="create-feature-collision-item">
                                         <strong>@collision.RepositoryName</strong>
-                                        <div class="text-muted small">@string.Join(", ", collision.Refs)</div>
+                                        <span class="text-muted small ms-2">@string.Join(", ", collision.Refs)</span>
                                     </li>
                                 }
                             </ul>

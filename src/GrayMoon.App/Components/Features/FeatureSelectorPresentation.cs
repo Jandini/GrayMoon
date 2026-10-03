@@ -35,7 +35,10 @@ internal static class FeatureSelectorPresentation
 
     public static bool ShowRemoveAction(WorkspaceFeatureContextInfo option) =>
         !option.IsSpecialWorkspace
-        && !string.Equals(option.LifecycleState, "Creating", StringComparison.OrdinalIgnoreCase)
+        // "Creating" is intentionally still removable (unlike "Removing", which already has its own
+        // remove in flight): a Feature can get stuck at "Creating" forever if the create operation was
+        // aborted or crashed before it reached NeedsRepair/Ready, and it is not selectable in that state
+        // (see CanSelect) - Remove is the only way out of that state from the selector.
         && !string.Equals(option.LifecycleState, "Removing", StringComparison.OrdinalIgnoreCase);
 
     public static bool IsReadOnlyContext(WorkspaceFeatureContextInfo? option) =>

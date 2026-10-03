@@ -104,7 +104,7 @@
                     else
                     {
                         <button type="button" class="btn btn-primary" data-default-action disabled="@_busy" @onclick="RetryAsync">Retry</button>
-                        <button type="button" class="btn btn-outline-danger" disabled="@_busy" @onclick="RollbackAsync">Roll back</button>
+                        <button type="button" class="btn btn-warning text-dark" disabled="@_busy" @onclick="RollbackAsync">Roll back</button>
                         <button type="button" class="btn btn-outline-secondary" disabled="@_busy" @onclick="RemoveAsync">Remove</button>
                     }
                     <button type="button" class="btn btn-outline-secondary" disabled="@_busy" @onclick="CloseAsync">Close</button>

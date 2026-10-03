@@ -35,11 +35,13 @@ public sealed class FeatureSelectorPresentationTests
     }
 
     [Fact]
-    public void ShowRemoveAction_hides_for_Creating_and_Removing()
+    public void ShowRemoveAction_hides_for_Removing_only()
     {
         Assert.True(FeatureSelectorPresentation.ShowRemoveAction(Info("Ready")));
         Assert.True(FeatureSelectorPresentation.ShowRemoveAction(Info("NeedsRepair")));
-        Assert.False(FeatureSelectorPresentation.ShowRemoveAction(Info("Creating")));
+        // "Creating" is not selectable (CanSelect is false), but Remove must still work from the
+        // selector so a Feature stuck at "Creating" forever (aborted/crashed create) is not a dead end.
+        Assert.True(FeatureSelectorPresentation.ShowRemoveAction(Info("Creating")));
         Assert.False(FeatureSelectorPresentation.ShowRemoveAction(Info("Removing")));
     }
 
