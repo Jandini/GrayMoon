@@ -27,9 +27,9 @@ public sealed class WorkspaceContextPathResolver(
         // Prefer persisted root unless it is a drive-root .graymoon path (legacy bug: C:\.graymoon\...).
         // Persisted roots stay put when the global Feature storage setting changes.
         if (!string.IsNullOrWhiteSpace(workspace.ManagedFeatureStorageRoot)
-            && !IsWindowsDriveRootGraymoonPath(workspace.ManagedFeatureStorageRoot))
+            && !AgentPath.IsLegacyWindowsDriveRootGraymoonPath(workspace.ManagedFeatureStorageRoot))
         {
-            return CombineWindows(workspace.ManagedFeatureStorageRoot.TrimEnd('\\', '/'), featureName);
+            return AgentPath.Combine(workspace.ManagedFeatureStorageRoot, featureName);
         }
 
         var storageRoot = await workspaceService.ResolveFeatureStorageRootPathAsync(
@@ -39,8 +39,8 @@ public sealed class WorkspaceContextPathResolver(
             throw new InvalidOperationException(
                 "Feature storage root is not configured. Set it on the Settings page (or connect the Agent so the host user profile can be used as the default).");
 
-        var derivedFeaturesRoot = CombineWindows(storageRoot, workspace.Name, "features");
-        return CombineWindows(derivedFeaturesRoot, featureName);
+        var derivedFeaturesRoot = AgentPath.Combine(storageRoot, workspace.Name, "features");
+        return AgentPath.Combine(derivedFeaturesRoot, featureName);
     }
 
     public async Task<string> GetRepositoryPathAsync(
@@ -73,14 +73,15 @@ public sealed class WorkspaceContextPathResolver(
 
             if (featureRepo is not null && !string.IsNullOrWhiteSpace(featureRepo.WorktreePath))
             {
-                // Agent/git often persist worktree paths with forward slashes (e.g. C:/Users/...).
-                // Normalize so native hosts (especially explorer.exe) receive Windows-shaped paths.
-                return featureRepo.WorktreePath.Replace('/', '\\').TrimEnd('\\');
+                // A Windows Agent/git may persist worktree paths with forward slashes (e.g.
+                // C:/Users/...); AgentPath.Normalize fixes that to '\' while leaving an
+                // already-POSIX path (a Linux/macOS Worker) untouched.
+                return AgentPath.Normalize(featureRepo.WorktreePath);
             }
         }
 
         var contextRoot = await GetContextRootAsync(contextId, cancellationToken);
-        return CombineWindows(contextRoot, repoName);
+        return AgentPath.Combine(contextRoot, repoName);
     }
 
     public async Task<(string AgentWorkspaceRoot, string AgentWorkspaceFolderName)> GetAgentWorkspaceArgsAsync(
@@ -88,12 +89,13 @@ public sealed class WorkspaceContextPathResolver(
         CancellationToken cancellationToken = default)
     {
         var contextRoot = await GetContextRootAsync(contextId, cancellationToken);
-        // Agent paths are Windows-shaped even when the App (and CI) run on Linux - do not use host Path.*.
-        var folderName = GetWindowsFileName(contextRoot);
+        // The context root is Agent/Worker-host-shaped (Windows or POSIX), which may differ from
+        // the App's own OS (e.g. App in Linux Docker, Worker on Windows) - never use host Path.*.
+        var folderName = AgentPath.GetFileName(contextRoot);
         if (string.IsNullOrWhiteSpace(folderName))
             throw new InvalidOperationException($"Cannot derive agent folder name from context root '{contextRoot}'.");
 
-        var parent = GetWindowsDirectoryName(contextRoot);
+        var parent = AgentPath.GetDirectoryName(contextRoot);
         if (string.IsNullOrWhiteSpace(parent))
             throw new InvalidOperationException($"Cannot derive agent parent root from context root '{contextRoot}'.");
 
@@ -114,48 +116,5 @@ public sealed class WorkspaceContextPathResolver(
             throw new InvalidOperationException($"Workspace folder path is empty for workspace {workspaceName}.");
 
         return folder.TrimEnd('\\', '/');
-    }
-
-    private static string CombineWindows(params string[] parts)
-    {
-        var cleaned = parts
-            .Where(p => !string.IsNullOrWhiteSpace(p))
-            .Select(p => p.Replace('/', '\\').Trim('\\'))
-            .ToArray();
-        return string.Join('\\', cleaned);
-    }
-
-    private static string GetWindowsFileName(string path)
-    {
-        var normalized = path.Replace('/', '\\').TrimEnd('\\');
-        if (string.IsNullOrEmpty(normalized))
-            return string.Empty;
-        var last = normalized.LastIndexOf('\\');
-        return last >= 0 ? normalized[(last + 1)..] : normalized;
-    }
-
-    private static string? GetWindowsDirectoryName(string path)
-    {
-        var normalized = path.Replace('/', '\\').TrimEnd('\\');
-        if (string.IsNullOrEmpty(normalized))
-            return null;
-        var last = normalized.LastIndexOf('\\');
-        return last >= 0 ? normalized[..last] : null;
-    }
-
-    /// <summary>True for <c>X:\.graymoon</c> / <c>X:\.graymoon\...</c> (Feature storage incorrectly rooted on a drive).</summary>
-    private static bool IsWindowsDriveRootGraymoonPath(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-            return false;
-        var normalized = path.Replace('/', '\\').TrimEnd('\\');
-        // "C:\.graymoon" is 12 chars; longer paths must continue with '\'.
-        if (normalized.Length < 12)
-            return false;
-        if (!char.IsLetter(normalized[0]) || normalized[1] != ':' || normalized[2] != '\\')
-            return false;
-        if (!normalized.AsSpan(3).StartsWith(".graymoon", StringComparison.OrdinalIgnoreCase))
-            return false;
-        return normalized.Length == 12 || normalized[12] == '\\';
     }
 }

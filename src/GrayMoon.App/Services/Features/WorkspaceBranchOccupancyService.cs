@@ -48,7 +48,7 @@ public sealed class WorkspaceBranchOccupancyService(
 
         var byPath = featureRows
             .Where(r => !string.IsNullOrWhiteSpace(r.WorktreePath))
-            .GroupBy(r => r.WorktreePath!.Replace('/', '\\').TrimEnd('\\'), StringComparer.OrdinalIgnoreCase)
+            .GroupBy(r => AgentPath.Normalize(r.WorktreePath!), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
         var result = new Dictionary<string, BranchOccupancyBadge>(StringComparer.OrdinalIgnoreCase);
@@ -69,8 +69,8 @@ public sealed class WorkspaceBranchOccupancyService(
             }
             else if (kind == GitWorktreeBranchOccupancyKind.OccupiedElsewhere)
             {
-                var pathKey = (wt.WorktreePath ?? "").Replace('/', '\\').TrimEnd('\\');
-                var mainKey = (mainPath ?? "").Replace('/', '\\').TrimEnd('\\');
+                var pathKey = AgentPath.Normalize(wt.WorktreePath ?? "");
+                var mainKey = AgentPath.Normalize(mainPath ?? "");
                 if (byPath.TryGetValue(pathKey, out var owned))
                 {
                     badge = BranchOccupancyKind.Feature;

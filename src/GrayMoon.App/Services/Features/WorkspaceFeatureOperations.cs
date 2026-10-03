@@ -151,7 +151,7 @@ public sealed class WorkspaceFeatureOperations(
         if (string.IsNullOrWhiteSpace(workspace.ManagedFeatureStorageRoot))
             throw new InvalidOperationException(
                 "Feature storage root is not configured. Set it on the Settings page (or connect the Agent so the host user profile can be used as the default).");
-        var featureRootPath = CombineWindowsPath(workspace.ManagedFeatureStorageRoot, name);
+        var featureRootPath = AgentPath.Combine(workspace.ManagedFeatureStorageRoot, name);
 
         var now = DateTime.UtcNow;
         var feature = new WorkspaceFeature
@@ -206,7 +206,7 @@ public sealed class WorkspaceFeatureOperations(
                     {
                         WorkspaceFeatureContextId = context.WorkspaceFeatureContextId,
                         WorkspaceRepositoryId = link.WorkspaceRepositoryId,
-                        WorktreePath = CombineWindowsPath(featureRootPath, repoName),
+                        WorktreePath = AgentPath.Combine(featureRootPath, repoName),
                         BaseCommitSha = sha,
                         ParentBranchName = pinnedTag == null ? parentBranch : null,
                         PinnedTag = pinnedTag,
@@ -2081,7 +2081,7 @@ public sealed class WorkspaceFeatureOperations(
         // Keep any already-persisted root so reconfiguring Settings does not orphan existing Features.
         // Relocate only the legacy drive-root bug (C:\.graymoon\...).
         if (!string.IsNullOrWhiteSpace(workspace.ManagedFeatureStorageRoot)
-            && !IsWindowsDriveRootGraymoonPath(workspace.ManagedFeatureStorageRoot))
+            && !AgentPath.IsLegacyWindowsDriveRootGraymoonPath(workspace.ManagedFeatureStorageRoot))
             return;
 
         var storageRoot = await workspaceService.ResolveFeatureStorageRootPathAsync(
@@ -2091,37 +2091,9 @@ public sealed class WorkspaceFeatureOperations(
             throw new InvalidOperationException(
                 "Feature storage root is not configured. Set it on the Settings page (or connect the Agent so the host user profile can be used as the default).");
 
-        // Keep Agent-facing Feature storage roots Windows-shaped (App/CI may run on Linux).
-        workspace.ManagedFeatureStorageRoot = string.Join('\\',
-            storageRoot.Replace('/', '\\').TrimEnd('\\'),
-            workspace.Name,
-            "features");
-    }
-
-    /// <summary>True for <c>X:\.graymoon</c> / <c>X:\.graymoon\...</c> (Feature storage incorrectly rooted on a drive).</summary>
-    private static bool IsWindowsDriveRootGraymoonPath(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-            return false;
-        var normalized = path.Replace('/', '\\').TrimEnd('\\');
-        // "C:\.graymoon" is 12 chars; longer paths must continue with '\'.
-        if (normalized.Length < 12)
-            return false;
-        if (!char.IsLetter(normalized[0]) || normalized[1] != ':' || normalized[2] != '\\')
-            return false;
-        if (!normalized.AsSpan(3).StartsWith(".graymoon", StringComparison.OrdinalIgnoreCase))
-            return false;
-        return normalized.Length == 12 || normalized[12] == '\\';
-    }
-
-    /// <summary>Agent-facing Windows-shaped path join (matches <see cref="WorkspaceContextPathResolver"/>).</summary>
-    private static string CombineWindowsPath(params string[] parts)
-    {
-        var cleaned = parts
-            .Where(p => !string.IsNullOrWhiteSpace(p))
-            .Select(p => p.Replace('/', '\\').Trim('\\'))
-            .ToArray();
-        return string.Join('\\', cleaned);
+        // Keep the Agent-facing Feature storage root in whichever shape the Agent/Worker already
+        // uses (Windows or POSIX) - never the App's own OS (it may run in a Linux Docker container).
+        workspace.ManagedFeatureStorageRoot = AgentPath.Combine(storageRoot, workspace.Name, "features");
     }
 
     private static RemoveFeatureClassification Classify(IReadOnlyList<RemoveFeatureRepositoryPlan> plans)

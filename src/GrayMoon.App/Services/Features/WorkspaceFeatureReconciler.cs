@@ -177,8 +177,8 @@ public sealed class WorkspaceFeatureReconciler(
                 continue;
             if (string.IsNullOrWhiteSpace(workspace.ManagedFeatureStorageRoot))
                 continue;
-            featureRootsByFeatureId[featureId] = CombineWindows(
-                workspace.ManagedFeatureStorageRoot.TrimEnd('\\', '/'),
+            featureRootsByFeatureId[featureId] = AgentPath.Combine(
+                workspace.ManagedFeatureStorageRoot,
                 ctx.WorkspaceFeature.Name);
         }
 
@@ -447,8 +447,7 @@ public sealed class WorkspaceFeatureReconciler(
         }
     }
 
-    internal static string NormalizePathKey(string path) =>
-        path.Replace('/', '\\').TrimEnd('\\');
+    internal static string NormalizePathKey(string path) => AgentPath.Normalize(path);
 
     internal static bool PathsEqualNormalized(string? left, string? right)
     {
@@ -464,21 +463,13 @@ public sealed class WorkspaceFeatureReconciler(
 
         var p = NormalizePathKey(path);
         var r = NormalizePathKey(root);
+        var sep = AgentPath.IsPosix(r) ? '/' : '\\';
         return p.Equals(r, StringComparison.OrdinalIgnoreCase)
-            || p.StartsWith(r + "\\", StringComparison.OrdinalIgnoreCase);
+            || p.StartsWith(r + sep, StringComparison.OrdinalIgnoreCase);
     }
 
     internal static string UntrackedWorktreeError(string path) =>
         $"Worktree {path} has no record in GrayMoon";
-
-    private static string CombineWindows(params string[] parts)
-    {
-        var cleaned = parts
-            .Where(p => !string.IsNullOrWhiteSpace(p))
-            .Select(p => p.Replace('/', '\\').Trim('\\'))
-            .ToArray();
-        return string.Join('\\', cleaned);
-    }
 
     private static bool IsUnknownCommandError(string? error) =>
         !string.IsNullOrWhiteSpace(error) && error.Contains("Unknown command", StringComparison.OrdinalIgnoreCase);
