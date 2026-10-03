@@ -279,6 +279,9 @@ try
         dbContext.Database.EnsureCreated();
         await Migrations.RunAllAsync(dbContext, app.Logger);
 
+        var keyProvider = services.GetRequiredService<ITokenEncryptionKeyProvider>();
+        await TokenReencryptionService.ReencryptLegacyTokensAsync(dbContext, tokenProtector, keyProvider, app.Logger);
+
         await dbContext.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;");
         await dbContext.Database.ExecuteSqlRawAsync("PRAGMA busy_timeout=5000;");
         await dbContext.Database.ExecuteSqlRawAsync("PRAGMA synchronous=NORMAL;");
@@ -290,14 +293,7 @@ try
         services.GetRequiredService<DesktopTopBarState>().LoadSilently(topBarVisible);
     }
 
-    static string? GetDatabasePath(string connectionString)
-    {
-        const string prefix = "Data Source=";
-        var idx = connectionString.IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
-        if (idx < 0) return null;
-        var path = connectionString[(idx + prefix.Length)..].Trim();
-        return string.IsNullOrEmpty(path) ? null : path;
-    }
+    static string? GetDatabasePath(string connectionString) => DatabasePathResolver.GetDatabasePath(connectionString);
 
     // Configure the HTTP request pipeline.
     if (!app.Environment.IsDevelopment())

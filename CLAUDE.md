@@ -103,7 +103,7 @@ Workspace repositories are topologically sorted into dependency levels (Kahn's a
 
 ### Token encryption
 
-Connector tokens are AES-256-GCM encrypted at rest via `AesGcmTokenProtector` (backed by ASP.NET Core Data Protection). Keys live in `/app/db/DataProtection-Keys/`. All git remote operations pass the token at runtime via `-c http.extraHeader="Authorization: Basic ..."` - tokens are never written to disk by the Worker.
+Connector tokens are AES-256-GCM encrypted at rest via `AesGcmTokenProtector`. The key comes from `TokenEncryptionKeyProvider`: a configured `TokenKey` setting always wins; otherwise a random 32-byte key is generated once per install and kept in `graymoon.key` next to the database (DPAPI-protected on Windows, file mode 600 elsewhere). The old hard-coded, source-derived key is kept decrypt-only forever under a legacy key id so pre-existing tokens still work; a startup step re-encrypts them onto the per-install key. ASP.NET Core Data Protection (`/app/db/DataProtection-Keys/`) is unrelated - it only protects antiforgery/circuit state, not connector tokens. All git remote operations pass the token at runtime via `-c http.extraHeader="Authorization: Basic ..."` - tokens are never written to disk by the Worker.
 
 ### File versioning
 

@@ -95,5 +95,18 @@ public sealed class AesGcmTokenProtector : ITokenProtector
 
         return Encoding.UTF8.GetString(plaintext);
     }
+
+    public string? TryGetKeyId(string protectedValue)
+    {
+        if (string.IsNullOrWhiteSpace(protectedValue))
+            return null;
+
+        var trimmed = protectedValue.Trim();
+        if (!trimmed.StartsWith(Scheme + ":", StringComparison.Ordinal))
+            return null; // legacy Level 1 (plain text or bare Base64): no key id to report.
+
+        var parts = trimmed.Split(':', 3);
+        return parts.Length == 3 ? parts[1] : null;
+    }
 }
 
