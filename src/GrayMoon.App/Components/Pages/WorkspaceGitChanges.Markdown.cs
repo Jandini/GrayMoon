@@ -24,6 +24,7 @@ public sealed partial class WorkspaceGitChanges
     private MarkdownProsePreviewMode _mdPreviewMode = MarkdownProsePreviewMode.Changes;
     private bool _mdPreferenceLoaded;
     private string? _markdownPreviewError;
+    private bool _isMarkdownPreviewLoading;
 
     private bool IsMarkdownFile =>
         _selectedRow is { Kind: GitChangesTreeRowKind.File, FilePath: { } path } && IsMarkdownPath(path);
@@ -198,65 +199,77 @@ public sealed partial class WorkspaceGitChanges
 
         if (!IsMarkdownFile || _selectedDiff == null || !RendersInMonaco(_selectedDiff.State))
         {
+            _isMarkdownPreviewLoading = false;
             return;
         }
 
-        CoerceMdPreviewModeForDocument();
+        _isMarkdownPreviewLoading = true;
+        StateHasChanged();
 
-        var result = MarkdownProseDiffService.Render(
-            _selectedDiff.OriginalContent,
-            _selectedDiff.ModifiedContent,
-            _mdPreviewMode);
-
-        if (result.TooLarge)
+        try
         {
-            _mdSurface = MdSurface.Source;
-            _markdownPreviewError = result.ErrorMessage;
-            ToastService.Show(result.ErrorMessage ?? "Markdown preview unavailable for this file.");
-            await PersistMdPreferenceAsync();
-            return;
-        }
+            CoerceMdPreviewModeForDocument();
 
-        if (!result.Success)
-        {
-            _markdownPreviewError = result.ErrorMessage ?? "Failed to render markdown preview.";
-            if (_markdownViewerRef != null)
+            var result = MarkdownProseDiffService.Render(
+                _selectedDiff.OriginalContent,
+                _selectedDiff.ModifiedContent,
+                _mdPreviewMode);
+
+            if (result.TooLarge)
             {
-                await _markdownViewerRef.ClearAsync();
+                _mdSurface = MdSurface.Source;
+                _markdownPreviewError = result.ErrorMessage;
+                ToastService.Show(result.ErrorMessage ?? "Markdown preview unavailable for this file.");
+                await PersistMdPreferenceAsync();
+                return;
             }
 
-            return;
-        }
-
-        var html = result.Html ?? string.Empty;
-        if (!string.IsNullOrEmpty(html)
-            && _selectedRow is { FilePath: { } mdPath, WorkspaceRepositoryId: var wrId })
-        {
-            var resolved = await ResolveRepositoryAsync(wrId);
-            if (resolved is { } repo)
+            if (!result.Success)
             {
-                var githubToken = await TryGetRepositoryGitHubTokenAsync(wrId);
-                html = await MarkdownImageEmbedder.EmbedAsync(
-                    html,
-                    repo.Root,
-                    repo.WorkspaceName,
-                    repo.RepositoryName,
-                    mdPath,
-                    githubToken);
+                _markdownPreviewError = result.ErrorMessage ?? "Failed to render markdown preview.";
+                if (_markdownViewerRef != null)
+                {
+                    await _markdownViewerRef.ClearAsync();
+                }
+
+                return;
             }
-            else
+
+            var html = result.Html ?? string.Empty;
+            if (!string.IsNullOrEmpty(html)
+                && _selectedRow is { FilePath: { } mdPath, WorkspaceRepositoryId: var wrId })
+            {
+                var resolved = await ResolveRepositoryAsync(wrId);
+                if (resolved is { } repo)
+                {
+                    var githubToken = await TryGetRepositoryGitHubTokenAsync(wrId);
+                    html = await MarkdownImageEmbedder.EmbedAsync(
+                        html,
+                        repo.Root,
+                        repo.WorkspaceName,
+                        repo.RepositoryName,
+                        mdPath,
+                        githubToken);
+                }
+                else
+                {
+                    html = MarkdownImageEmbedder.RewriteUnembeddedRemoteImages(html);
+                }
+            }
+            else if (!string.IsNullOrEmpty(html))
             {
                 html = MarkdownImageEmbedder.RewriteUnembeddedRemoteImages(html);
             }
-        }
-        else if (!string.IsNullOrEmpty(html))
-        {
-            html = MarkdownImageEmbedder.RewriteUnembeddedRemoteImages(html);
-        }
 
-        if (_markdownViewerRef != null)
+            if (_markdownViewerRef != null)
+            {
+                await _markdownViewerRef.SetHtmlAsync(html);
+            }
+        }
+        finally
         {
-            await _markdownViewerRef.SetHtmlAsync(html);
+            _isMarkdownPreviewLoading = false;
+            StateHasChanged();
         }
     }
 
@@ -335,6 +348,7 @@ public sealed partial class WorkspaceGitChanges
     private async Task ClearMarkdownViewerAsync()
     {
         _markdownPreviewError = null;
+        _isMarkdownPreviewLoading = IsMarkdownFile;
         if (_markdownViewerRef != null)
         {
             await _markdownViewerRef.ClearAsync();
