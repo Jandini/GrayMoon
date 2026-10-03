@@ -62,7 +62,17 @@ These come from the repo's own rules in `GrayMoon/.cursor/rules/`. Breaking them
 4. Do the "Self-check" list in the unit.
 5. Update Part C (status, notes) and Part E (changelog) in this file.
 
-Do not publish a bundle after a unit. `Publish-GrayMoonBundle.ps1` runs exactly once, as the last step of R4, after the entire plan's tests and release checklist are green (see R4 step 4) - not after any individual unit or gate.
+Do not publish a bundle after a plan unit (this section, A4). For a Part D unit, `Publish-GrayMoonBundle.ps1` runs exactly once, as the last step of R4, after the entire plan's tests and release checklist are green (see R4 step 4) - not after any individual unit or gate. Ad-hoc fixes the owner asks for while testing a build are different: see A4a.
+
+## A4a. Ad-hoc fixes the owner asks for while testing (not a plan unit)
+
+While the owner is testing a build, they will sometimes ask for something that is not a unit in Part D at all: a bug they hit, a UX tweak, "make this button yellow", and similar small iterations. These are not plan units and do not go through the Part D "Done when"/Regression guard machinery, but they still need the normal engineering care:
+
+1. Make the change. Build and run the affected tests; keep the whole affected test project green (same bar as A4 step 3).
+2. Unlike a plan unit, the owner needs an actual build to test the result right away. Once the change builds and tests are green, run `GrayMoon.Desktop\build\Publish-GrayMoonBundle.ps1` so a fresh bundle exists under `artifacts\bundle\` and tell the owner it is ready to test.
+3. Add one line to the changelog (Part E) describing what changed and why, the same way a unit would.
+
+Run the publish script after **every** such ad-hoc iteration, however small, so the owner is always testing current code. This is the only place outside R4 (A4) where the script runs.
 
 ### Commands (run from the folder that contains `GrayMoon` and `GrayMoon.Desktop`)
 
