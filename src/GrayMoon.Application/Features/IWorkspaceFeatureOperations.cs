@@ -33,6 +33,24 @@ public interface IWorkspaceFeatureOperations
     Task<IReadOnlyDictionary<int, string?>> GetParentBranchNamesByRepositoryIdAsync(
         WorkspaceFeatureContextId featureContextId,
         CancellationToken cancellationToken = default);
+
+    Task<bool> IsRemoveIncompleteAsync(
+        WorkspaceFeatureContextId featureContextId,
+        CancellationToken cancellationToken = default);
+
+    Task<FeatureStatusSnapshot?> GetFeatureStatusAsync(
+        WorkspaceFeatureContextId featureContextId,
+        CancellationToken cancellationToken = default);
+
+    Task<RepairFeatureResult> RepairFeatureAsync(
+        WorkspaceFeatureContextId featureContextId,
+        IProgress<OperationProgress>? progress = null,
+        CancellationToken cancellationToken = default);
+
+    Task<RollbackFeatureResult> RollbackFeatureAsync(
+        WorkspaceFeatureContextId featureContextId,
+        IProgress<OperationProgress>? progress = null,
+        CancellationToken cancellationToken = default);
 }
 
 public enum WorkspaceFeatureBaseKindApplication

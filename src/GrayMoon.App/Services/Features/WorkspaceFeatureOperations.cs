@@ -309,7 +309,14 @@ public sealed class WorkspaceFeatureOperations(
                 trackedFeature.LastError = "One or more worktrees failed to create.";
                 trackedFeature.UpdatedAt = DateTime.UtcNow;
                 await finalizeDb.SaveChangesAsync(cancellationToken);
-                return FailCreate("NeedsRepair", trackedFeature.LastError);
+                return new CreateFeatureResult
+                {
+                    Success = false,
+                    Condition = "NeedsRepair",
+                    Error = trackedFeature.LastError,
+                    ContextId = contextId,
+                    WorkspaceFeatureId = feature.WorkspaceFeatureId
+                };
             }
 
             progress?.Report(new OperationProgress("Seeding Feature projections..."));
@@ -1224,6 +1231,492 @@ public sealed class WorkspaceFeatureOperations(
     {
         var all = await contextResolver.ListForWorkspaceAsync(workspaceId, cancellationToken);
         return all.Where(c => !c.IsSpecialWorkspace).ToList();
+    }
+
+    public async Task<bool> IsRemoveIncompleteAsync(
+        WorkspaceFeatureContextId featureContextId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        return await db.WorkspaceFeatureRepositories.AnyAsync(
+            r => r.WorkspaceFeatureContextId == featureContextId.Value
+                && (r.State == WorkspaceFeatureRepositoryState.Removing
+                    || r.State == WorkspaceFeatureRepositoryState.Removed),
+            cancellationToken);
+    }
+
+    public async Task<FeatureStatusSnapshot?> GetFeatureStatusAsync(
+        WorkspaceFeatureContextId featureContextId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var context = await db.WorkspaceFeatureContexts
+            .AsNoTracking()
+            .Include(c => c.WorkspaceFeature)
+            .FirstOrDefaultAsync(c => c.WorkspaceFeatureContextId == featureContextId.Value, cancellationToken);
+        if (context?.WorkspaceFeature is null)
+            return null;
+
+        var rows = await db.WorkspaceFeatureRepositories
+            .AsNoTracking()
+            .Where(r => r.WorkspaceFeatureContextId == featureContextId.Value)
+            .Include(r => r.WorkspaceRepository)!.ThenInclude(l => l!.Repository)
+            .OrderBy(r => r.WorkspaceFeatureRepositoryId)
+            .ToListAsync(cancellationToken);
+
+        var repositories = rows
+            .Select(r => new FeatureStatusRepository(
+                r.WorkspaceRepository?.Repository?.RepositoryName ?? $"repo-{r.WorkspaceRepositoryId}",
+                r.State.ToString(),
+                r.LastError))
+            .ToList();
+        var removeIncomplete = rows.Any(r =>
+            r.State is WorkspaceFeatureRepositoryState.Removing or WorkspaceFeatureRepositoryState.Removed);
+
+        return new FeatureStatusSnapshot(
+            context.WorkspaceFeature.Name,
+            context.WorkspaceFeature.LastError,
+            removeIncomplete,
+            repositories);
+    }
+
+    public async Task<RepairFeatureResult> RepairFeatureAsync(
+        WorkspaceFeatureContextId featureContextId,
+        IProgress<OperationProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        var info = await contextResolver.GetRequiredAsync(featureContextId, cancellationToken: cancellationToken);
+        if (info.IsSpecialWorkspace || info.WorkspaceFeatureId is null)
+            return new RepairFeatureResult(false, "Not a Feature context.", []);
+
+        if (await IsRemoveIncompleteAsync(featureContextId, cancellationToken))
+            return new RepairFeatureResult(false, "This Feature was being removed. Use Continue removal.", []);
+
+        var tcs = new TaskCompletionSource<RepairFeatureResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var started = operationLock.TryStartStructural(
+            info.WorkspaceId,
+            "repair-feature",
+            WorkspaceJobKeys.RepositoriesOverlayKey(info.WorkspaceId),
+            "Repairing feature...",
+            async (op, ct) =>
+            {
+                try
+                {
+                    using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, cancellationToken);
+                    var result = await RepairFeatureCoreAsync(featureContextId, info, BindOverlayProgress(op, progress), linked.Token);
+                    tcs.TrySetResult(result);
+                }
+                catch (Exception ex)
+                {
+                    tcs.TrySetResult(new RepairFeatureResult(false, ex.Message, []));
+                    throw;
+                }
+            },
+            out _);
+
+        if (!started)
+            return new RepairFeatureResult(false, "A Workspace structural operation is already running.", []);
+
+        return await tcs.Task.WaitAsync(cancellationToken);
+    }
+
+    public async Task<RollbackFeatureResult> RollbackFeatureAsync(
+        WorkspaceFeatureContextId featureContextId,
+        IProgress<OperationProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        var info = await contextResolver.GetRequiredAsync(featureContextId, cancellationToken: cancellationToken);
+        if (info.IsSpecialWorkspace || info.WorkspaceFeatureId is null)
+            return new RollbackFeatureResult(false, "Not a Feature context.", []);
+
+        if (await IsRemoveIncompleteAsync(featureContextId, cancellationToken))
+            return new RollbackFeatureResult(false, "This Feature was being removed. Use Continue removal.", []);
+
+        var dirtyRefuse = await CollectDirtyReposForRollbackAsync(featureContextId, info, cancellationToken);
+        if (dirtyRefuse is not null)
+            return dirtyRefuse;
+
+        var tcs = new TaskCompletionSource<RollbackFeatureResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var started = operationLock.TryStartStructural(
+            info.WorkspaceId,
+            "rollback-feature",
+            WorkspaceJobKeys.RepositoriesOverlayKey(info.WorkspaceId),
+            "Rolling back feature...",
+            async (op, ct) =>
+            {
+                try
+                {
+                    using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, cancellationToken);
+                    var result = await RollbackFeatureCoreAsync(featureContextId, info, BindOverlayProgress(op, progress), linked.Token);
+                    tcs.TrySetResult(result);
+                }
+                catch (Exception ex)
+                {
+                    tcs.TrySetResult(new RollbackFeatureResult(false, ex.Message, []));
+                    throw;
+                }
+            },
+            out _);
+
+        if (!started)
+            return new RollbackFeatureResult(false, "A Workspace structural operation is already running.", []);
+
+        return await tcs.Task.WaitAsync(cancellationToken);
+    }
+
+    private async Task<RepairFeatureResult> RepairFeatureCoreAsync(
+        WorkspaceFeatureContextId featureContextId,
+        WorkspaceFeatureContextInfo info,
+        IProgress<OperationProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        var featureName = info.FeatureName
+            ?? throw new InvalidOperationException("Feature has no name.");
+        var specialContextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(info.WorkspaceId, cancellationToken);
+
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var rows = await db.WorkspaceFeatureRepositories
+            .Where(r => r.WorkspaceFeatureContextId == featureContextId.Value)
+            .ToListAsync(cancellationToken);
+        var wrIds = rows.Select(r => r.WorkspaceRepositoryId).ToList();
+        var links = await db.WorkspaceRepositories
+            .AsNoTracking()
+            .Include(l => l.Repository)
+            .Where(l => wrIds.Contains(l.WorkspaceRepositoryId))
+            .ToListAsync(cancellationToken);
+        var linkByWrId = links.ToDictionary(l => l.WorkspaceRepositoryId);
+
+        var results = new ConcurrentBag<(int WrId, FeatureRepairRepositoryResult Result)>();
+        var retryRows = rows
+            .Where(r => r.State is WorkspaceFeatureRepositoryState.Pending or WorkspaceFeatureRepositoryState.NeedsRepair)
+            .ToList();
+
+        foreach (var row in rows.Where(r => r.State == WorkspaceFeatureRepositoryState.Ready))
+        {
+            var name = linkByWrId.TryGetValue(row.WorkspaceRepositoryId, out var link)
+                ? link.Repository?.RepositoryName ?? ""
+                : "";
+            results.Add((row.WorkspaceRepositoryId, new FeatureRepairRepositoryResult(name, FeatureRepositoryOperationOutcome.Skipped, "Already ready.")));
+        }
+
+        if (retryRows.Count > 0)
+        {
+            using var gate = new SemaphoreSlim(MaxParallel);
+            var done = 0;
+            var tasks = retryRows.Select(async row =>
+            {
+                await gate.WaitAsync(cancellationToken);
+                try
+                {
+                    var link = linkByWrId[row.WorkspaceRepositoryId];
+                    var repoName = link.Repository?.RepositoryName ?? "";
+                    var mainPath = await pathResolver.GetRepositoryPathAsync(
+                        specialContextId, row.WorkspaceRepositoryId, cancellationToken);
+                    var response = await agentBridge.SendCommandAsync(
+                        AgentHubMethods.CreateGitWorktree,
+                        new
+                        {
+                            mainRepositoryPath = mainPath,
+                            worktreePath = row.WorktreePath,
+                            branchName = row.PinnedTag == null ? featureName : null,
+                            detach = row.PinnedTag != null,
+                            baseCommitSha = row.BaseCommitSha,
+                            divergenceBaseBranch = row.ParentBranchName,
+                            workspaceId = info.WorkspaceId,
+                            repositoryId = link.RepositoryId
+                        },
+                        cancellationToken);
+
+                    await using var writeDb = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+                    var tracked = await writeDb.WorkspaceFeatureRepositories
+                        .FirstAsync(r => r.WorkspaceFeatureRepositoryId == row.WorkspaceFeatureRepositoryId, cancellationToken);
+
+                    if (!response.Success)
+                    {
+                        tracked.State = WorkspaceFeatureRepositoryState.NeedsRepair;
+                        tracked.LastError = response.Error ?? "CreateGitWorktree failed.";
+                        await writeDb.SaveChangesAsync(cancellationToken);
+                        results.Add((row.WorkspaceRepositoryId, new FeatureRepairRepositoryResult(
+                            repoName, FeatureRepositoryOperationOutcome.Failed, tracked.LastError)));
+                        return;
+                    }
+
+                    var payload = AgentResponseJson.DeserializeAgentResponse<CreateGitWorktreeAgentResponse>(response.Data);
+                    if (payload is null || !payload.Success)
+                    {
+                        tracked.State = WorkspaceFeatureRepositoryState.NeedsRepair;
+                        tracked.LastError = payload?.ErrorMessage ?? "CreateGitWorktree returned no payload.";
+                        await writeDb.SaveChangesAsync(cancellationToken);
+                        results.Add((row.WorkspaceRepositoryId, new FeatureRepairRepositoryResult(
+                            repoName, FeatureRepositoryOperationOutcome.Failed, tracked.LastError)));
+                        return;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(payload.WorktreePath))
+                        tracked.WorktreePath = payload.WorktreePath;
+                    tracked.State = WorkspaceFeatureRepositoryState.Ready;
+                    tracked.LastError = null;
+                    await writeDb.SaveChangesAsync(cancellationToken);
+                    results.Add((row.WorkspaceRepositoryId, new FeatureRepairRepositoryResult(
+                        repoName, FeatureRepositoryOperationOutcome.Succeeded, null)));
+                }
+                finally
+                {
+                    var n = Interlocked.Increment(ref done);
+                    progress?.Report(new OperationProgress($"Repaired {n} of {retryRows.Count} repositories", n, retryRows.Count));
+                    gate.Release();
+                }
+            });
+            await Task.WhenAll(tasks);
+        }
+
+        var ordered = results.OrderBy(r => r.WrId).Select(r => r.Result).ToList();
+        var anyFailed = ordered.Any(r => r.Outcome == FeatureRepositoryOperationOutcome.Failed);
+
+        await using var finalizeDb = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var feature = await finalizeDb.WorkspaceFeatures
+            .FirstAsync(f => f.WorkspaceFeatureId == info.WorkspaceFeatureId, cancellationToken);
+
+        if (anyFailed)
+        {
+            var firstError = ordered.First(r => r.Outcome == FeatureRepositoryOperationOutcome.Failed).Message
+                ?? "One or more worktrees failed to create.";
+            feature.LifecycleState = WorkspaceFeatureLifecycleState.NeedsRepair;
+            feature.LastError = firstError;
+            feature.UpdatedAt = DateTime.UtcNow;
+            await finalizeDb.SaveChangesAsync(cancellationToken);
+            return new RepairFeatureResult(false, firstError, ordered);
+        }
+
+        progress?.Report(new OperationProgress("Seeding Feature projections..."));
+        await SeedInitialFeatureProjectionsAsync(finalizeDb, info.WorkspaceId, featureContextId, featureName, cancellationToken);
+        feature.LifecycleState = WorkspaceFeatureLifecycleState.Ready;
+        feature.LastError = null;
+        feature.UpdatedAt = DateTime.UtcNow;
+        await finalizeDb.SaveChangesAsync(cancellationToken);
+        return new RepairFeatureResult(true, null, ordered);
+    }
+
+    private async Task<RollbackFeatureResult?> CollectDirtyReposForRollbackAsync(
+        WorkspaceFeatureContextId featureContextId,
+        WorkspaceFeatureContextInfo info,
+        CancellationToken cancellationToken)
+    {
+        var specialContextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(info.WorkspaceId, cancellationToken);
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var rows = await db.WorkspaceFeatureRepositories.AsNoTracking()
+            .Where(r => r.WorkspaceFeatureContextId == featureContextId.Value)
+            .ToListAsync(cancellationToken);
+        var wrIds = rows.Select(r => r.WorkspaceRepositoryId).ToList();
+        var links = await db.WorkspaceRepositories.AsNoTracking()
+            .Include(l => l.Repository)
+            .Where(l => wrIds.Contains(l.WorkspaceRepositoryId))
+            .ToDictionaryAsync(l => l.WorkspaceRepositoryId, cancellationToken);
+
+        var dirty = new List<FeatureRepairRepositoryResult>();
+        foreach (var row in rows)
+        {
+            var repoName = links.TryGetValue(row.WorkspaceRepositoryId, out var link)
+                ? link.Repository?.RepositoryName ?? ""
+                : "";
+            var mainPath = await pathResolver.GetRepositoryPathAsync(specialContextId, row.WorkspaceRepositoryId, cancellationToken);
+            var disk = await InspectWorktreeDiskStatusAsync(mainPath, row.WorktreePath, null, null, cancellationToken);
+            if (!disk.StatusUnknown && disk.IsDirty == true)
+            {
+                dirty.Add(new FeatureRepairRepositoryResult(
+                    repoName, FeatureRepositoryOperationOutcome.Failed, "Has uncommitted changes."));
+            }
+        }
+
+        if (dirty.Count == 0)
+            return null;
+
+        return new RollbackFeatureResult(
+            false,
+            "One or more repositories have uncommitted changes. Commit or discard them before roll back.",
+            dirty);
+    }
+
+    private async Task<RollbackFeatureResult> RollbackFeatureCoreAsync(
+        WorkspaceFeatureContextId featureContextId,
+        WorkspaceFeatureContextInfo info,
+        IProgress<OperationProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        var featureName = info.FeatureName ?? "";
+        var specialContextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(info.WorkspaceId, cancellationToken);
+        using var monitoringPause = gitChangesMonitoringPause.Pause(featureContextId.Value);
+
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var rows = await db.WorkspaceFeatureRepositories
+            .Where(r => r.WorkspaceFeatureContextId == featureContextId.Value)
+            .ToListAsync(cancellationToken);
+        var wrIds = rows.Select(r => r.WorkspaceRepositoryId).ToList();
+        var links = await db.WorkspaceRepositories.AsNoTracking()
+            .Include(l => l.Repository)
+            .Where(l => wrIds.Contains(l.WorkspaceRepositoryId))
+            .ToListAsync(cancellationToken);
+        var linkByWrId = links.ToDictionary(l => l.WorkspaceRepositoryId);
+
+        string? workspaceRoot = null;
+        string? workspaceFolderName = null;
+        try
+        {
+            (workspaceRoot, workspaceFolderName) =
+                await pathResolver.GetAgentWorkspaceArgsAsync(specialContextId, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not resolve Workspace agent paths for Feature roll back.");
+        }
+
+        string? featureRootPath = null;
+        string? featureStorageRoot = null;
+        try
+        {
+            featureRootPath = await pathResolver.GetContextRootAsync(featureContextId, cancellationToken);
+            (featureStorageRoot, _) = await pathResolver.GetAgentWorkspaceArgsAsync(featureContextId, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not resolve Feature storage paths for roll back.");
+        }
+
+        var results = new List<FeatureRepairRepositoryResult>();
+        var done = 0;
+        foreach (var row in rows)
+        {
+            var repoName = linkByWrId.TryGetValue(row.WorkspaceRepositoryId, out var link)
+                ? link.Repository?.RepositoryName ?? ""
+                : "";
+            var mainPath = await pathResolver.GetRepositoryPathAsync(specialContextId, row.WorkspaceRepositoryId, cancellationToken);
+
+            var listResp = await agentBridge.SendCommandAsync(
+                AgentHubMethods.ListGitWorktrees,
+                new { mainRepositoryPath = mainPath },
+                cancellationToken);
+            GitWorktreeInfo? registered = null;
+            string? primaryBranch = null;
+            if (listResp.Success && listResp.Data != null)
+            {
+                var payload = AgentResponseJson.DeserializeAgentResponse<ListWorktreesAgentResponse>(listResp.Data);
+                var worktrees = payload?.Worktrees ?? [];
+                registered = worktrees.FirstOrDefault(wt =>
+                    WorkspaceFeatureReconciler.PathsEqualNormalized(wt.WorktreePath, row.WorktreePath));
+                primaryBranch = worktrees
+                    .FirstOrDefault(wt => WorkspaceFeatureReconciler.PathsEqualNormalized(wt.WorktreePath, mainPath))
+                    ?.BranchName;
+            }
+
+            if (registered is null)
+            {
+                results.Add(new FeatureRepairRepositoryResult(repoName, FeatureRepositoryOperationOutcome.Skipped, "Worktree not registered."));
+            }
+            else
+            {
+                var removeResp = await agentBridge.SendCommandAsync(
+                    AgentHubMethods.RemoveGitWorktree,
+                    new
+                    {
+                        mainRepositoryPath = mainPath,
+                        worktreePath = row.WorktreePath,
+                        force = false,
+                        featureRootPath,
+                        featureStorageRoot,
+                        unlock = false
+                    },
+                    cancellationToken);
+                if (!removeResp.Success)
+                {
+                    results.Add(new FeatureRepairRepositoryResult(
+                        repoName, FeatureRepositoryOperationOutcome.Failed, removeResp.Error ?? "RemoveGitWorktree failed."));
+                    done++;
+                    progress?.Report(new OperationProgress($"Rolled back {done} of {rows.Count} repositories", done, rows.Count));
+                    continue;
+                }
+
+                var branchName = row.PinnedTag == null ? featureName : null;
+                var defaultBranch = linkByWrId.TryGetValue(row.WorkspaceRepositoryId, out var branchLink)
+                    ? branchLink.DefaultBranchName
+                    : null;
+                var skipBranch =
+                    string.IsNullOrWhiteSpace(branchName)
+                    || (!string.IsNullOrWhiteSpace(defaultBranch)
+                        && branchName.Equals(defaultBranch.Trim(), StringComparison.OrdinalIgnoreCase))
+                    || (!string.IsNullOrWhiteSpace(primaryBranch)
+                        && branchName.Equals(primaryBranch.Trim(), StringComparison.OrdinalIgnoreCase));
+
+                if (!skipBranch
+                    && !string.IsNullOrWhiteSpace(workspaceRoot)
+                    && !string.IsNullOrWhiteSpace(workspaceFolderName)
+                    && !string.IsNullOrWhiteSpace(repoName))
+                {
+                    var deleteLocal = await agentBridge.SendCommandAsync(
+                        "DeleteBranch",
+                        new
+                        {
+                            workspaceName = workspaceFolderName,
+                            repositoryName = repoName,
+                            branchName,
+                            isRemote = false,
+                            force = false,
+                            workspaceRoot
+                        },
+                        cancellationToken);
+                    if (!deleteLocal.Success)
+                    {
+                        results.Add(new FeatureRepairRepositoryResult(
+                            repoName,
+                            FeatureRepositoryOperationOutcome.Succeeded,
+                            deleteLocal.Error ?? "Local branch kept (could not delete)."));
+                        done++;
+                        progress?.Report(new OperationProgress($"Rolled back {done} of {rows.Count} repositories", done, rows.Count));
+                        continue;
+                    }
+                }
+
+                results.Add(skipBranch && !string.IsNullOrWhiteSpace(branchName)
+                    ? new FeatureRepairRepositoryResult(repoName, FeatureRepositoryOperationOutcome.Skipped, "Branch delete refused (default or primary checkout).")
+                    : new FeatureRepairRepositoryResult(repoName, FeatureRepositoryOperationOutcome.Succeeded, null));
+            }
+
+            done++;
+            progress?.Report(new OperationProgress($"Rolled back {done} of {rows.Count} repositories", done, rows.Count));
+        }
+
+        if (results.Any(r => r.Outcome == FeatureRepositoryOperationOutcome.Failed))
+        {
+            var first = results.First(r => r.Outcome == FeatureRepositoryOperationOutcome.Failed);
+            return new RollbackFeatureResult(false, first.Message, results);
+        }
+
+        var special = specialContextId;
+        var selected = await selectedContextService.GetSelectedAsync(info.WorkspaceId, cancellationToken);
+        if (selected?.Value == featureContextId.Value)
+            await selectedContextService.SetSelectedAsync(info.WorkspaceId, special, cancellationToken);
+
+        await db.WorkspaceFeatureRepositories
+            .Where(r => r.WorkspaceFeatureContextId == featureContextId.Value)
+            .ExecuteDeleteAsync(cancellationToken);
+        foreach (var row in rows)
+            db.Entry(row).State = EntityState.Detached;
+
+        await DeleteContextScopedProjectDataAsync(db, featureContextId.Value, cancellationToken);
+        var contextRow = await db.WorkspaceFeatureContexts
+            .FirstAsync(c => c.WorkspaceFeatureContextId == featureContextId.Value, cancellationToken);
+        var featureRow = await db.WorkspaceFeatures
+            .FirstAsync(f => f.WorkspaceFeatureId == info.WorkspaceFeatureId, cancellationToken);
+        db.WorkspaceFeatureContexts.Remove(contextRow);
+        db.WorkspaceFeatures.Remove(featureRow);
+        await db.SaveChangesAsync(cancellationToken);
+
+        return new RollbackFeatureResult(true, null, results);
+    }
+
+    private sealed class ListWorktreesAgentResponse
+    {
+        [JsonPropertyName("worktrees")]
+        public List<GitWorktreeInfo>? Worktrees { get; set; }
     }
 
     private async Task SeedInitialFeatureProjectionsAsync(

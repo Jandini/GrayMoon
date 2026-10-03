@@ -115,12 +115,15 @@
                             disabled="@(!CanSelect(option))"
                             @onclick="() => SelectAsync(option)">
                         @DisplayName(option)
-                        @if (!string.IsNullOrEmpty(option.LifecycleState) && option.LifecycleState != "Ready")
+                        @{
+                            var label = FeatureSelectorPresentation.FriendlyLabel(option);
+                        }
+                        @if (!string.IsNullOrEmpty(label))
                         {
-                            <span class="text-muted small"> (@option.LifecycleState)</span>
+                            <span class="text-muted small" title="@(option.LastError ?? string.Empty)"> (@label)</span>
                         }
                     </button>
-                    @if (OnRequestRemoveFeature.HasDelegate)
+                    @if (OnRequestRemoveFeature.HasDelegate && FeatureSelectorPresentation.ShowRemoveAction(option))
                     {
                         <button type="button"
                                 class="workspace-feature-selector__remove-btn"
@@ -252,9 +255,12 @@
                                             @onclick="() => SwitchToWorkspaceFeatureAsync(ws.WorkspaceId, featureOption)"
                                             @onclick:stopPropagation>
                                         @(featureOption.FeatureName?.Trim() ?? string.Empty)
-                                        @if (!string.IsNullOrEmpty(featureOption.LifecycleState) && featureOption.LifecycleState != "Ready")
+                                        @{
+                                            var crossLabel = FeatureSelectorPresentation.FriendlyLabel(featureOption);
+                                        }
+                                        @if (!string.IsNullOrEmpty(crossLabel))
                                         {
-                                            <span class="text-muted small"> (@featureOption.LifecycleState)</span>
+                                            <span class="text-muted small" title="@(featureOption.LastError ?? string.Empty)"> (@crossLabel)</span>
                                         }
                                     </button>
                                 </li>
@@ -415,14 +421,15 @@
             ? (WorkspaceName?.Trim() ?? string.Empty)
             : (option.FeatureName?.Trim() ?? string.Empty);
 
-    private static string FeatureTitle(WorkspaceFeatureContextInfo option) =>
-        string.IsNullOrEmpty(option.LifecycleState) || option.LifecycleState == "Ready"
-            ? (option.FeatureName?.Trim() ?? string.Empty)
-            : $"{option.FeatureName?.Trim()} ({option.LifecycleState})";
+    private static string FeatureTitle(WorkspaceFeatureContextInfo option)
+    {
+        var name = option.FeatureName?.Trim() ?? string.Empty;
+        var label = FeatureSelectorPresentation.FriendlyLabel(option);
+        return string.IsNullOrEmpty(label) ? name : $"{name} ({label})";
+    }
 
     private static bool CanSelect(WorkspaceFeatureContextInfo option) =>
-        option.IsSpecialWorkspace
-        || string.Equals(option.LifecycleState, "Ready", StringComparison.OrdinalIgnoreCase);
+        FeatureSelectorPresentation.CanSelect(option);
 
     private List<WorkspaceFeatureContextInfo>? GetCachedFeatures(int workspaceId) =>
         _featuresByWorkspace.TryGetValue(workspaceId, out var list) ? list : null;
@@ -501,9 +508,7 @@
         {
             var all = await ContextResolver.ListForWorkspaceAsync(workspaceId);
             var features = all
-                .Where(c => !c.IsSpecialWorkspace
-                            && (string.Equals(c.LifecycleState, "Ready", StringComparison.OrdinalIgnoreCase)
-                                || string.Equals(c.LifecycleState, "NeedsRepair", StringComparison.OrdinalIgnoreCase)))
+                .Where(c => !c.IsSpecialWorkspace)
                 .OrderBy(c => c.FeatureName, StringComparer.OrdinalIgnoreCase)
                 .ToList();
             _featuresByWorkspace[workspaceId] = features;
@@ -608,8 +613,7 @@
         // (or the old "Context" fallback) while the list is in flight.
         var all = await ContextResolver.ListForWorkspaceAsync(WorkspaceId);
         _options.Clear();
-        _options.AddRange(all.Where(c => c.IsSpecialWorkspace || string.Equals(c.LifecycleState, "Ready", StringComparison.OrdinalIgnoreCase)
-                                                               || string.Equals(c.LifecycleState, "NeedsRepair", StringComparison.OrdinalIgnoreCase)));
+        _options.AddRange(all);
     }
 
     private async Task SelectAsync(WorkspaceFeatureContextInfo option)

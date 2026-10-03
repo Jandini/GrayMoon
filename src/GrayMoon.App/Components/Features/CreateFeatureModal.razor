@@ -167,6 +167,14 @@
                     return;
                 }
 
+                // Partial create: close and let the parent open Status and repair (C5).
+                if (string.Equals(result.Condition, "NeedsRepair", StringComparison.Ordinal)
+                    && result.ContextId is not null)
+                {
+                    await OnCreated.InvokeAsync(result);
+                    return;
+                }
+
                 _error = result.Error ?? result.Condition ?? "Feature creation failed.";
                 return;
             }

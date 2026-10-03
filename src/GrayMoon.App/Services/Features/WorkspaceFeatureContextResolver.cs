@@ -57,6 +57,7 @@ public sealed class WorkspaceFeatureContextResolver(IDbContextFactory<AppDbConte
         var row = await db.WorkspaceFeatureContexts
             .AsNoTracking()
             .Include(c => c.WorkspaceFeature)
+            .Include(c => c.FeatureRepositories)
             .FirstOrDefaultAsync(c => c.WorkspaceFeatureContextId == contextId.Value, cancellationToken)
             ?? throw new InvalidOperationException($"WorkspaceFeatureContext {contextId.Value} was not found.");
 
@@ -72,6 +73,7 @@ public sealed class WorkspaceFeatureContextResolver(IDbContextFactory<AppDbConte
         var rows = await db.WorkspaceFeatureContexts
             .AsNoTracking()
             .Include(c => c.WorkspaceFeature)
+            .Include(c => c.FeatureRepositories)
             .Where(c => c.WorkspaceId == workspaceId)
             .ToListAsync(cancellationToken);
 
@@ -92,9 +94,7 @@ public sealed class WorkspaceFeatureContextResolver(IDbContextFactory<AppDbConte
             .AsNoTracking()
             .Where(c => workspaceIds.Contains(c.WorkspaceId)
                         && c.Kind != WorkspaceFeatureContextKind.Workspace
-                        && c.WorkspaceFeature != null
-                        && (c.WorkspaceFeature.LifecycleState == WorkspaceFeatureLifecycleState.Ready
-                            || c.WorkspaceFeature.LifecycleState == WorkspaceFeatureLifecycleState.NeedsRepair))
+                        && c.WorkspaceFeature != null)
             .GroupBy(c => c.WorkspaceId)
             .Select(g => new { WorkspaceId = g.Key, Count = g.Count() })
             .ToListAsync(cancellationToken);
@@ -110,6 +110,9 @@ public sealed class WorkspaceFeatureContextResolver(IDbContextFactory<AppDbConte
         WorkspaceFeatureId = row.WorkspaceFeatureId,
         FeatureName = row.WorkspaceFeature?.Name,
         LifecycleState = row.WorkspaceFeature?.LifecycleState.ToString(),
+        LastError = row.WorkspaceFeature?.LastError,
+        IsRemoveIncomplete = row.FeatureRepositories.Any(r =>
+            r.State is WorkspaceFeatureRepositoryState.Removing or WorkspaceFeatureRepositoryState.Removed),
         LastSyncedAt = row.LastSyncedAt,
         IsInSync = row.IsInSync
     };

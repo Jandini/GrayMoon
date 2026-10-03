@@ -128,6 +128,14 @@
                         <li>
                             <button class="dropdown-item" type="button"
                                     role="menuitem"
+                                    @onclick="HandleFeatureStatusClick"
+                                    disabled="@(IsSyncing || IsUpdating || IsPushing)">
+                                Status and repair
+                            </button>
+                        </li>
+                        <li>
+                            <button class="dropdown-item" type="button"
+                                    role="menuitem"
                                     @onclick="HandleRemoveFeatureClick"
                                     disabled="@BranchActionsDisabled">
                                 Remove Feature
@@ -270,7 +278,7 @@
             {
                 <button class="btn btn-danger"
                         @onclick="@(() => OnPull.InvokeAsync())"
-                        disabled="@(WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || IsCommitSyncing || AgentTasksPendingCount > 0)">
+                        disabled="@(PushDisabled || IsCommitSyncing)">
                     Pull
                 </button>
             }
@@ -280,7 +288,7 @@
                     <button class="btn btn-warning"
                             @onclick="@(() => OnPush.InvokeAsync())"
                             @onclick:stopPropagation
-                            disabled="@(WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0)">
+                            disabled="@PushDisabled">
                         Push
                     </button>
                     <button type="button"
@@ -289,7 +297,7 @@
                             aria-expanded="@(_pushMenuOpen ? "true" : "false")"
                             @onclick="TogglePushMenu"
                             @onclick:stopPropagation
-                            disabled="@(WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0)">
+                            disabled="@PushDisabled">
                         <span class="visually-hidden">Toggle Dropdown</span>
                     </button>
                     @if (_pushMenuOpen)
@@ -298,7 +306,7 @@
                         <ul class="dropdown-menu show shadow branch-menu-list workspace-repository-actions-menu" role="menu">
                             <li>
                                 <button class="dropdown-item" type="button" role="menuitem"
-                                        disabled="@(WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0)"
+                                        disabled="@PushDisabled"
                                         @onclick="() => { ClosePushMenu(); _ = OnUndoPush.InvokeAsync(); }">
                                     Undo Push Commits
                                 </button>
@@ -311,7 +319,7 @@
             {
                 <button class="btn btn-outline-secondary"
                         @onclick="@(() => OnPush.InvokeAsync())"
-                        disabled="@(WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0)">
+                        disabled="@PushDisabled">
                     Push
                 </button>
             }
@@ -385,6 +393,9 @@
     [Parameter] public int WorkspaceId { get; set; }
     [Parameter] public WorkspaceFeatureContextId? SelectedContextId { get; set; }
     [Parameter] public bool IsFeatureContext { get; set; }
+    /// <summary>True when the selected Feature is NeedsRepair - Sync/Push/Update/Prepare stay disabled (C3).</summary>
+    [Parameter] public bool IsReadOnlyContext { get; set; }
+    [Parameter] public EventCallback OnShowFeatureStatus { get; set; }
     [Parameter] public EventCallback<WorkspaceFeatureContextId> OnSelectedContextChanged { get; set; }
     [Parameter] public EventCallback<string> OnRequestCreateFeature { get; set; }
     [Parameter] public EventCallback<WorkspaceFeatureContextId> OnRequestRemoveFeature { get; set; }
@@ -443,16 +454,19 @@
     private bool _pushMenuOpen;
 
     private bool SyncDisabled =>
-        IsSyncing || IsUpdating || IsPushing || IsRestoringPackages || RepositoriesCount == 0;
+        IsReadOnlyContext || IsSyncing || IsUpdating || IsPushing || IsRestoringPackages || RepositoriesCount == 0;
 
     private bool UpdateDisabled =>
-        WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0;
+        IsReadOnlyContext || WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0;
 
     private bool BranchActionsDisabled =>
-        IsSyncing || IsUpdating || IsPushing || RepositoriesCount == 0 || AgentTasksPendingCount > 0;
+        IsReadOnlyContext || IsSyncing || IsUpdating || IsPushing || RepositoriesCount == 0 || AgentTasksPendingCount > 0;
 
     private bool BranchMenuToggleDisabled =>
-        IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0;
+        IsReadOnlyContext || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0;
+
+    private bool PushDisabled =>
+        IsReadOnlyContext || WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0;
 
     /// <summary>
     /// Feature context with nothing creatable and no open PRs (merged, never-created, or abandoned closed).
@@ -624,6 +638,12 @@
     {
         CloseBranchMenu();
         await OnReturnToDefault.InvokeAsync();
+    }
+
+    private async Task HandleFeatureStatusClick()
+    {
+        CloseBranchMenu();
+        await OnShowFeatureStatus.InvokeAsync();
     }
 
     private async Task HandleRemoveFeatureClick()

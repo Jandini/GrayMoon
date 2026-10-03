@@ -4,6 +4,7 @@ using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
+using GrayMoon.App.Services.Agent;
 using GrayMoon.App.Services.Features;
 using GrayMoon.App.Services.GitChanges;
 using GrayMoon.App.Services.Jobs;
@@ -92,6 +93,8 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddScoped<IWorkspaceHookContextAttributor, WorkspaceHookContextAttributor>();
         services.AddScoped<IWorkspaceFeatureOperations, WorkspaceFeatureOperations>();
         services.AddScoped<IWorkspaceExternalWorktreeOperations, WorkspaceExternalWorktreeOperations>();
+        services.AddSingleton<AgentConnectionTracker>();
+        services.AddSingleton<IWorkspaceFeatureReconciler, WorkspaceFeatureReconciler>();
         services.AddSingleton<IWorkspaceOperationRunner, WorkspaceOperationRunner>();
         services.AddSingleton<IWorkspaceOperationLock>(sp => (IWorkspaceOperationLock)sp.GetRequiredService<IWorkspaceOperationRunner>());
         services.AddScoped<GitHubService>();

@@ -1,3 +1,4 @@
+using GrayMoon.App.Components.Features;
 using GrayMoon.App.Services;
 using GrayMoon.App.Services.Features;
 using GrayMoon.App.Services.Queries;
@@ -40,6 +41,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
 
     private WorkspaceFeatureContextId? _selectedContextId;
     private bool _isFeatureContext;
+    private bool _isReadOnlyContext;
     /// <summary>Last <see cref="ContextQuery"/> value applied to grid state - detects URL context switches.</summary>
     private int? _boundContextQuery;
     private bool _createFeatureModalVisible;
@@ -48,6 +50,8 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     private bool _removeFeatureModalVisible;
     private WorkspaceFeatureContextId? _removeFeatureContextId;
     private RemoveFeaturePlan? _removeFeaturePlan;
+    private bool _featureStatusPanelVisible;
+    private WorkspaceFeatureContextId? _featureStatusContextId;
 
     private const string SyncModeStorageKey = "graymoon:sync-mode";
     private bool _quickFetchIsPrimary;
@@ -64,8 +68,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         try
         {
             var info = await ContextNavigation.ResolveForPageAsync(WorkspaceId, ContextQuery);
-            _selectedContextId = info.ContextId;
-            _isFeatureContext = !info.IsSpecialWorkspace;
+            ApplySelectedContext(info);
         }
         catch (Exception ex)
         {
@@ -73,6 +76,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
             var special = await FeatureContextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(WorkspaceId);
             _selectedContextId = special;
             _isFeatureContext = false;
+            _isReadOnlyContext = false;
         }
     }
 
@@ -86,6 +90,13 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     private WorkspaceFeatureContextId RequireSelectedContextId()
         => _selectedContextId
            ?? throw new InvalidOperationException("Workspace Feature context is not resolved for this page.");
+
+    private void ApplySelectedContext(WorkspaceFeatureContextInfo info)
+    {
+        _selectedContextId = info.ContextId;
+        _isFeatureContext = !info.IsSpecialWorkspace;
+        _isReadOnlyContext = FeatureSelectorPresentation.IsReadOnlyContext(info);
+    }
 
     private async Task OnSelectedContextChangedAsync(WorkspaceFeatureContextId contextId)
     {
@@ -108,8 +119,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
             NavigationManager.NavigateTo(fallbackPath, replace: true);
         }
 
-        _selectedContextId = info.ContextId;
-        _isFeatureContext = !info.IsSpecialWorkspace;
+        ApplySelectedContext(info);
         _boundContextQuery = BoundContextQueryFromSelection();
         Interlocked.Increment(ref _contextGeneration);
         // Drop Feature/Workspace rows immediately so the selector label and grid cannot disagree
@@ -275,13 +285,57 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     private async Task OnFeatureCreatedAsync(CreateFeatureResult result)
     {
         _createFeatureModalVisible = false;
-        if (result.ContextId is WorkspaceFeatureContextId created)
+        if (result.ContextId is not WorkspaceFeatureContextId created)
+            return;
+
+        await OnSelectedContextChangedAsync(created);
+        var path = new Uri(NavigationManager.Uri).GetLeftPart(UriPartial.Path);
+        NavigationManager.NavigateTo($"{path}?context={created.Value}", replace: true);
+
+        if (!result.Success && string.Equals(result.Condition, "NeedsRepair", StringComparison.Ordinal))
         {
-            await OnSelectedContextChangedAsync(created);
-            var path = new Uri(NavigationManager.Uri).GetLeftPart(UriPartial.Path);
-            NavigationManager.NavigateTo($"{path}?context={created.Value}", replace: true);
-            ToastService.Show($"Feature created.");
+            OpenFeatureStatusPanel(created);
+            return;
         }
+
+        ToastService.Show("Feature created.");
+    }
+
+    private void OpenFeatureStatusPanel(WorkspaceFeatureContextId? contextId = null)
+    {
+        _featureStatusContextId = contextId ?? _selectedContextId;
+        _featureStatusPanelVisible = _featureStatusContextId is not null;
+    }
+
+    private Task OnFeatureStatusCloseAsync()
+    {
+        _featureStatusPanelVisible = false;
+        _featureStatusContextId = null;
+        return Task.CompletedTask;
+    }
+
+    private async Task OnFeatureStatusChangedAsync()
+    {
+        if (_selectedContextId is { } selected)
+        {
+            try
+            {
+                ApplySelectedContext(await FeatureContextResolver.GetRequiredAsync(selected, WorkspaceId));
+            }
+            catch (InvalidOperationException ex) when (ex.Message.Contains("was not found", StringComparison.Ordinal))
+            {
+                // The Feature was rolled back: leave it the same way Remove does.
+                var special = await FeatureContextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(WorkspaceId);
+                await OnSelectedContextChangedAsync(special);
+                var path = new Uri(NavigationManager.Uri).GetLeftPart(UriPartial.Path);
+                NavigationManager.NavigateTo(path, replace: true);
+                return;
+            }
+        }
+
+        await LoadWorkspaceAsync();
+        ApplySyncStateFromLoadedItems();
+        StateHasChanged();
     }
 
     private async Task OnFeatureRemovedAsync()

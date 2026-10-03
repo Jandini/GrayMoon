@@ -131,6 +131,8 @@ try
     builder.Services.AddScoped<IWorkspaceSelectedFeatureContextService, WorkspaceSelectedFeatureContextService>();
     builder.Services.AddScoped<IWorkspaceHookContextAttributor, WorkspaceHookContextAttributor>();
     builder.Services.AddScoped<IWorkspaceFeatureOperations, WorkspaceFeatureOperations>();
+    builder.Services.AddSingleton<IWorkspaceFeatureReconciler, WorkspaceFeatureReconciler>();
+    builder.Services.AddHostedService(sp => (WorkspaceFeatureReconciler)sp.GetRequiredService<IWorkspaceFeatureReconciler>());
     builder.Services.AddScoped<WorkspaceContextNavigationService>();
     builder.Services.AddScoped<IWorkspaceExternalWorktreeOperations, WorkspaceExternalWorktreeOperations>();
     builder.Services.AddScoped<IWorkspaceNativeLaunchService, WorkspaceNativeLaunchService>();
