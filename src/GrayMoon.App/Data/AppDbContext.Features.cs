@@ -13,7 +13,9 @@ public partial class AppDbContext
             entity.HasKey(f => f.WorkspaceFeatureId);
             entity.Property(f => f.WorkspaceFeatureId).ValueGeneratedOnAdd();
             entity.HasIndex(f => new { f.WorkspaceId, f.Name }).IsUnique();
-            entity.Property(f => f.Name).IsRequired().HasMaxLength(200);
+            // NOCASE: 'Foo' and 'foo' count as the same Feature name (E1). The strict migration step
+            // recreates the matching index with the same collation for databases from before this change.
+            entity.Property(f => f.Name).IsRequired().HasMaxLength(200).UseCollation("NOCASE");
             entity.Property(f => f.LastError).HasMaxLength(2000);
             entity.Property(f => f.LifecycleState).HasConversion<int>();
             entity.Property(f => f.BaseKind).HasConversion<int>();

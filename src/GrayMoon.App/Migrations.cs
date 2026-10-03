@@ -34,6 +34,7 @@ public static partial class Migrations
     internal static readonly IReadOnlyList<(int Version, string Name, Func<AppDbContext, Task> Action)> StrictSteps = new (int Version, string Name, Func<AppDbContext, Task> Action)[]
     {
         (2, "B2 orphan cleanup and WorkspaceProjects foreign key", dbContext => MigrateFeatureContextOrphanCleanupAndWorkspaceProjectsForeignKeyAsync(dbContext)),
+        (3, "E1 case-insensitive Feature name index", dbContext => MigrateFeatureNameIndexCollationAsync(dbContext)),
     };
 
     public static async Task RunAllAsync(AppDbContext dbContext, ILogger? logger = null)

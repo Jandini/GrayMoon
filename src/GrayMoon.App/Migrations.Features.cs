@@ -876,4 +876,54 @@ public static partial class Migrations
         cmd.CommandText = sql;
         return Convert.ToInt64(await cmd.ExecuteScalarAsync());
     }
+
+    /// <summary>
+    /// E1 strict step. Recreates "IX_WorkspaceFeatures_WorkspaceId_Name" with COLLATE NOCASE on Name, so
+    /// 'Foo' and 'foo' count as the same Feature name on databases from before this change, matching a
+    /// fresh EnsureCreated() database (<see cref="AppDbContext.ConfigureFeatureEntities"/>).
+    ///
+    /// Skipped (with a warning, never a startup failure) when the database already has a case-only
+    /// duplicate: creating the new unique index would fail on that existing data, and this step must not
+    /// block startup. The old, case-sensitive index is left in place in that case.
+    /// </summary>
+    public static async Task MigrateFeatureNameIndexCollationAsync(AppDbContext dbContext, ILogger? logger = null)
+    {
+        logger ??= NullLogger.Instance;
+
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync();
+
+        var caseOnlyDuplicateGroups = await CountCaseOnlyDuplicateFeatureNameGroupsAsync(conn);
+        if (caseOnlyDuplicateGroups > 0)
+        {
+            logger.LogWarning(
+                "Skipping Feature name case-insensitive index: {GroupCount} WorkspaceId/Name group(s) already " +
+                "have a case-only duplicate. Keeping the existing case-sensitive index.",
+                caseOnlyDuplicateGroups);
+            return;
+        }
+
+        await ExecuteNonQueryAsync(conn, """DROP INDEX IF EXISTS "IX_WorkspaceFeatures_WorkspaceId_Name";""");
+        await ExecuteNonQueryAsync(conn, """
+            CREATE UNIQUE INDEX "IX_WorkspaceFeatures_WorkspaceId_Name"
+            ON "WorkspaceFeatures" ("WorkspaceId", "Name" COLLATE NOCASE);
+            """);
+
+        logger.LogInformation("Recreated IX_WorkspaceFeatures_WorkspaceId_Name with COLLATE NOCASE on Name.");
+    }
+
+    private static async Task<int> CountCaseOnlyDuplicateFeatureNameGroupsAsync(DbConnection conn)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT COUNT(*) FROM (
+                SELECT "WorkspaceId", LOWER("Name") AS "NormalizedName"
+                FROM "WorkspaceFeatures"
+                GROUP BY "WorkspaceId", LOWER("Name")
+                HAVING COUNT(*) > 1
+            )
+            """;
+        return Convert.ToInt32(await cmd.ExecuteScalarAsync());
+    }
 }

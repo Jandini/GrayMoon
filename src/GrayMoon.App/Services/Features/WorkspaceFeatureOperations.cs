@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Text.RegularExpressions;
 using GrayMoon.Abstractions.Agent;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
@@ -13,6 +12,7 @@ using GrayMoon.App.Services.Jobs;
 using GrayMoon.App.Services.Workspaces;
 using GrayMoon.Application;
 using GrayMoon.Application.Features;
+using GrayMoon.Common.Features;
 using GrayMoon.Common.Git;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -34,10 +34,6 @@ public sealed class WorkspaceFeatureOperations(
     IOptions<WorkspaceOptions> workspaceOptions,
     ILogger<WorkspaceFeatureOperations> logger) : IWorkspaceFeatureOperations
 {
-    private static readonly Regex BranchNamePattern = new(
-        @"^(?!.*\.\.)(?!/)(?!.*/$)(?!.*//)(?!.*[@{])[^\s~^:?*\[\\]+$",
-        RegexOptions.Compiled | RegexOptions.CultureInvariant);
-
     private int MaxParallel => Math.Max(1, workspaceOptions.Value.MaxParallelOperations);
 
     public async Task<CreateFeatureResult> CreateFeatureAsync(
@@ -48,8 +44,9 @@ public sealed class WorkspaceFeatureOperations(
         CancellationToken cancellationToken = default)
     {
         var name = (featureName ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(name) || !BranchNamePattern.IsMatch(name))
-            return FailCreate("InvalidFeatureName", "Feature name is not a valid Git branch name.");
+        var validationError = FeatureNameValidator.Validate(name);
+        if (validationError is not null)
+            return FailCreate("InvalidFeatureName", validationError);
 
         if (baseKind != WorkspaceFeatureBaseKindApplication.CurrentWorkspace)
             return FailCreate("UnsupportedBaseKind", "Only Current Workspace base is supported.");
@@ -91,7 +88,8 @@ public sealed class WorkspaceFeatureOperations(
         CancellationToken cancellationToken)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        if (await db.WorkspaceFeatures.AnyAsync(f => f.WorkspaceId == workspaceId && f.Name == name, cancellationToken))
+        var normalizedName = name.ToLowerInvariant();
+        if (await db.WorkspaceFeatures.AnyAsync(f => f.WorkspaceId == workspaceId && f.Name.ToLower() == normalizedName, cancellationToken))
             return FailCreate("DuplicateName", $"A Feature named '{name}' already exists.");
 
         var workspace = await db.Workspaces.FirstOrDefaultAsync(w => w.WorkspaceId == workspaceId, cancellationToken)
