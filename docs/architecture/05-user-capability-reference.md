@@ -883,3 +883,45 @@ WorkspaceBranchOccupancyService
 IWorkspaceExternalWorktreeOperations
 Worker GetHeadCommits / CreateGitWorktree / RemoveGitWorktree / ListGitWorktrees
 ```
+
+---
+
+## 33. Local network security (no user login)
+
+GrayMoon has no user accounts. These rules stop another program or web page on the same machine from
+reading tokens or triggering actions through the browser GrayMoon's UI runs in.
+
+### REST API (`/api/...`, `/repos/...`)
+
+```text
+a non-GET request with no Origin header passes unchanged (scripts, curl, the Worker)
+a non-GET request with an Origin header is rejected (403) unless:
+  the Origin's host is this app's own host, a loopback name, or a configured Security:AllowedOrigins entry
+  and the request also carries X-GrayMoon-Request: 1
+    (a cross-site page cannot add that header without a CORS preflight, which GrayMoon does not allow)
+GET requests are never affected
+```
+
+### SignalR hubs
+
+```text
+/hub/agent: any request carrying an Origin header is rejected (403); the Worker's .NET client sends none
+/hubs/workspace-sync, /hubs/desktop, /_blazor: a request with no Origin header passes;
+  one with an Origin header passes only when its host is this app's own host, a loopback name,
+  or a configured Security:AllowedOrigins entry
+```
+
+"Own host" also accepts `X-Forwarded-Host` (reverse proxies) and any host listed in the optional
+`Security:AllowedOrigins` setting. Desktop sets `AllowedHosts` to loopback names only for the App process
+it launches; the shared `appsettings.json` keeps `AllowedHosts = "*"` for Docker and manual installs, which
+may be reached by host name or LAN IP.
+
+Git hooks post to the **Worker's** local listener (`127.0.0.1:<port>/hook/*`), not to the App, so they are
+outside this middleware.
+
+### Implementation
+
+```text
+RequestSecurityMiddleware
+SecurityOptions (Security:AllowedOrigins)
+```

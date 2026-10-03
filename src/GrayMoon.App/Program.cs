@@ -71,6 +71,7 @@ try
     builder.Services.Configure<WorkspaceOptions>(builder.Configuration.GetSection("Workspace"));
     builder.Services.Configure<GitChangesOptions>(builder.Configuration.GetSection("GitChanges"));
     builder.Services.Configure<AgentBridgeOptions>(builder.Configuration.GetSection(AgentBridgeOptions.SectionName));
+    builder.Services.Configure<SecurityOptions>(builder.Configuration.GetSection(SecurityOptions.SectionName));
 
     // Add services to the container.
     builder.Services.AddRazorComponents()
@@ -309,6 +310,9 @@ try
     {
         app.UseHttpsRedirection();
     }
+
+    // F3: cross-site/rebinding check, before routing reaches any API endpoint or hub.
+    app.UseMiddleware<RequestSecurityMiddleware>();
 
     app.UseStaticFiles();
     app.UseAntiforgery();
