@@ -5,7 +5,9 @@
 
 @if (IsVisible && !_removing)
 {
-    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: 1085;">
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: 1085;"
+         @onkeydown="HandleKeyDown"
+         @ref="_modalElement">
         <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
             <div class="modal-content">
                 <div class="modal-header">
@@ -176,12 +178,12 @@
                 <div class="modal-footer">
                     @if (_report is not null)
                     {
-                        <button type="button" class="btn btn-primary" @onclick="Done">Done</button>
+                        <button type="button" class="btn btn-primary" data-default-action @onclick="Done">Done</button>
                     }
                     else
                     {
                         <button type="button" class="btn btn-outline-secondary" @onclick="Cancel" disabled="@_analyzing">Cancel</button>
-                        <button type="button" class="@RemoveCtaClass" @onclick="RemoveAsync"
+                        <button type="button" class="@RemoveCtaClass" data-default-action @onclick="RemoveAsync"
                                 disabled="@(_analyzing || _plan is null || !CanRemove(AnyRepoStatusUnknown, ShowDiscardCheckbox, _allowDiscard, ShowForceCheckbox, _allowForce, ShowUnlockCheckbox, _allowUnlock))">
                             Remove Feature
                         </button>
@@ -205,6 +207,7 @@
     [Parameter] public EventCallback OnCancel { get; set; }
     [Parameter] public EventCallback OnRemoved { get; set; }
 
+    private ElementReference _modalElement;
     private RemoveFeaturePlan? _plan;
     private IReadOnlyList<RemoveFeatureRepositoryReport>? _report;
     private string? _error;
@@ -807,5 +810,17 @@
     {
         ResetDialogState();
         await OnRemoved.InvokeAsync();
+    }
+
+    /// <summary>Esc closes/acknowledges (while not analyzing/removing); Ctrl/Cmd+Enter is handled globally by modal-default-action.js via data-default-action.</summary>
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key != "Escape" || _analyzing)
+            return;
+
+        if (_report is not null)
+            await Done();
+        else
+            await Cancel();
     }
 }

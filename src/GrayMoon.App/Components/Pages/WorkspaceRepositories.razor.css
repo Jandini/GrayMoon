@@ -917,6 +917,24 @@
     margin-top: 0.5rem;
 }
 
+/* "This Feature needs attention." banner - same look as .page-error-callout (dark tinted strip with an
+   inset accent bar) but amber instead of red, since it's a warning rather than a hard error. No old-fashioned
+   bordered Bootstrap alert box - and no button here, since the header's "Repair" button (replacing Sync while
+   the Feature needs repair) is now the single, clearly visible way to open the status-and-repair dialog. */
+.page-warning-callout {
+    font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    padding: 0.35rem 0.75rem;
+    margin: 0.5rem 0 0;
+    white-space: pre-line;
+    overflow-wrap: break-word;
+    word-break: break-word;
+    color: #d4d4d4;
+    background: rgba(245, 158, 11, 0.18);
+    box-shadow: inset 3px 0 0 #f59e0b;
+}
+
 /* Combined metrics column (divergence, PR, deps, commits, status) */
 ::deep .col-metrics {
     width: 32%;

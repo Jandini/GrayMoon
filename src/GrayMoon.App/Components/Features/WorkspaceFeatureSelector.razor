@@ -120,7 +120,7 @@
                         }
                         @if (!string.IsNullOrEmpty(label))
                         {
-                            <span class="text-muted small" title="@(option.LastError ?? string.Empty)"> (@label)</span>
+                            <span class="text-muted small" title="@(option.LastError ?? string.Empty)"> — @label</span>
                         }
                     </button>
                     @if (OnRequestRemoveFeature.HasDelegate && FeatureSelectorPresentation.ShowRemoveAction(option))
@@ -260,7 +260,7 @@
                                         }
                                         @if (!string.IsNullOrEmpty(crossLabel))
                                         {
-                                            <span class="text-muted small" title="@(featureOption.LastError ?? string.Empty)"> (@crossLabel)</span>
+                                            <span class="text-muted small" title="@(featureOption.LastError ?? string.Empty)"> — @crossLabel</span>
                                         }
                                     </button>
                                 </li>
@@ -425,7 +425,7 @@
     {
         var name = option.FeatureName?.Trim() ?? string.Empty;
         var label = FeatureSelectorPresentation.FriendlyLabel(option);
-        return string.IsNullOrEmpty(label) ? name : $"{name} ({label})";
+        return string.IsNullOrEmpty(label) ? name : $"{name} — {label}";
     }
 
     private static bool CanSelect(WorkspaceFeatureContextInfo option) =>

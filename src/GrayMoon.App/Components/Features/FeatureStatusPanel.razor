@@ -4,11 +4,28 @@
 
 @if (IsVisible && FeatureContextId is { } contextId)
 {
-    <div class="modal fade show d-block" tabindex="-1" style="background: rgba(0,0,0,.45);" @onclick="CloseAsync">
-        <div class="modal-dialog modal-dialog-centered modal-lg" @onclick:stopPropagation>
+    @*
+        Own LoadingOverlay (not page-scoped, same as Repositories.razor/WorkspaceFiles.razor's fetch/update
+        overlays) shows "Repairing feature..."/"Rolling back feature..." the instant the button is clicked -
+        does not wait for the page's BackgroundJobOverlay to notice the structural operation has started.
+        z-index 9999 (LoadingOverlay's default) also covers this dialog, which additionally drops its own
+        z-index below the page's BackgroundJobOverlay (.loading-overlay--page, z-index: 100) while _busy, so
+        that overlay (once it does catch up) keeps covering the dialog too. Same pattern as SwitchBranchModal/
+        MergePullRequestModal.
+    *@
+    <LoadingOverlay IsVisible="@_busy" Message="@_busyMessage" ShowCommandTerminal="false" />
+    <div class="modal fade show d-block" tabindex="-1" style="background: rgba(0,0,0,.45); z-index: @(_busy ? 50 : 1055);" @onkeydown="HandleKeyDown" @ref="_modalElement" @onclick="CloseAsync">
+        <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable" @onclick:stopPropagation>
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">@(_featureName ?? "Feature") - status and repair</h5>
+                    @* Title no-wrap/ellipsis — same .modal-title--compound convention as BranchModal/SwitchBranchModal/MergePullRequestModal. *@
+                    <h5 class="modal-title modal-title--compound">
+                        <span class="modal-title__primary">Feature Status</span>
+                        @if (!string.IsNullOrEmpty(_featureName))
+                        {
+                            <span class="modal-title__secondary text-muted fw-normal fs-6" title="@_featureName">@_featureName</span>
+                        }
+                    </h5>
                     <button type="button" class="btn-close" aria-label="Close" @onclick="CloseAsync" disabled="@_busy"></button>
                 </div>
                 <div class="modal-body">
@@ -20,20 +37,28 @@
                     {
                         <div class="alert alert-danger py-2" role="alert">@_actionError</div>
                     }
-                    @if (_actionResults is { Count: > 0 })
+                    @if (_actionResults is { Count: > 0 } actionResults)
                     {
-                        <ul class="list-unstyled small mb-3">
-                            @foreach (var r in _actionResults)
-                            {
-                                <li>
-                                    <strong>@r.RepositoryName</strong>: @r.Outcome
-                                    @if (!string.IsNullOrWhiteSpace(r.Message))
-                                    {
-                                        <span class="text-muted"> - @r.Message</span>
-                                    }
-                                </li>
-                            }
-                        </ul>
+                        var commonAction = CommonActionMessage(actionResults);
+                        if (commonAction is not null)
+                        {
+                            <p class="small text-muted mb-3">All @actionResults.Count repositories: @commonAction</p>
+                        }
+                        else
+                        {
+                            <ul class="list-unstyled small mb-3">
+                                @foreach (var r in actionResults)
+                                {
+                                    <li>
+                                        <strong>@r.RepositoryName</strong>: @r.Outcome
+                                        @if (!string.IsNullOrWhiteSpace(r.Message))
+                                        {
+                                            <span class="text-muted"> - @r.Message</span>
+                                        }
+                                    </li>
+                                }
+                            </ul>
+                        }
                     }
                     @if (_loading)
                     {
@@ -45,6 +70,7 @@
                     }
                     else
                     {
+                        var commonRowError = CommonRowError(_rows);
                         <ul class="list-group list-group-flush">
                             @foreach (var row in _rows)
                             {
@@ -53,7 +79,7 @@
                                         <strong>@row.RepositoryName</strong>
                                         <span class="text-muted small">@FriendlyRepoState(row.State, _isRemoveIncomplete)</span>
                                     </div>
-                                    @if (!string.IsNullOrWhiteSpace(row.LastError))
+                                    @if (commonRowError is null && !string.IsNullOrWhiteSpace(row.LastError))
                                     {
                                         <div class="small text-danger mt-1">@row.LastError</div>
                                     }
@@ -64,18 +90,22 @@
                                 </li>
                             }
                         </ul>
+                        @if (commonRowError is not null)
+                        {
+                            <div class="alert alert-danger py-2 mt-2 mb-0" role="alert">@commonRowError</div>
+                        }
                     }
                 </div>
                 <div class="modal-footer">
                     @if (_isRemoveIncomplete)
                     {
-                        <button type="button" class="btn btn-warning" disabled="@_busy" @onclick="ContinueRemovalAsync">
+                        <button type="button" class="btn btn-warning" data-default-action disabled="@_busy" @onclick="ContinueRemovalAsync">
                             Continue removal
                         </button>
                     }
                     else
                     {
-                        <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="RetryAsync">Retry</button>
+                        <button type="button" class="btn btn-primary" data-default-action disabled="@_busy" @onclick="RetryAsync">Retry</button>
                         <button type="button" class="btn btn-outline-danger" disabled="@_busy" @onclick="RollbackAsync">Roll back</button>
                         <button type="button" class="btn btn-outline-secondary" disabled="@_busy" @onclick="RemoveAsync">Remove</button>
                     }
@@ -94,8 +124,10 @@
     [Parameter] public EventCallback<WorkspaceFeatureContextId> OnRequestRemove { get; set; }
     [Parameter] public EventCallback OnChanged { get; set; }
 
+    private ElementReference _modalElement;
     private bool _loading;
     private bool _busy;
+    private string? _busyMessage;
     private bool _isRemoveIncomplete;
     private string? _featureName;
     private string? _featureError;
@@ -150,6 +182,7 @@
         if (FeatureContextId is not { } contextId)
             return;
         _busy = true;
+        _busyMessage = "Repairing feature...";
         _actionError = null;
         try
         {
@@ -169,6 +202,7 @@
         finally
         {
             _busy = false;
+            _busyMessage = null;
         }
     }
 
@@ -177,6 +211,7 @@
         if (FeatureContextId is not { } contextId)
             return;
         _busy = true;
+        _busyMessage = "Rolling back feature...";
         _actionError = null;
         try
         {
@@ -199,6 +234,7 @@
         finally
         {
             _busy = false;
+            _busyMessage = null;
         }
     }
 
@@ -225,6 +261,46 @@
         _actionResults = null;
         _actionError = null;
         await OnClose.InvokeAsync();
+    }
+
+    /// <summary>Esc closes the dialog (while not busy); Ctrl/Cmd+Enter is handled globally by modal-default-action.js via data-default-action.</summary>
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape" && !_busy)
+        {
+            await CloseAsync();
+        }
+    }
+
+    /// <summary>
+    /// When every repository in an action result (Retry/Roll back) failed (or succeeded) with the exact
+    /// same outcome and message - e.g. "Worker not connected" for every repo because the GrayMoon Worker
+    /// is simply not running - collapses the per-repository list into one line instead of repeating the
+    /// same message once per repository, which just wastes dialog space.
+    /// </summary>
+    private static string? CommonActionMessage(IReadOnlyList<FeatureRepairRepositoryResult> results)
+    {
+        if (results.Count < 2)
+            return null;
+        var first = results[0];
+        if (!results.All(r => r.Outcome == first.Outcome && r.Message == first.Message))
+            return null;
+        return string.IsNullOrWhiteSpace(first.Message) ? first.Outcome.ToString() : $"{first.Outcome} - {first.Message}";
+    }
+
+    /// <summary>
+    /// Mirror of <see cref="CommonActionMessage"/> for the persisted status rows: when every repository
+    /// shows the same LastError (typically a shared infrastructure problem like the Worker being offline),
+    /// show it once below the list rather than once per repository.
+    /// </summary>
+    private static string? CommonRowError(IReadOnlyList<FeatureStatusRepository> rows)
+    {
+        if (rows.Count < 2)
+            return null;
+        var first = rows[0].LastError;
+        if (string.IsNullOrWhiteSpace(first))
+            return null;
+        return rows.All(r => r.LastError == first) ? first : null;
     }
 
     private static string FriendlyRepoState(string state, bool removeIncomplete) =>

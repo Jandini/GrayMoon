@@ -324,7 +324,19 @@
                 </button>
             }
         }
-        @if (HasRepositoryErrors)
+        @if (IsReadOnlyContext)
+        {
+            @* Feature NeedsRepair: Sync/Fetch/Restore stay disabled (C3), so the primary control becomes
+               "Repair" and opens the same Status and repair dialog as the Feature menu item. *@
+            <button type="button"
+                    class="btn btn-warning"
+                    @onclick="HandleRepairClick"
+                    @onclick:stopPropagation
+                    disabled="@(IsSyncing || IsUpdating || IsPushing)">
+                Repair
+            </button>
+        }
+        else if (HasRepositoryErrors)
         {
                 <button type="button"
                     class="btn btn-primary"
@@ -505,6 +517,12 @@
     {
         CloseSyncMenu();
         await OnClearErrors.InvokeAsync();
+    }
+
+    private async Task HandleRepairClick()
+    {
+        CloseSyncMenu();
+        await OnShowFeatureStatus.InvokeAsync();
     }
 
     private async Task HandleSyncPrimaryClick()

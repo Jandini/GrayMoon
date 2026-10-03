@@ -87,10 +87,7 @@
                             OnChanged="OnFeatureStatusChangedAsync" />
         @if (_isReadOnlyContext)
         {
-            <div class="alert alert-warning py-2 px-3 mb-0 mt-2 d-flex align-items-center justify-content-between gap-2" role="status">
-                <span>This Feature needs attention.</span>
-                <button type="button" class="btn btn-sm btn-outline-dark" @onclick="() => OpenFeatureStatusPanel()">Show details</button>
-            </div>
+            <div class="page-warning-callout" role="status">This Feature needs attention. Use Repair to continue.</div>
         }
         @if (errorMessage != null)
         {
