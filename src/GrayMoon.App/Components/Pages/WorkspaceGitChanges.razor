@@ -287,6 +287,10 @@
                     </div>
 
                     <div class="git-diff-viewer-container git-diff-markdown-container" style="display:@(ShowMarkdownPreview ? "flex" : "none")">
+                        @if (_isMarkdownPreviewLoading)
+                        {
+                            <div class="git-diff-markdown-loading text-muted">Loading document…</div>
+                        }
                         <MarkdownDiffViewer @ref="_markdownViewerRef"
                                             FileName="@System.IO.Path.GetFileName(_selectedRow.FilePath)"
                                             SideLabel="@MarkdownSideLabel" />
