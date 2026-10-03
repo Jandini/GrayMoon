@@ -1986,7 +1986,17 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             behindUpstream = behind;
         }
 
-        var aheadOfDefault = await ProbeAheadOfDefaultAsync(canonicalWorktreePath, defaultBranch, ct);
+        // A Feature worktree carries its own persisted "divergence base" (the branch it was actually
+        // created from - its parent, which can itself be another unmerged, not-yet-pushed Feature
+        // branch, not necessarily the repository's true default branch). "Ahead of default" must be
+        // judged against that parent when one was recorded, or deleting a nested Feature branch
+        // would be reported as losing every commit the parent branch is already ahead of main by,
+        // even though those commits stay reachable from the parent branch and are never actually
+        // lost. Falls back to the repository's true default branch when no divergence base was
+        // recorded, or it no longer resolves to an existing ref.
+        var aheadOfDefaultCompareRef = await ResolveAheadOfDefaultCompareRefAsync(canonicalWorktreePath, defaultBranch, ct);
+
+        var aheadOfDefault = await ProbeAheadOfDefaultAsync(canonicalWorktreePath, aheadOfDefaultCompareRef, ct);
 
         bool? featureBranchExists = null;
         string? featureBranchSha = null;
@@ -2000,7 +2010,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             if (featureBranchExists == true)
             {
                 featureBranchAheadOfDefault = await ProbeAheadOfDefaultForRefAsync(
-                    canonicalWorktreePath, defaultBranch, $"refs/heads/{featureBranch}", ct);
+                    canonicalWorktreePath, aheadOfDefaultCompareRef, $"refs/heads/{featureBranch}", ct);
                 var (featureUpstreamKnown, featureAhead) = await ProbeFeatureBranchUpstreamCountAsync(
                     canonicalWorktreePath, featureBranch, ct);
                 featureBranchHasUpstream = featureUpstreamKnown;
@@ -2033,12 +2043,38 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
     }
 
     /// <summary>
+    /// Resolves the ref to count "ahead of default" against: this worktree's own persisted
+    /// divergence base (<see cref="GetDivergenceBaseBranchAsync"/>, the Feature's actual parent
+    /// branch) when one was recorded and still exists - checked as a local branch name first since a
+    /// parent that is itself an unmerged, unpushed Feature branch never has an <c>origin/</c> ref -
+    /// falling back to <see cref="ToOriginBranchRef"/> of <paramref name="defaultBranch"/> otherwise
+    /// (same resolution order as <see cref="ResolveNoUpstreamCompareRefAsync"/>/GetCommitCountsCommand).
+    /// </summary>
+    private async Task<string?> ResolveAheadOfDefaultCompareRefAsync(string repoPath, string? defaultBranch, CancellationToken ct)
+    {
+        var divergenceBase = await GetDivergenceBaseBranchAsync(repoPath, ct);
+        if (!string.IsNullOrWhiteSpace(divergenceBase))
+        {
+            var local = divergenceBase.Trim();
+            if (local.StartsWith("origin/", StringComparison.OrdinalIgnoreCase))
+                local = local["origin/".Length..];
+            if (await RefExistsAsync(repoPath, local, ct))
+                return local;
+
+            var originRef = $"origin/{local}";
+            if (await RefExistsAsync(repoPath, originRef, ct))
+                return originRef;
+        }
+
+        return ToOriginBranchRef(defaultBranch);
+    }
+
+    /// <summary>
     /// Like <see cref="ProbeAheadOfDefaultAsync"/> but against an arbitrary ref instead of always
     /// HEAD, so a Feature branch can be judged without checking it out (09 SB-2, plan unit I1).
     /// </summary>
-    private async Task<int?> ProbeAheadOfDefaultForRefAsync(string repoPath, string? defaultBranch, string compareRef, CancellationToken ct)
+    private async Task<int?> ProbeAheadOfDefaultForRefAsync(string repoPath, string? defaultRef, string compareRef, CancellationToken ct)
     {
-        var defaultRef = ToOriginBranchRef(defaultBranch);
         if (defaultRef == null || !await RefExistsAsync(repoPath, defaultRef, ct))
             return null;
 
@@ -2185,9 +2221,8 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return (true, ahead, behind);
     }
 
-    private async Task<int?> ProbeAheadOfDefaultAsync(string repoPath, string? defaultBranch, CancellationToken ct)
+    private async Task<int?> ProbeAheadOfDefaultAsync(string repoPath, string? defaultRef, CancellationToken ct)
     {
-        var defaultRef = ToOriginBranchRef(defaultBranch);
         if (defaultRef == null || !await RefExistsAsync(repoPath, defaultRef, ct))
             return null;
 

@@ -259,6 +259,60 @@ public sealed class InspectWorktreeCommandTests : IDisposable
         Assert.Equal(2, result.AheadOfDefault);
     }
 
+    [Fact]
+    public async Task Nested_feature_ahead_of_default_is_judged_against_its_recorded_parent_branch_not_main()
+    {
+        // Reproduces a nested Feature: a worktree branched from another unmerged Feature branch
+        // ("parent-feature"), itself ahead of "main" by its own unmerged commits. Removing only the
+        // child's local branch never touches "parent-feature", so "ahead of default" must count only
+        // the child's own commits - not the parent's unrelated divergence from main too.
+        var mainPath = Path.Combine(_root, "main11");
+        Directory.CreateDirectory(mainPath);
+        await InitGitWithCommitAsync(mainPath);
+        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+        await RunGitAsync(mainPath, "update-ref refs/remotes/origin/main main");
+
+        // Parent Feature branch: 2 commits ahead of main, never merged.
+        await RunGitAsync(mainPath, "checkout -b parent-feature");
+        await File.WriteAllTextAsync(Path.Combine(mainPath, "p1.txt"), "1\n");
+        await RunGitAsync(mainPath, "add p1.txt");
+        await RunGitAsync(mainPath, "commit -m parent-commit-1");
+        await File.WriteAllTextAsync(Path.Combine(mainPath, "p2.txt"), "2\n");
+        await RunGitAsync(mainPath, "add p2.txt");
+        await RunGitAsync(mainPath, "commit -m parent-commit-2");
+        var parentHead = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+        await RunGitAsync(mainPath, "checkout main");
+
+        // Child Feature worktree, branched from parent-feature, recording it as the divergence base.
+        var worktreePath = Path.Combine(_root, "features", "nested", "main11");
+        var created = await _create.ExecuteAsync(new CreateGitWorktreeRequest
+        {
+            MainRepositoryPath = mainPath,
+            WorktreePath = worktreePath,
+            BranchName = "child-feature",
+            BaseCommitSha = parentHead,
+            DivergenceBaseBranch = "parent-feature",
+        });
+        Assert.True(created.Success, created.ErrorMessage);
+
+        // Child's own, single new commit on top of the parent tip.
+        await File.WriteAllTextAsync(Path.Combine(worktreePath, "c1.txt"), "1\n");
+        await RunGitAsync(worktreePath, "add c1.txt");
+        await RunGitAsync(worktreePath, "commit -m child-commit-1");
+
+        var result = await _inspect.ExecuteAsync(new InspectWorktreeRequest
+        {
+            MainRepositoryPath = mainPath,
+            WorktreePath = worktreePath,
+            DefaultBranch = "main",
+            FeatureBranch = "child-feature",
+        });
+
+        // Only the child's own commit, never the parent's 2 unrelated commits ahead of main.
+        Assert.Equal(1, result.AheadOfDefault);
+        Assert.Equal(1, result.FeatureBranchAheadOfDefault);
+    }
+
     // ---- Feature branch facts (09 SB-2, plan unit I1) --------------------------------------------
 
     [Fact]

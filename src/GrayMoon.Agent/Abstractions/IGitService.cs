@@ -164,6 +164,11 @@ public interface IGitService
     /// <paramref name="featureBranch"/> is set, the result also reports that branch's own facts
     /// (<c>refs/heads/&lt;featureBranch&gt;</c>), computed from refs without checking anything out
     /// (09 SB-2, plan unit I1); null leaves the Feature-branch fields null and nothing else changes.
+    /// "Ahead of default" is judged against this worktree's own persisted divergence base
+    /// (<see cref="GetDivergenceBaseBranchAsync"/>, the Feature's actual parent branch) when one was
+    /// recorded, falling back to <paramref name="defaultBranch"/> otherwise, so a nested Feature
+    /// (branched from another unmerged Feature branch) is never reported as ahead by commits that
+    /// already live safely on its parent branch.
     /// </summary>
     Task<WorktreeInspectionResult> InspectWorktreeAsync(
         string mainRepositoryPath,
