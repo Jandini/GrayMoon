@@ -118,8 +118,18 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     {
         if (!_isFeatureContext || _switchBranchModal.RepositoryId <= 0)
             return null;
-        return TryGetLink(_switchBranchModal.RepositoryId)?.CheckedOutTag;
+        return TryGetLink(_switchBranchModal.RepositoryId)?.FeaturePinnedTag;
     }
+
+    /// <summary>The Feature branch a grid row has drifted away from (I4); null in the Workspace or when the row is on its branch. Uses only row data already loaded - no Agent call.</summary>
+    private string? GetOffFeatureBranchName(GrayMoon.App.Models.WorkspaceRepositoryLink link)
+        => !_isFeatureContext
+            ? null
+            : FeatureBranchPolicy.GetOffFeatureBranch(
+                _selectedFeatureName,
+                link.FeaturePinnedTag,
+                link.BranchName,
+                hasRecordedState: !string.IsNullOrEmpty(link.HeadCommit));
 
     private async Task OnSelectedContextChangedAsync(WorkspaceFeatureContextId contextId)
     {

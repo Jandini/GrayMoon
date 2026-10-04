@@ -207,6 +207,7 @@
                                                                   ColSpan="@TableColSpan"
                                                                   OnVersionClick="() => CopyVersionToClipboard(wr.GitVersion!)"
                                                                   OnVersionMouseLeave="() => OnVersionMouseLeave(wr.GitVersion!)"
+                                                                  OffFeatureBranchName="@GetOffFeatureBranchName(wr)"
                                                                   OnBranchClick="() => ShowSwitchBranchModal(wr.RepositoryId, wr.BranchName, wr.Repository?.CloneUrl)"
                                                                   OnUpdateBranchClick="() => ShowUpdateBranchModal(wr.RepositoryId)"
                                                                   OnDependencyBadgeClick="() => OnDependencyBadgeClick(wr.RepositoryId, wr.UnmatchedDeps ?? 0)"

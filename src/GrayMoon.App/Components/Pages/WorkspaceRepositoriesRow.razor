@@ -100,6 +100,12 @@
             {
                 <span>&nbsp;</span>
             }
+            @if (!string.IsNullOrEmpty(OffFeatureBranchName))
+            {
+                <span class="badge bg-warning text-dark ms-1 off-feature-branch-badge @(ActionsDisabled ? "off-feature-branch-badge--disabled" : "")"
+                      @onclick="HandleBranchClick"
+                      title="@OffFeatureBranchTooltip">Off Feature branch</span>
+            }
         </td>
         <td class="col-metrics col-divergence col-pr text-center">
             <div class="metrics-grid">
@@ -452,6 +458,8 @@
 
     [Parameter] public EventCallback OnVersionClick { get; set; }
     [Parameter] public EventCallback OnVersionMouseLeave { get; set; }
+    /// <summary>Feature branch this repository should be on when it has drifted off it (I4); null in the Workspace or when it is on its Feature branch.</summary>
+    [Parameter] public string? OffFeatureBranchName { get; set; }
     [Parameter] public EventCallback OnBranchClick { get; set; }
     [Parameter] public EventCallback OnDependencyBadgeClick { get; set; }
     [Parameter] public EventCallback OnCustomDependenciesClick { get; set; }
@@ -489,6 +497,17 @@
         ProjectType.Library    => "bi-layers",
         _                      => "bi-question-circle"
     };
+
+    private string OffFeatureBranchTooltip
+    {
+        get
+        {
+            var current = !string.IsNullOrEmpty(Link?.BranchName) ? Link.BranchName
+                : !string.IsNullOrEmpty(Link?.CheckedOutTag) ? Link.CheckedOutTag
+                : "a detached commit";
+            return $"This repository is on {current}, not on {OffFeatureBranchName}. Click to return.";
+        }
+    }
 
     private async Task HandleBranchClick()
     {

@@ -51,7 +51,9 @@ public sealed record WorkspaceRepositoryLinkListItemDto(
     /// <summary>Feature creation tip SHA when viewing a Feature; null for Workspace.</summary>
     string? FeatureBaseCommitSha = null,
     /// <summary>Feature parent / PR-base branch when viewing a Feature; null for Workspace or when unknown.</summary>
-    string? ParentBranchName = null);
+    string? ParentBranchName = null,
+    /// <summary>Tag the Feature repository is pinned to when viewing a Feature; null for Workspace or an unpinned repository.</summary>
+    string? FeaturePinnedTag = null);
 
 public sealed record WorkspaceRepositoryLinkListPageResult(
     IReadOnlyList<WorkspaceRepositoryLinkListItemDto> Items,

@@ -27,6 +27,29 @@ public sealed class FeatureBranchPolicyTests
     }
 
     [Theory]
+    // On its Feature branch: not drifted.
+    [InlineData("feat-a", null, "feat-a", true, null)]
+    // Another branch: drifted, returns the Feature branch to go back to.
+    [InlineData("feat-a", null, "main", true, "feat-a")]
+    [InlineData("feat-a", null, "Feat-A", true, "feat-a")]
+    // Blank branch with a recorded state is a detached HEAD: drifted.
+    [InlineData("feat-a", null, null, true, "feat-a")]
+    [InlineData("feat-a", null, "", true, "feat-a")]
+    // Blank branch before the first sync is unknown: not flagged.
+    [InlineData("feat-a", null, null, false, null)]
+    // Tag-pinned repository: nothing is expected, so nothing is flagged.
+    [InlineData("feat-a", "1.0.0", null, true, null)]
+    [InlineData("feat-a", "1.0.0", "main", true, null)]
+    // Workspace (no Feature name): never flagged.
+    [InlineData(null, null, "main", true, null)]
+    [InlineData(null, null, null, true, null)]
+    public void GetOffFeatureBranch_flags_only_a_non_pinned_Feature_repository_off_its_branch(
+        string? featureName, string? pinnedTag, string? currentBranch, bool hasRecordedState, string? expected)
+    {
+        Assert.Equal(expected, FeatureBranchPolicy.GetOffFeatureBranch(featureName, pinnedTag, currentBranch, hasRecordedState));
+    }
+
+    [Theory]
     // Branch checkout: only the expected branch is allowed.
     [InlineData(FeatureBranchAction.Checkout, "feat-a", null, "feat-a", false, true)]
     [InlineData(FeatureBranchAction.Checkout, "feat-a", null, "main", false, false)]

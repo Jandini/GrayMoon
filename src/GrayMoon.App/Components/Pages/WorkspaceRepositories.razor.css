@@ -830,6 +830,18 @@
     cursor: not-allowed;
 }
 
+::deep .repositories-table .off-feature-branch-badge {
+    cursor: pointer;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+::deep .repositories-table .off-feature-branch-badge--disabled {
+    pointer-events: none;
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
 /* Version container with hover effect */
 ::deep .repositories-table .version-container {
     display: inline-flex;

@@ -41,6 +41,23 @@ public static class FeatureBranchPolicy
         => expectedBranch is not null && !string.Equals(expectedBranch, currentBranch, StringComparison.Ordinal);
 
     /// <summary>
+    /// The Feature branch a grid row has drifted away from, or null when it has not (I4). Always null
+    /// outside a Feature (<paramref name="featureName"/> null) and for a repository pinned to a tag.
+    /// A blank <paramref name="currentBranch"/> counts as drift only when the context already has a
+    /// recorded state for the repository (<paramref name="hasRecordedState"/>); before the first sync a
+    /// blank branch means "unknown", not "detached".
+    /// </summary>
+    public static string? GetOffFeatureBranch(string? featureName, string? pinnedTag, string? currentBranch, bool hasRecordedState)
+    {
+        if (featureName is null)
+            return null;
+        if (string.IsNullOrEmpty(currentBranch) && !hasRecordedState)
+            return null;
+        var expected = ExpectedBranch(featureName, pinnedTag);
+        return IsOffFeatureBranch(expected, string.IsNullOrEmpty(currentBranch) ? null : currentBranch) ? expected : null;
+    }
+
+    /// <summary>
     /// Decides whether <paramref name="action"/> is allowed in a Feature context. Returns null when it is
     /// allowed, otherwise the message to show the user. Fetch, delete, set upstream and Update Branch from
     /// Default are always allowed and are not routed through here.

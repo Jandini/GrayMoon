@@ -115,6 +115,10 @@ public class WorkspaceRepositoryLink
     [NotMapped]
     public string? ParentBranchName { get; set; }
 
+    /// <summary>Tag the Feature repository is pinned to when viewing a Feature. Not a link column.</summary>
+    [NotMapped]
+    public string? FeaturePinnedTag { get; set; }
+
     /// <summary>Persisted Git Changes file rows for this workspace-repo link. Navigation only.</summary>
     public ICollection<WorkspaceGitChangeEntry> GitChangeEntries { get; set; } = new List<WorkspaceGitChangeEntry>();
 
@@ -159,6 +163,7 @@ public class WorkspaceRepositoryLink
         HeadCommit = HeadCommit,
         FeatureBaseCommitSha = FeatureBaseCommitSha,
         ParentBranchName = ParentBranchName,
+        FeaturePinnedTag = FeaturePinnedTag,
         GitChangeEntries = GitChangeEntries,
     };
 }

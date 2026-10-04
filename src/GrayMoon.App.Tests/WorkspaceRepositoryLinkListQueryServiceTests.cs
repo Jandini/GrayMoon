@@ -323,6 +323,49 @@ public class WorkspaceRepositoryLinkListQueryServiceTests
         }
     }
 
+    [Fact]
+    public async Task Feature_context_rows_carry_the_Feature_pinned_tag_and_Workspace_rows_do_not()
+    {
+        var (ctx, workspaceId) = await ListQueryTestContext.CreateWithWorkspaceLinksAsync(3);
+        await using (ctx)
+        {
+            var contextId = await CreateFeatureContextAsync(ctx.DbContext, workspaceId, "feature-pin");
+            var links = await ctx.DbContext.WorkspaceRepositories.AsNoTracking()
+                .Where(wr => wr.WorkspaceId == workspaceId)
+                .OrderBy(wr => wr.WorkspaceRepositoryId)
+                .ToListAsync();
+            var pinned = links[0];
+            ctx.DbContext.WorkspaceFeatureRepositories.AddRange(
+                new WorkspaceFeatureRepository
+                {
+                    WorkspaceFeatureContextId = contextId.Value,
+                    WorkspaceRepositoryId = pinned.WorkspaceRepositoryId,
+                    WorktreePath = "C:\\wt\\pinned",
+                    BaseCommitSha = "abc",
+                    PinnedTag = "1.2.0",
+                },
+                new WorkspaceFeatureRepository
+                {
+                    WorkspaceFeatureContextId = contextId.Value,
+                    WorkspaceRepositoryId = links[1].WorkspaceRepositoryId,
+                    WorktreePath = "C:\\wt\\branch",
+                    BaseCommitSha = "abc",
+                });
+            await ctx.DbContext.SaveChangesAsync();
+
+            var request = new WorkspaceRepositoryLinkListRequest(workspaceId, null, 50, null);
+            var featurePage = await ctx.WorkspaceRepoLinkQuery.GetPageAsync(request, contextId, isSpecialWorkspace: false);
+            var byId = featurePage.Items.ToDictionary(i => i.WorkspaceRepositoryId);
+            Assert.Equal("1.2.0", byId[pinned.WorkspaceRepositoryId].FeaturePinnedTag);
+            Assert.Null(byId[links[1].WorkspaceRepositoryId].FeaturePinnedTag);
+            Assert.Null(byId[links[2].WorkspaceRepositoryId].FeaturePinnedTag);
+            Assert.Equal("1.2.0", WorkspaceRepositoryLinkListMapper.ToLink(byId[pinned.WorkspaceRepositoryId]).FeaturePinnedTag);
+
+            var workspacePage = await ctx.WorkspaceRepoLinkQuery.GetPageAsync(request);
+            Assert.All(workspacePage.Items, i => Assert.Null(i.FeaturePinnedTag));
+        }
+    }
+
     private static async Task<WorkspaceFeatureContextId> CreateFeatureContextAsync(
         AppDbContext db, int workspaceId, string name)
     {

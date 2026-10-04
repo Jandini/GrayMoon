@@ -633,7 +633,8 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
             db.WorkspaceGitContextChangeEntries.Count(e => e.WorkspaceFeatureContextId == cid && e.WorkspaceRepositoryId == x.wr.WorkspaceRepositoryId),
             HeadCommit: x.state != null ? x.state.HeadCommit : null,
             FeatureBaseCommitSha: x.featureRepo != null ? x.featureRepo.BaseCommitSha : null,
-            ParentBranchName: x.featureRepo != null ? x.featureRepo.ParentBranchName : null));
+            ParentBranchName: x.featureRepo != null ? x.featureRepo.ParentBranchName : null,
+            FeaturePinnedTag: x.featureRepo != null ? x.featureRepo.PinnedTag : null));
     }
 
     private static WorkspaceRepositoryLinkListCursor ToCursor(WorkspaceRepositoryLinkListItemDto dto) =>
