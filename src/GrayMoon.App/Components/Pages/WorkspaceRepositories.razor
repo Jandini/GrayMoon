@@ -118,7 +118,7 @@
                                         <span class="metrics-block metrics-deps" title="Dependencies" aria-label="Dependencies">
                                             <i class="bi bi-diagram-3 header-icon"></i>
                                         </span>
-                                        <span class="metrics-block metrics-commits" title="Outgoing ↑ Incoming ↓ commits" aria-label="Outgoing up / Incoming down commits">
+                                        <span class="metrics-block metrics-commits" title="Outgoing â†‘ Incoming â†“ commits" aria-label="Outgoing up / Incoming down commits">
                                             <i class="bi bi-arrow-down-up header-icon"></i>
                                         </span>
                                         <span class="metrics-block metrics-status" title="Status" aria-label="Status">
@@ -282,6 +282,7 @@
                    WorkspaceRepositoryId="@_switchBranchModal.WorkspaceRepositoryId"
                    ViewingContextId="@_selectedContextId"
                    IsFeatureContext="@_isFeatureContext"
+                   FeatureBranchName="@GetSwitchBranchModalFeatureBranchName()"
                    RepositoryName="@_switchBranchModal.RepositoryName"
                    CurrentBranch="@_switchBranchModal.CurrentBranch"
                    RepositoryUrl="@_switchBranchModal.RepositoryUrl"

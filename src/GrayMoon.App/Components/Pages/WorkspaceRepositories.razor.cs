@@ -42,6 +42,8 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     private WorkspaceFeatureContextId? _selectedContextId;
     private bool _isFeatureContext;
     private bool _isReadOnlyContext;
+    /// <summary>Name of the selected Feature; null in the Workspace. Loaded once per selection, not per row (I2).</summary>
+    private string? _selectedFeatureName;
     /// <summary>Last <see cref="ContextQuery"/> value applied to grid state - detects URL context switches.</summary>
     private int? _boundContextQuery;
     private bool _createFeatureModalVisible;
@@ -96,6 +98,20 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         _selectedContextId = info.ContextId;
         _isFeatureContext = !info.IsSpecialWorkspace;
         _isReadOnlyContext = FeatureSelectorPresentation.IsReadOnlyContext(info);
+        _selectedFeatureName = info.IsSpecialWorkspace ? null : info.FeatureName;
+    }
+
+    /// <summary>
+    /// The branch the Switch Branch dialog's repository is expected to be on in the viewed Feature:
+    /// the Feature's own name for a non-pinned repository, or null in the Workspace, when the dialog
+    /// has no repository yet, or for a repository pinned to a tag (I2).
+    /// </summary>
+    private string? GetSwitchBranchModalFeatureBranchName()
+    {
+        if (!_isFeatureContext || _selectedFeatureName is null || _switchBranchModal.RepositoryId <= 0)
+            return null;
+        var pinnedTag = TryGetLink(_switchBranchModal.RepositoryId)?.CheckedOutTag;
+        return FeatureBranchPolicy.ExpectedBranch(_selectedFeatureName, pinnedTag);
     }
 
     private async Task OnSelectedContextChangedAsync(WorkspaceFeatureContextId contextId)
@@ -211,7 +227,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     }
 
     /// <summary>
-    /// A branch in the Switch Branch dialog was owned by a Feature worktree (§28A): rather than attempting an
+    /// A branch in the Switch Branch dialog was owned by a Feature worktree (Â§28A): rather than attempting an
     /// ordinary git branch delete (which the worktree would reject anyway), route straight to Remove Feature
     /// for that Feature's own context.
     /// </summary>
@@ -418,7 +434,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
             return;
 
         // Await context + header + grid before first paint (prerender is off) so the header chrome
-        // and column layout appear once in their final state — no Branch↔Create PR or column jump.
+        // and column layout appear once in their final state â€” no Branchâ†”Create PR or column jump.
         var contextChanged = _boundContextQuery != ContextQuery;
         if (_loadedWorkspaceId == WorkspaceId && workspace != null && hasLoadedOnce && !contextChanged)
             return;
@@ -437,7 +453,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
             errorMessage = null;
             hasLoadedOnce = false;
             // Drop the previous workspace name so the selector shows a placeholder until the new
-            // header is read — never the generic "Workspace" fallback.
+            // header is read â€” never the generic "Workspace" fallback.
             workspace = null;
             ClearGridState();
         }

@@ -21,7 +21,7 @@
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
-                    @* Title no-wrap/ellipsis — MUST be merged with the ahead branch later. *@
+                    @* Title no-wrap/ellipsis â€” MUST be merged with the ahead branch later. *@
                     <h5 class="modal-title modal-title--compound">
                         <span class="modal-title__primary">Branch</span>
                         @if (!string.IsNullOrEmpty(RepositoryName))
@@ -38,6 +38,19 @@
                     }
                     else
                     {
+                        @if (IsFeatureContext && FeatureBranchPolicy.IsOffFeatureBranch(FeatureBranchName, CurrentBranch))
+                        {
+                            <div class="gm-callout gm-callout--warning d-flex align-items-center justify-content-between gap-2 mb-3" role="alert">
+                                <span>This repository is not on its Feature branch <code>@FeatureBranchName</code>.</span>
+                                <button type="button"
+                                        class="btn btn-warning btn-sm flex-shrink-0"
+                                        @onclick="ReturnToFeatureBranchAsync"
+                                        disabled="@isRefreshing">
+                                    <i class="bi bi-rewind me-1" aria-hidden="true"></i>
+                                    Return to Feature branch
+                                </button>
+                            </div>
+                        }
                         <div class="mb-3 switch-branch-tabs-wrapper">
                             <div class="d-flex align-items-center justify-content-between">
                                 <ul class="nav nav-tabs switch-branch-tabs mb-0 flex-grow-1" role="tablist">
@@ -165,7 +178,11 @@
                                                             }
                                                             else if (TryGetOccupancy(branch, out var occ))
                                                             {
-                                                                @if (occ.Kind == BranchOccupancyKind.Feature)
+                                                                @if (occ.Kind == BranchOccupancyKind.FeatureOwn)
+                                                                {
+                                                                    <span class="badge bg-info ms-2" title="This Feature">This Feature</span>
+                                                                }
+                                                                else if (occ.Kind == BranchOccupancyKind.Feature)
                                                                 {
                                                                     <span class="badge bg-info ms-2" title="@occ.FeatureName">Feature</span>
                                                                 }
@@ -216,7 +233,8 @@
                                                                 <i class="bi bi-folder-x" aria-hidden="true"></i>
                                                             </button>
                                                         }
-                                                        else if (branch != currentBranchLocal)
+                                                        else if (branch != currentBranchLocal
+                                                                 && !(TryGetOccupancy(branch, out var occForFeatureOwn) && occForFeatureOwn.Kind == BranchOccupancyKind.FeatureOwn))
                                                         {
                                                             <button type="button"
                                                                     class="btn btn-link p-0 branch-delete-link"
@@ -584,6 +602,8 @@
     [Parameter] public WorkspaceFeatureContextId? ViewingContextId { get; set; }
     /// <summary>When true, Return to Default is hidden (Workspace-only operation).</summary>
     [Parameter] public bool IsFeatureContext { get; set; }
+    /// <summary>The branch this repository is expected to be on in the viewed Feature; null in the Workspace and for a tag-pinned repository (I2).</summary>
+    [Parameter] public string? FeatureBranchName { get; set; }
     [Parameter] public string? RepositoryName { get; set; }
     [Parameter] public string? CurrentBranch { get; set; }
     [Parameter] public string? RepositoryUrl { get; set; }
@@ -595,7 +615,7 @@
     [Parameter] public EventCallback<(int RepositoryId, string? RepositoryName, string NewBranchName, string BaseBranch, bool SetUpstream)> OnCreateBranch { get; set; }
     /// <summary>Tab to activate when the modal opens. Null defaults to "local", but callers can pass "tags" to jump straight to the Tags tab (e.g. from the upgrade badge).</summary>
     [Parameter] public string? InitialTab { get; set; }
-    /// <summary>Raised instead of an ordinary delete when the selected local branch is owned by a Feature worktree (§28A) - the caller should close this dialog and route to Remove Feature for that context.</summary>
+    /// <summary>Raised instead of an ordinary delete when the selected local branch is owned by a Feature worktree (Â§28A) - the caller should close this dialog and route to Remove Feature for that context.</summary>
     [Parameter] public EventCallback<WorkspaceFeatureContextId> OnRequestFeatureCleanup { get; set; }
 
     private string activeTab = "local";
@@ -656,7 +676,7 @@
     private bool _awaitingForceDeleteConfirmation;
     private bool _wasBusy;
 
-    /// <summary>Branch whose "Worktree" badge cleanup confirm is open (§28B) - the counterpart to <see cref="branchToDelete"/> for external (non-Feature) git worktrees.</summary>
+    /// <summary>Branch whose "Worktree" badge cleanup confirm is open (Â§28B) - the counterpart to <see cref="branchToDelete"/> for external (non-Feature) git worktrees.</summary>
     private string? worktreeCleanupBranch;
     private GrayMoon.Application.Features.ExternalWorktreeCleanupPlan? _worktreeCleanupPlan;
     private bool isCleaningUpWorktree;
@@ -1208,7 +1228,7 @@
 
     /// <summary>
     /// Opens the inline cleanup confirm for a branch checked out in an external (non-Feature) git worktree
-    /// (§28B) and kicks off the analyze call. Counterpart to <see cref="RequestDeleteBranch"/> for the
+    /// (Â§28B) and kicks off the analyze call. Counterpart to <see cref="RequestDeleteBranch"/> for the
     /// "Worktree" occupancy badge - routes to <see cref="IWorkspaceExternalWorktreeOperations"/> instead of an
     /// ordinary branch delete, which git worktree rules would reject anyway.
     /// </summary>
@@ -1448,6 +1468,17 @@
         // Close dialog and let parent show full-page overlay and run sync
         await OnReturnToDefault.InvokeAsync((RepositoryId, RepositoryName, currentBranchLocal, defaultBranch));
         await OnCancel.InvokeAsync();
+    }
+
+    /// <summary>Checks the repository back out to the Feature's own branch (I2, 09 SB-1).</summary>
+    private async Task ReturnToFeatureBranchAsync()
+    {
+        if (string.IsNullOrWhiteSpace(FeatureBranchName))
+            return;
+
+        // Close modal immediately and trigger checkout from parent, same as an ordinary checkout.
+        await OnCancel.InvokeAsync();
+        await OnCheckoutBranch.InvokeAsync((RepositoryId, FeatureBranchName, false));
     }
 
     private string GetPullRequestUrl()

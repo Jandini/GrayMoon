@@ -53,8 +53,9 @@ public sealed partial class WorkspaceRepositories
         {
             IsVisible = true,
             RepositoryId = link.RepositoryId,
+            WorkspaceRepositoryId = wr?.WorkspaceRepositoryId ?? 0,
             RepositoryName = repo.RepositoryName,
-            CurrentBranch = null,
+            CurrentBranch = link.BranchName,
             RepositoryUrl = repo.CloneUrl,
             InitialTab = "tags"
         };
