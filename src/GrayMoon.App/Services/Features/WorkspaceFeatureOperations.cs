@@ -60,15 +60,21 @@ public sealed class WorkspaceFeatureOperations(
             "Creating feature...",
             async (op, ct) =>
             {
+                var startedAt = logger.FeatureOperationStarted("Create", workspaceId, null, null, name);
                 try
                 {
                     using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, cancellationToken);
                     var overlayProgress = BindOverlayProgress(op, progress);
                     var result = await CreateFeatureCoreAsync(workspaceId, name, overlayProgress, linked.Token);
+                    logger.FeatureOperationFinished(
+                        "Create", workspaceId, result.WorkspaceFeatureId, result.ContextId?.Value, name, startedAt,
+                        result.Success ? "Succeeded" : result.Condition ?? "Failed", result.Error);
                     tcs.TrySetResult(result);
                 }
                 catch (Exception ex)
                 {
+                    logger.LogWarning(ex, "Feature Create threw. WorkspaceId={WorkspaceId} FeatureName={FeatureName}", workspaceId, name);
+                    logger.FeatureOperationFinished("Create", workspaceId, null, null, name, startedAt, "Exception", ex.Message);
                     tcs.TrySetResult(FailCreate("Exception", ex.Message));
                     throw;
                 }
@@ -76,7 +82,12 @@ public sealed class WorkspaceFeatureOperations(
             out var operation);
 
         if (!started)
+        {
+            logger.LogInformation(
+                "Feature Create refused because the Workspace is busy. WorkspaceId={WorkspaceId} FeatureName={FeatureName}",
+                workspaceId, name);
             return FailCreate("WorkspaceBusy", "A Workspace structural operation is already running.");
+        }
 
         var created = await tcs.Task.WaitAsync(cancellationToken);
         await operation.WhenCompleted;
@@ -273,6 +284,7 @@ public sealed class WorkspaceFeatureOperations(
                         tracked.State = WorkspaceFeatureRepositoryState.NeedsRepair;
                         tracked.LastError = response.Error ?? "CreateGitWorktree failed.";
                         Interlocked.Exchange(ref anyFailure, 1);
+                        logger.FeatureRepositoryFailed("Create", workspaceId, name, link.Repository?.RepositoryName, tracked.LastError);
                     }
                     else
                     {
@@ -282,6 +294,7 @@ public sealed class WorkspaceFeatureOperations(
                             tracked.State = WorkspaceFeatureRepositoryState.NeedsRepair;
                             tracked.LastError = payload?.ErrorMessage ?? "CreateGitWorktree returned no payload.";
                             Interlocked.Exchange(ref anyFailure, 1);
+                            logger.FeatureRepositoryFailed("Create", workspaceId, name, link.Repository?.RepositoryName, tracked.LastError);
                         }
                         else
                         {
@@ -289,6 +302,7 @@ public sealed class WorkspaceFeatureOperations(
                                 tracked.WorktreePath = payload.WorktreePath;
                             tracked.State = WorkspaceFeatureRepositoryState.Ready;
                             tracked.LastError = null;
+                            logger.FeatureRepositoryDone("Create", workspaceId, name, link.Repository?.RepositoryName, "Ready");
                         }
                     }
 
@@ -347,6 +361,7 @@ public sealed class WorkspaceFeatureOperations(
         }
         catch (Exception ex)
         {
+            logger.LogWarning(ex, "Feature Create failed after the Feature was saved. WorkspaceId={WorkspaceId} FeatureName={FeatureName}", workspaceId, name);
             // Use CancellationToken.None: cancellationToken is very likely the thing that just got
             // cancelled (Abort), and this write must still land so the Feature does not stay stuck.
             await using var failDb = await dbContextFactory.CreateDbContextAsync(CancellationToken.None);
@@ -628,6 +643,7 @@ public sealed class WorkspaceFeatureOperations(
                 }
                 catch (Exception ex)
                 {
+                    logger.LogWarning(ex, "Feature Remove threw. WorkspaceId={WorkspaceId} FeatureName={FeatureName}", info.WorkspaceId, info.FeatureName);
                     tcs.TrySetResult(OperationResult.Fail(ex.Message));
                     throw;
                 }
@@ -635,11 +651,30 @@ public sealed class WorkspaceFeatureOperations(
             out var operation);
 
         if (!started)
+        {
+            logger.LogInformation(
+                "Feature Remove refused because the Workspace is busy. WorkspaceId={WorkspaceId} FeatureName={FeatureName}",
+                info.WorkspaceId, info.FeatureName);
             return OperationResult.Fail("A Workspace structural operation is already running.");
+        }
 
-        var removed = await tcs.Task.WaitAsync(cancellationToken);
-        await operation.WhenCompleted;
-        return removed;
+        var startedAt = logger.FeatureOperationStarted(
+            "Remove", info.WorkspaceId, info.WorkspaceFeatureId, featureContextId.Value, info.FeatureName);
+        try
+        {
+            var removed = await tcs.Task.WaitAsync(cancellationToken);
+            await operation.WhenCompleted;
+            logger.FeatureOperationFinished(
+                "Remove", info.WorkspaceId, info.WorkspaceFeatureId, featureContextId.Value, info.FeatureName, startedAt,
+                removed.Success ? "Succeeded" : "Failed", removed.Error);
+            return removed;
+        }
+        catch (OperationCanceledException)
+        {
+            logger.FeatureOperationFinished(
+                "Remove", info.WorkspaceId, info.WorkspaceFeatureId, featureContextId.Value, info.FeatureName, startedAt, "Cancelled");
+            throw;
+        }
     }
 
     private async Task<OperationResult> RemoveFeatureCoreAsync(
@@ -748,8 +783,8 @@ public sealed class WorkspaceFeatureOperations(
                     if (!response.Success)
                     {
                         logger.LogWarning(
-                            "RemoveGitWorktree failed for {Path}: {Error}",
-                            row.WorktreePath, response.Error);
+                            "RemoveGitWorktree failed for {Path}: {Error}. Repository={Repository} FeatureName={FeatureName}",
+                            row.WorktreePath, FeatureOperationLog.Redact(response.Error), repoName, info.FeatureName);
                         errorsByWrId[row.WorkspaceRepositoryId] = string.IsNullOrWhiteSpace(response.Error)
                             ? $"Failed to remove worktree {row.WorktreePath}."
                             : response.Error;
@@ -835,7 +870,7 @@ public sealed class WorkspaceFeatureOperations(
                                 : RemoveFeatureBranchOutcome.KeptUnmerged;
                             logger.LogWarning(
                                 "Delete local Feature branch {Branch} failed for {Repo}: {Error}",
-                                branchName, repoName, deleteLocal.Error);
+                                branchName, repoName, FeatureOperationLog.Redact(deleteLocal.Error));
                         }
                     }
 
@@ -853,6 +888,7 @@ public sealed class WorkspaceFeatureOperations(
                         {
                             remoteOutcome = RemoveFeatureRemoteBranchOutcome.Failed;
                             remoteMessage = "Could not resolve repository details to delete the remote branch.";
+                            logger.FeatureRepositoryFailed("Remove", info.WorkspaceId, info.FeatureName, repoName, remoteMessage);
                         }
                         else
                         {
@@ -862,6 +898,7 @@ public sealed class WorkspaceFeatureOperations(
                             {
                                 remoteOutcome = RemoveFeatureRemoteBranchOutcome.Failed;
                                 remoteMessage = "Refused to delete the repository default branch.";
+                                logger.FeatureRepositoryFailed("Remove", info.WorkspaceId, info.FeatureName, repoName, remoteMessage);
                             }
                             else
                             {
@@ -870,6 +907,7 @@ public sealed class WorkspaceFeatureOperations(
                                 {
                                     remoteOutcome = RemoveFeatureRemoteBranchOutcome.Failed;
                                     remoteMessage = "Could not confirm the Feature branch tip for a safe remote delete.";
+                                    logger.FeatureRepositoryFailed("Remove", info.WorkspaceId, info.FeatureName, repoName, remoteMessage);
                                 }
                                 else
                                 {
@@ -906,7 +944,7 @@ public sealed class WorkspaceFeatureOperations(
                                         remoteMessage = err;
                                         logger.LogWarning(
                                             "Delete remote Feature branch {Branch} failed for {Repo}: {Error}",
-                                            branchName, repoName, deleteRemote.Error);
+                                            branchName, repoName, FeatureOperationLog.Redact(deleteRemote.Error));
                                     }
                                 }
                             }
@@ -933,6 +971,7 @@ public sealed class WorkspaceFeatureOperations(
                         keptBranchName,
                         remoteOutcome,
                         remoteMessage);
+                    logger.FeatureRepositoryDone("Remove", info.WorkspaceId, info.FeatureName, repoName, "WorktreeRemoved");
                 }
                 finally
                 {
@@ -1347,6 +1386,7 @@ public sealed class WorkspaceFeatureOperations(
                 }
                 catch (Exception ex)
                 {
+                    logger.LogWarning(ex, "Feature Repair threw. WorkspaceId={WorkspaceId} FeatureName={FeatureName}", info.WorkspaceId, info.FeatureName);
                     tcs.TrySetResult(new RepairFeatureResult(false, DescribeOperationFailure(ex, "Repair"), []));
                     throw;
                 }
@@ -1354,11 +1394,30 @@ public sealed class WorkspaceFeatureOperations(
             out var operation);
 
         if (!started)
+        {
+            logger.LogInformation(
+                "Feature Repair refused because the Workspace is busy. WorkspaceId={WorkspaceId} FeatureName={FeatureName}",
+                info.WorkspaceId, info.FeatureName);
             return new RepairFeatureResult(false, "A Workspace structural operation is already running.", []);
+        }
 
-        var repaired = await tcs.Task.WaitAsync(cancellationToken);
-        await operation.WhenCompleted;
-        return repaired;
+        var startedAt = logger.FeatureOperationStarted(
+            "Repair", info.WorkspaceId, info.WorkspaceFeatureId, featureContextId.Value, info.FeatureName);
+        try
+        {
+            var repaired = await tcs.Task.WaitAsync(cancellationToken);
+            await operation.WhenCompleted;
+            logger.FeatureOperationFinished(
+                "Repair", info.WorkspaceId, info.WorkspaceFeatureId, featureContextId.Value, info.FeatureName, startedAt,
+                repaired.Success ? "Succeeded" : "Failed", repaired.Error);
+            return repaired;
+        }
+        catch (OperationCanceledException)
+        {
+            logger.FeatureOperationFinished(
+                "Repair", info.WorkspaceId, info.WorkspaceFeatureId, featureContextId.Value, info.FeatureName, startedAt, "Cancelled");
+            throw;
+        }
     }
 
     public async Task<RollbackFeatureResult> RollbackFeatureAsync(
@@ -1401,6 +1460,7 @@ public sealed class WorkspaceFeatureOperations(
                 }
                 catch (Exception ex)
                 {
+                    logger.LogWarning(ex, "Feature Rollback threw. WorkspaceId={WorkspaceId} FeatureName={FeatureName}", info.WorkspaceId, info.FeatureName);
                     tcs.TrySetResult(new RollbackFeatureResult(false, DescribeOperationFailure(ex, "Roll back"), []));
                     throw;
                 }
@@ -1408,11 +1468,30 @@ public sealed class WorkspaceFeatureOperations(
             out var operation);
 
         if (!started)
+        {
+            logger.LogInformation(
+                "Feature Rollback refused because the Workspace is busy. WorkspaceId={WorkspaceId} FeatureName={FeatureName}",
+                info.WorkspaceId, info.FeatureName);
             return new RollbackFeatureResult(false, "A Workspace structural operation is already running.", []);
+        }
 
-        var rolledBack = await tcs.Task.WaitAsync(cancellationToken);
-        await operation.WhenCompleted;
-        return rolledBack;
+        var startedAt = logger.FeatureOperationStarted(
+            "Rollback", info.WorkspaceId, info.WorkspaceFeatureId, featureContextId.Value, info.FeatureName);
+        try
+        {
+            var rolledBack = await tcs.Task.WaitAsync(cancellationToken);
+            await operation.WhenCompleted;
+            logger.FeatureOperationFinished(
+                "Rollback", info.WorkspaceId, info.WorkspaceFeatureId, featureContextId.Value, info.FeatureName, startedAt,
+                rolledBack.Success ? "Succeeded" : "Failed", rolledBack.Error);
+            return rolledBack;
+        }
+        catch (OperationCanceledException)
+        {
+            logger.FeatureOperationFinished(
+                "Rollback", info.WorkspaceId, info.WorkspaceFeatureId, featureContextId.Value, info.FeatureName, startedAt, "Cancelled");
+            throw;
+        }
     }
 
     private async Task<RepairFeatureResult> RepairFeatureCoreAsync(
@@ -1486,6 +1565,7 @@ public sealed class WorkspaceFeatureOperations(
                     {
                         tracked.State = WorkspaceFeatureRepositoryState.NeedsRepair;
                         tracked.LastError = response.Error ?? "CreateGitWorktree failed.";
+                        logger.FeatureRepositoryFailed("Repair", info.WorkspaceId, featureName, repoName, tracked.LastError);
                         await writeDb.SaveChangesAsync(cancellationToken);
                         results.Add((row.WorkspaceRepositoryId, new FeatureRepairRepositoryResult(
                             repoName, FeatureRepositoryOperationOutcome.Failed, tracked.LastError)));
@@ -1497,6 +1577,7 @@ public sealed class WorkspaceFeatureOperations(
                     {
                         tracked.State = WorkspaceFeatureRepositoryState.NeedsRepair;
                         tracked.LastError = payload?.ErrorMessage ?? "CreateGitWorktree returned no payload.";
+                        logger.FeatureRepositoryFailed("Repair", info.WorkspaceId, featureName, repoName, tracked.LastError);
                         await writeDb.SaveChangesAsync(cancellationToken);
                         results.Add((row.WorkspaceRepositoryId, new FeatureRepairRepositoryResult(
                             repoName, FeatureRepositoryOperationOutcome.Failed, tracked.LastError)));
@@ -1510,6 +1591,7 @@ public sealed class WorkspaceFeatureOperations(
                     await writeDb.SaveChangesAsync(cancellationToken);
                     results.Add((row.WorkspaceRepositoryId, new FeatureRepairRepositoryResult(
                         repoName, FeatureRepositoryOperationOutcome.Succeeded, null)));
+                    logger.FeatureRepositoryDone("Repair", info.WorkspaceId, featureName, repoName, "Ready");
                 }
                 finally
                 {
@@ -1697,6 +1779,7 @@ public sealed class WorkspaceFeatureOperations(
                     cancellationToken);
                 if (!removeResp.Success)
                 {
+                    logger.FeatureRepositoryFailed("Rollback", info.WorkspaceId, featureName, repoName, removeResp.Error ?? "RemoveGitWorktree failed.");
                     results.Add(new FeatureRepairRepositoryResult(
                         repoName, FeatureRepositoryOperationOutcome.Failed, removeResp.Error ?? "RemoveGitWorktree failed."));
                     done++;
@@ -1734,6 +1817,7 @@ public sealed class WorkspaceFeatureOperations(
                         cancellationToken);
                     if (!deleteLocal.Success)
                     {
+                        logger.FeatureRepositoryFailed("Rollback", info.WorkspaceId, featureName, repoName, deleteLocal.Error ?? "Local branch kept (could not delete).");
                         results.Add(new FeatureRepairRepositoryResult(
                             repoName,
                             FeatureRepositoryOperationOutcome.Succeeded,
@@ -1749,6 +1833,7 @@ public sealed class WorkspaceFeatureOperations(
                     : new FeatureRepairRepositoryResult(repoName, FeatureRepositoryOperationOutcome.Succeeded, null));
             }
 
+            logger.FeatureRepositoryDone("Rollback", info.WorkspaceId, featureName, repoName, results[^1].Outcome.ToString());
             done++;
             progress?.Report(new OperationProgress($"Rolled back {done} of {rows.Count} repositories", done, rows.Count));
         }

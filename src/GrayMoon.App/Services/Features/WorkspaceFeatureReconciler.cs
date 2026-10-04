@@ -4,6 +4,7 @@ using GrayMoon.App.Models;
 using GrayMoon.App.Services.Agent;
 using GrayMoon.Application.Features;
 using GrayMoon.Common.Git;
+using System.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 
@@ -86,8 +87,32 @@ public sealed class WorkspaceFeatureReconciler(
             var pathResolver = scope.ServiceProvider.GetRequiredService<IWorkspaceContextPathResolver>();
             var contextResolver = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureContextResolver>();
 
-            await InterruptStuckFeaturesAsync(dbFactory, cancellationToken);
-            await ReconcileWorktreesAsync(dbFactory, pathResolver, contextResolver, agentBridge, cancellationToken);
+            var startedAt = Stopwatch.GetTimestamp();
+            logger.LogInformation("Feature Reconcile started.");
+            var counts = new ReconcileCounts();
+            try
+            {
+                counts.Interrupted = await InterruptStuckFeaturesAsync(dbFactory, cancellationToken);
+                await ReconcileWorktreesAsync(dbFactory, pathResolver, contextResolver, agentBridge, counts, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(
+                    ex,
+                    "Feature Reconcile finished. DurationMs={DurationMs} Outcome={Outcome}",
+                    (long)Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds,
+                    ex is OperationCanceledException ? "Cancelled" : "Failed");
+                throw;
+            }
+
+            logger.LogInformation(
+                "Feature Reconcile finished. DurationMs={DurationMs} Outcome={Outcome} Interrupted={Interrupted} Recovered={Recovered} MissingWorktrees={MissingWorktrees} UntrackedWorktrees={UntrackedWorktrees}",
+                (long)Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds,
+                "Succeeded",
+                counts.Interrupted,
+                counts.Recovered,
+                counts.MissingWorktrees,
+                counts.UntrackedWorktrees);
 
             lock (_throttleLock)
                 _lastReconcileUtc = DateTime.UtcNow;
@@ -98,7 +123,15 @@ public sealed class WorkspaceFeatureReconciler(
         }
     }
 
-    private async Task InterruptStuckFeaturesAsync(
+    private sealed class ReconcileCounts
+    {
+        public int Interrupted;
+        public int Recovered;
+        public int MissingWorktrees;
+        public int UntrackedWorktrees;
+    }
+
+    private async Task<int> InterruptStuckFeaturesAsync(
         IDbContextFactory<AppDbContext> dbFactory,
         CancellationToken cancellationToken)
     {
@@ -108,7 +141,7 @@ public sealed class WorkspaceFeatureReconciler(
                 || f.LifecycleState == WorkspaceFeatureLifecycleState.Removing)
             .ToListAsync(cancellationToken);
 
-        var changed = false;
+        var interrupted = 0;
         foreach (var feature in stuck)
         {
             if (operationLock.IsWorkspaceStructurallyBusy(feature.WorkspaceId))
@@ -120,11 +153,15 @@ public sealed class WorkspaceFeatureReconciler(
             feature.LifecycleState = WorkspaceFeatureLifecycleState.NeedsRepair;
             feature.LastError = message;
             feature.UpdatedAt = DateTime.UtcNow;
-            changed = true;
+            interrupted++;
+            logger.LogWarning(
+                "Feature Reconcile marked an interrupted Feature NeedsRepair. WorkspaceId={WorkspaceId} FeatureId={FeatureId} FeatureName={FeatureName} Reason={Reason}",
+                feature.WorkspaceId, feature.WorkspaceFeatureId, feature.Name, message);
         }
 
-        if (changed)
+        if (interrupted > 0)
             await db.SaveChangesAsync(cancellationToken);
+        return interrupted;
     }
 
     private async Task ReconcileWorktreesAsync(
@@ -132,6 +169,7 @@ public sealed class WorkspaceFeatureReconciler(
         IWorkspaceContextPathResolver pathResolver,
         IWorkspaceFeatureContextResolver contextResolver,
         IAgentBridge agentBridge,
+        ReconcileCounts counts,
         CancellationToken cancellationToken)
     {
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
@@ -287,6 +325,10 @@ public sealed class WorkspaceFeatureReconciler(
                             tracked.State = WorkspaceFeatureRepositoryState.Ready;
                             tracked.LastError = null;
                             dirty = true;
+                            counts.Recovered++;
+                            logger.LogDebug(
+                                "Feature Reconcile found a registered worktree and marked the repository Ready. WorkspaceId={WorkspaceId} FeatureId={FeatureId} FeatureName={FeatureName} WorkspaceRepositoryId={WorkspaceRepositoryId}",
+                                workspaceId, featureId, feature.Name, row.WorkspaceRepositoryId);
                         }
 
                         continue;
@@ -335,6 +377,10 @@ public sealed class WorkspaceFeatureReconciler(
                     }
 
                     dirty = true;
+                    counts.MissingWorktrees++;
+                    logger.LogWarning(
+                        "Feature Reconcile found a missing worktree. WorkspaceId={WorkspaceId} FeatureId={FeatureId} FeatureName={FeatureName} WorkspaceRepositoryId={WorkspaceRepositoryId}",
+                        workspaceId, featureId, feature.Name, row.WorkspaceRepositoryId);
                 }
             }
 
@@ -358,6 +404,7 @@ public sealed class WorkspaceFeatureReconciler(
                     if (!seenUntracked.Add(pathKey))
                         continue;
 
+                    counts.UntrackedWorktrees++;
                     var owningFeatureId = featureRootsByFeatureId
                         .FirstOrDefault(kv => IsPathUnder(wt.WorktreePath, kv.Value))
                         .Key;
