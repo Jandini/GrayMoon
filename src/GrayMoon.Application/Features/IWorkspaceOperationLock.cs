@@ -35,6 +35,9 @@ public interface IWorkspaceLockedOperation
     string OperationKind { get; }
     string OverlayKey { get; }
     string DisplayMessage { get; }
+
+    /// <summary>Completes only after the lock has been released, so a caller can hand control back with the lock free.</summary>
+    Task WhenCompleted { get; }
     CancellationToken CancellationToken { get; }
     void ReportProgress(string message);
 }

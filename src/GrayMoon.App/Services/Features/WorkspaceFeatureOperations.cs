@@ -73,12 +73,14 @@ public sealed class WorkspaceFeatureOperations(
                     throw;
                 }
             },
-            out _);
+            out var operation);
 
         if (!started)
             return FailCreate("WorkspaceBusy", "A Workspace structural operation is already running.");
 
-        return await tcs.Task.WaitAsync(cancellationToken);
+        var created = await tcs.Task.WaitAsync(cancellationToken);
+        await operation.WhenCompleted;
+        return created;
     }
 
     private async Task<CreateFeatureResult> CreateFeatureCoreAsync(
@@ -630,12 +632,14 @@ public sealed class WorkspaceFeatureOperations(
                     throw;
                 }
             },
-            out _);
+            out var operation);
 
         if (!started)
             return OperationResult.Fail("A Workspace structural operation is already running.");
 
-        return await tcs.Task.WaitAsync(cancellationToken);
+        var removed = await tcs.Task.WaitAsync(cancellationToken);
+        await operation.WhenCompleted;
+        return removed;
     }
 
     private async Task<OperationResult> RemoveFeatureCoreAsync(
@@ -1347,12 +1351,14 @@ public sealed class WorkspaceFeatureOperations(
                     throw;
                 }
             },
-            out _);
+            out var operation);
 
         if (!started)
             return new RepairFeatureResult(false, "A Workspace structural operation is already running.", []);
 
-        return await tcs.Task.WaitAsync(cancellationToken);
+        var repaired = await tcs.Task.WaitAsync(cancellationToken);
+        await operation.WhenCompleted;
+        return repaired;
     }
 
     public async Task<RollbackFeatureResult> RollbackFeatureAsync(
@@ -1399,12 +1405,14 @@ public sealed class WorkspaceFeatureOperations(
                     throw;
                 }
             },
-            out _);
+            out var operation);
 
         if (!started)
             return new RollbackFeatureResult(false, "A Workspace structural operation is already running.", []);
 
-        return await tcs.Task.WaitAsync(cancellationToken);
+        var rolledBack = await tcs.Task.WaitAsync(cancellationToken);
+        await operation.WhenCompleted;
+        return rolledBack;
     }
 
     private async Task<RepairFeatureResult> RepairFeatureCoreAsync(

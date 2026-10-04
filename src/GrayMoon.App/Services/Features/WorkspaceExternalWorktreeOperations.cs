@@ -174,12 +174,14 @@ public sealed class WorkspaceExternalWorktreeOperations(
                     throw;
                 }
             },
-            out _);
+            out var operation);
 
         if (!started)
             return OperationResult.Fail("A Workspace structural operation is already running.");
 
-        return await tcs.Task.WaitAsync(cancellationToken);
+        var removed = await tcs.Task.WaitAsync(cancellationToken);
+        await operation.WhenCompleted;
+        return removed;
     }
 
     /// <summary>
