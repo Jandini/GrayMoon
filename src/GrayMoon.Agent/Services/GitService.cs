@@ -1348,22 +1348,51 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return Directory.GetDirectories(path).Select(Path.GetFileName).Where(n => n != null).Cast<string>().ToArray();
     }
 
+    private const string GrayMoonHookMarker = "# Created by GrayMoon.Agent";
+    private const string ReplacedHookSuffix = ".replaced-by-graymoon";
+
+    private sealed record GitHooksLocation(string? Directory, string? OutsideGitDirHooksPath);
+
     public async Task WriteSyncHooksAsync(string repoPath, int workspaceId, int repositoryId, CancellationToken ct)
     {
-        var hooksDir = await ResolveGitHooksDirectoryAsync(repoPath, ct);
-        if (hooksDir is null)
+        try
+        {
+            await WriteSyncHooksCoreAsync(repoPath, workspaceId, repositoryId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex,
+                "Could not install sync hooks for {RepoPath} (workspace {WorkspaceId}, repo {RepositoryId}); live updates for changes made outside GrayMoon will appear only after the next Sync.",
+                repoPath, workspaceId, repositoryId);
+        }
+    }
+
+    private async Task WriteSyncHooksCoreAsync(string repoPath, int workspaceId, int repositoryId, CancellationToken ct)
+    {
+        var location = await ResolveGitHooksLocationAsync(repoPath, ct);
+        if (location.Directory is null)
         {
             logger.LogWarning(
                 "Could not resolve git hooks directory for {RepoPath} (workspace {WorkspaceId}, repo {RepositoryId}); skipping hook install.",
                 repoPath, workspaceId, repositoryId);
             return;
         }
+
+        if (location.OutsideGitDirHooksPath is not null)
+        {
+            logger.LogWarning(
+                "Repository {RepoPath} sets core.hooksPath to '{HooksPath}', outside its Git directory. GrayMoon did not write or change any Git hooks there, so live updates for changes made outside GrayMoon will appear only after the next Sync.",
+                repoPath, location.OutsideGitDirHooksPath);
+            return;
+        }
+
+        var hooksDir = location.Directory;
         Directory.CreateDirectory(hooksDir);
 
         // Context-agnostic hooks: resolve the executing worktree root at runtime so linked
         // Feature worktrees attribute correctly. Do not embed a static Feature context id.
         var utf8 = new UTF8Encoding(false);
-        var comment = $"# Created by GrayMoon.Agent at {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}Z\n";
+        var comment = $"{GrayMoonHookMarker} at {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}Z\n";
         var resolveBody =
             "REPO_PATH=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0\n" +
             "REPO_JSON=$(printf '%s' \"$REPO_PATH\" | sed 's/\\\\/\\\\\\\\/g; s/\"/\\\\\"/g')\n" +
@@ -1374,48 +1403,141 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         string Curl(string hookPath) =>
             $"curl {curlFlags} -X POST \"http://127.0.0.1:{_listenPort}/hook/{hookPath}\" {header} -d \"$PAYLOAD\" || true";
 
-        WriteHookFile(Path.Combine(hooksDir, "post-commit"),
+        InstallSyncHook(repoPath, hooksDir, "post-commit",
             "#!/bin/sh\n" + comment + resolveBody + Curl("commit") + "\n", utf8);
-        WriteHookFile(Path.Combine(hooksDir, "post-checkout"),
+        InstallSyncHook(repoPath, hooksDir, "post-checkout",
             "#!/bin/sh\n" + comment + "[ \"$3\" = \"1\" ] || exit 0\n" + resolveBody + Curl("checkout") + "\n", utf8);
-        WriteHookFile(Path.Combine(hooksDir, "post-merge"),
+        InstallSyncHook(repoPath, hooksDir, "post-merge",
             "#!/bin/sh\n" + comment + resolveBody + Curl("merge") + "\n", utf8);
-        WriteHookFile(Path.Combine(hooksDir, "post-update"),
-            "#!/bin/sh\n" + comment + resolveBody + Curl("commit") + "\n", utf8);
-        WriteHookFile(Path.Combine(hooksDir, "pre-push"),
+        InstallSyncHook(repoPath, hooksDir, "pre-push",
             "#!/bin/sh\n" + comment + resolveBody + Curl("push") + "\n", utf8);
-        logger.LogDebug("Sync hooks written for repo {RepoId} in workspace {WorkspaceId}", repositoryId, workspaceId);
+        logger.LogDebug("Sync hooks checked for repo {RepoId} in workspace {WorkspaceId}", repositoryId, workspaceId);
+    }
+
+    private void InstallSyncHook(string repoPath, string hooksDir, string hookName, string content, Encoding encoding)
+    {
+        var path = Path.Combine(hooksDir, hookName);
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                logger.LogWarning(
+                    "Cannot install the GrayMoon {Hook} hook for {RepoPath}: '{HookPath}' is a directory. Live updates for that Git event will appear only after the next Sync.",
+                    hookName, repoPath, path);
+                return;
+            }
+
+            if (File.Exists(path))
+            {
+                var existing = File.ReadAllText(path);
+                if (IsGrayMoonHook(existing))
+                {
+                    if (WithoutMarkerLine(existing) == WithoutMarkerLine(content))
+                        return;
+                }
+                else
+                {
+                    string replacedPath;
+                    try
+                    {
+                        replacedPath = MoveForeignHookAside(path);
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        logger.LogWarning(ex,
+                            "Could not rename the existing Git hook '{Hook}' in {RepoPath}. GrayMoon left it untouched and did not install its own {Hook} hook, so live updates for that Git event will appear only after the next Sync.",
+                            hookName, repoPath, hookName);
+                        return;
+                    }
+
+                    logger.LogWarning(
+                        "Repository {RepoPath} already had its own Git hook '{Hook}'. GrayMoon renamed it to '{ReplacedName}' and installed its own hook. The renamed hook no longer runs (Git only runs files named exactly like the hook); rename it back to restore it.",
+                        repoPath, hookName, Path.GetFileName(replacedPath));
+                }
+            }
+
+            WriteHookFile(path, content, encoding);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning(ex,
+                "Could not install the GrayMoon {Hook} hook for {RepoPath}; live updates for that Git event will appear only after the next Sync.",
+                hookName, repoPath);
+        }
+    }
+
+    private static string MoveForeignHookAside(string path)
+    {
+        var replacedPath = path + ReplacedHookSuffix;
+        if (File.Exists(replacedPath) || Directory.Exists(replacedPath))
+            replacedPath = $"{path}{ReplacedHookSuffix}-{DateTime.UtcNow:yyyyMMddHHmmss}";
+        File.Move(path, replacedPath);
+        return replacedPath;
+    }
+
+    private static bool IsGrayMoonHook(string content)
+    {
+        using var reader = new StringReader(content);
+        var line = reader.ReadLine();
+        if (line is not null && line.StartsWith("#!", StringComparison.Ordinal))
+            line = reader.ReadLine();
+        while (line is not null && string.IsNullOrWhiteSpace(line))
+            line = reader.ReadLine();
+        return line is not null && line.StartsWith(GrayMoonHookMarker, StringComparison.Ordinal);
+    }
+
+    private static string WithoutMarkerLine(string content)
+    {
+        var lines = content.Replace("\r\n", "\n").Split('\n').ToList();
+        var markerIndex = lines.FindIndex(l => l.StartsWith(GrayMoonHookMarker, StringComparison.Ordinal));
+        if (markerIndex >= 0)
+            lines.RemoveAt(markerIndex);
+        return string.Join('\n', lines);
     }
 
     /// <summary>
-    /// Resolves the hooks directory that Git will actually execute for <paramref name="repoPath"/>.
-    /// For a normal checkout, <c>.git</c> is a directory and this is simply <c>.git/hooks</c>. For a
-    /// linked worktree (a GrayMoon Feature or an external worktree), <c>.git</c> is a *file* containing
-    /// a <c>gitdir:</c> pointer into the common repository's private worktree admin area - hooks are not
-    /// stored there. Hooks live once in the common Git directory and are shared by every linked worktree
-    /// (see design doc &#167;13.1), so this always resolves to the common directory's <c>hooks</c> folder via
-    /// <c>git rev-parse --git-common-dir</c> rather than assuming <c>.git</c> is a directory.
+    /// Resolves the hooks directory that Git will actually execute for <paramref name="repoPath"/> via
+    /// <c>git rev-parse --git-path hooks</c>, which honours <c>core.hooksPath</c>. For a linked worktree
+    /// (a GrayMoon Feature or an external worktree) this is the common Git directory's <c>hooks</c> folder,
+    /// shared by every linked worktree (see design doc &#167;13.1). When <c>core.hooksPath</c> is set and
+    /// resolves outside the common Git directory (husky, lefthook, a shared folder), the configured value
+    /// is returned in <see cref="GitHooksLocation.OutsideGitDirHooksPath"/> and nothing may be written there.
     /// </summary>
-    private async Task<string?> ResolveGitHooksDirectoryAsync(string repoPath, CancellationToken ct)
+    private async Task<GitHooksLocation> ResolveGitHooksLocationAsync(string repoPath, CancellationToken ct)
     {
-        var (exitCode, stdout, _) = await runner.RunAsync(
-            "git",
-            "rev-parse --git-common-dir",
-            repoPath,
-            ct,
-            streamStderrAsStdout: true,
-            mirrorFailureOutputAsStderr: false,
-            intent: GitLockIntent.Read);
+        var (hooksExit, hooksOut, _) = await runner.RunAsync(
+            "git", ["rev-parse", "--git-path", "hooks"], repoPath, null, ct, GitLockIntent.Read);
+        var hooksRaw = hooksOut?.Trim();
+        if (hooksExit != 0 || string.IsNullOrWhiteSpace(hooksRaw))
+            return new GitHooksLocation(null, null);
 
-        if (exitCode != 0 || string.IsNullOrWhiteSpace(stdout))
-            return null;
+        var hooksDir = Path.GetFullPath(Path.Combine(repoPath, hooksRaw));
 
-        var commonDir = stdout.Trim();
-        var fullCommonDir = Path.IsPathRooted(commonDir)
-            ? commonDir
-            : Path.GetFullPath(Path.Combine(repoPath, commonDir));
+        var (configExit, configOut, _) = await runner.RunAsync(
+            "git", ["config", "--get", "core.hooksPath"], repoPath, null, ct, GitLockIntent.Read);
+        var configured = configExit == 0 ? configOut?.Trim() : null;
+        if (string.IsNullOrEmpty(configured))
+            return new GitHooksLocation(hooksDir, null);
 
-        return Path.Combine(fullCommonDir, "hooks");
+        var (commonExit, commonOut, _) = await runner.RunAsync(
+            "git", ["rev-parse", "--git-common-dir"], repoPath, null, ct, GitLockIntent.Read);
+        var commonRaw = commonOut?.Trim();
+        if (commonExit != 0 || string.IsNullOrWhiteSpace(commonRaw))
+            return new GitHooksLocation(null, null);
+
+        var commonDir = Path.GetFullPath(Path.Combine(repoPath, commonRaw));
+        return IsPathInside(hooksDir, commonDir)
+            ? new GitHooksLocation(hooksDir, null)
+            : new GitHooksLocation(hooksDir, configured);
+    }
+
+    private static bool IsPathInside(string path, string parent)
+    {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var separator = Path.DirectorySeparatorChar;
+        var normalizedParent = Path.TrimEndingDirectorySeparator(parent) + separator;
+        var normalizedPath = Path.TrimEndingDirectorySeparator(path) + separator;
+        return normalizedPath.StartsWith(normalizedParent, comparison);
     }
 
     public async Task<(bool Success, IReadOnlyList<GitWorktreeInfo> Worktrees, string? ErrorCode, string? ErrorMessage)> ListWorktreesAsync(
