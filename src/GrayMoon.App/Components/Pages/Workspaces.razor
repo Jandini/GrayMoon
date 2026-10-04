@@ -218,10 +218,14 @@
                 <div class="modal-body">
                     <p class="mb-2">Remove workspace <strong>@workspaceToDelete?.Name</strong>?</p>
                     <p class="mb-0 text-muted">Only the GrayMoon workspace will be removed. Repositories on disk will stay untouched.</p>
+                    @if (deleteBlockedMessage != null)
+                    {
+                        <div class="alert alert-warning mt-3 mb-0" role="alert">@deleteBlockedMessage</div>
+                    }
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" @onclick="CloseDeleteModal">Cancel</button>
-                    <button type="button" class="btn btn-danger" data-default-action @onclick="DeleteWorkspaceAsync" disabled="@isDeleting">
+                    <button type="button" class="btn btn-danger" data-default-action @onclick="DeleteWorkspaceAsync" disabled="@(isDeleting || deleteBlockedMessage != null)">
                         @if (isDeleting)
                         {
                             <span class="spinner-border spinner-border-sm me-2"></span>
@@ -306,6 +310,7 @@
     private int? editingWorkspaceId;
     private string? editingWorkspaceRootPath;
     private bool editingWorkspaceHasFeatures;
+    private string? deleteBlockedMessage;
     private HashSet<int> editingWorkspaceRepositoryIds = new();
     private WorkspaceModel? workspaceToDelete;
     private HashSet<int> selectedRepositoryIds = new();
@@ -614,16 +619,25 @@
             await _deleteModalElement.FocusAsync();
     }
 
-    private void ShowDeleteModal(WorkspaceModel workspace)
+    private async Task ShowDeleteModal(WorkspaceModel workspace)
     {
         workspaceToDelete = workspace;
+        deleteBlockedMessage = null;
         showDeleteModal = true;
+
+        // A Workspace that still has Features cannot be deleted; say so up front instead of after Remove.
+        var features = await FeatureOperations.ListFeaturesAsync(workspace.WorkspaceId);
+        if (features.Count > 0 && workspaceToDelete == workspace)
+        {
+            deleteBlockedMessage = WorkspaceRepository.WorkspaceDeleteBlockedByFeaturesMessage;
+        }
     }
 
     private void CloseDeleteModal()
     {
         showDeleteModal = false;
         workspaceToDelete = null;
+        deleteBlockedMessage = null;
     }
 
     private async Task HandleDeleteModalKeyDown(KeyboardEventArgs e)
@@ -640,7 +654,7 @@
 
     private async Task DeleteWorkspaceAsync()
     {
-        if (workspaceToDelete == null)
+        if (workspaceToDelete == null || deleteBlockedMessage != null)
         {
             return;
         }
@@ -652,6 +666,11 @@
             await WorkspaceRepository.DeleteAsync(workspaceToDelete.WorkspaceId);
             CloseDeleteModal();
             await LoadWorkspacesAsync();
+        }
+        catch (InvalidOperationException ex) when (ex.Message == WorkspaceRepository.WorkspaceDeleteBlockedByFeaturesMessage)
+        {
+            // A Feature was created after the dialog opened; keep the dialog open and explain.
+            deleteBlockedMessage = ex.Message;
         }
         catch (Exception ex)
         {

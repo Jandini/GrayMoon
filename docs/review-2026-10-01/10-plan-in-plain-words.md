@@ -118,13 +118,11 @@ GrayMoon stays a tool without accounts or passwords. These steps stop other prog
 
 GrayMoon puts small Git hooks in your repos so the grid updates when you commit from a terminal. Background in [07-appendix-why-lane-g-hooks.md](07-appendix-why-lane-g-hooks.md).
 
-**G1 Never overwrite your own hooks.** If a repo uses its own hooks (husky, lefthook, or a hook you wrote), GrayMoon leaves them alone and shows a warning icon explaining that changes made outside GrayMoon appear after the next Sync. GrayMoon also stops rewriting its hook files on every Sync. *You will notice a warning icon on such repos. Your hooks stay untouched.*
+**G1 Your own hooks are set aside, not deleted.** If a repo already has a hook of its own (not GrayMoon's), GrayMoon renames it to `<hook>.replaced-by-graymoon` and writes its own, and logs a warning in the Worker log. Nothing is shown in the app. A repo using `core.hooksPath` (husky, lefthook) is left alone. GrayMoon also stops rewriting its hook files on every Sync. *Caution: a renamed hook of yours no longer runs until you rename it back. Chaining your hook with GrayMoon's is a later idea.*
 
-**G2 The Worker can remove GrayMoon's hooks.** It deletes only GrayMoon's own hook files, for the right Workspace. *You will notice nothing yet.*
+**G2, G3, G4 (removing hooks when a repo leaves a Workspace, and cleaning up old ones) moved out of this plan.** They are general Workspace housekeeping, not worktree work, and live in [12-hook-cleanup-plan.md](12-hook-cleanup-plan.md), to be done after the worktree release. *Until then, repos you remove keep their old GrayMoon hooks.*
 
-**G3 Hooks are removed when a repo leaves.** When you remove repos from a Workspace, delete a Workspace or a connector, GrayMoon removes its hooks from those folders in the background. Deleting a Workspace that still has Features is refused ("Remove the Features first"). *You will notice repos you removed no longer trigger GrayMoon.*
-
-**G4 Old hooks clean themselves up.** If a hook from a removed repo still fires (for example, the Worker was off), GrayMoon removes it the first time it fires. *You will notice fewer repeated warnings in the log.*
+**B7 You cannot delete a Workspace that still has Features.** Remove Workspace says "Remove the Features first, then delete the Workspace." and the Remove button stays disabled until the Features are gone. This part was pulled back from the hook plan into the worktree release. *You will notice it only if you try to delete a Workspace that has Features.*
 
 ---
 
@@ -152,7 +150,7 @@ Background in [09-switch-branch-in-feature-analysis.md](09-switch-branch-in-feat
 
 **R1 Documentation.** A user guide for Features, a troubleshooting page (including a manual cleanup recipe and how to go back to the previous version), an operations page for Docker and settings, and a changelog. The old design docs get a "superseded" banner. Worktrees are marked "Preview" until the final gate passes.
 
-**R2 Off switch.** A setting can hide Feature creation and the Features section, without a code change. The Workspace keeps working as normal.
+**R2 Off switch.** Dropped (owner, 2026-10-04). Features are part of GrayMoon, so there is no setting to hide them.
 
 **R3 Version check.** An automatic test checks that GrayMoon calculates the same versions as GitVersion on a real checkout. If it does not, you are told, and it becomes a new task.
 

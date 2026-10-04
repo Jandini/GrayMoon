@@ -126,6 +126,8 @@ public sealed class WorkspaceRepository(
         await transaction.CommitAsync();
     }
 
+    public const string WorkspaceDeleteBlockedByFeaturesMessage = "Remove the Features first, then delete the Workspace.";
+
     public async Task DeleteAsync(int workspaceId)
     {
         var workspace = await _dbContext.Workspaces
@@ -134,6 +136,13 @@ public sealed class WorkspaceRepository(
         if (workspace == null)
         {
             return;
+        }
+
+        // Deleting the Workspace would drop its Feature rows while their worktrees, branches and
+        // features\<name> folders stay on disk with nothing left in GrayMoon to clean them.
+        if (await _dbContext.WorkspaceFeatures.AnyAsync(f => f.WorkspaceId == workspaceId))
+        {
+            throw new InvalidOperationException(WorkspaceDeleteBlockedByFeaturesMessage);
         }
 
         _dbContext.Workspaces.Remove(workspace);

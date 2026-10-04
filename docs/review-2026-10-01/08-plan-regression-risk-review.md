@@ -15,7 +15,7 @@ These are the flows a Workspace-only user relies on today. They are the scope of
 | W3 | Sync (single repo and all) updates versions, branches and ahead/behind | G1 (hooks written during Sync), B4 |
 | W4 | Live updates after commit, checkout, pull or push outside GrayMoon | G1 |
 | W5 | Branch: switch all, create, switch single, Return to Default | B4 (bulk switch), A2 (external-worktree cleanup in Switch Branch), I2 (occupancy), I3 (service guard) |
-| W5b | Edit Workspace (rename, root change, add or remove repositories), Delete Workspace, connector refresh and delete | B5 (keep Feature repositories on refresh, refuse connector delete), B6 (no partial save, rename blocked while Features exist), G3 (unhook after removal, Feature guard on delete) |
+| W5b | Edit Workspace (rename, root change, add or remove repositories), Delete Workspace, connector refresh and delete | B5 (keep Feature repositories on refresh, refuse connector delete), B6 (no partial save, rename blocked while Features exist), B7 (Feature guard on Workspace delete), G3 (unhook after removal; moved to `12-hook-cleanup-plan.md`) |
 | W6 | Git Changes: view, stage, commit, discard | D2 (watcher stop) |
 | W7 | Update Dependencies, Push (with levels), Undo Push, Prepare | B3, B4 (push plan) |
 | W8 | Pull requests: create, badges, merge | A3, E2 (header button) |
@@ -131,7 +131,7 @@ Correction to the first version of `06`: F3 said the hook scripts post to `/api/
 | R-G2 | G2 | Unhook deletes a user's hook, or GrayMoon hooks that another Workspace wrote into the same folder later (for example a Workspace deleted and re-created with the same root and name). (L/M) | W4 in the other Workspace | Delete only files with the GrayMoon marker **and** a payload naming the requested `workspaceId`; everything else is skipped and reported. Tests cover both payload styles (0.1.0 and current). |
 | R-G3a | G3 | Unhooking is wired into Edit Workspace, Delete Workspace and connector refresh. A slow or offline Worker could make those actions slow or fail. (M/H) | W1, everyday workspace editing | Unhook runs after the database commit, in the background, with a 30 s timeout per repo, and only logs. The user's action never waits for it or fails because of it. Characterization tests pin today's removal results. |
 | R-G3b | G3 | Wrong targets: repositories that stay in the Workspace are unhooked, so their live updates stop. (L/H) | W4 | Targets are only the rows being deleted (`toRemove`, the deleted Workspace's links, the dropped connector repositories), collected before the transaction. A test asserts no call for repositories that stay. Sync re-hooks any repository anyway. |
-| R-G3c | G3 | The new "Remove the Features first" guard on Workspace delete surprises users who could delete before. (M/L) | Delete Workspace | Intended fix (deleting with Features orphaned worktrees on disk); same rule already applies to editing membership. Clear message plus Desktop README bullet. |
+| R-G3c | B7 (was G3) | The new "Remove the Features first" guard on Workspace delete surprises users who could delete before. (M/L) | Delete Workspace | Intended fix (deleting with Features orphaned worktrees on disk); same rule already applies to editing membership. Clear message plus Desktop README bullet. |
 | R-G4 | G4 | Self-heal unhooks a repository that is still in use: a transient DB failure looks like "not found", or the repo was re-added a moment ago. (L/H) | W4 | Unhook only when a fresh query **succeeds** and finds no link; never on query errors. A re-added repo has a link, so it is never touched. G2's `workspaceId` check is the second safety net. At most once per path per hour. |
 
 ### Lane I
@@ -149,7 +149,7 @@ Correction to the first version of `06`: F3 said the hook scripts post to `/api/
 | ID | Unit | Risk | Workspace impact | Mitigation |
 |---|---|---|---|---|
 | R-H1 | H1 | Information-level logging per repo floods logs on big Workspaces. (L/L) | none | Information per operation, Debug per repo, Warning per failure. |
-| R-R2 | R2 | The kill switch hides the whole context selector, including the Workspace entry. (L/M) | navigation | It hides only the Features section and the create button. Test with Features disabled: the Workspace page works unchanged. |
+| R-R2 | R2 | ~~The kill switch hides the whole context selector, including the Workspace entry.~~ Not applicable: R2 was dropped (owner, 2026-10-04, DEC-6 = No). | n/a | No kill switch is built, so this risk no longer exists. |
 
 ## 4. Workspace smoke test (run at every gate, after the gate's own steps)
 
