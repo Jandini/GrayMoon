@@ -221,6 +221,11 @@ try
     builder.Services.AddSingleton<ITokenEncryptionKeyProvider, TokenEncryptionKeyProvider>();
     builder.Services.AddSingleton<ITokenProtector, AesGcmTokenProtector>();
 
+    // Worker secret (F2) and one-time pairing codes
+    builder.Services.AddSingleton<IWorkerSecretSeenStore, DbWorkerSecretSeenStore>();
+    builder.Services.AddSingleton<WorkerSecretService>();
+    builder.Services.AddSingleton<WorkerPairingService>();
+
     // Background services
     builder.Services.AddSingleton<SyncBackgroundService>();
     builder.Services.AddHostedService(sp => sp.GetRequiredService<SyncBackgroundService>());
@@ -284,6 +289,8 @@ try
         var keyProvider = services.GetRequiredService<ITokenEncryptionKeyProvider>();
         await TokenReencryptionService.ReencryptLegacyTokensAsync(dbContext, tokenProtector, keyProvider, app.Logger);
 
+        await services.GetRequiredService<WorkerSecretService>().InitializeAsync();
+
         await dbContext.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;");
         await dbContext.Database.ExecuteSqlRawAsync("PRAGMA busy_timeout=5000;");
         await dbContext.Database.ExecuteSqlRawAsync("PRAGMA synchronous=NORMAL;");
@@ -314,6 +321,8 @@ try
 
     // F3: cross-site/rebinding check, before routing reaches any API endpoint or hub.
     app.UseMiddleware<RequestSecurityMiddleware>();
+    // F2: Worker secret on /hub/agent and /repos/{id}/connector.
+    app.UseMiddleware<WorkerSecretMiddleware>();
 
     app.UseStaticFiles();
     app.UseAntiforgery();

@@ -919,9 +919,44 @@ may be reached by host name or LAN IP.
 Git hooks post to the **Worker's** local listener (`127.0.0.1:<port>/hook/*`), not to the App, so they are
 outside this middleware.
 
+### Worker secret (`/hub/agent`, `/repos/{id}/connector`)
+
+Only the real Worker may open the Worker hub connection or fetch a connector token.
+
+```text
+secret: generated on first start, kept in graymoon-worker.secret next to the database
+  (plain text; file mode 600 on Linux; if the file is missing at startup a new secret is generated)
+header: X-GrayMoon-Worker-Secret, sent by the Worker on the hub connection and on the connector request
+wrong secret                      -> 401, always (constant-time comparison)
+missing secret                    -> accepted with a warning, UNLESS
+                                     Security:RequireWorkerSecret is true, or
+                                     some Worker has already presented the correct secret
+                                     (setting Security:WorkerSecretSeen), then 401
+/repos/{id}/connector with any Origin header -> 403 (the Worker never sends one)
+```
+
+How a Worker gets the secret (the install script returned by `GET /api/worker/install` never contains it):
+
+```text
+GrayMoon Desktop   the elevated installer copies the secret file to %ProgramData%\GrayMoon\worker.secret
+manual / Docker    GrayMoon > Worker shows a one-time pairing code (valid 10 minutes, works once,
+                   discarded after 5 wrong attempts); the install script asks for it and calls
+                   POST /api/worker/pair { "code": "..." }  ->  { "secret": "..." }  (401 if wrong or expired;
+                   403 if the request has an Origin header)
+```
+
+The Worker reads the secret from the `GRAYMOON_WORKER_SECRET` environment variable, then from
+`worker.secret` under its machine-wide GrayMoon data folder (`%ProgramData%\GrayMoon` on Windows). The file
+sits outside the install folder so a Worker update keeps it. A Worker installed before this feature keeps
+working without a secret (the App shows "Reinstall the Worker to finish securing GrayMoon") until a Worker
+has connected with the secret, or `Security:RequireWorkerSecret` is set.
+
 ### Implementation
 
 ```text
 RequestSecurityMiddleware
-SecurityOptions (Security:AllowedOrigins)
+WorkerSecretMiddleware / WorkerSecretService / WorkerPairingService
+SecurityOptions (Security:AllowedOrigins, Security:RequireWorkerSecret)
+Worker: WorkerSecretProvider, SignalRConnectionHostedService, AgentTokenProvider
+Desktop: WorkerInstaller (secret hand-off)
 ```

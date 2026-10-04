@@ -16,4 +16,11 @@ public sealed class SecurityOptions
     /// behind a reverse proxy allow their public hostname without opening GrayMoon to every site.
     /// </summary>
     public string[] AllowedOrigins { get; init; } = [];
+
+    /// <summary>
+    /// When true, the hub connection and the connector token endpoint reject a Worker that presents no
+    /// secret (F2). When false (the v1 default), an already-installed Worker without a secret is still
+    /// accepted until some Worker has proved it has one; see <see cref="WorkerSecretMiddleware"/>.
+    /// </summary>
+    public bool RequireWorkerSecret { get; init; }
 }

@@ -32,6 +32,7 @@ public sealed class SignalRConnectionHostedService(
     IDiffJobQueue diffJobQueue,
     CommandJobFactory commandJobFactory,
     CommandJobCancellationRegistry cancellationRegistry,
+    IWorkerSecretProvider workerSecretProvider,
     IOptions<AgentOptions> options,
     ILogger<SignalRConnectionHostedService> logger) : IHostedService, IAsyncDisposable
 {
@@ -71,8 +72,16 @@ public sealed class SignalRConnectionHostedService(
     {
         _hostCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
+        var workerSecret = workerSecretProvider.GetSecret();
+        if (string.IsNullOrEmpty(workerSecret))
+            logger.LogWarning("No worker secret is configured. Connecting without one; reinstall the Worker from GrayMoon > Worker to finish securing GrayMoon.");
+
         _connection = new HubConnectionBuilder()
-            .WithUrl(_options.AppHubUrl)
+            .WithUrl(_options.AppHubUrl, httpOptions =>
+            {
+                if (!string.IsNullOrEmpty(workerSecret))
+                    httpOptions.Headers[WorkerSecretHeader.Name] = workerSecret;
+            })
             .WithAutomaticReconnect(new FiveSecondRetryPolicy())
             .AddJsonProtocol(options =>
             {

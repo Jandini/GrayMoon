@@ -1,5 +1,7 @@
 @using GrayMoon.App.Services
 @using GrayMoon.Abstractions.Agent
+@using GrayMoon.App.Services.Security
+@inject WorkerSecretService WorkerSecret
 @inject AgentConnectionTracker AgentConnectionTracker
 @inject AgentQueueStateService AgentQueueStateService
 @inject IAgentBridge AgentBridge
@@ -89,7 +91,8 @@ else
         : State switch
         {
             AgentConnectionState.VersionMismatch => $"Worker version mismatch. Worker version: {AgentSemVer ?? "unknown"}. Click to update.",
-            AgentConnectionState.Online => AgentQueueStateService.GetTotalPendingCount() > 0 ? "Worker is running tasks" : "Worker connection status:  online",
+            AgentConnectionState.Online => (AgentQueueStateService.GetTotalPendingCount() > 0 ? "Worker is running tasks" : "Worker connection status:  online")
+                + (WorkerSecret.UnsecuredWorkerConnected ? ". Reinstall the Worker to finish securing GrayMoon." : string.Empty),
             AgentConnectionState.Offline => "Worker connection status:  offline",
             AgentConnectionState.Connecting => "Worker connection status:  connecting",
             _ => "Worker connection status:  unknown"
