@@ -1641,6 +1641,9 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             logger.LogInformation("Created worktree parent directory: {Path}", parent);
         }
 
+        // Feature worktrees live deeper than Workspace checkouts; allow paths over 260 characters on Windows.
+        await EnsureLongPathsAsync(mainRepositoryPath, ct);
+
         // Offline-safe: start from local commit SHA; never --force for normal creation.
         string[] addArgs = detach
             ? ["worktree", "add", "--detach", canonicalWorktreePath, baseCommitSha]
@@ -1677,6 +1680,45 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             "Git worktree created for {RepoPath}. Branch={Branch}, Path={WorktreePath}, Head={Head}",
             mainRepositoryPath, created.BranchName, created.WorktreePath, created.HeadSha);
         return (true, created, false, null, null);
+    }
+
+    /// <summary>
+    /// On Windows, makes sure <c>core.longpaths</c> is <c>true</c> for the repository (which every linked
+    /// worktree shares), so Feature worktrees with deep trees (for example <c>node_modules</c>) can be
+    /// checked out, used and removed past the 260-character limit. The value is written to the repository's
+    /// own config (not global, not per-worktree) and only when it is not already <c>true</c> there, so it is
+    /// written at most once. Does nothing on other operating systems. Never throws: a failure is logged and
+    /// the caller carries on.
+    /// </summary>
+    internal async Task EnsureLongPathsAsync(string repositoryPath, CancellationToken ct)
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        try
+        {
+            var (getExit, getOut, _) = await runner.RunAsync(
+                "git", ["config", "--local", "--get", "core.longpaths"], repositoryPath, null, ct, GitLockIntent.Read);
+            if (getExit == 0 && string.Equals(getOut?.Trim(), "true", StringComparison.OrdinalIgnoreCase))
+                return;
+
+            var (setExit, setOut, setErr) = await runner.RunAsync(
+                "git", ["config", "--local", "core.longpaths", "true"], repositoryPath, null, ct);
+            if (setExit != 0)
+            {
+                logger.LogWarning(
+                    "Could not set core.longpaths for {RepoPath}; very long paths in Feature worktrees may fail. {Error}",
+                    repositoryPath, CombineOutput(setOut, setErr));
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not set core.longpaths for {RepoPath}", repositoryPath);
+        }
     }
 
     public async Task<(bool Success, bool AlreadyRemoved, string? ErrorCode, string? ErrorMessage, WorktreeResidueResult Residue)> RemoveWorktreeAsync(
@@ -1738,6 +1780,9 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
                     canonicalWorktreePath, CombineOutput(unlockStdout, unlockStderr));
             }
         }
+
+        // Also covers Features created before long-path support was added.
+        await EnsureLongPathsAsync(mainRepositoryPath, ct);
 
         var args = force
             ? new[] { "worktree", "remove", "--force", canonicalWorktreePath }
