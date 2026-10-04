@@ -105,11 +105,20 @@ public sealed class WorkspaceBranchOperations(
                     }
 
                     // Feature branch may not yet be in shared RepositoryBranches (until Fetch).
-                    if (!string.IsNullOrWhiteSpace(currentBranch)
-                        && !localBranches.Contains(currentBranch, StringComparer.OrdinalIgnoreCase))
+                    AddLocalBranch(localBranches, currentBranch);
+
+                    // The App cannot see whether the branch still exists, so it is offered whenever the Feature
+                    // repository has a live worktree and is not pinned to a tag.
+                    var featureRepository = await db.WorkspaceFeatureRepositories
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(
+                            r => r.WorkspaceFeatureContextId == cid.Value
+                                 && r.WorkspaceRepositoryId == wr.WorkspaceRepositoryId,
+                            cancellationToken);
+                    if (featureRepository is { State: WorkspaceFeatureRepositoryState.Ready or WorkspaceFeatureRepositoryState.NeedsRepair }
+                        && info.FeatureName is { } featureName)
                     {
-                        localBranches.Add(currentBranch);
-                        localBranches.Sort(StringComparer.OrdinalIgnoreCase);
+                        AddLocalBranch(localBranches, FeatureBranchPolicy.ExpectedBranch(featureName, featureRepository.PinnedTag));
                     }
                 }
             }
@@ -138,6 +147,15 @@ public sealed class WorkspaceBranchOperations(
             logger.LogError(ex, "Error getting branches for repository {RepositoryId}", repositoryId);
             return BranchHttpOutcome.Problem("An error occurred while getting branches", 500);
         }
+    }
+
+    private static void AddLocalBranch(List<string> localBranches, string? branchName)
+    {
+        if (string.IsNullOrWhiteSpace(branchName) || localBranches.Contains(branchName, StringComparer.OrdinalIgnoreCase))
+            return;
+
+        localBranches.Add(branchName);
+        localBranches.Sort(StringComparer.OrdinalIgnoreCase);
     }
 
     public async Task<BranchHttpOutcome> RefreshBranchesAsync(int workspaceId, WorkspaceFeatureContextId contextId, int repositoryId, CancellationToken cancellationToken = default)
