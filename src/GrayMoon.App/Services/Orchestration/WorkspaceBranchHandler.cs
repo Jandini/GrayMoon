@@ -14,6 +14,7 @@ public sealed class WorkspaceBranchHandler(
     IServiceScopeFactory serviceScopeFactory,
     IWorkspaceBranchOperations branchOperations,
     IWorkspaceBranchOccupancyService branchOccupancyService,
+    IFeatureBranchGuard featureBranchGuard,
     ILogger<WorkspaceBranchHandler> logger)
 {
     private const int DefaultMaxParallelOperations = 16;
@@ -226,6 +227,15 @@ public sealed class WorkspaceBranchHandler(
     {
         if (workspaceRepositoryIdsByRepositoryId.Count == 0)
             return WorkspaceBranchBulkResult.Empty;
+
+        // A Feature keeps every repository on its own branch; the header hides bulk actions there, so this is defence only.
+        var refusal = await featureBranchGuard.CheckAsync(
+            contextId, repositoryId: 0, FeatureBranchAction.CreateBranch, branchName, isTag: false, cancellationToken);
+        if (refusal != null)
+        {
+            var refused = workspaceRepositoryIdsByRepositoryId.Keys.ToDictionary(id => id, _ => refusal);
+            return new WorkspaceBranchBulkResult(0, refused.Count, refused);
+        }
 
         var errors = new ConcurrentDictionary<int, string>();
         var occupancyCheckDegraded = false;

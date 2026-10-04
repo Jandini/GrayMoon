@@ -138,6 +138,7 @@ try
     builder.Services.AddScoped<IWorkspaceExternalWorktreeOperations, WorkspaceExternalWorktreeOperations>();
     builder.Services.AddScoped<IWorkspaceNativeLaunchService, WorkspaceNativeLaunchService>();
     builder.Services.AddScoped<IWorkspaceBranchOccupancyService, WorkspaceBranchOccupancyService>();
+    builder.Services.AddScoped<IFeatureBranchGuard, FeatureBranchGuard>();
     builder.Services.AddScoped<WorkspaceGitService>();
     builder.Services.AddScoped<ConnectorHealthService>();
     builder.Services.AddScoped<HomeNavAttentionMonitor>();

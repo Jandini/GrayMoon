@@ -114,6 +114,7 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddScoped<WorkspaceSyncHandler>();
         services.AddScoped<SyncCommandHandler>();
         services.AddScoped<WorkspaceBranchUpdateHandler>();
+        services.AddScoped<IFeatureBranchGuard, FeatureBranchGuard>();
         services.AddScoped<IWorkspaceBranchOperations, WorkspaceBranchOperations>();
 
         // Last registration wins for GetRequiredService; tests can replace path resolution, etc.

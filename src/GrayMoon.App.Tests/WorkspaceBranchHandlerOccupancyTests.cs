@@ -97,9 +97,31 @@ public sealed class WorkspaceBranchHandlerOccupancyTests
         Assert.False(result.OccupancyCheckDegraded);
     }
 
+    [Fact]
+    public async Task CheckoutBranchForWorkspaceAsync_refuses_the_whole_call_in_a_Feature_context_without_attempting_any_checkout()
+    {
+        var branchOperations = new FakeWorkspaceBranchOperations();
+        var handler = CreateHandler(branchOperations, new FakeBranchOccupancyService(), new RefuseAllFeatureBranchGuard());
+
+        var result = await handler.CheckoutBranchForWorkspaceAsync(
+            WorkspaceId,
+            new WorkspaceFeatureContextId(2),
+            new Dictionary<int, int> { [100] = 10, [101] = 11 },
+            BranchName,
+            reportProgress: null,
+            CancellationToken.None);
+
+        Assert.Empty(branchOperations.AttemptedRepositoryIds);
+        Assert.Equal(0, result.SuccessCount);
+        Assert.Equal(2, result.FailureCount);
+        Assert.Equal(FeatureBranchPolicy.CreateBranchMessage, result.ErrorsByRepositoryId[100]);
+        Assert.Equal(FeatureBranchPolicy.CreateBranchMessage, result.ErrorsByRepositoryId[101]);
+    }
+
     private static WorkspaceBranchHandler CreateHandler(
         FakeWorkspaceBranchOperations branchOperations,
-        FakeBranchOccupancyService occupancy)
+        FakeBranchOccupancyService occupancy,
+        IFeatureBranchGuard? guard = null)
     {
         var services = new ServiceCollection();
         services.AddSingleton<IWorkspaceBranchOperations>(branchOperations);
@@ -109,7 +131,20 @@ public sealed class WorkspaceBranchHandlerOccupancyTests
             provider.GetRequiredService<IServiceScopeFactory>(),
             branchOperations,
             occupancy,
+            guard ?? new AllowAllFeatureBranchGuard(),
             NullLogger<WorkspaceBranchHandler>.Instance);
+    }
+
+    private sealed class AllowAllFeatureBranchGuard : IFeatureBranchGuard
+    {
+        public Task<string?> CheckAsync(WorkspaceFeatureContextId contextId, int repositoryId, FeatureBranchAction action, string? target, bool isTag, CancellationToken cancellationToken = default)
+            => Task.FromResult<string?>(null);
+    }
+
+    private sealed class RefuseAllFeatureBranchGuard : IFeatureBranchGuard
+    {
+        public Task<string?> CheckAsync(WorkspaceFeatureContextId contextId, int repositoryId, FeatureBranchAction action, string? target, bool isTag, CancellationToken cancellationToken = default)
+            => Task.FromResult<string?>(FeatureBranchPolicy.Evaluate(action, "feature-x", null, target, isTag));
     }
 
     private sealed class FakeBranchOccupancyService : IWorkspaceBranchOccupancyService

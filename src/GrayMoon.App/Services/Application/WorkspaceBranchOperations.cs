@@ -5,6 +5,7 @@ using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
+using GrayMoon.App.Services.Features;
 using GrayMoon.Application.Features;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -24,6 +25,7 @@ public sealed class WorkspaceBranchOperations(
     WorkspaceBranchUpdateHandler updateHandler,
     IWorkspaceFeatureContextResolver contextResolver,
     IWorkspaceContextPathResolver pathResolver,
+    IFeatureBranchGuard featureBranchGuard,
     ILogger<WorkspaceBranchOperations> logger) : IWorkspaceBranchOperations
 {
     public Task<BranchHttpOutcome> GetBranchesAsync(int workspaceId, int repositoryId, CancellationToken cancellationToken = default)
@@ -215,6 +217,10 @@ public sealed class WorkspaceBranchOperations(
         if (workspaceId <= 0 || repositoryId <= 0 || string.IsNullOrWhiteSpace(branchName))
             return BranchHttpOutcome.BadRequest("workspaceId, repositoryId, and branchName are required.");
 
+        var refusal = await featureBranchGuard.CheckAsync(contextId, repositoryId, FeatureBranchAction.Checkout, branchName, isTag, cancellationToken);
+        if (refusal != null)
+            return BranchHttpOutcome.BadRequest(refusal);
+
         var resolved = await TryResolveLinkedRepoAsync(workspaceId, repositoryId, requireAgent: true, cancellationToken);
         if (resolved.Error != null)
             return resolved.Error;
@@ -245,11 +251,14 @@ public sealed class WorkspaceBranchOperations(
                 if (!tagSuccess)
                     return BranchHttpOutcome.Ok(new CheckoutBranchApiResult(false, tagError));
 
+                var checkedOutTag = tagCheckout?.CurrentTag ?? branchName.Trim();
                 await stateWriter.ApplyAsync(contextId, workspaceId, repositoryId, new RepositoryStateSnapshot
                 {
-                    CheckedOutTag = tagCheckout?.CurrentTag ?? branchName.Trim(),
+                    CheckedOutTag = checkedOutTag,
                     IdentityProbed = true,
                 }, new RepositoryStateWriteOptions { ReconcilePullRequest = true });
+
+                await UpdateFeaturePinnedTagAsync(contextId, wr.WorkspaceRepositoryId, checkedOutTag, cancellationToken);
 
                 await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
 
@@ -310,6 +319,10 @@ public sealed class WorkspaceBranchOperations(
     {
         if (workspaceId <= 0 || repositoryId <= 0 || string.IsNullOrWhiteSpace(currentBranchName))
             return BranchHttpOutcome.BadRequest("workspaceId, repositoryId, and currentBranchName are required.");
+
+        var refusal = await featureBranchGuard.CheckAsync(contextId, repositoryId, FeatureBranchAction.ReturnToDefault, currentBranchName, isTag: false, cancellationToken);
+        if (refusal != null)
+            return BranchHttpOutcome.BadRequest(refusal);
 
         var resolved = await TryResolveLinkedRepoAsync(workspaceId, repositoryId, requireAgent: true, cancellationToken);
         if (resolved.Error != null)
@@ -465,6 +478,10 @@ public sealed class WorkspaceBranchOperations(
         newBranchName = newBranchName?.Trim();
         if (workspaceId <= 0 || repositoryId <= 0 || string.IsNullOrWhiteSpace(newBranchName))
             return BranchHttpOutcome.BadRequest("workspaceId, repositoryId, and newBranchName are required.");
+
+        var refusal = await featureBranchGuard.CheckAsync(contextId, repositoryId, FeatureBranchAction.CreateBranch, newBranchName, isTag: false, cancellationToken);
+        if (refusal != null)
+            return BranchHttpOutcome.BadRequest(refusal);
 
         var resolved = await TryResolveLinkedRepoAsync(workspaceId, repositoryId, requireAgent: true, cancellationToken);
         if (resolved.Error != null)
@@ -722,6 +739,21 @@ public sealed class WorkspaceBranchOperations(
             return BranchHttpOutcome.Problem("An error occurred while updating branch from default", 500);
 
         return BranchHttpOutcome.Problem(err, 500);
+    }
+
+    /// <summary>A pinned-tag repository that moves to another tag in a Feature keeps its pin on the new tag. A repository without a pin is never given one.</summary>
+    private async Task UpdateFeaturePinnedTagAsync(
+        WorkspaceFeatureContextId contextId,
+        int workspaceRepositoryId,
+        string tagName,
+        CancellationToken cancellationToken)
+    {
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        await db.WorkspaceFeatureRepositories
+            .Where(r => r.WorkspaceFeatureContextId == contextId.Value
+                        && r.WorkspaceRepositoryId == workspaceRepositoryId
+                        && r.PinnedTag != null)
+            .ExecuteUpdateAsync(s => s.SetProperty(r => r.PinnedTag, tagName), cancellationToken);
     }
 
     private async Task<(BranchHttpOutcome? Error, Workspace? Workspace, Repository? Repo, WorkspaceRepositoryLink? Link)> TryResolveLinkedRepoAsync(

@@ -110,8 +110,15 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     {
         if (!_isFeatureContext || _selectedFeatureName is null || _switchBranchModal.RepositoryId <= 0)
             return null;
-        var pinnedTag = TryGetLink(_switchBranchModal.RepositoryId)?.CheckedOutTag;
-        return FeatureBranchPolicy.ExpectedBranch(_selectedFeatureName, pinnedTag);
+        return FeatureBranchPolicy.ExpectedBranch(_selectedFeatureName, GetSwitchBranchModalPinnedTag());
+    }
+
+    /// <summary>The tag the Switch Branch dialog's repository is pinned to in the viewed Feature; null in the Workspace or when it is on its Feature branch (I3).</summary>
+    private string? GetSwitchBranchModalPinnedTag()
+    {
+        if (!_isFeatureContext || _switchBranchModal.RepositoryId <= 0)
+            return null;
+        return TryGetLink(_switchBranchModal.RepositoryId)?.CheckedOutTag;
     }
 
     private async Task OnSelectedContextChangedAsync(WorkspaceFeatureContextId contextId)

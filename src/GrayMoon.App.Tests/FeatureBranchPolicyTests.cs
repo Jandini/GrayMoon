@@ -25,4 +25,36 @@ public sealed class FeatureBranchPolicyTests
     {
         Assert.Equal(expected, FeatureBranchPolicy.IsOffFeatureBranch(expectedBranch, currentBranch));
     }
+
+    [Theory]
+    // Branch checkout: only the expected branch is allowed.
+    [InlineData(FeatureBranchAction.Checkout, "feat-a", null, "feat-a", false, true)]
+    [InlineData(FeatureBranchAction.Checkout, "feat-a", null, "main", false, false)]
+    [InlineData(FeatureBranchAction.Checkout, "feat-a", null, "Feat-A", false, false)]
+    // A repository pinned to a tag has no expected branch, so no branch is allowed.
+    [InlineData(FeatureBranchAction.Checkout, null, "1.0.0", "feat-a", false, false)]
+    // Tag checkout: only for a pinned repository.
+    [InlineData(FeatureBranchAction.Checkout, null, "1.0.0", "2.0.0", true, true)]
+    [InlineData(FeatureBranchAction.Checkout, "feat-a", null, "2.0.0", true, false)]
+    // Create and Return to Default are never allowed.
+    [InlineData(FeatureBranchAction.CreateBranch, "feat-a", null, "other", false, false)]
+    [InlineData(FeatureBranchAction.ReturnToDefault, "feat-a", null, "feat-a", false, false)]
+    public void Evaluate_allows_only_actions_that_keep_the_repository_on_its_Feature_branch(
+        FeatureBranchAction action, string? expectedBranch, string? pinnedTag, string? target, bool isTag, bool allowed)
+    {
+        var message = FeatureBranchPolicy.Evaluate(action, expectedBranch, pinnedTag, target, isTag);
+
+        Assert.Equal(allowed, message is null);
+    }
+
+    [Fact]
+    public void Evaluate_uses_the_documented_messages()
+    {
+        Assert.Equal(FeatureBranchPolicy.TagNotPinnedMessage,
+            FeatureBranchPolicy.Evaluate(FeatureBranchAction.Checkout, "feat-a", null, "1.0.0", isTag: true));
+        Assert.Equal(FeatureBranchPolicy.CreateBranchMessage,
+            FeatureBranchPolicy.Evaluate(FeatureBranchAction.CreateBranch, "feat-a", null, "x", isTag: false));
+        Assert.Equal("Return to Default is a Workspace action.",
+            FeatureBranchPolicy.Evaluate(FeatureBranchAction.ReturnToDefault, "feat-a", null, null, isTag: false));
+    }
 }

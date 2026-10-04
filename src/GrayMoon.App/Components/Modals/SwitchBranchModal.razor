@@ -81,15 +81,18 @@
                                             Tags
                                         </button>
                                     </li>
-                                    <li class="nav-item" role="presentation">
-                                        <button class="nav-link @(activeTab == "newbranch" ? "active" : "")"
-                                                type="button"
-                                                role="tab"
-                                                disabled="@isRefreshing"
-                                                @onclick='() => SetActiveTab("newbranch")'>
-                                            New Branch
-                                        </button>
-                                    </li>
+                                    @if (!IsFeatureContext)
+                                    {
+                                        <li class="nav-item" role="presentation">
+                                            <button class="nav-link @(activeTab == "newbranch" ? "active" : "")"
+                                                    type="button"
+                                                    role="tab"
+                                                    disabled="@isRefreshing"
+                                                    @onclick='() => SetActiveTab("newbranch")'>
+                                                New Branch
+                                            </button>
+                                        </li>
+                                    }
                                 </ul>
                             </div>
                         </div>
@@ -271,7 +274,13 @@
                                                     else
                                                     {
                                                         <div class="d-flex align-items-center justify-content-between">
-                                                            <span class="text-danger small">@deleteConfirmMessage</span>
+                                                            <span class="text-danger small">
+                                                                @deleteConfirmMessage
+                                                                @if (IsFeatureContext)
+                                                                {
+                                                                    <span class="d-block text-muted">@SharedBranchDeleteNotice</span>
+                                                                }
+                                                            </span>
                                                             <div class="d-flex gap-2 flex-shrink-0">
                                                                 <button type="button" class="btn btn-danger btn-sm" @onclick="ProceedWithDeleteAsync" disabled="@(isDeleting || isRefreshing)" @onclick:stopPropagation="true">
                                                                     @if (isDeleting)
@@ -407,7 +416,13 @@
                                             @if (branchToDelete == branch && deleteIsRemote)
                                             {
                                                 <div class="branch-delete-confirm d-flex align-items-center justify-content-between px-2 py-2" @ref="deleteConfirmElementRef">
-                                                    <span class="text-danger small">@deleteConfirmMessage</span>
+                                                    <span class="text-danger small">
+                                                        @deleteConfirmMessage
+                                                        @if (IsFeatureContext)
+                                                        {
+                                                            <span class="d-block text-muted">@SharedBranchDeleteNotice</span>
+                                                        }
+                                                    </span>
                                                     <div class="d-flex gap-2 flex-shrink-0">
                                                         <button type="button" class="btn btn-danger btn-sm" @onclick="ProceedWithDeleteAsync" disabled="@(isDeleting || isRefreshing)" @onclick:stopPropagation="true">
                                                             @if (isDeleting)
@@ -575,6 +590,7 @@
                             <button type="button" 
                                     class="btn btn-primary" 
                                     data-default-action
+                                    title="@GetFeatureCheckoutRefusal()"
                                     @onclick="CheckoutAsync"
                                     disabled="@IsCheckoutDisabled()">
                                 @if (isProcessing)
@@ -604,6 +620,8 @@
     [Parameter] public bool IsFeatureContext { get; set; }
     /// <summary>The branch this repository is expected to be on in the viewed Feature; null in the Workspace and for a tag-pinned repository (I2).</summary>
     [Parameter] public string? FeatureBranchName { get; set; }
+    /// <summary>The tag this repository is pinned to in the viewed Feature; null in the Workspace and for a repository on its Feature branch (I3).</summary>
+    [Parameter] public string? PinnedTag { get; set; }
     [Parameter] public string? RepositoryName { get; set; }
     [Parameter] public string? CurrentBranch { get; set; }
     [Parameter] public string? RepositoryUrl { get; set; }
@@ -695,6 +713,8 @@
             {
                 // Modal just opened: reset to InitialTab when provided (e.g. "tags" from upgrade badge), otherwise Locals
                 activeTab = InitialTab ?? "local";
+                if (IsFeatureContext && activeTab == "newbranch")
+                    activeTab = "local";
                 newBranchName = "";
                 selectedBaseBranch = "__default__";
                 showBasedOnDropdown = false;
@@ -900,6 +920,8 @@
 
     private void SetActiveTab(string tab)
     {
+        if (IsFeatureContext && tab == "newbranch")
+            return;
         activeTab = tab;
         if (tab == "local" || tab == "remote" || tab == "tags")
             _focusFilterOnNextRender = true;
@@ -919,7 +941,8 @@
 
     /// <summary>True when Locals filter matched no branches so the footer can offer Create instead of Check out.</summary>
     private bool CanCreateFromFilter() =>
-        activeTab == "local"
+        !IsFeatureContext
+        && activeTab == "local"
         && localBranches.Count > 0
         && !string.IsNullOrWhiteSpace(branchFilter)
         && GetFilteredLocalBranches().Count() == 0;
@@ -1012,11 +1035,32 @@
         if (isRefreshing || string.IsNullOrWhiteSpace(selectedBranch))
             return true;
         if (activeTab == "tags")
-            return selectedBranch == currentTag;
+            return selectedBranch == currentTag || GetFeatureCheckoutRefusal() != null;
+        if (GetFeatureCheckoutRefusal() != null)
+            return true;
         if (TryGetOccupancy(selectedBranch, out var occ)
             && (occ.RequiresFeatureCleanup || occ.RequiresExternalCleanup || !occ.AllowCheckout))
             return true;
         return selectedBranch == currentBranchLocal;
+    }
+
+    private const string SharedBranchDeleteNotice =
+        "Branches are shared by the Workspace and every Feature of this repository. Deleting it removes it everywhere.";
+
+    /// <summary>
+    /// Why the selected branch or tag cannot be checked out in the viewed Feature, or null when it can (or in the Workspace).
+    /// Same rule as <see cref="FeatureBranchGuard"/>, so the dialog and the service give the same answer (I3).
+    /// </summary>
+    private string? GetFeatureCheckoutRefusal()
+    {
+        if (!IsFeatureContext || string.IsNullOrWhiteSpace(selectedBranch))
+            return null;
+
+        var isTag = activeTab == "tags";
+        var target = !isTag && selectedBranch.StartsWith("origin/", StringComparison.OrdinalIgnoreCase)
+            ? selectedBranch.Substring("origin/".Length)
+            : selectedBranch;
+        return FeatureBranchPolicy.Evaluate(FeatureBranchAction.Checkout, FeatureBranchName, PinnedTag, target, isTag);
     }
 
     private async Task LoadOccupancyAsync()
