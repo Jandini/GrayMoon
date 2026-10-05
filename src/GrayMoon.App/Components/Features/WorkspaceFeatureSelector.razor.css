@@ -265,6 +265,11 @@
     white-space: nowrap;
 }
 
+.workspace-feature-selector__section-icon {
+    margin-right: 0.35rem;
+    font-size: 0.7rem;
+}
+
 .workspace-feature-selector__menu .branch-menu-divider {
     border-top-color: var(--border-color, #6c757d);
     opacity: 0.9;

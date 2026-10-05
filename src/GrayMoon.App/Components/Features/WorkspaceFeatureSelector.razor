@@ -84,6 +84,13 @@
                             }
                             else
                             {
+                                @if (_recentSwitchWorkspaces.Count > 0)
+                                {
+                                    <li class="dropdown-header workspace-feature-selector__section-title">
+                                        <i class="bi bi-star-fill workspace-feature-selector__section-icon" aria-hidden="true"></i>
+                                        Frequently used
+                                    </li>
+                                }
                                 @foreach (var ws in _recentSwitchWorkspaces)
                                 {
                                     @SwitchWorkspaceRow(ws)
@@ -91,6 +98,13 @@
                                 @if (_recentSwitchWorkspaces.Count > 0 && _otherSwitchWorkspaces.Count > 0)
                                 {
                                     <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                                }
+                                @if (_otherSwitchWorkspaces.Count > 0)
+                                {
+                                    <li class="dropdown-header workspace-feature-selector__section-title">
+                                        <i class="bi bi-grid workspace-feature-selector__section-icon" aria-hidden="true"></i>
+                                        Workspaces
+                                    </li>
                                 }
                                 @foreach (var ws in _otherSwitchWorkspaces)
                                 {
@@ -233,6 +247,7 @@
                     </span>
                     <ul class="dropdown-menu show shadow workspace-feature-selector__submenu workspace-feature-selector__ws-features-submenu"
                         role="menu">
+                        <li class="dropdown-header workspace-feature-selector__section-title">Feature</li>
                         @if (features is null)
                         {
                             <li><span class="dropdown-item disabled text-muted">Loading...</span></li>
