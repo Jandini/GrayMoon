@@ -73,7 +73,7 @@ public sealed partial class WorkspaceGitChanges
     /// active filter.</summary>
     private void ConfirmDiscardFileOrFolder(int workspaceRepositoryId, GitChangeOperationScope scope, IReadOnlyList<string> paths, string rowKey)
     {
-        if (!AgentBridge.IsAgentConnected)
+        if (!WorkerBridge.IsWorkerConnected)
         {
             ToastService.ShowError("Worker not connected. Start the GrayMoon Worker and try again.");
             return;
@@ -108,7 +108,7 @@ public sealed partial class WorkspaceGitChanges
             ? RunRepositoryScopedDiscardJobAsync(workspaceRepositoryId)
             : RunMutationAsync(workspaceRepositoryId, rowKey, isDiscard: true, async (root, wsName, repoName, repositoryId) =>
             {
-                var result = await AgentClient.DiscardAsync(root, wsName, repoName, scope, paths, CancellationToken.None);
+                var result = await WorkerClient.DiscardAsync(root, wsName, repoName, scope, paths, CancellationToken.None);
                 await PersistMutationResultAsync(workspaceRepositoryId, repositoryId, result.Success, result.Snapshot, result.ErrorMessage);
             }), "Undo", details, UndoFooterNote, confirmIsDanger: true);
     }
@@ -186,7 +186,7 @@ public sealed partial class WorkspaceGitChanges
     /// in the repository (via `git clean`/`git restore`).</summary>
     private Task RunRepositoryScopedDiscardJobAsync(int workspaceRepositoryId)
     {
-        if (!AgentBridge.IsAgentConnected)
+        if (!WorkerBridge.IsWorkerConnected)
         {
             ToastService.ShowError("Worker not connected. Start the GrayMoon Worker and try again.");
             return Task.CompletedTask;
@@ -206,7 +206,7 @@ public sealed partial class WorkspaceGitChanges
                 return;
             }
 
-            var result = await AgentClient.DiscardAsync(
+            var result = await WorkerClient.DiscardAsync(
                 resolved.Value.Root, resolved.Value.WorkspaceName, resolved.Value.RepositoryName,
                 GitChangeOperationScope.Repository, [], ct);
 
@@ -225,7 +225,7 @@ public sealed partial class WorkspaceGitChanges
     /// <see cref="GitChangesOptions"/> concurrency limit, LoadingOverlay job) as <see cref="BulkSectionActionAsync"/>.</summary>
     private void ConfirmDiscardAllChanged()
     {
-        if (!AgentBridge.IsAgentConnected)
+        if (!WorkerBridge.IsWorkerConnected)
         {
             ToastService.ShowError("Worker not connected. Start the GrayMoon Worker and try again.");
             return;
@@ -280,7 +280,7 @@ public sealed partial class WorkspaceGitChanges
                         return;
                     }
 
-                    var result = await AgentClient.DiscardAsync(
+                    var result = await WorkerClient.DiscardAsync(
                         resolved.Value.Root, resolved.Value.WorkspaceName, resolved.Value.RepositoryName,
                         GitChangeOperationScope.Repository, [], ct);
 
@@ -308,7 +308,7 @@ public sealed partial class WorkspaceGitChanges
     /// discard since the undo icon does not exist on Staged rows, so no section filter is needed here.</summary>
     private void ConfirmDiscardSelected()
     {
-        if (!AgentBridge.IsAgentConnected)
+        if (!WorkerBridge.IsWorkerConnected)
         {
             ToastService.ShowError("Worker not connected. Start the GrayMoon Worker and try again.");
             return;
@@ -374,7 +374,7 @@ public sealed partial class WorkspaceGitChanges
                         return;
                     }
 
-                    var result = await AgentClient.DiscardAsync(
+                    var result = await WorkerClient.DiscardAsync(
                         resolved.Value.Root, resolved.Value.WorkspaceName, resolved.Value.RepositoryName,
                         GitChangeOperationScope.ExplicitPaths, paths, ct);
 

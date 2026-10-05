@@ -333,9 +333,9 @@ public sealed partial class WorkspaceRepositories
             SafeInvoke(() => ToastService.Show("Restore cancelled."));
             throw;
         }
-        catch (AgentNotConnectedException ex)
+        catch (WorkerNotConnectedException ex)
         {
-            Logger.LogError(ex, "Restore packages failed (agent not connected) for workspace {WorkspaceId}", WorkspaceId);
+            Logger.LogError(ex, "Restore packages failed (worker not connected) for workspace {WorkspaceId}", WorkspaceId);
             SafeInvoke(() => ToastService.ShowError($"Restore failed. {ex.Message}"));
             throw;
         }
@@ -399,9 +399,9 @@ public sealed partial class WorkspaceRepositories
             SafeInvoke(() => ToastService.Show("Restore cancelled."));
             throw;
         }
-        catch (AgentNotConnectedException ex)
+        catch (WorkerNotConnectedException ex)
         {
-            Logger.LogError(ex, "Restore packages failed (agent not connected) for workspace {WorkspaceId}", WorkspaceId);
+            Logger.LogError(ex, "Restore packages failed (worker not connected) for workspace {WorkspaceId}", WorkspaceId);
             SafeInvoke(() => ToastService.ShowError($"Restore failed. {ex.Message}"));
             throw;
         }

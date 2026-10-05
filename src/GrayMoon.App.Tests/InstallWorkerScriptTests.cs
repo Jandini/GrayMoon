@@ -1,5 +1,5 @@
 using System.Reflection;
-using GrayMoon.App.Services.Agent;
+using GrayMoon.App.Services.Worker;
 
 namespace GrayMoon.App.Tests;
 

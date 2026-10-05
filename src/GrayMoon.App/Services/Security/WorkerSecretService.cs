@@ -41,7 +41,7 @@ public sealed class DbWorkerSecretSeenStore(IDbContextFactory<AppDbContext> dbFa
 }
 
 /// <summary>
-/// The secret only the real Worker presents to <c>/hub/agent</c> and <c>/repos/{id}/connector</c> (F2).
+/// The secret only the real Worker presents to <c>/hub/worker</c> and <c>/repos/{id}/connector</c> (F2).
 ///
 /// The secret is generated on first start and kept in <c>graymoon-worker.secret</c> next to the database (same
 /// folder as the token key file; the Docker volume already persists it). It is plain text so GrayMoon.Desktop,

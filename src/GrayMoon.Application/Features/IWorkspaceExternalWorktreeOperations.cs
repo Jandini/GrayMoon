@@ -35,7 +35,7 @@ public sealed class ExternalWorktreeCleanupPlan
     public bool WorktreeExists { get; init; }
     public bool IsDirty { get; init; }
     /// <summary>
-    /// True when the Agent could not confirm the worktree's disk state (not connected, old Worker,
+    /// True when the Worker could not confirm the worktree's disk state (not connected, old Worker,
     /// or InspectWorktree failed). Unknown is distinct from Missing: the folder may still exist.
     /// </summary>
     public bool WorktreeStatusUnknown { get; init; }

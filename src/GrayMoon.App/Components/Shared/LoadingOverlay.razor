@@ -1,10 +1,10 @@
-@using GrayMoon.Abstractions.Agent
+@using GrayMoon.Abstractions.Worker
 @using GrayMoon.App.Services
 @inject IJSRuntime JS
 @inject MatrixOverlayPreferenceService MatrixPreference
 @inject CommandTerminalOverlayPreferenceService CommandTerminalOverlayPreference
 @inject LoadingOverlayUiSettingsService OverlayUiSettings
-@inject AgentQueueStateService AgentQueueStateService
+@inject WorkerQueueStateService WorkerQueueStateService
 @inject OverlayCommandTerminalService CommandTerminal
 @implements IAsyncDisposable
 @implements IDisposable
@@ -133,7 +133,7 @@
 
         if (IsVisible && !_prevIsVisibleForTerminal)
         {
-            if (TerminalBuffer == null && AgentQueueStateService.GetTotalPendingCount() == 0)
+            if (TerminalBuffer == null && WorkerQueueStateService.GetTotalPendingCount() == 0)
                 CommandTerminal.Clear();
 
             _terminalLines = TerminalBuffer?.GetSnapshot() ?? CommandTerminal.GetSnapshot();
@@ -148,7 +148,7 @@
         MatrixPreference.UseMatrixEffectChanged += OnMatrixPreferenceChanged;
         CommandTerminalOverlayPreference.IsVisibleChanged += OnCommandTerminalOverlayPreferenceChanged;
         OverlayUiSettings.Changed += OnOverlayUiSettingsChanged;
-        AgentQueueStateService.OnQueueStateChanged(OnQueueStateChanged);
+        WorkerQueueStateService.OnQueueStateChanged(OnQueueStateChanged);
         CommandTerminal.Changed += OnTerminalChanged;
         _terminalLines = TerminalBuffer?.GetSnapshot() ?? CommandTerminal.GetSnapshot();
     }
@@ -264,10 +264,10 @@
         return !s.IsEmpty && int.TryParse(s, out _);
     }
 
-    private static string KindCss(AgentCommandStreamKind kind) => kind switch
+    private static string KindCss(WorkerCommandStreamKind kind) => kind switch
     {
-        AgentCommandStreamKind.Stderr => "err",
-        AgentCommandStreamKind.CommandLine => "cmd",
+        WorkerCommandStreamKind.Stderr => "err",
+        WorkerCommandStreamKind.CommandLine => "cmd",
         _ => "out"
     };
 
@@ -285,7 +285,7 @@
         MatrixPreference.UseMatrixEffectChanged -= OnMatrixPreferenceChanged;
         CommandTerminalOverlayPreference.IsVisibleChanged -= OnCommandTerminalOverlayPreferenceChanged;
         OverlayUiSettings.Changed -= OnOverlayUiSettingsChanged;
-        AgentQueueStateService.RemoveQueueStateChanged(OnQueueStateChanged);
+        WorkerQueueStateService.RemoveQueueStateChanged(OnQueueStateChanged);
         CommandTerminal.Changed -= OnTerminalChanged;
         if (_subscribedBuffer != null)
             _subscribedBuffer.Changed -= OnJobTerminalChanged;

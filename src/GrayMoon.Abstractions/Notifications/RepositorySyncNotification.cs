@@ -1,7 +1,7 @@
 namespace GrayMoon.Abstractions.Notifications;
 
 /// <summary>
-/// Payload sent by the agent to the app when a repository sync completes (e.g. after commit/checkout/merge hook).
+/// Payload sent by the worker to the app when a repository sync completes (e.g. after commit/checkout/merge hook).
 /// A single object avoids argument count/order mismatches and makes the contract explicit.
 /// </summary>
 public sealed class RepositorySyncNotification
@@ -11,9 +11,9 @@ public sealed class RepositorySyncNotification
     public string Version { get; init; } = "-";
     public string Branch { get; init; } = "-";
     /// <summary>
-    /// True when the agent ran GitVersion and it failed, so <see cref="Version"/> is "-" because the version could not be
-    /// computed, not because the agent did not look. The app clears the stored version (shown as unresolved) instead of
-    /// keeping a stale one. Agents that predate this field send false, which keeps the old behaviour.
+    /// True when the worker ran GitVersion and it failed, so <see cref="Version"/> is "-" because the version could not be
+    /// computed, not because the worker did not look. The app clears the stored version (shown as unresolved) instead of
+    /// keeping a stale one. Workers that predate this field send false, which keeps the old behaviour.
     /// </summary>
     public bool GitVersionFailed { get; init; }
     /// <summary>Tag the repository is currently checked out at (detached HEAD on a tag). Null when on a branch.</summary>
@@ -37,13 +37,13 @@ public sealed class RepositorySyncNotification
     public string? RepositoryPath { get; init; }
 
     /// <summary>
-    /// Optional Agent-claimed context id. The App always re-validates against
+    /// Optional Worker-claimed context id. The App always re-validates against
     /// <see cref="RepositoryPath"/> and never trusts this alone.
     /// </summary>
     public int? WorkspaceFeatureContextId { get; init; }
 
     /// <summary>
-    /// Authoritative state with per-group probe markers. Agents that predate this field send null,
+    /// Authoritative state with per-group probe markers. Workers that predate this field send null,
     /// in which case the app falls back to merging the individual nullable fields above.
     /// </summary>
     public RepositoryStateSnapshot? State { get; init; }

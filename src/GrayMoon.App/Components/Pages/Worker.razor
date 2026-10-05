@@ -1,0 +1,471 @@
+@page "/worker"
+@page "/agent"
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Text.Json
+@using GrayMoon.Abstractions.Worker
+@using GrayMoon.App.Services
+@using GrayMoon.App.Services.Worker
+@using GrayMoon.App.Services.Security
+@implements IDisposable
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JSRuntime
+@inject WorkerConnectionTracker WorkerConnectionTracker
+@inject IWorkerBridge WorkerBridge
+@inject IToastService ToastService
+@inject HostPrerequisiteInstallService HostPrerequisiteInstall
+@inject WorkerInstallService WorkerInstall
+@inject WorkerSecretService WorkerSecret
+@inject WorkerPairingService WorkerPairing
+
+<PageTitle>Worker - GrayMoon</PageTitle>
+
+<div class="container-fluid page-container grid-page">
+    <div class="grid-page-header">
+        <h2>Worker</h2>
+        <p class="text-muted">Install or uninstall the GrayMoon Worker Service</p>
+    </div>
+
+    <div class="grid-page-body">
+        <div class="card page-card mb-4">
+                <div class="card-header">
+                    <ul class="nav nav-tabs card-header-tabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link @(ActiveTab == "install" ? "active" : "") @(InstallTabIsRed ? "install-tab-update" : "")" type="button" role="tab" @onclick='() => SetActiveTab("install")'>@InstallTabLabel</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link @(ActiveTab == "uninstall" ? "active" : "")" type="button" role="tab" @onclick='() => SetActiveTab("uninstall")'>Uninstall</button>
+                        </li>
+                        @if (WorkerConnectionTracker.State == WorkerConnectionState.Online || WorkerConnectionTracker.State == WorkerConnectionState.VersionMismatch)
+                        {
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link @(ActiveTab == "host" ? "active" : "") @(HostTabMissingPrerequisites ? "install-tab-update" : "")" type="button" role="tab" @onclick='() => SetActiveTab("host")'>Host</button>
+                            </li>
+                        }
+                    </ul>
+                </div>
+                <div class="card-body">
+                    <div class="tab-content">
+                        <div class="tab-pane @(ActiveTab == "install" ? "show active" : "")" role="tabpanel">
+                            @if (WorkerConnectionTracker.State == WorkerConnectionState.VersionMismatch)
+                            {
+                                <p class="mb-3 small text-muted">The worker is running version <strong class="text-muted">@(WorkerConnectionTracker.WorkerSemVer ?? "unknown")</strong>, which is not compatible with this application. Run the command below to update.</p>
+                            }
+                            <p class="mb-3">Run this PowerShell command as Administrator to install the GrayMoon Worker as a Windows service:</p>
+                            <div class="input-group">
+                                <input type="text" class="form-control font-monospace bg-dark" id="installCommand" readonly
+                                       value="@installCommand" />
+                                <button class="btn btn-primary" type="button" @onclick="CopyInstallCommand">Copy</button>
+                            </div>
+                            <small class="text-muted mt-2 d-block">
+                                The script will download, install, and start the worker service automatically.
+                            </small>
+                            <p class="mb-0 small worker-runtime-note mt-2 d-block">
+                                The Windows service requires the .NET 10 (x64) runtime on the host.
+                                <a href="@WorkerDotnet10RuntimeUrl" target="_blank" rel="noopener noreferrer">Download the .NET 10 runtime</a>
+                            </p>
+                            @if (ShowUnsecuredWorkerNotice)
+                            {
+                                <p class="small text-warning mt-3 mb-0">Reinstall the Worker to finish securing GrayMoon.</p>
+                            }
+                            <div class="mt-3">
+                                <small class="text-muted d-block mb-2">
+                                    Installing with the command above? The script asks for a one-time pairing code that links the worker to this GrayMoon. GrayMoon Desktop does this for you.
+                                </small>
+                                @if (_pairingCode is null || _pairingCode.ExpiresAt <= DateTimeOffset.UtcNow)
+                                {
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="ShowPairingCode">Show pairing code</button>
+                                }
+                                else
+                                {
+                                    <div class="input-group input-group-sm">
+                                        <input type="text" class="form-control font-monospace bg-dark" id="pairingCode" readonly value="@_pairingCode.Code" />
+                                        <button class="btn btn-outline-secondary" type="button" @onclick="CopyPairingCode">Copy</button>
+                                    </div>
+                                    <small class="text-muted d-block mt-1">Works once, until @_pairingCode.ExpiresAt.ToLocalTime().ToString("t").</small>
+                                }
+                            </div>
+                        </div>
+                        <div class="tab-pane @(ActiveTab == "uninstall" ? "show active" : "")" role="tabpanel">
+                            <p class="mb-3">Run this PowerShell command as Administrator to uninstall the GrayMoon Worker Windows service:</p>
+                            <div class="input-group">
+                                <input type="text" class="form-control font-monospace bg-dark" id="uninstallCommand" readonly
+                                       value="@uninstallCommand" />
+                                <button class="btn btn-outline-danger" type="button" @onclick="CopyUninstallCommand">Copy</button>
+                            </div>
+                            <small class="text-muted mt-2 d-block">
+                                The script will stop and remove the worker service.
+                            </small>
+                        </div>
+                        @if (WorkerConnectionTracker.State == WorkerConnectionState.Online || WorkerConnectionTracker.State == WorkerConnectionState.VersionMismatch)
+                        {
+                            <div class="tab-pane @(ActiveTab == "host" ? "show active" : "")" role="tabpanel">
+                                @if (hostInfo == null && hostInfoLoadError == null)
+                                {
+                                    <p class="text-muted mb-0">Loading...</p>
+                                }
+                                else if (hostInfoLoadError != null)
+                                {
+                                    <p class="text-muted mb-0">@hostInfoLoadError</p>
+                                }
+                                else if (hostInfo != null)
+                                {
+                                    <div class="host-info-grid small">
+                                        <span class="text-muted">Worker</span>
+                                        <span>@VersionBadge(WorkerConnectionTracker.WorkerSemVer)</span>
+                                        <span class="text-muted">.NET SDK</span>
+                                        <span>@PrerequisiteCell(hostInfo.DotnetVersion, HostPrerequisiteInstallCommands.DotnetSdk)</span>
+                                        <span class="text-muted">Git</span>
+                                        <span>@PrerequisiteCell(hostInfo.GitVersion, HostPrerequisiteInstallCommands.Git)</span>
+                                        <span class="text-muted">GitVersion</span>
+                                        <span>@PrerequisiteCell(hostInfo.GitVersionToolVersion, HostPrerequisiteInstallCommands.GitVersion)</span>
+                                    </div>
+                                    <p class="small text-muted mt-3 mb-0">@HostPrerequisitesNote(hostInfo)</p>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+                @if (ActiveTab == "install")
+                {
+                    <div class="card-footer card-footer-worker d-flex justify-content-between align-items-center">
+                        <small class="text-muted">@(ShowDesktopWorkerInstall ? "GrayMoon Desktop can install the worker automatically." : "You can download and run the worker executable manually.")</small>
+                        <div class="d-flex align-items-center gap-2">
+                            @if (ShowUpdateNowButton)
+                            {
+                                <button type="button" class="btn btn-danger" disabled="@_isUpdating" @onclick="UpdateWorkerNowAsync">
+                                    @(_isUpdating ? "Updating..." : "Update Now")
+                                </button>
+                            }
+                            @if (ShowDesktopWorkerInstall)
+                            {
+                                <button type="button" class="btn btn-danger" disabled="@WorkerInstall.IsInstalling" @onclick="InstallWorkerAsync">
+                                    @(WorkerInstall.IsInstalling ? "Installing..." : "Install")
+                                </button>
+                            }
+                            <button type="button" class="btn btn-outline-secondary" @onclick="DownloadWorker">Download</button>
+                        </div>
+                    </div>
+                }
+                else if (ShowHostInstallAllFooter)
+                {
+                    <div class="card-footer card-footer-worker d-flex justify-content-between align-items-center">
+                        <small class="text-muted">GrayMoon Desktop can install the missing prerequisites automatically.</small>
+                        <button type="button" class="btn btn-danger" disabled="@HostPrerequisiteInstall.IsInstalling" @onclick="InstallAllHostPrerequisitesAsync">
+                            @(HostPrerequisiteInstall.IsInstalling ? "Installing..." : "Install Now")
+                        </button>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+<LoadingOverlay IsVisible="@_isUpdating" PageScoped="true" ShowCommandTerminal="false"
+                Message="@(_waitingForReconnect ? "Waiting for worker..." : "Updating worker...")"
+                OnAbort="@(_waitingForReconnect ? EventCallback.Factory.Create(this, AbortWorkerUpdateWait) : default)" />
+
+@code {
+    private const string WorkerDotnet10RuntimeUrl = "https://aka.ms/dotnet-core-applaunch?framework=Microsoft.NETCore.App&framework_version=10.0.0&arch=x64&rid=win-x64&os=win10";
+
+    private sealed record HostInfoDto(string? DotnetVersion, string? GitVersion, string? GitVersionToolVersion);
+
+    private string installCommand = string.Empty;
+    private string uninstallCommand = string.Empty;
+    private string ActiveTab = "install";
+    private HostInfoDto? hostInfo;
+    private string? hostInfoLoadError;
+    private bool _isUpdating;
+    private bool _waitingForReconnect;
+    private bool _isDesktopHost;
+    private bool _desktopHostDetected;
+    private WorkerPairingCode? _pairingCode;
+
+    protected override void OnInitialized()
+    {
+        var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
+        var installUrl = $"{baseUrl}/api/worker/install";
+        installCommand = $"irm {installUrl} | iex";
+        var uninstallUrl = $"{baseUrl}/api/worker/uninstall";
+        uninstallCommand = $"irm {uninstallUrl} | iex";
+        SetDefaultTab();
+        HostPrerequisiteInstall.Changed += OnHostPrerequisiteInstallChanged;
+        WorkerInstall.Changed += OnWorkerInstallChanged;
+    }
+
+    private void OnWorkerInstallChanged()
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void OnHostPrerequisiteInstallChanged()
+    {
+        _ = InvokeAsync(async () =>
+        {
+            if (!HostPrerequisiteInstall.IsInstalling)
+                await LoadHostInfoAsync();
+            StateHasChanged();
+        });
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            WorkerConnectionTracker.OnStateChanged(state =>
+            {
+                if (state is WorkerConnectionState.Online or WorkerConnectionState.VersionMismatch)
+                    _ = InvokeAsync(LoadHostInfoAsync);
+                _ = InvokeAsync(() =>
+                {
+                    if (state is not WorkerConnectionState.Online and not WorkerConnectionState.VersionMismatch && ActiveTab == "host")
+                        ActiveTab = "install";
+                    StateHasChanged();
+                });
+            });
+
+            try
+            {
+                _isDesktopHost = await JSRuntime.InvokeAsync<bool>("graymoonDesktopBridge.isAvailable");
+            }
+            catch (JSException)
+            {
+                _isDesktopHost = false;
+            }
+            catch (JSDisconnectedException)
+            {
+                _isDesktopHost = false;
+            }
+
+            _desktopHostDetected = true;
+            await LoadHostInfoAsync();
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadHostInfoAsync()
+    {
+        if (!WorkerBridge.IsWorkerConnected)
+        {
+            hostInfo = null;
+            hostInfoLoadError = null;
+            return;
+        }
+        hostInfoLoadError = null;
+        var response = await WorkerBridge.SendCommandAsync("GetHostInfo", new { }, CancellationToken.None);
+        if (!response.Success || response.Data == null)
+        {
+            hostInfoLoadError = response.Error ?? "Failed to load host info.";
+            hostInfo = null;
+            return;
+        }
+        try
+        {
+            var json = response.Data is JsonElement je ? je.GetRawText() : JsonSerializer.Serialize(response.Data);
+            var dto = JsonSerializer.Deserialize<HostInfoDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            hostInfo = dto ?? new HostInfoDto(null, null, null);
+
+            // Confirms the reconnected worker is actually responsive (not just SignalR-connected)
+            // and reports the matching version, so the overlay never closes prematurely.
+            if (_waitingForReconnect
+                && WorkerConnectionTracker.State == WorkerConnectionState.Online
+                && !WorkerConnectionTracker.IsSelfUpdateInProgress)
+            {
+                _isUpdating = false;
+                _waitingForReconnect = false;
+            }
+        }
+        catch
+        {
+            hostInfoLoadError = "Failed to parse host info.";
+            hostInfo = null;
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private static RenderFragment VersionBadge(string? version) => builder =>
+    {
+        if (string.IsNullOrWhiteSpace(version))
+        {
+            builder.OpenElement(0, "span");
+            builder.AddAttribute(1, "class", "badge bg-secondary");
+            builder.AddContent(2, "not installed");
+            builder.CloseElement();
+        }
+        else
+        {
+            builder.AddContent(0, version);
+        }
+    };
+
+    private RenderFragment PrerequisiteCell(string? version, string installCommandText) => builder =>
+    {
+        if (!string.IsNullOrWhiteSpace(version))
+        {
+            builder.AddContent(0, version);
+            return;
+        }
+
+        builder.OpenElement(0, "div");
+        builder.AddAttribute(1, "class", "input-group input-group-sm host-prerequisite-command");
+        builder.OpenElement(2, "input");
+        builder.AddAttribute(3, "type", "text");
+        builder.AddAttribute(4, "class", "form-control font-monospace bg-dark");
+        builder.AddAttribute(5, "readonly", true);
+        builder.AddAttribute(6, "value", installCommandText);
+        builder.CloseElement();
+        builder.OpenElement(7, "button");
+        builder.AddAttribute(8, "type", "button");
+        builder.AddAttribute(9, "class", "btn btn-outline-secondary");
+        builder.AddAttribute(10, "onclick", EventCallback.Factory.Create(this, async () => await CopyToClipboard(installCommandText)));
+        builder.AddContent(11, "Copy");
+        builder.CloseElement();
+        builder.CloseElement();
+    };
+
+    private HostPrerequisiteVersions CurrentHostVersions =>
+        new(hostInfo?.DotnetVersion, hostInfo?.GitVersion, hostInfo?.GitVersionToolVersion);
+
+    private bool HostTabMissingPrerequisites =>
+        hostInfo != null && HostPrerequisiteState.AnyMissing(CurrentHostVersions);
+
+    private static string HostPrerequisitesNote(HostInfoDto hostInfo) =>
+        HostPrerequisiteState.Note(new HostPrerequisiteVersions(
+            hostInfo.DotnetVersion,
+            hostInfo.GitVersion,
+            hostInfo.GitVersionToolVersion));
+
+    private bool ShowHostInstallAllFooter =>
+        ActiveTab == "host"
+        && _desktopHostDetected
+        && _isDesktopHost
+        && HostTabMissingPrerequisites
+        && hostInfoLoadError is null;
+
+    private bool InstallTabIsRed => WorkerConnectionTracker.State == WorkerConnectionState.Offline || WorkerConnectionTracker.State == WorkerConnectionState.VersionMismatch;
+
+    private string InstallTabLabel => WorkerConnectionTracker.State == WorkerConnectionState.VersionMismatch ? "Update" : "Install";
+
+    private void SetDefaultTab()
+    {
+        var state = WorkerConnectionTracker.State;
+        ActiveTab = state == WorkerConnectionState.VersionMismatch ? "install" : (state == WorkerConnectionState.Online ? "host" : "install");
+    }
+
+    private void SetActiveTab(string tab)
+    {
+        ActiveTab = tab;
+    }
+
+    private bool ShowUpdateNowButton => WorkerConnectionTracker.State == WorkerConnectionState.VersionMismatch;
+
+    private bool ShowDesktopWorkerInstall =>
+        _desktopHostDetected
+        && _isDesktopHost
+        && WorkerConnectionTracker.State == WorkerConnectionState.Offline;
+
+    private async Task InstallWorkerAsync()
+    {
+        if (WorkerInstall.IsInstalling || !_isDesktopHost)
+            return;
+
+        await WorkerInstall.StartAsync();
+    }
+
+    private async Task DownloadWorker()
+    {
+        await JSRuntime.InvokeVoidAsync("graymoonDownloadWorker");
+    }
+
+    private async Task InstallAllHostPrerequisitesAsync()
+    {
+        if (HostPrerequisiteInstall.IsInstalling || hostInfo is null || !_isDesktopHost)
+            return;
+
+        var missing = HostPrerequisiteState.GetMissingIds(CurrentHostVersions);
+        if (missing.Count == 0)
+            return;
+
+        await HostPrerequisiteInstall.StartAsync(missing);
+    }
+
+    private async Task UpdateWorkerNowAsync()
+    {
+        _isUpdating = true;
+        _waitingForReconnect = false;
+        WorkerConnectionTracker.BeginSelfUpdate();
+        StateHasChanged();
+        var installUrl = NavigationManager.BaseUri.TrimEnd('/') + "/api/worker/install";
+        var response = await WorkerBridge.SendCommandAsync(WorkerHubMethods.SelfUpdate, new { installUrl }, CancellationToken.None);
+        if (!response.Success)
+        {
+            _isUpdating = false;
+            ToastService.ShowError("Worker update failed.");
+        }
+        else
+        {
+            _waitingForReconnect = true;
+        }
+        StateHasChanged();
+    }
+
+    private void AbortWorkerUpdateWait()
+    {
+        _isUpdating = false;
+        _waitingForReconnect = false;
+        WorkerConnectionTracker.EndSelfUpdate();
+        StateHasChanged();
+    }
+
+    private async Task CopyInstallCommand()
+    {
+        await CopyToClipboard(installCommand);
+    }
+
+    private bool ShowUnsecuredWorkerNotice =>
+        WorkerSecret.UnsecuredWorkerConnected
+        && WorkerConnectionTracker.State is WorkerConnectionState.Online or WorkerConnectionState.VersionMismatch;
+
+    private void ShowPairingCode()
+    {
+        _pairingCode = WorkerPairing.CreateCode();
+    }
+
+    private async Task CopyPairingCode()
+    {
+        if (_pairingCode is not null)
+            await CopyToClipboard(_pairingCode.Code);
+    }
+
+    private async Task CopyUninstallCommand()
+    {
+        await CopyToClipboard(uninstallCommand);
+    }
+
+    private async Task CopyToClipboard(string text)
+    {
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", text);
+        }
+        catch (JSException ex)
+        {
+            var message = ex.Message.Contains("not allowed", StringComparison.OrdinalIgnoreCase)
+                || ex.Message.Contains("permission", StringComparison.OrdinalIgnoreCase)
+                ? "Clipboard access was denied by the browser."
+                : ex.Message.Contains("undefined", StringComparison.OrdinalIgnoreCase)
+                    || ex.Message.Contains("null", StringComparison.OrdinalIgnoreCase)
+                    ? "Clipboard API is not available. The page must be served over HTTPS."
+                    : $"Could not copy to clipboard: {ex.Message}";
+            ToastService.ShowError(message);
+        }
+        catch (JSDisconnectedException)
+        {
+            ToastService.ShowError("Could not copy to clipboard: the connection to the server was lost.");
+        }
+    }
+
+    public void Dispose()
+    {
+        HostPrerequisiteInstall.Changed -= OnHostPrerequisiteInstallChanged;
+        WorkerInstall.Changed -= OnWorkerInstallChanged;
+    }
+}

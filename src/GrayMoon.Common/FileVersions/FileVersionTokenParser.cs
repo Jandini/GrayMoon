@@ -114,7 +114,7 @@ public static class FileVersionTokenParser
         return new FileVersionTokenValidationResult(valid, unknownRepos, unsupportedSelectors, selfReferencing);
     }
     /// <summary>
-    /// Parses pattern text into prefix / token / suffix entries for Agent update and check commands.
+    /// Parses pattern text into prefix / token / suffix entries for Worker update and check commands.
     /// Lines with unparseable tokens (including unsupported selectors) are skipped.
     /// </summary>
     public static IReadOnlyList<FileVersionPatternEntry> ParsePatternLines(string? pattern)

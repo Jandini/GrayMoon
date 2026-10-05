@@ -144,7 +144,7 @@ public sealed class ReturnToDefaultAnalyzeTests
     public async Task Analyze_already_on_default_reports_skipped()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        ctx.AgentBridge.Respond("RefreshBranches", RefreshBranchesOk());
+        ctx.WorkerBridge.Respond("RefreshBranches", RefreshBranchesOk());
         await ctx.MutateLinkAsync(link =>
         {
             link.BranchName = "main";
@@ -168,7 +168,7 @@ public sealed class ReturnToDefaultAnalyzeTests
     public async Task Analyze_ahead_without_safe_pr_is_not_automatic()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        ctx.AgentBridge.Respond("RefreshBranches", RefreshBranchesOk());
+        ctx.WorkerBridge.Respond("RefreshBranches", RefreshBranchesOk());
         // Seed leaves ahead=4; PR refresh without a token clears any PR row, so analysis must not treat cleanup as automatic.
         var handler = CreateHandler(ctx);
         var plan = await handler.AnalyzeReturnToDefaultAsync(
@@ -185,7 +185,7 @@ public sealed class ReturnToDefaultAnalyzeTests
     public async Task Analyze_tag_blocks_automatic_cleanup()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        ctx.AgentBridge.Respond("RefreshBranches", new BranchesResponse
+        ctx.WorkerBridge.Respond("RefreshBranches", new BranchesResponse
         {
             Success = true,
             LocalBranches = ["main"],
@@ -216,7 +216,7 @@ public sealed class ReturnToDefaultAnalyzeTests
     public async Task Analyze_fetch_failure_fails_safely()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        // No RefreshBranches canned response â†’ agent reports failure â†’ analysis fails.
+        // No RefreshBranches canned response â†’ worker reports failure â†’ analysis fails.
         var handler = CreateHandler(ctx);
         var plan = await handler.AnalyzeReturnToDefaultAsync(
             ctx.WorkspaceId, await ctx.GetSpecialContextIdAsync(), [ctx.RepositoryId], null, CancellationToken.None);
@@ -230,7 +230,7 @@ public sealed class ReturnToDefaultAnalyzeTests
     public async Task Unattended_aborts_when_ahead_without_safe_pr()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        ctx.AgentBridge.Respond("RefreshBranches", RefreshBranchesOk());
+        ctx.WorkerBridge.Respond("RefreshBranches", RefreshBranchesOk());
 
         var handler = CreateHandler(ctx);
         var result = await handler.ReturnToDefaultUnattendedAsync(
@@ -238,14 +238,14 @@ public sealed class ReturnToDefaultAnalyzeTests
 
         Assert.False(result.Completed);
         Assert.Contains("not safe", result.AbortReason, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain(ctx.AgentBridge.Calls, c => c.Command == "ReturnToDefaultBranch");
+        Assert.DoesNotContain(ctx.WorkerBridge.Calls, c => c.Command == "ReturnToDefaultBranch");
     }
 
     [Fact]
     public async Task Unattended_aborts_on_tag()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        ctx.AgentBridge.Respond("RefreshBranches", new BranchesResponse
+        ctx.WorkerBridge.Respond("RefreshBranches", new BranchesResponse
         {
             Success = true,
             LocalBranches = ["main"],
@@ -274,7 +274,7 @@ public sealed class ReturnToDefaultAnalyzeTests
     public async Task Unattended_succeeds_when_already_on_default()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        ctx.AgentBridge.Respond("RefreshBranches", new BranchesResponse
+        ctx.WorkerBridge.Respond("RefreshBranches", new BranchesResponse
         {
             Success = true,
             LocalBranches = ["main"],
@@ -299,14 +299,14 @@ public sealed class ReturnToDefaultAnalyzeTests
 
         Assert.True(result.Completed);
         Assert.Null(result.AbortReason);
-        Assert.DoesNotContain(ctx.AgentBridge.Calls, c => c.Command == "ReturnToDefaultBranch");
+        Assert.DoesNotContain(ctx.WorkerBridge.Calls, c => c.Command == "ReturnToDefaultBranch");
     }
 
     [Fact]
     public async Task Execute_deletes_remote_only_when_option_requests_it()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        ctx.AgentBridge.Respond("ReturnToDefaultBranch", new ReturnToDefaultBranchResponse
+        ctx.WorkerBridge.Respond("ReturnToDefaultBranch", new ReturnToDefaultBranchResponse
         {
             Success = true,
             CurrentBranch = "main",
@@ -340,11 +340,11 @@ public sealed class ReturnToDefaultAnalyzeTests
             null,
             CancellationToken.None);
 
-        var args = ctx.AgentBridge.Calls.Single(c => c.Command == "ReturnToDefaultBranch").Args;
+        var args = ctx.WorkerBridge.Calls.Single(c => c.Command == "ReturnToDefaultBranch").Args;
         var deleteRemote = args.GetType().GetProperty("deleteRemoteBranch")!.GetValue(args);
         Assert.Equal(false, deleteRemote);
 
-        ctx.AgentBridge.Calls.Clear();
+        ctx.WorkerBridge.Calls.Clear();
         await ctx.MutateLinkAsync(link =>
         {
             link.BranchName = "feature/x";
@@ -361,7 +361,7 @@ public sealed class ReturnToDefaultAnalyzeTests
             null,
             CancellationToken.None);
 
-        var args2 = ctx.AgentBridge.Calls.Single(c => c.Command == "ReturnToDefaultBranch").Args;
+        var args2 = ctx.WorkerBridge.Calls.Single(c => c.Command == "ReturnToDefaultBranch").Args;
         var deleteRemote2 = args2.GetType().GetProperty("deleteRemoteBranch")!.GetValue(args2);
         Assert.Equal(true, deleteRemote2);
     }
@@ -370,7 +370,7 @@ public sealed class ReturnToDefaultAnalyzeTests
     public async Task Execute_does_not_request_remote_delete_when_no_upstream()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        ctx.AgentBridge.Respond("ReturnToDefaultBranch", new ReturnToDefaultBranchResponse
+        ctx.WorkerBridge.Respond("ReturnToDefaultBranch", new ReturnToDefaultBranchResponse
         {
             Success = true,
             CurrentBranch = "main",
@@ -403,7 +403,7 @@ public sealed class ReturnToDefaultAnalyzeTests
             null,
             CancellationToken.None);
 
-        var args = ctx.AgentBridge.Calls.Single(c => c.Command == "ReturnToDefaultBranch").Args;
+        var args = ctx.WorkerBridge.Calls.Single(c => c.Command == "ReturnToDefaultBranch").Args;
         var deleteRemote = args.GetType().GetProperty("deleteRemoteBranch")!.GetValue(args);
         Assert.Equal(false, deleteRemote);
     }
@@ -412,8 +412,8 @@ public sealed class ReturnToDefaultAnalyzeTests
     public async Task Unattended_eligible_repo_executes_with_force_local_and_remote_when_upstream()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        ctx.AgentBridge.Respond("RefreshBranches", RefreshBranchesOk(hasUpstream: true));
-        ctx.AgentBridge.Respond("ReturnToDefaultBranch", new ReturnToDefaultBranchResponse
+        ctx.WorkerBridge.Respond("RefreshBranches", RefreshBranchesOk(hasUpstream: true));
+        ctx.WorkerBridge.Respond("ReturnToDefaultBranch", new ReturnToDefaultBranchResponse
         {
             Success = true,
             CurrentBranch = "main",
@@ -442,7 +442,7 @@ public sealed class ReturnToDefaultAnalyzeTests
             ctx.WorkspaceId, await ctx.GetSpecialContextIdAsync(), [ctx.RepositoryId], null, CancellationToken.None);
 
         Assert.True(result.Completed);
-        var args = ctx.AgentBridge.Calls.Single(c => c.Command == "ReturnToDefaultBranch").Args;
+        var args = ctx.WorkerBridge.Calls.Single(c => c.Command == "ReturnToDefaultBranch").Args;
         Assert.Equal(true, args.GetType().GetProperty("deleteRemoteBranch")!.GetValue(args));
         Assert.Equal(true, args.GetType().GetProperty("forceDeleteLocalBranch")!.GetValue(args));
     }
@@ -480,7 +480,7 @@ public sealed class ReturnToDefaultAnalyzeTests
             await db.SaveChangesAsync();
         }
 
-        ctx.AgentBridge.Respond("RefreshBranches", RefreshBranchesOk());
+        ctx.WorkerBridge.Respond("RefreshBranches", RefreshBranchesOk());
         // First repo stays ahead of default (unsafe); second is on default.
         await ctx.MutateLinkAsync(link =>
         {

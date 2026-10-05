@@ -5,7 +5,7 @@ using GrayMoon.App.Services.Features;
 
 namespace GrayMoon.App.Services.Workspaces;
 
-public sealed class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService> logger, AppSettingRepository appSettingRepository, Microsoft.Extensions.Options.IOptions<WorkspaceOptions> workspaceOptions)
+public sealed class WorkspaceService(IWorkerBridge workerBridge, ILogger<WorkspaceService> logger, AppSettingRepository appSettingRepository, Microsoft.Extensions.Options.IOptions<WorkspaceOptions> workspaceOptions)
 {
     private string? _cachedRootPath;
     private string? _cachedFeatureStorageRootPath;
@@ -78,11 +78,11 @@ public sealed class WorkspaceService(IAgentBridge agentBridge, ILogger<Workspace
             return false;
 
         var root = !string.IsNullOrWhiteSpace(rootOverride) ? rootOverride : await GetRootPathAsync(cancellationToken);
-        var response = await agentBridge.SendCommandAsync("GetWorkspaceExists", new { workspaceName, workspaceRoot = root }, cancellationToken);
+        var response = await workerBridge.SendCommandAsync("GetWorkspaceExists", new { workspaceName, workspaceRoot = root }, cancellationToken);
         if (!response.Success || response.Data == null)
             return false;
 
-        var data = AgentResponseJson.DeserializeAgentResponse<AgentWorkspaceExistsResponse>(response.Data);
+        var data = WorkerResponseJson.DeserializeWorkerResponse<WorkerWorkspaceExistsResponse>(response.Data);
         return data?.Exists ?? false;
     }
 
@@ -93,11 +93,11 @@ public sealed class WorkspaceService(IAgentBridge agentBridge, ILogger<Workspace
 
         var root = !string.IsNullOrWhiteSpace(rootOverride) ? rootOverride : await GetRootPathAsync(cancellationToken);
         var maxParallel = Math.Max(1, workspaceOptions.Value.MaxParallelOperations);
-        var response = await agentBridge.SendCommandAsync("GetWorkspaceRepositories", new { workspaceName, workspaceRoot = root, maxParallelOperations = maxParallel }, cancellationToken);
+        var response = await workerBridge.SendCommandAsync("GetWorkspaceRepositories", new { workspaceName, workspaceRoot = root, maxParallelOperations = maxParallel }, cancellationToken);
         if (!response.Success || response.Data == null)
             return 0;
 
-        var data = AgentResponseJson.DeserializeAgentResponse<AgentRepositoriesListResponse>(response.Data);
+        var data = WorkerResponseJson.DeserializeWorkerResponse<WorkerRepositoriesListResponse>(response.Data);
         return data?.Repositories?.Count ?? 0;
     }
 
@@ -111,11 +111,11 @@ public sealed class WorkspaceService(IAgentBridge agentBridge, ILogger<Workspace
 
         var root = !string.IsNullOrWhiteSpace(rootOverride) ? rootOverride : await GetRootPathAsync(cancellationToken);
         var maxParallel = Math.Max(1, workspaceOptions.Value.MaxParallelOperations);
-        var response = await agentBridge.SendCommandAsync("GetWorkspaceRepositories", new { workspaceName, workspaceRoot = root, maxParallelOperations = maxParallel }, cancellationToken);
+        var response = await workerBridge.SendCommandAsync("GetWorkspaceRepositories", new { workspaceName, workspaceRoot = root, maxParallelOperations = maxParallel }, cancellationToken);
         if (!response.Success || response.Data == null)
             return Array.Empty<(string, string?)>();
 
-        var data = AgentResponseJson.DeserializeAgentResponse<AgentWorkspaceRepositoriesResponse>(response.Data);
+        var data = WorkerResponseJson.DeserializeWorkerResponse<WorkerWorkspaceRepositoriesResponse>(response.Data);
         var infos = data?.RepositoryInfos;
         if (infos == null)
             return Array.Empty<(string, string?)>();
@@ -135,7 +135,7 @@ public sealed class WorkspaceService(IAgentBridge agentBridge, ILogger<Workspace
             return;
 
         var root = !string.IsNullOrWhiteSpace(rootOverride) ? rootOverride : await GetRootPathAsync(cancellationToken);
-        await agentBridge.SendCommandAsync("EnsureWorkspace", new { workspaceName, workspaceRoot = root }, cancellationToken);
+        await workerBridge.SendCommandAsync("EnsureWorkspace", new { workspaceName, workspaceRoot = root }, cancellationToken);
         logger.LogInformation("Created workspace directory: {Name}", workspaceName);
     }
 
@@ -181,7 +181,7 @@ public sealed class WorkspaceService(IAgentBridge agentBridge, ILogger<Workspace
 
     /// <summary>
     /// Returns the configured Feature worktree storage root (e.g. C:\Users\name\.graymoon), or null if unset.
-    /// Does not ask the Agent.
+    /// Does not ask the Worker.
     /// </summary>
     public async Task<string?> GetFeatureStorageRootPathAsync(CancellationToken cancellationToken = default)
     {
@@ -197,7 +197,7 @@ public sealed class WorkspaceService(IAgentBridge agentBridge, ILogger<Workspace
             var configured = await appSettingRepository.GetValueAsync(AppSettingRepository.FeatureStorageRootPathKey);
             if (!string.IsNullOrWhiteSpace(configured))
             {
-                _cachedFeatureStorageRootPath = AgentPath.Normalize(configured);
+                _cachedFeatureStorageRootPath = WorkerPath.Normalize(configured);
                 logger.LogInformation("Using configured Feature storage root: {RootPath}", _cachedFeatureStorageRootPath);
                 return _cachedFeatureStorageRootPath;
             }
@@ -216,9 +216,9 @@ public sealed class WorkspaceService(IAgentBridge agentBridge, ILogger<Workspace
     }
 
     /// <summary>
-    /// Resolves Feature storage root from settings, or from the Agent host user profile
+    /// Resolves Feature storage root from settings, or from the Worker host user profile
     /// (<c>{userProfile}\.graymoon</c>). When <paramref name="persistIfMissing"/> is true and the
-    /// setting was empty, persists the Agent default so Settings and future Features share it.
+    /// setting was empty, persists the Worker default so Settings and future Features share it.
     /// Does not relocate existing Workspace.ManagedFeatureStorageRoot values.
     /// </summary>
     public async Task<string?> ResolveFeatureStorageRootPathAsync(
@@ -229,63 +229,63 @@ public sealed class WorkspaceService(IAgentBridge agentBridge, ILogger<Workspace
         if (!string.IsNullOrWhiteSpace(configured))
             return configured;
 
-        var fromAgent = await TryGetAgentDefaultFeatureStorageRootAsync(cancellationToken);
-        if (string.IsNullOrWhiteSpace(fromAgent))
+        var fromWorker = await TryGetWorkerDefaultFeatureStorageRootAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(fromWorker))
             return null;
 
         if (persistIfMissing)
         {
-            await appSettingRepository.SetValueAsync(AppSettingRepository.FeatureStorageRootPathKey, fromAgent);
+            await appSettingRepository.SetValueAsync(AppSettingRepository.FeatureStorageRootPathKey, fromWorker);
             ClearCachedFeatureStorageRootPath();
-            logger.LogInformation("Persisted Agent-default Feature storage root: {RootPath}", fromAgent);
+            logger.LogInformation("Persisted Worker-default Feature storage root: {RootPath}", fromWorker);
             return await GetFeatureStorageRootPathAsync(cancellationToken);
         }
 
-        return fromAgent;
+        return fromWorker;
     }
 
     /// <summary>
-    /// Asks the Agent for the host user profile and returns <c>{profile}/.graymoon</c> (or
+    /// Asks the Worker for the host user profile and returns <c>{profile}/.graymoon</c> (or
     /// <c>{profile}\.graymoon</c> on a Windows Worker), or null if unavailable. The join style
-    /// follows whatever shape the Agent's own <c>UserProfilePath</c> already has - a Linux/macOS
+    /// follows whatever shape the Worker's own <c>UserProfilePath</c> already has - a Linux/macOS
     /// Worker's profile already starts with '/', so no separate "which OS" signal is needed.
     /// </summary>
-    public async Task<string?> TryGetAgentDefaultFeatureStorageRootAsync(CancellationToken cancellationToken = default)
+    public async Task<string?> TryGetWorkerDefaultFeatureStorageRootAsync(CancellationToken cancellationToken = default)
     {
-        if (!agentBridge.IsAgentConnected)
+        if (!workerBridge.IsWorkerConnected)
             return null;
 
         try
         {
-            var response = await agentBridge.SendCommandAsync("GetHostInfo", new { }, cancellationToken);
+            var response = await workerBridge.SendCommandAsync("GetHostInfo", new { }, cancellationToken);
             if (!response.Success || response.Data == null)
                 return null;
 
-            var data = AgentResponseJson.DeserializeAgentResponse<GetHostInfoAgentResponse>(response.Data);
+            var data = WorkerResponseJson.DeserializeWorkerResponse<GetHostInfoWorkerResponse>(response.Data);
             var profile = data?.UserProfilePath?.Trim();
             if (string.IsNullOrWhiteSpace(profile))
                 return null;
 
-            var normalizedProfile = AgentPath.Normalize(profile);
+            var normalizedProfile = WorkerPath.Normalize(profile);
             return string.IsNullOrWhiteSpace(normalizedProfile)
                 ? null
-                : AgentPath.Combine(normalizedProfile, ".graymoon");
+                : WorkerPath.Combine(normalizedProfile, ".graymoon");
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Could not resolve Agent user profile for Feature storage default");
+            logger.LogWarning(ex, "Could not resolve Worker user profile for Feature storage default");
             return null;
         }
     }
 
-    /// <summary>Asks the agent to validate whether the given path is usable as a workspace root.</summary>
+    /// <summary>Asks the worker to validate whether the given path is usable as a workspace root.</summary>
     public async Task<(bool IsValid, string? ErrorMessage)> ValidatePathAsync(string path, CancellationToken cancellationToken = default)
     {
-        var response = await agentBridge.SendCommandAsync("ValidatePath", new { path }, cancellationToken);
+        var response = await workerBridge.SendCommandAsync("ValidatePath", new { path }, cancellationToken);
         if (!response.Success)
             return (false, response.Error ?? "Worker did not respond.");
 
-        var data = AgentResponseJson.DeserializeAgentResponse<ValidatePathAgentResponse>(response.Data);
+        var data = WorkerResponseJson.DeserializeWorkerResponse<ValidatePathWorkerResponse>(response.Data);
         return (data?.IsValid ?? false, data?.ErrorMessage);
     }
 

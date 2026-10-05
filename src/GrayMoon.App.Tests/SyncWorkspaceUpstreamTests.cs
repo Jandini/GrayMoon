@@ -34,7 +34,7 @@ public sealed class SyncWorkspaceUpstreamTests
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
         await ctx.MutateLinkAsync(link => link.BranchHasUpstream = false);
-        ctx.AgentBridge.Respond("SyncRepository", SyncResponse(hasUpstream: true, upstreamProbed: true));
+        ctx.WorkerBridge.Respond("SyncRepository", SyncResponse(hasUpstream: true, upstreamProbed: true));
 
         await using var scope = ctx.CreateScope();
         var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
@@ -47,11 +47,11 @@ public sealed class SyncWorkspaceUpstreamTests
     }
 
     [Fact]
-    public async Task Sync_from_an_agent_that_does_not_probe_upstream_leaves_the_flag_alone()
+    public async Task Sync_from_a_worker_that_does_not_probe_upstream_leaves_the_flag_alone()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
         await ctx.MutateLinkAsync(link => link.BranchHasUpstream = false);
-        ctx.AgentBridge.Respond("SyncRepository", SyncResponse(hasUpstream: null, upstreamProbed: false));
+        ctx.WorkerBridge.Respond("SyncRepository", SyncResponse(hasUpstream: null, upstreamProbed: false));
 
         await using var scope = ctx.CreateScope();
         var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();

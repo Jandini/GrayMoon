@@ -6,8 +6,8 @@
 @inject WorkspaceRepository WorkspaceRepository
 @inject NavigationManager NavigationManager
 @inject IJSRuntime JsRuntime
-@inject AgentConnectionTracker AgentConnectionTracker
-@inject IAgentBridge AgentBridge
+@inject WorkerConnectionTracker WorkerConnectionTracker
+@inject IWorkerBridge WorkerBridge
 @inject ConnectorHealthService ConnectorHealthService
 @inject ConnectorRepository ConnectorRepository
 @inject WorkspaceContextNavigationService ContextNavigation
@@ -74,7 +74,7 @@ else
                     <p class="card-text">
                         Install, update, or uninstall the GrayMoon Worker service.
                     </p>
-                    <a class="btn @AgentButtonClass" href="/agent">@AgentButtonText</a>
+                    <a class="btn @WorkerButtonClass" href="/worker">@WorkerButtonText</a>
                 </div>
             </div>
         </div>
@@ -122,18 +122,18 @@ else
     private bool hostPrerequisitesMissing;
     private int hostInfoGeneration;
 
-    private string AgentButtonText =>
-        AgentConnectionTracker.State == AgentConnectionState.Online && hostPrerequisitesMissing
+    private string WorkerButtonText =>
+        WorkerConnectionTracker.State == WorkerConnectionState.Online && hostPrerequisitesMissing
             ? "Install Prerequisites"
-            : AgentConnectionTracker.State switch
+            : WorkerConnectionTracker.State switch
             {
-                AgentConnectionState.Online => "Manage Worker",
-                AgentConnectionState.VersionMismatch => "Update Worker",
+                WorkerConnectionState.Online => "Manage Worker",
+                WorkerConnectionState.VersionMismatch => "Update Worker",
                 _ => "Install Worker"
             };
 
-    private string AgentButtonClass =>
-        AgentConnectionTracker.State == AgentConnectionState.Online && !hostPrerequisitesMissing
+    private string WorkerButtonClass =>
+        WorkerConnectionTracker.State == WorkerConnectionState.Online && !hostPrerequisitesMissing
             ? "btn-primary"
             : "btn-danger";
 
@@ -153,11 +153,11 @@ else
         if (!firstRender)
             return;
 
-        AgentConnectionTracker.OnStateChanged(state =>
+        WorkerConnectionTracker.OnStateChanged(state =>
         {
             try
             {
-                _ = InvokeAsync(() => OnAgentStateChangedAsync(state));
+                _ = InvokeAsync(() => OnWorkerStateChangedAsync(state));
             }
             catch (ObjectDisposedException)
             {
@@ -165,9 +165,9 @@ else
         });
     }
 
-    private async Task OnAgentStateChangedAsync(AgentConnectionState state)
+    private async Task OnWorkerStateChangedAsync(WorkerConnectionState state)
     {
-        if (state != AgentConnectionState.Online)
+        if (state != WorkerConnectionState.Online)
         {
             Interlocked.Increment(ref hostInfoGeneration);
             hostPrerequisitesMissing = false;
@@ -186,18 +186,18 @@ else
         if (generation != Volatile.Read(ref hostInfoGeneration))
             return;
 
-        hostPrerequisitesMissing = AgentConnectionTracker.State == AgentConnectionState.Online && missing;
+        hostPrerequisitesMissing = WorkerConnectionTracker.State == WorkerConnectionState.Online && missing;
         StateHasChanged();
     }
 
     private async Task<bool> QueryHostPrerequisitesMissingAsync()
     {
-        if (!AgentBridge.IsAgentConnected)
+        if (!WorkerBridge.IsWorkerConnected)
             return false;
 
         try
         {
-            var response = await AgentBridge.SendCommandAsync("GetHostInfo", new { }, CancellationToken.None);
+            var response = await WorkerBridge.SendCommandAsync("GetHostInfo", new { }, CancellationToken.None);
             if (!response.Success || response.Data is null)
                 return false;
 

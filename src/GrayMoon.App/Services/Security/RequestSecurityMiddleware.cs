@@ -1,3 +1,4 @@
+using GrayMoon.App.Hubs;
 using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services.Security;
@@ -22,10 +23,10 @@ public sealed class RequestSecurityMiddleware(RequestDelegate next, IOptions<Sec
         var path = context.Request.Path.Value ?? string.Empty;
         var origin = context.Request.Headers.Origin.ToString();
 
-        if (IsHubPath(path, out var isAgentHub))
+        if (IsHubPath(path, out var isWorkerHub))
         {
             if (!string.IsNullOrEmpty(origin) &&
-                !IsHubOriginAllowed(origin, isAgentHub, context.Request.Host.Host, context.Request.Headers[ForwardedHostHeaderName].ToString(), options.Value.AllowedOrigins))
+                !IsHubOriginAllowed(origin, isWorkerHub, context.Request.Host.Host, context.Request.Headers[ForwardedHostHeaderName].ToString(), options.Value.AllowedOrigins))
             {
                 context.Response.StatusCode = StatusCodes.Status403Forbidden;
                 return;
@@ -61,13 +62,13 @@ public sealed class RequestSecurityMiddleware(RequestDelegate next, IOptions<Sec
     }
 
     /// <summary>True when a hub connection (negotiate or WebSocket upgrade) carrying an <c>Origin</c> header
-    /// is allowed. <c>/hub/agent</c> rejects every <c>Origin</c> header outright (no legitimate Worker ever
+    /// is allowed. <c>/hub/worker</c> rejects every <c>Origin</c> header outright (no legitimate Worker ever
     /// sends one); the other hubs (<c>/hubs/workspace-sync</c>, <c>/hubs/desktop</c>, <c>/_blazor</c>) accept
     /// an Origin whose host matches this app's own host. Call only when <paramref name="origin"/> is
     /// non-empty; a request without an Origin header always passes and never calls this method.</summary>
-    internal static bool IsHubOriginAllowed(string origin, bool isAgentHub, string requestHost, string forwardedHost, IReadOnlyCollection<string> allowedOrigins)
+    internal static bool IsHubOriginAllowed(string origin, bool isWorkerHub, string requestHost, string forwardedHost, IReadOnlyCollection<string> allowedOrigins)
     {
-        if (isAgentHub)
+        if (isWorkerHub)
             return false;
 
         if (!TryGetOriginHost(origin, out var originHost))
@@ -80,12 +81,12 @@ public sealed class RequestSecurityMiddleware(RequestDelegate next, IOptions<Sec
         path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase) ||
         path.StartsWith("/repos/", StringComparison.OrdinalIgnoreCase);
 
-    /// <param name="isAgentHub">True when <paramref name="path"/> is under <c>/hub/agent</c> specifically,
+    /// <param name="isWorkerHub">True when <paramref name="path"/> is under <c>/hub/worker</c> specifically,
     /// which has its own, stricter rule (any Origin is rejected).</param>
-    internal static bool IsHubPath(string path, out bool isAgentHub)
+    internal static bool IsHubPath(string path, out bool isWorkerHub)
     {
-        isAgentHub = path.StartsWith("/hub/agent", StringComparison.OrdinalIgnoreCase);
-        return isAgentHub ||
+        isWorkerHub = WorkerHubRoutes.IsWorkerHubPath(path);
+        return isWorkerHub ||
             path.StartsWith("/hubs/workspace-sync", StringComparison.OrdinalIgnoreCase) ||
             path.StartsWith("/hubs/desktop", StringComparison.OrdinalIgnoreCase) ||
             path.StartsWith("/_blazor", StringComparison.OrdinalIgnoreCase);

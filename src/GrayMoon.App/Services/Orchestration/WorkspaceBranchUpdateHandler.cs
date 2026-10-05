@@ -14,11 +14,11 @@ namespace GrayMoon.App.Services.Orchestration;
 
 /// <summary>
 /// Handles the "Update Branch from Default" operation.
-/// Calls the agent directly so CommandOutput streams to TerminalSinkContext when invoked inside a background job.
+/// Calls the worker directly so CommandOutput streams to TerminalSinkContext when invoked inside a background job.
 /// Stateless; all UI state is provided by the caller via callbacks.
 /// </summary>
 public sealed class WorkspaceBranchUpdateHandler(
-    IAgentBridge agentBridge,
+    IWorkerBridge workerBridge,
     WorkspaceRepository workspaceRepository,
     GitHubRepositoryRepository repoRepository,
     ConnectorHealthService connectorHealthService,
@@ -47,14 +47,14 @@ public sealed class WorkspaceBranchUpdateHandler(
         if (wr == null)
             return new UpdateBranchFromDefaultResult(false, false, Array.Empty<string>(), "Repository is not in the given workspace.");
 
-        if (!agentBridge.IsAgentConnected)
+        if (!workerBridge.IsWorkerConnected)
             return new UpdateBranchFromDefaultResult(false, false, Array.Empty<string>(), "Worker not connected. Start the GrayMoon Worker and try again.");
 
         try
         {
             await connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepositoryId, cancellationToken);
 
-            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
+            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
             var defaultBranchName = await dbContext.RepositoryBranches
                 .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && rb.IsDefault && !rb.IsTag)
                 .Select(rb => rb.BranchName)
@@ -90,11 +90,11 @@ public sealed class WorkspaceBranchUpdateHandler(
                 workspaceRoot
             };
 
-            // AgentBridge.SendCommandAsync reads TerminalSinkContext.Current (set by BackgroundJobService.StartJob)
+            // WorkerBridge.SendCommandAsync reads TerminalSinkContext.Current (set by BackgroundJobService.StartJob)
             // so all git output streams to the loading overlay terminal automatically.
-            var response = await agentBridge.SendCommandAsync("UpdateBranchFromDefault", args, cancellationToken);
+            var response = await workerBridge.SendCommandAsync("UpdateBranchFromDefault", args, cancellationToken);
 
-            var updateResponse = AgentResponseJson.DeserializeAgentResponse<UpdateBranchFromDefaultResponse>(response.Data);
+            var updateResponse = WorkerResponseJson.DeserializeWorkerResponse<UpdateBranchFromDefaultResponse>(response.Data);
             var commandSuccess = updateResponse?.Success ?? response.Success;
 
             if (!commandSuccess && updateResponse?.HasConflicts != true)

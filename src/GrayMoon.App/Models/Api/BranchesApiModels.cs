@@ -32,16 +32,16 @@ public sealed class BranchesResponse
     [JsonPropertyName("errorMessage")]
     public string? ErrorMessage { get; set; }
 
-    /// <summary>Whether the checked-out branch has a configured upstream, read from git config rather than matched by name against the remote list. Null from agents that predate this field.</summary>
+    /// <summary>Whether the checked-out branch has a configured upstream, read from git config rather than matched by name against the remote list. Null from workers that predate this field.</summary>
     [JsonPropertyName("hasUpstream")]
     public bool? HasUpstream { get; set; }
 
-    /// <summary>False when the agent could not determine the upstream (or predates the field), in which case <see cref="HasUpstream"/> must not overwrite persisted state.</summary>
+    /// <summary>False when the worker could not determine the upstream (or predates the field), in which case <see cref="HasUpstream"/> must not overwrite persisted state.</summary>
     [JsonPropertyName("upstreamProbed")]
     public bool UpstreamProbed { get; set; }
 }
 
-/// <summary>Response from POST /api/branches/checkout. Agent may send PascalCase; use case-insensitive deserialization.</summary>
+/// <summary>Response from POST /api/branches/checkout. Worker may send PascalCase; use case-insensitive deserialization.</summary>
 public sealed class CheckoutBranchResponse
 {
     [JsonPropertyName("success")]
@@ -54,7 +54,7 @@ public sealed class CheckoutBranchResponse
     public string? ErrorMessage { get; set; }
 }
 
-/// <summary>Agent response for CheckoutTag command (camelCase).</summary>
+/// <summary>Worker response for CheckoutTag command (camelCase).</summary>
 public sealed class CheckoutTagResponse
 {
     [JsonPropertyName("success")]
@@ -67,7 +67,7 @@ public sealed class CheckoutTagResponse
     public string? ErrorMessage { get; set; }
 }
 
-/// <summary>Agent CreateBranch response (camelCase).</summary>
+/// <summary>Worker CreateBranch response (camelCase).</summary>
 public sealed class CreateBranchResponse
 {
     [JsonPropertyName("success")]
@@ -108,7 +108,7 @@ public sealed class CreateBranchResponse
     public string? FetchError { get; set; }
 }
 
-/// <summary>Agent DeleteBranch response (camelCase).</summary>
+/// <summary>Worker DeleteBranch response (camelCase).</summary>
 public sealed class DeleteBranchResponse
 {
     [JsonPropertyName("success")]
@@ -118,7 +118,7 @@ public sealed class DeleteBranchResponse
     public string? ErrorMessage { get; set; }
 }
 
-/// <summary>Agent SetUpstreamBranch response (camelCase).</summary>
+/// <summary>Worker SetUpstreamBranch response (camelCase).</summary>
 public sealed class SetUpstreamBranchResponse
 {
     [JsonPropertyName("success")]
@@ -128,7 +128,7 @@ public sealed class SetUpstreamBranchResponse
     public string? ErrorMessage { get; set; }
 }
 
-/// <summary>Agent ReturnToDefaultBranch response (camelCase). Used to parse agent response.Data.</summary>
+/// <summary>Worker ReturnToDefaultBranch response (camelCase). Used to parse worker response.Data.</summary>
 public sealed class ReturnToDefaultBranchResponse
 {
     [JsonPropertyName("success")]
@@ -174,9 +174,9 @@ public sealed class ReturnToDefaultBranchResponse
     public string? GitVersion { get; set; }
 
     [JsonPropertyName("projects")]
-    public List<AgentProjectDto>? Projects { get; set; }
+    public List<WorkerProjectDto>? Projects { get; set; }
 
-    /// <summary>Authoritative post-checkout state with per-group probe markers. Null from agents that predate this field.</summary>
+    /// <summary>Authoritative post-checkout state with per-group probe markers. Null from workers that predate this field.</summary>
     [JsonPropertyName("state")]
     public GrayMoon.Abstractions.Notifications.RepositoryStateSnapshot? State { get; set; }
 }
@@ -201,7 +201,7 @@ public sealed class CreateBranchApiResult
     public string? Error { get; set; }
 }
 
-/// <summary>Agent StageAndCommit response (camelCase).</summary>
+/// <summary>Worker StageAndCommit response (camelCase).</summary>
 public sealed class StageAndCommitResponse
 {
     [JsonPropertyName("success")]
@@ -214,14 +214,14 @@ public sealed class StageAndCommitResponse
     public string? ErrorMessage { get; set; }
 }
 
-/// <summary>Agent SyncRepositoryDependencies response (camelCase).</summary>
+/// <summary>Worker SyncRepositoryDependencies response (camelCase).</summary>
 public sealed class SyncRepositoryDependenciesResponse
 {
     [JsonPropertyName("updatedCount")]
     public int UpdatedCount { get; set; }
 }
 
-/// <summary>Agent PushRepository response (camelCase).</summary>
+/// <summary>Worker PushRepository response (camelCase).</summary>
 public sealed class PushRepositoryResponse
 {
     [JsonPropertyName("success")]

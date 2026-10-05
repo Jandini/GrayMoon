@@ -1,4 +1,4 @@
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Data;
 using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
@@ -28,11 +28,11 @@ public sealed class WorkspaceTopBarServiceTests
         protected override void NavigateToCore(string uri, NavigationOptions options) => SetUri(uri);
     }
 
-    private sealed class NoOpAgentBridge : IAgentBridge
+    private sealed class NoOpWorkerBridge : IWorkerBridge
     {
-        public bool IsAgentConnected => false;
+        public bool IsWorkerConnected => false;
 
-        public Task<AgentCommandResponse> SendCommandAsync(string command, object args, CancellationToken cancellationToken = default) =>
+        public Task<WorkerCommandResponse> SendCommandAsync(string command, object args, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException("Not used by these tests.");
     }
 
@@ -55,7 +55,7 @@ public sealed class WorkspaceTopBarServiceTests
     private static WorkspaceRepository CreateWorkspaceRepository(AppDbContext dbContext)
     {
         var workspaceService = new WorkspaceService(
-            new NoOpAgentBridge(),
+            new NoOpWorkerBridge(),
             NullLogger<WorkspaceService>.Instance,
             new AppSettingRepository(dbContext),
             Options.Create(new WorkspaceOptions()));

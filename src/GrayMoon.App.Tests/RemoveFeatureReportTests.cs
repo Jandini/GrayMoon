@@ -1,4 +1,4 @@
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services.GitChanges;
@@ -36,9 +36,9 @@ public sealed class RemoveFeatureReportTests
         await using var ctx = await SyncStateTestContext.CreateAsync();
         var featureContextId = await SeedRemovableFeatureAsync(ctx);
 
-        ctx.AgentBridge.Respond(AgentHubMethods.InspectWorktree, CleanInspectWorktree());
-        ctx.AgentBridge.Respond(AgentHubMethods.RemoveGitWorktree, new { success = true });
-        ctx.AgentBridge.Respond(
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree());
+        ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new { success = true });
+        ctx.WorkerBridge.Respond(
             "DeleteBranch",
             data: null,
             success: false,
@@ -63,13 +63,13 @@ public sealed class RemoveFeatureReportTests
     }
 
     [Fact]
-    public async Task Residue_reported_by_Agent_appears_in_the_report()
+    public async Task Residue_reported_by_Worker_appears_in_the_report()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
         var featureContextId = await SeedRemovableFeatureAsync(ctx);
 
-        ctx.AgentBridge.Respond(AgentHubMethods.InspectWorktree, CleanInspectWorktree());
-        ctx.AgentBridge.Respond(AgentHubMethods.RemoveGitWorktree, new
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree());
+        ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new
         {
             success = true,
             residueRemaining = true,
@@ -77,7 +77,7 @@ public sealed class RemoveFeatureReportTests
             residueSampleFiles = new[] { "build.log" },
             residueMessage = "Some files could not be deleted. They may still be open in another program.",
         });
-        ctx.AgentBridge.Respond("DeleteBranch", new { success = true });
+        ctx.WorkerBridge.Respond("DeleteBranch", new { success = true });
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -103,7 +103,7 @@ public sealed class RemoveFeatureReportTests
         await using var ctx = await SyncStateTestContext.CreateAsync();
         var featureContextId = await SeedRemovableFeatureAsync(ctx);
 
-        ctx.AgentBridge.Respond(AgentHubMethods.InspectWorktree, new
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, new
         {
             exists = true,
             isDirty = false,
@@ -116,8 +116,8 @@ public sealed class RemoveFeatureReportTests
             featureBranchHasUpstream = false,
             featureBranchAheadOfUpstream = (int?)null,
         });
-        ctx.AgentBridge.Respond(AgentHubMethods.RemoveGitWorktree, new { success = true });
-        ctx.AgentBridge.Respond("DeleteBranch", new { success = true });
+        ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new { success = true });
+        ctx.WorkerBridge.Respond("DeleteBranch", new { success = true });
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -131,7 +131,7 @@ public sealed class RemoveFeatureReportTests
         Assert.Equal(RemoveFeatureBranchOutcome.Deleted, repo.BranchOutcome);
         Assert.Equal("side", repo.KeptBranchName);
         Assert.Contains(
-            ctx.AgentBridge.Calls,
+            ctx.WorkerBridge.Calls,
             c => c.Command == "DeleteBranch" && c.Args.GetType().GetProperty("branchName")!.GetValue(c.Args) as string == "feat-refresh");
     }
 
@@ -141,15 +141,15 @@ public sealed class RemoveFeatureReportTests
         await using var ctx = await SyncStateTestContext.CreateAsync();
         var featureContextId = await SeedRemovableFeatureWithThreeReposAsync(ctx);
 
-        ctx.AgentBridge.Respond(AgentHubMethods.InspectWorktree, CleanInspectWorktree());
-        ctx.AgentBridge.Respond(AgentHubMethods.RemoveGitWorktree, args =>
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree());
+        ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, args =>
         {
             var path = GetWorktreePath(args);
             if (path.EndsWith("graymoon-web", StringComparison.Ordinal))
-                return new AgentCommandResponse(false, null, "Permission denied on graymoon-web");
-            return new AgentCommandResponse(true, new { success = true }, null);
+                return new WorkerCommandResponse(false, null, "Permission denied on graymoon-web");
+            return new WorkerCommandResponse(true, new { success = true }, null);
         });
-        ctx.AgentBridge.Respond("DeleteBranch", new { success = true });
+        ctx.WorkerBridge.Respond("DeleteBranch", new { success = true });
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -176,7 +176,7 @@ public sealed class RemoveFeatureReportTests
     }
 
     [Fact]
-    public async Task Second_Remove_skips_an_already_Removed_row_and_issues_zero_Agent_calls_for_it()
+    public async Task Second_Remove_skips_an_already_Removed_row_and_issues_zero_Worker_calls_for_it()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
         var featureContextId = await SeedRemovableFeatureWithTwoReposAsync(ctx);
@@ -195,9 +195,9 @@ public sealed class RemoveFeatureReportTests
             await seedDb.SaveChangesAsync();
         }
 
-        ctx.AgentBridge.Respond(AgentHubMethods.InspectWorktree, CleanInspectWorktree());
-        ctx.AgentBridge.Respond(AgentHubMethods.RemoveGitWorktree, new { success = true });
-        ctx.AgentBridge.Respond("DeleteBranch", new { success = true });
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree());
+        ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new { success = true });
+        ctx.WorkerBridge.Respond("DeleteBranch", new { success = true });
 
         await using var scope2 = ctx.CreateScope();
         var ops = scope2.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -213,10 +213,10 @@ public sealed class RemoveFeatureReportTests
         Assert.True(result.Success, result.Error);
         Assert.Single(result.RemoveFeatureReport!);
         Assert.DoesNotContain(
-            ctx.AgentBridge.Calls,
-            c => c.Command == AgentHubMethods.RemoveGitWorktree && GetWorktreePath(c.Args) == removedWorktreePath);
-        Assert.Equal(1, ctx.AgentBridge.Calls.Count(c => c.Command == AgentHubMethods.RemoveGitWorktree));
-        Assert.Equal(1, ctx.AgentBridge.Calls.Count(c => c.Command == "DeleteBranch"));
+            ctx.WorkerBridge.Calls,
+            c => c.Command == WorkerHubMethods.RemoveGitWorktree && GetWorktreePath(c.Args) == removedWorktreePath);
+        Assert.Equal(1, ctx.WorkerBridge.Calls.Count(c => c.Command == WorkerHubMethods.RemoveGitWorktree));
+        Assert.Equal(1, ctx.WorkerBridge.Calls.Count(c => c.Command == "DeleteBranch"));
 
         await using var read = ctx.CreateScope();
         var db = read.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -231,9 +231,9 @@ public sealed class RemoveFeatureReportTests
         var featureContextId = await SeedRemovableFeatureAsync(ctx);
         var specialContextId = await ctx.GetSpecialContextIdAsync();
 
-        ctx.AgentBridge.Respond(AgentHubMethods.InspectWorktree, CleanInspectWorktree());
-        ctx.AgentBridge.Respond(AgentHubMethods.RemoveGitWorktree, new { success = true });
-        ctx.AgentBridge.Respond("DeleteBranch", new { success = true });
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree());
+        ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new { success = true });
+        ctx.WorkerBridge.Respond("DeleteBranch", new { success = true });
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -257,7 +257,7 @@ public sealed class RemoveFeatureReportTests
         await using var ctx = await SyncStateTestContext.CreateAsync();
         var featureContextId = await SeedRemovableFeatureAsync(ctx);
 
-        ctx.AgentBridge.Respond(AgentHubMethods.InspectWorktree, new
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, new
         {
             exists = true,
             isLocked = true,
@@ -292,7 +292,7 @@ public sealed class RemoveFeatureReportTests
         await using var ctx = await SyncStateTestContext.CreateAsync();
         var featureContextId = await SeedRemovableFeatureAsync(ctx);
 
-        ctx.AgentBridge.Respond(AgentHubMethods.InspectWorktree, CleanInspectWorktree());
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree());
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -308,11 +308,11 @@ public sealed class RemoveFeatureReportTests
     public async Task RemoveFeatureAsync_forwards_AllowUnlockWorktrees_as_unlock_on_the_RemoveGitWorktree_command()
     {
         // D5: the App never unlocks a worktree itself (it never touches the developer's disk); it
-        // only forwards the user's consent to the Agent, which runs git worktree unlock.
+        // only forwards the user's consent to the Worker, which runs git worktree unlock.
         await using var ctx = await SyncStateTestContext.CreateAsync();
         var featureContextId = await SeedRemovableFeatureAsync(ctx);
 
-        ctx.AgentBridge.Respond(AgentHubMethods.InspectWorktree, new
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, new
         {
             exists = true,
             isLocked = true,
@@ -327,8 +327,8 @@ public sealed class RemoveFeatureReportTests
             featureBranchHasUpstream = true,
             featureBranchAheadOfUpstream = 0,
         });
-        ctx.AgentBridge.Respond(AgentHubMethods.RemoveGitWorktree, new { success = true });
-        ctx.AgentBridge.Respond("DeleteBranch", new { success = true });
+        ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new { success = true });
+        ctx.WorkerBridge.Respond("DeleteBranch", new { success = true });
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -337,7 +337,7 @@ public sealed class RemoveFeatureReportTests
             new RemoveFeatureOptions { AllowUnlockWorktrees = true });
 
         Assert.True(result.Success, result.Error);
-        var call = Assert.Single(ctx.AgentBridge.Calls, c => c.Command == AgentHubMethods.RemoveGitWorktree);
+        var call = Assert.Single(ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.RemoveGitWorktree);
         var unlockProp = call.Args.GetType().GetProperty("unlock");
         Assert.NotNull(unlockProp);
         Assert.Equal(true, unlockProp!.GetValue(call.Args));
@@ -349,9 +349,9 @@ public sealed class RemoveFeatureReportTests
         await using var ctx = await SyncStateTestContext.CreateAsync();
         var featureContextId = await SeedRemovableFeatureAsync(ctx);
 
-        ctx.AgentBridge.Respond(AgentHubMethods.InspectWorktree, CleanInspectWorktree());
-        ctx.AgentBridge.Respond(
-            AgentHubMethods.RemoveGitWorktree,
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree());
+        ctx.WorkerBridge.Respond(
+            WorkerHubMethods.RemoveGitWorktree,
             data: null,
             success: false,
             error: "Permission denied");

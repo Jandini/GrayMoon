@@ -555,7 +555,7 @@ public static partial class Migrations
                     Deletions = s.Deletions,
                     StagedInsertions = s.StagedInsertions,
                     StagedDeletions = s.StagedDeletions,
-                    AgentScannedAt = s.AgentScannedAt,
+                    WorkerScannedAt = s.WorkerScannedAt,
                     PersistedAt = s.PersistedAt,
                     LastErrorCode = s.LastErrorCode,
                     LastErrorMessage = s.LastErrorMessage

@@ -1,4 +1,4 @@
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Data;
 using GrayMoon.Application.Features;
 using Microsoft.EntityFrameworkCore;
@@ -35,7 +35,7 @@ public sealed class FeatureNameValidationTests
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
 
-        ctx.AgentBridge.Respond(AgentHubMethods.GetHeadCommits, new
+        ctx.WorkerBridge.Respond(WorkerHubMethods.GetHeadCommits, new
         {
             commits = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
@@ -46,7 +46,7 @@ public sealed class FeatureNameValidationTests
                 ["graymoon-api"] = "develop",
             },
         });
-        ctx.AgentBridge.Respond(AgentHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:\wt" });
+        ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:\wt" });
 
         await using var firstScope = ctx.CreateScope();
         var firstOps = firstScope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();

@@ -1,6 +1,6 @@
 using System.Diagnostics;
 using System.Text;
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -37,11 +37,11 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
             LogSafe.ForLog(arguments),
             cwd);
 
-        ReportAmbient(new CommandLineStreamEvent(AgentCommandStreamKind.CommandLine, $"$ {fileName} {LogSafe.ForLog(arguments)}"));
+        ReportAmbient(new CommandLineStreamEvent(WorkerCommandStreamKind.CommandLine, $"$ {fileName} {LogSafe.ForLog(arguments)}"));
 
         var suppressStreamLogging = ShouldSuppressStreamLogging(fileName, arguments);
         var suppressOverlayStdout = IsGitStatusCommand(fileName, arguments);
-        var stderrStreamKind = streamStderrAsStdout ? AgentCommandStreamKind.Stdout : AgentCommandStreamKind.Stderr;
+        var stderrStreamKind = streamStderrAsStdout ? WorkerCommandStreamKind.Stdout : WorkerCommandStreamKind.Stderr;
 
         var startInfo = new ProcessStartInfo
         {
@@ -77,7 +77,7 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
 
         var stdoutTask = ConsumeStreamAsync(
             process.StandardOutput,
-            segment => OnStreamSegment(fileName, suppressStreamLogging, suppressOverlayStdout, AgentCommandStreamKind.Stdout, segment),
+            segment => OnStreamSegment(fileName, suppressStreamLogging, suppressOverlayStdout, WorkerCommandStreamKind.Stdout, segment),
             runToken);
         var stderrTask = ConsumeStreamAsync(
             process.StandardError,
@@ -137,11 +137,11 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
             loggedArguments,
             cwd);
 
-        ReportAmbient(new CommandLineStreamEvent(AgentCommandStreamKind.CommandLine, $"$ {fileName} {loggedArguments}"));
+        ReportAmbient(new CommandLineStreamEvent(WorkerCommandStreamKind.CommandLine, $"$ {fileName} {loggedArguments}"));
 
         var suppressStreamLogging = ShouldSuppressStreamLogging(fileName, arguments);
         var suppressOverlayStdout = IsGitStatusCommand(fileName, arguments);
-        var stderrStreamKind = streamStderrAsStdout ? AgentCommandStreamKind.Stdout : AgentCommandStreamKind.Stderr;
+        var stderrStreamKind = streamStderrAsStdout ? WorkerCommandStreamKind.Stdout : WorkerCommandStreamKind.Stderr;
 
         var startInfo = new ProcessStartInfo
         {
@@ -180,7 +180,7 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
 
         var stdoutTask = ConsumeStreamPreservingLineEndingsAsync(
             process.StandardOutput,
-            segment => OnStreamSegment(fileName, suppressStreamLogging, suppressOverlayStdout, AgentCommandStreamKind.Stdout, segment),
+            segment => OnStreamSegment(fileName, suppressStreamLogging, suppressOverlayStdout, WorkerCommandStreamKind.Stdout, segment),
             runToken);
         var stderrTask = ConsumeStreamPreservingLineEndingsAsync(
             process.StandardError,
@@ -248,7 +248,7 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
         logger.LogWarning(
             "Command {Executable} {Parameters} timed out after {ElapsedMs}ms (limit {TimeoutSeconds}s) and was killed",
             fileName, loggedArguments, sw.ElapsedMilliseconds, timeout.TotalSeconds);
-        ReportAmbient(new CommandLineStreamEvent(AgentCommandStreamKind.Stderr, message));
+        ReportAmbient(new CommandLineStreamEvent(WorkerCommandStreamKind.Stderr, message));
 
         return new CommandLineResult(-1, stdout, message);
     }
@@ -316,7 +316,7 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
                     ? string.Concat(raw.AsSpan(0, MaxMirrorLineLength), " …")
                     : raw;
 
-                ReportAmbient(new CommandLineStreamEvent(AgentCommandStreamKind.Stderr, line));
+                ReportAmbient(new CommandLineStreamEvent(WorkerCommandStreamKind.Stderr, line));
             }
         }
     }
@@ -593,11 +593,11 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
         return true;
     }
 
-    private void OnStreamSegment(string fileName, bool suppressStreamLogging, bool suppressOverlay, AgentCommandStreamKind kind, string segment)
+    private void OnStreamSegment(string fileName, bool suppressStreamLogging, bool suppressOverlay, WorkerCommandStreamKind kind, string segment)
     {
         if (!suppressStreamLogging)
         {
-            var label = kind == AgentCommandStreamKind.Stderr ? "stderr" : "stdout";
+            var label = kind == WorkerCommandStreamKind.Stderr ? "stderr" : "stdout";
             logger.LogDebug("Command {Stream} ({Executable}): {Segment}", label, fileName, TruncateForLog(LogSafe.ForLog(segment)));
         }
 

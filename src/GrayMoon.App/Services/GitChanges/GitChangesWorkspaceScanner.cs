@@ -41,15 +41,15 @@ public sealed class GitChangesWorkspaceScanner(
         int? repositoryId = null)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
-        var agentBridge = scope.ServiceProvider.GetRequiredService<IAgentBridge>();
-        if (!agentBridge.IsAgentConnected)
+        var workerBridge = scope.ServiceProvider.GetRequiredService<IWorkerBridge>();
+        if (!workerBridge.IsWorkerConnected)
         {
             return;
         }
 
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var pathResolver = scope.ServiceProvider.GetRequiredService<IWorkspaceContextPathResolver>();
-        var agentClient = scope.ServiceProvider.GetRequiredService<IGitChangesAgentClient>();
+        var workerClient = scope.ServiceProvider.GetRequiredService<IGitChangesWorkerClient>();
         var writeQueue = scope.ServiceProvider.GetRequiredService<WorkspaceGitChangesWriteQueue>();
         var pushHandler = scope.ServiceProvider.GetRequiredService<GitChangesSnapshotPushHandler>();
 
@@ -66,7 +66,7 @@ public sealed class GitChangesWorkspaceScanner(
             .AsNoTracking()
             .ToListAsync(cancellationToken);
 
-        var (root, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
+        var (root, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
 
         var targets = new List<MonitorTarget>();
         foreach (var link in links)
@@ -107,7 +107,7 @@ public sealed class GitChangesWorkspaceScanner(
             var success = false;
             try
             {
-                var result = await agentClient.GetStatusAsync(
+                var result = await workerClient.GetStatusAsync(
                     target.Root, target.WorkspaceName, target.RepositoryName,
                     target.WorkspaceId, target.RepositoryId, cancellationToken,
                     includeLineStats);

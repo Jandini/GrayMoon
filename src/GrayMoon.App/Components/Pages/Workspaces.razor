@@ -16,8 +16,8 @@
 @inject IRepositoryListQueryService RepositoryListQueryService
 @inject GitHubRepositoryService RepositoryService
 @inject WorkspaceService WorkspaceService
-@inject IAgentBridge AgentBridge
-@inject AgentConnectionTracker AgentConnectionTracker
+@inject IWorkerBridge WorkerBridge
+@inject WorkerConnectionTracker WorkerConnectionTracker
 @inject ILogger<Workspaces> Logger
 @inject WorkspaceContextNavigationService ContextNavigation
 @using GrayMoon.App.Services.Features
@@ -182,7 +182,7 @@
                IsSaving="@isSaving"
                IsCheckingDirectory="@isLoadingDirectoryInfo"
                ErrorMessage="@editorErrorMessage"
-               SaveDisabled="@(editingWorkspaceId == null && !AgentBridge.IsAgentConnected)"
+               SaveDisabled="@(editingWorkspaceId == null && !WorkerBridge.IsWorkerConnected)"
                OnSave="@SaveWorkspaceAsync"
                OnCancel="@CloseEditorModal" />
 
@@ -329,13 +329,13 @@
 
     protected override void OnInitialized()
     {
-        AgentConnectionTracker.OnStateChanged(OnAgentConnectionStateChanged);
+        WorkerConnectionTracker.OnStateChanged(OnWorkerConnectionStateChanged);
     }
 
-    private void OnAgentConnectionStateChanged(AgentConnectionState state)
+    private void OnWorkerConnectionStateChanged(WorkerConnectionState state)
     {
         if (_disposed) return;
-        if (state is AgentConnectionState.Online or AgentConnectionState.VersionMismatch)
+        if (state is WorkerConnectionState.Online or WorkerConnectionState.VersionMismatch)
             _ = InvokeAsync(async () =>
             {
                 await WorkspaceService.GetRootPathAsync();
@@ -356,7 +356,7 @@
     protected override async Task OnInitializedAsync()
     {
         await LoadWorkspacesAsync();
-        if (AgentBridge.IsAgentConnected)
+        if (WorkerBridge.IsWorkerConnected)
             await WorkspaceService.GetRootPathAsync();
     }
 
@@ -405,7 +405,7 @@
         directoryExists = false;
         existingRepositoryCount = 0;
 
-        if (!AgentBridge.IsAgentConnected)
+        if (!WorkerBridge.IsWorkerConnected)
         {
             editorErrorMessage = "Worker is not available. Please start the GrayMoon Worker to add workspaces.";
         }
@@ -496,7 +496,7 @@
             return;
         }
 
-        if (editingWorkspaceId == null && !AgentBridge.IsAgentConnected)
+        if (editingWorkspaceId == null && !WorkerBridge.IsWorkerConnected)
         {
             editorErrorMessage = "Worker is not available. Please start the GrayMoon Worker to add workspaces.";
             return;

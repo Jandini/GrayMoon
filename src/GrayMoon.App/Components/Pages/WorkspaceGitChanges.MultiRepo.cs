@@ -95,7 +95,7 @@ public sealed partial class WorkspaceGitChanges
             return;
         }
 
-        if (!AgentBridge.IsAgentConnected)
+        if (!WorkerBridge.IsWorkerConnected)
         {
             ToastService.ShowError("Worker not connected. Start the GrayMoon Worker and try again.");
             return;
@@ -276,7 +276,7 @@ public sealed partial class WorkspaceGitChanges
     /// the page's LoadingOverlay/terminal job since it spans every repository in the section.</summary>
     private void BulkSectionActionAsync(bool unstageStagedSection)
     {
-        if (!AgentBridge.IsAgentConnected)
+        if (!WorkerBridge.IsWorkerConnected)
         {
             ToastService.ShowError("Worker not connected. Start the GrayMoon Worker and try again.");
             return;

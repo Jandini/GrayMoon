@@ -1,0 +1,20 @@
+using GrayMoon.Worker.Abstractions;
+
+namespace GrayMoon.Worker.Commands;
+
+/// <summary>Routes incoming notify jobs to the appropriate hook handler based on <see cref="INotifyJob.HookKind"/>.</summary>
+public sealed class HookSyncDispatcher(
+    CheckoutHookSyncCommand checkoutHandler,
+    CommitHookSyncCommand commitHandler,
+    MergeHookSyncCommand mergeHandler,
+    PushHookSyncCommand pushHandler) : INotifySyncHandler
+{
+    public Task ExecuteAsync(INotifyJob payload, CancellationToken cancellationToken = default)
+        => payload.HookKind switch
+        {
+            NotifyHookKind.Checkout => checkoutHandler.ExecuteAsync(payload, cancellationToken),
+            NotifyHookKind.Merge => mergeHandler.ExecuteAsync(payload, cancellationToken),
+            NotifyHookKind.Push => pushHandler.ExecuteAsync(payload, cancellationToken),
+            _ => commitHandler.ExecuteAsync(payload, cancellationToken),
+        };
+}

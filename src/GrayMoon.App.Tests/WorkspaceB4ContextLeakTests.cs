@@ -1,4 +1,4 @@
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
@@ -338,11 +338,11 @@ public sealed class B4ContextLeakTestContext : IAsyncDisposable
         _provider = provider;
     }
 
-    private sealed class NoOpAgentBridge : IAgentBridge
+    private sealed class NoOpWorkerBridge : IWorkerBridge
     {
-        public bool IsAgentConnected => false;
+        public bool IsWorkerConnected => false;
 
-        public Task<AgentCommandResponse> SendCommandAsync(string command, object args, CancellationToken cancellationToken = default) =>
+        public Task<WorkerCommandResponse> SendCommandAsync(string command, object args, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException("Not used by these tests.");
     }
 
@@ -448,7 +448,7 @@ public sealed class B4ContextLeakTestContext : IAsyncDisposable
         var db = Db(scope);
         var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
         var workspaceService = new WorkspaceService(
-            new NoOpAgentBridge(),
+            new NoOpWorkerBridge(),
             NullLogger<WorkspaceService>.Instance,
             new AppSettingRepository(db),
             Options.Create(new WorkspaceOptions()));

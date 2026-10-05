@@ -2,7 +2,7 @@ namespace GrayMoon.App.Tests;
 
 /// <summary>
 /// The App never touches the developer's disk directly: disk facts about repository and worktree
-/// paths come only from the Agent through IAgentBridge.SendCommandAsync, because the App can run in
+/// paths come only from the Worker through IWorkerBridge.SendCommandAsync, because the App can run in
 /// Docker where those paths do not exist. This scans App/Services/Features/ source files and fails
 /// if any of them call System.IO.Directory, System.IO.File, or Path.Exists. WorkspaceContextPathResolver.cs
 /// is allow-listed because it only builds path strings and never reads disk.
@@ -38,7 +38,7 @@ public sealed class FeaturesDiskAccessArchitectureTests
 
         Assert.True(
             violations.Count == 0,
-            "App/Services/Features must not touch disk directly; disk facts come from the Agent via InspectWorktree:\n"
+            "App/Services/Features must not touch disk directly; disk facts come from the Worker via InspectWorktree:\n"
             + string.Join(Environment.NewLine, violations));
     }
 

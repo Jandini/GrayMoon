@@ -27,7 +27,7 @@ public interface IWorkspaceFileOperations
 
     Task<(bool Found, int Added)> AddAsync(int workspaceId, IReadOnlyList<AddWorkspaceFileRequest> items, CancellationToken cancellationToken);
 
-    Task<(bool Found, bool AgentConnected, AgentSearchFilesResponse? Data, string? Error)> SearchAsync(
+    Task<(bool Found, bool WorkerConnected, WorkerSearchFilesResponse? Data, string? Error)> SearchAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         string? pattern,

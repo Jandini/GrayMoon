@@ -1,4 +1,4 @@
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
@@ -13,12 +13,12 @@ namespace GrayMoon.App.Tests;
 
 public sealed class WorkspaceRepositoryExcludeAiWorkflowsTests
 {
-    private sealed class NoOpAgentBridge : IAgentBridge
+    private sealed class NoOpWorkerBridge : IWorkerBridge
     {
-        public bool IsAgentConnected => false;
+        public bool IsWorkerConnected => false;
 
-        public Task<AgentCommandResponse> SendCommandAsync(string command, object args, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new AgentCommandResponse(true, null, null));
+        public Task<WorkerCommandResponse> SendCommandAsync(string command, object args, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new WorkerCommandResponse(true, null, null));
     }
 
     private sealed class Fixture : IAsyncDisposable
@@ -60,7 +60,7 @@ public sealed class WorkspaceRepositoryExcludeAiWorkflowsTests
         public WorkspaceRepository CreateWorkspaceRepository()
         {
             var workspaceService = new WorkspaceService(
-                new NoOpAgentBridge(),
+                new NoOpWorkerBridge(),
                 NullLogger<WorkspaceService>.Instance,
                 new AppSettingRepository(CircuitDb),
                 Options.Create(new WorkspaceOptions()));

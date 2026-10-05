@@ -1,5 +1,5 @@
 using System.Collections.Concurrent;
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.Abstractions.Exceptions;
 using GrayMoon.Abstractions.Notifications;
 using GrayMoon.App.Data;
@@ -28,14 +28,14 @@ public sealed partial class WorkspaceGitService
         Action<int, int>? onProgress = null,
         CancellationToken cancellationToken = default)
     {
-        if (!_agentBridge.IsAgentConnected)
-            throw new AgentNotConnectedException();
+        if (!_workerBridge.IsWorkerConnected)
+            throw new WorkerNotConnectedException();
 
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)
             throw new InvalidOperationException($"Workspace {workspaceId} not found.");
 
-        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
 
         var links = workspace.Repositories
             .Where(l => l.Repository != null && (repositoryIds == null || repositoryIds.Contains(l.RepositoryId)))
@@ -69,9 +69,9 @@ public sealed partial class WorkspaceGitService
                     workspaceRoot,
                     divergenceBaseBranch
                 };
-                var response = await _agentBridge.SendCommandAsync("FetchCommits", args, cancellationToken);
+                var response = await _workerBridge.SendCommandAsync("FetchCommits", args, cancellationToken);
                 var data = response.Data != null
-                    ? AgentResponseJson.DeserializeAgentResponse<AgentFetchCommitsResponse>(response.Data)
+                    ? WorkerResponseJson.DeserializeWorkerResponse<WorkerFetchCommitsResponse>(response.Data)
                     : null;
                 string? error = null;
                 if (!response.Success || data is { Success: false, ErrorMessage: not null })

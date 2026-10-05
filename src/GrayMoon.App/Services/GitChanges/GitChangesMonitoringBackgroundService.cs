@@ -6,11 +6,11 @@ namespace GrayMoon.App.Services.GitChanges;
 
 /// <summary>
 /// Owns the Git Changes background monitoring policy. Per the feature's design, a repository's
-/// Agent-side <c>FileSystemWatcher</c> lease belongs to the workspace background service, not the
+/// Worker-side <c>FileSystemWatcher</c> lease belongs to the workspace background service, not the
 /// browser page - navigating among workspace pages must never directly start or stop monitoring.
 /// This sweep periodically calls <c>GetGitChangeStatus</c> for every repository in every
 /// <i>active</i> workspace (per <see cref="IWorkspaceGitChangesActivityTracker"/>) - not every
-/// workspace in the database - which both seeds/renews the Agent's <c>GitRepositoryWatcherManager</c>
+/// workspace in the database - which both seeds/renews the Worker's <c>GitRepositoryWatcherManager</c>
 /// lease (idle grace period is <see cref="GitChangesOptions.WatcherIdleGraceMinutes"/>) and keeps the
 /// persisted SQLite projection fresh while a workspace is in view anywhere in GrayMoon. Workspaces with
 /// no recent viewer fall out of scope on their own once
@@ -24,7 +24,7 @@ public sealed class GitChangesMonitoringBackgroundService(
     IGitChangesWorkspaceScanner scanner,
     IWorkspaceGitChangesActivityTracker activityTracker,
     IWorkspaceGitChangesMonitoringPause monitoringPause,
-    AgentConnectionTracker connectionTracker,
+    WorkerConnectionTracker connectionTracker,
     IOptions<GitChangesOptions> gitChangesOptions,
     ILogger<GitChangesMonitoringBackgroundService> logger) : BackgroundService
 {
@@ -32,11 +32,11 @@ public sealed class GitChangesMonitoringBackgroundService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Trigger an immediate sweep on Agent (re)connect, per the design's "Agent reconnect" trigger,
+        // Trigger an immediate sweep on Worker (re)connect, per the design's "Worker reconnect" trigger,
         // instead of waiting for the next renewal interval.
         connectionTracker.OnStateChanged(state =>
         {
-            if (state == AgentConnectionState.Online)
+            if (state == WorkerConnectionState.Online)
             {
                 TryWake();
             }
@@ -101,8 +101,8 @@ public sealed class GitChangesMonitoringBackgroundService(
     private async Task MonitorActiveWorkspacesAsync(CancellationToken cancellationToken)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
-        var agentBridge = scope.ServiceProvider.GetRequiredService<IAgentBridge>();
-        if (!agentBridge.IsAgentConnected)
+        var workerBridge = scope.ServiceProvider.GetRequiredService<IWorkerBridge>();
+        if (!workerBridge.IsWorkerConnected)
         {
             return;
         }
@@ -116,7 +116,7 @@ public sealed class GitChangesMonitoringBackgroundService(
 
         // Scanned sequentially: each ScanWorkspaceAsync call is already internally bounded to
         // MaxParallelRepositoryOperations, so looping (rather than fanning all workspaces out at once)
-        // keeps the sweep's total concurrent Agent status scans within that same bound.
+        // keeps the sweep's total concurrent Worker status scans within that same bound.
         foreach (var workspaceId in activeWorkspaceIds)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -129,7 +129,7 @@ public sealed class GitChangesMonitoringBackgroundService(
                     cancellationToken.ThrowIfCancellationRequested();
 
                     // D2: a Feature context being removed is paused here so the sweep never asks the
-                    // Agent to scan a worktree that Remove Feature is deleting at the same time. The
+                    // Worker to scan a worktree that Remove Feature is deleting at the same time. The
                     // special Workspace context is never paused, so its own monitoring is unaffected.
                     if (monitoringPause.IsPaused(ctx.ContextId.Value))
                         continue;

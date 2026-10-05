@@ -10,7 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace GrayMoon.App.Tests;
 
 /// <summary>
-/// Characterisation tests for <c>WorkspaceGitService.ReturnToDefaultDirectAsync</c>: after the agent
+/// Characterisation tests for <c>WorkspaceGitService.ReturnToDefaultDirectAsync</c>: after the worker
 /// reports a successful switch to the default branch, the link row and the branch rows must reflect
 /// the branch that is now checked out.
 /// </summary>
@@ -32,7 +32,7 @@ public sealed class ReturnToDefaultPersistenceTests
         GitVersion = "2.0.0",
         Projects =
         [
-            new AgentProjectDto
+            new WorkerProjectDto
             {
                 Name = "Acme.Api",
                 ProjectType = (int)ProjectType.Service,
@@ -46,7 +46,7 @@ public sealed class ReturnToDefaultPersistenceTests
     public async Task Successful_sync_persists_branch_version_counts_and_upstream()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        ctx.AgentBridge.Respond("ReturnToDefaultBranch", SuccessfulResponse());
+        ctx.WorkerBridge.Respond("ReturnToDefaultBranch", SuccessfulResponse());
 
         await using var scope = ctx.CreateScope();
         var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
@@ -71,10 +71,10 @@ public sealed class ReturnToDefaultPersistenceTests
     }
 
     [Fact]
-    public async Task Successful_sync_replaces_the_branch_rows_with_the_agent_list()
+    public async Task Successful_sync_replaces_the_branch_rows_with_the_worker_list()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        ctx.AgentBridge.Respond("ReturnToDefaultBranch", SuccessfulResponse());
+        ctx.WorkerBridge.Respond("ReturnToDefaultBranch", SuccessfulResponse());
 
         await using (var seedScope = ctx.CreateScope())
         {
@@ -103,7 +103,7 @@ public sealed class ReturnToDefaultPersistenceTests
     public async Task Successful_sync_persists_the_projects_found_on_the_default_branch()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        ctx.AgentBridge.Respond("ReturnToDefaultBranch", SuccessfulResponse());
+        ctx.WorkerBridge.Respond("ReturnToDefaultBranch", SuccessfulResponse());
 
         await using var scope = ctx.CreateScope();
         var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
@@ -125,7 +125,7 @@ public sealed class ReturnToDefaultPersistenceTests
         bool expectedForceDelete)
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        ctx.AgentBridge.Respond("ReturnToDefaultBranch", SuccessfulResponse());
+        ctx.WorkerBridge.Respond("ReturnToDefaultBranch", SuccessfulResponse());
 
         await using var scope = ctx.CreateScope();
         var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
@@ -134,16 +134,16 @@ public sealed class ReturnToDefaultPersistenceTests
             ctx.WorkspaceId, special, ctx.RepositoryId, "feature/x",
             deleteRemoteBranch: false, allowForceDeleteLocalBranch, CancellationToken.None);
 
-        var args = ctx.AgentBridge.Calls.Single(c => c.Command == "ReturnToDefaultBranch").Args;
+        var args = ctx.WorkerBridge.Calls.Single(c => c.Command == "ReturnToDefaultBranch").Args;
         var force = args.GetType().GetProperty("forceDeleteLocalBranch")!.GetValue(args);
         Assert.Equal(expectedForceDelete, force);
     }
 
     [Fact]
-    public async Task Failed_agent_command_reports_the_inner_error_and_leaves_the_row_untouched()
+    public async Task Failed_worker_command_reports_the_inner_error_and_leaves_the_row_untouched()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        ctx.AgentBridge.Respond("ReturnToDefaultBranch", new ReturnToDefaultBranchResponse
+        ctx.WorkerBridge.Respond("ReturnToDefaultBranch", new ReturnToDefaultBranchResponse
         {
             Success = false,
             ErrorMessage = "Could not determine default branch",
@@ -169,7 +169,7 @@ public sealed class ReturnToDefaultPersistenceTests
     public async Task GetBranches_after_sync_in_another_scope_returns_main_not_stale_tracked_branch()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        ctx.AgentBridge.Respond("ReturnToDefaultBranch", SuccessfulResponse());
+        ctx.WorkerBridge.Respond("ReturnToDefaultBranch", SuccessfulResponse());
 
         await using var circuitScope = ctx.CreateScope();
         var circuitDb = circuitScope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -209,8 +209,8 @@ public sealed class ReturnToDefaultPersistenceTests
     public async Task DeleteBranch_after_switching_away_in_another_scope_is_not_refused_as_the_current_branch()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        ctx.AgentBridge.Respond("ReturnToDefaultBranch", SuccessfulResponse());
-        ctx.AgentBridge.Respond("DeleteBranch", new DeleteBranchResponse { Success = true });
+        ctx.WorkerBridge.Respond("ReturnToDefaultBranch", SuccessfulResponse());
+        ctx.WorkerBridge.Respond("DeleteBranch", new DeleteBranchResponse { Success = true });
 
         await using var circuitScope = ctx.CreateScope();
         var circuitDb = circuitScope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -230,7 +230,7 @@ public sealed class ReturnToDefaultPersistenceTests
 
         // Still the stale value in the circuit's tracked entity.
         Assert.Equal("feature/x", tracked.BranchName);
-        ctx.AgentBridge.Calls.Clear();
+        ctx.WorkerBridge.Calls.Clear();
 
         var ops = circuitScope.ServiceProvider.GetRequiredService<IWorkspaceBranchOperations>();
         var special2 = await ctx.GetSpecialContextIdAsync();
@@ -238,14 +238,14 @@ public sealed class ReturnToDefaultPersistenceTests
 
         Assert.True(outcome.IsSuccessStatus);
         Assert.True(Assert.IsType<DeleteBranchApiResult>(outcome.Body).Success);
-        Assert.Single(ctx.AgentBridge.Calls, c => c.Command == "DeleteBranch");
+        Assert.Single(ctx.WorkerBridge.Calls, c => c.Command == "DeleteBranch");
     }
 
     [Fact]
     public async Task DeleteBranch_of_the_branch_that_is_checked_out_is_refused_without_calling_the_Worker()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        ctx.AgentBridge.Respond("DeleteBranch", new DeleteBranchResponse { Success = true });
+        ctx.WorkerBridge.Respond("DeleteBranch", new DeleteBranchResponse { Success = true });
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceBranchOperations>();
@@ -255,6 +255,6 @@ public sealed class ReturnToDefaultPersistenceTests
         var outcome = await ops.DeleteBranchAsync(ctx.WorkspaceId, special, ctx.RepositoryId, "feature/x", isRemote: false, force: false);
 
         Assert.False(outcome.IsSuccessStatus);
-        Assert.DoesNotContain(ctx.AgentBridge.Calls, c => c.Command == "DeleteBranch");
+        Assert.DoesNotContain(ctx.WorkerBridge.Calls, c => c.Command == "DeleteBranch");
     }
 }

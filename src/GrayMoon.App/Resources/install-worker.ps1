@@ -58,8 +58,8 @@ if (-not $isAdmin) {
 
 $serviceName = 'GrayMoonWorker'
 $legacyServiceName = 'GrayMoonAgent'
-$agentPath   = Join-Path $env:ProgramFiles 'GrayMoon'
-$agentExe    = Join-Path $agentPath 'graymoon-worker.exe'
+$workerPath   = Join-Path $env:ProgramFiles 'GrayMoon'
+$workerExe    = Join-Path $workerPath 'graymoon-worker.exe'
 $downloadUrl = '{DOWNLOAD_URL}'
 $hubUrl      = '{HUB_URL}'
 $zipPath     = Join-Path $env:TEMP 'graymoon-worker-windows-install.zip'
@@ -121,10 +121,10 @@ foreach ($name in @($serviceName, $legacyServiceName)) {
 
 # Prepare installation directory.
 Write-Host 'Preparing installation directory...' -ForegroundColor Yellow
-if (Test-Path -LiteralPath $agentPath) {
-    Get-ChildItem -LiteralPath $agentPath -Force | Remove-Item -Recurse -Force -ErrorAction Stop
+if (Test-Path -LiteralPath $workerPath) {
+    Get-ChildItem -LiteralPath $workerPath -Force | Remove-Item -Recurse -Force -ErrorAction Stop
 } else {
-    New-Item -ItemType Directory -Path $agentPath -Force | Out-Null
+    New-Item -ItemType Directory -Path $workerPath -Force | Out-Null
 }
 
 # Download worker archive.
@@ -134,18 +134,18 @@ Write-Host 'Download completed.' -ForegroundColor Green
 
 # Extract worker.
 Write-Host 'Extracting worker...' -ForegroundColor Yellow
-Expand-Archive -LiteralPath $zipPath -DestinationPath $agentPath -Force
+Expand-Archive -LiteralPath $zipPath -DestinationPath $workerPath -Force
 Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
 
-if (-not (Test-Path -LiteralPath $agentExe)) {
-    Write-Host "ERROR: graymoon-worker.exe not found under $agentPath after extract. Install .NET 10 Runtime if the app fails to start." -ForegroundColor Red
+if (-not (Test-Path -LiteralPath $workerExe)) {
+    Write-Host "ERROR: graymoon-worker.exe not found under $workerPath after extract. Install .NET 10 Runtime if the app fails to start." -ForegroundColor Red
     Complete-WorkerInstall -Code 1
     return 1
 }
 
 # Delegate all service management (create/update, rights grant, start) to the worker.
 Write-Host 'Installing service...' -ForegroundColor Yellow
-& $agentExe install --hub-url $hubUrl
+& $workerExe install --hub-url $hubUrl
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Installation failed. Correct any errors above and run the script again." -ForegroundColor Red
     Complete-WorkerInstall -Code 1

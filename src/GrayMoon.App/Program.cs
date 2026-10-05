@@ -8,7 +8,7 @@ using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
-using GrayMoon.App.Services.Agent;
+using GrayMoon.App.Services.Worker;
 using GrayMoon.App.Services.Connectors;
 using GrayMoon.App.Services.Git;
 using GrayMoon.App.Services.GitChanges;
@@ -70,7 +70,10 @@ try
 
     builder.Services.Configure<WorkspaceOptions>(builder.Configuration.GetSection("Workspace"));
     builder.Services.Configure<GitChangesOptions>(builder.Configuration.GetSection("GitChanges"));
-    builder.Services.Configure<AgentBridgeOptions>(builder.Configuration.GetSection(AgentBridgeOptions.SectionName));
+    // Legacy section name (before the Agent -> Worker rename) is applied first so an existing override keeps
+    // working; the current section wins when both are set.
+    builder.Services.Configure<WorkerBridgeOptions>(builder.Configuration.GetSection(WorkerBridgeOptions.LegacySectionName));
+    builder.Services.Configure<WorkerBridgeOptions>(builder.Configuration.GetSection(WorkerBridgeOptions.SectionName));
     builder.Services.Configure<SecurityOptions>(builder.Configuration.GetSection(SecurityOptions.SectionName));
 
     // Add services to the container.
@@ -79,8 +82,8 @@ try
 
     // Default SignalR incoming message limit is 32KB. SyncRepository ResponseCommand carries branch lists
     // plus full .csproj/package graphs; larger repos exceed that and the server closes the connection,
-    // which surfaces on the agent as HubException during InvokeAsync (not a git failure).
-    // SyncCommand no longer awaits agent responses inline - it enqueues to AgentSyncNotificationQueue and
+    // which surfaces on the worker as HubException during InvokeAsync (not a git failure).
+    // SyncCommand no longer awaits worker responses inline - it enqueues to WorkerSyncNotificationQueue and
     // returns immediately - so the default MaximumParallelInvocationsPerClient = 1 is sufficient.
     builder.Services.AddSignalR(options =>
     {
@@ -107,12 +110,12 @@ try
     builder.Services.AddScoped<AppSettingRepository>();
     builder.Services.AddScoped<NavbarCollapseService>();
     builder.Services.AddSingleton<DesktopTopBarState>();
-    builder.Services.AddSingleton<AgentConnectionTracker>();
+    builder.Services.AddSingleton<WorkerConnectionTracker>();
     builder.Services.AddScoped<HostPrerequisiteInstallService>();
     builder.Services.AddScoped<WorkerInstallService>();
-    builder.Services.AddHostedService<AgentUpdateDesktopNotifier>();
-    builder.Services.AddSingleton<AgentQueueStateService>();
-    builder.Services.AddSingleton<AgentCommandCancelSender>();
+    builder.Services.AddHostedService<WorkerUpdateDesktopNotifier>();
+    builder.Services.AddSingleton<WorkerQueueStateService>();
+    builder.Services.AddSingleton<WorkerCommandCancelSender>();
     builder.Services.AddSingleton<OverlayCommandTerminalService>();
     builder.Services.AddSingleton<IToastService, ToastService>();
     builder.Services.AddSingleton<MatrixOverlayPreferenceService>();
@@ -125,7 +128,7 @@ try
     builder.Services.AddSingleton<IGitHubApiUsageRecorder, GitHubApiUsageRecorder>();
     builder.Services.AddHostedService<GitHubApiUsageLoggerBackgroundService>();
     builder.Services.AddScoped<SyncCommandHandler>();
-    builder.Services.AddScoped<IAgentBridge, AgentBridge>();
+    builder.Services.AddScoped<IWorkerBridge, WorkerBridge>();
     builder.Services.AddScoped<WorkspaceService>();
     builder.Services.AddScoped<IWorkspaceFeatureContextResolver, WorkspaceFeatureContextResolver>();
     builder.Services.AddScoped<IWorkspaceContextPathResolver, WorkspaceContextPathResolver>();
@@ -192,7 +195,7 @@ try
     builder.Services.AddSingleton<DesktopWorkspaceContextTracker>();
 
     builder.Services.AddScoped<IWorkspaceGitChangesReadService, WorkspaceGitChangesReadService>();
-    builder.Services.AddScoped<IGitChangesAgentClient, GitChangesAgentClient>();
+    builder.Services.AddScoped<IGitChangesWorkerClient, GitChangesWorkerClient>();
     builder.Services.AddSingleton<MarkdownProseDiffService>();
     builder.Services.AddScoped<MarkdownImageEmbedder>();
     builder.Services.AddHttpClient(nameof(MarkdownImageEmbedder))
@@ -229,8 +232,8 @@ try
     // Background services
     builder.Services.AddSingleton<SyncBackgroundService>();
     builder.Services.AddHostedService(sp => sp.GetRequiredService<SyncBackgroundService>());
-    builder.Services.AddSingleton<AgentSyncNotificationQueue>();
-    builder.Services.AddHostedService(sp => sp.GetRequiredService<AgentSyncNotificationQueue>());
+    builder.Services.AddSingleton<WorkerSyncNotificationQueue>();
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<WorkerSyncNotificationQueue>());
     builder.Services.AddHostedService<TokenHealthBackgroundService>();
     builder.Services.AddSingleton<WorkspaceGitChangesWriteQueue>();
     builder.Services.AddHostedService(sp => sp.GetRequiredService<WorkspaceGitChangesWriteQueue>());
@@ -251,7 +254,7 @@ try
         .PersistKeysToFileSystem(new DirectoryInfo(keyRingDir));
 
     var app = builder.Build();
-    AgentResponseDelivery.SetCancelNotifier(app.Services.GetRequiredService<AgentCommandCancelSender>().NotifyCancel);
+    WorkerResponseDelivery.SetCancelNotifier(app.Services.GetRequiredService<WorkerCommandCancelSender>().NotifyCancel);
     //var version = Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
     var version = typeof(Program).Assembly
         .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
@@ -321,7 +324,7 @@ try
 
     // F3: cross-site/rebinding check, before routing reaches any API endpoint or hub.
     app.UseMiddleware<RequestSecurityMiddleware>();
-    // F2: Worker secret on /hub/agent and /repos/{id}/connector.
+    // F2: Worker secret on /hub/worker and /repos/{id}/connector.
     app.UseMiddleware<WorkerSecretMiddleware>();
 
     app.UseStaticFiles();
@@ -331,7 +334,9 @@ try
 
     app.MapApiEndpoints();
     app.MapHub<WorkspaceSyncHub>("/hubs/workspace-sync");
-    app.MapHub<AgentHub>("/hub/agent");
+    app.MapHub<WorkerHub>(WorkerHubRoutes.Path);
+    // Workers installed before the Agent -> Worker rename still connect to the old path.
+    app.MapHub<WorkerHub>(WorkerHubRoutes.LegacyPath);
 
     // Desktop-mode-only endpoints
     if (isDesktopMode)

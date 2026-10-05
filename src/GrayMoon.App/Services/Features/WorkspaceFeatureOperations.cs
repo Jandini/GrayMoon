@@ -1,11 +1,11 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
-using GrayMoon.App.Services.Agent;
+using GrayMoon.App.Services.Worker;
 using GrayMoon.App.Services.Git;
 using GrayMoon.App.Services.GitChanges;
 using GrayMoon.App.Services.Jobs;
@@ -27,7 +27,7 @@ public sealed class WorkspaceFeatureOperations(
     IWorkspaceFeatureContextResolver contextResolver,
     IWorkspaceContextPathResolver pathResolver,
     IWorkspaceSelectedFeatureContextService selectedContextService,
-    IAgentBridge agentBridge,
+    IWorkerBridge workerBridge,
     WorkspaceService workspaceService,
     WorkspacePullRequestService workspacePullRequestService,
     IWorkspaceGitChangesMonitoringPause gitChangesMonitoringPause,
@@ -163,8 +163,8 @@ public sealed class WorkspaceFeatureOperations(
         // against this write (and against WorkspaceGitChangesWriteQueue).
         if (string.IsNullOrWhiteSpace(workspace.ManagedFeatureStorageRoot))
             throw new InvalidOperationException(
-                "Feature storage root is not configured. Set it on the Settings page (or connect the Agent so the host user profile can be used as the default).");
-        var featureRootPath = AgentPath.Combine(workspace.ManagedFeatureStorageRoot, name);
+                "Feature storage root is not configured. Set it on the Settings page (or connect the Worker so the host user profile can be used as the default).");
+        var featureRootPath = WorkerPath.Combine(workspace.ManagedFeatureStorageRoot, name);
 
         var now = DateTime.UtcNow;
         var feature = new WorkspaceFeature
@@ -206,7 +206,7 @@ public sealed class WorkspaceFeatureOperations(
                     var repoName = link.Repository!.RepositoryName;
                     var sha = snapshot.Commits[repoName];
 
-                    // Parent branch from the same agent snapshot as BaseCommitSha. Detached HEAD -> null
+                    // Parent branch from the same worker snapshot as BaseCommitSha. Detached HEAD -> null
                     // (do not invent a name from mutable Workspace link state).
                     snapshot.Branches.TryGetValue(repoName, out var parentBranch);
                     parentBranch = string.IsNullOrWhiteSpace(parentBranch) ? null : parentBranch.Trim();
@@ -219,7 +219,7 @@ public sealed class WorkspaceFeatureOperations(
                     {
                         WorkspaceFeatureContextId = context.WorkspaceFeatureContextId,
                         WorkspaceRepositoryId = link.WorkspaceRepositoryId,
-                        WorktreePath = AgentPath.Combine(featureRootPath, repoName),
+                        WorktreePath = WorkerPath.Combine(featureRootPath, repoName),
                         BaseCommitSha = sha,
                         ParentBranchName = pinnedTag == null ? parentBranch : null,
                         PinnedTag = pinnedTag,
@@ -260,8 +260,8 @@ public sealed class WorkspaceFeatureOperations(
                     var link = links.First(l => l.WorkspaceRepositoryId == row.WorkspaceRepositoryId);
                     var mainPath = await pathResolver.GetRepositoryPathAsync(
                         specialContextId, link.WorkspaceRepositoryId, cancellationToken);
-                    var response = await agentBridge.SendCommandAsync(
-                        AgentHubMethods.CreateGitWorktree,
+                    var response = await workerBridge.SendCommandAsync(
+                        WorkerHubMethods.CreateGitWorktree,
                         new
                         {
                             mainRepositoryPath = mainPath,
@@ -288,7 +288,7 @@ public sealed class WorkspaceFeatureOperations(
                     }
                     else
                     {
-                        var payload = AgentResponseJson.DeserializeAgentResponse<CreateGitWorktreeAgentResponse>(response.Data);
+                        var payload = WorkerResponseJson.DeserializeWorkerResponse<CreateGitWorktreeWorkerResponse>(response.Data);
                         if (payload is null || !payload.Success)
                         {
                             tracked.State = WorkspaceFeatureRepositoryState.NeedsRepair;
@@ -463,7 +463,7 @@ public sealed class WorkspaceFeatureOperations(
                         disk.Exists,
                         cancellationToken);
 
-                    // The live current branch, from the Agent; null when detached or when disk status
+                    // The live current branch, from the Worker; null when detached or when disk status
                     // is itself Unknown (09 SB-2). Drift is judged against this, never against the
                     // cached database state, which can be stale.
                     var checkedOutBranch = disk.StatusUnknown ? null : disk.Branch;
@@ -552,7 +552,7 @@ public sealed class WorkspaceFeatureOperations(
     {
         try
         {
-            return await pathResolver.GetAgentWorkspaceArgsAsync(featureContextId, cancellationToken);
+            return await pathResolver.GetWorkerWorkspaceArgsAsync(featureContextId, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -596,7 +596,7 @@ public sealed class WorkspaceFeatureOperations(
                         return;
                     }
 
-                    // Unknown disk state (Agent unreachable, or InspectWorktree failed) can hide real dirty work,
+                    // Unknown disk state (Worker unreachable, or InspectWorktree failed) can hide real dirty work,
                     // so Remove is refused here regardless of discard/force authorization - see A2 rule.
                     if (plan.Repositories.Any(r => r.WorktreeStatusUnknown))
                     {
@@ -701,7 +701,7 @@ public sealed class WorkspaceFeatureOperations(
 
         var specialContextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(info.WorkspaceId, cancellationToken);
         // Rows already Removed (a prior partial remove) are left alone here; only the still-live rows
-        // move to Removing. Skipping them keeps a retry from re-asking the Agent about an already gone worktree.
+        // move to Removing. Skipping them keeps a retry from re-asking the Worker about an already gone worktree.
         var rows = await db.WorkspaceFeatureRepositories
             .Where(r => r.WorkspaceFeatureContextId == featureContextId.Value
                 && r.State != WorkspaceFeatureRepositoryState.Removed)
@@ -731,21 +731,21 @@ public sealed class WorkspaceFeatureOperations(
         try
         {
             (workspaceRoot, workspaceFolderName) =
-                await pathResolver.GetAgentWorkspaceArgsAsync(specialContextId, cancellationToken);
+                await pathResolver.GetWorkerWorkspaceArgsAsync(specialContextId, cancellationToken);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Could not resolve Workspace agent paths for Feature branch delete.");
+            logger.LogWarning(ex, "Could not resolve Workspace worker paths for Feature branch delete.");
         }
 
-        // D1's Agent-side residue cleanup only deletes files when both of these are set; an old App
+        // D1's Worker-side residue cleanup only deletes files when both of these are set; an old App
         // (or a resolution failure here) leaves them null, matching the old, report-only behaviour.
         string? featureRootPath = null;
         string? featureStorageRoot = null;
         try
         {
             featureRootPath = await pathResolver.GetContextRootAsync(featureContextId, cancellationToken);
-            (featureStorageRoot, _) = await pathResolver.GetAgentWorkspaceArgsAsync(featureContextId, cancellationToken);
+            (featureStorageRoot, _) = await pathResolver.GetWorkerWorkspaceArgsAsync(featureContextId, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -768,8 +768,8 @@ public sealed class WorkspaceFeatureOperations(
                     // Force worktree remove only when the user authorized discarding dirty Feature files.
                     // AllowForceDeleteLocalBranches does not imply discard permission.
                     var force = options.AllowDiscardUncommitted;
-                    var response = await agentBridge.SendCommandAsync(
-                        AgentHubMethods.RemoveGitWorktree,
+                    var response = await workerBridge.SendCommandAsync(
+                        WorkerHubMethods.RemoveGitWorktree,
                         new
                         {
                             mainRepositoryPath = mainPath,
@@ -791,7 +791,7 @@ public sealed class WorkspaceFeatureOperations(
                         return;
                     }
 
-                    var worktreeResult = AgentResponseJson.DeserializeAgentResponse<RemoveGitWorktreeResult>(response.Data);
+                    var worktreeResult = WorkerResponseJson.DeserializeWorkerResponse<RemoveGitWorktreeResult>(response.Data);
 
                     // The worktree is unregistered now, regardless of any kept branch or leftover files
                     // below; persist this row's progress at once with its own short-lived context, so a
@@ -841,7 +841,7 @@ public sealed class WorkspaceFeatureOperations(
                     }
                     else
                     {
-                        var deleteLocal = await agentBridge.SendCommandAsync(
+                        var deleteLocal = await workerBridge.SendCommandAsync(
                             "DeleteBranch",
                             new
                             {
@@ -913,7 +913,7 @@ public sealed class WorkspaceFeatureOperations(
                                 {
                                     var bearerToken = ConnectorHelpers.UnprotectToken(
                                         remoteLink.Repository?.Connector?.UserToken);
-                                    var deleteRemote = await agentBridge.SendCommandAsync(
+                                    var deleteRemote = await workerBridge.SendCommandAsync(
                                         "DeleteBranch",
                                         new
                                         {
@@ -988,7 +988,7 @@ public sealed class WorkspaceFeatureOperations(
 
         if (!errorsByWrId.IsEmpty)
         {
-            // Agent work ran in parallel; apply EF updates sequentially (DbContext is not thread-safe).
+            // Worker work ran in parallel; apply EF updates sequentially (DbContext is not thread-safe).
             // Do not continue into Workspace refresh or report success: the UI would navigate back while
             // the Feature still owns failed worktrees. Keep metadata for retry (§27.8).
             // A failed row stays Removing with its error in LastError (D2 step 0): row-level NeedsRepair
@@ -1056,7 +1056,7 @@ public sealed class WorkspaceFeatureOperations(
     }
 
     /// <summary>
-    /// App-side shape of the Agent's RemoveGitWorktree response (GrayMoon.Agent.Jobs.Response is not
+    /// App-side shape of the Worker's RemoveGitWorktree response (GrayMoon.Worker.Jobs.Response is not
     /// referenced here), used only to read the residue fields added for the Remove report (D1/D2).
     /// </summary>
     private sealed class RemoveGitWorktreeResult
@@ -1154,14 +1154,14 @@ public sealed class WorkspaceFeatureOperations(
             || string.IsNullOrWhiteSpace(featureWorkspaceFolder)
             || string.IsNullOrWhiteSpace(repoName)
             || repositoryId is null
-            || !agentBridge.IsAgentConnected)
+            || !workerBridge.IsWorkerConnected)
         {
             return FeatureWorktreeLiveStatus.Unavailable;
         }
 
         try
         {
-            var response = await agentBridge.SendCommandAsync(
+            var response = await workerBridge.SendCommandAsync(
                 "GetGitChangeStatus",
                 new
                 {
@@ -1174,7 +1174,7 @@ public sealed class WorkspaceFeatureOperations(
                 },
                 cancellationToken);
 
-            var status = AgentResponseJson.DeserializeAgentResponse<GitChangesStatusResult>(response.Data);
+            var status = WorkerResponseJson.DeserializeWorkerResponse<GitChangesStatusResult>(response.Data);
             if (status is null || !status.Success || status.Snapshot is null)
             {
                 logger.LogWarning(
@@ -1228,7 +1228,7 @@ public sealed class WorkspaceFeatureOperations(
             && p.LiveStatusEstablished
             // The branch Remove actually deletes is the Feature branch, not whatever is checked out
             // right now (09 SB-2); EffectiveOutgoingCommits reads the Feature branch's own count for a
-            // non-pinned repo. A null count (Agent unreachable, no upstream, or an older Worker) is
+            // non-pinned repo. A null count (Worker unreachable, no upstream, or an older Worker) is
             // unknown, never treated as zero commits pending.
             && p.EffectiveOutgoingCommits == 0
             && !p.HasUncommittedChanges
@@ -1238,9 +1238,9 @@ public sealed class WorkspaceFeatureOperations(
             && !p.IsLocked);
 
     /// <summary>
-    /// Disk facts for one Feature worktree, from the Agent's InspectWorktree command. The App never
+    /// Disk facts for one Feature worktree, from the Worker's InspectWorktree command. The App never
     /// reads repository or worktree paths from local disk directly (it can run in Docker, where those
-    /// paths do not exist). Any failure to reach the Agent or parse its response is Unknown, never
+    /// paths do not exist). Any failure to reach the Worker or parse its response is Unknown, never
     /// treated as Missing.
     /// </summary>
     private async Task<WorktreeDiskStatus> InspectWorktreeDiskStatusAsync(
@@ -1254,21 +1254,21 @@ public sealed class WorkspaceFeatureOperations(
 
         if (string.IsNullOrWhiteSpace(mainRepositoryPath)
             || string.IsNullOrWhiteSpace(worktreePath)
-            || !agentBridge.IsAgentConnected)
+            || !workerBridge.IsWorkerConnected)
         {
             return WorktreeDiskStatus.Unknown(unknownReason);
         }
 
         try
         {
-            var response = await agentBridge.SendCommandAsync(
-                AgentHubMethods.InspectWorktree,
+            var response = await workerBridge.SendCommandAsync(
+                WorkerHubMethods.InspectWorktree,
                 new { mainRepositoryPath, worktreePath, defaultBranch, featureBranch },
                 cancellationToken);
             if (!response.Success)
                 return WorktreeDiskStatus.Unknown(unknownReason);
 
-            var payload = AgentResponseJson.DeserializeAgentResponse<InspectWorktreeAgentResponse>(response.Data);
+            var payload = WorkerResponseJson.DeserializeWorkerResponse<InspectWorktreeWorkerResponse>(response.Data);
             if (payload is null || !string.IsNullOrWhiteSpace(payload.Error))
                 return WorktreeDiskStatus.Unknown(unknownReason);
 
@@ -1432,7 +1432,7 @@ public sealed class WorkspaceFeatureOperations(
         if (await IsRemoveIncompleteAsync(featureContextId, cancellationToken))
             return new RollbackFeatureResult(false, "This Feature was being removed. Use Continue removal.", []);
 
-        // The dirty check (CollectDirtyReposForRollbackAsync) asks the Agent for live disk status per
+        // The dirty check (CollectDirtyReposForRollbackAsync) asks the Worker for live disk status per
         // repository, one at a time - for a Feature with many repositories this can take a few seconds
         // with nothing on screen if run before the structural lock starts (TryStartStructural raises the
         // page's BackgroundJobOverlay synchronously, before returning). Running it as the first step inside
@@ -1542,8 +1542,8 @@ public sealed class WorkspaceFeatureOperations(
                     var repoName = link.Repository?.RepositoryName ?? "";
                     var mainPath = await pathResolver.GetRepositoryPathAsync(
                         specialContextId, row.WorkspaceRepositoryId, cancellationToken);
-                    var response = await agentBridge.SendCommandAsync(
-                        AgentHubMethods.CreateGitWorktree,
+                    var response = await workerBridge.SendCommandAsync(
+                        WorkerHubMethods.CreateGitWorktree,
                         new
                         {
                             mainRepositoryPath = mainPath,
@@ -1572,7 +1572,7 @@ public sealed class WorkspaceFeatureOperations(
                         return;
                     }
 
-                    var payload = AgentResponseJson.DeserializeAgentResponse<CreateGitWorktreeAgentResponse>(response.Data);
+                    var payload = WorkerResponseJson.DeserializeWorkerResponse<CreateGitWorktreeWorkerResponse>(response.Data);
                     if (payload is null || !payload.Success)
                     {
                         tracked.State = WorkspaceFeatureRepositoryState.NeedsRepair;
@@ -1646,11 +1646,11 @@ public sealed class WorkspaceFeatureOperations(
             .Where(l => wrIds.Contains(l.WorkspaceRepositoryId))
             .ToDictionaryAsync(l => l.WorkspaceRepositoryId, cancellationToken);
 
-        // One InspectWorktree Agent round trip per repository - run them concurrently (same
+        // One InspectWorktree Worker round trip per repository - run them concurrently (same
         // SemaphoreSlim(MaxParallel) pattern as RepairFeatureCoreAsync/RollbackFeatureCoreAsync) instead
         // of one at a time, so this pre-check does not itself become the slow part of Roll back for a
         // Feature with many repositories. Ordered by WrId afterwards (ConcurrentBag has no ordering of
-        // its own) so the result list is deterministic regardless of which repository's Agent call
+        // its own) so the result list is deterministic regardless of which repository's Worker call
         // happens to finish first.
         var dirty = new ConcurrentBag<(int WrId, FeatureRepairRepositoryResult Result)>();
         using (var gate = new SemaphoreSlim(MaxParallel))
@@ -1714,11 +1714,11 @@ public sealed class WorkspaceFeatureOperations(
         try
         {
             (workspaceRoot, workspaceFolderName) =
-                await pathResolver.GetAgentWorkspaceArgsAsync(specialContextId, cancellationToken);
+                await pathResolver.GetWorkerWorkspaceArgsAsync(specialContextId, cancellationToken);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Could not resolve Workspace agent paths for Feature roll back.");
+            logger.LogWarning(ex, "Could not resolve Workspace worker paths for Feature roll back.");
         }
 
         string? featureRootPath = null;
@@ -1726,7 +1726,7 @@ public sealed class WorkspaceFeatureOperations(
         try
         {
             featureRootPath = await pathResolver.GetContextRootAsync(featureContextId, cancellationToken);
-            (featureStorageRoot, _) = await pathResolver.GetAgentWorkspaceArgsAsync(featureContextId, cancellationToken);
+            (featureStorageRoot, _) = await pathResolver.GetWorkerWorkspaceArgsAsync(featureContextId, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -1742,15 +1742,15 @@ public sealed class WorkspaceFeatureOperations(
                 : "";
             var mainPath = await pathResolver.GetRepositoryPathAsync(specialContextId, row.WorkspaceRepositoryId, cancellationToken);
 
-            var listResp = await agentBridge.SendCommandAsync(
-                AgentHubMethods.ListGitWorktrees,
+            var listResp = await workerBridge.SendCommandAsync(
+                WorkerHubMethods.ListGitWorktrees,
                 new { mainRepositoryPath = mainPath },
                 cancellationToken);
             GitWorktreeInfo? registered = null;
             string? primaryBranch = null;
             if (listResp.Success && listResp.Data != null)
             {
-                var payload = AgentResponseJson.DeserializeAgentResponse<ListWorktreesAgentResponse>(listResp.Data);
+                var payload = WorkerResponseJson.DeserializeWorkerResponse<ListWorktreesWorkerResponse>(listResp.Data);
                 var worktrees = payload?.Worktrees ?? [];
                 registered = worktrees.FirstOrDefault(wt =>
                     WorkspaceFeatureReconciler.PathsEqualNormalized(wt.WorktreePath, row.WorktreePath));
@@ -1765,8 +1765,8 @@ public sealed class WorkspaceFeatureOperations(
             }
             else
             {
-                var removeResp = await agentBridge.SendCommandAsync(
-                    AgentHubMethods.RemoveGitWorktree,
+                var removeResp = await workerBridge.SendCommandAsync(
+                    WorkerHubMethods.RemoveGitWorktree,
                     new
                     {
                         mainRepositoryPath = mainPath,
@@ -1803,7 +1803,7 @@ public sealed class WorkspaceFeatureOperations(
                     && !string.IsNullOrWhiteSpace(workspaceFolderName)
                     && !string.IsNullOrWhiteSpace(repoName))
                 {
-                    var deleteLocal = await agentBridge.SendCommandAsync(
+                    var deleteLocal = await workerBridge.SendCommandAsync(
                         "DeleteBranch",
                         new
                         {
@@ -1867,7 +1867,7 @@ public sealed class WorkspaceFeatureOperations(
         return new RollbackFeatureResult(true, null, results);
     }
 
-    private sealed class ListWorktreesAgentResponse
+    private sealed class ListWorktreesWorkerResponse
     {
         [JsonPropertyName("worktrees")]
         public List<GitWorktreeInfo>? Worktrees { get; set; }
@@ -2146,8 +2146,8 @@ public sealed class WorkspaceFeatureOperations(
         var emptyTags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var emptyCollisions = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         var root = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
-        var response = await agentBridge.SendCommandAsync(
-            AgentHubMethods.GetHeadCommits,
+        var response = await workerBridge.SendCommandAsync(
+            WorkerHubMethods.GetHeadCommits,
             new
             {
                 workspaceId = workspace.WorkspaceId,
@@ -2161,7 +2161,7 @@ public sealed class WorkspaceFeatureOperations(
         if (!response.Success)
             return (emptyCommits, emptyBranches, emptyTags, emptyCollisions);
 
-        var payload = AgentResponseJson.DeserializeAgentResponse<GetHeadCommitsAgentResponse>(response.Data);
+        var payload = WorkerResponseJson.DeserializeWorkerResponse<GetHeadCommitsWorkerResponse>(response.Data);
         return (
             payload?.Commits ?? emptyCommits,
             payload?.Branches ?? emptyBranches,
@@ -2174,7 +2174,7 @@ public sealed class WorkspaceFeatureOperations(
         // Keep any already-persisted root so reconfiguring Settings does not orphan existing Features.
         // Relocate only the legacy drive-root bug (C:\.graymoon\...).
         if (!string.IsNullOrWhiteSpace(workspace.ManagedFeatureStorageRoot)
-            && !AgentPath.IsLegacyWindowsDriveRootGraymoonPath(workspace.ManagedFeatureStorageRoot))
+            && !WorkerPath.IsLegacyWindowsDriveRootGraymoonPath(workspace.ManagedFeatureStorageRoot))
             return;
 
         var storageRoot = await workspaceService.ResolveFeatureStorageRootPathAsync(
@@ -2182,11 +2182,11 @@ public sealed class WorkspaceFeatureOperations(
             cancellationToken);
         if (string.IsNullOrWhiteSpace(storageRoot))
             throw new InvalidOperationException(
-                "Feature storage root is not configured. Set it on the Settings page (or connect the Agent so the host user profile can be used as the default).");
+                "Feature storage root is not configured. Set it on the Settings page (or connect the Worker so the host user profile can be used as the default).");
 
-        // Keep the Agent-facing Feature storage root in whichever shape the Agent/Worker already
+        // Keep the Worker-facing Feature storage root in whichever shape the Worker already
         // uses (Windows or POSIX) - never the App's own OS (it may run in a Linux Docker container).
-        workspace.ManagedFeatureStorageRoot = AgentPath.Combine(storageRoot, workspace.Name, "features");
+        workspace.ManagedFeatureStorageRoot = WorkerPath.Combine(storageRoot, workspace.Name, "features");
     }
 
     private static RemoveFeatureClassification Classify(IReadOnlyList<RemoveFeatureRepositoryPlan> plans)
@@ -2237,7 +2237,7 @@ public sealed class WorkspaceFeatureOperations(
         Error = error
     };
 
-    private sealed class GetHeadCommitsAgentResponse
+    private sealed class GetHeadCommitsWorkerResponse
     {
         [JsonPropertyName("commits")]
         public Dictionary<string, string>? Commits { get; set; }
@@ -2252,7 +2252,7 @@ public sealed class WorkspaceFeatureOperations(
         public Dictionary<string, List<string>>? BranchCollisions { get; set; }
     }
 
-    private sealed class CreateGitWorktreeAgentResponse
+    private sealed class CreateGitWorktreeWorkerResponse
     {
         [JsonPropertyName("success")]
         public bool Success { get; set; }

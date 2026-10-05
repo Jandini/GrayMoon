@@ -521,7 +521,7 @@ select:disabled,
     flex: 1 1 auto;
     min-width: 0;
 }
-.workspace-repos-header .workspace-repos-title-row .workspace-repos-agent-tasks {
+.workspace-repos-header .workspace-repos-title-row .workspace-repos-worker-tasks {
     flex-shrink: 0;
     margin-left: auto;
 }
@@ -544,7 +544,7 @@ select:disabled,
 
 /* max-height is derived from --topbar-height (see :root / .page--topbar-hidden in
    MainLayout.razor.css) instead of a hardcoded viewport offset, so grid pages (Repositories,
-   Connectors, Agent, etc.) expand to fill the reclaimed space when the desktop top bar is
+   Connectors, Worker, etc.) expand to fill the reclaimed space when the desktop top bar is
    hidden, while shrinking to leave the correct amount of space below the grid.
    IMPORTANT: the 120px offset is a must and must NOT be changed - it was tuned against the
    live app so the grid's bottom edge lines up with the left/right padding-block gap. Match
@@ -571,7 +571,7 @@ select:disabled,
 /* Match bottom spacing to left/right: remove extra card margin so padding-block provides equal gap.
    !important is required here because Bootstrap's own .mb-4 utility class ships with
    `margin-bottom: 1.5rem !important`, which otherwise wins regardless of selector specificity or
-   stylesheet order - without this, every grid page (Repositories, Connectors, Agent, etc.) keeps a
+   stylesheet order - without this, every grid page (Repositories, Connectors, Worker, etc.) keeps a
    hidden 24px gap below the card that makes the bottom margin visibly larger than the left/right
    padding. */
 .grid-page-body .page-card.mb-4,

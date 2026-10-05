@@ -9,10 +9,10 @@ public interface IWorkspaceContextPathResolver
     Task<string> GetRepositoryPathAsync(WorkspaceFeatureContextId contextId, int workspaceRepositoryId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Splits the context root into the agent <c>workspaceRoot</c> (parent) + folder name pair
-    /// expected by Agent commands that call <c>GetWorkspacePath(root, name)</c>.
+    /// Splits the context root into the worker <c>workspaceRoot</c> (parent) + folder name pair
+    /// expected by Worker commands that call <c>GetWorkspacePath(root, name)</c>.
     /// </summary>
-    Task<(string AgentWorkspaceRoot, string AgentWorkspaceFolderName)> GetAgentWorkspaceArgsAsync(
+    Task<(string WorkerWorkspaceRoot, string WorkerWorkspaceFolderName)> GetWorkerWorkspaceArgsAsync(
         WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken = default);
 }

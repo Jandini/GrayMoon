@@ -20,7 +20,7 @@ public sealed partial class WorkspaceGitChanges
         string folderName;
         try
         {
-            (root, folderName) = await PathResolver.GetAgentWorkspaceArgsAsync(_selectedContextId.Value);
+            (root, folderName) = await PathResolver.GetWorkerWorkspaceArgsAsync(_selectedContextId.Value);
         }
         catch (Exception)
         {
@@ -137,7 +137,7 @@ public sealed partial class WorkspaceGitChanges
     }
 
     /// <summary>Builds an absolute path with backslashes always, regardless of the App container's OS -
-    /// GrayMoon workspaces only ever exist on Windows machines (the Agent's host), and the App itself
+    /// GrayMoon workspaces only ever exist on Windows machines (the Worker's host), and the App itself
     /// never touches the local filesystem so <see cref="Path.Combine"/> (which would use the container's
     /// separator) must not be used here.</summary>
     private static string BuildAbsoluteFilePath(string root, string workspaceName, string repositoryName, string relativePath)

@@ -13,7 +13,7 @@ public sealed class WorkspaceGitServiceStageAndCommitTests
     public async Task CommitDependencyUpdatesAsync_sends_skipHooks_when_requested()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        ctx.AgentBridge.Respond("StageAndCommit", new StageAndCommitResponse { Success = true, Committed = true });
+        ctx.WorkerBridge.Respond("StageAndCommit", new StageAndCommitResponse { Success = true, Committed = true });
 
         await using var scope = ctx.CreateScope();
         var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
@@ -33,7 +33,7 @@ public sealed class WorkspaceGitServiceStageAndCommitTests
         Assert.True(result.Committed);
         Assert.Null(result.ErrorMessage);
 
-        var call = Assert.Single(ctx.AgentBridge.Calls, c => c.Command == "StageAndCommit");
+        var call = Assert.Single(ctx.WorkerBridge.Calls, c => c.Command == "StageAndCommit");
         using var doc = JsonDocument.Parse(JsonSerializer.Serialize(call.Args));
         Assert.True(doc.RootElement.GetProperty("skipHooks").GetBoolean());
     }

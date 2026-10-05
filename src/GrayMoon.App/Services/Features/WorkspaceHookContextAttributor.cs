@@ -24,7 +24,7 @@ public sealed class WorkspaceHookContextAttributor(
     {
         if (string.IsNullOrWhiteSpace(repositoryPath))
         {
-            // Legacy agents/hooks without a path write the special Workspace context only.
+            // Legacy workers/hooks without a path write the special Workspace context only.
             var special = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
             if (claimedContextId is int claimed && claimed != special.Value)
             {
@@ -93,7 +93,7 @@ public sealed class WorkspaceHookContextAttributor(
         if (claimedContextId is int claim && claim != resolved.Value)
         {
             logger.LogWarning(
-                "Hook attribution: agent claimed context {ClaimedContextId} but path resolved to {ResolvedContextId}; using path",
+                "Hook attribution: worker claimed context {ClaimedContextId} but path resolved to {ResolvedContextId}; using path",
                 claim, resolved.Value);
         }
 
@@ -101,7 +101,7 @@ public sealed class WorkspaceHookContextAttributor(
     }
 
     private static string NormalizePath(string path)
-        => AgentPath.Normalize(path.Trim());
+        => WorkerPath.Normalize(path.Trim());
 
     private static bool PathsEqual(string a, string b)
         => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);

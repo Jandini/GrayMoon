@@ -39,7 +39,7 @@ public sealed class CommitSyncPullStateTests
         },
     };
 
-    /// <summary>Response shape of an agent that predates the state snapshot: two counts and nothing else.</summary>
+    /// <summary>Response shape of a worker that predates the state snapshot: two counts and nothing else.</summary>
     private static object LegacyPulledResponse() => new
     {
         success = true,
@@ -76,7 +76,7 @@ public sealed class CommitSyncPullStateTests
             link.DefaultBranchBehindCommits = 2;
             link.DefaultBranchAheadCommits = 0;
         });
-        ctx.AgentBridge.Respond("CommitSyncRepository", PulledResponse());
+        ctx.WorkerBridge.Respond("CommitSyncRepository", PulledResponse());
 
         await RunPullAsync(ctx);
 
@@ -89,7 +89,7 @@ public sealed class CommitSyncPullStateTests
     }
 
     [Fact]
-    public async Task Pull_from_an_agent_without_a_state_snapshot_leaves_the_counts_it_cannot_report()
+    public async Task Pull_from_a_worker_without_a_state_snapshot_leaves_the_counts_it_cannot_report()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
         await ctx.MutateLinkAsync(link =>
@@ -97,7 +97,7 @@ public sealed class CommitSyncPullStateTests
             link.BranchName = "main";
             link.DefaultBranchBehindCommits = 2;
         });
-        ctx.AgentBridge.Respond("CommitSyncRepository", LegacyPulledResponse());
+        ctx.WorkerBridge.Respond("CommitSyncRepository", LegacyPulledResponse());
 
         await RunPullAsync(ctx);
 
@@ -111,7 +111,7 @@ public sealed class CommitSyncPullStateTests
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
         const string gitError = "Please commit your changes or stash them before you merge. Aborting";
-        ctx.AgentBridge.Respond("CommitSyncRepository", data: null, success: false, error: gitError);
+        ctx.WorkerBridge.Respond("CommitSyncRepository", data: null, success: false, error: gitError);
 
         string? repoError = null;
         string? pageError = null;

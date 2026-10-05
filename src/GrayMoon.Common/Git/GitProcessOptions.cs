@@ -1,7 +1,7 @@
 namespace GrayMoon.Common.Git;
 
 /// <summary>
-/// Per-operation-kind timeouts for every git (and dotnet-gitversion) process the Agent launches through
+/// Per-operation-kind timeouts for every git (and dotnet-gitversion) process the Worker launches through
 /// <c>GitProcessRunner</c>. Every invocation is bounded by one of these tiers - there is no "no timeout"
 /// option - so a hung process (stuck credential prompt, cloud-sync/antivirus file lock, unresponsive
 /// network share) is killed and reported as a normal failure instead of hanging its caller's

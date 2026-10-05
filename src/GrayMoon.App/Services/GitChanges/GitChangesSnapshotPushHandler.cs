@@ -9,7 +9,7 @@ using Microsoft.EntityFrameworkCore;
 namespace GrayMoon.App.Services.GitChanges;
 
 /// <summary>
-/// Persists an Agent-pushed Git Changes snapshot (rejecting versions older than or equal to what is
+/// Persists a Worker-pushed Git Changes snapshot (rejecting versions older than or equal to what is
 /// already persisted), then broadcasts. Dual-writes context projection tables; legacy tables remain
 /// authoritative for the special Workspace during cutover.
 /// </summary>
@@ -226,7 +226,7 @@ public sealed class GitChangesSnapshotPushHandler(
         existing.StagedDeletions = snapshot.StagedDeletions.HasValue
             ? snapshot.StagedDeletions
             : stagedCount == 0 ? 0 : existing.StagedDeletions;
-        existing.AgentScannedAt = snapshot.ScannedAt;
+        existing.WorkerScannedAt = snapshot.ScannedAt;
         existing.PersistedAt = DateTimeOffset.UtcNow;
         existing.LastErrorCode = null;
         existing.LastErrorMessage = null;
@@ -262,7 +262,7 @@ public sealed class GitChangesSnapshotPushHandler(
         existing.StagedDeletions = snapshot.StagedDeletions.HasValue
             ? snapshot.StagedDeletions
             : stagedCount == 0 ? 0 : existing.StagedDeletions;
-        existing.AgentScannedAt = snapshot.ScannedAt;
+        existing.WorkerScannedAt = snapshot.ScannedAt;
         existing.PersistedAt = DateTimeOffset.UtcNow;
         existing.LastErrorCode = null;
         existing.LastErrorMessage = null;

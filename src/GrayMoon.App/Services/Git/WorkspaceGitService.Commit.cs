@@ -1,5 +1,5 @@
 using System.Collections.Concurrent;
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.Abstractions.Exceptions;
 using GrayMoon.Abstractions.Notifications;
 using GrayMoon.App.Data;
@@ -26,7 +26,7 @@ public sealed partial class WorkspaceGitService
         bool includeDepsInCommitMessage = true,
         bool skipHooks = false)
     {
-        if (!_agentBridge.IsAgentConnected || reposToCommit.Count == 0)
+        if (!_workerBridge.IsWorkerConnected || reposToCommit.Count == 0)
             return Array.Empty<(int, bool, string?)>();
 
         var tagPinnedIds = (await _dbContext.WorkspaceRepositories
@@ -43,7 +43,7 @@ public sealed partial class WorkspaceGitService
             return reposToCommit.Select(r => (r.RepoId, false, (string?)"Workspace not found.")).ToList();
 
         var total = reposToCommit.Count;
-        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
         var completed = 0;
         var semaphore = new SemaphoreSlim(_maxConcurrent);
 
@@ -90,16 +90,16 @@ public sealed partial class WorkspaceGitService
                     workspaceRoot,
                     skipHooks
                 };
-                var response = await _agentBridge.SendCommandAsync("StageAndCommit", args, cancellationToken);
+                var response = await _workerBridge.SendCommandAsync("StageAndCommit", args, cancellationToken);
                 var parsed = response.Success && response.Data != null
-                    ? AgentResponseJson.DeserializeAgentResponse<StageAndCommitResponse>(response.Data)
+                    ? WorkerResponseJson.DeserializeWorkerResponse<StageAndCommitResponse>(response.Data)
                     : null;
-                var agentSuccess = parsed is { Success: true };
-                var agentCommitted = parsed?.Committed ?? false;
-                var err = agentSuccess ? null : (response.Error ?? parsed?.ErrorMessage ?? "Commit failed");
+                var workerSuccess = parsed is { Success: true };
+                var workerCommitted = parsed?.Committed ?? false;
+                var err = workerSuccess ? null : (response.Error ?? parsed?.ErrorMessage ?? "Commit failed");
                 var c = Interlocked.Increment(ref completed);
                 onProgress?.Invoke(c, total, repo.RepoId);
-                return (RepoId: repo.RepoId, Committed: agentCommitted, ErrorMessage: err);
+                return (RepoId: repo.RepoId, Committed: workerCommitted, ErrorMessage: err);
             }
             finally
             {
@@ -112,7 +112,7 @@ public sealed partial class WorkspaceGitService
         return reposToCommit.Select(r => (r.RepoId, byRepo[r.RepoId].Committed, byRepo[r.RepoId].ErrorMessage)).ToList();
     }
 
-    /// <summary>Stages the given file paths per repo and commits with message "chore(deps): update versions (N)" where N is the path count for that repo. Uses the same agent StageAndCommit command.</summary>
+    /// <summary>Stages the given file paths per repo and commits with message "chore(deps): update versions (N)" where N is the path count for that repo. Uses the same worker StageAndCommit command.</summary>
     public async Task<IReadOnlyList<(int RepoId, bool Committed, string? ErrorMessage)>> CommitFilePathsAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
@@ -122,7 +122,7 @@ public sealed partial class WorkspaceGitService
         string? commitMessageOverride = null,
         bool skipHooks = false)
     {
-        if (!_agentBridge.IsAgentConnected || reposAndPaths.Count == 0)
+        if (!_workerBridge.IsWorkerConnected || reposAndPaths.Count == 0)
             return Array.Empty<(int, bool, string?)>();
 
         var tagPinnedIdsFp = (await _dbContext.WorkspaceRepositories
@@ -138,7 +138,7 @@ public sealed partial class WorkspaceGitService
         if (workspace == null)
             return reposAndPaths.Select(r => (r.RepoId, false, (string?)"Workspace not found.")).ToList();
 
-        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
         var total = reposAndPaths.Count;
         var completed = 0;
         var semaphore = new SemaphoreSlim(_maxConcurrent);
@@ -167,16 +167,16 @@ public sealed partial class WorkspaceGitService
                     workspaceRoot,
                     skipHooks
                 };
-                var response = await _agentBridge.SendCommandAsync("StageAndCommit", args, cancellationToken);
+                var response = await _workerBridge.SendCommandAsync("StageAndCommit", args, cancellationToken);
                 var parsed = response.Success && response.Data != null
-                    ? AgentResponseJson.DeserializeAgentResponse<StageAndCommitResponse>(response.Data)
+                    ? WorkerResponseJson.DeserializeWorkerResponse<StageAndCommitResponse>(response.Data)
                     : null;
-                var agentSuccess = parsed is { Success: true };
-                var agentCommitted = parsed?.Committed ?? false;
-                var err = agentSuccess ? null : (response.Error ?? parsed?.ErrorMessage ?? "Commit failed");
+                var workerSuccess = parsed is { Success: true };
+                var workerCommitted = parsed?.Committed ?? false;
+                var err = workerSuccess ? null : (response.Error ?? parsed?.ErrorMessage ?? "Commit failed");
                 var c = Interlocked.Increment(ref completed);
                 onProgress?.Invoke(c, total, repo.RepoId);
-                return (RepoId: repo.RepoId, Committed: agentCommitted, ErrorMessage: err);
+                return (RepoId: repo.RepoId, Committed: workerCommitted, ErrorMessage: err);
             }
             finally
             {

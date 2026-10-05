@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 namespace GrayMoon.App.Services.GitChanges;
 
 /// <summary>
-/// Read-only access to the persisted Git Changes projection. Never contacts the Agent - opening or
+/// Read-only access to the persisted Git Changes projection. Never contacts the Worker - opening or
 /// reloading the Git Changes page must read SQLite only, per the feature's architecture.
 /// </summary>
 public interface IWorkspaceGitChangesReadService
@@ -97,7 +97,7 @@ public sealed class WorkspaceGitChangesReadService(IDbContextFactory<AppDbContex
                     Deletions = s.Deletions,
                     StagedInsertions = s.StagedInsertions,
                     StagedDeletions = s.StagedDeletions,
-                    AgentScannedAt = s.AgentScannedAt,
+                    WorkerScannedAt = s.WorkerScannedAt,
                     PersistedAt = s.PersistedAt,
                     LastErrorCode = s.LastErrorCode,
                     LastErrorMessage = s.LastErrorMessage,
@@ -188,7 +188,7 @@ public sealed class WorkspaceGitChangesReadService(IDbContextFactory<AppDbContex
                     Deletions = s.Deletions,
                     StagedInsertions = s.StagedInsertions,
                     StagedDeletions = s.StagedDeletions,
-                    AgentScannedAt = s.AgentScannedAt,
+                    WorkerScannedAt = s.WorkerScannedAt,
                     PersistedAt = s.PersistedAt,
                     LastErrorCode = s.LastErrorCode,
                     LastErrorMessage = s.LastErrorMessage,

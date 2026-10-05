@@ -1,4 +1,4 @@
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Api.Endpoints;
 using GrayMoon.App.Services.Security;
 using Microsoft.AspNetCore.Http;
@@ -182,7 +182,8 @@ public class WorkerSecretTests
 
     [Theory]
     [InlineData("/repos/7/connector")]
-    [InlineData("/hub/agent")]
+    [InlineData("/hub/worker")]
+    [InlineData("/hub/agent")]   // legacy path kept for already-installed Workers
     public async Task Right_secret_passes_and_marks_seen(string path)
     {
         using var folder = new TempSecretFolder();
@@ -199,8 +200,9 @@ public class WorkerSecretTests
 
     [Theory]
     [InlineData("/repos/7/connector")]
-    [InlineData("/hub/agent")]
-    [InlineData("/hub/agent/negotiate")]
+    [InlineData("/hub/worker")]
+    [InlineData("/hub/agent")]   // legacy path kept for already-installed Workers
+    [InlineData("/hub/worker/negotiate")]
     public async Task Wrong_secret_is_401(string path)
     {
         using var folder = new TempSecretFolder();
@@ -214,7 +216,8 @@ public class WorkerSecretTests
 
     [Theory]
     [InlineData("/repos/7/connector")]
-    [InlineData("/hub/agent")]
+    [InlineData("/hub/worker")]
+    [InlineData("/hub/agent")]   // legacy path kept for already-installed Workers
     public async Task Missing_secret_is_accepted_while_not_required_and_never_seen(string path)
     {
         using var folder = new TempSecretFolder();
@@ -228,7 +231,8 @@ public class WorkerSecretTests
 
     [Theory]
     [InlineData("/repos/7/connector")]
-    [InlineData("/hub/agent")]
+    [InlineData("/hub/worker")]
+    [InlineData("/hub/agent")]   // legacy path kept for already-installed Workers
     public async Task Missing_secret_is_401_when_required(string path)
     {
         using var folder = new TempSecretFolder();
@@ -242,7 +246,8 @@ public class WorkerSecretTests
 
     [Theory]
     [InlineData("/repos/7/connector")]
-    [InlineData("/hub/agent")]
+    [InlineData("/hub/worker")]
+    [InlineData("/hub/agent")]   // legacy path kept for already-installed Workers
     public async Task Missing_secret_is_401_once_a_worker_has_presented_the_secret(string path)
     {
         using var folder = new TempSecretFolder();
@@ -256,23 +261,25 @@ public class WorkerSecretTests
         Assert.Equal(StatusCodes.Status401Unauthorized, context.Response.StatusCode);
     }
 
-    [Fact]
-    public async Task Hub_without_secret_flags_an_unsecured_worker_until_it_disconnects_or_is_secured()
+    [Theory]
+    [InlineData("/hub/worker")]
+    [InlineData("/hub/agent")]   // legacy path kept for already-installed Workers
+    public async Task Hub_without_secret_flags_an_unsecured_worker_until_it_disconnects_or_is_secured(string hubPath)
     {
         using var folder = new TempSecretFolder();
         var service = CreateService(folder);
         var pipeline = new Pipeline(service, new SecurityOptions());
 
-        await pipeline.SendAsync("/hub/agent/negotiate", method: "POST");
+        await pipeline.SendAsync(hubPath + "/negotiate", method: "POST");
         Assert.True(service.UnsecuredWorkerConnected);
 
         service.NoteWorkerDisconnected();
         Assert.False(service.UnsecuredWorkerConnected);
 
-        await pipeline.SendAsync("/hub/agent");
+        await pipeline.SendAsync(hubPath);
         Assert.True(service.UnsecuredWorkerConnected);
 
-        await pipeline.SendAsync("/hub/agent", secret: service.Secret);
+        await pipeline.SendAsync(hubPath, secret: service.Secret);
         Assert.False(service.UnsecuredWorkerConnected);
     }
 
@@ -444,21 +451,21 @@ public class WorkerSecretTests
         var secrets = CreateService(folder);
         var pairing = CreatePairing(secrets);
 
-        var rejected = AgentEndpoints.PairWorker(new AgentEndpoints.WorkerPairRequest("00000000"), pairing);
+        var rejected = WorkerEndpoints.PairWorker(new WorkerEndpoints.WorkerPairRequest("00000000"), pairing);
         Assert.IsType<UnauthorizedHttpResult>(rejected);
 
         var code = pairing.CreateCode().Code;
-        var accepted = AgentEndpoints.PairWorker(new AgentEndpoints.WorkerPairRequest(code), pairing);
+        var accepted = WorkerEndpoints.PairWorker(new WorkerEndpoints.WorkerPairRequest(code), pairing);
         var value = Assert.IsAssignableFrom<IValueHttpResult>(accepted).Value;
-        Assert.Equal(secrets.Secret, Assert.IsType<AgentEndpoints.WorkerPairResponse>(value).Secret);
+        Assert.Equal(secrets.Secret, Assert.IsType<WorkerEndpoints.WorkerPairResponse>(value).Secret);
 
-        var missingBody = AgentEndpoints.PairWorker(null, pairing);
+        var missingBody = WorkerEndpoints.PairWorker(null, pairing);
         Assert.IsType<UnauthorizedHttpResult>(missingBody);
     }
 
     private static string ReadInstallScriptTemplate()
     {
-        using var stream = typeof(AgentEndpoints).Assembly.GetManifestResourceStream("GrayMoon.App.Resources.install-worker.ps1");
+        using var stream = typeof(WorkerEndpoints).Assembly.GetManifestResourceStream("GrayMoon.App.Resources.install-worker.ps1");
         Assert.NotNull(stream);
         using var reader = new StreamReader(stream!);
         return reader.ReadToEnd();
@@ -470,7 +477,7 @@ public class WorkerSecretTests
         using var folder = new TempSecretFolder();
         var secrets = CreateService(folder);
 
-        var script = AgentEndpoints.RenderInstallScript(ReadInstallScriptTemplate(), "http://localhost:8384", secretRequired: false);
+        var script = WorkerEndpoints.RenderInstallScript(ReadInstallScriptTemplate(), "http://localhost:8384", secretRequired: false);
 
         Assert.DoesNotContain(secrets.Secret, script, StringComparison.Ordinal);
         Assert.DoesNotContain("{SECRET_REQUIRED}", script, StringComparison.Ordinal);
@@ -484,7 +491,7 @@ public class WorkerSecretTests
     [Fact]
     public void Install_script_says_a_secret_is_required_once_that_is_the_rule()
     {
-        var script = AgentEndpoints.RenderInstallScript(ReadInstallScriptTemplate(), "http://localhost:8384", secretRequired: true);
+        var script = WorkerEndpoints.RenderInstallScript(ReadInstallScriptTemplate(), "http://localhost:8384", secretRequired: true);
 
         Assert.Contains("'1' -eq '1'", script, StringComparison.Ordinal);
     }

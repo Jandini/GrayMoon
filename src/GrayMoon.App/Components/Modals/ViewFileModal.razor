@@ -2,7 +2,7 @@
 @using GrayMoon.App.Models.Api
 @using GrayMoon.App.Services
 @using GrayMoon.App.Api.Endpoints
-@inject IAgentBridge AgentBridge
+@inject IWorkerBridge WorkerBridge
 @inject IJSRuntime JS
 
 @if (IsVisible)
@@ -126,7 +126,7 @@
     {
         try
         {
-            if (!AgentBridge.IsAgentConnected)
+            if (!WorkerBridge.IsWorkerConnected)
             {
                 _errorMessage = "Worker is not connected.";
                 _isLoading = false;
@@ -141,7 +141,7 @@
                 return;
             }
 
-            var resp = await AgentBridge.SendCommandAsync("GetFileContents", new
+            var resp = await WorkerBridge.SendCommandAsync("GetFileContents", new
             {
                 workspaceName = WorkspaceName,
                 workspaceRoot = WorkspaceRoot,
@@ -151,7 +151,7 @@
 
             if (resp.Success && resp.Data != null)
             {
-                var result = AgentResponseJson.DeserializeAgentResponse<AgentGetFileContentsResponse>(resp.Data);
+                var result = WorkerResponseJson.DeserializeWorkerResponse<WorkerGetFileContentsResponse>(resp.Data);
                 if (result?.ErrorMessage != null)
                     _errorMessage = result.ErrorMessage;
                 else

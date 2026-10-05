@@ -6,18 +6,18 @@ namespace GrayMoon.App.Services.Git;
 public sealed partial class WorkspaceGitService
 {
     /// <summary>
-    /// Resolves agent <c>workspaceRoot</c> + folder name for the given Feature/Workspace context.
+    /// Resolves worker <c>workspaceRoot</c> + folder name for the given Feature/Workspace context.
     /// Callers must pass an explicit context id - never infer from ambient UI state.
     /// </summary>
-    private Task<(string WorkspaceRoot, string WorkspaceFolderName)> ResolveAgentPathArgsAsync(
+    private Task<(string WorkspaceRoot, string WorkspaceFolderName)> ResolveWorkerPathArgsAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken)
-        => _pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
+        => _pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
 
     /// <summary>
     /// Per-repository Feature parent branch for divergence / PR base.
-    /// Empty dictionary for the special Workspace context (agent then uses the repo default).
+    /// Empty dictionary for the special Workspace context (worker then uses the repo default).
     /// </summary>
     private async Task<IReadOnlyDictionary<int, string?>> GetDivergenceBaseBranchesByRepositoryIdAsync(
         WorkspaceFeatureContextId contextId,

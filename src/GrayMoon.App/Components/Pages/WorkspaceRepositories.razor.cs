@@ -24,7 +24,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     [Inject] private IWorkspacePullRequestOperations PullRequestOperations { get; set; } = default!;
     [Inject] private WorkspaceDependencyService WorkspaceDependencyService { get; set; } = default!;
     [Inject] private WorkspaceBranchHandler WorkspaceBranchHandler { get; set; } = default!;
-    [Inject] private AgentQueueStateService AgentQueueStateService { get; set; } = default!;
+    [Inject] private WorkerQueueStateService WorkerQueueStateService { get; set; } = default!;
     [Inject] private IBackgroundJobService JobService { get; set; } = default!;
     [Inject] private IScopedServiceExecutor ScopedExecutor { get; set; } = default!;
     [Inject] private IWorkspaceRepositoryLinkListQueryService LinkListQueryService { get; set; } = default!;
@@ -61,7 +61,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
 
     protected override void OnInitialized()
     {
-        AgentQueueStateService.OnQueueStateChanged(OnQueueStateChanged);
+        WorkerQueueStateService.OnQueueStateChanged(OnQueueStateChanged);
         JobService.Changed += OnJobServiceChanged;
     }
 
@@ -121,7 +121,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         return TryGetLink(_switchBranchModal.RepositoryId)?.FeaturePinnedTag;
     }
 
-    /// <summary>The Feature branch a grid row has drifted away from (I4); null in the Workspace or when the row is on its branch. Uses only row data already loaded - no Agent call.</summary>
+    /// <summary>The Feature branch a grid row has drifted away from (I4); null in the Workspace or when the row is on its branch. Uses only row data already loaded - no Worker call.</summary>
     private string? GetOffFeatureBranchName(GrayMoon.App.Models.WorkspaceRepositoryLink link)
         => !_isFeatureContext
             ? null
@@ -541,7 +541,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         _disposed = true;
         StopPrPollingLoop();
         CancelBackgroundWork();
-        AgentQueueStateService.RemoveQueueStateChanged(OnQueueStateChanged);
+        WorkerQueueStateService.RemoveQueueStateChanged(OnQueueStateChanged);
         JobService.Changed -= OnJobServiceChanged;
         lock (_refreshDebounceLock)
         {

@@ -194,7 +194,7 @@ public sealed partial class WorkspaceRepositories
                     await ReloadWorkspaceDataAfterCancelAsync();
                 throw;
             }
-            catch (AgentNotConnectedException ex)
+            catch (WorkerNotConnectedException ex)
             {
                 Logger.LogError(ex, "Sync failed for workspace {WorkspaceId}", WorkspaceId);
                 if (jobContextGeneration == _contextGeneration)

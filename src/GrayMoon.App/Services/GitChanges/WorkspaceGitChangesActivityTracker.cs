@@ -7,7 +7,7 @@ namespace GrayMoon.App.Services.GitChanges;
 /// Tracks which workspaces currently have any GrayMoon page open under <c>/workspaces/{id}/...</c>, so
 /// background monitoring only sweeps repositories the user is actively working in instead of every
 /// repository in the database. Ref-counted per workspace like <c>GitRepositoryWatcherManager</c>'s
-/// Agent-side watcher lease, but with time-based expiry on top: a workspace stays "active" for a grace
+/// Worker-side watcher lease, but with time-based expiry on top: a workspace stays "active" for a grace
 /// period after its last viewer leaves, so a crashed/undisposed circuit cannot pin a workspace active
 /// forever and silently regress back toward sweeping everything.
 /// </summary>

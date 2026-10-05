@@ -92,8 +92,8 @@ stop
 ### Implementation areas
 
 ```text
-AgentHub
-AgentConnectionTracker
+WorkerHub
+WorkerConnectionTracker
 Worker CLI
 SignalRConnectionHostedService
 Worker queue state services
@@ -617,7 +617,7 @@ unavailable/unsupported diff
 ```text
 WorkspaceGitChanges.razor + partials
 IWorkspaceGitChangesOperations
-GitChangesAgentClient
+GitChangesWorkerClient
 WorkspaceGitChangesWriteQueue
 GitChangesSnapshotPushHandler
 Worker Git Changes commands
@@ -905,7 +905,7 @@ GET requests are never affected
 ### SignalR hubs
 
 ```text
-/hub/agent: any request carrying an Origin header is rejected (403); the Worker's .NET client sends none
+/hub/worker (and the legacy /hub/agent alias): any request carrying an Origin header is rejected (403); the Worker's .NET client sends none
 /hubs/workspace-sync, /hubs/desktop, /_blazor: a request with no Origin header passes;
   one with an Origin header passes only when its host is this app's own host, a loopback name,
   or a configured Security:AllowedOrigins entry
@@ -919,7 +919,7 @@ may be reached by host name or LAN IP.
 Git hooks post to the **Worker's** local listener (`127.0.0.1:<port>/hook/*`), not to the App, so they are
 outside this middleware.
 
-### Worker secret (`/hub/agent`, `/repos/{id}/connector`)
+### Worker secret (`/hub/worker`, `/repos/{id}/connector`)
 
 Only the real Worker may open the Worker hub connection or fetch a connector token.
 
@@ -957,6 +957,6 @@ has connected with the secret, or `Security:RequireWorkerSecret` is set.
 RequestSecurityMiddleware
 WorkerSecretMiddleware / WorkerSecretService / WorkerPairingService
 SecurityOptions (Security:AllowedOrigins, Security:RequireWorkerSecret)
-Worker: WorkerSecretProvider, SignalRConnectionHostedService, AgentTokenProvider
+Worker: WorkerSecretProvider, SignalRConnectionHostedService, WorkerTokenProvider
 Desktop: WorkerInstaller (secret hand-off)
 ```

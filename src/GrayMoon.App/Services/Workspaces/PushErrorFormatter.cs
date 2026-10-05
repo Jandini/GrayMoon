@@ -1,6 +1,6 @@
 namespace GrayMoon.App.Services.Workspaces;
 
-/// <summary>Maps raw git/agent push stderr into a short user-facing message.</summary>
+/// <summary>Maps raw git/worker push stderr into a short user-facing message.</summary>
 internal static class PushErrorFormatter
 {
     public static string Format(string? rawError)

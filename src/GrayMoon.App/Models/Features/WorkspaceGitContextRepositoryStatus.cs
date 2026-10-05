@@ -35,7 +35,7 @@ public sealed class WorkspaceGitContextRepositoryStatus
     public int? Deletions { get; set; }
     public int? StagedInsertions { get; set; }
     public int? StagedDeletions { get; set; }
-    public DateTimeOffset AgentScannedAt { get; set; }
+    public DateTimeOffset WorkerScannedAt { get; set; }
     public DateTimeOffset PersistedAt { get; set; }
     public string? LastErrorCode { get; set; }
     public string? LastErrorMessage { get; set; }

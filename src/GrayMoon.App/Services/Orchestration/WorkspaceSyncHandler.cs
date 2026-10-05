@@ -196,7 +196,7 @@ public sealed class WorkspaceSyncHandler(
             ? "Returning to default branch..."
             : $"Returning {ids.Count} repositories to default branch...");
 
-        // Snapshot reads stay sequential on one DbContext; agent work runs in parallel with per-repo scopes.
+        // Snapshot reads stay sequential on one DbContext; worker work runs in parallel with per-repo scopes.
         var workItems = new List<(int RepoId, string BranchName, bool DeleteRemote, bool ClosePr, int? PrNumber)>(ids.Count);
         var repoErrors = new ConcurrentDictionary<int, string>();
         var skippedAlreadyOnDefault = 0;
@@ -338,7 +338,7 @@ public sealed class WorkspaceSyncHandler(
 
             // Bounded parallel fan-out (each task on its own DI scope/DbContext), matching Execute/Analyze.
             // The "abort the whole batch on first failure" contract is preserved: every task still runs
-            // (an in-flight agent operation cannot be safely aborted mid-flight), but the first failure found
+            // (an in-flight worker operation cannot be safely aborted mid-flight), but the first failure found
             // once the batch completes is what gets reported, same as the sequential version reported the
             // first failure it hit.
             var returnDone = 0;

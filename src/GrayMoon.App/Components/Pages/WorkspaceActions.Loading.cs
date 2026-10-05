@@ -104,7 +104,7 @@ public sealed partial class WorkspaceActions
     }
 
     /// <summary>
-    /// After agent hook sync (e.g. push hook): refresh GitHub Actions for affected repos so running workflows and the live terminal appear.
+    /// After worker hook sync (e.g. push hook): refresh GitHub Actions for affected repos so running workflows and the live terminal appear.
     /// </summary>
     private async Task RefreshFromRepositorySyncAsync()
     {

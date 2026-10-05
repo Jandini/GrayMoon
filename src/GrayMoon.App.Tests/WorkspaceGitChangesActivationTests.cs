@@ -1,5 +1,5 @@
-using GrayMoon.Abstractions.Agent;
-using GrayMoon.App.Services.Agent;
+using GrayMoon.Abstractions.Worker;
+using GrayMoon.App.Services.Worker;
 using GrayMoon.App.Services.GitChanges;
 using GrayMoon.App.Services.Jobs;
 using GrayMoon.App.Services.Ui;
@@ -15,7 +15,7 @@ public sealed class WorkspaceGitChangesActivationTests
     [Fact]
     public async Task Activate_when_workspace_is_cold_starts_one_scan()
     {
-        var (activation, tracker, scanner, jobs) = CreateActivation(agentConnected: true);
+        var (activation, tracker, scanner, jobs) = CreateActivation(workerConnected: true);
 
         using var lease = activation.Activate(8);
 
@@ -30,7 +30,7 @@ public sealed class WorkspaceGitChangesActivationTests
     [Fact]
     public void Activate_when_already_active_does_not_start_scan()
     {
-        var (activation, tracker, scanner, jobs) = CreateActivation(agentConnected: true);
+        var (activation, tracker, scanner, jobs) = CreateActivation(workerConnected: true);
         using var existing = tracker.Subscribe(8);
 
         using var lease = activation.Activate(8);
@@ -42,9 +42,9 @@ public sealed class WorkspaceGitChangesActivationTests
     }
 
     [Fact]
-    public void Activate_when_agent_is_offline_subscribes_but_does_not_scan()
+    public void Activate_when_worker_is_offline_subscribes_but_does_not_scan()
     {
-        var (activation, tracker, scanner, jobs) = CreateActivation(agentConnected: false);
+        var (activation, tracker, scanner, jobs) = CreateActivation(workerConnected: false);
 
         using var lease = activation.Activate(8);
 
@@ -58,7 +58,7 @@ public sealed class WorkspaceGitChangesActivationTests
     [Fact]
     public async Task Activate_when_scan_already_running_does_not_start_another()
     {
-        var (activation, _, scanner, jobs) = CreateActivation(agentConnected: true);
+        var (activation, _, scanner, jobs) = CreateActivation(workerConnected: true);
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -80,7 +80,7 @@ public sealed class WorkspaceGitChangesActivationTests
     [Fact]
     public async Task Activate_when_workspace_mutation_is_running_does_not_start_scan()
     {
-        var (activation, tracker, scanner, jobs) = CreateActivation(agentConnected: true);
+        var (activation, tracker, scanner, jobs) = CreateActivation(workerConnected: true);
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -104,7 +104,7 @@ public sealed class WorkspaceGitChangesActivationTests
         WorkspaceGitChangesActivation Activation,
         WorkspaceGitChangesActivityTracker Tracker,
         RecordingScanner Scanner,
-        BackgroundJobService Jobs) CreateActivation(bool agentConnected)
+        BackgroundJobService Jobs) CreateActivation(bool workerConnected)
     {
         var tracker = new WorkspaceGitChangesActivityTracker(
             Options.Create(new GitChangesOptions { WorkspaceActivityGraceMinutes = 8 }));
@@ -114,7 +114,7 @@ public sealed class WorkspaceGitChangesActivationTests
         var activation = new WorkspaceGitChangesActivation(
             tracker,
             scanner,
-            new FakeAgentBridge(agentConnected),
+            new FakeWorkerBridge(workerConnected),
             jobs,
             new NoopToastService(),
             new FakeFeatureContextScopeFactory(new WorkspaceFeatureContextId(1)),
@@ -157,11 +157,11 @@ public sealed class WorkspaceGitChangesActivationTests
         }
     }
 
-    private sealed class FakeAgentBridge(bool connected) : IAgentBridge
+    private sealed class FakeWorkerBridge(bool connected) : IWorkerBridge
     {
-        public bool IsAgentConnected { get; } = connected;
+        public bool IsWorkerConnected { get; } = connected;
 
-        public Task<AgentCommandResponse> SendCommandAsync(
+        public Task<WorkerCommandResponse> SendCommandAsync(
             string command,
             object args,
             CancellationToken cancellationToken = default)

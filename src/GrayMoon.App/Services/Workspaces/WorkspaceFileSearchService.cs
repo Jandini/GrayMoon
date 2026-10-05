@@ -4,10 +4,10 @@ using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Services.Workspaces;
 
-/// <summary>Runs file search via the agent for a workspace. Used by AddFilesModal.</summary>
+/// <summary>Runs file search via the worker for a workspace. Used by AddFilesModal.</summary>
 public interface IWorkspaceFileSearchService
 {
-    Task<AgentSearchFilesResponse?> SearchAsync(
+    Task<WorkerSearchFilesResponse?> SearchAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         string? pattern,
@@ -16,11 +16,11 @@ public interface IWorkspaceFileSearchService
 }
 
 public sealed class WorkspaceFileSearchService(
-    IAgentBridge agentBridge,
+    IWorkerBridge workerBridge,
     WorkspaceRepository workspaceRepository,
     IWorkspaceContextPathResolver pathResolver) : IWorkspaceFileSearchService
 {
-    public async Task<AgentSearchFilesResponse?> SearchAsync(
+    public async Task<WorkerSearchFilesResponse?> SearchAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         string? pattern,
@@ -28,12 +28,12 @@ public sealed class WorkspaceFileSearchService(
         CancellationToken cancellationToken = default)
     {
         var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
-        if (workspace == null || !agentBridge.IsAgentConnected)
+        if (workspace == null || !workerBridge.IsWorkerConnected)
             return null;
 
-        var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
         var searchPattern = string.IsNullOrWhiteSpace(pattern) ? "*" : pattern.Trim();
-        var response = await agentBridge.SendCommandAsync("SearchFiles", new
+        var response = await workerBridge.SendCommandAsync("SearchFiles", new
         {
             workspaceName = workspaceFolderName,
             repositoryName = string.IsNullOrWhiteSpace(repositoryName) ? null : repositoryName.Trim(),
@@ -44,7 +44,7 @@ public sealed class WorkspaceFileSearchService(
         if (!response.Success || response.Data == null)
             return null;
 
-        return AgentResponseJson.DeserializeAgentResponse<AgentSearchFilesResponse>(response.Data)
-            ?? new AgentSearchFilesResponse { Files = [] };
+        return WorkerResponseJson.DeserializeWorkerResponse<WorkerSearchFilesResponse>(response.Data)
+            ?? new WorkerSearchFilesResponse { Files = [] };
     }
 }

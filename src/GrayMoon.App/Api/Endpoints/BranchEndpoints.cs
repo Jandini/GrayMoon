@@ -214,7 +214,7 @@ public sealed class CheckoutBranchApiRequest
     public int WorkspaceId { get; set; }
     public int RepositoryId { get; set; }
     public string? BranchName { get; set; }
-    /// <summary>When true, <see cref="BranchName"/> is treated as a tag name and the agent dispatches a CheckoutTag command (detached HEAD). Defaults to false for backward compatibility.</summary>
+    /// <summary>When true, <see cref="BranchName"/> is treated as a tag name and the worker dispatches a CheckoutTag command (detached HEAD). Defaults to false for backward compatibility.</summary>
     public bool IsTag { get; set; }
 }
 
@@ -283,7 +283,7 @@ public sealed class UpdateBranchFromDefaultApiRequest
     public int RepositoryId { get; set; }
 }
 
-/// <summary>Mirrors UpdateBranchFromDefaultResponse from the Agent for JSON deserialization on the App side.</summary>
+/// <summary>Mirrors UpdateBranchFromDefaultResponse from the Worker for JSON deserialization on the App side.</summary>
 public sealed class UpdateBranchFromDefaultResponse
 {
     [System.Text.Json.Serialization.JsonPropertyName("success")]

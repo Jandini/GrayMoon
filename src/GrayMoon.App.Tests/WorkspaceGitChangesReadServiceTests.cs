@@ -23,17 +23,17 @@ public class WorkspaceGitChangesReadServiceTests
     }
 
     [Fact]
-    public async Task Reading_does_not_require_any_agent_command()
+    public async Task Reading_does_not_require_any_worker_command()
     {
-        // The read service's public surface is a pure SQLite query - there is no IAgentBridge dependency
-        // at all, so opening/reloading the page can never issue an agent status command by construction.
+        // The read service's public surface is a pure SQLite query - there is no IWorkerBridge dependency
+        // at all, so opening/reloading the page can never issue a worker status command by construction.
         await using var ctx = await GitChangesTestDbContext.CreateAsync();
         var factory = new GitChangesTestDbContext.TestDbContextFactory(ctx.Options);
         IWorkspaceGitChangesReadService readService = new WorkspaceGitChangesReadService(factory);
 
         await readService.GetWorkspaceAsync(ctx.WorkspaceId, CancellationToken.None);
 
-        // No exception, no agent bridge required to construct the service - nothing further to assert.
+        // No exception, no worker bridge required to construct the service - nothing further to assert.
     }
 
     [Fact]

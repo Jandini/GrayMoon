@@ -1,0 +1,62 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<TargetFramework>net10.0</TargetFramework>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<RootNamespace>GrayMoon.Worker</RootNamespace>
+		<AssemblyName>graymoon-worker</AssemblyName>
+		<Authors>GrayMoon</Authors>
+		<Description>Host-side worker for GrayMoon: executes git and repository I/O operations.</Description>
+		<PackageType>DotnetTool</PackageType>
+		<PackAsTool>true</PackAsTool>
+		<ToolCommandName>graymoon-worker</ToolCommandName>
+		<PublishSingleFile>false</PublishSingleFile>
+		<SelfContained>false</SelfContained>
+		<SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+		<IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\GrayMoon.Abstractions\GrayMoon.Abstractions.csproj" />
+		<ProjectReference Include="..\GrayMoon.Common\GrayMoon.Common.csproj" />
+		<Compile Remove="Example\**\*" />
+	</ItemGroup>
+	<ItemGroup>
+		<InternalsVisibleTo Include="GrayMoon.Worker.Tests" />
+	</ItemGroup>
+	<ItemGroup>
+		<Content Include="appsettings.json">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Content>
+		<Content Include="appsettings.Development.json">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<CopyToPublishDirectory>Never</CopyToPublishDirectory>
+		</Content>
+		<EmbeddedResource Include="appsettings.json" />
+		<EmbeddedResource Include="appsettings.Development.json" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="GitVersion.MsBuild" Version="5.12.*">
+			<PrivateAssets>all</PrivateAssets>
+			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+		</PackageReference>
+
+		<PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.*" />
+		<PackageReference Include="System.CommandLine" Version="2.0.2" />
+		<PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.*" />
+		<PackageReference Include="Microsoft.Extensions.FileProviders.Embedded" Version="10.0.*" />
+		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.*" />
+		<PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.*" />
+		<PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.*" />
+		<PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="10.0.*" />
+		<PackageReference Include="Polly" Version="8.4.2" />
+		<PackageReference Include="Serilog.Enrichers.Environment" Version="3.0.1" />
+		<PackageReference Include="Serilog.Extensions.Hosting" Version="8.0.0" />
+		<PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
+		<PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
+	</ItemGroup>
+
+</Project>

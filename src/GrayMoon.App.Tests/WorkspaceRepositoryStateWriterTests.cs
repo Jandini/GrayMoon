@@ -7,7 +7,7 @@ namespace GrayMoon.App.Tests;
 
 /// <summary>
 /// Tests for the per-group replace semantics of <see cref="WorkspaceRepositoryStateWriter"/>: a group is
-/// rewritten only when its probe marker says the agent actually looked, and a probed null really does clear
+/// rewritten only when its probe marker says the worker actually looked, and a probed null really does clear
 /// the column. The seeded row starts on <c>feature/x</c> with every badge column populated, so any accidental
 /// write shows up as a changed value.
 /// </summary>
@@ -29,7 +29,7 @@ public sealed class WorkspaceRepositoryStateWriterTests
         await using var ctx = await SyncStateTestContext.CreateAsync();
         var before = await ctx.ReadLinkAsync();
 
-        // What an agent that predates the snapshot contract effectively sends: a payload the App can
+        // What a worker that predates the snapshot contract effectively sends: a payload the App can
         // deserialize but that claims nothing. It must not be able to blank a single badge.
         var applied = await ApplyAsync(ctx, new RepositoryStateSnapshot());
 

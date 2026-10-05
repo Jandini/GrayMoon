@@ -55,7 +55,7 @@ See the full tour, with real screenshots from a running instance, in the **[Gray
 ## Coming soon
 
 - **Azure DevOps support (GrayMoon).** GrayMoon is GitHub-first today (connectors, Actions, pull requests). Azure DevOps support brings the same workspace model - clone, branch, dependency-aware updates, and pull requests - plus **Pipelines** status and control across the workspace (the Azure DevOps counterpart to GitHub Actions), so teams whose code and CI live in Azure DevOps are not locked to one host.
-- **MCP in GrayMoon Desktop.** An MCP server in the Desktop shell so AI coding agents can drive GrayMoon through a stable tool surface - open workspaces, inspect status, and run coordinated actions - instead of scraping the UI or inventing one-off scripts. Desktop is the natural host: local Worker, native process, and a single place agents already run beside your editor.
+- **MCP in GrayMoon Desktop.** An MCP server in the Desktop shell so AI coding agents can drive GrayMoon through a stable tool surface - open workspaces, inspect status, and run coordinated actions - instead of scraping the UI or inventing one-off scripts. Desktop is the natural host: local Worker, native process, and a single place workers already run beside your editor.
 
 ## Quick start
 
@@ -78,7 +78,7 @@ docker run -d --restart unless-stopped --name graymoon -p 8384:8384 -v graymoon:
 
 Open `http://localhost:8384`, install the Worker from the **Worker** page (one PowerShell command), add a GitHub connector, and you're cloning your first workspace in minutes.
 
-![PowerShell Worker install](https://raw.githubusercontent.com/wiki/Jandini/GrayMoon/screenshots/agent-install.gif)
+![PowerShell Worker install](https://raw.githubusercontent.com/wiki/Jandini/GrayMoon/screenshots/worker-install.gif)
 
 Full walkthrough, from empty install to a working workspace: **[Getting Started](https://github.com/Jandini/GrayMoon/wiki/Getting-Started)**.
 

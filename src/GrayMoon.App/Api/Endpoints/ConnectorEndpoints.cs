@@ -8,7 +8,7 @@ public static class ConnectorEndpoints
 {
     public static IEndpointRouteBuilder MapConnectorEndpoints(this IEndpointRouteBuilder routes)
     {
-        // This endpoint is primarily for the Agent to obtain a connector-scoped token
+        // This endpoint is primarily for the Worker to obtain a connector-scoped token
         // for a given repository. It intentionally has no /api prefix to match the
         // planned shape: GET /repos/{repoId}/connector.
         routes.MapGet("/repos/{repoId:int}/connector", GetConnectorForRepository);

@@ -1,10 +1,10 @@
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Data;
 using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
-using GrayMoon.App.Services.Agent;
+using GrayMoon.App.Services.Worker;
 using GrayMoon.App.Services.Features;
 using GrayMoon.App.Services.GitChanges;
 using GrayMoon.App.Services.Jobs;
@@ -22,7 +22,7 @@ namespace GrayMoon.App.Tests;
 /// <summary>
 /// Real DI container over an in-memory SQLite database, used by the write-side tests
 /// (sync command handling, return-to-default persistence, PR refresh). The only substituted
-/// dependencies are the agent transport and the SignalR hub, so the services under test run
+/// dependencies are the worker transport and the SignalR hub, so the services under test run
 /// their production code paths against a real EF Core model.
 /// </summary>
 public sealed class SyncStateTestContext : IAsyncDisposable
@@ -30,17 +30,17 @@ public sealed class SyncStateTestContext : IAsyncDisposable
     private readonly SqliteConnection _connection;
     private readonly ServiceProvider _provider;
 
-    public FakeAgentBridge AgentBridge { get; }
+    public FakeWorkerBridge WorkerBridge { get; }
     public FakeHubContext<WorkspaceSyncHub> HubContext { get; }
     public int WorkspaceId { get; private set; }
     public int RepositoryId { get; private set; }
     public int WorkspaceRepositoryId { get; private set; }
 
-    private SyncStateTestContext(SqliteConnection connection, ServiceProvider provider, FakeAgentBridge agentBridge, FakeHubContext<WorkspaceSyncHub> hubContext)
+    private SyncStateTestContext(SqliteConnection connection, ServiceProvider provider, FakeWorkerBridge workerBridge, FakeHubContext<WorkspaceSyncHub> hubContext)
     {
         _connection = connection;
         _provider = provider;
-        AgentBridge = agentBridge;
+        WorkerBridge = workerBridge;
         HubContext = hubContext;
     }
 
@@ -52,7 +52,7 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
 
-        var agentBridge = new FakeAgentBridge();
+        var workerBridge = new FakeWorkerBridge();
         var hubContext = new FakeHubContext<WorkspaceSyncHub>();
 
         var services = new ServiceCollection();
@@ -63,7 +63,7 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddSingleton<IGitHubETagCache, GitHubETagCache>();
         services.AddSingleton<IGitHubApiUsageRecorder, FakeGitHubApiUsageRecorder>();
         services.AddSingleton(new HttpClient());
-        services.AddSingleton<IAgentBridge>(agentBridge);
+        services.AddSingleton<IWorkerBridge>(workerBridge);
         services.AddSingleton<IHubContext<WorkspaceSyncHub>>(hubContext);
 
         void ConfigureDb(DbContextOptionsBuilder o)
@@ -93,7 +93,7 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddScoped<IWorkspaceHookContextAttributor, WorkspaceHookContextAttributor>();
         services.AddScoped<IWorkspaceFeatureOperations, WorkspaceFeatureOperations>();
         services.AddScoped<IWorkspaceExternalWorktreeOperations, WorkspaceExternalWorktreeOperations>();
-        services.AddSingleton<AgentConnectionTracker>();
+        services.AddSingleton<WorkerConnectionTracker>();
         services.AddSingleton<IWorkspaceFeatureReconciler, WorkspaceFeatureReconciler>();
         services.AddSingleton<IWorkspaceOperationRunner, WorkspaceOperationRunner>();
         services.AddSingleton<IWorkspaceOperationLock>(sp => (IWorkspaceOperationLock)sp.GetRequiredService<IWorkspaceOperationRunner>());
@@ -122,7 +122,7 @@ public sealed class SyncStateTestContext : IAsyncDisposable
 
         var provider = services.BuildServiceProvider();
 
-        var ctx = new SyncStateTestContext(connection, provider, agentBridge, hubContext);
+        var ctx = new SyncStateTestContext(connection, provider, workerBridge, hubContext);
         await ctx.SeedAsync(userToken);
         return ctx;
     }
@@ -271,27 +271,27 @@ public sealed class SyncStateTestContext : IAsyncDisposable
     }
 }
 
-/// <summary>Agent transport stub. Tests register a canned response per command name; unregistered commands fail like a disconnected agent would.</summary>
-public sealed class FakeAgentBridge : IAgentBridge
+/// <summary>Worker transport stub. Tests register a canned response per command name; unregistered commands fail like a disconnected worker would.</summary>
+public sealed class FakeWorkerBridge : IWorkerBridge
 {
-    private readonly Dictionary<string, Func<object, AgentCommandResponse>> _handlers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Func<object, WorkerCommandResponse>> _handlers = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _callsLock = new();
 
-    public bool IsAgentConnected { get; set; } = true;
+    public bool IsWorkerConnected { get; set; } = true;
     public List<(string Command, object Args)> Calls { get; } = [];
 
     public void Respond(string command, object? data, bool success = true, string? error = null)
-        => _handlers[command] = _ => new AgentCommandResponse(success, data, error);
+        => _handlers[command] = _ => new WorkerCommandResponse(success, data, error);
 
-    public void Respond(string command, Func<object, AgentCommandResponse> handler)
+    public void Respond(string command, Func<object, WorkerCommandResponse> handler)
         => _handlers[command] = handler;
 
-    public Task<AgentCommandResponse> SendCommandAsync(string command, object args, CancellationToken cancellationToken = default)
+    public Task<WorkerCommandResponse> SendCommandAsync(string command, object args, CancellationToken cancellationToken = default)
     {
         lock (_callsLock)
             Calls.Add((command, args));
         if (_handlers.TryGetValue(command, out var handler))
             return Task.FromResult(handler(args));
-        return Task.FromResult(new AgentCommandResponse(false, null, $"No canned response for '{command}'."));
+        return Task.FromResult(new WorkerCommandResponse(false, null, $"No canned response for '{command}'."));
     }
 }

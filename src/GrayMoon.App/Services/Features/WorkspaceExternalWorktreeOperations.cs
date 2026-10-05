@@ -1,6 +1,6 @@
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Data;
-using GrayMoon.App.Services.Agent;
+using GrayMoon.App.Services.Worker;
 using GrayMoon.App.Services.Jobs;
 using GrayMoon.Application;
 using GrayMoon.Application.Features;
@@ -14,7 +14,7 @@ public sealed class WorkspaceExternalWorktreeOperations(
     IWorkspaceOperationLock operationLock,
     IWorkspaceContextPathResolver pathResolver,
     IWorkspaceFeatureContextResolver contextResolver,
-    IAgentBridge agentBridge,
+    IWorkerBridge workerBridge,
     ILogger<WorkspaceExternalWorktreeOperations> logger) : IWorkspaceExternalWorktreeOperations
 {
     internal const string FeatureOwnedError = "This worktree belongs to a GrayMoon Feature. Use Remove Feature instead.";
@@ -64,15 +64,15 @@ public sealed class WorkspaceExternalWorktreeOperations(
 
             var special = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
             var mainPath = await pathResolver.GetRepositoryPathAsync(special, workspaceRepositoryId, cancellationToken);
-            var listResp = await agentBridge.SendCommandAsync(
-                AgentHubMethods.ListGitWorktrees,
+            var listResp = await workerBridge.SendCommandAsync(
+                WorkerHubMethods.ListGitWorktrees,
                 new { mainRepositoryPath = mainPath },
                 cancellationToken);
 
             GitWorktreeInfo? match = null;
             if (listResp.Success && listResp.Data != null)
             {
-                var payload = AgentResponseJson.DeserializeAgentResponse<ListWorktreesAgentResponse>(listResp.Data);
+                var payload = WorkerResponseJson.DeserializeWorkerResponse<ListWorktreesWorkerResponse>(listResp.Data);
                 match = GitWorktreeOccupancy.FindByPath(payload?.Worktrees, worktreePath);
             }
 
@@ -155,8 +155,8 @@ public sealed class WorkspaceExternalWorktreeOperations(
                     var special = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, linked.Token);
                     var mainPath = await pathResolver.GetRepositoryPathAsync(special, workspaceRepositoryId, linked.Token);
                     var force = options.AllowForceRemoveDirty || plan.RequiresForce || !plan.Success;
-                    var resp = await agentBridge.SendCommandAsync(
-                        AgentHubMethods.RemoveGitWorktree,
+                    var resp = await workerBridge.SendCommandAsync(
+                        WorkerHubMethods.RemoveGitWorktree,
                         new { mainRepositoryPath = mainPath, worktreePath, force },
                         linked.Token);
                     if (!resp.Success)
@@ -185,9 +185,9 @@ public sealed class WorkspaceExternalWorktreeOperations(
     }
 
     /// <summary>
-    /// Disk facts for one external worktree, from the Agent's InspectWorktree command. The App never
+    /// Disk facts for one external worktree, from the Worker's InspectWorktree command. The App never
     /// reads repository or worktree paths from local disk directly (it can run in Docker, where those
-    /// paths do not exist). Any failure to reach the Agent, an old Worker, or a parse failure is
+    /// paths do not exist). Any failure to reach the Worker, an old Worker, or a parse failure is
     /// Unknown, never treated as Missing or clean.
     /// </summary>
     private async Task<WorktreeDiskStatus> InspectWorktreeDiskStatusAsync(
@@ -197,15 +197,15 @@ public sealed class WorkspaceExternalWorktreeOperations(
     {
         if (string.IsNullOrWhiteSpace(mainRepositoryPath)
             || string.IsNullOrWhiteSpace(worktreePath)
-            || !agentBridge.IsAgentConnected)
+            || !workerBridge.IsWorkerConnected)
         {
             return WorktreeDiskStatus.Unknown("Could not check this repository. Make sure the Worker is running, then try again.");
         }
 
         try
         {
-            var response = await agentBridge.SendCommandAsync(
-                AgentHubMethods.InspectWorktree,
+            var response = await workerBridge.SendCommandAsync(
+                WorkerHubMethods.InspectWorktree,
                 new { mainRepositoryPath, worktreePath },
                 cancellationToken);
             if (!response.Success)
@@ -216,7 +216,7 @@ public sealed class WorkspaceExternalWorktreeOperations(
                 return WorktreeDiskStatus.Unknown(reason);
             }
 
-            var payload = AgentResponseJson.DeserializeAgentResponse<InspectWorktreeAgentResponse>(response.Data);
+            var payload = WorkerResponseJson.DeserializeWorkerResponse<InspectWorktreeWorkerResponse>(response.Data);
             if (payload is null || !string.IsNullOrWhiteSpace(payload.Error))
                 return WorktreeDiskStatus.Unknown("Could not check this repository. Make sure the Worker is running, then try again.");
 
@@ -232,7 +232,7 @@ public sealed class WorkspaceExternalWorktreeOperations(
     private static bool IsUnknownCommandError(string? error) =>
         !string.IsNullOrWhiteSpace(error) && error.Contains("Unknown command", StringComparison.OrdinalIgnoreCase);
 
-    private sealed class ListWorktreesAgentResponse
+    private sealed class ListWorktreesWorkerResponse
     {
         [System.Text.Json.Serialization.JsonPropertyName("worktrees")]
         public List<GitWorktreeInfo>? Worktrees { get; set; }

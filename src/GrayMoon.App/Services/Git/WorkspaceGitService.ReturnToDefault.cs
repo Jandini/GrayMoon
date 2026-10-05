@@ -1,5 +1,5 @@
 using System.Collections.Concurrent;
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.Abstractions.Exceptions;
 using GrayMoon.Abstractions.Notifications;
 using GrayMoon.App.Data;
@@ -15,7 +15,7 @@ namespace GrayMoon.App.Services.Git;
 
 public sealed partial class WorkspaceGitService
 {
-    /// <summary>Runs GetCommitCounts (agent) for each repo and returns DefaultBranchAhead and HasUpstream per repo. Used to check if return-to-default is safe (no commits ahead of default). Respects MaxParallelOperations.</summary>
+    /// <summary>Runs GetCommitCounts (worker) for each repo and returns DefaultBranchAhead and HasUpstream per repo. Used to check if return-to-default is safe (no commits ahead of default). Respects MaxParallelOperations.</summary>
     public async Task<IReadOnlyList<(int RepoId, int? DefaultAhead, bool? HasUpstream)>> GetCommitCountsForReposAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
@@ -29,7 +29,7 @@ public sealed partial class WorkspaceGitService
         if (workspace == null)
             return Array.Empty<(int, int?, bool?)>();
 
-        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
         var maxParallel = _maxConcurrent;
 
         using var semaphore = new SemaphoreSlim(maxParallel, maxParallel);
@@ -41,7 +41,7 @@ public sealed partial class WorkspaceGitService
             {
                 try
                 {
-                    var response = await _agentBridge.SendCommandAsync("GetCommitCounts", new
+                    var response = await _workerBridge.SendCommandAsync("GetCommitCounts", new
                     {
                         workspaceName = workspaceFolderName,
                         repositoryName = repoName,
@@ -49,7 +49,7 @@ public sealed partial class WorkspaceGitService
                     }, cancellationToken);
                     if (!response.Success || response.Data == null)
                         return (RepoId: repoId, DefaultAhead: (int?)null, HasUpstream: (bool?)null);
-                    var data = AgentResponseJson.DeserializeAgentResponse<AgentCommitCountsResponse>(response.Data);
+                    var data = WorkerResponseJson.DeserializeWorkerResponse<WorkerCommitCountsResponse>(response.Data);
                     return (RepoId: repoId, DefaultAhead: data?.DefaultBranchAhead, HasUpstream: data?.HasUpstream);
                 }
                 catch (Exception ex)
@@ -69,7 +69,7 @@ public sealed partial class WorkspaceGitService
     }
 
     /// <summary>
-    /// Syncs a single repository to its default branch by calling the agent directly, so CommandOutput flows to TerminalSinkContext when called inside a background job.
+    /// Syncs a single repository to its default branch by calling the worker directly, so CommandOutput flows to TerminalSinkContext when called inside a background job.
     /// Persists the resulting state through <see cref="WorkspaceRepositoryStateWriter"/> but does not recompute workspace-wide stats or broadcast:
     /// the caller owns that boundary and must call <see cref="RecomputeAndBroadcastWorkspaceSyncedAsync"/> once after its whole batch, single-repository batches included.
     /// </summary>
@@ -114,7 +114,7 @@ public sealed partial class WorkspaceGitService
         // A merged or closed pull request stays an independent reason the branch is safe to drop.
         var forceDeleteLocalBranch = allowForceDeleteLocalBranch || prInfo?.IsMerged == true || prInfo?.IsClosed == true;
 
-        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
         var args = new
         {
             workspaceName = workspaceFolderName,
@@ -126,8 +126,8 @@ public sealed partial class WorkspaceGitService
             deleteRemoteBranch
         };
 
-        var response = await _agentBridge.SendCommandAsync("ReturnToDefaultBranch", args, cancellationToken);
-        var syncResponse = AgentResponseJson.DeserializeAgentResponse<ReturnToDefaultBranchResponse>(response.Data);
+        var response = await _workerBridge.SendCommandAsync("ReturnToDefaultBranch", args, cancellationToken);
+        var syncResponse = WorkerResponseJson.DeserializeWorkerResponse<ReturnToDefaultBranchResponse>(response.Data);
         var commandSuccess = syncResponse?.Success ?? response.Success;
         var errorMessage = syncResponse?.ErrorMessage ?? response.Error ?? "Failed to return to default branch";
 
@@ -136,7 +136,7 @@ public sealed partial class WorkspaceGitService
 
         if (syncResponse?.LocalBranches == null)
         {
-            // The agent reported no branch lists, so the writer cannot replace them. Remove at least the
+            // The worker reported no branch lists, so the writer cannot replace them. Remove at least the
             // branch that was just deleted locally.
             var toRemove = await _dbContext.RepositoryBranches
                 .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && !rb.IsRemote && rb.BranchName == currentBranchName)
@@ -161,7 +161,7 @@ public sealed partial class WorkspaceGitService
     }
 
     /// <summary>
-    /// Builds the state snapshot for a return-to-default response. Newer agents send an explicit snapshot
+    /// Builds the state snapshot for a return-to-default response. Newer workers send an explicit snapshot
     /// with probe markers; older ones send the flat fields, which are mapped here with the markers a
     /// successful return-to-default is known to satisfy.
     /// </summary>
@@ -191,7 +191,7 @@ public sealed partial class WorkspaceGitService
             Projects = syncResponse.Projects != null ? ToProjectNotifications(GetProjectsDetail(syncResponse.Projects)) ?? [] : null,
             IdentityProbed = true,
             GitVersionProbed = !string.IsNullOrWhiteSpace(syncResponse.GitVersion),
-            // A pre-snapshot agent only reaches this point after a successful checkout and pull, at which
+            // A pre-snapshot worker only reaches this point after a successful checkout and pull, at which
             // point it always ran both count queries and the upstream check.
             CommitCountsProbed = true,
             UpstreamProbed = syncResponse.HasUpstream.HasValue,

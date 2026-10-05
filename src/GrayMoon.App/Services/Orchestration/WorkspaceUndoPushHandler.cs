@@ -7,7 +7,7 @@ using GrayMoon.Application.Features;
 namespace GrayMoon.App.Services.Orchestration;
 
 public sealed class WorkspaceUndoPushHandler(
-    IAgentBridge agentBridge,
+    IWorkerBridge workerBridge,
     WorkspaceRepository workspaceRepo,
     IOptions<WorkspaceOptions> options,
     IWorkspaceContextPathResolver pathResolver,
@@ -32,7 +32,7 @@ public sealed class WorkspaceUndoPushHandler(
         if (workspace == null)
             return Array.Empty<(int, bool, string?)>();
 
-        var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, ct);
+        var (workspaceRoot, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, ct);
 
         var total = targets.Count;
         var completedCount = 0;
@@ -56,7 +56,7 @@ public sealed class WorkspaceUndoPushHandler(
                     workspaceRoot,
                     bearerToken = ConnectorHelpers.UnprotectToken(wr.Repository?.Connector?.UserToken),
                 };
-                var response = await agentBridge.SendCommandAsync("UndoPush", args, ct);
+                var response = await workerBridge.SendCommandAsync("UndoPush", args, ct);
                 if (!response.Success || response.Data == null)
                 {
                     var errMsg = response.Error ?? "Worker command failed";
@@ -64,11 +64,11 @@ public sealed class WorkspaceUndoPushHandler(
                     return (wr.RepositoryId, false, errMsg);
                 }
 
-                var result = AgentResponseJson.DeserializeAgentResponse<UndoPushAgentResponse>(response.Data);
+                var result = WorkerResponseJson.DeserializeWorkerResponse<UndoPushWorkerResponse>(response.Data);
                 if (result is not { Success: true })
                 {
                     var errMsg = result?.ErrorMessage ?? "Unknown error";
-                    logger.LogError("UndoPush agent returned failure for repo {RepositoryId}: {Error}", wr.RepositoryId, errMsg);
+                    logger.LogError("UndoPush worker returned failure for repo {RepositoryId}: {Error}", wr.RepositoryId, errMsg);
                     return (wr.RepositoryId, false, errMsg);
                 }
 
@@ -92,7 +92,7 @@ public sealed class WorkspaceUndoPushHandler(
         return results;
     }
 
-    private sealed class UndoPushAgentResponse
+    private sealed class UndoPushWorkerResponse
     {
         public bool Success { get; set; }
         public string? ErrorMessage { get; set; }

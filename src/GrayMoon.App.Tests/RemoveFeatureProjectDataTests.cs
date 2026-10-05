@@ -1,4 +1,4 @@
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.Application.Features;
@@ -49,19 +49,19 @@ public sealed class RemoveFeatureProjectDataTests
     };
 
     /// <summary>
-    /// Agent responses for the post-remove Workspace status refresh (RefreshWorkspaceStateAfterFeatureRemoveAsync).
+    /// Worker responses for the post-remove Workspace status refresh (RefreshWorkspaceStateAfterFeatureRemoveAsync).
     /// This refresh independently reconciles the special Workspace context's own WorkspaceProjects and
-    /// WorkspaceFileLineStatuses from live Agent data - behaviour that exists before B1 and is already
+    /// WorkspaceFileLineStatuses from live Worker data - behaviour that exists before B1 and is already
     /// covered by RemoveFeatureWorkspaceRefreshTests. These responses report an empty project/file set
     /// (nothing configured in this fixture) so that refresh is not itself under test here.
     /// </summary>
     private static void RespondCleanRemoval(SyncStateTestContext ctx)
     {
-        ctx.AgentBridge.Respond(AgentHubMethods.InspectWorktree, CleanInspectWorktree());
-        ctx.AgentBridge.Respond(AgentHubMethods.RemoveGitWorktree, new { success = true });
-        ctx.AgentBridge.Respond("DeleteBranch", new { success = true });
-        ctx.AgentBridge.Respond("SyncRepository", SyncResponse());
-        ctx.AgentBridge.Respond("CheckFileVersions", new { success = true, files = Array.Empty<object>() });
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree());
+        ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new { success = true });
+        ctx.WorkerBridge.Respond("DeleteBranch", new { success = true });
+        ctx.WorkerBridge.Respond("SyncRepository", SyncResponse());
+        ctx.WorkerBridge.Respond("CheckFileVersions", new { success = true, files = Array.Empty<object>() });
     }
 
     [Fact]
