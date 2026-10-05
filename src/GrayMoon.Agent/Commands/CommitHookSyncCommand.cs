@@ -2,6 +2,7 @@ using System.Diagnostics;
 using GrayMoon.Abstractions.Agent;
 using GrayMoon.Abstractions.Notifications;
 using GrayMoon.Agent.Abstractions;
+using GrayMoon.Agent.Services;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
 
@@ -23,7 +24,8 @@ public sealed class CommitHookSyncCommand(IGitService git, ICsProjFileService cs
 
         var (versionResult, _) = await git.GetVersionAsync(payload.RepositoryPath, cancellationToken);
         var version = versionResult?.InformationalVersion ?? "-";
-        var branch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? "-";
+        // A GitVersion failure leaves the version unresolved; it must not cost the repository its branch.
+        var branch = await git.ResolveBranchAsync(versionResult, payload.RepositoryPath, cancellationToken) ?? "-";
         var findProjectsTask = csProjFileService.FindAsync(payload.RepositoryPath, cancellationToken);
 
         var currentTag = await git.GetCheckedOutTagAsync(payload.RepositoryPath, cancellationToken);
@@ -74,6 +76,7 @@ public sealed class CommitHookSyncCommand(IGitService git, ICsProjFileService cs
                 RepositoryId = payload.RepositoryId,
                 RepositoryPath = payload.RepositoryPath,
                 Version = version,
+                GitVersionFailed = versionResult == null,
                 Branch = branch,
                 Tag = currentTag,
                 OutgoingCommits = outgoing,

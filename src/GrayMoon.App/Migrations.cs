@@ -1,27 +1,206 @@
+using System.Data;
+using System.Data.Common;
 using GrayMoon.App.Data;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace GrayMoon.App;
 
 /// <summary>
-/// Pre-release, the database schema is fully described by <see cref="AppDbContext.OnModelCreating"/> and
-/// created via <c>EnsureCreated()</c> - there is no shipped version whose database needs patching, so no
-/// schema-patching migrations live here. Once GrayMoon has a real release, any schema change made after that
-/// point needs an idempotent <c>Migrate*Async</c> method here (guarded by <c>pragma_table_info</c>/<c>sqlite_master</c>
-/// checks) to bring existing installed databases up to date - see CLAUDE.md "Database schema" for the pattern.
-/// This class otherwise only runs one-time data seeding.
+/// Schema patches for databases created by an earlier build. EnsureCreated() only builds brand-new databases
+/// from the current model; every change made after GrayMoon's first shipped release (0.1.0) needs a patch here
+/// so existing installed databases come up to date too - see CLAUDE.md "Database schema" for the pattern.
+///
+/// Patches run in two modes, tracked with SQLite's <c>PRAGMA user_version</c>:
+/// - Step 1 ("legacy baseline", <see cref="LegacyBaselineVersion"/>) bundles every patch written before this
+///   versioning scheme existed. It runs in tolerant mode: an unexpected error in one patch is logged and
+///   startup continues, because real installed databases have months of history this must not refuse to open.
+/// - Step 2 and later (<see cref="StrictSteps"/>) are new, versioned patches. Each one runs in its own
+///   transaction; a failure rolls back and throws <see cref="DatabaseMigrationException"/>, which stops startup.
+/// A backup of the database file is written with <c>VACUUM INTO</c> before any pending step runs (step 1 or
+/// later), so a failed strict step never leaves a user without a way back.
 /// </summary>
 public static partial class Migrations
 {
-    public static async Task RunAllAsync(AppDbContext dbContext)
+    internal const int LegacyBaselineVersion = 1;
+
+    /// <summary>
+    /// Ordered strict (post-versioning) migration steps. Each unit that adds one appends a new entry here with
+    /// the next free version number; never edit another unit's entry.
+    /// </summary>
+    internal static readonly IReadOnlyList<(int Version, string Name, Func<AppDbContext, Task> Action)> StrictSteps = new (int Version, string Name, Func<AppDbContext, Task> Action)[]
     {
-        await SeedDefaultWorkspaceRootPathAsync(dbContext);
-        await MigrateWorkspaceRepositoriesHasSelfFileVersionTokenAsync(dbContext);
-        await MigrateWorkspaceProjectsIsGeneratedAsync(dbContext);
-        await MigrateDropGitHubApiUsageHourlyAsync(dbContext);
-        await MigrateWorkspacesExcludeAiWorkflowsAsync(dbContext);
-        await MigrateWorkspaceGitRepositoryStatusLineStatsAsync(dbContext);
-        await MigrateWorkspaceFeatureContextSchemaAsync(dbContext);
+        (2, "B2 orphan cleanup and WorkspaceProjects foreign key", dbContext => MigrateFeatureContextOrphanCleanupAndWorkspaceProjectsForeignKeyAsync(dbContext)),
+        (3, "E1 case-insensitive Feature name index", dbContext => MigrateFeatureNameIndexCollationAsync(dbContext)),
+    };
+
+    public static async Task RunAllAsync(AppDbContext dbContext, ILogger? logger = null)
+    {
+        logger ??= NullLogger.Instance;
+
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != ConnectionState.Open)
+            await conn.OpenAsync();
+
+        var version = await GetUserVersionAsync(conn);
+        var legacyPending = version < LegacyBaselineVersion;
+        var strictPending = StrictSteps.Where(s => s.Version > version).OrderBy(s => s.Version).ToList();
+
+        string? backupPath = null;
+        if (legacyPending || strictPending.Count > 0)
+            backupPath = await BackupDatabaseAsync(conn, logger);
+
+        if (legacyPending)
+        {
+            await RunLegacyBaselineAsync(dbContext, logger);
+            await SetUserVersionAsync(conn, LegacyBaselineVersion);
+        }
+
+        foreach (var step in strictPending)
+            await RunStrictStepAsync(dbContext, step.Version, step.Name, step.Action, backupPath, logger);
+    }
+
+    private static async Task RunLegacyBaselineAsync(AppDbContext dbContext, ILogger logger)
+    {
+        await SeedDefaultWorkspaceRootPathAsync(dbContext, logger);
+        await MigrateWorkspaceRepositoriesHasSelfFileVersionTokenAsync(dbContext, logger);
+        await MigrateWorkspaceProjectsIsGeneratedAsync(dbContext, logger);
+        await MigrateDropGitHubApiUsageHourlyAsync(dbContext, logger);
+        await MigrateWorkspacesExcludeAiWorkflowsAsync(dbContext, logger);
+        await MigrateWorkspaceGitRepositoryStatusLineStatsAsync(dbContext, logger);
+        await MigrateWorkspaceFeatureContextSchemaAsync(dbContext, logger);
+    }
+
+    /// <summary>
+    /// Runs one strict-mode step in its own transaction. Rolls back and throws
+    /// <see cref="DatabaseMigrationException"/> on any failure, so the schema is never left half-applied.
+    /// Internal so unit tests can exercise failure handling directly, without needing a real entry in
+    /// <see cref="StrictSteps"/>.
+    /// </summary>
+    internal static async Task RunStrictStepAsync(
+        AppDbContext dbContext,
+        int version,
+        string name,
+        Func<AppDbContext, Task> action,
+        string? backupPath,
+        ILogger logger)
+    {
+        await using var transaction = await dbContext.Database.BeginTransactionAsync();
+        try
+        {
+            await action(dbContext);
+            // Not ExecuteSqlRawAsync: SQLite's PRAGMA grammar does not accept a bound parameter for the
+            // value, so this goes through a plain ADO.NET command (enlisted in the same transaction) instead
+            // of an EF Core raw-SQL API. version is an internal int, never user input.
+            var conn = dbContext.Database.GetDbConnection();
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = transaction.GetDbTransaction();
+                cmd.CommandText = $"PRAGMA user_version = {version};";
+                await cmd.ExecuteNonQueryAsync();
+            }
+            await transaction.CommitAsync();
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync();
+            logger.LogError(ex, "Migration step {Version} ({Name}) failed and was rolled back.", version, name);
+            throw new DatabaseMigrationException(version, name, backupPath, ex);
+        }
+    }
+
+    private static async Task<int> GetUserVersionAsync(DbConnection conn)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "PRAGMA user_version;";
+        var result = await cmd.ExecuteScalarAsync();
+        return result is null ? 0 : Convert.ToInt32(result);
+    }
+
+    private static async Task SetUserVersionAsync(DbConnection conn, int version)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"PRAGMA user_version = {version};";
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>
+    /// Backs up the database file with <c>VACUUM INTO</c> (a plain file copy of an open WAL database can be
+    /// corrupt) before a pending migration step runs. Skipped for non-file-backed databases (in-memory tests).
+    /// Keeps the 3 newest backups next to the database file and deletes older ones.
+    /// </summary>
+    private static async Task<string?> BackupDatabaseAsync(DbConnection conn, ILogger logger)
+    {
+        var dataSource = conn.DataSource;
+        if (string.IsNullOrWhiteSpace(dataSource) || dataSource.Equals(":memory:", StringComparison.OrdinalIgnoreCase))
+        {
+            logger.LogDebug("Skipping pre-migration database backup: database is not file-backed.");
+            return null;
+        }
+
+        var directory = Path.GetDirectoryName(dataSource);
+        if (string.IsNullOrEmpty(directory))
+            directory = Directory.GetCurrentDirectory();
+        Directory.CreateDirectory(directory);
+
+        var fileName = Path.GetFileName(dataSource);
+        var backupFileName = $"{fileName}.bak-{DateTime.UtcNow:yyyyMMdd-HHmmss}";
+        var backupPath = Path.Combine(directory, backupFileName);
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "VACUUM INTO $backupPath;";
+            var parameter = cmd.CreateParameter();
+            parameter.ParameterName = "$backupPath";
+            parameter.Value = backupPath;
+            cmd.Parameters.Add(parameter);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        if (await IsBackupIntegrityOkAsync(backupPath))
+            logger.LogInformation("Created pre-migration database backup at {BackupPath}.", backupPath);
+        else
+            logger.LogError("Pre-migration database backup at {BackupPath} failed integrity check.", backupPath);
+
+        PruneOldBackups(directory, fileName, logger);
+
+        return backupPath;
+    }
+
+    private static async Task<bool> IsBackupIntegrityOkAsync(string backupPath)
+    {
+        try
+        {
+            await using var connection = new SqliteConnection($"Data Source={backupPath}");
+            await connection.OpenAsync();
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = "PRAGMA integrity_check;";
+            var result = await cmd.ExecuteScalarAsync() as string;
+            return string.Equals(result, "ok", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void PruneOldBackups(string directory, string dbFileName, ILogger logger)
+    {
+        try
+        {
+            var stale = Directory.GetFiles(directory, $"{dbFileName}.bak-*")
+                .OrderByDescending(f => f, StringComparer.Ordinal)
+                .Skip(3);
+            foreach (var old in stale)
+                File.Delete(old);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to prune old database backups in {Directory}.", directory);
+        }
     }
 
     /// <summary>
@@ -31,12 +210,13 @@ public static partial class Migrations
     /// query against WorkspaceRepositories. Safe to keep even pre-release since it only ever adds a nullable
     /// column and is a no-op once the column exists.
     /// </summary>
-    public static async Task MigrateWorkspaceRepositoriesHasSelfFileVersionTokenAsync(AppDbContext dbContext)
+    public static async Task MigrateWorkspaceRepositoriesHasSelfFileVersionTokenAsync(AppDbContext dbContext, ILogger? logger = null)
     {
+        logger ??= NullLogger.Instance;
         try
         {
             var conn = dbContext.Database.GetDbConnection();
-            if (conn.State != System.Data.ConnectionState.Open)
+            if (conn.State != ConnectionState.Open)
                 await conn.OpenAsync();
 
             await using var checkCmd = conn.CreateCommand();
@@ -48,9 +228,10 @@ public static partial class Migrations
             alterCmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN HasSelfFileVersionToken INTEGER NULL";
             await alterCmd.ExecuteNonQueryAsync();
         }
-        catch
+        catch (Exception ex)
         {
             // Table doesn't exist yet (fresh db, EnsureCreated will create it with the column already present).
+            logger.LogError(ex, "Legacy migration step MigrateWorkspaceRepositoriesHasSelfFileVersionTokenAsync failed; continuing startup.");
         }
     }
 
@@ -62,12 +243,13 @@ public static partial class Migrations
     /// Safe to keep even pre-release since it only ever adds a column with a default value and is a no-op once
     /// the column exists.
     /// </summary>
-    public static async Task MigrateWorkspaceProjectsIsGeneratedAsync(AppDbContext dbContext)
+    public static async Task MigrateWorkspaceProjectsIsGeneratedAsync(AppDbContext dbContext, ILogger? logger = null)
     {
+        logger ??= NullLogger.Instance;
         try
         {
             var conn = dbContext.Database.GetDbConnection();
-            if (conn.State != System.Data.ConnectionState.Open)
+            if (conn.State != ConnectionState.Open)
                 await conn.OpenAsync();
 
             await using var checkCmd = conn.CreateCommand();
@@ -79,9 +261,10 @@ public static partial class Migrations
             alterCmd.CommandText = "ALTER TABLE WorkspaceProjects ADD COLUMN IsGenerated INTEGER NOT NULL DEFAULT 0";
             await alterCmd.ExecuteNonQueryAsync();
         }
-        catch
+        catch (Exception ex)
         {
             // Table doesn't exist yet (fresh db, EnsureCreated will create it with the column already present).
+            logger.LogError(ex, "Legacy migration step MigrateWorkspaceProjectsIsGeneratedAsync failed; continuing startup.");
         }
     }
 
@@ -90,12 +273,13 @@ public static partial class Migrations
     /// time the app runs against a fresh database - i.e. whenever no row for that key exists yet. Skipped once
     /// a row exists (including an explicitly cleared one), so it never overrides a user's own choice.
     /// </summary>
-    public static async Task SeedDefaultWorkspaceRootPathAsync(AppDbContext dbContext)
+    public static async Task SeedDefaultWorkspaceRootPathAsync(AppDbContext dbContext, ILogger? logger = null)
     {
+        logger ??= NullLogger.Instance;
         try
         {
             var conn = dbContext.Database.GetDbConnection();
-            if (conn.State != System.Data.ConnectionState.Open)
+            if (conn.State != ConnectionState.Open)
                 await conn.OpenAsync();
 
             await using var cmd = conn.CreateCommand();
@@ -118,9 +302,10 @@ public static partial class Migrations
             cmd.Parameters.Add(valueParam);
             await cmd.ExecuteNonQueryAsync();
         }
-        catch
+        catch (Exception ex)
         {
             // Seed may already be applied or table doesn't exist yet
+            logger.LogError(ex, "Legacy migration step SeedDefaultWorkspaceRootPathAsync failed; continuing startup.");
         }
     }
 
@@ -128,12 +313,13 @@ public static partial class Migrations
     /// Drops GitHubApiUsageHourly if a prior build created it via EnsureCreated. Usage counters are now
     /// in-memory only, so the table is unused. No-op when the table was never created.
     /// </summary>
-    public static async Task MigrateDropGitHubApiUsageHourlyAsync(AppDbContext dbContext)
+    public static async Task MigrateDropGitHubApiUsageHourlyAsync(AppDbContext dbContext, ILogger? logger = null)
     {
+        logger ??= NullLogger.Instance;
         try
         {
             var conn = dbContext.Database.GetDbConnection();
-            if (conn.State != System.Data.ConnectionState.Open)
+            if (conn.State != ConnectionState.Open)
                 await conn.OpenAsync();
 
             await using var checkCmd = conn.CreateCommand();
@@ -145,9 +331,10 @@ public static partial class Migrations
             dropCmd.CommandText = "DROP TABLE IF EXISTS GitHubApiUsageHourly";
             await dropCmd.ExecuteNonQueryAsync();
         }
-        catch
+        catch (Exception ex)
         {
             // Table doesn't exist or already dropped.
+            logger.LogError(ex, "Legacy migration step MigrateDropGitHubApiUsageHourlyAsync failed; continuing startup.");
         }
     }
 
@@ -158,12 +345,13 @@ public static partial class Migrations
     /// Workspaces. Safe to keep even pre-release since it only ever adds a column with a default value and is a
     /// no-op once the column exists.
     /// </summary>
-    public static async Task MigrateWorkspacesExcludeAiWorkflowsAsync(AppDbContext dbContext)
+    public static async Task MigrateWorkspacesExcludeAiWorkflowsAsync(AppDbContext dbContext, ILogger? logger = null)
     {
+        logger ??= NullLogger.Instance;
         try
         {
             var conn = dbContext.Database.GetDbConnection();
-            if (conn.State != System.Data.ConnectionState.Open)
+            if (conn.State != ConnectionState.Open)
                 await conn.OpenAsync();
 
             await using var checkCmd = conn.CreateCommand();
@@ -175,9 +363,10 @@ public static partial class Migrations
             alterCmd.CommandText = "ALTER TABLE Workspaces ADD COLUMN ExcludeAiWorkflows INTEGER NOT NULL DEFAULT 1";
             await alterCmd.ExecuteNonQueryAsync();
         }
-        catch
+        catch (Exception ex)
         {
             // Table doesn't exist yet (fresh db, EnsureCreated will create it with the column already present).
+            logger.LogError(ex, "Legacy migration step MigrateWorkspacesExcludeAiWorkflowsAsync failed; continuing startup.");
         }
     }
 
@@ -185,12 +374,13 @@ public static partial class Migrations
     /// Adds WorkspaceGitRepositoryStatus.Insertions and Deletions for local databases created before
     /// header line stats existed. EnsureCreated() only creates missing tables, not missing columns.
     /// </summary>
-    public static async Task MigrateWorkspaceGitRepositoryStatusLineStatsAsync(AppDbContext dbContext)
+    public static async Task MigrateWorkspaceGitRepositoryStatusLineStatsAsync(AppDbContext dbContext, ILogger? logger = null)
     {
+        logger ??= NullLogger.Instance;
         try
         {
             var conn = dbContext.Database.GetDbConnection();
-            if (conn.State != System.Data.ConnectionState.Open)
+            if (conn.State != ConnectionState.Open)
                 await conn.OpenAsync();
 
             await AddNullableIntegerColumnIfMissingAsync(conn, "WorkspaceGitRepositoryStatus", "Insertions");
@@ -198,9 +388,10 @@ public static partial class Migrations
             await AddNullableIntegerColumnIfMissingAsync(conn, "WorkspaceGitRepositoryStatus", "StagedInsertions");
             await AddNullableIntegerColumnIfMissingAsync(conn, "WorkspaceGitRepositoryStatus", "StagedDeletions");
         }
-        catch
+        catch (Exception ex)
         {
             // Table doesn't exist yet (fresh db, EnsureCreated will create it with the columns already present).
+            logger.LogError(ex, "Legacy migration step MigrateWorkspaceGitRepositoryStatusLineStatsAsync failed; continuing startup.");
         }
     }
 

@@ -57,6 +57,7 @@ public sealed class WorkspaceFeatureContextResolver(IDbContextFactory<AppDbConte
         var row = await db.WorkspaceFeatureContexts
             .AsNoTracking()
             .Include(c => c.WorkspaceFeature)
+            .Include(c => c.FeatureRepositories)
             .FirstOrDefaultAsync(c => c.WorkspaceFeatureContextId == contextId.Value, cancellationToken)
             ?? throw new InvalidOperationException($"WorkspaceFeatureContext {contextId.Value} was not found.");
 
@@ -72,6 +73,7 @@ public sealed class WorkspaceFeatureContextResolver(IDbContextFactory<AppDbConte
         var rows = await db.WorkspaceFeatureContexts
             .AsNoTracking()
             .Include(c => c.WorkspaceFeature)
+            .Include(c => c.FeatureRepositories)
             .Where(c => c.WorkspaceId == workspaceId)
             .ToListAsync(cancellationToken);
 
@@ -82,6 +84,24 @@ public sealed class WorkspaceFeatureContextResolver(IDbContextFactory<AppDbConte
             .ToList();
     }
 
+    public async Task<IReadOnlyDictionary<int, int>> GetFeatureCountsAsync(IReadOnlyCollection<int> workspaceIds, CancellationToken cancellationToken = default)
+    {
+        if (workspaceIds.Count == 0)
+            return new Dictionary<int, int>();
+
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var counts = await db.WorkspaceFeatureContexts
+            .AsNoTracking()
+            .Where(c => workspaceIds.Contains(c.WorkspaceId)
+                        && c.Kind != WorkspaceFeatureContextKind.Workspace
+                        && c.WorkspaceFeature != null)
+            .GroupBy(c => c.WorkspaceId)
+            .Select(g => new { WorkspaceId = g.Key, Count = g.Count() })
+            .ToListAsync(cancellationToken);
+
+        return counts.ToDictionary(x => x.WorkspaceId, x => x.Count);
+    }
+
     private static WorkspaceFeatureContextInfo ToInfo(WorkspaceFeatureContext row) => new()
     {
         ContextId = new WorkspaceFeatureContextId(row.WorkspaceFeatureContextId),
@@ -90,6 +110,9 @@ public sealed class WorkspaceFeatureContextResolver(IDbContextFactory<AppDbConte
         WorkspaceFeatureId = row.WorkspaceFeatureId,
         FeatureName = row.WorkspaceFeature?.Name,
         LifecycleState = row.WorkspaceFeature?.LifecycleState.ToString(),
+        LastError = row.WorkspaceFeature?.LastError,
+        IsRemoveIncomplete = row.FeatureRepositories.Any(r =>
+            r.State is WorkspaceFeatureRepositoryState.Removing or WorkspaceFeatureRepositoryState.Removed),
         LastSyncedAt = row.LastSyncedAt,
         IsInSync = row.IsInSync
     };

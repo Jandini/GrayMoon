@@ -23,4 +23,8 @@
     <ProjectReference Include="..\GrayMoon.App\GrayMoon.App.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="Fixtures\graymoon-0.1.0.db" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

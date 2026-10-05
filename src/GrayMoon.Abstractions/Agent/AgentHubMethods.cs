@@ -49,4 +49,7 @@ public static class AgentHubMethods
 
     /// <summary>App → Agent: remove a linked worktree; force only when the request explicitly authorizes it.</summary>
     public const string RemoveGitWorktree = "RemoveGitWorktree";
+
+    /// <summary>App → Agent: report everything removal needs to know about one worktree, checked live (read-only).</summary>
+    public const string InspectWorktree = "InspectWorktree";
 }

@@ -89,7 +89,9 @@ public sealed partial class WorkspaceGitService
                 Projects = HasProjectsBlock(response.Data) ? ToProjectNotifications(projectsDetail) ?? [] : null,
                 ErrorMessage = combinedError,
                 IdentityProbed = probed,
-                GitVersionProbed = probed && version != "-",
+                // A reported GitVersion failure is a probe result too: it clears the stored version, which the
+                // grid then shows as unresolved, instead of leaving a stale number from before the failure.
+                GitVersionProbed = probed && (version != "-" || !string.IsNullOrWhiteSpace(gitVersionError)),
                 CommitCountsProbed = probed && !onTag,
                 UpstreamProbed = probed && !onTag && upstreamProbed,
                 BranchesProbed = probed && localBranches != null,
@@ -135,7 +137,7 @@ public sealed partial class WorkspaceGitService
                 LocalBranches = localBranches?.ToList(),
                 ErrorMessage = combinedError,
                 IdentityProbed = true,
-                GitVersionProbed = version != "-",
+                GitVersionProbed = version != "-" || !string.IsNullOrWhiteSpace(gitVersionError),
                 CommitCountsProbed = !onTag,
                 UpstreamProbed = !onTag && hasUpstream.HasValue,
                 // This command lists branches but not tags, so it must not replace the persisted refs.

@@ -76,6 +76,7 @@ public sealed class WorkspaceRepository(
     public async Task UpdateAsync(int workspaceId, string name, IReadOnlyCollection<int> repositoryIds, string? rootPath)
     {
         var normalized = NormalizeName(name);
+        var normalizedRootPath = string.IsNullOrWhiteSpace(rootPath) ? null : rootPath.Trim();
 
         // Fresh context: the injected AppDbContext is circuit-scoped and may still track
         // Workspace / WRL graphs loaded by Git Changes or other page services.
@@ -94,13 +95,38 @@ public sealed class WorkspaceRepository(
             throw new InvalidOperationException("Workspace not found.");
         }
 
+        var nameChanged = !string.Equals(workspace.Name, normalized, StringComparison.Ordinal);
+        var rootPathChanged = !string.Equals(workspace.RootPath, normalizedRootPath, StringComparison.Ordinal);
+
+        // A rename or root change would move the primary checkout, and every Feature worktree's
+        // Git link points into that checkout's .git\worktrees, so it is refused up front, before
+        // any write, whenever the Workspace has Features. An unchanged name and root path is never
+        // blocked here, even when Features exist.
+        if (nameChanged || rootPathChanged)
+        {
+            if (await db.WorkspaceFeatures.AnyAsync(f => f.WorkspaceId == workspaceId))
+            {
+                throw new InvalidOperationException(
+                    "Rename and root changes are not possible while Features exist. Remove Features first.");
+            }
+        }
+
+        // One transaction for the rename/root save and the membership change, so a membership
+        // failure (Features exist and the repository set actually changed) rolls back the rename
+        // instead of leaving a partial save.
+        await using var transaction = await db.Database.BeginTransactionAsync();
+
         workspace.Name = normalized;
-        workspace.RootPath = string.IsNullOrWhiteSpace(rootPath) ? null : rootPath.Trim();
+        workspace.RootPath = normalizedRootPath;
         await db.SaveChangesAsync();
         _logger.LogInformation("Persistence: saved Workspace. Action=Update, WorkspaceId={WorkspaceId}, Name={Name}", workspaceId, workspace.Name);
 
-        await ReplaceRepositoriesAsync(db, workspace.WorkspaceId, repositoryIds);
+        await ReplaceRepositoriesCoreAsync(db, workspace.WorkspaceId, repositoryIds);
+
+        await transaction.CommitAsync();
     }
+
+    public const string WorkspaceDeleteBlockedByFeaturesMessage = "Remove the Features first, then delete the Workspace.";
 
     public async Task DeleteAsync(int workspaceId)
     {
@@ -110,6 +136,13 @@ public sealed class WorkspaceRepository(
         if (workspace == null)
         {
             return;
+        }
+
+        // Deleting the Workspace would drop its Feature rows while their worktrees, branches and
+        // features\<name> folders stay on disk with nothing left in GrayMoon to clean them.
+        if (await _dbContext.WorkspaceFeatures.AnyAsync(f => f.WorkspaceId == workspaceId))
+        {
+            throw new InvalidOperationException(WorkspaceDeleteBlockedByFeaturesMessage);
         }
 
         _dbContext.Workspaces.Remove(workspace);
@@ -279,6 +312,94 @@ public sealed class WorkspaceRepository(
         return result;
     }
 
+    /// <summary>
+    /// Repo ids that "need a push" scoped to <paramref name="workspaceFeatureContextId"/>, used only to decide
+    /// whether the Workspace Action notification panel should show the synchronized-push modal (not which repos
+    /// actually get pushed). Same fallback rule as <see cref="GetRepositoryIdsNeedingPushAsync"/>: a repo's
+    /// effective CheckedOutTag/OutgoingCommits/BranchHasUpstream/DependencyLevel come from its own
+    /// <see cref="WorkspaceRepositoryContextState"/> when a row exists for that context, falling back to the
+    /// shared <see cref="WorkspaceRepositoryLink"/> only for the special Workspace context (or when no
+    /// context-state row has been persisted for that repo yet - a Feature with no row is "not needing push", never
+    /// the Workspace's answer). Keeps the notification panel's two historical predicates unchanged so the special
+    /// Workspace's result never changes: <paramref name="includeNeverPushedUpstream"/> false matches the main Push
+    /// button (outgoing commits only); true matches the per-repo push badge (outgoing commits or never pushed
+    /// upstream). <paramref name="maxLevel"/> filters to repos at or below that dependency level (main Push button
+    /// only; pass null to include every level).
+    /// </summary>
+    public async Task<IReadOnlySet<int>> GetRepositoryIdsThatNeedPushForNotificationAsync(
+        int workspaceId,
+        int workspaceFeatureContextId,
+        IReadOnlySet<int> repositoryIds,
+        int? maxLevel,
+        bool includeNeverPushedUpstream,
+        CancellationToken cancellationToken = default)
+    {
+        if (repositoryIds.Count == 0)
+            return new HashSet<int>();
+
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        var isSpecialWorkspace = await db.WorkspaceFeatureContexts
+            .AsNoTracking()
+            .Where(c => c.WorkspaceFeatureContextId == workspaceFeatureContextId)
+            .Select(c => c.Kind == WorkspaceFeatureContextKind.Workspace)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var links = await db.WorkspaceRepositories
+            .AsNoTracking()
+            .Where(wr => wr.WorkspaceId == workspaceId && repositoryIds.Contains(wr.RepositoryId))
+            .Select(wr => new { wr.WorkspaceRepositoryId, wr.RepositoryId, wr.CheckedOutTag, wr.OutgoingCommits, wr.BranchHasUpstream, wr.DependencyLevel })
+            .ToListAsync(cancellationToken);
+        if (links.Count == 0)
+            return new HashSet<int>();
+
+        var linkIds = links.Select(l => l.WorkspaceRepositoryId).ToList();
+        var states = await db.WorkspaceRepositoryContextStates
+            .AsNoTracking()
+            .Where(s => s.WorkspaceFeatureContextId == workspaceFeatureContextId && linkIds.Contains(s.WorkspaceRepositoryId))
+            .Select(s => new { s.WorkspaceRepositoryId, s.CheckedOutTag, s.OutgoingCommits, s.BranchHasUpstream, s.DependencyLevel })
+            .ToListAsync(cancellationToken);
+        var stateByLinkId = states.ToDictionary(s => s.WorkspaceRepositoryId);
+
+        var result = new HashSet<int>();
+        foreach (var link in links)
+        {
+            string? checkedOutTag;
+            int? outgoingCommits;
+            bool? branchHasUpstream;
+            int? dependencyLevel;
+
+            if (stateByLinkId.TryGetValue(link.WorkspaceRepositoryId, out var state))
+            {
+                checkedOutTag = state.CheckedOutTag;
+                outgoingCommits = state.OutgoingCommits;
+                branchHasUpstream = state.BranchHasUpstream;
+                dependencyLevel = state.DependencyLevel;
+            }
+            else if (isSpecialWorkspace)
+            {
+                checkedOutTag = link.CheckedOutTag;
+                outgoingCommits = link.OutgoingCommits;
+                branchHasUpstream = link.BranchHasUpstream;
+                dependencyLevel = link.DependencyLevel;
+            }
+            else
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(checkedOutTag))
+                continue;
+            if (maxLevel.HasValue && (dependencyLevel ?? 0) > maxLevel.Value)
+                continue;
+
+            var needsPush = (outgoingCommits ?? 0) > 0 || (includeNeverPushedUpstream && branchHasUpstream == false);
+            if (needsPush)
+                result.Add(link.RepositoryId);
+        }
+        return result;
+    }
+
     public async Task AddRepositoriesAsync(int workspaceId, IReadOnlyCollection<int> repositoryIds, CancellationToken cancellationToken = default)
     {
         if (await _dbContext.WorkspaceFeatures.AnyAsync(f => f.WorkspaceId == workspaceId, cancellationToken))
@@ -316,14 +437,18 @@ public sealed class WorkspaceRepository(
 
     private async Task ReplaceRepositoriesAsync(AppDbContext db, int workspaceId, IReadOnlyCollection<int> repositoryIds)
     {
-        if (await db.WorkspaceFeatures.AnyAsync(f => f.WorkspaceId == workspaceId))
-        {
-            throw new InvalidOperationException(
-                "Cannot change Workspace repository membership while Features exist. Remove Features first.");
-        }
-
         await using var transaction = await db.Database.BeginTransactionAsync();
+        await ReplaceRepositoriesCoreAsync(db, workspaceId, repositoryIds);
+        await transaction.CommitAsync();
+    }
 
+    /// <summary>
+    /// Does the actual repository-membership swap. Never opens its own transaction, so it can run
+    /// either on its own (via <see cref="ReplaceRepositoriesAsync"/>) or inside a caller's existing
+    /// transaction (<see cref="UpdateAsync"/>, so a membership failure rolls back a rename too).
+    /// </summary>
+    private async Task ReplaceRepositoriesCoreAsync(AppDbContext db, int workspaceId, IReadOnlyCollection<int> repositoryIds)
+    {
         var current = await db.WorkspaceRepositories
             .AsNoTracking()
             .Where(wr => wr.WorkspaceId == workspaceId)
@@ -347,6 +472,18 @@ public sealed class WorkspaceRepository(
         }
 
         var existingRepoIds = current.Select(wr => wr.RepositoryId).ToHashSet();
+
+        // An unchanged membership set is a no-op: a save that does not actually add or remove any
+        // repository must never be blocked by the Features-exist guard below.
+        if (existingRepoIds.SetEquals(validSet))
+            return;
+
+        if (await db.WorkspaceFeatures.AnyAsync(f => f.WorkspaceId == workspaceId))
+        {
+            throw new InvalidOperationException(
+                "Cannot change Workspace repository membership while Features exist. Remove Features first.");
+        }
+
         var toRemove = current.Where(wr => !validSet.Contains(wr.RepositoryId)).ToList();
         var toAdd = validSet.Except(existingRepoIds).ToList();
 
@@ -385,7 +522,6 @@ public sealed class WorkspaceRepository(
         if (toAdd.Count > 0)
             await db.SaveChangesAsync();
 
-        await transaction.CommitAsync();
         _logger.LogInformation(
             "Persistence: saved WorkspaceRepository links. Action=ReplaceRepositories, WorkspaceId={WorkspaceId}, Removed={RemovedCount}, Added={AddedCount}, RepositoryIds=[{RepositoryIds}]",
             workspaceId, toRemove.Count, toAdd.Count, string.Join(", ", validSet));

@@ -78,6 +78,8 @@ public sealed class GitHubRepositoryRepository(
         public IReadOnlyList<RenamedRepositoryInfo> Renames { get; init; } = [];
         /// <summary>Maps a deleted duplicate RepositoryId to the surviving canonical RepositoryId. Empty when no merges were needed.</summary>
         public IReadOnlyDictionary<int, int> MergedRepositoryIdMap { get; init; } = new Dictionary<int, int>();
+        /// <summary>Repositories no longer returned by the provider but kept because a Feature still uses them. Empty when nothing was kept.</summary>
+        public IReadOnlyList<KeptRepositoryForFeaturesInfo> KeptForFeatures { get; init; } = [];
     }
 
     /// <summary>
@@ -281,38 +283,94 @@ public sealed class GitHubRepositoryRepository(
         // ---------------------------------------------------------------------------
         // PHASE E - Delete unmatched existing rows (no longer returned by the provider)
         //           Delete WorkspaceRepositoryLink rows first (ExecuteDeleteAsync respects no tracker).
+        //           A candidate still used by a Feature (WorkspaceFeatureRepositories cascades from the
+        //           WorkspaceRepositoryLink row - see FK_WorkspaceFeatureRepositories_Links) is kept
+        //           instead of deleted, so a connector refresh can never silently drop a Feature's
+        //           repository and leave its worktree without a database row.
         // ---------------------------------------------------------------------------
-        var toDeleteIds = existing
+        var candidateDeleteIds = existing
             .Where(r => !matchedExistingIds.Contains(r.RepositoryId))
             .Select(r => r.RepositoryId)
             .ToList();
 
         List<int> affectedWorkspaceIds = [];
-        if (toDeleteIds.Count > 0)
+        var keptForFeatures = new List<KeptRepositoryForFeaturesInfo>();
+        var toDeleteIds = candidateDeleteIds;
+
+        if (candidateDeleteIds.Count > 0)
         {
-            foreach (var rid in toDeleteIds)
-                _logger.LogWarning(
-                    "MergeRepositories: Repository no longer returned by provider, will delete. RepositoryId={RepositoryId}, RepositoryName={RepositoryName}",
-                    rid,
-                    existing.First(r => r.RepositoryId == rid).RepositoryName);
-
-            // Delete dependent rows first so FK constraint is not violated.
-            var linksToRemove = await _dbContext.WorkspaceRepositories
-                .Where(wr => toDeleteIds.Contains(wr.RepositoryId))
-                .Select(wr => new { wr.WorkspaceRepositoryId, wr.WorkspaceId })
+            var candidateLinks = await _dbContext.WorkspaceRepositories
+                .Where(wr => candidateDeleteIds.Contains(wr.RepositoryId))
+                .Select(wr => new { wr.WorkspaceRepositoryId, wr.WorkspaceId, wr.RepositoryId })
                 .ToListAsync();
-            var wrlIdsToRemove = linksToRemove.Select(l => l.WorkspaceRepositoryId).ToList();
-            affectedWorkspaceIds = linksToRemove.Select(l => l.WorkspaceId).Distinct().ToList();
+            var candidateLinkIds = candidateLinks.Select(l => l.WorkspaceRepositoryId).ToList();
 
-            await WorkspaceRepositoryLinkCleanup.DeleteDependentsAsync(_dbContext, wrlIdsToRemove, toDeleteIds);
+            var featureUsage = new List<(int WorkspaceRepositoryId, string FeatureName)>();
+            if (candidateLinkIds.Count > 0)
+            {
+                var featureUsageRows = await _dbContext.WorkspaceFeatureRepositories
+                    .Where(wfr => candidateLinkIds.Contains(wfr.WorkspaceRepositoryId))
+                    .Select(wfr => new { wfr.WorkspaceRepositoryId, FeatureName = wfr.WorkspaceFeatureContext!.WorkspaceFeature!.Name })
+                    .ToListAsync();
+                foreach (var row in featureUsageRows)
+                    featureUsage.Add((row.WorkspaceRepositoryId, row.FeatureName));
+            }
 
-            await _dbContext.WorkspaceRepositories
-                .Where(wr => toDeleteIds.Contains(wr.RepositoryId))
-                .ExecuteDeleteAsync();
+            var linkIdToRepositoryId = candidateLinks.ToDictionary(l => l.WorkspaceRepositoryId, l => l.RepositoryId);
+            var repositoryIdToFeatureNames = new Dictionary<int, List<string>>();
+            foreach (var (workspaceRepositoryId, featureName) in featureUsage)
+            {
+                if (!linkIdToRepositoryId.TryGetValue(workspaceRepositoryId, out var repositoryId)) continue;
+                if (!repositoryIdToFeatureNames.TryGetValue(repositoryId, out var names))
+                {
+                    names = [];
+                    repositoryIdToFeatureNames[repositoryId] = names;
+                }
+                names.Add(featureName);
+            }
 
-            await _dbContext.Repositories
-                .Where(r => toDeleteIds.Contains(r.RepositoryId))
-                .ExecuteDeleteAsync();
+            var keptRepositoryIds = repositoryIdToFeatureNames.Keys.ToHashSet();
+            toDeleteIds = candidateDeleteIds.Where(id => !keptRepositoryIds.Contains(id)).ToList();
+
+            foreach (var (repositoryId, featureNames) in repositoryIdToFeatureNames)
+            {
+                var keptRepository = existing.First(r => r.RepositoryId == repositoryId);
+                var distinctFeatureNames = featureNames.Distinct(StringComparer.Ordinal).OrderBy(n => n, StringComparer.Ordinal).ToList();
+                _logger.LogWarning(
+                    "MergeRepositories: Repository {RepositoryId} is no longer returned by the provider but is used by Feature(s) {FeatureNames}; kept until those Features are removed.",
+                    repositoryId, string.Join(", ", distinctFeatureNames));
+                keptForFeatures.Add(new KeptRepositoryForFeaturesInfo
+                {
+                    RepositoryId = repositoryId,
+                    RepositoryName = keptRepository.RepositoryName,
+                    OrgName = keptRepository.OrgName,
+                    FeatureNames = distinctFeatureNames
+                });
+            }
+
+            if (toDeleteIds.Count > 0)
+            {
+                foreach (var rid in toDeleteIds)
+                    _logger.LogWarning(
+                        "MergeRepositories: Repository no longer returned by provider, will delete. RepositoryId={RepositoryId}, RepositoryName={RepositoryName}",
+                        rid,
+                        existing.First(r => r.RepositoryId == rid).RepositoryName);
+
+                // Delete dependent rows first so FK constraint is not violated.
+                var linksToRemove = candidateLinks.Where(l => toDeleteIds.Contains(l.RepositoryId)).ToList();
+                var wrlIdsToRemove = linksToRemove.Select(l => l.WorkspaceRepositoryId).ToList();
+                affectedWorkspaceIds = linksToRemove.Select(l => l.WorkspaceId).Distinct().ToList();
+
+                await WorkspaceRepositoryLinkCleanup.DeleteDependentsAsync(_dbContext, wrlIdsToRemove, toDeleteIds);
+
+                await _dbContext.WorkspaceRepositories
+                    .Where(wr => toDeleteIds.Contains(wr.RepositoryId))
+                    .ExecuteDeleteAsync();
+
+                await _dbContext.Repositories
+                    .Where(r => toDeleteIds.Contains(r.RepositoryId))
+                    .ExecuteDeleteAsync();
+            }
         }
 
         await transaction.CommitAsync();
@@ -321,13 +379,14 @@ public sealed class GitHubRepositoryRepository(
             _gitChangesNotifier.Publish(workspaceId, IWorkspaceGitChangesNotifier.AllContexts);
 
         _logger.LogInformation(
-            "MergeRepositories: Complete. Updated={Updated}, Inserted={Inserted}, Deleted={Deleted}, Renames={Renames}",
-            updateCount, insertCount, toDeleteIds.Count, renames.Count);
+            "MergeRepositories: Complete. Updated={Updated}, Inserted={Inserted}, Deleted={Deleted}, Renames={Renames}, KeptForFeatures={KeptForFeatures}",
+            updateCount, insertCount, toDeleteIds.Count, renames.Count, keptForFeatures.Count);
 
         return new MergeRepositoriesResult
         {
             Renames = renames,
-            MergedRepositoryIdMap = new Dictionary<int, int>()
+            MergedRepositoryIdMap = new Dictionary<int, int>(),
+            KeptForFeatures = keptForFeatures
         };
     }
 

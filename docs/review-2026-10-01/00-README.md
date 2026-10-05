@@ -2,6 +2,8 @@
 
 This folder is a full review of GrayMoon and GrayMoon.Desktop, focused on closing the first release of worktree Features. Every finding in the detailed documents carries file and line evidence. Reviewed at GrayMoon `a06fe33` and GrayMoon.Desktop `8c4fb90`, both on branch `opus-review`.
 
+> **Status (2026-10-05):** the roadmap below was the starting point. Implementation closed every item it describes (`06-worktree-release-implementation-plan.md` tracks each one; see its status callout). What is left before release is owner testing (tracked live in `13-gate-4-test-progress.md`), the docs unit `R1`, the regression-and-checklist unit `R4`, and the two sign-off gates `GATE-4`/`GATE-5`. The "not ready to release" verdict just below describes the state *before* this work, not the current state.
+
 | Doc | Contents |
 |---|---|
 | [01-documentation-audit.md](01-documentation-audit.md) | What was changed in the existing docs (20 files), the remaining gaps, and places where the code contradicts the docs |
@@ -14,6 +16,10 @@ This folder is a full review of GrayMoon and GrayMoon.Desktop, focused on closin
 | [08-plan-regression-risk-review.md](08-plan-regression-risk-review.md) | Risk register for the plan: what each unit could break in standard Workspace workflows, the mitigation written into `06`, and the Workspace smoke test |
 | [09-switch-branch-in-feature-analysis.md](09-switch-branch-in-feature-analysis.md) | Is the per-repository Switch Branch dialog helpful and safe while a Feature is selected? Findings SB-1 to SB-8, options, chosen v1 behaviour (option B), planned as lane I (I1 to I4) in `06` |
 | [10-plan-in-plain-words.md](10-plan-in-plain-words.md) | For the owner, not for AI agents: every step of `06` in plain words, what changes and what you will notice as a user |
+| [12-hook-cleanup-plan.md](12-hook-cleanup-plan.md) | Separate plan, run after the worktree plan: G2 to G4 (Worker `UnhookRepository`, unhook when repos leave a Workspace, self-heal stale hooks), moved out of `06` |
+| [13-gate-4-test-progress.md](13-gate-4-test-progress.md) | Owner's checklist for GATE-4: tick boxes and write notes while testing |
+| [11-post-release-plans.md](11-post-release-plans.md) | Documentation-only plans for after v1: a REST API that can target a Feature (v1 only documents the limit) and the `WorkspaceFeatureOperations` refactor |
+| [14-cross-computer-pr-and-parent-branch-detection.md](14-cross-computer-pr-and-parent-branch-detection.md) | Does Remove-Feature detect a PR created/merged from a second computer's plain checkout (yes, by branch name, regardless of merge target)? Why does the New PR dialog default to `main` there instead of the parent branch (git has no parent-branch concept; GrayMoon's `ParentBranchName` is a Feature-only, local-database-only snapshot)? |
 
 ## Verdict
 

@@ -1,6 +1,7 @@
 using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
+using GrayMoon.App.Services.Features;
 
 namespace GrayMoon.App.Services.Workspaces;
 
@@ -196,7 +197,7 @@ public sealed class WorkspaceService(IAgentBridge agentBridge, ILogger<Workspace
             var configured = await appSettingRepository.GetValueAsync(AppSettingRepository.FeatureStorageRootPathKey);
             if (!string.IsNullOrWhiteSpace(configured))
             {
-                _cachedFeatureStorageRootPath = NormalizeWindowsRoot(configured);
+                _cachedFeatureStorageRootPath = AgentPath.Normalize(configured);
                 logger.LogInformation("Using configured Feature storage root: {RootPath}", _cachedFeatureStorageRootPath);
                 return _cachedFeatureStorageRootPath;
             }
@@ -244,7 +245,10 @@ public sealed class WorkspaceService(IAgentBridge agentBridge, ILogger<Workspace
     }
 
     /// <summary>
-    /// Asks the Agent for the host user profile and returns <c>{profile}\.graymoon</c>, or null if unavailable.
+    /// Asks the Agent for the host user profile and returns <c>{profile}/.graymoon</c> (or
+    /// <c>{profile}\.graymoon</c> on a Windows Worker), or null if unavailable. The join style
+    /// follows whatever shape the Agent's own <c>UserProfilePath</c> already has - a Linux/macOS
+    /// Worker's profile already starts with '/', so no separate "which OS" signal is needed.
     /// </summary>
     public async Task<string?> TryGetAgentDefaultFeatureStorageRootAsync(CancellationToken cancellationToken = default)
     {
@@ -262,10 +266,10 @@ public sealed class WorkspaceService(IAgentBridge agentBridge, ILogger<Workspace
             if (string.IsNullOrWhiteSpace(profile))
                 return null;
 
-            var normalizedProfile = NormalizeWindowsRoot(profile);
+            var normalizedProfile = AgentPath.Normalize(profile);
             return string.IsNullOrWhiteSpace(normalizedProfile)
                 ? null
-                : NormalizeWindowsRoot(normalizedProfile + @"\.graymoon");
+                : AgentPath.Combine(normalizedProfile, ".graymoon");
         }
         catch (Exception ex)
         {
@@ -283,13 +287,6 @@ public sealed class WorkspaceService(IAgentBridge agentBridge, ILogger<Workspace
 
         var data = AgentResponseJson.DeserializeAgentResponse<ValidatePathAgentResponse>(response.Data);
         return (data?.IsValid ?? false, data?.ErrorMessage);
-    }
-
-    /// <summary>Normalizes a Windows-shaped absolute root (Agent host). Does not use host Path.* for separators.</summary>
-    private static string NormalizeWindowsRoot(string path)
-    {
-        var normalized = path.Replace('/', '\\').Trim();
-        return normalized.TrimEnd('\\');
     }
 
     private static string SanitizeDirectoryName(string name)

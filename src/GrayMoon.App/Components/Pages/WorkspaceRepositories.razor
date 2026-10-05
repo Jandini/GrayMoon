@@ -20,10 +20,12 @@
                                     WorkspaceId="WorkspaceId"
                                     SelectedContextId="_selectedContextId"
                                     IsFeatureContext="_isFeatureContext"
+                                    IsReadOnlyContext="_isReadOnlyContext"
                                     OnSelectedContextChanged="OnSelectedContextChangedAsync"
                                     OnRequestCreateFeature="OnRequestCreateFeatureAsync"
                                     OnRequestRemoveFeature="OnRequestRemoveFeatureFromSelectorAsync"
                                     OnRemoveFeature="OnRemoveFeatureAsync"
+                                    OnShowFeatureStatus="() => OpenFeatureStatusPanel()"
                                     RepositoriesCount="@(_headerState?.TotalCount ?? 0)"
                                     CountReady="@(hasLoadedOnce && !isInitialLoading)"
                                     HasFilter="@HasSearchFilter"
@@ -32,6 +34,7 @@
                                     HasUnmatchedDependencies="@hasUnmatchedDependencies"
                                     HasCreatablePr="@hasCreatablePr"
                                     HasOpenPr="@hasOpenPr"
+                                    AllFeaturePrsCompleted="@allFeaturePrsCompleted"
                                     IsPushRecommended="@isPushRecommended"
                                     HasIncomingCommits="@hasIncomingCommits"
                                     IsOutOfSync="@isOutOfSync"
@@ -74,8 +77,19 @@
                             OnCreated="OnFeatureCreatedAsync" />
         <RemoveFeatureModal IsVisible="_removeFeatureModalVisible"
                             FeatureContextId="_removeFeatureContextId"
-                            OnCancel="() => _removeFeatureModalVisible = false"
+                            InitialPlan="_removeFeaturePlan"
+                            OnCancel="OnRemoveFeatureCancelAsync"
                             OnRemoved="OnFeatureRemovedAsync" />
+        <FeatureStatusPanel IsVisible="_featureStatusPanelVisible"
+                            FeatureContextId="_featureStatusContextId"
+                            OnClose="OnFeatureStatusCloseAsync"
+                            OnContinueRemoval="OnRequestRemoveFeatureFromSelectorAsync"
+                            OnRequestRemove="OnRequestRemoveFeatureFromSelectorAsync"
+                            OnChanged="OnFeatureStatusChangedAsync" />
+        @if (_isReadOnlyContext)
+        {
+            <div class="page-warning-callout" role="status">This Feature needs attention. Use Repair to continue.</div>
+        }
         @if (errorMessage != null)
         {
             <div class="page-error-callout repo-error-line" role="alert">@errorMessage</div>
@@ -104,7 +118,7 @@
                                         <span class="metrics-block metrics-deps" title="Dependencies" aria-label="Dependencies">
                                             <i class="bi bi-diagram-3 header-icon"></i>
                                         </span>
-                                        <span class="metrics-block metrics-commits" title="Outgoing ↑ Incoming ↓ commits" aria-label="Outgoing up / Incoming down commits">
+                                        <span class="metrics-block metrics-commits" title="Outgoing â†‘ Incoming â†“ commits" aria-label="Outgoing up / Incoming down commits">
                                             <i class="bi bi-arrow-down-up header-icon"></i>
                                         </span>
                                         <span class="metrics-block metrics-status" title="Status" aria-label="Status">
@@ -193,6 +207,7 @@
                                                                   ColSpan="@TableColSpan"
                                                                   OnVersionClick="() => CopyVersionToClipboard(wr.GitVersion!)"
                                                                   OnVersionMouseLeave="() => OnVersionMouseLeave(wr.GitVersion!)"
+                                                                  OffFeatureBranchName="@GetOffFeatureBranchName(wr)"
                                                                   OnBranchClick="() => ShowSwitchBranchModal(wr.RepositoryId, wr.BranchName, wr.Repository?.CloneUrl)"
                                                                   OnUpdateBranchClick="() => ShowUpdateBranchModal(wr.RepositoryId)"
                                                                   OnDependencyBadgeClick="() => OnDependencyBadgeClick(wr.RepositoryId, wr.UnmatchedDeps ?? 0)"
@@ -268,6 +283,8 @@
                    WorkspaceRepositoryId="@_switchBranchModal.WorkspaceRepositoryId"
                    ViewingContextId="@_selectedContextId"
                    IsFeatureContext="@_isFeatureContext"
+                   FeatureBranchName="@GetSwitchBranchModalFeatureBranchName()"
+                   PinnedTag="@GetSwitchBranchModalPinnedTag()"
                    RepositoryName="@_switchBranchModal.RepositoryName"
                    CurrentBranch="@_switchBranchModal.CurrentBranch"
                    RepositoryUrl="@_switchBranchModal.RepositoryUrl"

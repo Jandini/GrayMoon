@@ -33,4 +33,11 @@ public sealed class GitWorktreeInfo
     /// <summary>Optional prune reason from porcelain when <see cref="IsPrunable"/> is true.</summary>
     [JsonPropertyName("prunableReason")]
     public string? PrunableReason { get; set; }
+
+    [JsonPropertyName("isLocked")]
+    public bool IsLocked { get; set; }
+
+    /// <summary>Optional lock reason from porcelain when <see cref="IsLocked"/> is true.</summary>
+    [JsonPropertyName("lockReason")]
+    public string? LockReason { get; set; }
 }

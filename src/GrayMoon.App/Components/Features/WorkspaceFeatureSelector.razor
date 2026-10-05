@@ -1,6 +1,10 @@
-﻿@using GrayMoon.Application.Features
+﻿@using System.Text.RegularExpressions
+@using GrayMoon.Application
+@using GrayMoon.Application.Features
+@using Microsoft.AspNetCore.WebUtilities
 @inject IWorkspaceFeatureContextResolver ContextResolver
 @inject IWorkspaceSelectedFeatureContextService SelectedContextService
+@inject IWorkspaceCatalogOperations WorkspaceCatalog
 @inject IWorkspaceNativeLaunchService NativeLaunch
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
@@ -58,16 +62,43 @@
                             @onclick="() => SelectAsync(option)">
                         @DisplayName(option)
                     </button>
-                    <button type="button"
-                            class="workspace-feature-selector__switch-btn"
-                            data-gm-switch-workspace
-                            role="menuitem"
-                            title="Switch Workspace"
-                            aria-label="Switch Workspace"
-                            @onclick="GoToWorkspaces"
-                            @onclick:stopPropagation>
-                        <i class="bi bi-arrow-left-right" aria-hidden="true"></i>
-                    </button>
+                    <div class="workspace-feature-selector__switch-flyout">
+                        <button type="button"
+                                class="workspace-feature-selector__switch-btn"
+                                data-gm-switch-workspace
+                                role="menuitem"
+                                title="Switch Workspace"
+                                aria-label="Switch Workspace"
+                                aria-haspopup="menu"
+                                @onclick="GoToWorkspaces"
+                                @onclick:stopPropagation>
+                            <i class="bi bi-arrow-left-right" aria-hidden="true"></i>
+                        </button>
+                        <ul class="dropdown-menu show shadow workspace-feature-selector__submenu workspace-feature-selector__switch-submenu"
+                            role="menu">
+                            @if (_switchWorkspacesLoaded && _recentSwitchWorkspaces.Count == 0 && _otherSwitchWorkspaces.Count == 0)
+                            {
+                                <li>
+                                    <span class="dropdown-item disabled text-muted">No other workspaces</span>
+                                </li>
+                            }
+                            else
+                            {
+                                @foreach (var ws in _recentSwitchWorkspaces)
+                                {
+                                    @SwitchWorkspaceRow(ws)
+                                }
+                                @if (_recentSwitchWorkspaces.Count > 0 && _otherSwitchWorkspaces.Count > 0)
+                                {
+                                    <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                                }
+                                @foreach (var ws in _otherSwitchWorkspaces)
+                                {
+                                    @SwitchWorkspaceRow(ws)
+                                }
+                            }
+                        </ul>
+                    </div>
                 </li>
             }
             @if (_options.Any(o => !o.IsSpecialWorkspace))
@@ -84,12 +115,15 @@
                             disabled="@(!CanSelect(option))"
                             @onclick="() => SelectAsync(option)">
                         @DisplayName(option)
-                        @if (!string.IsNullOrEmpty(option.LifecycleState) && option.LifecycleState != "Ready")
+                        @{
+                            var label = FeatureSelectorPresentation.FriendlyLabel(option);
+                        }
+                        @if (!string.IsNullOrEmpty(label))
                         {
-                            <span class="text-muted small"> (@option.LifecycleState)</span>
+                            <span class="text-muted small ms-1" title="@(option.LastError ?? string.Empty)">@label</span>
                         }
                     </button>
-                    @if (OnRequestRemoveFeature.HasDelegate)
+                    @if (OnRequestRemoveFeature.HasDelegate && FeatureSelectorPresentation.ShowRemoveAction(option))
                     {
                         <button type="button"
                                 class="workspace-feature-selector__remove-btn"
@@ -114,26 +148,26 @@
                     <ul class="dropdown-menu show shadow workspace-feature-selector__submenu" role="menu">
                         @if (_toolAvailability?.Cursor == true)
                         {
-                            @LaunchToolItem("openInCursor", "Cursor")
+                            @LaunchToolItem("openInCursor", "Cursor", imageSrc: "icons/cursor.svg")
                         }
                         @if (_toolAvailability?.ClaudeCli == true)
                         {
-                            @LaunchToolItem("openInClaudeCli", "Claude CLI")
+                            @LaunchToolItem("openInClaudeCli", "Claude CLI", imageSrc: "icons/claude.svg")
                         }
                         @if (_toolAvailability?.VsCode == true)
                         {
-                            @LaunchToolItem("openInVsCode", "VS Code")
+                            @LaunchToolItem("openInVsCode", "VS Code", imageSrc: "icons/visualstudiocode.svg")
                         }
                         @if (_toolAvailability?.VisualStudio == true)
                         {
-                            @LaunchToolItem("openInVisualStudio", "Visual Studio")
+                            @LaunchToolItem("openInVisualStudio", "Visual Studio", imageSrc: "icons/visualstudio.svg")
                         }
                         @if (HasAnyIdeAvailable)
                         {
                             <li><hr class="dropdown-divider branch-menu-divider" /></li>
                         }
-                        @LaunchToolItem("openInTerminal", "Terminal")
-                        @LaunchToolItem("showInExplorer", "Explorer")
+                        @LaunchToolItem("openInTerminal", "Terminal", iconClass: "bi-terminal-fill")
+                        @LaunchToolItem("showInExplorer", "Explorer", iconClass: "bi-folder2-open")
                     </ul>
                 </li>
             }
@@ -153,23 +187,107 @@
 
     private readonly List<WorkspaceFeatureContextInfo> _options = [];
     private readonly List<NativeLaunchRepositoryPath> _repositories = [];
+    private readonly List<WorkspaceCatalogItem> _recentSwitchWorkspaces = [];
+    private readonly List<WorkspaceCatalogItem> _otherSwitchWorkspaces = [];
+    private readonly Dictionary<int, List<WorkspaceFeatureContextInfo>> _featuresByWorkspace = new();
+    private readonly HashSet<int> _featuresLoading = [];
+    private readonly Dictionary<int, int> _featureCountByWorkspace = new();
     private bool _open;
     private bool _loaded;
     private bool _desktopAvailable;
+    private bool _switchWorkspacesLoaded;
     private int? _lastKnownSelectedValue;
     private ToolAvailabilityDto? _toolAvailability;
 
     private bool HasAnyIdeAvailable =>
         _toolAvailability is { } t && (t.Cursor || t.ClaudeCli || t.VsCode || t.VisualStudio);
 
-    private RenderFragment LaunchToolItem(string method, string label) => __builder =>
+    private RenderFragment SwitchWorkspaceRow(WorkspaceCatalogItem ws) => __builder =>
+    {
+        // The chevron reflects the Feature *count* fetched up front (in one batched query) when
+        // the Switch Workspace menu opened — so it is accurate immediately, with no per-row flicker
+        // or hover delay before it appears. The *detail* list (names, lifecycle state) is still
+        // fetched lazily, per workspace, only once the user actually hovers the chevron — so we
+        // never pull every workspace's full Feature list up front.
+        var hasFeatures = _featureCountByWorkspace.TryGetValue(ws.WorkspaceId, out var count) && count > 0;
+        var features = GetCachedFeatures(ws.WorkspaceId);
+        <li class="workspace-feature-selector__ws-flyout">
+            <button type="button"
+                    class="dropdown-item workspace-feature-selector__ws-name-btn"
+                    role="menuitem"
+                    @onclick="() => SwitchToWorkspace(ws.WorkspaceId)"
+                    @onclick:stopPropagation>
+                @ws.Name
+            </button>
+            @if (hasFeatures)
+            {
+                @* Rendered unconditionally (not only once the detail list has loaded) so the hover
+                   target exists in the DOM from the very first paint — hovering it is what triggers
+                   the lazy detail lookup, and the submenu opens on *this* element's :hover, so the
+                   two can never race against each other. *@
+                <div class="workspace-feature-selector__ws-chevron-flyout"
+                     title="Features"
+                     @onmouseenter="() => EnsureFeaturesForWorkspaceAsync(ws.WorkspaceId)">
+                    <span class="workspace-feature-selector__repo-chevron" aria-hidden="true">
+                        <i class="bi bi-chevron-right"></i>
+                    </span>
+                    <ul class="dropdown-menu show shadow workspace-feature-selector__submenu workspace-feature-selector__ws-features-submenu"
+                        role="menu">
+                        @if (features is null)
+                        {
+                            <li><span class="dropdown-item disabled text-muted">Loading...</span></li>
+                        }
+                        else if (features.Count == 0)
+                        {
+                            <li><span class="dropdown-item disabled text-muted">No features</span></li>
+                        }
+                        else
+                        {
+                            @foreach (var feature in features)
+                            {
+                                var featureOption = feature;
+                                <li>
+                                    <button type="button"
+                                            class="dropdown-item"
+                                            role="menuitem"
+                                            disabled="@(!CanSelect(featureOption))"
+                                            title="@FeatureTitle(featureOption)"
+                                            @onclick="() => SwitchToWorkspaceFeatureAsync(ws.WorkspaceId, featureOption)"
+                                            @onclick:stopPropagation>
+                                        @(featureOption.FeatureName?.Trim() ?? string.Empty)
+                                        @{
+                                            var crossLabel = FeatureSelectorPresentation.FriendlyLabel(featureOption);
+                                        }
+                                        @if (!string.IsNullOrEmpty(crossLabel))
+                                        {
+                                            <span class="text-muted small ms-1" title="@(featureOption.LastError ?? string.Empty)">@crossLabel</span>
+                                        }
+                                    </button>
+                                </li>
+                            }
+                        }
+                    </ul>
+                </div>
+            }
+        </li>
+    };
+
+    private RenderFragment LaunchToolItem(string method, string label, string? imageSrc = null, string? iconClass = null) => __builder =>
     {
         <li class="workspace-feature-selector__launch-row">
             <button type="button"
                     class="dropdown-item workspace-feature-selector__launch-item"
                     role="menuitem"
                     @onclick="() => LaunchAsync(method)">
-                @label
+                @if (!string.IsNullOrEmpty(imageSrc))
+                {
+                    <img src="@imageSrc" alt="" class="workspace-feature-selector__launch-icon" aria-hidden="true" />
+                }
+                else if (!string.IsNullOrEmpty(iconClass))
+                {
+                    <i class="bi @iconClass workspace-feature-selector__launch-icon workspace-feature-selector__launch-icon--glyph" aria-hidden="true"></i>
+                }
+                <span>@label</span>
             </button>
             @if (_repositories.Count > 0)
             {
@@ -184,11 +302,12 @@
                             var repoPath = repo.Path;
                             <li>
                                 <button type="button"
-                                        class="dropdown-item"
+                                        class="dropdown-item workspace-feature-selector__repo-item"
                                         role="menuitem"
                                         title="@repoPath"
                                         @onclick="() => LaunchAsync(method, repoPath)">
-                                    @repo.RepositoryName
+                                    <i class="bi bi-folder-fill workspace-feature-selector__launch-icon workspace-feature-selector__launch-icon--folder" aria-hidden="true"></i>
+                                    <span class="workspace-feature-selector__repo-name">@repo.RepositoryName</span>
                                 </button>
                             </li>
                         }
@@ -292,6 +411,7 @@
             // Refresh the Feature list every time the menu opens so a Feature removed/created from
             // elsewhere (or by an operation that finished since the last load) is reflected immediately.
             await ReloadAsync();
+            await LoadSwitchWorkspacesAsync();
             if (_desktopAvailable)
             {
                 await RefreshToolAvailabilityAsync();
@@ -310,9 +430,144 @@
             ? (WorkspaceName?.Trim() ?? string.Empty)
             : (option.FeatureName?.Trim() ?? string.Empty);
 
+    private static string FeatureTitle(WorkspaceFeatureContextInfo option)
+    {
+        var name = option.FeatureName?.Trim() ?? string.Empty;
+        var label = FeatureSelectorPresentation.FriendlyLabel(option);
+        return string.IsNullOrEmpty(label) ? name : $"{name} {label}";
+    }
+
     private static bool CanSelect(WorkspaceFeatureContextInfo option) =>
-        option.IsSpecialWorkspace
-        || string.Equals(option.LifecycleState, "Ready", StringComparison.OrdinalIgnoreCase);
+        FeatureSelectorPresentation.CanSelect(option);
+
+    private List<WorkspaceFeatureContextInfo>? GetCachedFeatures(int workspaceId) =>
+        _featuresByWorkspace.TryGetValue(workspaceId, out var list) ? list : null;
+
+    private async Task LoadSwitchWorkspacesAsync()
+    {
+        try
+        {
+            var catalog = await WorkspaceCatalog.ListAsync();
+            var others = catalog
+                .Where(w => w.WorkspaceId != WorkspaceId)
+                .ToList();
+
+            var recentIds = Array.Empty<int>();
+            try
+            {
+                await JS.InvokeVoidAsync("gmRecentWorkspaces.record");
+                recentIds = await JS.InvokeAsync<int[]>("gmRecentWorkspaces.ids") ?? [];
+            }
+            catch
+            {
+                recentIds = [];
+            }
+
+            var byId = others.ToDictionary(w => w.WorkspaceId);
+            _recentSwitchWorkspaces.Clear();
+            foreach (var id in recentIds)
+            {
+                if (byId.TryGetValue(id, out var item))
+                    _recentSwitchWorkspaces.Add(item);
+            }
+
+            var recentSet = _recentSwitchWorkspaces.Select(w => w.WorkspaceId).ToHashSet();
+            _otherSwitchWorkspaces.Clear();
+            _otherSwitchWorkspaces.AddRange(others
+                .Where(w => !recentSet.Contains(w.WorkspaceId))
+                .OrderBy(w => w.Name, StringComparer.OrdinalIgnoreCase));
+        }
+        catch
+        {
+            _recentSwitchWorkspaces.Clear();
+            _otherSwitchWorkspaces.Clear();
+        }
+
+        _switchWorkspacesLoaded = true;
+        // Fresh open: drop per-workspace feature caches so lists stay current.
+        _featuresByWorkspace.Clear();
+        _featuresLoading.Clear();
+        _featureCountByWorkspace.Clear();
+
+        // One batched count query for every workspace in the menu, so every row's chevron is
+        // accurate from the very first paint. This is still cheap/dynamic in spirit — it is just a
+        // count, not the Feature details — and the actual detail list per workspace is only fetched
+        // lazily (see EnsureFeaturesForWorkspaceAsync), on hover.
+        try
+        {
+            var ids = _recentSwitchWorkspaces.Concat(_otherSwitchWorkspaces)
+                .Select(w => w.WorkspaceId)
+                .ToList();
+            var counts = await ContextResolver.GetFeatureCountsAsync(ids);
+            foreach (var (workspaceId, count) in counts)
+                _featureCountByWorkspace[workspaceId] = count;
+        }
+        catch
+        {
+            _featureCountByWorkspace.Clear();
+        }
+    }
+
+    private async Task EnsureFeaturesForWorkspaceAsync(int workspaceId)
+    {
+        if (_featuresByWorkspace.ContainsKey(workspaceId) || !_featuresLoading.Add(workspaceId))
+            return;
+
+        try
+        {
+            var all = await ContextResolver.ListForWorkspaceAsync(workspaceId);
+            var features = all
+                .Where(c => !c.IsSpecialWorkspace)
+                .OrderBy(c => c.FeatureName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            _featuresByWorkspace[workspaceId] = features;
+        }
+        catch
+        {
+            _featuresByWorkspace[workspaceId] = [];
+        }
+        finally
+        {
+            _featuresLoading.Remove(workspaceId);
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void SwitchToWorkspace(int targetWorkspaceId)
+    {
+        _open = false;
+        Navigation.NavigateTo(BuildCrossWorkspaceHref(targetWorkspaceId));
+    }
+
+    private async Task SwitchToWorkspaceFeatureAsync(int targetWorkspaceId, WorkspaceFeatureContextInfo feature)
+    {
+        if (!CanSelect(feature))
+            return;
+
+        // Persist selection for the target workspace so landing resolves the intended Feature.
+        await SelectedContextService.SetSelectedAsync(targetWorkspaceId, feature.ContextId);
+        _open = false;
+        Navigation.NavigateTo(BuildCrossWorkspaceHref(targetWorkspaceId, feature.ContextId.Value));
+    }
+
+    private string BuildCrossWorkspaceHref(int targetWorkspaceId, int? featureContextId = null)
+    {
+        var uri = new Uri(Navigation.Uri);
+        var path = uri.AbsolutePath.TrimStart('/');
+        var match = Regex.Match(path, @"^workspaces/\d+(?<suffix>/.*)?$", RegexOptions.IgnoreCase);
+        var suffix = match.Success ? match.Groups["suffix"].Value : string.Empty;
+
+        if (featureContextId is int ctxId)
+            return $"/workspaces/{targetWorkspaceId}{suffix}?context={ctxId}";
+
+        var query = QueryHelpers.ParseQuery(uri.Query)
+            .Where(kv => !string.Equals(kv.Key, "context", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(kv => kv.Value.Select(v => $"{Uri.EscapeDataString(kv.Key)}={Uri.EscapeDataString(v ?? string.Empty)}"))
+            .ToList();
+        var qs = query.Count > 0 ? "?" + string.Join("&", query) : string.Empty;
+        return $"/workspaces/{targetWorkspaceId}{suffix}{qs}";
+    }
 
     private async Task RefreshLaunchRepositoriesAsync()
     {
@@ -367,8 +622,7 @@
         // (or the old "Context" fallback) while the list is in flight.
         var all = await ContextResolver.ListForWorkspaceAsync(WorkspaceId);
         _options.Clear();
-        _options.AddRange(all.Where(c => c.IsSpecialWorkspace || string.Equals(c.LifecycleState, "Ready", StringComparison.OrdinalIgnoreCase)
-                                                               || string.Equals(c.LifecycleState, "NeedsRepair", StringComparison.OrdinalIgnoreCase)));
+        _options.AddRange(all);
     }
 
     private async Task SelectAsync(WorkspaceFeatureContextInfo option)

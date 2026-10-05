@@ -235,6 +235,35 @@ public sealed class GitWorktreeCommandTests : IDisposable
         Assert.Equal("CannotRemovePrimary", result.ErrorCode);
     }
 
+    [Fact]
+    public async Task GetLocalBranches_from_worktree_on_another_branch_still_lists_the_feature_branch()
+    {
+        var mainPath = Path.Combine(_root, "main7");
+        Directory.CreateDirectory(mainPath);
+        await InitGitWithCommitAsync(mainPath);
+        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+        await RunGitAsync(mainPath, "branch other");
+
+        var worktreePath = Path.Combine(_root, "features", "ABC-7", "main7");
+        var created = await _create.ExecuteAsync(new CreateGitWorktreeRequest
+        {
+            MainRepositoryPath = mainPath,
+            WorktreePath = worktreePath,
+            BranchName = "ABC-7",
+            BaseCommitSha = head,
+        });
+        Assert.True(created.Success, created.ErrorMessage);
+
+        await RunGitAsync(worktreePath, "checkout other");
+        Assert.Equal("other", await CurrentBranchAsync(worktreePath));
+
+        var local = await _git.GetLocalBranchesAsync(worktreePath, CancellationToken.None);
+
+        Assert.Contains("ABC-7", local);
+        Assert.Contains("main", local);
+        Assert.Contains("other", local);
+    }
+
     private static async Task InitGitWithCommitAsync(string repoPath)
     {
         await RunGitAsync(repoPath, "init");

@@ -1,5 +1,6 @@
-﻿@using GrayMoon.Application
+@using GrayMoon.Application
 @using GrayMoon.Application.Features
+@using GrayMoon.Common.Features
 @inject IWorkspaceFeatureOperations FeatureOperations
 @inject ILogger<CreateFeatureModal> Logger
 
@@ -10,25 +11,45 @@
         <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: 1085;"
              @onkeydown="HandleKeyDown"
              @ref="_modalElement">
-            <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-dialog modal-dialog-centered @(HasBranchCollisions ? "modal-lg" : null)">
                 <div class="modal-content">
                     <div class="modal-header">
                         <h5 class="modal-title">New Feature <small class="text-muted fw-normal">worktree</small></h5>
                         <button type="button" class="btn-close" aria-label="Close" @onclick="Cancel"></button>
                     </div>
                     <div class="modal-body">
-                        @if (!string.IsNullOrEmpty(_error))
+                        @if (HasBranchCollisions)
+                        {
+                            <div class="gm-callout gm-callout--error mb-3" role="alert">
+                                <div class="fw-semibold">@BranchExistsSummary</div>
+                            </div>
+                            <ul class="list-unstyled mb-2 create-feature-collision-list">
+                                @foreach (var collision in _branchCollisions!)
+                                {
+                                    <li class="create-feature-collision-item">
+                                        <strong>@collision.RepositoryName</strong>
+                                        <span class="text-muted small ms-2">@string.Join(", ", collision.Refs)</span>
+                                    </li>
+                                }
+                            </ul>
+                            <p class="text-muted small mb-3">Choose a different Feature name, or delete those branches first.</p>
+                        }
+                        else if (!string.IsNullOrEmpty(_error))
                         {
                             <div class="gm-callout gm-callout--error mb-3" role="alert">@_error</div>
                         }
                         <div class="mb-3">
                             <label class="form-label" for="create-feature-name">Feature name <small class="text-muted fw-normal">branch</small></label>
                             <input id="create-feature-name"
-                                   class="form-control"
+                                   class="form-control @(NameValidationError is not null ? "is-invalid" : null)"
                                    @bind="_name"
                                    @bind:event="oninput"
                                    autocomplete="off"
                                    @ref="_nameInput" />
+                            @if (NameValidationError is not null)
+                            {
+                                <div class="text-danger small mt-1">@NameValidationError</div>
+                            }
                         </div>
                         <div class="mb-3">
                             <label class="form-label" for="create-feature-base">Based on</label>
@@ -53,7 +74,7 @@
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-outline-secondary" @onclick="Cancel">Cancel</button>
-                        <button type="button" class="btn btn-primary" data-default-action @onclick="CreateAsync" disabled="@(string.IsNullOrWhiteSpace(_name))">
+                        <button type="button" class="btn btn-primary" data-default-action @onclick="CreateAsync" disabled="@(string.IsNullOrWhiteSpace(_name) || NameValidationError is not null)">
                             New Feature
                         </button>
                     </div>
@@ -78,9 +99,29 @@
     private ElementReference _nameInput;
     private string _name = "";
     private string? _error;
+    private IReadOnlyList<CreateFeatureBranchCollision>? _branchCollisions;
+    private int _totalRepositoryCount;
     private bool _busy;
     private bool _wasVisible;
     private bool _focusPending;
+
+    private bool HasBranchCollisions => _branchCollisions is { Count: > 0 };
+
+    /// <summary>Null while the field is empty (no error shown before the user types anything) or valid.</summary>
+    private string? NameValidationError =>
+        string.IsNullOrWhiteSpace(_name) ? null : FeatureNameValidator.Validate(_name.Trim());
+
+    private string BranchExistsSummary =>
+        FormatBranchExistsSummary(_name.Trim(), _branchCollisions?.Count ?? 0, _totalRepositoryCount);
+
+    /// <summary>Short "X of Y" summary for BranchExists without the concatenated Error string (E5).</summary>
+    internal static string FormatBranchExistsSummary(string featureName, int collisionCount, int totalRepositoryCount)
+    {
+        var name = string.IsNullOrWhiteSpace(featureName) ? "this name" : $"'{featureName.Trim()}'";
+        if (totalRepositoryCount <= 0)
+            return $"Branch {name} already exists in {collisionCount} repositories";
+        return $"Branch {name} already exists in {collisionCount} of {totalRepositoryCount} repositories";
+    }
 
     protected override void OnParametersSet()
     {
@@ -88,6 +129,8 @@
         {
             _name = InitialName?.Trim() ?? "";
             _error = null;
+            _branchCollisions = null;
+            _totalRepositoryCount = 0;
             _focusPending = true;
         }
 
@@ -114,6 +157,8 @@
     {
         _busy = true;
         _error = null;
+        _branchCollisions = null;
+        _totalRepositoryCount = 0;
         try
         {
             var result = await FeatureOperations.CreateFeatureAsync(
@@ -122,6 +167,23 @@
                 WorkspaceFeatureBaseKindApplication.CurrentWorkspace);
             if (!result.Success)
             {
+                if (string.Equals(result.Condition, "BranchExists", StringComparison.Ordinal)
+                    && result.BranchCollisions is { Count: > 0 })
+                {
+                    _branchCollisions = result.BranchCollisions;
+                    _totalRepositoryCount = result.TotalRepositoryCount ?? result.BranchCollisions.Count;
+                    _error = null;
+                    return;
+                }
+
+                // Partial create: close and let the parent open Status and repair (C5).
+                if (string.Equals(result.Condition, "NeedsRepair", StringComparison.Ordinal)
+                    && result.ContextId is not null)
+                {
+                    await OnCreated.InvokeAsync(result);
+                    return;
+                }
+
                 _error = result.Error ?? result.Condition ?? "Feature creation failed.";
                 return;
             }
@@ -147,7 +209,7 @@
         {
             await Cancel();
         }
-        else if (ModalKeyboard.IsPlainEnter(e) && !_busy && !string.IsNullOrWhiteSpace(_name))
+        else if (ModalKeyboard.IsPlainEnter(e) && !_busy && !string.IsNullOrWhiteSpace(_name) && NameValidationError is null)
         {
             // Ctrl/Cmd+Enter is handled globally by modal-default-action.js via data-default-action.
             await CreateAsync();

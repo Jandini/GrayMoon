@@ -19,6 +19,10 @@
                                @oninput="OnNameChanged"
                                disabled="@IsNameDisabled"
                                @ref="firstInputElement" />
+                        @if (IsNameDisabled && !string.IsNullOrWhiteSpace(NameDisabledHint))
+                        {
+                            <div class="form-text">@NameDisabledHint</div>
+                        }
                     </div>
 
                     <div class="mb-3">
@@ -65,6 +69,7 @@
     [Parameter] public bool DirectoryAlreadyExists { get; set; }
     [Parameter] public int ExistingRepositoryCount { get; set; }
     [Parameter] public bool IsNameDisabled { get; set; }
+    [Parameter] public string? NameDisabledHint { get; set; }
     [Parameter] public bool IsSaving { get; set; }
     [Parameter] public bool IsCheckingDirectory { get; set; }
     [Parameter] public bool SaveDisabled { get; set; }

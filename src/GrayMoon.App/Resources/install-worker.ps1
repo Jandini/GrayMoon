@@ -63,6 +63,50 @@ $agentExe    = Join-Path $agentPath 'graymoon-worker.exe'
 $downloadUrl = '{DOWNLOAD_URL}'
 $hubUrl      = '{HUB_URL}'
 $zipPath     = Join-Path $env:TEMP 'graymoon-worker-windows-install.zip'
+$baseUrl     = '{BASE_URL}'
+
+# The worker secret lives outside the install folder so updating the worker keeps it.
+# This script never contains the secret: GrayMoon Desktop writes the file itself, and a manual
+# install exchanges the one-time pairing code shown on GrayMoon > Worker for it.
+$secretRequired = '{SECRET_REQUIRED}' -eq '1'
+$secretDir      = Join-Path $env:ProgramData 'GrayMoon'
+$secretPath     = Join-Path $secretDir 'worker.secret'
+$hasSecret      = (Test-Path -LiteralPath $secretPath) -and -not [string]::IsNullOrWhiteSpace((Get-Content -LiteralPath $secretPath -Raw -ErrorAction SilentlyContinue))
+
+if (-not ($hasSecret -and $env:GRAYMOON_DESKTOP_INSTALL -eq '1')) {
+    $pairingCode = $env:GRAYMOON_WORKER_PAIRING_CODE
+    if ([string]::IsNullOrWhiteSpace($pairingCode)) {
+        $prompt = if ($hasSecret) { 'Pairing code from GrayMoon > Worker (press Enter to keep the existing worker secret)' } else { 'Pairing code from GrayMoon > Worker' }
+        try { $pairingCode = Read-Host $prompt } catch { $pairingCode = $null }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($pairingCode)) {
+        Write-Host 'Pairing with GrayMoon...' -ForegroundColor Yellow
+        try {
+            $pairBody = @{ code = $pairingCode.Trim() } | ConvertTo-Json -Compress
+            $pairResult = Invoke-RestMethod -Method Post -Uri "$baseUrl/api/worker/pair" -ContentType 'application/json' -Body $pairBody
+            if ([string]::IsNullOrWhiteSpace($pairResult.secret)) { throw 'empty secret' }
+            New-Item -ItemType Directory -Path $secretDir -Force | Out-Null
+            Set-Content -LiteralPath $secretPath -Value $pairResult.secret -NoNewline -Encoding ASCII
+            $hasSecret = $true
+            Write-Host 'Paired.' -ForegroundColor Green
+        }
+        catch {
+            Write-Host 'ERROR: Pairing failed. Open GrayMoon > Worker and copy a new pairing code.' -ForegroundColor Red
+            Complete-WorkerInstall -Code 1
+            return 1
+        }
+    }
+    elseif (-not $hasSecret) {
+        if ($secretRequired) {
+            Write-Host 'ERROR: A pairing code is required. Open GrayMoon > Worker and copy a new pairing code.' -ForegroundColor Red
+            Complete-WorkerInstall -Code 1
+            return 1
+        }
+
+        Write-Host 'WARNING: No pairing code given. The worker will connect without a secret; reinstall it later from GrayMoon > Worker.' -ForegroundColor Yellow
+    }
+}
 
 # Stop any running service before replacing files so the executable is not locked.
 foreach ($name in @($serviceName, $legacyServiceName)) {

@@ -35,6 +35,6 @@ public sealed partial class WorkspaceGitService
             select new { l.RepositoryId, r.ParentBranchName }
         ).ToListAsync(cancellationToken);
 
-        return rows.ToDictionary(x => x.RepositoryId, x => x.ParentBranchName);
+        return rows.ToDictionary(x => x.RepositoryId, x => (string?)x.ParentBranchName);
     }
 }

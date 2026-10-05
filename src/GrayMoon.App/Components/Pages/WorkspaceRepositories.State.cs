@@ -50,6 +50,7 @@ public sealed partial class WorkspaceRepositories
     private bool hasUnmatchedDependencies => _headerState?.HasUnmatchedDependencies ?? false;
     private bool hasCreatablePr => _headerState?.HasCreatablePr ?? false;
     private bool hasOpenPr => _headerState?.HasOpenPr ?? false;
+    private bool allFeaturePrsCompleted => _headerState?.AllFeaturePrsCompleted ?? false;
     private bool isPushRecommended => _headerState?.IsPushRecommended ?? false;
     private int? lowestLevelNeedingWork => _headerState?.LowestLevelNeedingWork;
     private bool hasTaggedRepos => _headerState?.HasTaggedRepos ?? false;

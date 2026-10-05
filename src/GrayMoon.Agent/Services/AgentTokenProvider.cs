@@ -1,5 +1,7 @@
+using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
+using GrayMoon.Abstractions.Agent;
 using GrayMoon.Agent.Abstractions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -8,6 +10,7 @@ namespace GrayMoon.Agent.Services;
 
 internal sealed class AgentTokenProvider(
     IOptions<AgentOptions> options,
+    IWorkerSecretProvider secretProvider,
     ILogger<AgentTokenProvider> logger) : IAgentTokenProvider
 {
     private readonly AgentOptions _options = options.Value;
@@ -32,10 +35,18 @@ internal sealed class AgentTokenProvider(
         {
             using var client = new HttpClient { BaseAddress = new Uri(baseUrl, UriKind.Absolute) };
             var path = $"/repos/{repositoryId}/connector";
-            using var response = await client.GetAsync(path, cancellationToken);
+            using var request = new HttpRequestMessage(HttpMethod.Get, path);
+            var secret = secretProvider.GetSecret();
+            if (!string.IsNullOrEmpty(secret))
+                request.Headers.TryAddWithoutValidation(WorkerSecretHeader.Name, secret);
+
+            using var response = await client.SendAsync(request, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("AgentTokenProvider: GET {Path} failed for repo {RepositoryId} with status {StatusCode}.", path, repositoryId, response.StatusCode);
+                if (response.StatusCode == HttpStatusCode.Unauthorized)
+                    _logger.LogWarning("AgentTokenProvider: the App rejected this Worker's secret for repo {RepositoryId}. Reinstall the Worker from GrayMoon > Worker.", repositoryId);
+                else
+                    _logger.LogWarning("AgentTokenProvider: GET {Path} failed for repo {RepositoryId} with status {StatusCode}.", path, repositoryId, response.StatusCode);
                 return null;
             }
 

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using GrayMoon.App.Api.Endpoints;
 using GrayMoon.App.Models.Api;
+using GrayMoon.App.Services.Features;
 using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Services.Orchestration;
@@ -12,6 +13,8 @@ namespace GrayMoon.App.Services.Orchestration;
 public sealed class WorkspaceBranchHandler(
     IServiceScopeFactory serviceScopeFactory,
     IWorkspaceBranchOperations branchOperations,
+    IWorkspaceBranchOccupancyService branchOccupancyService,
+    IFeatureBranchGuard featureBranchGuard,
     ILogger<WorkspaceBranchHandler> logger)
 {
     private const int DefaultMaxParallelOperations = 16;
@@ -204,23 +207,72 @@ public sealed class WorkspaceBranchHandler(
         return new WorkspaceBranchBulkResult(total - failureCount, failureCount, new Dictionary<int, string>(errors));
     }
 
+    /// <summary>
+    /// Checks out <paramref name="branchName"/> across every repo in <paramref name="workspaceRepositoryIdsByRepositoryId"/>.
+    /// Before attempting checkout, asks <see cref="IWorkspaceBranchOccupancyService"/> whether that branch is held
+    /// by a Feature or another worktree for each repo; a held repo is skipped (never attempted, so it cannot fail
+    /// mid-run with git's "already checked out" error) and reported in <see cref="WorkspaceBranchBulkResult.ErrorsByRepositoryId"/>
+    /// with a descriptive message. If the occupancy answer cannot be determined for a repo (Worker offline, old
+    /// Worker, or any other error), that repo's checkout is attempted exactly as before this check existed, and
+    /// <see cref="WorkspaceBranchBulkResult.OccupancyCheckDegraded"/> is set so the caller can show one "could not
+    /// check worktrees" notice instead of silently proceeding.
+    /// </summary>
     public async Task<WorkspaceBranchBulkResult> CheckoutBranchForWorkspaceAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
-        IReadOnlyCollection<int> repositoryIds,
+        IReadOnlyDictionary<int, int> workspaceRepositoryIdsByRepositoryId,
         string branchName,
         Action<int, int>? reportProgress,
         CancellationToken cancellationToken)
     {
-        if (repositoryIds.Count == 0)
+        if (workspaceRepositoryIdsByRepositoryId.Count == 0)
             return WorkspaceBranchBulkResult.Empty;
 
-        var total = repositoryIds.Count;
-        var completed = 0;
+        // A Feature keeps every repository on its own branch; the header hides bulk actions there, so this is defence only.
+        var refusal = await featureBranchGuard.CheckAsync(
+            contextId, repositoryId: 0, FeatureBranchAction.CreateBranch, branchName, isTag: false, cancellationToken);
+        if (refusal != null)
+        {
+            var refused = workspaceRepositoryIdsByRepositoryId.Keys.ToDictionary(id => id, _ => refusal);
+            return new WorkspaceBranchBulkResult(0, refused.Count, refused);
+        }
+
         var errors = new ConcurrentDictionary<int, string>();
+        var occupancyCheckDegraded = false;
+        var repositoryIdsToCheckout = new List<int>();
+
+        foreach (var (repositoryId, workspaceRepositoryId) in workspaceRepositoryIdsByRepositoryId)
+        {
+            try
+            {
+                var badges = await branchOccupancyService.GetBadgesForRepositoryAsync(
+                    workspaceId, workspaceRepositoryId, contextId, cancellationToken);
+                if (badges.TryGetValue(branchName, out var badge) && !badge.AllowCheckout)
+                {
+                    errors[repositoryId] = badge.Kind == BranchOccupancyKind.Feature
+                        ? $"Skipped: branch is held by Feature '{badge.FeatureName}'."
+                        : "Skipped: branch is checked out in another worktree.";
+                    continue;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Branch occupancy check failed for repository {RepositoryId}; attempting checkout anyway", repositoryId);
+                occupancyCheckDegraded = true;
+            }
+            repositoryIdsToCheckout.Add(repositoryId);
+        }
+
+        var total = workspaceRepositoryIdsByRepositoryId.Count;
+        var completed = total - repositoryIdsToCheckout.Count;
+        reportProgress?.Invoke(completed, total);
         using var semaphore = new SemaphoreSlim(DefaultMaxParallelOperations, DefaultMaxParallelOperations);
 
-        var tasks = repositoryIds.Select(async repositoryId =>
+        var tasks = repositoryIdsToCheckout.Select(async repositoryId =>
         {
             await semaphore.WaitAsync(cancellationToken);
             try
@@ -256,7 +308,7 @@ public sealed class WorkspaceBranchHandler(
 
         await Task.WhenAll(tasks);
         var failureCount = errors.Count;
-        return new WorkspaceBranchBulkResult(total - failureCount, failureCount, new Dictionary<int, string>(errors));
+        return new WorkspaceBranchBulkResult(total - failureCount, failureCount, new Dictionary<int, string>(errors), occupancyCheckDegraded);
     }
 
     private static BranchesResponse? TryReadRefreshBody(object? body)
@@ -266,7 +318,8 @@ public sealed class WorkspaceBranchHandler(
 public sealed record WorkspaceBranchBulkResult(
     int SuccessCount,
     int FailureCount,
-    IReadOnlyDictionary<int, string> ErrorsByRepositoryId)
+    IReadOnlyDictionary<int, string> ErrorsByRepositoryId,
+    bool OccupancyCheckDegraded = false)
 {
     public static WorkspaceBranchBulkResult Empty { get; } = new(0, 0, new Dictionary<int, string>());
 }

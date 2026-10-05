@@ -1,0 +1,306 @@
+@using GrayMoon.Application.Features
+@inject IWorkspaceFeatureOperations FeatureOperations
+@inject ILogger<FeatureStatusPanel> Logger
+
+@if (IsVisible && FeatureContextId is { } contextId)
+{
+    @*
+        z-index drops below the page's BackgroundJobOverlay (.loading-overlay--page, z-index: 100) while
+        _busy (Retry/Roll back) so that overlay - which already shows "Repairing feature..."/"Rolling back
+        feature..." - visually covers this still-mounted dialog instead of the dialog sticking out above it
+        during the delay. Same pattern as SwitchBranchModal/MergePullRequestModal. Deliberately does NOT also
+        render its own LoadingOverlay here - that duplicated the page's overlay (two spinners/messages on top
+        of each other) instead of replacing it.
+    *@
+    <div class="modal fade show d-block" tabindex="-1" style="background: rgba(0,0,0,.45); z-index: @(_busy ? 50 : 1055);" @onkeydown="HandleKeyDown" @ref="_modalElement" @onclick="CloseAsync">
+        <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable" @onclick:stopPropagation>
+            <div class="modal-content">
+                <div class="modal-header">
+                    @* Title no-wrap/ellipsis — same .modal-title--compound convention as BranchModal/SwitchBranchModal/MergePullRequestModal. *@
+                    <h5 class="modal-title modal-title--compound">
+                        <span class="modal-title__primary">Feature Status</span>
+                        @if (!string.IsNullOrEmpty(_featureName))
+                        {
+                            <span class="modal-title__secondary text-muted fw-normal fs-6" title="@_featureName">@_featureName</span>
+                        }
+                    </h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseAsync" disabled="@_busy"></button>
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrWhiteSpace(_featureError))
+                    {
+                        <p class="text-muted small mb-3">@_featureError</p>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(_actionError))
+                    {
+                        <div class="gm-callout gm-callout--error mb-3" role="alert">@_actionError</div>
+                    }
+                    @if (_actionResults is { Count: > 0 } actionResults)
+                    {
+                        var commonAction = CommonActionMessage(actionResults);
+                        if (commonAction is not null)
+                        {
+                            <p class="small text-muted mb-3">All @actionResults.Count repositories: @commonAction</p>
+                        }
+                        else
+                        {
+                            <ul class="list-unstyled small mb-3">
+                                @foreach (var r in actionResults)
+                                {
+                                    <li>
+                                        <strong>@r.RepositoryName</strong>: @r.Outcome
+                                        @if (!string.IsNullOrWhiteSpace(r.Message))
+                                        {
+                                            <span class="text-muted"> - @r.Message</span>
+                                        }
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    }
+                    @if (_loading)
+                    {
+                        <p class="text-muted mb-0">Loading...</p>
+                    }
+                    else if (_rows.Count == 0)
+                    {
+                        <p class="text-muted mb-0">No repositories on this Feature.</p>
+                    }
+                    else
+                    {
+                        var commonRowError = CommonRowError(_rows);
+                        <ul class="list-group list-group-flush">
+                            @foreach (var row in _rows)
+                            {
+                                <li class="list-group-item px-0">
+                                    <div class="d-flex justify-content-between gap-2">
+                                        <strong>@row.RepositoryName</strong>
+                                        <span class="text-muted small">@FriendlyRepoState(row.State, _isRemoveIncomplete)</span>
+                                    </div>
+                                    @if (commonRowError is null && !string.IsNullOrWhiteSpace(row.LastError))
+                                    {
+                                        <div class="small text-danger mt-1">@row.LastError</div>
+                                    }
+                                    else if (string.Equals(row.State, "Removed", StringComparison.Ordinal) && _isRemoveIncomplete)
+                                    {
+                                        <div class="small text-muted mt-1">Already removed</div>
+                                    }
+                                </li>
+                            }
+                        </ul>
+                        @if (commonRowError is not null)
+                        {
+                            <div class="gm-callout gm-callout--error mt-2 mb-0" role="alert">@commonRowError</div>
+                        }
+                    }
+                </div>
+                <div class="modal-footer">
+                    @if (_isRemoveIncomplete)
+                    {
+                        <button type="button" class="btn btn-warning" data-default-action disabled="@_busy" @onclick="ContinueRemovalAsync">
+                            Continue removal
+                        </button>
+                    }
+                    else
+                    {
+                        <button type="button" class="btn btn-primary" data-default-action disabled="@_busy" @onclick="RetryAsync">Retry</button>
+                        <button type="button" class="btn btn-warning text-dark" disabled="@_busy" @onclick="RollbackAsync">Roll back</button>
+                        <button type="button" class="btn btn-outline-secondary" disabled="@_busy" @onclick="RemoveAsync">Remove</button>
+                    }
+                    <button type="button" class="btn btn-outline-secondary" disabled="@_busy" @onclick="CloseAsync">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public WorkspaceFeatureContextId? FeatureContextId { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback<WorkspaceFeatureContextId> OnContinueRemoval { get; set; }
+    [Parameter] public EventCallback<WorkspaceFeatureContextId> OnRequestRemove { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private ElementReference _modalElement;
+    private bool _loading;
+    private bool _busy;
+    private bool _isRemoveIncomplete;
+    private string? _featureName;
+    private string? _featureError;
+    private string? _actionError;
+    private IReadOnlyList<FeatureRepairRepositoryResult>? _actionResults;
+    private List<FeatureStatusRepository> _rows = [];
+    private WorkspaceFeatureContextId? _loadedFor;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!IsVisible || FeatureContextId is null)
+            return;
+        if (_loadedFor == FeatureContextId)
+            return;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync(bool keepActionFeedback = false)
+    {
+        if (FeatureContextId is not { } contextId)
+            return;
+
+        _loading = true;
+        if (!keepActionFeedback)
+        {
+            _actionError = null;
+            _actionResults = null;
+        }
+        _loadedFor = contextId;
+        try
+        {
+            var status = await FeatureOperations.GetFeatureStatusAsync(contextId);
+            _featureName = status?.FeatureName;
+            _featureError = status?.LastError;
+            _isRemoveIncomplete = status?.IsRemoveIncomplete ?? false;
+            _rows = status?.Repositories.ToList() ?? [];
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load Feature status panel");
+            _actionError = ex.Message;
+            _rows = [];
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task RetryAsync()
+    {
+        if (FeatureContextId is not { } contextId)
+            return;
+        _busy = true;
+        _actionError = null;
+        try
+        {
+            var result = await FeatureOperations.RepairFeatureAsync(contextId);
+            _actionResults = result.Repositories;
+            if (!result.Success)
+                _actionError = result.Error;
+            await LoadAsync(keepActionFeedback: true);
+            await OnChanged.InvokeAsync();
+            if (result.Success)
+                await CloseAsync();
+        }
+        catch (Exception ex)
+        {
+            _actionError = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RollbackAsync()
+    {
+        if (FeatureContextId is not { } contextId)
+            return;
+        _busy = true;
+        _actionError = null;
+        try
+        {
+            var result = await FeatureOperations.RollbackFeatureAsync(contextId);
+            _actionResults = result.Repositories;
+            if (!result.Success)
+            {
+                _actionError = result.Error;
+                await LoadAsync(keepActionFeedback: true);
+                return;
+            }
+
+            await OnChanged.InvokeAsync();
+            await CloseAsync();
+        }
+        catch (Exception ex)
+        {
+            _actionError = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RemoveAsync()
+    {
+        if (FeatureContextId is not { } contextId)
+            return;
+        await OnRequestRemove.InvokeAsync(contextId);
+        await CloseAsync();
+    }
+
+    private async Task ContinueRemovalAsync()
+    {
+        if (FeatureContextId is not { } contextId)
+            return;
+        await OnContinueRemoval.InvokeAsync(contextId);
+        await CloseAsync();
+    }
+
+    private async Task CloseAsync()
+    {
+        _loadedFor = null;
+        _rows = [];
+        _actionResults = null;
+        _actionError = null;
+        await OnClose.InvokeAsync();
+    }
+
+    /// <summary>Esc closes the dialog (while not busy); Ctrl/Cmd+Enter is handled globally by modal-default-action.js via data-default-action.</summary>
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape" && !_busy)
+        {
+            await CloseAsync();
+        }
+    }
+
+    /// <summary>
+    /// When every repository in an action result (Retry/Roll back) failed (or succeeded) with the exact
+    /// same outcome and message - e.g. "Worker not connected" for every repo because the GrayMoon Worker
+    /// is simply not running - collapses the per-repository list into one line instead of repeating the
+    /// same message once per repository, which just wastes dialog space.
+    /// </summary>
+    private static string? CommonActionMessage(IReadOnlyList<FeatureRepairRepositoryResult> results)
+    {
+        if (results.Count < 2)
+            return null;
+        var first = results[0];
+        if (!results.All(r => r.Outcome == first.Outcome && r.Message == first.Message))
+            return null;
+        return string.IsNullOrWhiteSpace(first.Message) ? first.Outcome.ToString() : $"{first.Outcome} - {first.Message}";
+    }
+
+    /// <summary>
+    /// Mirror of <see cref="CommonActionMessage"/> for the persisted status rows: when every repository
+    /// shows the same LastError (typically a shared infrastructure problem like the Worker being offline),
+    /// show it once below the list rather than once per repository.
+    /// </summary>
+    private static string? CommonRowError(IReadOnlyList<FeatureStatusRepository> rows)
+    {
+        if (rows.Count < 2)
+            return null;
+        var first = rows[0].LastError;
+        if (string.IsNullOrWhiteSpace(first))
+            return null;
+        return rows.All(r => r.LastError == first) ? first : null;
+    }
+
+    private static string FriendlyRepoState(string state, bool removeIncomplete) =>
+        state switch
+        {
+            "NeedsRepair" => "Needs attention",
+            "Removed" => removeIncomplete ? "Already removed" : "Removed",
+            _ => state
+        };
+}

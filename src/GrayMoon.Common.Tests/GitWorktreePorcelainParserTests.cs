@@ -74,6 +74,53 @@ public sealed class GitWorktreePorcelainParserTests
     }
 
     [Fact]
+    public void Parses_locked_with_and_without_reason()
+    {
+        var output =
+            """
+            worktree C:/repos/locked-with-reason
+            HEAD ccc
+            branch refs/heads/locked-feat
+            locked manual lock for maintenance
+
+            worktree C:/repos/locked-no-reason
+            HEAD ddd
+            branch refs/heads/locked-feat-2
+            locked
+
+            """;
+
+        var list = GitWorktreePorcelainParser.Parse(output);
+        Assert.Equal(2, list.Count);
+
+        Assert.True(list[0].IsLocked);
+        Assert.Equal("manual lock for maintenance", list[0].LockReason);
+
+        Assert.True(list[1].IsLocked);
+        Assert.Null(list[1].LockReason);
+    }
+
+    [Fact]
+    public void Repo_with_no_linked_worktrees_parses_single_main_entry()
+    {
+        var output =
+            """
+            worktree C:/repos/solo
+            HEAD eee111
+            branch refs/heads/main
+
+            """;
+
+        var list = GitWorktreePorcelainParser.Parse(output);
+        Assert.Single(list);
+        Assert.Equal("C:/repos/solo", list[0].WorktreePath);
+        Assert.False(list[0].IsLocked);
+        Assert.False(list[0].IsPrunable);
+        Assert.False(list[0].IsDetached);
+        Assert.False(list[0].IsBare);
+    }
+
+    [Fact]
     public void TryGetBranchName_only_heads_refs()
     {
         Assert.Equal("feat", GitWorktreePorcelainParser.TryGetBranchName("refs/heads/feat"));

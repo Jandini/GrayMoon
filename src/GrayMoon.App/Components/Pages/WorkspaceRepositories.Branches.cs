@@ -53,8 +53,9 @@ public sealed partial class WorkspaceRepositories
         {
             IsVisible = true,
             RepositoryId = link.RepositoryId,
+            WorkspaceRepositoryId = wr?.WorkspaceRepositoryId ?? 0,
             RepositoryName = repo.RepositoryName,
-            CurrentBranch = null,
+            CurrentBranch = link.BranchName,
             RepositoryUrl = repo.CloneUrl,
             InitialTab = "tags"
         };
@@ -222,13 +223,15 @@ public sealed partial class WorkspaceRepositories
             return;
 
         var allLinks = await GetAllLinksForOperationAsync();
-        var repoIds = allLinks
+        var selectedLinks = allLinks
             .Where(wr => !skipReposOnTags || !wr.IsOnTag)
-            .Select(wr => wr.RepositoryId)
-            .Distinct()
             .ToList();
+        var repoIds = selectedLinks.Select(wr => wr.RepositoryId).Distinct().ToList();
         if (repoIds.Count == 0)
             return;
+        var workspaceRepositoryIdsByRepositoryId = selectedLinks
+            .GroupBy(wr => wr.RepositoryId)
+            .ToDictionary(g => g.Key, g => g.First().WorkspaceRepositoryId);
 
         StartPageJob("Checking out...", async (job, ct) =>
         {
@@ -236,7 +239,7 @@ public sealed partial class WorkspaceRepositories
                 svc => svc.CheckoutBranchForWorkspaceAsync(
                     WorkspaceId,
                     RequireSelectedContextId(),
-                    repoIds,
+                    workspaceRepositoryIdsByRepositoryId,
                     branchName,
                     (completed, total) =>
                     {
@@ -255,6 +258,8 @@ public sealed partial class WorkspaceRepositories
                     else
                         ClearRepositoryError(repoId);
                 }
+                if (result.OccupancyCheckDegraded)
+                    ToastService.Show("Could not check worktrees. Branch switch was attempted for every repository.");
             });
 
         }, new PageJobOptions

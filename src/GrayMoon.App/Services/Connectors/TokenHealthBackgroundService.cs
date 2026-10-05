@@ -61,7 +61,20 @@ public sealed class TokenHealthBackgroundService(
                         return;
                     }
 
-                    var plainToken = ConnectorHelpers.UnprotectToken(connector.UserToken);
+                    string? plainToken;
+                    try
+                    {
+                        plainToken = ConnectorHelpers.UnprotectToken(connector.UserToken);
+                    }
+                    catch (Exception)
+                    {
+                        // Tampered ciphertext, or a key that can no longer decrypt it (F1 R-F1a #6):
+                        // report it through the normal health UI instead of throwing.
+                        connector.IsHealthy = false;
+                        connector.LastError = "Token needs to be re-entered.";
+                        return;
+                    }
+
                     if (string.IsNullOrWhiteSpace(plainToken))
                     {
                         connector.IsHealthy = false;

@@ -224,6 +224,78 @@ public sealed class FeatureContextIsolationTests
     }
 
     [Fact]
+    public async Task Path_resolver_feature_root_uses_posix_configured_feature_storage_setting()
+    {
+        // A Linux/macOS Worker's own profile and configured storage root are POSIX-shaped
+        // ('/'); the resolver must keep that shape end-to-end, not force Windows backslashes.
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await using var scope = ctx.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var pathResolver = scope.ServiceProvider.GetRequiredService<IWorkspaceContextPathResolver>();
+        var settings = scope.ServiceProvider.GetRequiredService<AppSettingRepository>();
+        var workspaceService = scope.ServiceProvider.GetRequiredService<WorkspaceService>();
+
+        var feature = await CreateFeatureContextAsync(db, ctx.WorkspaceId, "feat-posix");
+
+        await using var seedDb = await scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>()
+            .CreateDbContextAsync();
+        var workspace = await seedDb.Workspaces.FirstAsync(w => w.WorkspaceId == ctx.WorkspaceId);
+        workspace.ManagedFeatureStorageRoot = null;
+        await seedDb.SaveChangesAsync();
+
+        await settings.SetValueAsync(AppSettingRepository.FeatureStorageRootPathKey, "/home/dev/.graymoon");
+        workspaceService.ClearCachedFeatureStorageRootPath();
+
+        var featureRoot = await pathResolver.GetContextRootAsync(feature);
+        Assert.Equal("/home/dev/.graymoon/test-ws/features/feat-posix", featureRoot);
+        Assert.DoesNotContain('\\', featureRoot);
+    }
+
+    [Fact]
+    public async Task Path_resolver_repository_path_uses_posix_feature_worktree_when_present()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await using var scope = ctx.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var pathResolver = scope.ServiceProvider.GetRequiredService<IWorkspaceContextPathResolver>();
+
+        var feature = await CreateFeatureContextAsync(db, ctx.WorkspaceId, "feat-posix-wt");
+        const string worktreePath = "/home/dev/.graymoon/test-ws/features/feat-posix-wt/graymoon-api";
+
+        db.WorkspaceFeatureRepositories.Add(new WorkspaceFeatureRepository
+        {
+            WorkspaceFeatureContextId = feature.Value,
+            WorkspaceRepositoryId = ctx.WorkspaceRepositoryId,
+            WorktreePath = worktreePath,
+            State = WorkspaceFeatureRepositoryState.Ready,
+            BaseCommitSha = "abc123",
+            CreatedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var resolved = await pathResolver.GetRepositoryPathAsync(feature, ctx.WorkspaceRepositoryId);
+        Assert.Equal(worktreePath, resolved);
+    }
+
+    [Fact]
+    public async Task Agent_default_feature_storage_root_follows_posix_user_profile_shape()
+    {
+        // No explicit "which OS is the Worker" field is used - the Agent's own UserProfilePath
+        // already starts with '/' for a Linux/macOS Worker, which is enough to pick '/' joins.
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await using var scope = ctx.CreateScope();
+        var settings = scope.ServiceProvider.GetRequiredService<AppSettingRepository>();
+        var workspaceService = scope.ServiceProvider.GetRequiredService<WorkspaceService>();
+
+        await settings.SetValueAsync(AppSettingRepository.FeatureStorageRootPathKey, null);
+        workspaceService.ClearCachedFeatureStorageRootPath();
+        ctx.AgentBridge.Respond("GetHostInfo", new { userProfilePath = "/home/dev" });
+
+        var root = await workspaceService.TryGetAgentDefaultFeatureStorageRootAsync();
+        Assert.Equal("/home/dev/.graymoon", root);
+    }
+
+    [Fact]
     public async Task Path_resolver_ignores_persisted_drive_root_graymoon()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();

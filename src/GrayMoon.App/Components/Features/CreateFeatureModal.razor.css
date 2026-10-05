@@ -1,0 +1,26 @@
+.create-feature-collision-list {
+    max-height: min(40vh, 70%);
+    overflow-y: auto;
+    margin-bottom: 0.5rem;
+    padding-right: 0.25rem;
+}
+
+.create-feature-collision-item {
+    display: flex;
+    align-items: baseline;
+    gap: 0.25rem;
+    padding: 0.2rem 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.create-feature-collision-item:last-child {
+    border-bottom: none;
+}
+
+.create-feature-collision-item strong {
+    flex-shrink: 0;
+}
+
+.create-feature-collision-item span {
+    overflow-wrap: anywhere;
+}

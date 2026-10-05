@@ -151,9 +151,6 @@
     display: none;
     align-items: center;
     justify-content: center;
-    position: absolute;
-    top: 0;
-    right: 0;
     width: 2.25rem;
     height: 100%;
     padding: 0;
@@ -163,9 +160,29 @@
     cursor: pointer;
 }
 
-/* Switch Workspace stays visible so recent-workspaces hover works without hunting for a row-hover icon. */
-.workspace-feature-selector__switch-btn {
+.workspace-feature-selector__remove-btn {
+    position: absolute;
+    top: 0;
+    right: 0;
+}
+
+/* Switch Workspace stays visible so the workspaces submenu hover target is always available. */
+.workspace-feature-selector__switch-flyout {
     display: flex;
+    align-items: center;
+    justify-content: center;
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 2.25rem;
+    height: 100%;
+}
+
+.workspace-feature-selector__switch-flyout > .workspace-feature-selector__switch-btn {
+    display: flex;
+    position: static;
+    width: 100%;
+    height: 100%;
 }
 
 .workspace-feature-selector__feature-row:hover .workspace-feature-selector__remove-btn,
@@ -179,6 +196,63 @@
 
 .workspace-feature-selector__switch-btn:hover {
     color: var(--text-primary);
+}
+
+.workspace-feature-selector__switch-flyout:hover > .workspace-feature-selector__submenu,
+.workspace-feature-selector__switch-flyout:focus-within > .workspace-feature-selector__submenu {
+    display: block;
+}
+
+/* No overflow/max-height clipping here: this list hosts a 3rd-level Features flyout
+   (.workspace-feature-selector__ws-chevron-flyout, positioned via left: 100%) for every row that
+   has Features. Any non-"visible" overflow-x/overflow-y on this element clips that flyout
+   completely (even once it's open and populated), which is why it used to render but never show.
+   Keep this menu unclipped; it is the one place in this component a 3rd level needs room. */
+.workspace-feature-selector__switch-submenu {
+    min-width: 12rem;
+    max-width: 18rem;
+}
+
+.workspace-feature-selector__ws-flyout {
+    position: relative;
+}
+
+/* Reserve room for the chevron zone on the right regardless of whether it is currently rendered,
+   so the row does not reflow/shift once the feature lookup resolves. */
+.workspace-feature-selector__ws-flyout > .workspace-feature-selector__ws-name-btn {
+    padding-right: 2.25rem;
+}
+
+/* Fixed zone on the right edge of the row — mirrors .workspace-feature-selector__repo-flyout.
+   Only rendered when an eager, batched count fetched when the menu opened says the workspace has
+   Features, so the chevron appears immediately (no per-row hover delay) and means "this workspace
+   has Features". Hovering/focusing *this zone* (not the whole row) is what triggers the lazy
+   detail lookup and reveals the Features flyout, keeping a click on the row free to switch
+   workspace directly. */
+.workspace-feature-selector__ws-chevron-flyout {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 2.25rem;
+    height: 100%;
+    color: var(--text-muted);
+}
+
+.workspace-feature-selector__ws-chevron-flyout:hover > .workspace-feature-selector__submenu,
+.workspace-feature-selector__ws-chevron-flyout:focus-within > .workspace-feature-selector__submenu {
+    display: block;
+}
+
+.workspace-feature-selector__ws-features-submenu {
+    min-width: 11rem;
+    max-width: 16rem;
+    max-height: calc(8 * 2rem);
+    overflow-x: hidden;
+    overflow-y: auto;
+    z-index: 1062;
 }
 
 .workspace-feature-selector__section-title {
@@ -243,6 +317,42 @@
     padding-right: 2rem;
 }
 
+.workspace-feature-selector__launch-item,
+.workspace-feature-selector__repo-item {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+/* Fixed-size slot so labels line up across rows regardless of icon type (SVG brand logo or glyph). */
+.workspace-feature-selector__launch-icon {
+    flex: 0 0 1.1rem;
+    width: 1.1rem;
+    height: 1.1rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    object-fit: contain;
+}
+
+.workspace-feature-selector__launch-icon--glyph {
+    font-size: 1.05rem;
+    line-height: 1;
+}
+
+.workspace-feature-selector__launch-icon--folder {
+    font-size: 1rem;
+    line-height: 1;
+    color: #e3b341;
+}
+
+.workspace-feature-selector__repo-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* Chevron stays invisible until the tool row is hovered; the repo list opens only when the
    chevron (flyout) itself is hovered — clicking the label still opens the whole context root. */
 .workspace-feature-selector__repo-flyout {
@@ -287,6 +397,40 @@
     overflow-x: hidden;
     overflow-y: auto;
     z-index: 1062;
+}
+
+/* Gray, auto-width scrollbars for menus that scroll (matches tree / table scrollbars). */
+.workspace-feature-selector__menu,
+.workspace-feature-selector__ws-features-submenu,
+.workspace-feature-selector__repo-submenu {
+    scrollbar-width: auto;
+    scrollbar-color: #5a5a5a var(--bg-card, #252526);
+}
+
+.workspace-feature-selector__menu::-webkit-scrollbar,
+.workspace-feature-selector__ws-features-submenu::-webkit-scrollbar,
+.workspace-feature-selector__repo-submenu::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.workspace-feature-selector__menu::-webkit-scrollbar-track,
+.workspace-feature-selector__ws-features-submenu::-webkit-scrollbar-track,
+.workspace-feature-selector__repo-submenu::-webkit-scrollbar-track {
+    background: var(--bg-card, #252526);
+}
+
+.workspace-feature-selector__menu::-webkit-scrollbar-thumb,
+.workspace-feature-selector__ws-features-submenu::-webkit-scrollbar-thumb,
+.workspace-feature-selector__repo-submenu::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 4px;
+}
+
+.workspace-feature-selector__menu::-webkit-scrollbar-thumb:hover,
+.workspace-feature-selector__ws-features-submenu::-webkit-scrollbar-thumb:hover,
+.workspace-feature-selector__repo-submenu::-webkit-scrollbar-thumb:hover {
+    background: #6a6a6a;
 }
 
 .workspace-feature-selector__repo-flyout:hover > .workspace-feature-selector__repo-submenu,

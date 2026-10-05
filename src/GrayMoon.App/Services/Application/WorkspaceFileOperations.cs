@@ -12,13 +12,14 @@ public sealed class WorkspaceFileOperations(
     WorkspaceGitService workspaceGitService,
     IWorkspaceContextPathResolver pathResolver) : IWorkspaceFileOperations
 {
-    public async Task<List<WorkspaceFileDto>?> ListAsync(int workspaceId, CancellationToken cancellationToken)
+    public async Task<List<WorkspaceFileDto>?> ListAsync(int workspaceId, WorkspaceFeatureContextId contextId, CancellationToken cancellationToken)
     {
         var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)
             return null;
 
         var files = await fileRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
+        var missingFlags = await fileVersionService.GetMissingFlagsByFileIdAsync(workspaceId, contextId, cancellationToken);
         return files.Select(f => new WorkspaceFileDto
         {
             FileId = f.FileId,
@@ -27,7 +28,7 @@ public sealed class WorkspaceFileOperations(
             RepositoryName = f.Repository?.RepositoryName,
             FileName = f.FileName,
             FilePath = f.FilePath,
-            IsMissingOnDisk = f.IsMissingOnDisk == true
+            IsMissingOnDisk = (missingFlags.TryGetValue(f.FileId, out var flag) ? flag : f.IsMissingOnDisk) == true
         }).ToList();
     }
 

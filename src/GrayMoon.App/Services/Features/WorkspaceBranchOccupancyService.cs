@@ -48,7 +48,7 @@ public sealed class WorkspaceBranchOccupancyService(
 
         var byPath = featureRows
             .Where(r => !string.IsNullOrWhiteSpace(r.WorktreePath))
-            .GroupBy(r => r.WorktreePath!.Replace('/', '\\').TrimEnd('\\'), StringComparer.OrdinalIgnoreCase)
+            .GroupBy(r => AgentPath.Normalize(r.WorktreePath!), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
         var result = new Dictionary<string, BranchOccupancyBadge>(StringComparer.OrdinalIgnoreCase);
@@ -69,8 +69,8 @@ public sealed class WorkspaceBranchOccupancyService(
             }
             else if (kind == GitWorktreeBranchOccupancyKind.OccupiedElsewhere)
             {
-                var pathKey = (wt.WorktreePath ?? "").Replace('/', '\\').TrimEnd('\\');
-                var mainKey = (mainPath ?? "").Replace('/', '\\').TrimEnd('\\');
+                var pathKey = AgentPath.Normalize(wt.WorktreePath ?? "");
+                var mainKey = AgentPath.Normalize(mainPath ?? "");
                 if (byPath.TryGetValue(pathKey, out var owned))
                 {
                     badge = BranchOccupancyKind.Feature;
@@ -80,7 +80,7 @@ public sealed class WorkspaceBranchOccupancyService(
                 else if (!string.IsNullOrWhiteSpace(mainKey)
                          && string.Equals(pathKey, mainKey, StringComparison.OrdinalIgnoreCase))
                 {
-                    // Special Workspace checkout — not an external worktree to remove (§28B).
+                    // Special Workspace checkout â€” not an external worktree to remove (Â§28B).
                     badge = BranchOccupancyKind.Workspace;
                     worktreePath = wt.WorktreePath;
                 }
@@ -107,11 +107,29 @@ public sealed class WorkspaceBranchOccupancyService(
         }
 
         // Feature branches owned in DB but not currently listed still block Workspace checkout.
+        // Exception: the Feature currently being viewed can always check out its own branch (I2, 09 SB-1).
         foreach (var row in featureRows)
         {
             var name = row.WorkspaceFeatureContext?.WorkspaceFeature?.Name;
             if (string.IsNullOrWhiteSpace(name) || result.ContainsKey(name))
                 continue;
+
+            if (row.WorkspaceFeatureContextId == viewingContextId.Value)
+            {
+                result[name] = new BranchOccupancyBadge
+                {
+                    Kind = BranchOccupancyKind.FeatureOwn,
+                    FeatureName = name,
+                    WorktreePath = row.WorktreePath,
+                    AllowCheckout = true,
+                    AllowOrdinaryDelete = false,
+                    RequiresFeatureCleanup = false,
+                    RequiresExternalCleanup = false,
+                    ContextId = null
+                };
+                continue;
+            }
+
             result[name] = new BranchOccupancyBadge
             {
                 Kind = BranchOccupancyKind.Feature,
@@ -145,7 +163,9 @@ public enum BranchOccupancyKind
     Feature = 2,
     Worktree = 3,
     /// <summary>Checked out in the special Workspace path (not a disposable external worktree).</summary>
-    Workspace = 4
+    Workspace = 4,
+    /// <summary>The Feature currently being viewed owns this branch itself (I2, 09 SB-1) - always checkable, never routed to Remove Feature.</summary>
+    FeatureOwn = 5
 }
 
 public sealed class BranchOccupancyBadge
@@ -159,7 +179,7 @@ public sealed class BranchOccupancyBadge
     public bool RequiresExternalCleanup { get; init; }
 
     /// <summary>The owning Feature's context id when <see cref="RequiresFeatureCleanup"/> is true - lets the UI
-    /// route "delete this branch" to Remove Feature (§28A) instead of attempting an ordinary git branch delete
+    /// route "delete this branch" to Remove Feature (Â§28A) instead of attempting an ordinary git branch delete
     /// that git worktree rules would reject anyway.</summary>
     public WorkspaceFeatureContextId? ContextId { get; init; }
 }

@@ -24,9 +24,11 @@ public static class WorkspaceEndpoints
     private static async Task<Results<Ok<List<WorkspaceFileDto>>, NotFound>> GetWorkspaceFiles(
         int workspaceId,
         IWorkspaceFileOperations operations,
+        IWorkspaceFeatureContextResolver contextResolver,
         CancellationToken cancellationToken)
     {
-        var files = await operations.ListAsync(workspaceId, cancellationToken);
+        var contextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+        var files = await operations.ListAsync(workspaceId, contextId, cancellationToken);
         return files == null ? TypedResults.NotFound() : TypedResults.Ok(files);
     }
 

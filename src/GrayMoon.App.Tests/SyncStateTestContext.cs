@@ -4,6 +4,7 @@ using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
+using GrayMoon.App.Services.Agent;
 using GrayMoon.App.Services.Features;
 using GrayMoon.App.Services.GitChanges;
 using GrayMoon.App.Services.Jobs;
@@ -43,7 +44,10 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         HubContext = hubContext;
     }
 
-    public static async Task<SyncStateTestContext> CreateAsync(string? userToken = null)
+    public static async Task<SyncStateTestContext> CreateAsync(
+        string? userToken = null,
+        Action<IServiceCollection>? configureServices = null,
+        Action<DbContextOptionsBuilder>? configureDb = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -62,10 +66,17 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddSingleton<IAgentBridge>(agentBridge);
         services.AddSingleton<IHubContext<WorkspaceSyncHub>>(hubContext);
 
-        services.AddDbContext<AppDbContext>(o => o.UseSqlite(connection), ServiceLifetime.Scoped);
-        services.AddDbContextFactory<AppDbContext>(o => o.UseSqlite(connection), ServiceLifetime.Singleton);
+        void ConfigureDb(DbContextOptionsBuilder o)
+        {
+            o.UseSqlite(connection);
+            configureDb?.Invoke(o);
+        }
+
+        services.AddDbContext<AppDbContext>(ConfigureDb, ServiceLifetime.Scoped);
+        services.AddDbContextFactory<AppDbContext>(ConfigureDb, ServiceLifetime.Singleton);
 
         services.AddSingleton<IWorkspaceGitChangesNotifier, WorkspaceGitChangesNotifier>();
+        services.AddSingleton<IWorkspaceGitChangesMonitoringPause, WorkspaceGitChangesMonitoringPause>();
         services.AddScoped<AppSettingRepository>();
         services.AddScoped<ConnectorRepository>();
         services.AddScoped<GitHubRepositoryRepository>();
@@ -81,6 +92,9 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddScoped<IWorkspaceSelectedFeatureContextService, WorkspaceSelectedFeatureContextService>();
         services.AddScoped<IWorkspaceHookContextAttributor, WorkspaceHookContextAttributor>();
         services.AddScoped<IWorkspaceFeatureOperations, WorkspaceFeatureOperations>();
+        services.AddScoped<IWorkspaceExternalWorktreeOperations, WorkspaceExternalWorktreeOperations>();
+        services.AddSingleton<AgentConnectionTracker>();
+        services.AddSingleton<IWorkspaceFeatureReconciler, WorkspaceFeatureReconciler>();
         services.AddSingleton<IWorkspaceOperationRunner, WorkspaceOperationRunner>();
         services.AddSingleton<IWorkspaceOperationLock>(sp => (IWorkspaceOperationLock)sp.GetRequiredService<IWorkspaceOperationRunner>());
         services.AddScoped<GitHubService>();
@@ -100,7 +114,11 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddScoped<WorkspaceSyncHandler>();
         services.AddScoped<SyncCommandHandler>();
         services.AddScoped<WorkspaceBranchUpdateHandler>();
+        services.AddScoped<IFeatureBranchGuard, FeatureBranchGuard>();
         services.AddScoped<IWorkspaceBranchOperations, WorkspaceBranchOperations>();
+
+        // Last registration wins for GetRequiredService; tests can replace path resolution, etc.
+        configureServices?.Invoke(services);
 
         var provider = services.BuildServiceProvider();
 

@@ -147,7 +147,8 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
                 var error = BuildProcessError(stderr, stdout, $"{toolName} exited with code {exitCode}");
                 if (manifestExists)
                     logger.LogWarning("{ToolName} failed in {ElapsedMs}ms in {RepoPath}. Tool manifest exists, but failure does not look like a missing local tool; skipping 'dotnet tool restore'. ExitCode={ExitCode}", toolName, sw.ElapsedMilliseconds, repoPath, exitCode);
-                logger.LogError("{ToolName} failed in {ElapsedMs}ms. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", toolName, sw.ElapsedMilliseconds, exitCode, stdout, stderr);
+                // A warning, not an error: the repository keeps syncing with an unresolved version.
+                logger.LogWarning("{ToolName} failed in {ElapsedMs}ms. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", toolName, sw.ElapsedMilliseconds, exitCode, stdout, stderr);
                 return (null, error);
             }
         }
@@ -813,7 +814,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return (true, null);
     }
 
-    public async Task<(bool Success, string? ErrorMessage)> DeleteBranchAsync(string repoPath, string branchName, bool isRemote, bool force, CancellationToken ct, bool skipHooks = false, string? bearerToken = null)
+    public async Task<(bool Success, string? ErrorMessage)> DeleteBranchAsync(string repoPath, string branchName, bool isRemote, bool force, CancellationToken ct, bool skipHooks = false, string? bearerToken = null, string? expectedSha = null)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
             return (false, "Invalid repository path or branch name");
@@ -825,7 +826,69 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
                 name = name.Substring("origin/".Length);
             if (string.IsNullOrWhiteSpace(name))
                 return (false, "Invalid branch name");
+
+            var defaultBranch = await GetDefaultBranchNameAsync(repoPath, ct);
+            if (!string.IsNullOrWhiteSpace(defaultBranch)
+                && name.Equals(defaultBranch.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                logger.LogWarning("Refusing to delete default branch {Branch} in {RepoPath}", name, repoPath);
+                return (false, "Cannot delete the repository default branch.");
+            }
+
             var hooksPrefix = GetHooksConfigPrefix(skipHooks);
+
+            // Lease-based delete (D4): fetch so the lease compares against the current remote tip, then
+            // push a delete that refuses when origin/<name> is no longer at expectedSha.
+            if (!string.IsNullOrWhiteSpace(expectedSha))
+            {
+                // Always fetch this branch's remote tip (plus default when known) so the lease compares
+                // against current origin state, even when the local branch has no upstream configured.
+                var (fetchOk, fetchErr) = await FetchMinimalAsync(
+                    repoPath, name, $"origin/{name}", bearerToken, ct, skipUpstreamCheck: true);
+                if (!fetchOk)
+                {
+                    logger.LogWarning(
+                        "Fetch before lease remote delete failed for {RepoPath}. Branch={Branch}, Error={Error}",
+                        repoPath, name, fetchErr);
+                    return (false, string.IsNullOrWhiteSpace(fetchErr)
+                        ? "Could not fetch remote before deleting the branch."
+                        : fetchErr);
+                }
+
+                var leaseSpec = $"refs/heads/{name}:{expectedSha.Trim()}";
+                var leaseArgs = string.IsNullOrWhiteSpace(bearerToken)
+                    ? $"{hooksPrefix}push --force-with-lease={leaseSpec} origin :{name}"
+                    : $"{BuildAuthHeaderArgs(bearerToken)} {hooksPrefix}push --force-with-lease={leaseSpec} origin :{name}";
+                var (leaseExit, leaseStdout, leaseStderr) = await runner.PushPipeline.ExecuteAsync(
+                    async cancellationToken => await runner.RunAsync("git", leaseArgs, repoPath, cancellationToken),
+                    ct);
+                if (leaseExit != 0)
+                {
+                    var combined = CombineOutput(leaseStdout, leaseStderr) ?? "";
+                    if (IsRemoteBranchAlreadyDeleted(combined))
+                    {
+                        logger.LogInformation("Git remote branch already deleted for {RepoPath}. Branch={Branch}", repoPath, name);
+                        return (true, null);
+                    }
+
+                    if (IsForceWithLeaseRejected(combined))
+                    {
+                        logger.LogWarning(
+                            "Git force-with-lease remote delete refused for {RepoPath}. Branch={Branch}",
+                            repoPath, name);
+                        return (false, "Remote branch tip no longer matches this Feature. Someone else may have pushed; remote branch was kept.");
+                    }
+
+                    logger.LogWarning(
+                        "Git force-with-lease remote delete failed for {RepoPath}. Branch={Branch}, ExitCode={ExitCode}",
+                        repoPath, name, leaseExit);
+                    return (false, combined);
+                }
+
+                logger.LogInformation("Git remote branch deleted with lease for {RepoPath}. Branch={Branch}", repoPath, name);
+                return (true, null);
+            }
+
             var args = string.IsNullOrWhiteSpace(bearerToken)
                 ? $"{hooksPrefix}push origin --delete {name}"
                 : $"{BuildAuthHeaderArgs(bearerToken)} {hooksPrefix}push origin --delete {name}";
@@ -1286,22 +1349,51 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return Directory.GetDirectories(path).Select(Path.GetFileName).Where(n => n != null).Cast<string>().ToArray();
     }
 
+    private const string GrayMoonHookMarker = "# Created by GrayMoon.Agent";
+    private const string ReplacedHookSuffix = ".replaced-by-graymoon";
+
+    private sealed record GitHooksLocation(string? Directory, string? OutsideGitDirHooksPath);
+
     public async Task WriteSyncHooksAsync(string repoPath, int workspaceId, int repositoryId, CancellationToken ct)
     {
-        var hooksDir = await ResolveGitHooksDirectoryAsync(repoPath, ct);
-        if (hooksDir is null)
+        try
+        {
+            await WriteSyncHooksCoreAsync(repoPath, workspaceId, repositoryId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex,
+                "Could not install sync hooks for {RepoPath} (workspace {WorkspaceId}, repo {RepositoryId}); live updates for changes made outside GrayMoon will appear only after the next Sync.",
+                repoPath, workspaceId, repositoryId);
+        }
+    }
+
+    private async Task WriteSyncHooksCoreAsync(string repoPath, int workspaceId, int repositoryId, CancellationToken ct)
+    {
+        var location = await ResolveGitHooksLocationAsync(repoPath, ct);
+        if (location.Directory is null)
         {
             logger.LogWarning(
                 "Could not resolve git hooks directory for {RepoPath} (workspace {WorkspaceId}, repo {RepositoryId}); skipping hook install.",
                 repoPath, workspaceId, repositoryId);
             return;
         }
+
+        if (location.OutsideGitDirHooksPath is not null)
+        {
+            logger.LogWarning(
+                "Repository {RepoPath} sets core.hooksPath to '{HooksPath}', outside its Git directory. GrayMoon did not write or change any Git hooks there, so live updates for changes made outside GrayMoon will appear only after the next Sync.",
+                repoPath, location.OutsideGitDirHooksPath);
+            return;
+        }
+
+        var hooksDir = location.Directory;
         Directory.CreateDirectory(hooksDir);
 
         // Context-agnostic hooks: resolve the executing worktree root at runtime so linked
         // Feature worktrees attribute correctly. Do not embed a static Feature context id.
         var utf8 = new UTF8Encoding(false);
-        var comment = $"# Created by GrayMoon.Agent at {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}Z\n";
+        var comment = $"{GrayMoonHookMarker} at {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}Z\n";
         var resolveBody =
             "REPO_PATH=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0\n" +
             "REPO_JSON=$(printf '%s' \"$REPO_PATH\" | sed 's/\\\\/\\\\\\\\/g; s/\"/\\\\\"/g')\n" +
@@ -1312,48 +1404,141 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         string Curl(string hookPath) =>
             $"curl {curlFlags} -X POST \"http://127.0.0.1:{_listenPort}/hook/{hookPath}\" {header} -d \"$PAYLOAD\" || true";
 
-        WriteHookFile(Path.Combine(hooksDir, "post-commit"),
+        InstallSyncHook(repoPath, hooksDir, "post-commit",
             "#!/bin/sh\n" + comment + resolveBody + Curl("commit") + "\n", utf8);
-        WriteHookFile(Path.Combine(hooksDir, "post-checkout"),
+        InstallSyncHook(repoPath, hooksDir, "post-checkout",
             "#!/bin/sh\n" + comment + "[ \"$3\" = \"1\" ] || exit 0\n" + resolveBody + Curl("checkout") + "\n", utf8);
-        WriteHookFile(Path.Combine(hooksDir, "post-merge"),
+        InstallSyncHook(repoPath, hooksDir, "post-merge",
             "#!/bin/sh\n" + comment + resolveBody + Curl("merge") + "\n", utf8);
-        WriteHookFile(Path.Combine(hooksDir, "post-update"),
-            "#!/bin/sh\n" + comment + resolveBody + Curl("commit") + "\n", utf8);
-        WriteHookFile(Path.Combine(hooksDir, "pre-push"),
+        InstallSyncHook(repoPath, hooksDir, "pre-push",
             "#!/bin/sh\n" + comment + resolveBody + Curl("push") + "\n", utf8);
-        logger.LogDebug("Sync hooks written for repo {RepoId} in workspace {WorkspaceId}", repositoryId, workspaceId);
+        logger.LogDebug("Sync hooks checked for repo {RepoId} in workspace {WorkspaceId}", repositoryId, workspaceId);
+    }
+
+    private void InstallSyncHook(string repoPath, string hooksDir, string hookName, string content, Encoding encoding)
+    {
+        var path = Path.Combine(hooksDir, hookName);
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                logger.LogWarning(
+                    "Cannot install the GrayMoon {Hook} hook for {RepoPath}: '{HookPath}' is a directory. Live updates for that Git event will appear only after the next Sync.",
+                    hookName, repoPath, path);
+                return;
+            }
+
+            if (File.Exists(path))
+            {
+                var existing = File.ReadAllText(path);
+                if (IsGrayMoonHook(existing))
+                {
+                    if (WithoutMarkerLine(existing) == WithoutMarkerLine(content))
+                        return;
+                }
+                else
+                {
+                    string replacedPath;
+                    try
+                    {
+                        replacedPath = MoveForeignHookAside(path);
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        logger.LogWarning(ex,
+                            "Could not rename the existing Git hook '{Hook}' in {RepoPath}. GrayMoon left it untouched and did not install its own {Hook} hook, so live updates for that Git event will appear only after the next Sync.",
+                            hookName, repoPath, hookName);
+                        return;
+                    }
+
+                    logger.LogWarning(
+                        "Repository {RepoPath} already had its own Git hook '{Hook}'. GrayMoon renamed it to '{ReplacedName}' and installed its own hook. The renamed hook no longer runs (Git only runs files named exactly like the hook); rename it back to restore it.",
+                        repoPath, hookName, Path.GetFileName(replacedPath));
+                }
+            }
+
+            WriteHookFile(path, content, encoding);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning(ex,
+                "Could not install the GrayMoon {Hook} hook for {RepoPath}; live updates for that Git event will appear only after the next Sync.",
+                hookName, repoPath);
+        }
+    }
+
+    private static string MoveForeignHookAside(string path)
+    {
+        var replacedPath = path + ReplacedHookSuffix;
+        if (File.Exists(replacedPath) || Directory.Exists(replacedPath))
+            replacedPath = $"{path}{ReplacedHookSuffix}-{DateTime.UtcNow:yyyyMMddHHmmss}";
+        File.Move(path, replacedPath);
+        return replacedPath;
+    }
+
+    private static bool IsGrayMoonHook(string content)
+    {
+        using var reader = new StringReader(content);
+        var line = reader.ReadLine();
+        if (line is not null && line.StartsWith("#!", StringComparison.Ordinal))
+            line = reader.ReadLine();
+        while (line is not null && string.IsNullOrWhiteSpace(line))
+            line = reader.ReadLine();
+        return line is not null && line.StartsWith(GrayMoonHookMarker, StringComparison.Ordinal);
+    }
+
+    private static string WithoutMarkerLine(string content)
+    {
+        var lines = content.Replace("\r\n", "\n").Split('\n').ToList();
+        var markerIndex = lines.FindIndex(l => l.StartsWith(GrayMoonHookMarker, StringComparison.Ordinal));
+        if (markerIndex >= 0)
+            lines.RemoveAt(markerIndex);
+        return string.Join('\n', lines);
     }
 
     /// <summary>
-    /// Resolves the hooks directory that Git will actually execute for <paramref name="repoPath"/>.
-    /// For a normal checkout, <c>.git</c> is a directory and this is simply <c>.git/hooks</c>. For a
-    /// linked worktree (a GrayMoon Feature or an external worktree), <c>.git</c> is a *file* containing
-    /// a <c>gitdir:</c> pointer into the common repository's private worktree admin area - hooks are not
-    /// stored there. Hooks live once in the common Git directory and are shared by every linked worktree
-    /// (see design doc &#167;13.1), so this always resolves to the common directory's <c>hooks</c> folder via
-    /// <c>git rev-parse --git-common-dir</c> rather than assuming <c>.git</c> is a directory.
+    /// Resolves the hooks directory that Git will actually execute for <paramref name="repoPath"/> via
+    /// <c>git rev-parse --git-path hooks</c>, which honours <c>core.hooksPath</c>. For a linked worktree
+    /// (a GrayMoon Feature or an external worktree) this is the common Git directory's <c>hooks</c> folder,
+    /// shared by every linked worktree (see design doc &#167;13.1). When <c>core.hooksPath</c> is set and
+    /// resolves outside the common Git directory (husky, lefthook, a shared folder), the configured value
+    /// is returned in <see cref="GitHooksLocation.OutsideGitDirHooksPath"/> and nothing may be written there.
     /// </summary>
-    private async Task<string?> ResolveGitHooksDirectoryAsync(string repoPath, CancellationToken ct)
+    private async Task<GitHooksLocation> ResolveGitHooksLocationAsync(string repoPath, CancellationToken ct)
     {
-        var (exitCode, stdout, _) = await runner.RunAsync(
-            "git",
-            "rev-parse --git-common-dir",
-            repoPath,
-            ct,
-            streamStderrAsStdout: true,
-            mirrorFailureOutputAsStderr: false,
-            intent: GitLockIntent.Read);
+        var (hooksExit, hooksOut, _) = await runner.RunAsync(
+            "git", ["rev-parse", "--git-path", "hooks"], repoPath, null, ct, GitLockIntent.Read);
+        var hooksRaw = hooksOut?.Trim();
+        if (hooksExit != 0 || string.IsNullOrWhiteSpace(hooksRaw))
+            return new GitHooksLocation(null, null);
 
-        if (exitCode != 0 || string.IsNullOrWhiteSpace(stdout))
-            return null;
+        var hooksDir = Path.GetFullPath(Path.Combine(repoPath, hooksRaw));
 
-        var commonDir = stdout.Trim();
-        var fullCommonDir = Path.IsPathRooted(commonDir)
-            ? commonDir
-            : Path.GetFullPath(Path.Combine(repoPath, commonDir));
+        var (configExit, configOut, _) = await runner.RunAsync(
+            "git", ["config", "--get", "core.hooksPath"], repoPath, null, ct, GitLockIntent.Read);
+        var configured = configExit == 0 ? configOut?.Trim() : null;
+        if (string.IsNullOrEmpty(configured))
+            return new GitHooksLocation(hooksDir, null);
 
-        return Path.Combine(fullCommonDir, "hooks");
+        var (commonExit, commonOut, _) = await runner.RunAsync(
+            "git", ["rev-parse", "--git-common-dir"], repoPath, null, ct, GitLockIntent.Read);
+        var commonRaw = commonOut?.Trim();
+        if (commonExit != 0 || string.IsNullOrWhiteSpace(commonRaw))
+            return new GitHooksLocation(null, null);
+
+        var commonDir = Path.GetFullPath(Path.Combine(repoPath, commonRaw));
+        return IsPathInside(hooksDir, commonDir)
+            ? new GitHooksLocation(hooksDir, null)
+            : new GitHooksLocation(hooksDir, configured);
+    }
+
+    private static bool IsPathInside(string path, string parent)
+    {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var separator = Path.DirectorySeparatorChar;
+        var normalizedParent = Path.TrimEndingDirectorySeparator(parent) + separator;
+        var normalizedPath = Path.TrimEndingDirectorySeparator(path) + separator;
+        return normalizedPath.StartsWith(normalizedParent, comparison);
     }
 
     public async Task<(bool Success, IReadOnlyList<GitWorktreeInfo> Worktrees, string? ErrorCode, string? ErrorMessage)> ListWorktreesAsync(
@@ -1436,7 +1621,15 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
                 $"Branch '{branchName}' is already checked out at '{branchOccupied.WorktreePath}'.");
         }
 
-        if (Directory.Exists(canonicalWorktreePath) || File.Exists(canonicalWorktreePath))
+        if (File.Exists(canonicalWorktreePath))
+        {
+            return (false, null, false, "PathExists",
+                $"Worktree path already exists on disk: {canonicalWorktreePath}");
+        }
+
+        // An existing, empty folder is allowed (D1): residue cleanup can legitimately leave an empty
+        // worktree folder behind, and git worktree add works fine with an empty target directory.
+        if (Directory.Exists(canonicalWorktreePath) && Directory.EnumerateFileSystemEntries(canonicalWorktreePath).Any())
         {
             return (false, null, false, "PathExists",
                 $"Worktree path already exists on disk: {canonicalWorktreePath}");
@@ -1448,6 +1641,9 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             Directory.CreateDirectory(parent);
             logger.LogInformation("Created worktree parent directory: {Path}", parent);
         }
+
+        // Feature worktrees live deeper than Workspace checkouts; allow paths over 260 characters on Windows.
+        await EnsureLongPathsAsync(mainRepositoryPath, ct);
 
         // Offline-safe: start from local commit SHA; never --force for normal creation.
         string[] addArgs = detach
@@ -1487,16 +1683,58 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return (true, created, false, null, null);
     }
 
-    public async Task<(bool Success, bool AlreadyRemoved, string? ErrorCode, string? ErrorMessage)> RemoveWorktreeAsync(
+    /// <summary>
+    /// On Windows, makes sure <c>core.longpaths</c> is <c>true</c> for the repository (which every linked
+    /// worktree shares), so Feature worktrees with deep trees (for example <c>node_modules</c>) can be
+    /// checked out, used and removed past the 260-character limit. The value is written to the repository's
+    /// own config (not global, not per-worktree) and only when it is not already <c>true</c> there, so it is
+    /// written at most once. Does nothing on other operating systems. Never throws: a failure is logged and
+    /// the caller carries on.
+    /// </summary>
+    internal async Task EnsureLongPathsAsync(string repositoryPath, CancellationToken ct)
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        try
+        {
+            var (getExit, getOut, _) = await runner.RunAsync(
+                "git", ["config", "--local", "--get", "core.longpaths"], repositoryPath, null, ct, GitLockIntent.Read);
+            if (getExit == 0 && string.Equals(getOut?.Trim(), "true", StringComparison.OrdinalIgnoreCase))
+                return;
+
+            var (setExit, setOut, setErr) = await runner.RunAsync(
+                "git", ["config", "--local", "core.longpaths", "true"], repositoryPath, null, ct);
+            if (setExit != 0)
+            {
+                logger.LogWarning(
+                    "Could not set core.longpaths for {RepoPath}; very long paths in Feature worktrees may fail. {Error}",
+                    repositoryPath, CombineOutput(setOut, setErr));
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not set core.longpaths for {RepoPath}", repositoryPath);
+        }
+    }
+
+    public async Task<(bool Success, bool AlreadyRemoved, string? ErrorCode, string? ErrorMessage, WorktreeResidueResult Residue)> RemoveWorktreeAsync(
         string mainRepositoryPath,
         string worktreePath,
         bool force,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? featureRootPath = null,
+        string? featureStorageRoot = null,
+        bool unlock = false)
     {
         if (string.IsNullOrWhiteSpace(mainRepositoryPath) || !Directory.Exists(mainRepositoryPath))
-            return (false, false, "RepositoryNotFound", "Repository not found.");
+            return (false, false, "RepositoryNotFound", "Repository not found.", WorktreeResidueResult.None);
         if (string.IsNullOrWhiteSpace(worktreePath))
-            return (false, false, "InvalidWorktreePath", "worktreePath is required.");
+            return (false, false, "InvalidWorktreePath", "worktreePath is required.", WorktreeResidueResult.None);
 
         string canonicalWorktreePath;
         try
@@ -1505,52 +1743,671 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         }
         catch (Exception ex)
         {
-            return (false, false, "InvalidWorktreePath", ex.Message);
+            return (false, false, "InvalidWorktreePath", ex.Message, WorktreeResidueResult.None);
         }
 
         var (listOk, worktrees, listCode, listError) = await ListWorktreesAsync(mainRepositoryPath, ct);
         if (!listOk)
-            return (false, false, listCode, listError);
+            return (false, false, listCode, listError, WorktreeResidueResult.None);
 
         var existing = GitWorktreeOccupancy.FindByPath(worktrees, canonicalWorktreePath);
         if (existing == null)
         {
             logger.LogInformation("Worktree {WorktreePath} already absent from inventory; treating remove as success.", canonicalWorktreePath);
-            return (true, true, null, null);
+            var residueWhenAlreadyGone = await RemoveWorktreeResidueAsync(
+                mainRepositoryPath, canonicalWorktreePath, featureRootPath, featureStorageRoot, isRegisteredWorktree: false, ct);
+            return (true, true, null, null, residueWhenAlreadyGone);
         }
 
         // Never remove the main (first / primary) worktree via this primitive.
         var primary = worktrees.FirstOrDefault(w => !w.IsBare && !string.IsNullOrWhiteSpace(w.WorktreePath));
         if (primary != null && GitWorktreeOccupancy.PathsEqual(primary.WorktreePath, canonicalWorktreePath))
         {
-            return (false, false, "CannotRemovePrimary", "Cannot remove the primary repository worktree.");
+            return (false, false, "CannotRemovePrimary", "Cannot remove the primary repository worktree.", WorktreeResidueResult.None);
         }
+
+        // D5: unlock is only authorized after explicit consent, surfaced in the Remove dialog when
+        // InspectWorktree reports the worktree as locked. A failed unlock (for example it was not
+        // actually locked) is logged and the remove below is attempted anyway, so git reports the
+        // real reason for any remaining failure.
+        if (unlock)
+        {
+            var (unlockExitCode, unlockStdout, unlockStderr) = await runner.RunAsync(
+                "git", new[] { "worktree", "unlock", canonicalWorktreePath }, mainRepositoryPath, null, ct);
+            if (unlockExitCode != 0)
+            {
+                logger.LogWarning(
+                    "git worktree unlock failed for {WorktreePath}: {Error}",
+                    canonicalWorktreePath, CombineOutput(unlockStdout, unlockStderr));
+            }
+        }
+
+        // Also covers Features created before long-path support was added.
+        await EnsureLongPathsAsync(mainRepositoryPath, ct);
 
         var args = force
             ? new[] { "worktree", "remove", "--force", canonicalWorktreePath }
             : new[] { "worktree", "remove", canonicalWorktreePath };
 
         var (exitCode, stdout, stderr) = await runner.RunAsync("git", args, mainRepositoryPath, null, ct);
-        if (exitCode != 0)
-        {
-            var error = CombineOutput(stdout, stderr) ?? "git worktree remove failed";
-            logger.LogError(
-                "Git worktree remove failed for {RepoPath}. Path={WorktreePath}, Force={Force}, ExitCode={ExitCode}",
-                mainRepositoryPath, canonicalWorktreePath, force, exitCode);
-            return (false, false, "GitFailed", error);
-        }
+        var gitError = exitCode != 0 ? CombineOutput(stdout, stderr) ?? "git worktree remove failed" : null;
 
         var (verifyOk, after, verifyCode, verifyError) = await ListWorktreesAsync(mainRepositoryPath, ct);
         if (!verifyOk)
-            return (false, false, verifyCode, verifyError);
+        {
+            if (gitError != null)
+                return (false, false, "GitFailed", gitError, WorktreeResidueResult.None);
+            return (false, false, verifyCode, verifyError, WorktreeResidueResult.None);
+        }
 
         if (GitWorktreeOccupancy.FindByPath(after, canonicalWorktreePath) != null)
         {
-            return (false, false, "VerifyFailed", "Worktree remove reported success but path is still listed.");
+            // Still registered: git genuinely refused (for example dirty without force).
+            logger.LogError(
+                "Git worktree remove failed for {RepoPath}. Path={WorktreePath}, Force={Force}, ExitCode={ExitCode}",
+                mainRepositoryPath, canonicalWorktreePath, force, exitCode);
+            return gitError != null
+                ? (false, false, "GitFailed", gitError, WorktreeResidueResult.None)
+                : (false, false, "VerifyFailed", "Worktree remove reported success but path is still listed.", WorktreeResidueResult.None);
         }
 
-        logger.LogInformation("Git worktree removed for {RepoPath}. Path={WorktreePath}, Force={Force}", mainRepositoryPath, canonicalWorktreePath, force);
-        return (true, false, null, null);
+        // Git unregistered the worktree either way. On Windows, deleting the directory itself can fail
+        // (for example a file still open elsewhere) even though git already removed its own bookkeeping;
+        // residue cleanup below retries the folder and reports the truth instead of a bare git error.
+        if (gitError != null)
+        {
+            logger.LogWarning(
+                "Git worktree remove exited {ExitCode} for {WorktreePath} but the worktree is unregistered; checking for leftover files. {Error}",
+                exitCode, canonicalWorktreePath, gitError);
+        }
+        else
+        {
+            logger.LogInformation("Git worktree removed for {RepoPath}. Path={WorktreePath}, Force={Force}", mainRepositoryPath, canonicalWorktreePath, force);
+        }
+
+        var residue = await RemoveWorktreeResidueAsync(
+            mainRepositoryPath, canonicalWorktreePath, featureRootPath, featureStorageRoot, isRegisteredWorktree: false, ct);
+        return (true, false, null, null, residue);
+    }
+
+    /// <summary>
+    /// After Git's own worktree removal, deletes any leftover files in <paramref name="worktreePath"/> with a
+    /// custom walk (retries, reparse-point-safe) when every safety guard in
+    /// <see cref="ValidateResidueRemovalGuards"/> passes, and reports anything left when it does not or when
+    /// deletion could not finish (for example a file still open elsewhere). When <paramref name="featureRootPath"/>
+    /// becomes empty afterward, it is removed too. Without <paramref name="featureRootPath"/> or
+    /// <paramref name="featureStorageRoot"/>, nothing is deleted and only today's folder state is reported.
+    /// </summary>
+    private async Task<WorktreeResidueResult> RemoveWorktreeResidueAsync(
+        string mainRepositoryPath,
+        string worktreePath,
+        string? featureRootPath,
+        string? featureStorageRoot,
+        bool isRegisteredWorktree,
+        CancellationToken ct)
+    {
+        var guardFailure = ValidateResidueRemovalGuards(worktreePath, mainRepositoryPath, featureRootPath, featureStorageRoot, isRegisteredWorktree);
+
+        if (!Directory.Exists(worktreePath))
+        {
+            if (guardFailure == null)
+                TryRemoveEmptyFeatureRoot(featureRootPath);
+            return WorktreeResidueResult.None;
+        }
+
+        if (guardFailure != null)
+        {
+            logger.LogWarning("Worktree residue cleanup skipped for {WorktreePath}: {Guard}", worktreePath, guardFailure);
+            var (skippedCount, skippedSample) = ScanResidueFiles(worktreePath);
+            return new WorktreeResidueResult(true, skippedCount, skippedSample, guardFailure);
+        }
+
+        await DeleteFolderRecursivelyWithRetryAsync(worktreePath, ct);
+
+        if (Directory.Exists(worktreePath))
+        {
+            try
+            {
+                if (!Directory.EnumerateFileSystemEntries(worktreePath).Any())
+                    Directory.Delete(worktreePath, false);
+            }
+            catch
+            {
+                // Best effort; the residue scan below reports the true state either way.
+            }
+        }
+
+        if (Directory.Exists(worktreePath))
+        {
+            var (remainingCount, remainingSample) = ScanResidueFiles(worktreePath);
+            var message = remainingCount > 0
+                ? "Some files could not be deleted. They may still be open in another program."
+                : "The worktree folder could not be removed.";
+            logger.LogWarning("Worktree residue remains at {WorktreePath}: {Count} file(s). {Message}", worktreePath, remainingCount, message);
+            return new WorktreeResidueResult(true, remainingCount, remainingSample, message);
+        }
+
+        TryRemoveEmptyFeatureRoot(featureRootPath);
+        return WorktreeResidueResult.None;
+    }
+
+    /// <summary>
+    /// Deletes <paramref name="featureRootPath"/> only when it exists and is empty. A reparse point at
+    /// this level is never treated as empty content and is left alone (should not occur for a Feature root).
+    /// </summary>
+    private void TryRemoveEmptyFeatureRoot(string? featureRootPath)
+    {
+        if (string.IsNullOrWhiteSpace(featureRootPath) || !Directory.Exists(featureRootPath))
+            return;
+
+        try
+        {
+            if (!Directory.EnumerateFileSystemEntries(featureRootPath).Any())
+            {
+                Directory.Delete(featureRootPath, false);
+                logger.LogInformation("Removed empty Feature root folder {FeatureRootPath}.", featureRootPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not remove Feature root folder {FeatureRootPath}.", featureRootPath);
+        }
+    }
+
+    private static readonly char[] PathSeparators = [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar];
+    private static readonly int[] ResidueDeleteRetryDelaysMs = [200, 400, 800, 1600, 3200];
+
+    /// <summary>
+    /// Checks every safety guard before any residue deletion is allowed. Returns null when all guards pass,
+    /// or a short description of the first guard that failed. Pure (no deletion); callers must still check
+    /// disk state separately. Depth is checked before the Feature-root relationship so a path that is both
+    /// too shallow and outside the root is reported as too shallow, matching the dedicated test for that guard.
+    /// </summary>
+    internal static string? ValidateResidueRemovalGuards(
+        string worktreePath,
+        string mainRepositoryPath,
+        string? featureRootPath,
+        string? featureStorageRoot,
+        bool isRegisteredWorktree)
+    {
+        if (string.IsNullOrWhiteSpace(featureStorageRoot) || string.IsNullOrWhiteSpace(featureRootPath))
+            return "No Feature storage root was provided; residue was only reported, not removed.";
+
+        string normalizedWorktreePath;
+        string normalizedMainRepositoryPath;
+        string normalizedFeatureRootPath;
+        string normalizedFeatureStorageRoot;
+        try
+        {
+            normalizedWorktreePath = NormalizeResiduePath(worktreePath);
+            normalizedMainRepositoryPath = NormalizeResiduePath(mainRepositoryPath);
+            normalizedFeatureRootPath = NormalizeResiduePath(featureRootPath);
+            normalizedFeatureStorageRoot = NormalizeResiduePath(featureStorageRoot);
+        }
+        catch (Exception ex)
+        {
+            return $"Could not resolve the Feature storage paths: {ex.Message}";
+        }
+
+        // Guard: at least 2 levels below featureStorageRoot (features\<FeatureName>\<Repo>).
+        var relativeToStorageRoot = Path.GetRelativePath(normalizedFeatureStorageRoot, normalizedWorktreePath);
+        var escapesStorageRoot = relativeToStorageRoot.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relativeToStorageRoot);
+        if (!escapesStorageRoot)
+        {
+            var depthSegments = relativeToStorageRoot.Split(PathSeparators, StringSplitOptions.RemoveEmptyEntries);
+            if (depthSegments.Length < 2)
+                return "Worktree path is too shallow under the Feature storage root.";
+        }
+
+        // Guard: worktreePath is strictly under featureStorageRoot\<FeatureName>\, and featureRootPath
+        // equals featureStorageRoot\<FeatureName>. Worktrees under the legacy drive-root path fail here.
+        var featureRootParent = Path.GetDirectoryName(normalizedFeatureRootPath);
+        if (!string.Equals(featureRootParent, normalizedFeatureStorageRoot, StringComparison.OrdinalIgnoreCase)
+            || !IsStrictlyUnderResiduePath(normalizedWorktreePath, normalizedFeatureRootPath))
+        {
+            return "Worktree path is not under this Feature's storage root.";
+        }
+
+        // Guard: never the primary repository checkout, and never a path that contains it.
+        if (string.Equals(normalizedWorktreePath, normalizedMainRepositoryPath, StringComparison.OrdinalIgnoreCase)
+            || IsStrictlyUnderResiduePath(normalizedMainRepositoryPath, normalizedWorktreePath))
+        {
+            return "Worktree path is or contains the primary repository checkout.";
+        }
+
+        // Guard: must not currently be a registered worktree.
+        if (isRegisteredWorktree)
+            return "Path is still a registered Git worktree.";
+
+        // Guard: a real repository has a .git directory at its top level; a linked worktree does not.
+        if (Directory.Exists(Path.Combine(normalizedWorktreePath, ".git")))
+            return "Path contains a .git directory and looks like a real repository, not a linked worktree.";
+
+        return null;
+    }
+
+    private static string NormalizeResiduePath(string path) =>
+        Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+    private static bool IsStrictlyUnderResiduePath(string path, string potentialAncestor)
+    {
+        var prefix = potentialAncestor + Path.DirectorySeparatorChar;
+        return path.Length > prefix.Length && path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Counts files under <paramref name="folderPath"/> (never entering a reparse point) and samples up to 5 relative paths. No deletion.</summary>
+    private static (int Count, List<string> Sample) ScanResidueFiles(string folderPath)
+    {
+        var count = 0;
+        var sample = new List<string>();
+        VisitResidueEntries(folderPath, entry =>
+        {
+            count++;
+            if (sample.Count < 5)
+                sample.Add(Path.GetRelativePath(folderPath, entry.FullName));
+        });
+        return (count, sample);
+    }
+
+    private static void VisitResidueEntries(string folderPath, Action<FileSystemInfo> onFileOrLink)
+    {
+        IEnumerable<FileSystemInfo> entries;
+        try
+        {
+            entries = new DirectoryInfo(folderPath).EnumerateFileSystemInfos();
+        }
+        catch
+        {
+            return;
+        }
+
+        foreach (var entry in entries)
+        {
+            var isReparsePoint = entry.Attributes.HasFlag(FileAttributes.ReparsePoint);
+            if (entry is DirectoryInfo && !isReparsePoint)
+            {
+                VisitResidueEntries(entry.FullName, onFileOrLink);
+                continue;
+            }
+
+            // A file, or a reparse point (junction/symlink): never enter the link, only count/report it.
+            onFileOrLink(entry);
+        }
+    }
+
+    /// <summary>
+    /// Deletes everything under <paramref name="folderPath"/> with a custom walk (never
+    /// <c>Directory.Delete(path, true)</c>): clears read-only attributes, deletes reparse points
+    /// (junctions/symlinks) as the link itself without entering them, and retries each entry up to 5
+    /// times (200, 400, 800, 1600, 3200 ms) on <see cref="IOException"/> or
+    /// <see cref="UnauthorizedAccessException"/> (for example a file still open in another program).
+    /// Leaves whatever it could not delete in place; the caller reports that as residue.
+    /// </summary>
+    private static async Task DeleteFolderRecursivelyWithRetryAsync(string folderPath, CancellationToken ct)
+    {
+        List<FileSystemInfo> entries;
+        try
+        {
+            entries = new DirectoryInfo(folderPath).EnumerateFileSystemInfos().ToList();
+        }
+        catch
+        {
+            return;
+        }
+
+        foreach (var entry in entries)
+        {
+            ct.ThrowIfCancellationRequested();
+            var isReparsePoint = entry.Attributes.HasFlag(FileAttributes.ReparsePoint);
+            if (entry is DirectoryInfo && !isReparsePoint)
+                await DeleteFolderRecursivelyWithRetryAsync(entry.FullName, ct);
+
+            await DeleteResidueEntryWithRetryAsync(entry, ct);
+        }
+    }
+
+    private static async Task DeleteResidueEntryWithRetryAsync(FileSystemInfo entry, CancellationToken ct)
+    {
+        for (var attempt = 0; attempt <= ResidueDeleteRetryDelaysMs.Length; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                if (entry.Attributes.HasFlag(FileAttributes.ReadOnly))
+                    entry.Attributes &= ~FileAttributes.ReadOnly;
+
+                if (entry is DirectoryInfo directory)
+                {
+                    // Delete the entry itself only (reparse point: the link; otherwise an already-emptied directory).
+                    directory.Delete(false);
+                }
+                else
+                {
+                    entry.Delete();
+                }
+
+                return;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                if (attempt == ResidueDeleteRetryDelaysMs.Length)
+                    return;
+                await Task.Delay(ResidueDeleteRetryDelaysMs[attempt], ct);
+            }
+            catch
+            {
+                return;
+            }
+        }
+    }
+
+    public async Task<WorktreeInspectionResult> InspectWorktreeAsync(
+        string mainRepositoryPath,
+        string worktreePath,
+        string? defaultBranch,
+        string? featureBranch,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(mainRepositoryPath) || !Directory.Exists(mainRepositoryPath))
+            return new WorktreeInspectionResult(false, false, false, null, null, null, null, null, null, null, null, null, null, null, null, "Repository not found.");
+        if (string.IsNullOrWhiteSpace(worktreePath))
+            return new WorktreeInspectionResult(false, false, false, null, null, null, null, null, null, null, null, null, null, null, null, "worktreePath is required.");
+
+        string canonicalWorktreePath;
+        try
+        {
+            canonicalWorktreePath = Path.GetFullPath(worktreePath);
+        }
+        catch (Exception ex)
+        {
+            return new WorktreeInspectionResult(false, false, false, null, null, null, null, null, null, null, null, null, null, null, null, ex.Message);
+        }
+
+        var (listOk, worktrees, _, listError) = await ListWorktreesAsync(mainRepositoryPath, ct);
+        if (!listOk)
+            return new WorktreeInspectionResult(false, false, false, null, null, null, null, null, null, null, null, null, null, null, null, listError ?? "Failed to list worktrees.");
+
+        var registered = GitWorktreeOccupancy.FindByPath(worktrees, canonicalWorktreePath);
+        var isRegistered = registered != null;
+        var isLocked = registered?.IsLocked ?? false;
+        var lockReason = registered?.LockReason;
+
+        if (!Directory.Exists(canonicalWorktreePath))
+        {
+            return new WorktreeInspectionResult(isRegistered, false, isLocked, lockReason, null, null, null, null, null, null, null, null, null, null, null, null);
+        }
+
+        var headSha = await GetHeadCommitAsync(canonicalWorktreePath, ct);
+        var branch = await GetCurrentBranchNameAsync(canonicalWorktreePath, ct);
+
+        var (statusOk, staged, unstaged, untracked, conflicts, statusError) = await ProbeWorktreeStatusAsync(canonicalWorktreePath, ct);
+        bool? isDirty = statusOk ? staged + unstaged + untracked + conflicts > 0 : null;
+
+        bool? hasUpstream = null;
+        int? aheadOfUpstream = null;
+        int? behindUpstream = null;
+        if (!string.IsNullOrWhiteSpace(branch))
+        {
+            var (upstreamKnown, ahead, behind) = await ProbeUpstreamCountsAsync(canonicalWorktreePath, branch, ct);
+            hasUpstream = upstreamKnown;
+            aheadOfUpstream = ahead;
+            behindUpstream = behind;
+        }
+
+        // A Feature worktree carries its own persisted "divergence base" (the branch it was actually
+        // created from - its parent, which can itself be another unmerged, not-yet-pushed Feature
+        // branch, not necessarily the repository's true default branch). "Ahead of default" must be
+        // judged against that parent when one was recorded, or deleting a nested Feature branch
+        // would be reported as losing every commit the parent branch is already ahead of main by,
+        // even though those commits stay reachable from the parent branch and are never actually
+        // lost. Falls back to the repository's true default branch when no divergence base was
+        // recorded, or it no longer resolves to an existing ref.
+        var aheadOfDefaultCompareRef = await ResolveAheadOfDefaultCompareRefAsync(canonicalWorktreePath, defaultBranch, ct);
+
+        var aheadOfDefault = await ProbeAheadOfDefaultAsync(canonicalWorktreePath, aheadOfDefaultCompareRef, ct);
+
+        bool? featureBranchExists = null;
+        string? featureBranchSha = null;
+        int? featureBranchAheadOfDefault = null;
+        bool? featureBranchHasUpstream = null;
+        int? featureBranchAheadOfUpstream = null;
+        if (!string.IsNullOrWhiteSpace(featureBranch))
+        {
+            featureBranchSha = await GetRevisionShaAsync(canonicalWorktreePath, $"refs/heads/{featureBranch}", ct);
+            featureBranchExists = featureBranchSha != null;
+            if (featureBranchExists == true)
+            {
+                featureBranchAheadOfDefault = await ProbeAheadOfDefaultForRefAsync(
+                    canonicalWorktreePath, aheadOfDefaultCompareRef, $"refs/heads/{featureBranch}", ct);
+                var (featureUpstreamKnown, featureAhead) = await ProbeFeatureBranchUpstreamCountAsync(
+                    canonicalWorktreePath, featureBranch, ct);
+                featureBranchHasUpstream = featureUpstreamKnown;
+                featureBranchAheadOfUpstream = featureAhead;
+            }
+        }
+
+        return new WorktreeInspectionResult(
+            isRegistered,
+            true,
+            isLocked,
+            lockReason,
+            headSha,
+            branch,
+            isDirty,
+            statusOk ? staged : null,
+            statusOk ? unstaged : null,
+            statusOk ? untracked : null,
+            statusOk ? conflicts : null,
+            hasUpstream,
+            aheadOfUpstream,
+            behindUpstream,
+            aheadOfDefault,
+            statusOk ? null : statusError,
+            featureBranchExists,
+            featureBranchSha,
+            featureBranchAheadOfDefault,
+            featureBranchHasUpstream,
+            featureBranchAheadOfUpstream);
+    }
+
+    /// <summary>
+    /// Resolves the ref to count "ahead of default" against: this worktree's own persisted
+    /// divergence base (<see cref="GetDivergenceBaseBranchAsync"/>, the Feature's actual parent
+    /// branch) when one was recorded and still exists - checked as a local branch name first since a
+    /// parent that is itself an unmerged, unpushed Feature branch never has an <c>origin/</c> ref -
+    /// falling back to <see cref="ToOriginBranchRef"/> of <paramref name="defaultBranch"/> otherwise
+    /// (same resolution order as <see cref="ResolveNoUpstreamCompareRefAsync"/>/GetCommitCountsCommand).
+    /// </summary>
+    private async Task<string?> ResolveAheadOfDefaultCompareRefAsync(string repoPath, string? defaultBranch, CancellationToken ct)
+    {
+        var divergenceBase = await GetDivergenceBaseBranchAsync(repoPath, ct);
+        if (!string.IsNullOrWhiteSpace(divergenceBase))
+        {
+            var local = divergenceBase.Trim();
+            if (local.StartsWith("origin/", StringComparison.OrdinalIgnoreCase))
+                local = local["origin/".Length..];
+            if (await RefExistsAsync(repoPath, local, ct))
+                return local;
+
+            var originRef = $"origin/{local}";
+            if (await RefExistsAsync(repoPath, originRef, ct))
+                return originRef;
+        }
+
+        return ToOriginBranchRef(defaultBranch);
+    }
+
+    /// <summary>
+    /// Like <see cref="ProbeAheadOfDefaultAsync"/> but against an arbitrary ref instead of always
+    /// HEAD, so a Feature branch can be judged without checking it out (09 SB-2, plan unit I1).
+    /// </summary>
+    private async Task<int?> ProbeAheadOfDefaultForRefAsync(string repoPath, string? defaultRef, string compareRef, CancellationToken ct)
+    {
+        if (defaultRef == null || !await RefExistsAsync(repoPath, defaultRef, ct))
+            return null;
+
+        var (exitCode, stdout, stderr) = await runner.RunAsync(
+            "git",
+            $"rev-list --count {defaultRef}..{compareRef}",
+            repoPath,
+            ct,
+            streamStderrAsStdout: true,
+            mirrorFailureOutputAsStderr: false);
+        if (exitCode != 0)
+        {
+            logger.LogWarning("Git rev-list (InspectWorktree Feature branch ahead of default) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
+            return null;
+        }
+
+        return int.TryParse((stdout ?? "").Trim(), out var count) ? count : (int?)null;
+    }
+
+    /// <summary>
+    /// Like <see cref="ProbeUpstreamCountsAsync"/> but for an arbitrary local branch instead of
+    /// always HEAD, so a Feature branch's upstream state can be judged without checking it out
+    /// (09 SB-2, plan unit I1). Behind-count is not needed by any caller, so it is not computed.
+    /// </summary>
+    private async Task<(bool HasUpstream, int? Ahead)> ProbeFeatureBranchUpstreamCountAsync(string repoPath, string branchName, CancellationToken ct)
+    {
+        var upstreamRef = await GetUpstreamRefAsync(repoPath, branchName, ct);
+        if (string.IsNullOrWhiteSpace(upstreamRef) || !await RefExistsAsync(repoPath, upstreamRef, ct))
+            return (false, null);
+
+        var (exitCode, stdout, stderr) = await runner.RunAsync(
+            "git",
+            $"rev-list --left-right --count {upstreamRef}...refs/heads/{branchName}",
+            repoPath,
+            ct,
+            streamStderrAsStdout: true,
+            mirrorFailureOutputAsStderr: false);
+        if (exitCode != 0)
+        {
+            logger.LogWarning("Git rev-list --left-right (InspectWorktree Feature branch upstream count) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
+            return (true, null);
+        }
+
+        var parts = (stdout ?? "").Trim().Split('\t', StringSplitOptions.RemoveEmptyEntries);
+        var ahead = parts.Length >= 2 && int.TryParse(parts[1], out var a) ? a : (int?)null;
+        return (true, ahead);
+    }
+
+    /// <summary>
+    /// SHA of a revision if it exists, or null. Uses <c>rev-parse --verify --quiet</c> so a missing
+    /// ref is a silent non-zero exit instead of a visible Git error (same reasoning as <see cref="RefExistsAsync"/>).
+    /// </summary>
+    private async Task<string?> GetRevisionShaAsync(string repoPath, string revision, CancellationToken ct)
+    {
+        var (exitCode, stdout, _) = await runner.RunAsync(
+            "git",
+            $"rev-parse --verify --quiet {revision}",
+            repoPath,
+            ct,
+            streamStderrAsStdout: true,
+            mirrorFailureOutputAsStderr: false);
+        if (exitCode != 0)
+            return null;
+
+        var sha = (stdout ?? "").Trim();
+        return string.IsNullOrWhiteSpace(sha) ? null : sha;
+    }
+
+    private async Task<(bool Success, int Staged, int Unstaged, int Untracked, int Conflicts, string? Error)> ProbeWorktreeStatusAsync(
+        string repoPath,
+        CancellationToken ct)
+    {
+        var (exitCode, stdout, stderr) = await runner.RunAsync(
+            "git",
+            "--no-optional-locks status --porcelain=v1",
+            repoPath,
+            ct,
+            streamStderrAsStdout: true,
+            mirrorFailureOutputAsStderr: false,
+            intent: GitLockIntent.Read);
+        if (exitCode != 0)
+            return (false, 0, 0, 0, 0, CombineOutput(stdout, stderr) ?? "git status failed");
+
+        var staged = 0;
+        var unstaged = 0;
+        var untracked = 0;
+        var conflicts = 0;
+        foreach (var line in (stdout ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (line.Length < 2)
+                continue;
+            var x = line[0];
+            var y = line[1];
+            if (x == '?' && y == '?')
+            {
+                untracked++;
+                continue;
+            }
+            if (IsUnmergedStatusCode(x, y))
+            {
+                conflicts++;
+                continue;
+            }
+            if (x != ' ')
+                staged++;
+            if (y != ' ')
+                unstaged++;
+        }
+
+        return (true, staged, unstaged, untracked, conflicts, null);
+    }
+
+    private static bool IsUnmergedStatusCode(char x, char y)
+        => x == 'U' || y == 'U' || (x == 'A' && y == 'A') || (x == 'D' && y == 'D');
+
+    /// <summary>Ahead/behind strictly against the branch's configured upstream; no fallback to the default branch
+    /// or a Feature divergence base, unlike <see cref="ProbeCommitCountsAsync"/>, so the InspectWorktree caller
+    /// gets a clean null when there is no upstream instead of a value computed against something else.</summary>
+    private async Task<(bool HasUpstream, int? Ahead, int? Behind)> ProbeUpstreamCountsAsync(
+        string repoPath,
+        string branchName,
+        CancellationToken ct)
+    {
+        var upstreamRef = await GetUpstreamRefAsync(repoPath, branchName, ct);
+        if (string.IsNullOrWhiteSpace(upstreamRef) || !await RefExistsAsync(repoPath, upstreamRef, ct))
+            return (false, null, null);
+
+        var (exitCode, stdout, stderr) = await runner.RunAsync(
+            "git",
+            $"rev-list --left-right --count {upstreamRef}...HEAD",
+            repoPath,
+            ct,
+            streamStderrAsStdout: true,
+            mirrorFailureOutputAsStderr: false);
+        if (exitCode != 0)
+        {
+            logger.LogWarning("Git rev-list --left-right (InspectWorktree upstream counts) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
+            return (true, null, null);
+        }
+
+        var parts = (stdout ?? "").Trim().Split('\t', StringSplitOptions.RemoveEmptyEntries);
+        var behind = parts.Length >= 1 && int.TryParse(parts[0], out var b) ? b : (int?)null;
+        var ahead = parts.Length >= 2 && int.TryParse(parts[1], out var a) ? a : (int?)null;
+        return (true, ahead, behind);
+    }
+
+    private async Task<int?> ProbeAheadOfDefaultAsync(string repoPath, string? defaultRef, CancellationToken ct)
+    {
+        if (defaultRef == null || !await RefExistsAsync(repoPath, defaultRef, ct))
+            return null;
+
+        var (exitCode, stdout, stderr) = await runner.RunAsync(
+            "git",
+            $"rev-list --count {defaultRef}..HEAD",
+            repoPath,
+            ct,
+            streamStderrAsStdout: true,
+            mirrorFailureOutputAsStderr: false);
+        if (exitCode != 0)
+        {
+            logger.LogWarning("Git rev-list (InspectWorktree ahead of default) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
+            return null;
+        }
+
+        return int.TryParse((stdout ?? "").Trim(), out var count) ? count : (int?)null;
     }
 
     private static void WriteHookFile(string path, string content, Encoding encoding)
@@ -1715,4 +2572,13 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         => output.Contains("remote ref does not exist", StringComparison.OrdinalIgnoreCase)
         || (output.Contains("unable to delete", StringComparison.OrdinalIgnoreCase)
             && output.Contains("does not exist", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>True when git refused a force-with-lease push because the remote tip moved (D4).</summary>
+    private static bool IsForceWithLeaseRejected(string output)
+        => output.Contains("stale info", StringComparison.OrdinalIgnoreCase)
+        || output.Contains("rejected", StringComparison.OrdinalIgnoreCase)
+            && output.Contains("force-with-lease", StringComparison.OrdinalIgnoreCase)
+        || (output.Contains("failed to push some refs", StringComparison.OrdinalIgnoreCase)
+            && (output.Contains("force-with-lease", StringComparison.OrdinalIgnoreCase)
+                || output.Contains("but expected", StringComparison.OrdinalIgnoreCase)));
 }

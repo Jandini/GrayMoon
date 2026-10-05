@@ -203,9 +203,9 @@
                 packages = new List<WorkspaceProject>();
                 return;
             }
-            packages = await WorkspaceProjectRepository.GetPackagesByWorkspaceIdAsync(WorkspaceId);
-            if (_selectedContextId is WorkspaceFeatureContextId ctx)
-                packages = packages.Where(p => p.WorkspaceFeatureContextId == ctx.Value).ToList();
+            packages = _selectedContextId is WorkspaceFeatureContextId ctx
+                ? await WorkspaceProjectRepository.GetPackagesByWorkspaceIdAsync(WorkspaceId, ctx.Value)
+                : await WorkspaceProjectRepository.GetPackagesByWorkspaceIdAsync(WorkspaceId);
         }
         catch (Exception ex)
         {

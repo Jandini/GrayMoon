@@ -101,7 +101,7 @@ public sealed class WorkspaceHookContextAttributor(
     }
 
     private static string NormalizePath(string path)
-        => path.Replace('/', '\\').TrimEnd('\\').Trim();
+        => AgentPath.Normalize(path.Trim());
 
     private static bool PathsEqual(string a, string b)
         => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);

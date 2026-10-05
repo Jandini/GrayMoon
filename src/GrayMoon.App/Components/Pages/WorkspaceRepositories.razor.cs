@@ -1,3 +1,4 @@
+using GrayMoon.App.Components.Features;
 using GrayMoon.App.Services;
 using GrayMoon.App.Services.Features;
 using GrayMoon.App.Services.Queries;
@@ -40,6 +41,9 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
 
     private WorkspaceFeatureContextId? _selectedContextId;
     private bool _isFeatureContext;
+    private bool _isReadOnlyContext;
+    /// <summary>Name of the selected Feature; null in the Workspace. Loaded once per selection, not per row (I2).</summary>
+    private string? _selectedFeatureName;
     /// <summary>Last <see cref="ContextQuery"/> value applied to grid state - detects URL context switches.</summary>
     private int? _boundContextQuery;
     private bool _createFeatureModalVisible;
@@ -47,6 +51,9 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     private string? _createFeatureWorkspaceBranch;
     private bool _removeFeatureModalVisible;
     private WorkspaceFeatureContextId? _removeFeatureContextId;
+    private RemoveFeaturePlan? _removeFeaturePlan;
+    private bool _featureStatusPanelVisible;
+    private WorkspaceFeatureContextId? _featureStatusContextId;
 
     private const string SyncModeStorageKey = "graymoon:sync-mode";
     private bool _quickFetchIsPrimary;
@@ -63,8 +70,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         try
         {
             var info = await ContextNavigation.ResolveForPageAsync(WorkspaceId, ContextQuery);
-            _selectedContextId = info.ContextId;
-            _isFeatureContext = !info.IsSpecialWorkspace;
+            ApplySelectedContext(info);
         }
         catch (Exception ex)
         {
@@ -72,6 +78,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
             var special = await FeatureContextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(WorkspaceId);
             _selectedContextId = special;
             _isFeatureContext = false;
+            _isReadOnlyContext = false;
         }
     }
 
@@ -85,6 +92,44 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     private WorkspaceFeatureContextId RequireSelectedContextId()
         => _selectedContextId
            ?? throw new InvalidOperationException("Workspace Feature context is not resolved for this page.");
+
+    private void ApplySelectedContext(WorkspaceFeatureContextInfo info)
+    {
+        _selectedContextId = info.ContextId;
+        _isFeatureContext = !info.IsSpecialWorkspace;
+        _isReadOnlyContext = FeatureSelectorPresentation.IsReadOnlyContext(info);
+        _selectedFeatureName = info.IsSpecialWorkspace ? null : info.FeatureName;
+    }
+
+    /// <summary>
+    /// The branch the Switch Branch dialog's repository is expected to be on in the viewed Feature:
+    /// the Feature's own name for a non-pinned repository, or null in the Workspace, when the dialog
+    /// has no repository yet, or for a repository pinned to a tag (I2).
+    /// </summary>
+    private string? GetSwitchBranchModalFeatureBranchName()
+    {
+        if (!_isFeatureContext || _selectedFeatureName is null || _switchBranchModal.RepositoryId <= 0)
+            return null;
+        return FeatureBranchPolicy.ExpectedBranch(_selectedFeatureName, GetSwitchBranchModalPinnedTag());
+    }
+
+    /// <summary>The tag the Switch Branch dialog's repository is pinned to in the viewed Feature; null in the Workspace or when it is on its Feature branch (I3).</summary>
+    private string? GetSwitchBranchModalPinnedTag()
+    {
+        if (!_isFeatureContext || _switchBranchModal.RepositoryId <= 0)
+            return null;
+        return TryGetLink(_switchBranchModal.RepositoryId)?.FeaturePinnedTag;
+    }
+
+    /// <summary>The Feature branch a grid row has drifted away from (I4); null in the Workspace or when the row is on its branch. Uses only row data already loaded - no Agent call.</summary>
+    private string? GetOffFeatureBranchName(GrayMoon.App.Models.WorkspaceRepositoryLink link)
+        => !_isFeatureContext
+            ? null
+            : FeatureBranchPolicy.GetOffFeatureBranch(
+                _selectedFeatureName,
+                link.FeaturePinnedTag,
+                link.BranchName,
+                hasRecordedState: !string.IsNullOrEmpty(link.HeadCommit));
 
     private async Task OnSelectedContextChangedAsync(WorkspaceFeatureContextId contextId)
     {
@@ -107,8 +152,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
             NavigationManager.NavigateTo(fallbackPath, replace: true);
         }
 
-        _selectedContextId = info.ContextId;
-        _isFeatureContext = !info.IsSpecialWorkspace;
+        ApplySelectedContext(info);
         _boundContextQuery = BoundContextQueryFromSelection();
         Interlocked.Increment(ref _contextGeneration);
         // Drop Feature/Workspace rows immediately so the selector label and grid cannot disagree
@@ -185,10 +229,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     private Task OnRemoveFeatureAsync()
     {
         if (_isFeatureContext && _selectedContextId is WorkspaceFeatureContextId ctx)
-        {
-            _removeFeatureContextId = ctx;
-            _removeFeatureModalVisible = true;
-        }
+            BeginRemoveFeatureAnalysis(ctx);
         return Task.CompletedTask;
     }
 
@@ -198,33 +239,136 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     /// </summary>
     private Task OnRequestRemoveFeatureFromSelectorAsync(WorkspaceFeatureContextId contextId)
     {
-        _removeFeatureContextId = contextId;
-        _removeFeatureModalVisible = true;
+        BeginRemoveFeatureAnalysis(contextId);
         return Task.CompletedTask;
     }
 
     /// <summary>
-    /// A branch in the Switch Branch dialog was owned by a Feature worktree (§28A): rather than attempting an
+    /// A branch in the Switch Branch dialog was owned by a Feature worktree (Â§28A): rather than attempting an
     /// ordinary git branch delete (which the worktree would reject anyway), route straight to Remove Feature
     /// for that Feature's own context.
     /// </summary>
     private Task OnRequestFeatureCleanupFromBranchModalAsync(WorkspaceFeatureContextId featureContextId)
     {
-        _removeFeatureContextId = featureContextId;
-        _removeFeatureModalVisible = true;
+        BeginRemoveFeatureAnalysis(featureContextId);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Runs remove analysis under the page LoadingOverlay/terminal, then opens the confirmation dialog
+    /// with the finished plan (no in-dialog "Checking..." spinner).
+    /// </summary>
+    private void BeginRemoveFeatureAnalysis(WorkspaceFeatureContextId contextId)
+    {
+        if (IsJobRunning)
+            return;
+
+        JobService.StartJob(PageJobKey, "Checking feature status...", async (job, ct) =>
+        {
+            try
+            {
+                var progress = new Progress<OperationProgress>(p =>
+                {
+                    if (p.Completed is int done && p.Total is int total && total > 0)
+                        job.ReportProgress($"Checked {done} of {total}");
+                    else if (!string.IsNullOrWhiteSpace(p.Message))
+                        job.ReportProgress(p.Message);
+                });
+
+                var plan = await ScopedExecutor.ExecuteAsync<IWorkspaceFeatureOperations, RemoveFeaturePlan>(
+                    svc => svc.AnalyzeRemoveFeatureAsync(contextId, ct, progress));
+
+                if (!plan.Success)
+                {
+                    SafeInvoke(() => ToastService.ShowError(plan.Error ?? "Failed to prepare Feature removal."));
+                    return;
+                }
+
+                await InvokeAsync(() =>
+                {
+                    if (_disposed) return;
+                    _removeFeatureContextId = contextId;
+                    _removeFeaturePlan = plan;
+                    _removeFeatureModalVisible = true;
+                    StateHasChanged();
+                });
+            }
+            catch (OperationCanceledException)
+            {
+                SafeInvoke(() => ToastService.Show("Feature status check cancelled."));
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error analyzing Feature removal for context {ContextId}", contextId.Value);
+                SafeInvoke(() => ToastService.ShowError("Failed to prepare Feature removal."));
+                throw;
+            }
+        });
+    }
+
+    private Task OnRemoveFeatureCancelAsync()
+    {
+        _removeFeatureModalVisible = false;
+        _removeFeaturePlan = null;
+        _removeFeatureContextId = null;
         return Task.CompletedTask;
     }
 
     private async Task OnFeatureCreatedAsync(CreateFeatureResult result)
     {
         _createFeatureModalVisible = false;
-        if (result.ContextId is WorkspaceFeatureContextId created)
+        if (result.ContextId is not WorkspaceFeatureContextId created)
+            return;
+
+        await OnSelectedContextChangedAsync(created);
+        var path = new Uri(NavigationManager.Uri).GetLeftPart(UriPartial.Path);
+        NavigationManager.NavigateTo($"{path}?context={created.Value}", replace: true);
+
+        if (!result.Success && string.Equals(result.Condition, "NeedsRepair", StringComparison.Ordinal))
         {
-            await OnSelectedContextChangedAsync(created);
-            var path = new Uri(NavigationManager.Uri).GetLeftPart(UriPartial.Path);
-            NavigationManager.NavigateTo($"{path}?context={created.Value}", replace: true);
-            ToastService.Show($"Feature created.");
+            OpenFeatureStatusPanel(created);
+            return;
         }
+
+        ToastService.Show("Feature created.");
+    }
+
+    private void OpenFeatureStatusPanel(WorkspaceFeatureContextId? contextId = null)
+    {
+        _featureStatusContextId = contextId ?? _selectedContextId;
+        _featureStatusPanelVisible = _featureStatusContextId is not null;
+    }
+
+    private Task OnFeatureStatusCloseAsync()
+    {
+        _featureStatusPanelVisible = false;
+        _featureStatusContextId = null;
+        return Task.CompletedTask;
+    }
+
+    private async Task OnFeatureStatusChangedAsync()
+    {
+        if (_selectedContextId is { } selected)
+        {
+            try
+            {
+                ApplySelectedContext(await FeatureContextResolver.GetRequiredAsync(selected, WorkspaceId));
+            }
+            catch (InvalidOperationException ex) when (ex.Message.Contains("was not found", StringComparison.Ordinal))
+            {
+                // The Feature was rolled back: leave it the same way Remove does.
+                var special = await FeatureContextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(WorkspaceId);
+                await OnSelectedContextChangedAsync(special);
+                var path = new Uri(NavigationManager.Uri).GetLeftPart(UriPartial.Path);
+                NavigationManager.NavigateTo(path, replace: true);
+                return;
+            }
+        }
+
+        await LoadWorkspaceAsync();
+        ApplySyncStateFromLoadedItems();
+        StateHasChanged();
     }
 
     private async Task OnFeatureRemovedAsync()
@@ -240,14 +384,24 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
             && _selectedContextId is { } selectedId
             && removedId.Value == selectedId.Value;
         _removeFeatureContextId = null;
+        _removeFeaturePlan = null;
 
         if (removedCurrentContext)
         {
-            var special = await FeatureContextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(WorkspaceId);
-            await SelectedFeatureContextService.SetSelectedAsync(WorkspaceId, special);
-            await OnSelectedContextChangedAsync(special);
-            var path = new Uri(NavigationManager.Uri).GetLeftPart(UriPartial.Path);
-            NavigationManager.NavigateTo(path, replace: true);
+            try
+            {
+                var special = await FeatureContextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(WorkspaceId);
+                await SelectedFeatureContextService.SetSelectedAsync(WorkspaceId, special);
+                await OnSelectedContextChangedAsync(special);
+                var path = new Uri(NavigationManager.Uri).GetLeftPart(UriPartial.Path);
+                NavigationManager.NavigateTo(path, replace: true);
+            }
+            catch (InvalidOperationException ex) when (ex.Message.Contains("was not found", StringComparison.Ordinal))
+            {
+                // The Feature context is already gone after a successful remove; a follow-up load that
+                // still targets it must not surface as a remove-dialog error.
+                Logger.LogDebug(ex, "Post-remove navigation ignored expected missing Feature context.");
+            }
         }
         ToastService.Show("Feature removed.");
     }
@@ -297,7 +451,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
             return;
 
         // Await context + header + grid before first paint (prerender is off) so the header chrome
-        // and column layout appear once in their final state — no Branch↔Create PR or column jump.
+        // and column layout appear once in their final state â€” no Branchâ†”Create PR or column jump.
         var contextChanged = _boundContextQuery != ContextQuery;
         if (_loadedWorkspaceId == WorkspaceId && workspace != null && hasLoadedOnce && !contextChanged)
             return;
@@ -316,7 +470,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
             errorMessage = null;
             hasLoadedOnce = false;
             // Drop the previous workspace name so the selector shows a placeholder until the new
-            // header is read — never the generic "Workspace" fallback.
+            // header is read â€” never the generic "Workspace" fallback.
             workspace = null;
             ClearGridState();
         }

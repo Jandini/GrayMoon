@@ -265,11 +265,24 @@ public sealed class WorkspaceRepositoryStateWriter(
             return;
         }
 
-        var hasValidVersion = !Blank(state.GitVersion) && (!Blank(state.BranchName) || !Blank(state.CheckedOutTag));
+        // A repository is known once it has a branch or a tag. The GitVersion result is deliberately not part
+        // of that: when GitVersion cannot compute a version (an empty repository, a broken config) the row shows
+        // the version as unresolved, and the repository and the Workspace carry on as normal.
+        var hasIdentity = !Blank(state.BranchName) || !Blank(state.CheckedOutTag);
         var hasDefaultBranch = !Blank(defaultBranchName);
-        state.SyncStatus = !hasValidVersion
+
+        // A remote that has no branches at all (a freshly created, still empty hosted repository) has no
+        // default branch to be out of sync with, so a completed sync must not leave the repository on NeedsSync.
+        var remoteIsEmpty = snapshot.RemoteBranches is { Count: 0 };
+
+        // Hook notifications (a commit made in a terminal) say nothing about the remote's branches, so they cannot
+        // learn a default branch. They must not take away an in-sync status an earlier full sync established.
+        var knowsNothingAboutRemote = snapshot.RemoteBranches is null;
+        var keepsEarlierSync = knowsNothingAboutRemote && state.SyncStatus == RepoSyncStatus.InSync;
+
+        state.SyncStatus = !hasIdentity
             ? RepoSyncStatus.Error
-            : hasDefaultBranch ? RepoSyncStatus.InSync : RepoSyncStatus.NeedsSync;
+            : hasDefaultBranch || remoteIsEmpty || keepsEarlierSync ? RepoSyncStatus.InSync : RepoSyncStatus.NeedsSync;
     }
 
     private async Task ApplyProjectsAsync(

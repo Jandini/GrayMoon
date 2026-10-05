@@ -861,6 +861,7 @@
         var pushOps = scope.ServiceProvider.GetRequiredService<IWorkspacePushOperations>();
                 var contextId = await ResolveOperationContextAsync(scope.ServiceProvider, workspaceId, ct);
         var depService = scope.ServiceProvider.GetRequiredService<WorkspaceDependencyService>();
+        var workspaceRepoForNeedPush = scope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
 
         var plan = await pushOps.GetPlanAsync(workspaceId, contextId, maxLevel, ct);
         if (!plan.HasUnpushed || plan.RepositoryIds.Count == 0)
@@ -869,11 +870,8 @@
             return;
         }
 
-        var repoIdsThatNeedPush = links
-            .Where(wr => !wr.IsOnTag && (wr.OutgoingCommits ?? 0) > 0)
-            .Where(wr => !maxLevel.HasValue || (wr.DependencyLevel ?? 0) <= maxLevel.Value)
-            .Select(wr => wr.RepositoryId)
-            .ToHashSet();
+        var repoIdsThatNeedPush = await workspaceRepoForNeedPush.GetRepositoryIdsThatNeedPushForNotificationAsync(
+            workspaceId, contextId.Value, links.Select(l => l.RepositoryId).ToHashSet(), maxLevel, includeNeverPushedUpstream: false, ct);
         var pushRepoIds = plan.RepositoryIds;
         var depInfo = await depService.GetPushDependencyInfoForRepoSetAsync(workspaceId, contextId.Value, pushRepoIds, ct);
         bool synchronizedPush = WorkspaceDependencyService.ShouldShowSynchronizedPushModal(depInfo, repoIdsThatNeedPush);
@@ -930,15 +928,14 @@
             await using var scope = ServiceScopeFactory.CreateAsyncScope();
             var depService = scope.ServiceProvider.GetRequiredService<WorkspaceDependencyService>();
             var contextId = await ResolveOperationContextAsync(scope.ServiceProvider, workspaceId, CancellationToken.None);
-            HashSet<int> repoIdsThatNeedPush;
+            IReadOnlySet<int> repoIdsThatNeedPush;
             if (n.TotalActionRepoCount > n.Repos.Count)
             {
                 var workspaceRepo = scope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
                 var ws = await workspaceRepo.GetByIdAsync(workspaceId);
-                repoIdsThatNeedPush = (ws?.Repositories ?? [])
-                    .Where(wr => !wr.IsOnTag && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false))
-                    .Select(wr => wr.RepositoryId)
-                    .ToHashSet();
+                var repoIds = (ws?.Repositories ?? []).Select(wr => wr.RepositoryId).ToHashSet();
+                repoIdsThatNeedPush = await workspaceRepo.GetRepositoryIdsThatNeedPushForNotificationAsync(
+                    workspaceId, contextId.Value, repoIds, maxLevel: null, includeNeverPushedUpstream: true, CancellationToken.None);
             }
             else
             {

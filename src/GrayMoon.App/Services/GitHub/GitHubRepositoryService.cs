@@ -91,18 +91,21 @@ public sealed class GitHubRepositoryService(
 
         IReadOnlyList<RenamedRepositoryInfo> renamedRepositories = [];
         IReadOnlyDictionary<int, int> mergedIdMap = new Dictionary<int, int>();
+        IReadOnlyList<KeptRepositoryForFeaturesInfo> keptForFeatures = [];
         if (allFetched.Count > 0)
         {
             var mergeResult = await repositoryRepository.MergeRepositoriesAsync(allFetched);
             renamedRepositories = mergeResult.Renames;
             mergedIdMap = mergeResult.MergedRepositoryIdMap;
+            keptForFeatures = mergeResult.KeptForFeatures;
         }
 
         return new RefreshRepositoriesResult
         {
             ConnectorErrors = connectorErrors,
             RenamedRepositories = renamedRepositories,
-            MergedRepositoryIdMap = mergedIdMap
+            MergedRepositoryIdMap = mergedIdMap,
+            KeptForFeatures = keptForFeatures
         };
     }
 }

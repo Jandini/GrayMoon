@@ -830,6 +830,18 @@
     cursor: not-allowed;
 }
 
+::deep .repositories-table .off-feature-branch-badge {
+    cursor: pointer;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+::deep .repositories-table .off-feature-branch-badge--disabled {
+    pointer-events: none;
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
 /* Version container with hover effect */
 ::deep .repositories-table .version-container {
     display: inline-flex;
@@ -856,6 +868,16 @@
 ::deep .repositories-table .version-inner:hover {
     background-color: #2c3136;
     border-color: #5a6268;
+}
+
+/* Version GitVersion could not compute: same box as the version, in red, and nothing to copy or highlight. */
+::deep .repositories-table .version-inner.version-inner--unresolved,
+::deep .repositories-table .version-inner.version-inner--unresolved:hover {
+    color: var(--bs-danger, #dc3545);
+    background-color: transparent;
+    border-color: transparent;
+    box-shadow: none;
+    cursor: default;
 }
 
 /* Workspaces breadcrumb link - same gray as "X repositories", override global a color */
@@ -915,6 +937,24 @@
 
 .page-error-callout {
     margin-top: 0.5rem;
+}
+
+/* "This Feature needs attention." banner - same look as .page-error-callout (dark tinted strip with an
+   inset accent bar) but amber instead of red, since it's a warning rather than a hard error. No old-fashioned
+   bordered Bootstrap alert box - and no button here, since the header's "Repair" button (replacing Sync while
+   the Feature needs repair) is now the single, clearly visible way to open the status-and-repair dialog. */
+.page-warning-callout {
+    font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    padding: 0.35rem 0.75rem;
+    margin: 0.5rem 0 0;
+    white-space: pre-line;
+    overflow-wrap: break-word;
+    word-break: break-word;
+    color: #d4d4d4;
+    background: rgba(245, 158, 11, 0.18);
+    box-shadow: inset 3px 0 0 #f59e0b;
 }
 
 /* Combined metrics column (divergence, PR, deps, commits, status) */

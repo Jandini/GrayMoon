@@ -1,6 +1,6 @@
 # Appendix to the plan: why lane G (Git hooks) is in worktrees v1
 
-Companion to `06-worktree-release-implementation-plan.md`, units G1 to G4. Code references are on branch `opus-review` (`a06fe33`); locate them by symbol, since line numbers drift.
+Companion to `06-worktree-release-implementation-plan.md` (unit G1) and `12-hook-cleanup-plan.md` (units G2 to G4, moved out of the worktree plan on 2026-10-04; section 6 below is their background). Code references are on branch `opus-review` (`a06fe33`); locate them by symbol, since line numbers drift.
 
 ## 1. What GrayMoon's hooks do today
 

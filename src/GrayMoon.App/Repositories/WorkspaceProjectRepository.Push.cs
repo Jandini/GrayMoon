@@ -135,6 +135,45 @@ public sealed partial class WorkspaceProjectRepository
         return result.OrderBy(r => r.RepoName, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
+    /// <summary>Returns each repo's effective CheckedOutTag scoped to <paramref name="workspaceFeatureContextId"/>: reads <see cref="WorkspaceRepositoryContextState.CheckedOutTag"/> when a row exists for that context, falling back to the shared <see cref="WorkspaceRepositoryLink.CheckedOutTag"/> only for the special Workspace context (or when no context-state row has been persisted for that repo yet) - same fallback rule as <see cref="GetContextVersionAndLevelByRepoAsync"/>. Used so a Feature's own tag-pinned repos are excluded from its push plan instead of the Workspace's.</summary>
+    private async Task<Dictionary<int, string?>> GetContextCheckedOutTagByRepoAsync(
+        int workspaceId,
+        int workspaceFeatureContextId,
+        CancellationToken cancellationToken)
+    {
+        var isSpecialWorkspace = await dbContext.WorkspaceFeatureContexts
+            .AsNoTracking()
+            .Where(c => c.WorkspaceFeatureContextId == workspaceFeatureContextId)
+            .Select(c => c.Kind == WorkspaceFeatureContextKind.Workspace)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var links = await dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Where(wr => wr.WorkspaceId == workspaceId)
+            .Select(wr => new { wr.RepositoryId, wr.WorkspaceRepositoryId, wr.CheckedOutTag })
+            .ToListAsync(cancellationToken);
+
+        var states = await dbContext.WorkspaceRepositoryContextStates
+            .AsNoTracking()
+            .Where(s => s.WorkspaceFeatureContextId == workspaceFeatureContextId
+                && links.Select(l => l.WorkspaceRepositoryId).Contains(s.WorkspaceRepositoryId))
+            .Select(s => new { s.WorkspaceRepositoryId, s.CheckedOutTag })
+            .ToListAsync(cancellationToken);
+        var stateByLinkId = states.ToDictionary(s => s.WorkspaceRepositoryId);
+
+        var tagByRepo = new Dictionary<int, string?>();
+        foreach (var link in links)
+        {
+            if (stateByLinkId.TryGetValue(link.WorkspaceRepositoryId, out var state))
+                tagByRepo[link.RepositoryId] = state.CheckedOutTag;
+            else if (isSpecialWorkspace)
+                tagByRepo[link.RepositoryId] = link.CheckedOutTag;
+            else
+                tagByRepo[link.RepositoryId] = null;
+        }
+        return tagByRepo;
+    }
+
     /// <summary>Legacy overload for callers without a context id: resolves the special Workspace context.</summary>
     public async Task<List<PushRepoPayload>> GetPushPlanPayloadAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
@@ -153,6 +192,7 @@ public sealed partial class WorkspaceProjectRepository
         if (links.Count == 0) return new List<PushRepoPayload>();
 
         var (_, contextLevelByRepo) = await GetContextVersionAndLevelByRepoAsync(workspaceId, workspaceFeatureContextId, cancellationToken);
+        var checkedOutTagByRepo = await GetContextCheckedOutTagByRepoAsync(workspaceId, workspaceFeatureContextId, cancellationToken);
 
         var repoIdsInWorkspace = links.Select(l => l.RepositoryId).ToHashSet();
         var levelByRepo = contextLevelByRepo
@@ -204,7 +244,7 @@ public sealed partial class WorkspaceProjectRepository
         var result = new List<PushRepoPayload>();
         foreach (var link in links)
         {
-            if (!string.IsNullOrWhiteSpace(link.CheckedOutTag))
+            if (!string.IsNullOrWhiteSpace(checkedOutTagByRepo.GetValueOrDefault(link.RepositoryId)))
                 continue;
             var repo = link.Repository;
             var repoName = repo?.RepositoryName ?? "";

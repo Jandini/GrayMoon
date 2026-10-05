@@ -73,6 +73,13 @@ public static class GitWorktreePorcelainParser
                     ? line["prunable".Length..].TrimStart()
                     : null;
             }
+            else if (line.StartsWith("locked", StringComparison.Ordinal))
+            {
+                current.IsLocked = true;
+                current.LockReason = line.Length > "locked".Length
+                    ? line["locked".Length..].TrimStart()
+                    : null;
+            }
         }
 
         if (current != null)

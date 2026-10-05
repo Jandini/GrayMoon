@@ -2,6 +2,7 @@ using GrayMoon.Abstractions.Agent;
 using GrayMoon.Abstractions.Notifications;
 using GrayMoon.App.Services;
 using GrayMoon.App.Services.GitChanges;
+using GrayMoon.App.Services.Security;
 using GrayMoon.Common.Git;
 using Microsoft.AspNetCore.SignalR;
 
@@ -12,6 +13,7 @@ public sealed class AgentHub(
     AgentQueueStateService agentQueueStateService,
     AgentSyncNotificationQueue syncNotificationQueue,
     WorkspaceGitChangesWriteQueue gitChangesWriteQueue,
+    WorkerSecretService workerSecret,
     IServiceScopeFactory scopeFactory,
     ILogger<AgentHub> logger) : Hub
 {
@@ -40,6 +42,7 @@ public sealed class AgentHub(
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         connectionTracker.OnAgentDisconnected(Context.ConnectionId);
+        workerSecret.NoteWorkerDisconnected();
         agentQueueStateService.Clear();
         // Fail any request still in flight immediately rather than letting it wait out its full
         // AgentBridge command timeout - there is only ever one agent connection, so no per-connection
