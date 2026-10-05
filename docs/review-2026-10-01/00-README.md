@@ -19,6 +19,7 @@ This folder is a full review of GrayMoon and GrayMoon.Desktop, focused on closin
 | [12-hook-cleanup-plan.md](12-hook-cleanup-plan.md) | Separate plan, run after the worktree plan: G2 to G4 (Worker `UnhookRepository`, unhook when repos leave a Workspace, self-heal stale hooks), moved out of `06` |
 | [13-gate-4-test-progress.md](13-gate-4-test-progress.md) | Owner's checklist for GATE-4: tick boxes and write notes while testing |
 | [11-post-release-plans.md](11-post-release-plans.md) | Documentation-only plans for after v1: a REST API that can target a Feature (v1 only documents the limit) and the `WorkspaceFeatureOperations` refactor |
+| [14-cross-computer-pr-and-parent-branch-detection.md](14-cross-computer-pr-and-parent-branch-detection.md) | Does Remove-Feature detect a PR created/merged from a second computer's plain checkout (yes, by branch name, regardless of merge target)? Why does the New PR dialog default to `main` there instead of the parent branch (git has no parent-branch concept; GrayMoon's `ParentBranchName` is a Feature-only, local-database-only snapshot)? |
 
 ## Verdict
 
