@@ -72,10 +72,26 @@
     display: block !important;
 }
 
+/* Render "Configure application settings" as a tight subtitle directly under the page title
+   instead of a normally-spaced paragraph. */
+.settings-page__subtitle {
+    margin-top: 0.25rem;
+    font-size: 0.875rem;
+}
+
 .settings-page .settings-page__card {
     flex: none !important;
     min-height: 0 !important;
     display: block !important;
+}
+
+/* The settings page stacks multiple cards vertically (unlike other grid pages, which show a
+   single card filling the body), so unlike app.css's `.grid-page-body .page-card.mb-4` rule
+   (which zeroes out mb-4 to match left/right padding for single-card pages), we need to restore
+   a visible gap between the Workspace and Terminal Color cards here. Extra class specificity is
+   required to win over app.css's `!important` margin-bottom: 0 rule. */
+.settings-page.settings-page__scroll .grid-page-body .page-card.mb-4.settings-page__card {
+    margin-bottom: 1.5rem !important;
 }
 
 .settings-page .settings-page__card .card-body {
