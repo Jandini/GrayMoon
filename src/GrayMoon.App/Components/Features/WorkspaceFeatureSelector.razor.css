@@ -363,6 +363,40 @@
     z-index: 1062;
 }
 
+/* Gray, auto-width scrollbars for menus that scroll (matches tree / table scrollbars). */
+.workspace-feature-selector__menu,
+.workspace-feature-selector__ws-features-submenu,
+.workspace-feature-selector__repo-submenu {
+    scrollbar-width: auto;
+    scrollbar-color: #5a5a5a var(--bg-card, #252526);
+}
+
+.workspace-feature-selector__menu::-webkit-scrollbar,
+.workspace-feature-selector__ws-features-submenu::-webkit-scrollbar,
+.workspace-feature-selector__repo-submenu::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.workspace-feature-selector__menu::-webkit-scrollbar-track,
+.workspace-feature-selector__ws-features-submenu::-webkit-scrollbar-track,
+.workspace-feature-selector__repo-submenu::-webkit-scrollbar-track {
+    background: var(--bg-card, #252526);
+}
+
+.workspace-feature-selector__menu::-webkit-scrollbar-thumb,
+.workspace-feature-selector__ws-features-submenu::-webkit-scrollbar-thumb,
+.workspace-feature-selector__repo-submenu::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 4px;
+}
+
+.workspace-feature-selector__menu::-webkit-scrollbar-thumb:hover,
+.workspace-feature-selector__ws-features-submenu::-webkit-scrollbar-thumb:hover,
+.workspace-feature-selector__repo-submenu::-webkit-scrollbar-thumb:hover {
+    background: #6a6a6a;
+}
+
 .workspace-feature-selector__repo-flyout:hover > .workspace-feature-selector__repo-submenu,
 .workspace-feature-selector__repo-flyout:focus-within > .workspace-feature-selector__repo-submenu {
     display: block;

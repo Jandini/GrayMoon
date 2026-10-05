@@ -658,22 +658,7 @@ public sealed class WorkspaceBranchOperations(
 
         if (!isRemote)
         {
-            string? currentBranch = wr.BranchName;
-            await using (var db = await dbContextFactory.CreateDbContextAsync(cancellationToken))
-            {
-                var info = await contextResolver.GetRequiredAsync(contextId, workspaceId, cancellationToken);
-                if (!info.IsSpecialWorkspace)
-                {
-                    var state = await db.WorkspaceRepositoryContextStates
-                        .AsNoTracking()
-                        .FirstOrDefaultAsync(
-                            s => s.WorkspaceFeatureContextId == contextId.Value
-                                 && s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId,
-                            cancellationToken);
-                    if (state != null)
-                        currentBranch = state.BranchName;
-                }
-            }
+            var currentBranch = await GetCurrentBranchAsync(workspaceId, contextId, wr.WorkspaceRepositoryId, cancellationToken);
 
             if (string.Equals(currentBranch, branchName, StringComparison.OrdinalIgnoreCase))
                 return BranchHttpOutcome.BadRequest("Cannot delete the current branch. Check out another branch first.");
@@ -713,7 +698,7 @@ public sealed class WorkspaceBranchOperations(
                 await dbContext.SaveChangesAsync(cancellationToken);
             }
 
-            if (isRemote && string.Equals(wr.BranchName, branchName, StringComparison.OrdinalIgnoreCase))
+            if (isRemote && string.Equals(await GetCurrentBranchAsync(workspaceId, contextId, wr.WorkspaceRepositoryId, cancellationToken), branchName, StringComparison.OrdinalIgnoreCase))
             {
                 wr.BranchHasUpstream = false;
                 await dbContext.SaveChangesAsync(cancellationToken);
@@ -772,6 +757,41 @@ public sealed class WorkspaceBranchOperations(
                         && r.WorkspaceRepositoryId == workspaceRepositoryId
                         && r.PinnedTag != null)
             .ExecuteUpdateAsync(s => s.SetProperty(r => r.PinnedTag, tagName), cancellationToken);
+    }
+
+    /// <summary>
+    /// The branch the repository is on right now in the viewed context, read from a fresh untracked context.
+    /// Never use the link returned by <see cref="TryResolveLinkedRepoAsync"/> for this: that comes from the
+    /// circuit-scoped <c>dbContext</c>, which keeps tracking a link loaded earlier (for example while the repository
+    /// was still on the branch the user has since switched away from) and does not see what the sync writer saved
+    /// through another context.
+    /// </summary>
+    private async Task<string?> GetCurrentBranchAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        int workspaceRepositoryId,
+        CancellationToken cancellationToken)
+    {
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        var info = await contextResolver.GetRequiredAsync(contextId, workspaceId, cancellationToken);
+        if (!info.IsSpecialWorkspace)
+        {
+            var state = await db.WorkspaceRepositoryContextStates
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    s => s.WorkspaceFeatureContextId == contextId.Value
+                         && s.WorkspaceRepositoryId == workspaceRepositoryId,
+                    cancellationToken);
+            if (state != null)
+                return state.BranchName;
+        }
+
+        return await db.WorkspaceRepositories
+            .AsNoTracking()
+            .Where(w => w.WorkspaceRepositoryId == workspaceRepositoryId)
+            .Select(w => w.BranchName)
+            .FirstOrDefaultAsync(cancellationToken);
     }
 
     private async Task<(BranchHttpOutcome? Error, Workspace? Workspace, Repository? Repo, WorkspaceRepositoryLink? Link)> TryResolveLinkedRepoAsync(

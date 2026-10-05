@@ -258,6 +258,7 @@ Notes:
 | E | 2 | Merge dialog showed "1 uncommitted change" for a clean Feature worktree (stale Git Changes snapshot after a terminal commit; informational only, needs "Merge anyway") | v1.1 |
 | F | log | Once, a unique-constraint error inserting the Git Changes snapshot (`WorkspaceGitContextRepositoryStatuses`), caught and not user visible: two writers race in `GitChangesSnapshotPushHandler` (probably also the cause of E) | v1.1, non-blocking |
 | G | 2 | After Remove with "Delete remote Feature branches", the Workspace repo still lists `origin/gate4-br` until a fetch with prune | v1.1 |
+| H | branch dialog | Owner report 2026-10-05: created a branch in all repositories, switched one repository back to main, then deleting the new branch from the switch-branch dialog said "Cannot delete the current branch" although the repository was on main. Cause: the delete check read the branch from a link tracked by the page's long-lived database context, which still held the old branch (the sync had saved main through another context). Worker was never called. | Fixed in code (fresh read), regression tests added; needs a check on a new build |
 
 ## Final result
 
