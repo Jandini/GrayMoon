@@ -11,7 +11,14 @@
         <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Remove Feature</h5>
+                    @* Title no-wrap/ellipsis — same .modal-title--compound convention as BranchModal/SwitchBranchModal/FeatureStatusPanel. *@
+                    <h5 class="modal-title modal-title--compound">
+                        <span class="modal-title__primary">Remove Feature</span>
+                        @if (!string.IsNullOrEmpty(_featureName))
+                        {
+                            <span class="modal-title__secondary text-muted fw-normal fs-6" title="@_featureName">@_featureName</span>
+                        }
+                    </h5>
                     <button type="button" class="btn-close" aria-label="Close" @onclick="@(_report is null ? Cancel : Done)" disabled="@_analyzing"></button>
                 </div>
                 <div class="modal-body">
@@ -220,6 +227,8 @@
     private bool _deleteRemoteBranches;
     private int? _analyzedFor;
     private int? _appliedInitialPlanFor;
+    private string? _featureName;
+    private int? _featureNameLoadedFor;
 
     /// <summary>
     /// True when a successful remove left something the user should acknowledge: kept/failed branch,
@@ -453,8 +462,16 @@
     internal const string NothingPendingStatusMessage = "Up to date with nothing pending";
     internal const string NoPullRequestStatusMessage = "No pull request has been opened for this branch";
 
+    /// <summary>
+    /// True when the Feature still has work the user hasn't safely saved (dirty worktree, or local
+    /// commits/branches that would be force-deleted). "Completed" classification only reflects pull
+    /// request state, so a Feature can be PR-Completed and still have this kind of pending work; in
+    /// that case the headline must not call removal "safe" (fixes the Completed+dirty contradiction).
+    /// </summary>
+    private bool HasUnsavedWork => ShowDiscardCheckbox || ShowForceCheckbox;
+
     private bool UseNeutralStatusText =>
-        _plan?.Classification == RemoveFeatureClassification.Completed;
+        _plan?.Classification == RemoveFeatureClassification.Completed && !HasUnsavedWork;
 
     private string RemoveCtaClass =>
         _plan is not null && !RemoveCtaIsDestructive(_plan)
@@ -557,6 +574,17 @@
             if (_plan?.Classification == RemoveFeatureClassification.Active && HasOutgoingCommitsWithoutPullRequest)
                 return "Some repositories have commits that are not in a pull request yet.";
 
+            // Completed only describes pull-request state (merged, or never opened). A Feature can be
+            // Completed and still have unsaved worktree changes or local commits ahead of default - in
+            // that case don't call it "safe to remove" here, since the warning callout below says the
+            // opposite.
+            if (_plan?.Classification == RemoveFeatureClassification.Completed && HasUnsavedWork)
+            {
+                return AllPullRequestsMerged
+                    ? "This feature's pull requests are merged, but it still has work that hasn't been saved. Review before removing."
+                    : "This feature has no pull request pending, but it still has work that hasn't been saved. Review before removing.";
+            }
+
             return _plan?.Classification switch
             {
                 RemoveFeatureClassification.Completed when AllPullRequestsMerged =>
@@ -578,6 +606,7 @@
     {
         RemoveFeatureClassification.Abandoned => "gm-callout--warning",
         RemoveFeatureClassification.NeedsRepair => "gm-callout--warning",
+        RemoveFeatureClassification.Completed when HasUnsavedWork => "gm-callout--warning",
         _ => "gm-callout--info"
     };
 
@@ -657,6 +686,10 @@
         if (!IsVisible || FeatureContextId is null)
             return;
 
+        // Fire-and-forget: title subtitle only, never blocks or fails the removal flow itself.
+        if (_featureNameLoadedFor != FeatureContextId.Value.Value)
+            _ = LoadFeatureNameAsync(FeatureContextId.Value);
+
         // After a successful remove the Feature context is gone. Never re-analyze while showing the
         // warnings report (or while the structural overlay is covering the page) - that would surface
         // "WorkspaceFeatureContext N was not found" next to the removal outcome.
@@ -685,6 +718,28 @@
         finally
         {
             _analyzing = false;
+        }
+    }
+
+    /// <summary>
+    /// Loads the Feature name for the title subtitle, same source as <see cref="FeatureStatusPanel"/>.
+    /// Purely cosmetic: failures are swallowed so a transient lookup error never blocks or interrupts
+    /// the removal flow.
+    /// </summary>
+    private async Task LoadFeatureNameAsync(WorkspaceFeatureContextId contextId)
+    {
+        _featureNameLoadedFor = contextId.Value;
+        try
+        {
+            var status = await FeatureOperations.GetFeatureStatusAsync(contextId);
+            if (FeatureContextId?.Value != contextId.Value)
+                return;
+            _featureName = status?.FeatureName;
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to load Feature name for Remove Feature dialog title");
         }
     }
 
@@ -791,6 +846,8 @@
         _plan = null;
         _analyzedFor = null;
         _appliedInitialPlanFor = null;
+        _featureName = null;
+        _featureNameLoadedFor = null;
         _report = null;
         _allowDiscard = false;
         _allowForce = false;
