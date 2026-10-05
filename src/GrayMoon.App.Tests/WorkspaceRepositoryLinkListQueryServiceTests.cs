@@ -1,5 +1,7 @@
+using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services.Queries;
+using GrayMoon.Application.Features;
 using GrayMoon.Common.Git;
 using Microsoft.EntityFrameworkCore;
 
@@ -234,6 +236,164 @@ public class WorkspaceRepositoryLinkListQueryServiceTests
         }
     }
 
+    [Fact]
+    public async Task Feature_context_sort_keyset_and_level_grouping_use_context_state_not_shared_link()
+    {
+        var (ctx, workspaceId) = await ListQueryTestContext.CreateWithWorkspaceLinksAsync(12);
+        await using (ctx)
+        {
+            var contextId = await CreateFeatureContextAsync(ctx.DbContext, workspaceId, "feature-a");
+
+            // Give every link a context state whose DependencyLevel/RepositoryType/Dependencies/GitVersion are
+            // deliberately the *inverse* of the shared link's, so any code path that accidentally reads the
+            // link instead of the context state produces different sort order / grouping / results.
+            var links = await ctx.DbContext.WorkspaceRepositories.AsNoTracking()
+                .Where(wr => wr.WorkspaceId == workspaceId)
+                .ToListAsync();
+            foreach (var link in links)
+            {
+                ctx.DbContext.WorkspaceRepositoryContextStates.Add(new WorkspaceRepositoryContextState
+                {
+                    WorkspaceFeatureContextId = contextId.Value,
+                    WorkspaceRepositoryId = link.WorkspaceRepositoryId,
+                    DependencyLevel = 99 - (link.DependencyLevel ?? 0),
+                    Dependencies = 99 - (link.Dependencies ?? 0),
+                    RepositoryType = link.RepositoryType == ProjectType.Service ? ProjectType.Library : ProjectType.Service,
+                    GitVersion = $"context-{link.WorkspaceRepositoryId}",
+                });
+            }
+            await ctx.DbContext.SaveChangesAsync();
+
+            var filter = new WorkspaceRepositoryLinkListFilter(workspaceId, null);
+
+            // GetIndexAsync/BuildSlots grouping must key off the context's level, not the link's.
+            var index = await ctx.WorkspaceRepoLinkQuery.GetIndexAsync(
+                filter, contextId, isSpecialWorkspace: false);
+            Assert.Equal(links.Count, index.Count);
+            foreach (var entry in index)
+            {
+                var link = links.Single(l => l.WorkspaceRepositoryId == entry.WorkspaceRepositoryId);
+                Assert.Equal(99 - (link.DependencyLevel ?? 0), entry.DependencyLevel);
+            }
+            var expectedOrder = index.OrderByDescending(e => e.DependencyLevel ?? int.MinValue).Select(e => e.WorkspaceRepositoryId).ToList();
+            Assert.Equal(expectedOrder, index.Select(e => e.WorkspaceRepositoryId).ToList());
+
+            // GetPageAsync's sort/keyset must reach the same order using the context state.
+            var page = await ctx.WorkspaceRepoLinkQuery.GetPageAsync(
+                new WorkspaceRepositoryLinkListRequest(workspaceId, null, 50, null), contextId, isSpecialWorkspace: false);
+            Assert.Equal(index.Select(e => e.WorkspaceRepositoryId), page.Items.Select(i => i.WorkspaceRepositoryId));
+
+            // GetRepositoryIdsAtLevelAsync ("jump to level" / bulk level actions) must match against the
+            // context's level, not the link's.
+            var someLink = links[0];
+            var contextLevel = 99 - (someLink.DependencyLevel ?? 0);
+            var idsAtLevel = await ctx.WorkspaceRepoLinkQuery.GetRepositoryIdsAtLevelAsync(
+                workspaceId, contextLevel, null, contextId, isSpecialWorkspace: false);
+            Assert.Contains(someLink.RepositoryId, idsAtLevel);
+            Assert.DoesNotContain(someLink.RepositoryId, await ctx.WorkspaceRepoLinkQuery.GetRepositoryIdsAtLevelAsync(
+                workspaceId, someLink.DependencyLevel, null, contextId, isSpecialWorkspace: false));
+
+            // GetGitVersionNameMapAsync must read the context's GitVersion, not the link's. The test fixture
+            // reuses repository names ("graymoon-api" for every even RepositoryId), so restrict this check to
+            // repos with a unique name - the map is keyed by name and can't distinguish same-named repos
+            // either way, which is a pre-existing limitation unrelated to context-scoping.
+            var versionMap = await ctx.WorkspaceRepoLinkQuery.GetGitVersionNameMapAsync(
+                workspaceId, contextId, isSpecialWorkspace: false);
+            var repoNamesById = await ctx.DbContext.Repositories.AsNoTracking()
+                .ToDictionaryAsync(r => r.RepositoryId, r => r.RepositoryName);
+            var namesWithSingleRepo = repoNamesById.Values
+                .GroupBy(n => n, StringComparer.OrdinalIgnoreCase)
+                .Where(g => g.Count() == 1)
+                .Select(g => g.Key)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            Assert.All(links.Where(l => namesWithSingleRepo.Contains(repoNamesById[l.RepositoryId])), link =>
+            {
+                var repoName = repoNamesById[link.RepositoryId];
+                Assert.True(versionMap.TryGetValue(repoName, out var version));
+                Assert.Equal($"context-{link.WorkspaceRepositoryId}", version);
+            });
+
+            // The special Workspace's own read of the same rows must still use the shared link, unaffected.
+            var workspaceIndex = await ctx.WorkspaceRepoLinkQuery.GetIndexAsync(filter);
+            foreach (var entry in workspaceIndex)
+            {
+                var link = links.Single(l => l.WorkspaceRepositoryId == entry.WorkspaceRepositoryId);
+                Assert.Equal(link.DependencyLevel, entry.DependencyLevel);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task Feature_context_rows_carry_the_Feature_pinned_tag_and_Workspace_rows_do_not()
+    {
+        var (ctx, workspaceId) = await ListQueryTestContext.CreateWithWorkspaceLinksAsync(3);
+        await using (ctx)
+        {
+            var contextId = await CreateFeatureContextAsync(ctx.DbContext, workspaceId, "feature-pin");
+            var links = await ctx.DbContext.WorkspaceRepositories.AsNoTracking()
+                .Where(wr => wr.WorkspaceId == workspaceId)
+                .OrderBy(wr => wr.WorkspaceRepositoryId)
+                .ToListAsync();
+            var pinned = links[0];
+            ctx.DbContext.WorkspaceFeatureRepositories.AddRange(
+                new WorkspaceFeatureRepository
+                {
+                    WorkspaceFeatureContextId = contextId.Value,
+                    WorkspaceRepositoryId = pinned.WorkspaceRepositoryId,
+                    WorktreePath = "C:\\wt\\pinned",
+                    BaseCommitSha = "abc",
+                    PinnedTag = "1.2.0",
+                },
+                new WorkspaceFeatureRepository
+                {
+                    WorkspaceFeatureContextId = contextId.Value,
+                    WorkspaceRepositoryId = links[1].WorkspaceRepositoryId,
+                    WorktreePath = "C:\\wt\\branch",
+                    BaseCommitSha = "abc",
+                });
+            await ctx.DbContext.SaveChangesAsync();
+
+            var request = new WorkspaceRepositoryLinkListRequest(workspaceId, null, 50, null);
+            var featurePage = await ctx.WorkspaceRepoLinkQuery.GetPageAsync(request, contextId, isSpecialWorkspace: false);
+            var byId = featurePage.Items.ToDictionary(i => i.WorkspaceRepositoryId);
+            Assert.Equal("1.2.0", byId[pinned.WorkspaceRepositoryId].FeaturePinnedTag);
+            Assert.Null(byId[links[1].WorkspaceRepositoryId].FeaturePinnedTag);
+            Assert.Null(byId[links[2].WorkspaceRepositoryId].FeaturePinnedTag);
+            Assert.Equal("1.2.0", WorkspaceRepositoryLinkListMapper.ToLink(byId[pinned.WorkspaceRepositoryId]).FeaturePinnedTag);
+
+            var workspacePage = await ctx.WorkspaceRepoLinkQuery.GetPageAsync(request);
+            Assert.All(workspacePage.Items, i => Assert.Null(i.FeaturePinnedTag));
+        }
+    }
+
+    private static async Task<WorkspaceFeatureContextId> CreateFeatureContextAsync(
+        AppDbContext db, int workspaceId, string name)
+    {
+        var feature = new WorkspaceFeature
+        {
+            WorkspaceId = workspaceId,
+            Name = name,
+            LifecycleState = WorkspaceFeatureLifecycleState.Ready,
+            BaseKind = WorkspaceFeatureBaseKind.CurrentWorkspace,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        db.WorkspaceFeatures.Add(feature);
+        await db.SaveChangesAsync();
+
+        var context = new WorkspaceFeatureContext
+        {
+            WorkspaceId = workspaceId,
+            Kind = WorkspaceFeatureContextKind.Feature,
+            WorkspaceFeatureId = feature.WorkspaceFeatureId,
+            CreatedAt = DateTime.UtcNow,
+            IsInSync = true,
+        };
+        db.WorkspaceFeatureContexts.Add(context);
+        await db.SaveChangesAsync();
+        return new WorkspaceFeatureContextId(context.WorkspaceFeatureContextId);
+    }
+
     private static WorkspaceGitChangeEntry Entry(int workspaceRepositoryId, string path, GitChangeKind index, GitChangeKind worktree) =>
         new()
         {
@@ -254,6 +414,130 @@ public class WorkspaceRepositoryLinkListQueryServiceTests
             Assert.Equal(15, header.TotalCount);
             Assert.True(header.HasUnmatchedDependencies);
             Assert.True(header.IsPushRecommended);
+        }
+    }
+
+    // E2: AllFeaturePrsCompleted drives the header's "Remove" primary action and must only be true once
+    // every repository's pull request is merged or closed and no repository has commits outside a PR.
+
+    [Fact]
+    public async Task AllFeaturePrsCompleted_false_for_special_Workspace()
+    {
+        var (ctx, workspaceId) = await ListQueryTestContext.CreateWithWorkspaceLinksAsync(5);
+        await using (ctx)
+        {
+            var header = await ctx.WorkspaceRepoLinkQuery.GetHeaderStateAsync(workspaceId);
+            Assert.False(header.AllFeaturePrsCompleted);
+        }
+    }
+
+    [Fact]
+    public async Task AllFeaturePrsCompleted_false_with_no_pull_request_at_all()
+    {
+        var (ctx, workspaceId) = await ListQueryTestContext.CreateWithWorkspaceLinksAsync(3);
+        await using (ctx)
+        {
+            var contextId = await CreateFeatureContextAsync(ctx.DbContext, workspaceId, "feature-no-pr");
+
+            var header = await ctx.WorkspaceRepoLinkQuery.GetHeaderStateAsync(
+                workspaceId, contextId, isSpecialWorkspace: false);
+
+            Assert.False(header.HasCreatablePr);
+            Assert.False(header.HasOpenPr);
+            Assert.False(header.AllFeaturePrsCompleted);
+        }
+    }
+
+    [Fact]
+    public async Task AllFeaturePrsCompleted_true_when_only_pr_is_merged()
+    {
+        var (ctx, workspaceId) = await ListQueryTestContext.CreateWithWorkspaceLinksAsync(3);
+        await using (ctx)
+        {
+            var contextId = await CreateFeatureContextAsync(ctx.DbContext, workspaceId, "feature-merged");
+            var link = await ctx.DbContext.WorkspaceRepositories.AsNoTracking()
+                .FirstAsync(wr => wr.WorkspaceId == workspaceId);
+
+            ctx.DbContext.WorkspaceRepositoryContextPullRequests.Add(new WorkspaceRepositoryContextPullRequest
+            {
+                WorkspaceFeatureContextId = contextId.Value,
+                WorkspaceRepositoryId = link.WorkspaceRepositoryId,
+                PullRequestNumber = 42,
+                State = "closed",
+                MergedAt = DateTimeOffset.UtcNow,
+            });
+            await ctx.DbContext.SaveChangesAsync();
+
+            var header = await ctx.WorkspaceRepoLinkQuery.GetHeaderStateAsync(
+                workspaceId, contextId, isSpecialWorkspace: false);
+
+            Assert.False(header.HasCreatablePr);
+            Assert.False(header.HasOpenPr);
+            Assert.True(header.AllFeaturePrsCompleted);
+        }
+    }
+
+    [Fact]
+    public async Task AllFeaturePrsCompleted_false_when_a_pr_is_still_open()
+    {
+        var (ctx, workspaceId) = await ListQueryTestContext.CreateWithWorkspaceLinksAsync(3);
+        await using (ctx)
+        {
+            var contextId = await CreateFeatureContextAsync(ctx.DbContext, workspaceId, "feature-open");
+            var link = await ctx.DbContext.WorkspaceRepositories.AsNoTracking()
+                .FirstAsync(wr => wr.WorkspaceId == workspaceId);
+
+            ctx.DbContext.WorkspaceRepositoryContextPullRequests.Add(new WorkspaceRepositoryContextPullRequest
+            {
+                WorkspaceFeatureContextId = contextId.Value,
+                WorkspaceRepositoryId = link.WorkspaceRepositoryId,
+                PullRequestNumber = 7,
+                State = "open",
+            });
+            await ctx.DbContext.SaveChangesAsync();
+
+            var header = await ctx.WorkspaceRepoLinkQuery.GetHeaderStateAsync(
+                workspaceId, contextId, isSpecialWorkspace: false);
+
+            Assert.True(header.HasOpenPr);
+            Assert.False(header.AllFeaturePrsCompleted);
+        }
+    }
+
+    [Fact]
+    public async Task AllFeaturePrsCompleted_false_when_another_repo_has_commits_outside_a_pr()
+    {
+        var (ctx, workspaceId) = await ListQueryTestContext.CreateWithWorkspaceLinksAsync(3);
+        await using (ctx)
+        {
+            var contextId = await CreateFeatureContextAsync(ctx.DbContext, workspaceId, "feature-mixed");
+            var links = await ctx.DbContext.WorkspaceRepositories.AsNoTracking()
+                .Where(wr => wr.WorkspaceId == workspaceId)
+                .ToListAsync();
+            var mergedRepo = links[0];
+            var creatableRepo = links[1];
+
+            ctx.DbContext.WorkspaceRepositoryContextPullRequests.Add(new WorkspaceRepositoryContextPullRequest
+            {
+                WorkspaceFeatureContextId = contextId.Value,
+                WorkspaceRepositoryId = mergedRepo.WorkspaceRepositoryId,
+                PullRequestNumber = 1,
+                State = "closed",
+                MergedAt = DateTimeOffset.UtcNow,
+            });
+            ctx.DbContext.WorkspaceRepositoryContextStates.Add(new WorkspaceRepositoryContextState
+            {
+                WorkspaceFeatureContextId = contextId.Value,
+                WorkspaceRepositoryId = creatableRepo.WorkspaceRepositoryId,
+                DefaultBranchAheadCommits = 3,
+            });
+            await ctx.DbContext.SaveChangesAsync();
+
+            var header = await ctx.WorkspaceRepoLinkQuery.GetHeaderStateAsync(
+                workspaceId, contextId, isSpecialWorkspace: false);
+
+            Assert.True(header.HasCreatablePr);
+            Assert.False(header.AllFeaturePrsCompleted);
         }
     }
 }

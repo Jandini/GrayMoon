@@ -92,6 +92,8 @@ persist in App
 
 This keeps Docker/web deployment valid.
 
+The same applies to filesystem probes such as `Directory.Exists`: in Docker the App cannot see the developer's paths, so the answer must come from the Worker.
+
 ---
 
 ## 4. Use application contracts for reusable mutations
@@ -319,7 +321,7 @@ If a new event can fire very frequently, plan backpressure/debounce.
 Every long-running mutation must define:
 
 ```text
-operation lock scope
+operation lock scope (structural Workspace or one Feature context)
 progress
 cancellation
 page disposal behavior
@@ -346,6 +348,20 @@ sealed classes
 Command handlers should remain narrow.
 
 Shared Git execution should use the common Git/command abstraction rather than starting processes ad hoc.
+
+Adding a Worker command touches:
+
+```text
+GrayMoon.Agent/Jobs/Requests + Jobs/Response   DTOs
+GrayMoon.Agent/Commands                        ICommandHandler<TRequest, TResponse>
+Cli/Handlers/RunCommandHandler.cs              DI registration
+Services/CommandDispatcher.cs                  executor entry
+Services/CommandJobFactory.cs                  DeserializeRequest case
+Hosted/SignalRConnectionHostedService.cs       ReadOnlyCommands / DiffCommands, only if not a main-pool command
+GrayMoon.Abstractions/Agent/AgentHubMethods.cs optional name constant
+```
+
+The `.claude/skills/add-agent-command` skill walks through these steps.
 
 ---
 
@@ -411,12 +427,28 @@ For a schema change:
 
 1. update EF model;
 2. update new-database creation;
-3. add guarded existing-database migration;
+3. add guarded existing-database migration in `src/GrayMoon.App/Migrations.cs` (or `Migrations.Features.cs` for Feature context tables) and call it from `Migrations.RunAllAsync`;
 4. ensure new column is nullable or has default;
 5. add indexes;
 6. test migration from existing shape;
 7. test fresh database;
-8. ensure no duplicate source of truth remains.
+8. ensure no duplicate source of truth remains;
+9. if the data is observed from a checkout, key it by `WorkspaceFeatureContextId` and backfill the special Workspace context for existing rows.
+
+---
+
+## 20A. Feature context scoping
+
+A Workspace repository can be checked out in several contexts at once (the special Workspace plus each Feature). The rule (`.cursor/rules/feature-context-scoping.mdc`):
+
+1. any query or write of projects, dependency stats, GitVersion, PR, Actions, or Git Changes data takes a `WorkspaceFeatureContextId`, not just a `workspaceId`;
+2. for a Feature, read and write the context tables (`WorkspaceRepositoryContextState` and siblings); never fall back to the shared link row when the context row is missing - the answer is unknown;
+3. mirror writes onto the shared `WorkspaceRepositoryLink` / legacy tables only for the special Workspace context;
+4. include the context id in any lookup key that is not globally unique across contexts;
+5. resolve repository paths through `IWorkspaceContextPathResolver`, and attribute Worker notifications through `IWorkspaceHookContextAttributor`; never derive a context from the UI selection inside an operation;
+6. structural changes (membership, Feature create/remove) use `TryStartStructural`; per-context mutations use a context job key (`WorkspaceJobKeys.ContextOverlayKey`).
+
+Reference test: `WorkspaceRepositoryLinkListQueryServiceTests.Feature_context_sort_keyset_and_level_grouping_use_context_state_not_shared_link`.
 
 ---
 
@@ -472,6 +504,6 @@ Analysis-final-final
 Implementation-Plan-2
 ```
 
-Temporary proposals are fine during design, but shipped behavior should be folded into the current-state reference.
+Temporary proposals are fine during design, but shipped behavior should be folded into the current-state reference. The `docs/worktree/` design set is in that state: Features have shipped and this folder is now the reference.
 
 The architecture folder should answer "how GrayMoon works now".

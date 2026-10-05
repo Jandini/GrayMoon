@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Services.Jobs;
 
@@ -109,6 +110,32 @@ public sealed class BackgroundJobService : IBackgroundJobService, IDisposable
         string displayMessage,
         Func<BackgroundJobHandle, CancellationToken, Task> work)
     {
+        // Context-scoped overlay keys (/workspaces/{id}/ctx/{contextId}/...) use hierarchical context locks
+        // so Feature A and Feature B mutations can run concurrently.
+        if (_runner is IWorkspaceOperationLock hierarchical
+            && WorkspaceJobKeys.TryGetContextId(jobKey, out _, out var contextIdValue))
+        {
+            var contextId = new WorkspaceFeatureContextId(contextIdValue);
+            hierarchical.TryStartContext(
+                contextId,
+                workspaceId,
+                operationKind: jobKey,
+                overlayKey: jobKey,
+                displayMessage,
+                async (operation, ct) =>
+                {
+                    var bound = Attach(jobKey, (WorkspaceOperation)operation);
+                    await work(bound, ct);
+                },
+                out var locked);
+
+            var concrete = (WorkspaceOperation)locked;
+            if (WorkspaceJobKeys.OverlayMatches(jobKey, concrete))
+                return Attach(jobKey, concrete);
+
+            return Attach(concrete.OverlayKey, concrete);
+        }
+
         _runner.TryStart(
             workspaceId,
             operationKind: jobKey,

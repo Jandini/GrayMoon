@@ -3,6 +3,8 @@ using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services;
 using GrayMoon.App.Services.GitChanges;
+using GrayMoon.App.Services.Features;
+using GrayMoon.Application.Features;
 using GrayMoon.Common.Git;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.SignalR.Client;
@@ -19,12 +21,18 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     [SupplyParameterFromQuery(Name = "q")]
     public string? IncomingFilterQuery { get; set; }
 
+    [SupplyParameterFromQuery(Name = "context")]
+    public int? ContextQuery { get; set; }
+
+    private WorkspaceFeatureContextId? _selectedContextId;
+
     [Inject] private IWorkspaceGitChangesReadService ReadService { get; set; } = default!;
     [Inject] private IWorkspaceGitChangesOperations GitChangesOperations { get; set; } = default!;
     [Inject] private IGitChangesAgentClient AgentClient { get; set; } = default!;
-    [Inject] private WorkspaceGitChangesWriteQueue WriteQueue { get; set; } = default!;
+    [Inject] private GitChangesSnapshotPushHandler SnapshotPushHandler { get; set; } = default!;
     [Inject] private IDbContextFactory<AppDbContext> DbContextFactory { get; set; } = default!;
     [Inject] private WorkspaceService WorkspaceService { get; set; } = default!;
+    [Inject] private IWorkspaceContextPathResolver PathResolver { get; set; } = default!;
     [Inject] private IAgentBridge AgentBridge { get; set; } = default!;
     [Inject] private IToastService ToastService { get; set; } = default!;
     [Inject] private NavigationManager NavigationManager { get; set; } = default!;
@@ -35,7 +43,12 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     [Inject] private WorkspaceGitChangesPushAfterCommitMemory PushAfterCommitMemory { get; set; } = default!;
     [Inject] private IScopedServiceExecutor ScopedExecutor { get; set; } = default!;
     [Inject] private IJSRuntime Js { get; set; } = default!;
+    [Inject] private WorkspaceContextNavigationService ContextNavigation { get; set; } = default!;
+    [Inject] private MarkdownProseDiffService MarkdownProseDiffService { get; set; } = default!;
+    [Inject] private MarkdownImageEmbedder MarkdownImageEmbedder { get; set; } = default!;
 
+    private int? _loadedWorkspaceId;
+    private int? _loadedContextQuery;
     private Workspace? _workspace;
     private WorkspaceGitChangesView? _view;
     private IReadOnlyList<GitChangesTreeRow> _rows = [];
@@ -68,8 +81,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         ApplyIncomingFilterQuery();
         EnsureActivitySubscription();
         RestoreWorkspaceCommitMessage();
-        StartInitialLoadJob();
-        return Task.CompletedTask;
+        return ResolveContextAndStartLoadAsync();
     }
 
     /// <summary>Idempotently applies `?q=` to the filter box. Guarding on `_appliedFilterQuery` keeps this
@@ -92,6 +104,28 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         }
     }
 
+    /// <summary>Drops the typed filter when navigating to another workspace so the previous workspace's
+    /// query does not carry over. Resets <see cref="_appliedFilterQuery"/> so a new <c>?q=</c> on the
+    /// destination route can still be applied by <see cref="ApplyIncomingFilterQuery"/>.</summary>
+    private void ClearFilterForWorkspaceChange()
+    {
+        _filterQuery = string.Empty;
+        _appliedFilterQuery = null;
+    }
+
+    /// <summary>Clears the filter once every repository has no staged or changed files left (e.g. after a
+    /// successful commit). Leaves <see cref="_appliedFilterQuery"/> alone so an unchanged <c>?q=</c> is not
+    /// immediately re-applied on the next parameters pass.</summary>
+    private void ClearFilterIfNoChangesRemain()
+    {
+        if (string.IsNullOrEmpty(_filterQuery) || ChangedRepositoryCount > 0)
+        {
+            return;
+        }
+
+        _filterQuery = string.Empty;
+    }
+
     private void OnJobServiceChanged()
     {
         if (_disposed)
@@ -102,19 +136,25 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         _ = InvokeAsync(StateHasChanged);
     }
 
-    protected override Task OnParametersSetAsync()
+    protected override async Task OnParametersSetAsync()
     {
+        var workspaceChanged = _loadedWorkspaceId is int loadedWorkspaceId && loadedWorkspaceId != WorkspaceId;
+        if (workspaceChanged)
+        {
+            ClearFilterForWorkspaceChange();
+        }
+
         ApplyIncomingFilterQuery();
         EnsureActivitySubscription();
 
-        if (_view != null && _view.WorkspaceId == WorkspaceId)
-        {
-            return Task.CompletedTask;
-        }
+        var contextChanged = _loadedContextQuery != ContextQuery;
+        if (_loadedWorkspaceId == WorkspaceId && _view != null && _view.WorkspaceId == WorkspaceId && !contextChanged)
+            return;
 
+        _loadedWorkspaceId = WorkspaceId;
+        _loadedContextQuery = ContextQuery;
         RestoreWorkspaceCommitMessage();
-        StartInitialLoadJob();
-        return Task.CompletedTask;
+        await ResolveContextAndStartLoadAsync();
     }
 
     private Task? _initialLoadTask;
@@ -122,8 +162,8 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     /// <summary>
     /// Runs the initial (or workspace-switch) load inline instead of a background job, so opening this
     /// page (including re-opening it with a remembered file selection) never shows the
-    /// BackgroundJobOverlay's "Loading changes..." LoadingOverlay. The tree itself renders as soon as the
-    /// persisted projection is read, which is fast since it never sends an Agent command.
+    /// BackgroundJobOverlay's "Loading changes..." LoadingOverlay - the tree itself renders as soon as
+    /// the persisted projection is read, which is fast since it never sends an Agent command.
     /// </summary>
     private void StartInitialLoadJob()
     {
@@ -140,15 +180,28 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     private async Task LoadAsync()
     {
         _errorMessage = null;
+
+        // Fetched before the StateHasChanged below (rather than after, alongside the heavier git-status
+        // read further down) so the header's Workspace name is already correct by the time this
+        // intermediate render happens. Otherwise WorkspaceFeatureSelector briefly renders its
+        // special-workspace fallback label ("Workspace") for the ~100-300ms the git status read takes,
+        // before flipping to the real name - a longer, more noticeable flicker than the other workspace
+        // pages show (they resolve the name via a similarly-fast, separate query before their own
+        // heavier grid loads).
+        await using (var db = await DbContextFactory.CreateDbContextAsync())
+        {
+            _workspace = await db.Workspaces.AsNoTracking().FirstOrDefaultAsync(w => w.WorkspaceId == WorkspaceId);
+        }
+
         StateHasChanged();
 
         try
         {
-            await using (var db = await DbContextFactory.CreateDbContextAsync())
-            {
-                _workspace = await db.Workspaces.AsNoTracking().FirstOrDefaultAsync(w => w.WorkspaceId == WorkspaceId);
-            }
-            _view = await ReadService.GetWorkspaceAsync(WorkspaceId, CancellationToken.None);
+            if (_selectedContextId is WorkspaceFeatureContextId ctxId)
+                _view = await ReadService.GetContextAsync(WorkspaceId, ctxId, CancellationToken.None);
+            else
+                _view = await ReadService.GetWorkspaceAsync(WorkspaceId, CancellationToken.None);
+            ClearFilterIfNoChangesRemain();
             RebuildRows();
             await ClearSelectionIfStaleAsync();
         }
@@ -163,10 +216,10 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         }
 
         // Restoring a remembered file selection re-fetches its diff from the Agent, which can be slow
-        // and, unlike the tree read above, is a real Agent command. It must not block the tree render
-        // above. TryRestoreSelectionAsync only does work when this page instance has no selection yet
-        // (first load / workspace switch); later reloads triggered by Refresh or a mutation already have
-        // a selection and return immediately.
+        // (and, unlike the tree read above, is a real Agent command) - it must never gate the tree
+        // render above. TryRestoreSelectionAsync only does work when this page instance has no
+        // selection yet (first load / workspace switch); later reloads triggered by Refresh or a
+        // mutation already have a selection and return immediately.
         if (_errorMessage == null)
         {
             await TryRestoreSelectionAsync();
@@ -189,7 +242,8 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             return;
         }
 
-        if (IsAnyScanRunning)
+        // Own overlay job or an in-flight scan - not workspace-wide IsBusy (Push Updated elsewhere).
+        if (IsLocalGitChangesWorkRunning)
         {
             ToastService.Show("Another Git Changes operation is already running.");
             return;
@@ -387,6 +441,8 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         {
             await _diffViewerRef.ClearAsync();
         }
+
+        await ClearMarkdownViewerAsync();
     }
 
     private async Task ScrollSelectionIntoViewIfPendingAsync()
@@ -543,7 +599,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             ? RunRepositoryScopedMutationJobAsync(workspaceRepositoryId, isStage: true)
             : RunMutationAsync(workspaceRepositoryId, rowKey, isDiscard: false, async (_, _, _, repositoryId) =>
             {
-                var result = await GitChangesOperations.StageAsync(WorkspaceId, repositoryId, scope, paths, CancellationToken.None);
+                var result = await GitChangesOperations.StageAsync(WorkspaceId, RequireSelectedContextId(), repositoryId, scope, paths, CancellationToken.None);
                 await PersistMutationResultAsync(workspaceRepositoryId, repositoryId, result.Success, result.Snapshot, result.ErrorMessage);
             });
 
@@ -552,7 +608,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             ? RunRepositoryScopedMutationJobAsync(workspaceRepositoryId, isStage: false)
             : RunMutationAsync(workspaceRepositoryId, rowKey, isDiscard: false, async (_, _, _, repositoryId) =>
             {
-                var result = await GitChangesOperations.UnstageAsync(WorkspaceId, repositoryId, scope, paths, CancellationToken.None);
+                var result = await GitChangesOperations.UnstageAsync(WorkspaceId, RequireSelectedContextId(), repositoryId, scope, paths, CancellationToken.None);
                 await PersistMutationResultAsync(workspaceRepositoryId, repositoryId, result.Success, result.Snapshot, result.ErrorMessage);
             });
 
@@ -581,8 +637,8 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
                 }
 
                 var result = isStage
-                    ? await GitChangesOperations.StageAsync(WorkspaceId, resolved.Value.RepositoryId, GitChangeOperationScope.Repository, [], ct)
-                    : await GitChangesOperations.UnstageAsync(WorkspaceId, resolved.Value.RepositoryId, GitChangeOperationScope.Repository, [], ct);
+                    ? await GitChangesOperations.StageAsync(WorkspaceId, RequireSelectedContextId(), resolved.Value.RepositoryId, GitChangeOperationScope.Repository, [], ct)
+                    : await GitChangesOperations.UnstageAsync(WorkspaceId, RequireSelectedContextId(), resolved.Value.RepositoryId, GitChangeOperationScope.Repository, [], ct);
 
                 // reload:false - StartPageJob's own ReloadOnSuccess (properly dispatcher-marshalled via
                 // InvokeAsync) does the final LoadAsync() once this job body returns; calling LoadAsync's
@@ -639,7 +695,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     }
 
     /// <summary>
-    /// Persists a mutation's returned snapshot through the same queue/handler used for Agent-pushed
+    /// Persists a mutation's returned snapshot through the same handler used for Agent-pushed
     /// snapshots, so stage/unstage/commit never create a separate optimistic front-end truth - the tree
     /// always re-renders from the persisted SQLite projection, reloaded once the write completes.
     /// <paramref name="reload"/> is false for multi-repository fan-out, which reloads once after every
@@ -657,22 +713,32 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             return;
         }
 
-        WriteQueue.Enqueue(new GitChangesSnapshotNotification
+        // RepositoryPath is required for Feature attribution; null path falls back to special Workspace only.
+        string? repositoryPath = null;
+        if (_selectedContextId is WorkspaceFeatureContextId contextId)
+        {
+            try
+            {
+                repositoryPath = await PathResolver.GetRepositoryPathAsync(contextId, workspaceRepositoryId);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex,
+                    "Could not resolve repository path for WorkspaceRepository {WorkspaceRepositoryId}; snapshot may attribute to Workspace context",
+                    workspaceRepositoryId);
+            }
+        }
+
+        await SnapshotPushHandler.HandleAsync(new GitChangesSnapshotNotification
         {
             WorkspaceId = WorkspaceId,
             RepositoryId = repositoryId,
+            RepositoryPath = repositoryPath,
             Snapshot = snapshot,
-        });
+        }, CancellationToken.None);
 
-        if (!reload)
-        {
-            return;
-        }
-
-        // The write queue processes on a background worker; give it a moment before reloading so the
-        // page reflects the just-persisted state rather than racing the write.
-        await Task.Delay(150);
-        await LoadAsync();
+        if (reload)
+            await LoadAsync();
     }
 
     private async Task<(string Root, string WorkspaceName, string RepositoryName, int RepositoryId)?> ResolveRepositoryAsync(int workspaceRepositoryId)
@@ -683,13 +749,13 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             .Include(l => l.Repository)
             .FirstOrDefaultAsync(l => l.WorkspaceRepositoryId == workspaceRepositoryId);
 
-        if (link?.Workspace == null || link.Repository == null)
+        if (link?.Workspace == null || link.Repository == null || _selectedContextId is null)
         {
             return null;
         }
 
-        var root = await WorkspaceService.GetRootPathForWorkspaceAsync(link.Workspace);
-        return string.IsNullOrWhiteSpace(root) ? null : (root, link.Workspace.Name, link.Repository.RepositoryName, link.RepositoryId);
+        var (root, folderName) = await PathResolver.GetAgentWorkspaceArgsAsync(_selectedContextId.Value);
+        return string.IsNullOrWhiteSpace(root) ? null : (root, folderName, link.Repository.RepositoryName, link.RepositoryId);
     }
 
     public async ValueTask DisposeAsync()
@@ -702,10 +768,34 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         _disposed = true;
         JobService.Changed -= OnJobServiceChanged;
         ReleaseActivitySubscription();
+        await UnbindDiffReviewEscListenerAsync();
 
         if (_hubConnection != null)
         {
             await _hubConnection.DisposeAsync();
         }
+    }
+    private async Task ResolveContextAndStartLoadAsync()
+    {
+        var info = await ContextNavigation.ResolveForPageAsync(WorkspaceId, ContextQuery);
+        _selectedContextId = info.ContextId;
+        StartInitialLoadJob();
+    }
+
+    private WorkspaceFeatureContextId RequireSelectedContextId()
+        => _selectedContextId
+           ?? throw new InvalidOperationException("Workspace Feature context is not resolved for this page.");
+
+    private async Task OnSelectedContextChangedAsync(WorkspaceFeatureContextId contextId)
+    {
+        // Scans keep a captured context id; abort so a warm-up/Refresh for the previous context
+        // cannot keep writing snapshots after the user switched. Page overlay mutations stay
+        // blocked via IsOwnPageJobRunning on the selector instead (RequireSelectedContextId
+        // mid-commit would retarget writes).
+        AbortScan();
+        _selectedContextId = contextId;
+        _loadedContextQuery = contextId.Value;
+        StartInitialLoadJob();
+        await InvokeAsync(StateHasChanged);
     }
 }

@@ -6,4 +6,6 @@ public sealed class GetHeadCommitsRequest : WorkspaceCommandRequest
     [JsonPropertyName("workspaceName")] public string? WorkspaceName { get; set; }
     /// <summary>Repository folder names under the workspace root.</summary>
     [JsonPropertyName("repositoryNames")] public List<string>? RepositoryNames { get; set; }
+    /// <summary>Optional branch name to probe for local/remote-tracking collisions (Feature creation preflight).</summary>
+    [JsonPropertyName("collisionBranchName")] public string? CollisionBranchName { get; set; }
 }

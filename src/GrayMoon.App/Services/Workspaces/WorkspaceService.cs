@@ -1,12 +1,14 @@
 using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
+using GrayMoon.App.Services.Features;
 
 namespace GrayMoon.App.Services.Workspaces;
 
 public sealed class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService> logger, AppSettingRepository appSettingRepository, Microsoft.Extensions.Options.IOptions<WorkspaceOptions> workspaceOptions)
 {
     private string? _cachedRootPath;
+    private string? _cachedFeatureStorageRootPath;
     private readonly SemaphoreSlim _cacheLock = new(1, 1);
 
     public string? RootPath => _cachedRootPath;
@@ -171,6 +173,111 @@ public sealed class WorkspaceService(IAgentBridge agentBridge, ILogger<Workspace
         _cachedRootPath = null;
     }
 
+    /// <summary>Clears the cached Feature storage root.</summary>
+    public void ClearCachedFeatureStorageRootPath()
+    {
+        _cachedFeatureStorageRootPath = null;
+    }
+
+    /// <summary>
+    /// Returns the configured Feature worktree storage root (e.g. C:\Users\name\.graymoon), or null if unset.
+    /// Does not ask the Agent.
+    /// </summary>
+    public async Task<string?> GetFeatureStorageRootPathAsync(CancellationToken cancellationToken = default)
+    {
+        if (_cachedFeatureStorageRootPath != null)
+            return _cachedFeatureStorageRootPath;
+
+        await _cacheLock.WaitAsync(cancellationToken);
+        try
+        {
+            if (_cachedFeatureStorageRootPath != null)
+                return _cachedFeatureStorageRootPath;
+
+            var configured = await appSettingRepository.GetValueAsync(AppSettingRepository.FeatureStorageRootPathKey);
+            if (!string.IsNullOrWhiteSpace(configured))
+            {
+                _cachedFeatureStorageRootPath = AgentPath.Normalize(configured);
+                logger.LogInformation("Using configured Feature storage root: {RootPath}", _cachedFeatureStorageRootPath);
+                return _cachedFeatureStorageRootPath;
+            }
+
+            return null;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Error reading Feature storage root from settings");
+            return null;
+        }
+        finally
+        {
+            _cacheLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Resolves Feature storage root from settings, or from the Agent host user profile
+    /// (<c>{userProfile}\.graymoon</c>). When <paramref name="persistIfMissing"/> is true and the
+    /// setting was empty, persists the Agent default so Settings and future Features share it.
+    /// Does not relocate existing Workspace.ManagedFeatureStorageRoot values.
+    /// </summary>
+    public async Task<string?> ResolveFeatureStorageRootPathAsync(
+        bool persistIfMissing = false,
+        CancellationToken cancellationToken = default)
+    {
+        var configured = await GetFeatureStorageRootPathAsync(cancellationToken);
+        if (!string.IsNullOrWhiteSpace(configured))
+            return configured;
+
+        var fromAgent = await TryGetAgentDefaultFeatureStorageRootAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(fromAgent))
+            return null;
+
+        if (persistIfMissing)
+        {
+            await appSettingRepository.SetValueAsync(AppSettingRepository.FeatureStorageRootPathKey, fromAgent);
+            ClearCachedFeatureStorageRootPath();
+            logger.LogInformation("Persisted Agent-default Feature storage root: {RootPath}", fromAgent);
+            return await GetFeatureStorageRootPathAsync(cancellationToken);
+        }
+
+        return fromAgent;
+    }
+
+    /// <summary>
+    /// Asks the Agent for the host user profile and returns <c>{profile}/.graymoon</c> (or
+    /// <c>{profile}\.graymoon</c> on a Windows Worker), or null if unavailable. The join style
+    /// follows whatever shape the Agent's own <c>UserProfilePath</c> already has - a Linux/macOS
+    /// Worker's profile already starts with '/', so no separate "which OS" signal is needed.
+    /// </summary>
+    public async Task<string?> TryGetAgentDefaultFeatureStorageRootAsync(CancellationToken cancellationToken = default)
+    {
+        if (!agentBridge.IsAgentConnected)
+            return null;
+
+        try
+        {
+            var response = await agentBridge.SendCommandAsync("GetHostInfo", new { }, cancellationToken);
+            if (!response.Success || response.Data == null)
+                return null;
+
+            var data = AgentResponseJson.DeserializeAgentResponse<GetHostInfoAgentResponse>(response.Data);
+            var profile = data?.UserProfilePath?.Trim();
+            if (string.IsNullOrWhiteSpace(profile))
+                return null;
+
+            var normalizedProfile = AgentPath.Normalize(profile);
+            return string.IsNullOrWhiteSpace(normalizedProfile)
+                ? null
+                : AgentPath.Combine(normalizedProfile, ".graymoon");
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not resolve Agent user profile for Feature storage default");
+            return null;
+        }
+    }
+
     /// <summary>Asks the agent to validate whether the given path is usable as a workspace root.</summary>
     public async Task<(bool IsValid, string? ErrorMessage)> ValidatePathAsync(string path, CancellationToken cancellationToken = default)
     {
@@ -181,7 +288,6 @@ public sealed class WorkspaceService(IAgentBridge agentBridge, ILogger<Workspace
         var data = AgentResponseJson.DeserializeAgentResponse<ValidatePathAgentResponse>(response.Data);
         return (data?.IsValid ?? false, data?.ErrorMessage);
     }
-
 
     private static string SanitizeDirectoryName(string name)
     {

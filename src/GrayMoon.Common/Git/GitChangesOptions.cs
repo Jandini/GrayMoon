@@ -29,12 +29,14 @@ public sealed class GitChangesOptions
     /// How often the workspace background monitoring service (not the browser page) sweeps active
     /// workspace repositories to seed/renew their Agent-side watcher lease. Must stay comfortably below
     /// <see cref="WatcherIdleGraceMinutes"/> or leases would expire between sweeps. Default 3.
+    /// An active workspace is any GrayMoon circuit currently on a <c>/workspaces/{id}/...</c> route
+    /// (plus the configured workspace activity grace after leaving).
     /// </summary>
     public int WatcherRenewalIntervalMinutes { get; init; } = 3;
 
     /// <summary>
     /// How long a workspace stays "active" (and therefore in scope for background monitoring) after its
-    /// last Git Changes page viewer navigates away or disconnects. Kept just under
+    /// last GrayMoon circuit leaves any <c>/workspaces/{id}/...</c> page or disconnects. Kept just under
     /// <see cref="WatcherIdleGraceMinutes"/> so the App stops sweeping a workspace slightly before its
     /// Agent-side watcher leases would idle out anyway. Default 8.
     /// </summary>

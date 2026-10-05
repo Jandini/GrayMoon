@@ -9,6 +9,10 @@ public sealed class WorkspaceFileLineStatus
 {
     public int StatusId { get; set; }
     public int WorkspaceId { get; set; }
+
+    /// <summary>Owning Feature context for this observation. Null until backfill.</summary>
+    public int? WorkspaceFeatureContextId { get; set; }
+
     public int RepositoryId { get; set; }
 
     [MaxLength(2000)]

@@ -5,6 +5,7 @@
 @using GrayMoon.App.Services
 @using GrayMoon.App.Services.Queries
 @using GrayMoon.App.Components.Shared
+@using GrayMoon.App.Components.Features
 @using static GrayMoon.App.Components.Shared.VirtualScrollUi
 @using Microsoft.AspNetCore.Components.Web
 @inject WorkspaceRepository WorkspaceRepository
@@ -20,6 +21,7 @@
             <div class="workspace-repos-title-row">
                 <h2 class="workspace-repos-title">Projects</h2>
                 <p class="text-muted mb-0 workspace-repos-subtitle workspace-projects__subtitle">
+                    <WorkspaceSubtitleName Name="@(workspace?.Name)" />
                     @if (hasLoadedOnce && !isInitialLoading)
                     {
                         var projSuffix = HasSearchFilter ? " found" : "";
@@ -37,8 +39,11 @@
                 </p>
                 <span class="workspace-repos-title-spacer"></span>
             </div>
-            <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
-                <div class="workspace-grid-search-wrapper">
+            <div class="d-flex gap-2 align-items-center workspace-repos-header-actions flex-wrap">
+                <WorkspaceContextBar WorkspaceId="WorkspaceId"
+                                     WorkspaceName="@(workspace?.Name)"
+                                     SelectedContextId="_selectedContextId"
+                                     SelectedContextIdChanged="OnSelectedContextChangedAsync">
                     <FilterSearchInput Value="@searchTerm"
                                        ValueChanged="OnSearchTermChangedAsync"
                                        InputId="workspace-projects-search"
@@ -47,7 +52,7 @@
                                        Disabled="@(isInitialLoading && !hasLoadedOnce)"
                                        OnKeyDown="OnSearchKeyDown"
                                        OnClear="ClearSearchFilter" />
-                </div>
+                </WorkspaceContextBar>
             </div>
         </div>
         @if (errorMessage != null)

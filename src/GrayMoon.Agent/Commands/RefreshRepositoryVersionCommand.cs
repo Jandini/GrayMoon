@@ -1,6 +1,7 @@
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Jobs.Requests;
 using GrayMoon.Agent.Jobs.Response;
+using GrayMoon.Agent.Services;
 
 namespace GrayMoon.Agent.Commands;
 
@@ -22,10 +23,10 @@ public sealed class RefreshRepositoryVersionCommand(IGitService git, IAgentToken
         {
             var (vr, versionError) = await git.GetVersionAsync(repoPath, cancellationToken);
             if (vr != null)
-            {
                 version = vr.InformationalVersion ?? "-";
-                branch = vr.BranchName ?? vr.EscapedBranchName ?? "-";
-            }
+
+            // A GitVersion failure leaves the version unresolved; it must not cost the repository its branch.
+            branch = await git.ResolveBranchAsync(vr, repoPath, cancellationToken) ?? "-";
 
             // Detect tag/detached HEAD; when on a tag we don't have a real branch.
             var currentTag = await git.GetCheckedOutTagAsync(repoPath, cancellationToken);
@@ -38,8 +39,10 @@ public sealed class RefreshRepositoryVersionCommand(IGitService git, IAgentToken
             if (branch != "-")
             {
                 var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, cancellationToken);
+                await git.SetDivergenceBaseBranchAsync(repoPath, request.DivergenceBaseBranch, cancellationToken);
+                var divergenceRef = git.ToOriginBranchRef(request.DivergenceBaseBranch) ?? defaultRef;
                 var countsTask = git.ProbeCommitCountsAsync(repoPath, branch, defaultRef, cancellationToken);
-                var vsDefaultTask = git.GetCommitCountsVsDefaultAsync(repoPath, defaultRef, cancellationToken);
+                var vsDefaultTask = git.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, cancellationToken);
                 await Task.WhenAll(countsTask, vsDefaultTask);
                 var counts = await countsTask;
                 (defaultBehind, defaultAhead, _) = await vsDefaultTask;

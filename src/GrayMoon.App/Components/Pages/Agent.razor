@@ -4,6 +4,7 @@
 @using GrayMoon.Abstractions.Agent
 @using GrayMoon.App.Services
 @using GrayMoon.App.Services.Agent
+@using GrayMoon.App.Services.Security
 @implements IDisposable
 @inject NavigationManager NavigationManager
 @inject IJSRuntime JSRuntime
@@ -12,6 +13,8 @@
 @inject IToastService ToastService
 @inject HostPrerequisiteInstallService HostPrerequisiteInstall
 @inject WorkerInstallService WorkerInstall
+@inject WorkerSecretService WorkerSecret
+@inject WorkerPairingService WorkerPairing
 
 <PageTitle>Worker - GrayMoon</PageTitle>
 
@@ -59,6 +62,27 @@
                                 The Windows service requires the .NET 10 (x64) runtime on the host.
                                 <a href="@AgentDotnet10RuntimeUrl" target="_blank" rel="noopener noreferrer">Download the .NET 10 runtime</a>
                             </p>
+                            @if (ShowUnsecuredWorkerNotice)
+                            {
+                                <p class="small text-warning mt-3 mb-0">Reinstall the Worker to finish securing GrayMoon.</p>
+                            }
+                            <div class="mt-3">
+                                <small class="text-muted d-block mb-2">
+                                    Installing with the command above? The script asks for a one-time pairing code that links the worker to this GrayMoon. GrayMoon Desktop does this for you.
+                                </small>
+                                @if (_pairingCode is null || _pairingCode.ExpiresAt <= DateTimeOffset.UtcNow)
+                                {
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="ShowPairingCode">Show pairing code</button>
+                                }
+                                else
+                                {
+                                    <div class="input-group input-group-sm">
+                                        <input type="text" class="form-control font-monospace bg-dark" id="pairingCode" readonly value="@_pairingCode.Code" />
+                                        <button class="btn btn-outline-secondary" type="button" @onclick="CopyPairingCode">Copy</button>
+                                    </div>
+                                    <small class="text-muted d-block mt-1">Works once, until @_pairingCode.ExpiresAt.ToLocalTime().ToString("t").</small>
+                                }
+                            </div>
                         </div>
                         <div class="tab-pane @(ActiveTab == "uninstall" ? "show active" : "")" role="tabpanel">
                             <p class="mb-3">Run this PowerShell command as Administrator to uninstall the GrayMoon Worker Windows service:</p>
@@ -152,6 +176,7 @@
     private bool _waitingForReconnect;
     private bool _isDesktopHost;
     private bool _desktopHostDetected;
+    private WorkerPairingCode? _pairingCode;
 
     protected override void OnInitialized()
     {
@@ -392,6 +417,21 @@
     private async Task CopyInstallCommand()
     {
         await CopyToClipboard(installCommand);
+    }
+
+    private bool ShowUnsecuredWorkerNotice =>
+        WorkerSecret.UnsecuredWorkerConnected
+        && AgentConnectionTracker.State is AgentConnectionState.Online or AgentConnectionState.VersionMismatch;
+
+    private void ShowPairingCode()
+    {
+        _pairingCode = WorkerPairing.CreateCode();
+    }
+
+    private async Task CopyPairingCode()
+    {
+        if (_pairingCode is not null)
+            await CopyToClipboard(_pairingCode.Code);
     }
 
     private async Task CopyUninstallCommand()

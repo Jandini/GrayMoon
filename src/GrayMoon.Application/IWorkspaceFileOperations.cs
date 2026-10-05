@@ -1,4 +1,5 @@
 using GrayMoon.App.Models.Api;
+using GrayMoon.Application.Features;
 
 namespace GrayMoon.Application;
 
@@ -22,18 +23,20 @@ public sealed class AddWorkspaceFileRequest
 
 public interface IWorkspaceFileOperations
 {
-    Task<List<WorkspaceFileDto>?> ListAsync(int workspaceId, CancellationToken cancellationToken);
+    Task<List<WorkspaceFileDto>?> ListAsync(int workspaceId, WorkspaceFeatureContextId contextId, CancellationToken cancellationToken);
 
     Task<(bool Found, int Added)> AddAsync(int workspaceId, IReadOnlyList<AddWorkspaceFileRequest> items, CancellationToken cancellationToken);
 
     Task<(bool Found, bool AgentConnected, AgentSearchFilesResponse? Data, string? Error)> SearchAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         string? pattern,
         string? repositoryName,
         CancellationToken cancellationToken);
 
     Task<WorkspaceFileVersionUpdateResult> UpdateVersionsAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken,
         IReadOnlySet<int>? selectedRepositoryIds = null,
         bool filterPatternTokensToSelectedRepositories = true,

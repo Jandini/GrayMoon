@@ -54,8 +54,10 @@ public sealed class CommitSyncPullStateTests
     {
         await using var scope = ctx.CreateScope();
         var handler = scope.ServiceProvider.GetRequiredService<WorkspaceCommitSyncHandler>();
+        var special = await ctx.GetSpecialContextIdAsync();
         await handler.CommitSyncAsync(
             ctx.WorkspaceId,
+            special,
             ctx.RepositoryId,
             CancellationToken.None,
             new Progress<OperationProgress>(_ => { }),
@@ -115,8 +117,10 @@ public sealed class CommitSyncPullStateTests
         string? pageError = null;
         await using var scope = ctx.CreateScope();
         var handler = scope.ServiceProvider.GetRequiredService<WorkspaceCommitSyncHandler>();
+        var special = await ctx.GetSpecialContextIdAsync();
         await handler.CommitSyncAsync(
             ctx.WorkspaceId,
+            special,
             ctx.RepositoryId,
             CancellationToken.None,
             new Progress<OperationProgress>(_ => { }),

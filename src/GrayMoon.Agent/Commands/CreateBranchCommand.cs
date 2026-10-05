@@ -1,6 +1,7 @@
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Jobs.Requests;
 using GrayMoon.Agent.Jobs.Response;
+using GrayMoon.Agent.Services;
 
 namespace GrayMoon.Agent.Commands;
 
@@ -61,7 +62,7 @@ public sealed class CreateBranchCommand(IGitService git, IAgentTokenProvider tok
 
         var (versionResult, _) = await git.GetVersionAsync(repoPath, nonNormalize: true, cancellationToken);
         var version = versionResult?.InformationalVersion ?? "-";
-        var branch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? "-";
+        var branch = await git.ResolveBranchAsync(versionResult, repoPath, cancellationToken) ?? "-";
 
         var currentTag = await git.GetCheckedOutTagAsync(repoPath, cancellationToken);
         if (currentTag != null)
@@ -74,10 +75,12 @@ public sealed class CreateBranchCommand(IGitService git, IAgentTokenProvider tok
         bool? hasUpstream = null;
         if (branch != "-")
         {
+            var divergenceRef = git.ToOriginBranchRef(await git.GetDivergenceBaseBranchAsync(repoPath, cancellationToken))
+                ?? defaultRef;
             var (o, i, _) = await git.GetCommitCountsAsync(repoPath, branch, defaultRef, cancellationToken, skipUpstreamCheck: true);
             outgoing = o;
             incoming = i;
-            var (db, da, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, defaultRef, cancellationToken);
+            var (db, da, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, cancellationToken);
             defaultBehind = db;
             defaultAhead = da;
 

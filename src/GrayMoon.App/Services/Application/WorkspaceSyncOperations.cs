@@ -1,6 +1,7 @@
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services.Queries;
+using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Services.Application;
 
@@ -9,10 +10,13 @@ public sealed class WorkspaceSyncOperations(
     WorkspaceCommitSyncHandler commitSyncHandler,
     WorkspaceUndoPushHandler undoPushHandler,
     WorkspaceRepository workspaceRepository,
-    WorkspaceGitService workspaceGitService) : IWorkspaceSyncOperations
+    WorkspaceGitService workspaceGitService,
+    IWorkspaceFeatureContextResolver contextResolver,
+    IWorkspaceRepositoryLinkListQueryService linkListQueryService) : IWorkspaceSyncOperations
 {
     public Task<IReadOnlyDictionary<int, RepoGitVersionInfo>> SyncAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlyList<int>? repositoryIds,
         bool skipDependencyLevelPersistence,
         CancellationToken cancellationToken,
@@ -21,6 +25,7 @@ public sealed class WorkspaceSyncOperations(
         Action<int, RepoSyncStatus> setRepoSyncStatus)
         => syncHandler.RunSyncAsync(
             workspaceId,
+            contextId,
             repositoryIds,
             skipDependencyLevelPersistence,
             cancellationToken,
@@ -30,28 +35,32 @@ public sealed class WorkspaceSyncOperations(
 
     public Task<ReturnToDefaultPlan> AnalyzeReturnToDefaultAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlyList<int> repositoryIds,
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken)
-        => syncHandler.AnalyzeReturnToDefaultAsync(workspaceId, repositoryIds, progress, cancellationToken);
+        => syncHandler.AnalyzeReturnToDefaultAsync(workspaceId, contextId, repositoryIds, progress, cancellationToken);
 
     public Task<OperationResult> ExecuteReturnToDefaultAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlyList<int> repositoryIds,
         ReturnToDefaultOptions options,
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken)
-        => syncHandler.ExecuteReturnToDefaultAsync(workspaceId, repositoryIds, options, progress, cancellationToken);
+        => syncHandler.ExecuteReturnToDefaultAsync(workspaceId, contextId, repositoryIds, options, progress, cancellationToken);
 
     public Task<UnattendedReturnToDefaultResult> ReturnToDefaultAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlyList<int> repositoryIds,
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken)
-        => syncHandler.ReturnToDefaultUnattendedAsync(workspaceId, repositoryIds, progress, cancellationToken);
+        => syncHandler.ReturnToDefaultUnattendedAsync(workspaceId, contextId, repositoryIds, progress, cancellationToken);
 
     public async Task<OperationResult> PullAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken)
@@ -60,6 +69,7 @@ public sealed class WorkspaceSyncOperations(
         var repoErrors = new Dictionary<int, string>();
         await commitSyncHandler.CommitSyncAsync(
             workspaceId,
+            contextId,
             repositoryId,
             cancellationToken,
             progress,
@@ -80,6 +90,7 @@ public sealed class WorkspaceSyncOperations(
 
     public async Task<OperationResult> PullLevelAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlyList<int> repositoryIds,
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken)
@@ -88,6 +99,7 @@ public sealed class WorkspaceSyncOperations(
         var repoErrors = new Dictionary<int, string>();
         await commitSyncHandler.CommitSyncLevelAsync(
             workspaceId,
+            contextId,
             repositoryIds,
             cancellationToken,
             (completed, total) =>
@@ -112,6 +124,7 @@ public sealed class WorkspaceSyncOperations(
 
     public async Task<OperationResult> UndoPushAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         bool keepChanges,
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken)
@@ -120,9 +133,33 @@ public sealed class WorkspaceSyncOperations(
         if (workspace == null)
             return OperationResult.Fail("Workspace not found.");
 
+        var repos = workspace.Repositories.ToList();
+
+        // The shared WorkspaceRepositoryLink row's OutgoingCommits/BranchName/CheckedOutTag are only kept in
+        // sync for the special Workspace context (see WorkspaceRepositoryStateWriter.ApplyAsync). For a Feature
+        // context those fields live in WorkspaceRepositoryContextState instead, so without this overlay the
+        // handler's "has outgoing commits" filter sees stale/zero values and silently undoes nothing.
+        var contextInfo = await contextResolver.GetRequiredAsync(contextId, workspaceId, cancellationToken);
+        if (!contextInfo.IsSpecialWorkspace)
+        {
+            var liveByRepoId = (await linkListQueryService.GetAllSnapshotsAsync(
+                    workspaceId, contextId, isSpecialWorkspace: false, cancellationToken))
+                .ToDictionary(dto => dto.RepositoryId);
+
+            foreach (var wr in repos)
+            {
+                if (!liveByRepoId.TryGetValue(wr.RepositoryId, out var live))
+                    continue;
+                wr.BranchName = live.BranchName;
+                wr.CheckedOutTag = live.CheckedOutTag;
+                wr.OutgoingCommits = live.OutgoingCommits;
+            }
+        }
+
         var results = await undoPushHandler.RunUndoPushAsync(
             workspaceId,
-            workspace.Repositories.ToList(),
+            contextId,
+            repos,
             keepChanges,
             progress,
             cancellationToken);
@@ -138,12 +175,14 @@ public sealed class WorkspaceSyncOperations(
 
     public async Task<OperationResult> QuickFetchAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlyCollection<int>? repositoryIds,
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken)
     {
         var errors = await workspaceGitService.QuickFetchAsync(
             workspaceId,
+            contextId,
             repositoryIds,
             onProgress: (done, total) => progress.Report($"Fetched {done} of {total}", done, total),
             cancellationToken);

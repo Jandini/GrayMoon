@@ -581,6 +581,36 @@ public sealed class GitCliRepositoryGitChangesServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Commit_all_with_many_files_stages_and_commits_everything()
+    {
+        _repo.CommitInitial("seed.txt", "seed\n");
+
+        const int fileCount = 184;
+        for (var i = 0; i < fileCount; i++)
+        {
+            _repo.WriteFile($"bulk/file-{i:D3}.txt", $"content-{i}\n");
+        }
+
+        // One file already staged must not shrink Commit All to staged-only.
+        _repo.RunGit("add", "bulk/file-000.txt");
+
+        var commitResult = await _service.CommitAsync(
+            _repo.RepositoryPath,
+            new GitCommitOperationRequest("Commit all 184 files", StageAllFirst: true),
+            2,
+            CancellationToken.None);
+
+        Assert.True(commitResult.Success, commitResult.ErrorMessage);
+        Assert.Empty(commitResult.Snapshot!.Changes);
+
+        var (lsExit, lsOut, _) = _repo.RunGit("ls-files", "bulk");
+        Assert.Equal(0, lsExit);
+        var tracked = (lsOut ?? string.Empty)
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal(fileCount, tracked.Length);
+    }
+
+    [Fact]
     public async Task Commit_staged_with_one_staged_and_many_unstaged_commits_only_staged()
     {
         _repo.CommitInitial("staged.txt", "s0\n");

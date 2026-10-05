@@ -1,0 +1,31 @@
+---
+description: Keep ASCII/box-drawing diagrams column-aligned; never leave uneven padding before borders.
+alwaysApply: true
+---
+
+# ASCII diagram alignment
+
+When drawing ASCII or box-drawing diagrams (tables, UI mockups, trees, borders with `┌┐└┘│─├┤┬┴┼`, etc.), every vertical border must line up with the corresponding corners on the rows above and below. Pad cell contents with spaces so the right edge closes flush - never leave a column short ("outspaced").
+
+**Wrong** - right border drifts left of the top/bottom edge:
+
+```
+┌──────────────────┬────────────────────────────────────────────┐
+│ ABC-2856       ▾ │ Search repositories...                    │
+└──────────────────┴────────────────────────────────────────────┘
+```
+
+**Right** - content padded so `│` aligns with `┐` / `┘`:
+
+```
+┌──────────────────┬────────────────────────────────────────────┐
+│ ABC-2856       ▾ │ Search repositories...                     │
+└──────────────────┴────────────────────────────────────────────┘
+```
+
+**Checklist before shipping a diagram**
+
+- Count characters per row (including borders); every row in a closed box must be the same width.
+- Multi-column boxes: each column's width is fixed by the longest header/separator for that column; shorter cells get trailing spaces.
+- Prefer a monospace-safe character count over visual eyeballing in a proportional font.
+- Fix alignment when editing an existing diagram; do not leave one crooked line.

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Threading.Channels;
 using GrayMoon.App.Models;
+using GrayMoon.Application.Features;
 using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services.Agent;
@@ -95,7 +96,10 @@ public sealed class SyncBackgroundService(
 
                 await using var scope = scopeFactory.CreateAsyncScope();
                 var svc = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-                await svc.SyncSingleRepositoryAsync(request.RepositoryId, request.WorkspaceId, stoppingToken);
+                var contextResolver = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureContextResolver>();
+                // REST sync queue has no Feature context id - use the special Workspace context explicitly.
+                var contextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(request.WorkspaceId, stoppingToken);
+                await svc.SyncSingleRepositoryAsync(request.RepositoryId, request.WorkspaceId, contextId, stoppingToken);
 
                 logger.LogDebug("Worker {WorkerId} completed sync. Trigger={Trigger}, repositoryId={RepositoryId}, workspaceId={WorkspaceId}",
                     workerId, request.Trigger, request.RepositoryId, request.WorkspaceId);

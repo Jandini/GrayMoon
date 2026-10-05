@@ -1,7 +1,9 @@
-using GrayMoon.App.Data;
+﻿using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Services;
+using GrayMoon.App.Services.Git;
+using GrayMoon.Application;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -48,9 +50,10 @@ public sealed class ReturnToDefaultPersistenceTests
 
         await using var scope = ctx.CreateScope();
         var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+        var special = await ctx.GetSpecialContextIdAsync();
 
         var (success, error) = await git.ReturnToDefaultDirectAsync(
-            ctx.WorkspaceId, ctx.RepositoryId, "feature/x",
+            ctx.WorkspaceId, special, ctx.RepositoryId, "feature/x",
             deleteRemoteBranch: false, allowForceDeleteLocalBranch: true, CancellationToken.None);
 
         Assert.True(success);
@@ -85,8 +88,9 @@ public sealed class ReturnToDefaultPersistenceTests
 
         await using var scope = ctx.CreateScope();
         var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+        var special = await ctx.GetSpecialContextIdAsync();
         await git.ReturnToDefaultDirectAsync(
-            ctx.WorkspaceId, ctx.RepositoryId, "feature/x",
+            ctx.WorkspaceId, special, ctx.RepositoryId, "feature/x",
             deleteRemoteBranch: false, allowForceDeleteLocalBranch: true, CancellationToken.None);
 
         var branches = await ctx.ReadBranchesAsync();
@@ -103,8 +107,9 @@ public sealed class ReturnToDefaultPersistenceTests
 
         await using var scope = ctx.CreateScope();
         var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+        var special = await ctx.GetSpecialContextIdAsync();
         await git.ReturnToDefaultDirectAsync(
-            ctx.WorkspaceId, ctx.RepositoryId, "feature/x",
+            ctx.WorkspaceId, special, ctx.RepositoryId, "feature/x",
             deleteRemoteBranch: false, allowForceDeleteLocalBranch: true, CancellationToken.None);
 
         var projects = await ctx.ReadProjectsAsync();
@@ -124,8 +129,9 @@ public sealed class ReturnToDefaultPersistenceTests
 
         await using var scope = ctx.CreateScope();
         var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+        var special = await ctx.GetSpecialContextIdAsync();
         await git.ReturnToDefaultDirectAsync(
-            ctx.WorkspaceId, ctx.RepositoryId, "feature/x",
+            ctx.WorkspaceId, special, ctx.RepositoryId, "feature/x",
             deleteRemoteBranch: false, allowForceDeleteLocalBranch, CancellationToken.None);
 
         var args = ctx.AgentBridge.Calls.Single(c => c.Command == "ReturnToDefaultBranch").Args;
@@ -145,9 +151,10 @@ public sealed class ReturnToDefaultPersistenceTests
 
         await using var scope = ctx.CreateScope();
         var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+        var special = await ctx.GetSpecialContextIdAsync();
 
         var (success, error) = await git.ReturnToDefaultDirectAsync(
-            ctx.WorkspaceId, ctx.RepositoryId, "feature/x",
+            ctx.WorkspaceId, special, ctx.RepositoryId, "feature/x",
             deleteRemoteBranch: false, allowForceDeleteLocalBranch: true, CancellationToken.None);
 
         Assert.False(success);
@@ -173,8 +180,9 @@ public sealed class ReturnToDefaultPersistenceTests
         await using (var jobScope = ctx.CreateScope())
         {
             var git = jobScope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+            var special = await ctx.GetSpecialContextIdAsync();
             var (success, error) = await git.ReturnToDefaultDirectAsync(
-                ctx.WorkspaceId, ctx.RepositoryId, "feature/x",
+                ctx.WorkspaceId, special, ctx.RepositoryId, "feature/x",
                 deleteRemoteBranch: false, allowForceDeleteLocalBranch: true, CancellationToken.None);
             Assert.True(success);
             Assert.Null(error);
@@ -190,5 +198,63 @@ public sealed class ReturnToDefaultPersistenceTests
         Assert.Equal("main", snapshot.DefaultBranch);
         Assert.Contains("origin/main", snapshot.RemoteBranches);
         Assert.DoesNotContain(snapshot.LocalBranches, b => b == "feature/x");
+    }
+
+    /// <summary>
+    /// The user created a branch in every repository, switched one repository back to main, then deleted the
+    /// new branch from the switch-branch dialog and got "Cannot delete the current branch". The circuit-scoped
+    /// context still tracked the link from when the repository was on the new branch.
+    /// </summary>
+    [Fact]
+    public async Task DeleteBranch_after_switching_away_in_another_scope_is_not_refused_as_the_current_branch()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        ctx.AgentBridge.Respond("ReturnToDefaultBranch", SuccessfulResponse());
+        ctx.AgentBridge.Respond("DeleteBranch", new DeleteBranchResponse { Success = true });
+
+        await using var circuitScope = ctx.CreateScope();
+        var circuitDb = circuitScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var tracked = await circuitDb.WorkspaceRepositories
+            .FirstAsync(wr => wr.WorkspaceId == ctx.WorkspaceId && wr.RepositoryId == ctx.RepositoryId);
+        Assert.Equal("feature/x", tracked.BranchName);
+
+        await using (var jobScope = ctx.CreateScope())
+        {
+            var git = jobScope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+            var special = await ctx.GetSpecialContextIdAsync();
+            var (success, _) = await git.ReturnToDefaultDirectAsync(
+                ctx.WorkspaceId, special, ctx.RepositoryId, "feature/x",
+                deleteRemoteBranch: false, allowForceDeleteLocalBranch: false, CancellationToken.None);
+            Assert.True(success);
+        }
+
+        // Still the stale value in the circuit's tracked entity.
+        Assert.Equal("feature/x", tracked.BranchName);
+        ctx.AgentBridge.Calls.Clear();
+
+        var ops = circuitScope.ServiceProvider.GetRequiredService<IWorkspaceBranchOperations>();
+        var special2 = await ctx.GetSpecialContextIdAsync();
+        var outcome = await ops.DeleteBranchAsync(ctx.WorkspaceId, special2, ctx.RepositoryId, "feature/x", isRemote: false, force: false);
+
+        Assert.True(outcome.IsSuccessStatus);
+        Assert.True(Assert.IsType<DeleteBranchApiResult>(outcome.Body).Success);
+        Assert.Single(ctx.AgentBridge.Calls, c => c.Command == "DeleteBranch");
+    }
+
+    [Fact]
+    public async Task DeleteBranch_of_the_branch_that_is_checked_out_is_refused_without_calling_the_Worker()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        ctx.AgentBridge.Respond("DeleteBranch", new DeleteBranchResponse { Success = true });
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceBranchOperations>();
+        var special = await ctx.GetSpecialContextIdAsync();
+
+        // The seeded link is on feature/x.
+        var outcome = await ops.DeleteBranchAsync(ctx.WorkspaceId, special, ctx.RepositoryId, "feature/x", isRemote: false, force: false);
+
+        Assert.False(outcome.IsSuccessStatus);
+        Assert.DoesNotContain(ctx.AgentBridge.Calls, c => c.Command == "DeleteBranch");
     }
 }

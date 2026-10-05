@@ -1,0 +1,16 @@
+﻿@namespace GrayMoon.App.Components.GitChanges
+@implements IAsyncDisposable
+
+<div class="markdown-diff-viewer-wrap">
+    <div class="markdown-diff-viewer-header">
+        @if (!string.IsNullOrEmpty(FileName))
+        {
+            <strong class="markdown-diff-viewer-header__file">@FileName</strong>
+        }
+        @if (!string.IsNullOrEmpty(SideLabel))
+        {
+            <span class="markdown-diff-viewer-header__side">@SideLabel</span>
+        }
+    </div>
+    <div id="@_elementId" class="markdown-diff-viewer markdown-body" tabindex="0"></div>
+</div>

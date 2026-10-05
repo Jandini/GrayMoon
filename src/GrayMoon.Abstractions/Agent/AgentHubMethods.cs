@@ -40,4 +40,16 @@ public static class AgentHubMethods
 
     /// <summary>Agent → App: an unsolicited Git Changes status snapshot for one repository (watcher-driven or post-mutation refresh).</summary>
     public const string GitChangesSnapshotUpdated = "GitChangesSnapshotUpdated";
+
+    /// <summary>App → Agent: list linked worktrees for one repository (<c>git worktree list --porcelain</c>).</summary>
+    public const string ListGitWorktrees = "ListGitWorktrees";
+
+    /// <summary>App → Agent: create a Feature linked worktree from a committed HEAD SHA (offline-safe, no <c>--force</c>).</summary>
+    public const string CreateGitWorktree = "CreateGitWorktree";
+
+    /// <summary>App → Agent: remove a linked worktree; force only when the request explicitly authorizes it.</summary>
+    public const string RemoveGitWorktree = "RemoveGitWorktree";
+
+    /// <summary>App → Agent: report everything removal needs to know about one worktree, checked live (read-only).</summary>
+    public const string InspectWorktree = "InspectWorktree";
 }

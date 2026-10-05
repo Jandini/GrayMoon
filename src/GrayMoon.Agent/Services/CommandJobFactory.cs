@@ -45,6 +45,8 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid GetWorkspaceRepositories args"),
             "GetRepositoryVersion" => JsonSerializer.Deserialize<GetRepositoryVersionRequest>(json, options)
                 ?? throw new ArgumentException("Invalid GetRepositoryVersion args"),
+            "GetGitVersionAtDefaultTip" => JsonSerializer.Deserialize<GetGitVersionAtDefaultTipRequest>(json, options)
+                ?? throw new ArgumentException("Invalid GetGitVersionAtDefaultTip args"),
             "GetWorkspaceExists" => JsonSerializer.Deserialize<GetWorkspaceExistsRequest>(json, options)
                 ?? throw new ArgumentException("Invalid GetWorkspaceExists args"),
             "GetHostInfo" => JsonSerializer.Deserialize<GetHostInfoRequest>(json, options) ?? new GetHostInfoRequest(),
@@ -110,6 +112,14 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid DiscardGitChanges args"),
             "CommitGitChanges" => JsonSerializer.Deserialize<CommitGitChangesRequest>(json, options)
                 ?? throw new ArgumentException("Invalid CommitGitChanges args"),
+            AgentHubMethods.ListGitWorktrees => JsonSerializer.Deserialize<ListGitWorktreesRequest>(json, options)
+                ?? throw new ArgumentException("Invalid ListGitWorktrees args"),
+            AgentHubMethods.CreateGitWorktree => JsonSerializer.Deserialize<CreateGitWorktreeRequest>(json, options)
+                ?? throw new ArgumentException("Invalid CreateGitWorktree args"),
+            AgentHubMethods.RemoveGitWorktree => JsonSerializer.Deserialize<RemoveGitWorktreeRequest>(json, options)
+                ?? throw new ArgumentException("Invalid RemoveGitWorktree args"),
+            AgentHubMethods.InspectWorktree => JsonSerializer.Deserialize<InspectWorktreeRequest>(json, options)
+                ?? throw new ArgumentException("Invalid InspectWorktree args"),
             _ => throw new NotSupportedException($"Unknown command: {command}")
         };
     }

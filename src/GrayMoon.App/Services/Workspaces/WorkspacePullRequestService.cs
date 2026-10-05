@@ -67,6 +67,16 @@ public sealed class WorkspacePullRequestService(
     }
 
     /// <summary>
+    /// Context-aware counterpart of <see cref="GetPersistedPullRequestsForWorkspaceAsync"/> for a Feature context —
+    /// reads <see cref="Models.WorkspaceRepositoryContextPullRequest"/> instead of the legacy workspace-link table.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<int, PullRequestInfo?>> GetPersistedPullRequestsForWorkspaceContextAsync(
+        int workspaceId, int contextId, CancellationToken cancellationToken = default)
+    {
+        return await pullRequestRepository.GetByWorkspaceIdContextAsync(workspaceId, contextId, cancellationToken);
+    }
+
+    /// <summary>
     /// Fetches PR state from the API for the given repos and persists it. Call after sync, refresh, push, or hooks.
     /// Returns the outcome per repository so callers can tell "there is no PR" apart from "we could not find out".
     /// </summary>
@@ -172,6 +182,98 @@ public sealed class WorkspacePullRequestService(
             return;
 
         await pullRequestRepository.UpsertAsync(workspaceRepositoryId, null, cancellationToken);
+    }
+
+    /// <summary>
+    /// Clears a Feature context's own PR projection (<see cref="WorkspaceRepositoryContextPullRequest"/>) without
+    /// contacting GitHub. Counterpart to <see cref="ClearPullRequestAsync"/> for non-special contexts - see §17.
+    /// </summary>
+    public Task ClearContextPullRequestAsync(int contextId, int workspaceRepositoryId, CancellationToken cancellationToken = default) =>
+        pullRequestRepository.UpsertContextAsync(contextId, workspaceRepositoryId, null, cancellationToken);
+
+    /// <summary>
+    /// Fetches PR state from the API for the given repos' checked-out branch <paramref name="branchByRepositoryId"/>
+    /// under a Feature context, and persists it into that context's own <see cref="WorkspaceRepositoryContextPullRequest"/>
+    /// projection (never mutating the shared link or legacy PR row - see §17 and the data-corruption note in
+    /// <see cref="Workspaces.WorkspaceRepositoryStateWriter"/>). Repositories missing from
+    /// <paramref name="branchByRepositoryId"/> or with a blank branch have their context PR row cleared.
+    /// Returns the outcome per repository (keyed by RepositoryId) so callers can tell "there is no PR"
+    /// apart from "we could not find out" (<see cref="PullRequestRefreshOutcome.Failed"/>).
+    /// </summary>
+    public async Task<IReadOnlyDictionary<int, PullRequestRefreshOutcome>> RefreshContextPullRequestsAsync(
+        int workspaceId,
+        int contextId,
+        IReadOnlyDictionary<int, string?> branchByRepositoryId,
+        bool force = false,
+        CancellationToken cancellationToken = default)
+    {
+        var outcomes = new Dictionary<int, PullRequestRefreshOutcome>();
+        if (branchByRepositoryId.Count == 0) return outcomes;
+
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var repositoryIds = branchByRepositoryId.Keys.ToList();
+        var links = await dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Include(wr => wr.Repository)
+            .ThenInclude(r => r!.Connector)
+            .Where(wr => wr.WorkspaceId == workspaceId && repositoryIds.Contains(wr.RepositoryId))
+            .ToListAsync(cancellationToken);
+
+        var toClear = links.Where(wr => wr.Repository == null || string.IsNullOrWhiteSpace(branchByRepositoryId.GetValueOrDefault(wr.RepositoryId))).ToList();
+        foreach (var wr in toClear)
+        {
+            await pullRequestRepository.UpsertContextAsync(contextId, wr.WorkspaceRepositoryId, null, cancellationToken);
+            outcomes[wr.RepositoryId] = PullRequestRefreshOutcome.Cleared;
+        }
+
+        var toRefresh = links.Where(wr => wr.Repository != null && !string.IsNullOrWhiteSpace(branchByRepositoryId.GetValueOrDefault(wr.RepositoryId))).ToList();
+        if (toRefresh.Count == 0) return outcomes;
+
+        using var semaphore = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
+        var fetchTasks = toRefresh.Select(async wr =>
+        {
+            await semaphore.WaitAsync(cancellationToken);
+            try
+            {
+                var branch = branchByRepositoryId[wr.RepositoryId]!;
+                var cacheKey = (wr.RepositoryId, branch);
+                if (!force && _cache.TryGetValue(cacheKey, out var cached) && DateTime.UtcNow - cached.FetchedAt < CacheTtl)
+                    return (Wr: wr, Pr: cached.Result, Outcome: PullRequestRefreshOutcome.CacheHit);
+
+                var connectorName = wr.Repository!.Connector?.ConnectorName;
+                if (!string.IsNullOrWhiteSpace(connectorName) && rateLimitTracker.GetPausedUntil(connectorName) is { } pausedUntil)
+                {
+                    logger.LogTrace("Context PR refresh skipped (rate-limited until {PausedUntil}) for repo {RepositoryId}", pausedUntil, wr.RepositoryId);
+                    return (Wr: wr, Pr: (PullRequestInfo?)null, Outcome: PullRequestRefreshOutcome.Failed);
+                }
+
+                var pr = await gitHubPullRequestService.GetPullRequestForBranchAsync(wr.Repository!, wr.Repository!.Connector, branch, cancellationToken);
+                _cache[cacheKey] = (pr, DateTime.UtcNow);
+                return (Wr: wr, Pr: pr, Outcome: PullRequestRefreshOutcome.Refreshed);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "RefreshContextPullRequest failed. WorkspaceId={WorkspaceId}, ContextId={ContextId}, RepositoryId={RepositoryId}", workspaceId, contextId, wr.RepositoryId);
+                return (Wr: wr, Pr: (PullRequestInfo?)null, Outcome: PullRequestRefreshOutcome.Failed);
+            }
+            finally
+            {
+                semaphore.Release();
+            }
+        });
+        var fetched = await Task.WhenAll(fetchTasks);
+
+        foreach (var result in fetched)
+        {
+            outcomes[result.Wr.RepositoryId] = result.Outcome;
+            // Cache hits still persist into this context's own projection (unlike the special
+            // Workspace RefreshPullRequestsAsync above): a cache warmed by one context must still be
+            // written into a different context's row the first time that context asks for it.
+            if (result.Outcome is PullRequestRefreshOutcome.Refreshed or PullRequestRefreshOutcome.CacheHit)
+                await pullRequestRepository.UpsertContextAsync(contextId, result.Wr.WorkspaceRepositoryId, result.Pr, cancellationToken);
+        }
+
+        return outcomes;
     }
 
     /// <summary>Drops every cached PR lookup for a repository. Call on branch change so the old branch's entry cannot be served after a later checkout back onto it.</summary>

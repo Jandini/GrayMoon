@@ -108,6 +108,31 @@ public sealed class ConnectorRepository(AppDbContext dbContext, ILogger<Connecto
             return;
         }
 
+        // Deleting the Connector cascades to its Repositories, their WorkspaceRepositoryLink rows, and
+        // (via FK_WorkspaceFeatureRepositories_Links) any WorkspaceFeatureRepositories row that points at
+        // those links. Refuse the whole delete instead of silently dropping a Feature's repository.
+        var connectorRepositoryIds = await dbContext.Repositories
+            .Where(repository => repository.ConnectorId == connectorId)
+            .Select(repository => repository.RepositoryId)
+            .ToListAsync();
+
+        if (connectorRepositoryIds.Count > 0)
+        {
+            var usedByFeature = await dbContext.WorkspaceRepositories
+                .Where(link => connectorRepositoryIds.Contains(link.RepositoryId))
+                .Join(
+                    dbContext.WorkspaceFeatureRepositories,
+                    link => link.WorkspaceRepositoryId,
+                    featureRepository => featureRepository.WorkspaceRepositoryId,
+                    (link, featureRepository) => featureRepository.WorkspaceFeatureRepositoryId)
+                .AnyAsync();
+
+            if (usedByFeature)
+            {
+                throw new InvalidOperationException("Remove the Features that use this connector's repositories first.");
+            }
+        }
+
         dbContext.Connectors.Remove(connector);
         await dbContext.SaveChangesAsync();
         logger.LogInformation("Persistence: saved Connector. Action=Delete, ConnectorId={ConnectorId}, ConnectorName={ConnectorName}", connectorId, connector.ConnectorName);

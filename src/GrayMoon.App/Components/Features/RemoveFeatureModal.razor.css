@@ -1,0 +1,37 @@
+.form-check-input:not(:checked) {
+    background-color: #6c757d;
+    border-color: #6c757d;
+}
+
+/* Cap the repository list so dialog chrome stays visible (D6). */
+.remove-feature-repo-list {
+    max-height: min(40vh, 70%);
+    overflow-y: auto;
+    margin-bottom: 0.5rem;
+    padding-right: 0.25rem;
+}
+
+/* Green Remove CTA when automatically safe - same family as Merge PR (.merge-pr-btn-github). */
+::deep .remove-feature-btn-safe {
+    background-color: #238636;
+    border-color: rgba(240, 246, 252, 0.1);
+    color: #fff;
+}
+
+::deep .remove-feature-btn-safe:hover:not(:disabled),
+::deep .remove-feature-btn-safe:focus-visible:not(:disabled) {
+    background-color: #2ea043;
+    border-color: rgba(240, 246, 252, 0.1);
+    color: #fff;
+}
+
+::deep .remove-feature-btn-safe:active:not(:disabled) {
+    background-color: #238636;
+    color: #fff;
+}
+
+::deep .remove-feature-btn-safe:disabled {
+    background-color: #30363d;
+    border-color: rgba(240, 246, 252, 0.1);
+    color: rgba(255, 255, 255, 0.5);
+}

@@ -45,7 +45,15 @@ public sealed record WorkspaceRepositoryLinkListItemDto(
     string? PullRequestMergeableState,
     int? PullRequestChangedFiles,
     bool Archived,
-    int UncommittedChangedFileCount);
+    int UncommittedChangedFileCount,
+    /// <summary>HEAD SHA for the selected context (Feature Create PR compares to <see cref="FeatureBaseCommitSha"/>).</summary>
+    string? HeadCommit = null,
+    /// <summary>Feature creation tip SHA when viewing a Feature; null for Workspace.</summary>
+    string? FeatureBaseCommitSha = null,
+    /// <summary>Feature parent / PR-base branch when viewing a Feature; null for Workspace or when unknown.</summary>
+    string? ParentBranchName = null,
+    /// <summary>Tag the Feature repository is pinned to when viewing a Feature; null for Workspace or an unpinned repository.</summary>
+    string? FeaturePinnedTag = null);
 
 public sealed record WorkspaceRepositoryLinkListPageResult(
     IReadOnlyList<WorkspaceRepositoryLinkListItemDto> Items,
@@ -63,7 +71,15 @@ public sealed record WorkspaceRepositoryHeaderStateDto(
     bool IsOutOfSync,
     int? LowestLevelNeedingWork,
     /// <summary>True when at least one repository would show the yellow "create" PR badge (ahead of default, no open/merged/closed PR).</summary>
-    bool HasCreatablePr);
+    bool HasCreatablePr,
+    /// <summary>True when at least one repository has an open pull request in the selected context.</summary>
+    bool HasOpenPr,
+    /// <summary>
+    /// True when the Feature has at least one pull request, every pull request is merged or closed (none open),
+    /// and no repository has commits outside a pull request (not <see cref="HasCreatablePr"/>). Always false for
+    /// the special Workspace, where "Remove" is never the header's primary action (E2).
+    /// </summary>
+    bool AllFeaturePrsCompleted = false);
 
 /// <summary>Lightweight row for virtual-scroll index (no PR/join payload).</summary>
 public sealed record WorkspaceRepositoryLinkIndexEntry(

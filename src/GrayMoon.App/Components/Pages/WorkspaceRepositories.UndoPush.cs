@@ -47,7 +47,7 @@ public sealed partial class WorkspaceRepositories
             try
             {
                 var result = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, OperationResult>(svc =>
-                    svc.UndoPushAsync(WorkspaceId, keepChanges, job.ToOperationProgress(), ct));
+                    svc.UndoPushAsync(WorkspaceId, RequireSelectedContextId(), keepChanges, job.ToOperationProgress(), ct));
                 SafeInvoke(() =>
                 {
                     ApplyRepositoryErrors(result.RepoErrors);

@@ -83,6 +83,7 @@ public sealed class CheckoutHookSyncCommand(IGitService git, IRepositoryStatePro
             {
                 WorkspaceId = payload.WorkspaceId,
                 RepositoryId = payload.RepositoryId,
+                RepositoryPath = payload.RepositoryPath,
                 Version = version,
                 Branch = branch,
                 Tag = state.CheckedOutTag,

@@ -15,6 +15,11 @@ public sealed partial class WorkspaceRepositories
             CancelBackgroundWork();
             _backgroundWorkCts = new CancellationTokenSource();
             await LoadWorkspaceHeaderAsync();
+            if (workspace == null)
+            {
+                return;
+            }
+
             await ResetAndLoadFromTopAsync();
         }
         catch (Exception ex)
@@ -38,7 +43,8 @@ public sealed partial class WorkspaceRepositories
     }
     private async Task LoadHeaderStateAsync(CancellationToken cancellationToken = default)
     {
-        _headerState = await LinkListQueryService.GetHeaderStateAsync(WorkspaceId, cancellationToken);
+        _headerState = await LinkListQueryService.GetHeaderStateAsync(
+            WorkspaceId, _selectedContextId, !_isFeatureContext, cancellationToken);
     }
     private async Task ResetAndLoadFromTopAsync(bool restoreScroll = true)
     {
@@ -63,7 +69,7 @@ public sealed partial class WorkspaceRepositories
                 return;
             }
             var token = _queryLoader.BeginQueryCycle(out generation);
-            ClearGridState();
+            ClearGridState(clearHeaderState: false);
             isInitialLoading = true;
             _virtualScrollAttached = false;
             _attachInitialScrollTop = 0;
@@ -72,7 +78,8 @@ public sealed partial class WorkspaceRepositories
                 var filter = new WorkspaceRepositoryLinkListFilter(WorkspaceId, _effectiveSearch);
                 await LoadHeaderStateAsync(token);
                 totalCount = await LinkListQueryService.CountAsync(filter, token);
-                var index = await LinkListQueryService.GetIndexAsync(filter, token);
+                var index = await LinkListQueryService.GetIndexAsync(
+                    filter, _selectedContextId, !_isFeatureContext, token);
                 if (generation != _queryLoader.Generation || _disposed)
                 {
                     return;
@@ -140,7 +147,8 @@ public sealed partial class WorkspaceRepositories
         {
             return false;
         }
-        var dtos = await LinkListQueryService.GetByIdsAsync(WorkspaceId, missingIds, cancellationToken);
+        var dtos = await LinkListQueryService.GetByIdsAsync(
+            WorkspaceId, missingIds, _selectedContextId, !_isFeatureContext, cancellationToken);
         if (cancellationToken.IsCancellationRequested || _disposed)
         {
             return false;
@@ -319,7 +327,8 @@ public sealed partial class WorkspaceRepositories
             }
             if (ids.Count > 0)
             {
-                var dtos = await LinkListQueryService.GetByIdsAsync(WorkspaceId, ids, cancellationToken);
+                var dtos = await LinkListQueryService.GetByIdsAsync(
+                    WorkspaceId, ids, _selectedContextId, !_isFeatureContext, cancellationToken);
                 ApplyItemsFromDtos(dtos, replace: false);
             }
         }
@@ -329,7 +338,7 @@ public sealed partial class WorkspaceRepositories
         try
         {
             await ScopedExecutor.ExecuteAsync<IWorkspaceBranchOperations>(
-                svc => svc.RefreshBranchesAsync(WorkspaceId, repositoryId, CancellationToken.None));
+                svc => svc.RefreshBranchesAsync(WorkspaceId, RequireSelectedContextId(), repositoryId, CancellationToken.None));
         }
         catch (Exception ex)
         {
@@ -414,7 +423,8 @@ public sealed partial class WorkspaceRepositories
                 // from the live scroll pixel position rather than reusing old slot indices, since a level
                 // split/merge shifts slot positions in the rebuilt list.
                 var filter = new WorkspaceRepositoryLinkListFilter(WorkspaceId, _effectiveSearch);
-                var index = await LinkListQueryService.GetIndexAsync(filter, token);
+                var index = await LinkListQueryService.GetIndexAsync(
+                    filter, _selectedContextId, !_isFeatureContext, token);
                 if (_disposed) return;
                 BuildSlots(index);
                 totalCount = index.Count;
@@ -480,13 +490,14 @@ public sealed partial class WorkspaceRepositories
             var projectRepo = scope.ServiceProvider.GetRequiredService<WorkspaceProjectRepository>();
             var fileVersionService = scope.ServiceProvider.GetRequiredService<WorkspaceFileVersionService>();
             var customDepRepo = scope.ServiceProvider.GetRequiredService<WorkspaceRepositoryCustomDependencyRepository>();
-            var mismatched = await projectRepo.GetMismatchedDependencyLinesForRepoAsync(WorkspaceId, repositoryId);
-            var allDeps = await projectRepo.GetPackageDependencyLinesForRepoAsync(WorkspaceId, repositoryId);
-            var mismatchedFiles = await fileVersionService.GetMismatchedFileVersionLinesForRepoAsync(WorkspaceId, repositoryId);
-            var fileStatuses = await fileVersionService.GetFileLineStatusForRepoAsync(WorkspaceId, repositoryId);
+            var mismatched = await projectRepo.GetMismatchedDependencyLinesForRepoAsync(WorkspaceId, repositoryId, _selectedContextId);
+            var allDeps = await projectRepo.GetPackageDependencyLinesForRepoAsync(WorkspaceId, repositoryId, _selectedContextId);
+            var mismatchedFiles = await fileVersionService.GetMismatchedFileVersionLinesForRepoAsync(WorkspaceId, RequireSelectedContextId(), repositoryId);
+            var fileStatuses = await fileVersionService.GetFileLineStatusForRepoAsync(WorkspaceId, RequireSelectedContextId(), repositoryId);
             var linkListQuery = scope.ServiceProvider.GetRequiredService<IWorkspaceRepositoryLinkListQueryService>();
-            var repoVersionMap = await linkListQuery.GetGitVersionNameMapAsync(WorkspaceId);
-            var allFileLines = await fileVersionService.GetAllFileVersionLinesForRepoAsync(WorkspaceId, repositoryId, repoVersionMap);
+            var repoVersionMap = await linkListQuery.GetGitVersionNameMapAsync(
+                WorkspaceId, _selectedContextId, !_isFeatureContext);
+            var allFileLines = await fileVersionService.GetAllFileVersionLinesForRepoAsync(WorkspaceId, RequireSelectedContextId(), repositoryId, repoVersionMap);
             var custom = await customDepRepo.GetCustomDependencyNamesForRepoAsync(WorkspaceId, repositoryId);
             var mismatchDict = _mismatchedDependencyLinesByRepo as Dictionary<int, IReadOnlyList<DependencyMismatchLine>>
                 ?? _mismatchedDependencyLinesByRepo.ToDictionary(kv => kv.Key, kv => kv.Value);

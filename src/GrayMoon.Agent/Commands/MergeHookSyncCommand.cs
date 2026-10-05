@@ -39,6 +39,7 @@ public sealed class MergeHookSyncCommand(IRepositoryStateProbe stateProbe, IHubC
             {
                 WorkspaceId = payload.WorkspaceId,
                 RepositoryId = payload.RepositoryId,
+                RepositoryPath = payload.RepositoryPath,
                 Version = version,
                 Branch = branch,
                 Tag = state.CheckedOutTag,

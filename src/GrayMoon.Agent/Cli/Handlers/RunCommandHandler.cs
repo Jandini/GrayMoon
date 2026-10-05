@@ -113,6 +113,7 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<GitProcessRunner>();
         builder.Services.AddSingleton<IGitService, GitService>();
         builder.Services.AddSingleton<GitRemoteIntegrateService>();
+        builder.Services.AddSingleton<IWorkerSecretProvider, WorkerSecretProvider>();
         builder.Services.AddSingleton<IAgentTokenProvider, AgentTokenProvider>();
         builder.Services.AddSingleton<ICsProjFileParser, CsProjFileParser>();
         builder.Services.AddSingleton<ICsProjFileService, CsProjFileService>();
@@ -167,6 +168,11 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<ICommandHandler<UnstageGitChangesRequest, GitMutationResponse>, UnstageGitChangesCommand>();
         builder.Services.AddSingleton<ICommandHandler<DiscardGitChangesRequest, GitMutationResponse>, DiscardGitChangesCommand>();
         builder.Services.AddSingleton<ICommandHandler<CommitGitChangesRequest, CommitGitChangesResponse>, CommitGitChangesCommand>();
+        builder.Services.AddSingleton<ICommandHandler<ListGitWorktreesRequest, ListGitWorktreesResponse>, ListGitWorktreesCommand>();
+        builder.Services.AddSingleton<ICommandHandler<CreateGitWorktreeRequest, CreateGitWorktreeResponse>, CreateGitWorktreeCommand>();
+        builder.Services.AddSingleton<ICommandHandler<RemoveGitWorktreeRequest, RemoveGitWorktreeResponse>, RemoveGitWorktreeCommand>();
+        builder.Services.AddSingleton<ICommandHandler<InspectWorktreeRequest, InspectWorktreeResponse>, InspectWorktreeCommand>();
+        builder.Services.AddSingleton<ICommandHandler<GetGitVersionAtDefaultTipRequest, GetGitVersionAtDefaultTipResponse>, GetGitVersionAtDefaultTipCommand>();
         builder.Services.AddSingleton<CheckoutHookSyncCommand>();
         builder.Services.AddSingleton<CommitHookSyncCommand>();
         builder.Services.AddSingleton<MergeHookSyncCommand>();

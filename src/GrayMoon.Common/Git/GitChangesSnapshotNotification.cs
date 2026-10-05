@@ -16,6 +16,10 @@ public sealed class GitChangesSnapshotNotification
     [JsonPropertyName("repositoryId")]
     public int RepositoryId { get; init; }
 
+    /// <summary>Absolute checkout/worktree path that produced the snapshot; App attributes to a Feature context.</summary>
+    [JsonPropertyName("repositoryPath")]
+    public string? RepositoryPath { get; init; }
+
     [JsonPropertyName("snapshot")]
     public required GitChangeSnapshot Snapshot { get; init; }
 }

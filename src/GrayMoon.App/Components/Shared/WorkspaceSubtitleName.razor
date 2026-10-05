@@ -1,0 +1,10 @@
+@namespace GrayMoon.App.Components.Shared
+
+@if (!string.IsNullOrWhiteSpace(Name))
+{
+    <span class="workspace-subtitle-name">@Name</span>
+}
+
+@code {
+    [Parameter] public string? Name { get; set; }
+}

@@ -1,4 +1,5 @@
 using GrayMoon.App.Services.GitChanges;
+using GrayMoon.Application.Features;
 using GrayMoon.Common.Git;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -113,6 +114,7 @@ public sealed class GitChangesLineStatsRefreshTests
         var scanner = new RecordingScanner(onScan);
         var refresh = new GitChangesLineStatsRefresh(
             scanner,
+            new FakeFeatureContextScopeFactory(new WorkspaceFeatureContextId(1)),
             Options.Create(new GitChangesOptions { WatcherDebounceMilliseconds = 10 }),
             NullLogger<GitChangesLineStatsRefresh>.Instance);
         return (refresh, scanner);
@@ -142,6 +144,7 @@ public sealed class GitChangesLineStatsRefreshTests
 
         public async Task ScanWorkspaceAsync(
             int workspaceId,
+            WorkspaceFeatureContextId contextId,
             CancellationToken cancellationToken,
             Action<GitChangesWorkspaceScanProgress>? onProgress = null,
             bool includeLineStats = false,

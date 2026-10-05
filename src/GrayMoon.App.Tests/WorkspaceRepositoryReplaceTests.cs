@@ -3,6 +3,7 @@ using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
+using GrayMoon.App.Services.GitChanges;
 using GrayMoon.Common.Git;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -155,6 +156,209 @@ public sealed class WorkspaceRepositoryReplaceTests
         Assert.Empty(await verify.WorkspaceGitChangeEntries.ToListAsync());
     }
 
+    [Fact]
+    public async Task UpdateAsync_publishes_git_changes_for_all_contexts_when_repositories_are_removed()
+    {
+        await using var fx = await Fixture.CreateAsync(linkCount: 2);
+        var notifier = new RecordingGitChangesNotifier();
+        var catalog = fx.CreateWorkspaceRepository(notifier);
+
+        await catalog.UpdateAsync(fx.WorkspaceId, "test-workspace", fx.RepositoryIds, null);
+        Assert.Empty(notifier.Published);
+
+        await catalog.UpdateAsync(fx.WorkspaceId, "test-workspace", [fx.RepositoryIds[1]], null);
+
+        Assert.Equal((fx.WorkspaceId, IWorkspaceGitChangesNotifier.AllContexts), Assert.Single(notifier.Published));
+    }
+
+    // B6 characterization test (A4 step 0): a Workspace with no Features must keep behaving exactly
+    // as today, including a rename, a root path change and a repository membership change together
+    // in one UpdateAsync call. Keep this test green after the B6 fix.
+    [Fact]
+    public async Task UpdateAsync_without_features_rename_root_and_membership_change_still_succeeds()
+    {
+        await using var fx = await Fixture.CreateAsync(linkCount: 2);
+        var catalog = fx.CreateWorkspaceRepository();
+
+        await catalog.UpdateAsync(fx.WorkspaceId, "renamed-workspace", [fx.RepositoryIds[1]], "C:\\custom-root");
+
+        await using var verify = fx.Factory.CreateDbContext();
+        var workspace = await verify.Workspaces.AsNoTracking()
+            .FirstAsync(w => w.WorkspaceId == fx.WorkspaceId);
+        Assert.Equal("renamed-workspace", workspace.Name);
+        Assert.Equal("C:\\custom-root", workspace.RootPath);
+
+        var remaining = await verify.WorkspaceRepositories
+            .AsNoTracking()
+            .Where(wr => wr.WorkspaceId == fx.WorkspaceId)
+            .ToListAsync();
+        Assert.Equal(fx.RepositoryIds[1], Assert.Single(remaining).RepositoryId);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_with_features_unchanged_name_root_and_members_succeeds()
+    {
+        await using var fx = await Fixture.CreateAsync(linkCount: 2);
+        fx.CircuitDb.WorkspaceFeatures.Add(new WorkspaceFeature { WorkspaceId = fx.WorkspaceId, Name = "my-feature" });
+        await fx.CircuitDb.SaveChangesAsync();
+
+        var catalog = fx.CreateWorkspaceRepository();
+
+        // Same name, same (null) root, same repository set: not a rename, not a root change,
+        // not a membership change, so it must succeed even though a Feature exists.
+        await catalog.UpdateAsync(fx.WorkspaceId, "test-workspace", fx.RepositoryIds, null);
+
+        await using var verify = fx.Factory.CreateDbContext();
+        var workspace = await verify.Workspaces.AsNoTracking()
+            .FirstAsync(w => w.WorkspaceId == fx.WorkspaceId);
+        Assert.Equal("test-workspace", workspace.Name);
+        Assert.Null(workspace.RootPath);
+        var links = await verify.WorkspaceRepositories.AsNoTracking()
+            .Where(wr => wr.WorkspaceId == fx.WorkspaceId)
+            .Select(wr => wr.RepositoryId)
+            .ToListAsync();
+        Assert.Equal(fx.RepositoryIds.OrderBy(id => id), links.OrderBy(id => id));
+    }
+
+    [Fact]
+    public async Task UpdateAsync_with_features_rename_is_refused_and_nothing_is_saved()
+    {
+        await using var fx = await Fixture.CreateAsync(linkCount: 2);
+        fx.CircuitDb.WorkspaceFeatures.Add(new WorkspaceFeature { WorkspaceId = fx.WorkspaceId, Name = "my-feature" });
+        await fx.CircuitDb.SaveChangesAsync();
+
+        var catalog = fx.CreateWorkspaceRepository();
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => catalog.UpdateAsync(fx.WorkspaceId, "renamed-workspace", fx.RepositoryIds, null));
+        Assert.Contains("Features exist", ex.Message);
+
+        await using var verify = fx.Factory.CreateDbContext();
+        var workspace = await verify.Workspaces.AsNoTracking()
+            .FirstAsync(w => w.WorkspaceId == fx.WorkspaceId);
+        Assert.Equal("test-workspace", workspace.Name);
+        Assert.Null(workspace.RootPath);
+        var links = await verify.WorkspaceRepositories.AsNoTracking()
+            .Where(wr => wr.WorkspaceId == fx.WorkspaceId)
+            .Select(wr => wr.RepositoryId)
+            .ToListAsync();
+        Assert.Equal(fx.RepositoryIds.OrderBy(id => id), links.OrderBy(id => id));
+    }
+
+    [Fact]
+    public async Task UpdateAsync_with_features_root_change_is_refused_and_nothing_is_saved()
+    {
+        await using var fx = await Fixture.CreateAsync(linkCount: 2);
+        fx.CircuitDb.WorkspaceFeatures.Add(new WorkspaceFeature { WorkspaceId = fx.WorkspaceId, Name = "my-feature" });
+        await fx.CircuitDb.SaveChangesAsync();
+
+        var catalog = fx.CreateWorkspaceRepository();
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => catalog.UpdateAsync(fx.WorkspaceId, "test-workspace", fx.RepositoryIds, "C:\\custom-root"));
+        Assert.Contains("Features exist", ex.Message);
+
+        await using var verify = fx.Factory.CreateDbContext();
+        var workspace = await verify.Workspaces.AsNoTracking()
+            .FirstAsync(w => w.WorkspaceId == fx.WorkspaceId);
+        Assert.Null(workspace.RootPath);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_with_features_membership_change_is_refused_and_name_is_unchanged()
+    {
+        await using var fx = await Fixture.CreateAsync(linkCount: 2);
+        fx.CircuitDb.WorkspaceFeatures.Add(new WorkspaceFeature { WorkspaceId = fx.WorkspaceId, Name = "my-feature" });
+        await fx.CircuitDb.SaveChangesAsync();
+
+        var catalog = fx.CreateWorkspaceRepository();
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => catalog.UpdateAsync(fx.WorkspaceId, "test-workspace", [fx.RepositoryIds[1]], null));
+        Assert.Contains("Features exist", ex.Message);
+
+        await using var verify = fx.Factory.CreateDbContext();
+        var workspace = await verify.Workspaces.AsNoTracking()
+            .FirstAsync(w => w.WorkspaceId == fx.WorkspaceId);
+        Assert.Equal("test-workspace", workspace.Name);
+        var links = await verify.WorkspaceRepositories.AsNoTracking()
+            .Where(wr => wr.WorkspaceId == fx.WorkspaceId)
+            .Select(wr => wr.RepositoryId)
+            .ToListAsync();
+        Assert.Equal(fx.RepositoryIds.OrderBy(id => id), links.OrderBy(id => id));
+    }
+
+    // Workspace delete guard. Characterization test first (A4 step 0): a Workspace with no Features is
+    // deleted exactly as before, links included.
+    [Fact]
+    public async Task DeleteAsync_without_features_deletes_the_workspace_and_its_links_as_today()
+    {
+        await using var fx = await Fixture.CreateAsync(linkCount: 2);
+        var catalog = fx.CreateWorkspaceRepository();
+
+        await catalog.DeleteAsync(fx.WorkspaceId);
+
+        await using var verify = fx.Factory.CreateDbContext();
+        Assert.False(await verify.Workspaces.AnyAsync(w => w.WorkspaceId == fx.WorkspaceId));
+        Assert.False(await verify.WorkspaceRepositories.AnyAsync(wr => wr.WorkspaceId == fx.WorkspaceId));
+        Assert.Equal(fx.RepositoryIds.Count, await verify.Repositories.CountAsync(r => fx.RepositoryIds.Contains(r.RepositoryId)));
+    }
+
+    [Fact]
+    public async Task DeleteAsync_with_features_is_refused_and_nothing_is_deleted()
+    {
+        await using var fx = await Fixture.CreateAsync(linkCount: 2);
+        fx.CircuitDb.WorkspaceFeatures.Add(new WorkspaceFeature { WorkspaceId = fx.WorkspaceId, Name = "my-feature" });
+        await fx.CircuitDb.SaveChangesAsync();
+
+        var catalog = fx.CreateWorkspaceRepository();
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => catalog.DeleteAsync(fx.WorkspaceId));
+        Assert.Equal("Remove the Features first, then delete the Workspace.", ex.Message);
+
+        await using var verify = fx.Factory.CreateDbContext();
+        Assert.True(await verify.Workspaces.AnyAsync(w => w.WorkspaceId == fx.WorkspaceId));
+        Assert.Equal(2, await verify.WorkspaceRepositories.CountAsync(wr => wr.WorkspaceId == fx.WorkspaceId));
+        Assert.True(await verify.WorkspaceFeatures.AnyAsync(f => f.WorkspaceId == fx.WorkspaceId));
+    }
+
+    [Fact]
+    public async Task DeleteAsync_ignores_features_of_other_workspaces()
+    {
+        await using var fx = await Fixture.CreateAsync(linkCount: 1);
+        var other = new Workspace { Name = "other-workspace" };
+        fx.CircuitDb.Workspaces.Add(other);
+        await fx.CircuitDb.SaveChangesAsync();
+        fx.CircuitDb.WorkspaceFeatures.Add(new WorkspaceFeature { WorkspaceId = other.WorkspaceId, Name = "other-feature" });
+        await fx.CircuitDb.SaveChangesAsync();
+
+        var catalog = fx.CreateWorkspaceRepository();
+        await catalog.DeleteAsync(fx.WorkspaceId);
+
+        await using var verify = fx.Factory.CreateDbContext();
+        Assert.False(await verify.Workspaces.AnyAsync(w => w.WorkspaceId == fx.WorkspaceId));
+        Assert.True(await verify.Workspaces.AnyAsync(w => w.WorkspaceId == other.WorkspaceId));
+    }
+
+    [Fact]
+    public async Task DeleteAsync_succeeds_once_the_features_are_gone()
+    {
+        await using var fx = await Fixture.CreateAsync(linkCount: 1);
+        var feature = new WorkspaceFeature { WorkspaceId = fx.WorkspaceId, Name = "my-feature" };
+        fx.CircuitDb.WorkspaceFeatures.Add(feature);
+        await fx.CircuitDb.SaveChangesAsync();
+
+        var catalog = fx.CreateWorkspaceRepository();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => catalog.DeleteAsync(fx.WorkspaceId));
+
+        fx.CircuitDb.WorkspaceFeatures.Remove(feature);
+        await fx.CircuitDb.SaveChangesAsync();
+        await catalog.DeleteAsync(fx.WorkspaceId);
+
+        await using var verify = fx.Factory.CreateDbContext();
+        Assert.False(await verify.Workspaces.AnyAsync(w => w.WorkspaceId == fx.WorkspaceId));
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;
@@ -236,7 +440,7 @@ public sealed class WorkspaceRepositoryReplaceTests
             return new Fixture(connection, factory, db, workspace.WorkspaceId, repositoryIds, linkIds);
         }
 
-        public WorkspaceRepository CreateWorkspaceRepository()
+        public WorkspaceRepository CreateWorkspaceRepository(IWorkspaceGitChangesNotifier? notifier = null)
         {
             var workspaceService = new WorkspaceService(
                 new NoOpAgentBridge(),
@@ -248,6 +452,7 @@ public sealed class WorkspaceRepositoryReplaceTests
                 CircuitDb,
                 Factory,
                 workspaceService,
+                notifier ?? new WorkspaceGitChangesNotifier(NullLogger<WorkspaceGitChangesNotifier>.Instance),
                 NullLogger<WorkspaceRepository>.Instance);
         }
 

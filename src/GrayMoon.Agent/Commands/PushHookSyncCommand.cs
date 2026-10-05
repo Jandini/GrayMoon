@@ -1,6 +1,7 @@
 using GrayMoon.Abstractions.Agent;
 using GrayMoon.Abstractions.Notifications;
 using GrayMoon.Agent.Abstractions;
+using GrayMoon.Agent.Services;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
 
@@ -24,7 +25,8 @@ public sealed class PushHookSyncCommand(IGitService git, ICsProjFileService csPr
 
         var (versionResult, _) = await git.GetVersionAsync(payload.RepositoryPath, cancellationToken);
         var version = versionResult?.InformationalVersion ?? "-";
-        var branch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? "-";
+        // A GitVersion failure leaves the version unresolved; it must not cost the repository its branch.
+        var branch = await git.ResolveBranchAsync(versionResult, payload.RepositoryPath, cancellationToken) ?? "-";
 
         var currentTag = await git.GetCheckedOutTagAsync(payload.RepositoryPath, cancellationToken);
         if (currentTag != null)
@@ -47,7 +49,9 @@ public sealed class PushHookSyncCommand(IGitService git, ICsProjFileService csPr
             {
                 WorkspaceId = payload.WorkspaceId,
                 RepositoryId = payload.RepositoryId,
+                RepositoryPath = payload.RepositoryPath,
                 Version = version,
+                GitVersionFailed = versionResult == null,
                 Branch = branch,
                 Tag = currentTag,
                 ErrorMessage = null
@@ -104,7 +108,9 @@ public sealed class PushHookSyncCommand(IGitService git, ICsProjFileService csPr
                 }
 
                 // Push done (outgoing == 0 or null) or max attempts reached - send final notification
-                var (defaultBehind, defaultAhead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, defaultRef, CancellationToken.None);
+                var divergenceRef = git.ToOriginBranchRef(await git.GetDivergenceBaseBranchAsync(repoPath, CancellationToken.None))
+                    ?? defaultRef;
+                var (defaultBehind, defaultAhead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, CancellationToken.None);
                 var (versionResult, _) = await git.GetVersionAsync(repoPath, CancellationToken.None);
                 var finalVersion = versionResult?.InformationalVersion ?? "-";
                 var finalBranch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? branch;
@@ -123,7 +129,9 @@ public sealed class PushHookSyncCommand(IGitService git, ICsProjFileService csPr
                 {
                     WorkspaceId = payload.WorkspaceId,
                     RepositoryId = payload.RepositoryId,
+                    RepositoryPath = payload.RepositoryPath,
                     Version = finalVersion,
+                    GitVersionFailed = versionResult == null,
                     Branch = finalBranch,
                     Tag = finalTag,
                     OutgoingCommits = outgoing,

@@ -1,5 +1,6 @@
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
+using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Services.Application;
 
@@ -10,6 +11,7 @@ public sealed class WorkspacePushOperations(
 {
     public async Task<WorkspacePushPlan> GetPlanAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int? maxLevel = null,
         CancellationToken cancellationToken = default)
     {
@@ -17,40 +19,33 @@ public sealed class WorkspacePushOperations(
         if (workspace == null)
             return new WorkspacePushPlan(new HashSet<int>(), new HashSet<string>(StringComparer.OrdinalIgnoreCase), false);
 
-        return await GetPlanForLinksAsync(workspaceId, workspace.Repositories.ToList(), maxLevel, cancellationToken);
+        return await GetPlanForLinksAsync(workspaceId, contextId, workspace.Repositories.ToList(), maxLevel, cancellationToken);
     }
 
     public async Task<IReadOnlySet<int>> GetRepositoryIdsNeedingPushAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlySet<int> repositoryIds,
         CancellationToken cancellationToken = default)
     {
         if (repositoryIds.Count == 0)
             return new HashSet<int>();
 
-        var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
-        if (workspace == null)
-            return new HashSet<int>();
-
-        return workspace.Repositories
-            .Where(wr => repositoryIds.Contains(wr.RepositoryId)
-                && !wr.IsOnTag
-                && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false))
-            .Select(wr => wr.RepositoryId)
-            .ToHashSet();
+        return await workspaceRepository.GetRepositoryIdsNeedingPushAsync(workspaceId, contextId.Value, repositoryIds, cancellationToken);
     }
 
     public async Task<WorkspacePushPlan> GetPlanForLinksAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlyList<WorkspaceRepositoryLink> links,
         int? maxLevel = null,
         CancellationToken cancellationToken = default)
     {
-        var (_, pushRepoIds, hasUnpushed) = await pushHandler.GetPushPlanAsync(workspaceId, links, cancellationToken, maxLevel);
+        var (_, pushRepoIds, hasUnpushed) = await pushHandler.GetPushPlanAsync(workspaceId, contextId, links, cancellationToken, maxLevel);
         if (!hasUnpushed || pushRepoIds.Count == 0)
             return new WorkspacePushPlan(new HashSet<int>(), new HashSet<string>(StringComparer.OrdinalIgnoreCase), false);
 
-        var depInfo = await dependencyService.GetPushDependencyInfoForRepoSetAsync(workspaceId, pushRepoIds, cancellationToken);
+        var depInfo = await dependencyService.GetPushDependencyInfoForRepoSetAsync(workspaceId, contextId.Value, pushRepoIds, cancellationToken);
         var required = depInfo?.PayloadForRepo?.RequiredPackages
             .Select(r => r.PackageId?.Trim())
             .Where(id => !string.IsNullOrEmpty(id))
@@ -62,6 +57,7 @@ public sealed class WorkspacePushOperations(
 
     public Task<OperationResult> PushAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlySet<int> repositoryIds,
         bool synchronizedPush,
         IReadOnlySet<string> requiredPackageIds,
@@ -72,6 +68,7 @@ public sealed class WorkspacePushOperations(
         bool restorePackages = true)
         => pushHandler.RunPushWithDependenciesAsync(
             workspaceId,
+            contextId,
             repositoryIds,
             synchronizedPush,
             requiredPackageIds,
@@ -83,16 +80,18 @@ public sealed class WorkspacePushOperations(
 
     public async Task<OperationResult> PushPendingAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         bool synchronizedPush,
         IProgress<OperationProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        var plan = await GetPlanAsync(workspaceId, maxLevel: null, cancellationToken);
+        var plan = await GetPlanAsync(workspaceId, contextId, maxLevel: null, cancellationToken);
         if (!plan.HasUnpushed)
             return OperationResult.Ok();
 
         return await PushAsync(
             workspaceId,
+            contextId,
             plan.RepositoryIds,
             synchronizedPush,
             plan.RequiredPackageIds,
@@ -102,12 +101,14 @@ public sealed class WorkspacePushOperations(
 
     public Task<OperationResult> PushSingleAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         string? branchName,
         IProgress<OperationProgress>? progress = null,
         CancellationToken cancellationToken = default)
         => pushHandler.PushSingleRepositoryWithUpstreamAsync(
             workspaceId,
+            contextId,
             repositoryId,
             branchName,
             progress,

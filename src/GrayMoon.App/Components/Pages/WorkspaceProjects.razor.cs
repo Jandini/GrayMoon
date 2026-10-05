@@ -1,7 +1,9 @@
 using GrayMoon.App.Components.Shared;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
+using GrayMoon.App.Services.Features;
 using GrayMoon.App.Services.Queries;
+using GrayMoon.Application.Features;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.JSInterop;
@@ -13,7 +15,11 @@ public sealed partial class WorkspaceProjects : IAsyncDisposable, IDisposable
 {
     [Parameter] public int WorkspaceId { get; set; }
 
+    [SupplyParameterFromQuery(Name = "context")]
+    public int? ContextQuery { get; set; }
+
     [Inject] private IJSRuntime JSRuntime { get; set; } = default!;
+    [Inject] private WorkspaceContextNavigationService ContextNavigation { get; set; } = default!;
 
     private readonly DebouncedQueryLoader _queryLoader = new();
     private readonly VirtualTableScrollState<WorkspaceProjectListItemDto> _virtual = new();
@@ -28,6 +34,8 @@ public sealed partial class WorkspaceProjects : IAsyncDisposable, IDisposable
     private string _effectiveSearch = string.Empty;
     private bool _disposed;
     private int _loadedWorkspaceId;
+    private WorkspaceFeatureContextId? _selectedContextId;
+    private int? _loadedContextId;
 
     private bool HasSearchFilter => !string.IsNullOrWhiteSpace(_effectiveSearch);
 
@@ -82,13 +90,24 @@ public sealed partial class WorkspaceProjects : IAsyncDisposable, IDisposable
 
     protected override async Task OnParametersSetAsync()
     {
-        if (_loadedWorkspaceId == WorkspaceId && workspace != null)
+        var contextChanged = _loadedContextId != ContextQuery;
+        if (_loadedWorkspaceId == WorkspaceId && workspace != null && !contextChanged)
         {
             return;
         }
 
         _loadedWorkspaceId = WorkspaceId;
+        _loadedContextId = ContextQuery;
+        var info = await ContextNavigation.ResolveForPageAsync(WorkspaceId, ContextQuery);
+        _selectedContextId = info.ContextId;
         await LoadWorkspaceHeaderAsync();
+        await ResetAndLoadFromTopAsync();
+    }
+
+    private async Task OnSelectedContextChangedAsync(WorkspaceFeatureContextId contextId)
+    {
+        _selectedContextId = contextId;
+        _loadedContextId = contextId.Value;
         await ResetAndLoadFromTopAsync();
     }
 
@@ -140,7 +159,7 @@ public sealed partial class WorkspaceProjects : IAsyncDisposable, IDisposable
 
         try
         {
-            var filter = new WorkspaceProjectListFilter(WorkspaceId, _effectiveSearch);
+            var filter = new WorkspaceProjectListFilter(WorkspaceId, _effectiveSearch, _selectedContextId?.Value);
             totalCount = await WorkspaceProjectListQueryService.CountAsync(filter, token);
             var ids = await WorkspaceProjectListQueryService.GetIndexAsync(filter, token);
 

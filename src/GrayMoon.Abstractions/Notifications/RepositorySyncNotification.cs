@@ -10,6 +10,12 @@ public sealed class RepositorySyncNotification
     public int RepositoryId { get; init; }
     public string Version { get; init; } = "-";
     public string Branch { get; init; } = "-";
+    /// <summary>
+    /// True when the agent ran GitVersion and it failed, so <see cref="Version"/> is "-" because the version could not be
+    /// computed, not because the agent did not look. The app clears the stored version (shown as unresolved) instead of
+    /// keeping a stale one. Agents that predate this field send false, which keeps the old behaviour.
+    /// </summary>
+    public bool GitVersionFailed { get; init; }
     /// <summary>Tag the repository is currently checked out at (detached HEAD on a tag). Null when on a branch.</summary>
     public string? Tag { get; init; }
     public int? OutgoingCommits { get; init; }
@@ -23,6 +29,18 @@ public sealed class RepositorySyncNotification
     public List<string>? RemoteBranches { get; init; }
     /// <summary>All tag names ordered newest-first (SortIndex 0 = newest), populated on checkout-to-tag so the app can persist tag state and compute HasNewerTag. Null when not on a tag or when tag fetch was skipped.</summary>
     public List<string>? RemoteTags { get; init; }
+
+    /// <summary>
+    /// Absolute worktree/checkout path that produced this sync (from hook
+    /// <c>git rev-parse --show-toplevel</c>). Used by the App for context attribution.
+    /// </summary>
+    public string? RepositoryPath { get; init; }
+
+    /// <summary>
+    /// Optional Agent-claimed context id. The App always re-validates against
+    /// <see cref="RepositoryPath"/> and never trusts this alone.
+    /// </summary>
+    public int? WorkspaceFeatureContextId { get; init; }
 
     /// <summary>
     /// Authoritative state with per-group probe markers. Agents that predate this field send null,

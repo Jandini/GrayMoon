@@ -1,4 +1,8 @@
+using GrayMoon.Application.Features;
+
 namespace GrayMoon.App.Api.Endpoints;
+
+using GrayMoon.Application.Features;
 
 public static class BranchEndpoints
 {
@@ -46,6 +50,7 @@ public static class BranchEndpoints
     private static async Task<IResult> CheckoutBranch(
         CheckoutBranchApiRequest? body,
         IWorkspaceBranchOperations operations,
+        IWorkspaceFeatureContextResolver contextResolver,
         CancellationToken cancellationToken)
     {
         if (body == null)
@@ -53,8 +58,10 @@ public static class BranchEndpoints
         if (body.WorkspaceId <= 0 || body.RepositoryId <= 0 || string.IsNullOrWhiteSpace(body.BranchName))
             return Results.BadRequest("workspaceId, repositoryId, and branchName are required.");
 
+        var contextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(body.WorkspaceId, cancellationToken);
         return (await operations.CheckoutAsync(
             body.WorkspaceId,
+            contextId,
             body.RepositoryId,
             body.BranchName,
             body.IsTag,
@@ -64,6 +71,7 @@ public static class BranchEndpoints
     private static async Task<IResult> ReturnToDefaultBranch(
         ReturnToDefaultBranchApiRequest? body,
         IWorkspaceBranchOperations operations,
+        IWorkspaceFeatureContextResolver contextResolver,
         CancellationToken cancellationToken)
     {
         if (body == null)
@@ -71,8 +79,10 @@ public static class BranchEndpoints
         if (body.WorkspaceId <= 0 || body.RepositoryId <= 0 || string.IsNullOrWhiteSpace(body.CurrentBranchName))
             return Results.BadRequest("workspaceId, repositoryId, and currentBranchName are required.");
 
+        var contextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(body.WorkspaceId, cancellationToken);
         return (await operations.ReturnToDefaultAsync(
             body.WorkspaceId,
+            contextId,
             body.RepositoryId,
             body.CurrentBranchName,
             body.DeleteRemoteBranch,
@@ -83,6 +93,7 @@ public static class BranchEndpoints
     private static async Task<IResult> RefreshBranches(
         RefreshBranchesApiRequest? body,
         IWorkspaceBranchOperations operations,
+        IWorkspaceFeatureContextResolver contextResolver,
         CancellationToken cancellationToken)
     {
         if (body == null)
@@ -90,12 +101,14 @@ public static class BranchEndpoints
         if (body.WorkspaceId <= 0 || body.RepositoryId <= 0)
             return Results.BadRequest("workspaceId and repositoryId are required.");
 
-        return (await operations.RefreshBranchesAsync(body.WorkspaceId, body.RepositoryId, cancellationToken)).ToHttpResult();
+        var contextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(body.WorkspaceId, cancellationToken);
+        return (await operations.RefreshBranchesAsync(body.WorkspaceId, contextId, body.RepositoryId, cancellationToken)).ToHttpResult();
     }
 
     private static async Task<IResult> CreateBranch(
         CreateBranchApiRequest? body,
         IWorkspaceBranchOperations operations,
+        IWorkspaceFeatureContextResolver contextResolver,
         CancellationToken cancellationToken)
     {
         if (body == null)
@@ -103,8 +116,10 @@ public static class BranchEndpoints
         if (body.WorkspaceId <= 0 || body.RepositoryId <= 0 || string.IsNullOrWhiteSpace(body.NewBranchName))
             return Results.BadRequest("workspaceId, repositoryId, and newBranchName are required.");
 
+        var contextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(body.WorkspaceId, cancellationToken);
         return (await operations.CreateBranchAsync(
             body.WorkspaceId,
+            contextId,
             body.RepositoryId,
             body.NewBranchName,
             body.BaseBranch,
@@ -114,6 +129,7 @@ public static class BranchEndpoints
     private static async Task<IResult> SetUpstreamBranch(
         SetUpstreamBranchApiRequest? body,
         IWorkspaceBranchOperations operations,
+        IWorkspaceFeatureContextResolver contextResolver,
         CancellationToken cancellationToken)
     {
         if (body == null)
@@ -121,8 +137,10 @@ public static class BranchEndpoints
         if (body.WorkspaceId <= 0 || body.RepositoryId <= 0 || string.IsNullOrWhiteSpace(body.BranchName))
             return Results.BadRequest("workspaceId, repositoryId, and branchName are required.");
 
+        var contextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(body.WorkspaceId, cancellationToken);
         return (await operations.SetUpstreamAsync(
             body.WorkspaceId,
+            contextId,
             body.RepositoryId,
             body.BranchName,
             cancellationToken)).ToHttpResult();
@@ -131,6 +149,7 @@ public static class BranchEndpoints
     private static async Task<IResult> DeleteBranch(
         DeleteBranchApiRequest? body,
         IWorkspaceBranchOperations operations,
+        IWorkspaceFeatureContextResolver contextResolver,
         CancellationToken cancellationToken)
     {
         if (body == null)
@@ -138,8 +157,10 @@ public static class BranchEndpoints
         if (body.WorkspaceId <= 0 || body.RepositoryId <= 0 || string.IsNullOrWhiteSpace(body.BranchName))
             return Results.BadRequest("workspaceId, repositoryId, and branchName are required.");
 
+        var contextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(body.WorkspaceId, cancellationToken);
         return (await operations.DeleteBranchAsync(
             body.WorkspaceId,
+            contextId,
             body.RepositoryId,
             body.BranchName,
             body.IsRemote,
@@ -150,6 +171,7 @@ public static class BranchEndpoints
     private static async Task<IResult> UpdateBranchFromDefault(
         UpdateBranchFromDefaultApiRequest? body,
         IWorkspaceBranchOperations operations,
+        IWorkspaceFeatureContextResolver contextResolver,
         CancellationToken cancellationToken)
     {
         if (body == null)
@@ -157,7 +179,8 @@ public static class BranchEndpoints
         if (body.WorkspaceId <= 0 || body.RepositoryId <= 0)
             return Results.BadRequest("workspaceId and repositoryId are required.");
 
-        return (await operations.UpdateBranchFromDefaultAsync(body.WorkspaceId, body.RepositoryId, cancellationToken)).ToHttpResult();
+        var contextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(body.WorkspaceId, cancellationToken);
+        return (await operations.UpdateBranchFromDefaultAsync(body.WorkspaceId, contextId, body.RepositoryId, cancellationToken)).ToHttpResult();
     }
 
     private static async Task<IResult> GetCommonBranches(

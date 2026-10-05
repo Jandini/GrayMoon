@@ -25,6 +25,9 @@ public sealed class RepositoryStateSnapshot
     /// <summary>Tag HEAD is checked out at, or null when on a branch. Applied when <see cref="IdentityProbed"/>.</summary>
     public string? CheckedOutTag { get; init; }
 
+    /// <summary>Full SHA of HEAD. Applied when <see cref="IdentityProbed"/>.</summary>
+    public string? HeadCommit { get; init; }
+
     /// <summary>GitVersion informational version. Applied when <see cref="GitVersionProbed"/>.</summary>
     public string? GitVersion { get; init; }
 

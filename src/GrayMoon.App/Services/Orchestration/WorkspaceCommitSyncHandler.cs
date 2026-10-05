@@ -7,6 +7,8 @@ using GrayMoon.App.Repositories;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
+using GrayMoon.Application.Features;
+
 namespace GrayMoon.App.Services.Orchestration;
 
 /// <summary>
@@ -18,16 +20,17 @@ public sealed class WorkspaceCommitSyncHandler(
     IAgentBridge agentBridge,
     WorkspaceRepository workspaceRepository,
     GitHubRepositoryRepository repoRepository,
-    WorkspaceService workspaceService,
     ConnectorHealthService connectorHealthService,
     AppDbContext dbContext,
     WorkspaceRepositoryStateWriter stateWriter,
     IHubContext<WorkspaceSyncHub> hubContext,
     IServiceScopeFactory serviceScopeFactory,
+    IWorkspaceContextPathResolver pathResolver,
     ILogger<WorkspaceCommitSyncHandler> logger)
 {
     public async Task CommitSyncAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         CancellationToken cancellationToken,
         IProgress<OperationProgress>? progress,
@@ -59,15 +62,23 @@ public sealed class WorkspaceCommitSyncHandler(
         try
         {
             await connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepositoryId, cancellationToken);
-            var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
+            var divergenceBaseBranch = await (
+                from r in dbContext.WorkspaceFeatureRepositories.AsNoTracking()
+                join l in dbContext.WorkspaceRepositories.AsNoTracking()
+                    on r.WorkspaceRepositoryId equals l.WorkspaceRepositoryId
+                where r.WorkspaceFeatureContextId == contextId.Value && l.RepositoryId == repositoryId
+                select r.ParentBranchName
+            ).FirstOrDefaultAsync(cancellationToken);
             var args = new
             {
-                workspaceName = workspace.Name,
+                workspaceName = workspaceFolderName,
                 repositoryId = repo.RepositoryId,
                 repositoryName = repo.RepositoryName,
                 bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
                 workspaceId,
-                workspaceRoot
+                workspaceRoot,
+                divergenceBaseBranch
             };
 
             var response = await agentBridge.SendCommandAsync("CommitSyncRepository", args, cancellationToken);
@@ -83,7 +94,7 @@ public sealed class WorkspaceCommitSyncHandler(
             }
 
             var result = AgentResponseJson.DeserializeAgentResponse<CommitSyncResponse>(response.Data);
-            await ApplyResultToDbAsync(dbContext, stateWriter, workspaceId, repositoryId, result, cancellationToken);
+            await ApplyResultToDbAsync(dbContext, stateWriter, contextId, workspaceId, repositoryId, result, cancellationToken);
             await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
 
             if (result != null && !string.IsNullOrWhiteSpace(result.ErrorMessage))
@@ -108,6 +119,7 @@ public sealed class WorkspaceCommitSyncHandler(
 
     public async Task CommitSyncLevelAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlyList<int> repositoryIds,
         CancellationToken cancellationToken,
         Func<int, int, Task> reportProgress,
@@ -130,9 +142,17 @@ public sealed class WorkspaceCommitSyncHandler(
             return;
         }
 
-        var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
         var total = repositoryIds.Count;
         var completedCount = 0;
+
+        var parentByRepoId = await (
+            from r in dbContext.WorkspaceFeatureRepositories.AsNoTracking()
+            join l in dbContext.WorkspaceRepositories.AsNoTracking()
+                on r.WorkspaceRepositoryId equals l.WorkspaceRepositoryId
+            where r.WorkspaceFeatureContextId == contextId.Value
+            select new { l.RepositoryId, r.ParentBranchName }
+        ).ToDictionaryAsync(x => x.RepositoryId, x => x.ParentBranchName, cancellationToken);
 
         var tasks = repositoryIds.Select(async repositoryId =>
         {
@@ -154,14 +174,16 @@ public sealed class WorkspaceCommitSyncHandler(
 
                 await scopedConnectorHealth.EnsureConnectorHealthyForRepositoryAsync(repo.RepositoryId, cancellationToken);
 
+                parentByRepoId.TryGetValue(repositoryId, out var divergenceBaseBranch);
                 var args = new
                 {
-                    workspaceName = workspace.Name,
+                    workspaceName = workspaceFolderName,
                     repositoryId = repo.RepositoryId,
                     repositoryName = repo.RepositoryName,
                     bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
                     workspaceId,
-                    workspaceRoot
+                    workspaceRoot,
+                    divergenceBaseBranch
                 };
 
                 var response = await agentBridge.SendCommandAsync("CommitSyncRepository", args, cancellationToken);
@@ -177,7 +199,7 @@ public sealed class WorkspaceCommitSyncHandler(
                 }
 
                 var result = AgentResponseJson.DeserializeAgentResponse<CommitSyncResponse>(response.Data);
-                await ApplyResultToDbAsync(scopedDbContext, scopedStateWriter, workspaceId, repositoryId, result, cancellationToken);
+                await ApplyResultToDbAsync(scopedDbContext, scopedStateWriter, contextId, workspaceId, repositoryId, result, cancellationToken);
                 await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
 
                 if (result != null && !string.IsNullOrWhiteSpace(result.ErrorMessage))
@@ -212,6 +234,7 @@ public sealed class WorkspaceCommitSyncHandler(
     private static async Task ApplyResultToDbAsync(
         AppDbContext db,
         WorkspaceRepositoryStateWriter stateWriter,
+        WorkspaceFeatureContextId contextId,
         int workspaceId,
         int repositoryId,
         CommitSyncResponse? result,
@@ -224,7 +247,7 @@ public sealed class WorkspaceCommitSyncHandler(
         }
 
         var statusWrite = result.Success && !result.MergeConflict ? SyncStatusWrite.InSync : SyncStatusWrite.Error;
-        await stateWriter.ApplyAsync(workspaceId, repositoryId, BuildSnapshot(result), new RepositoryStateWriteOptions
+        await stateWriter.ApplyAsync(contextId, workspaceId, repositoryId, BuildSnapshot(result), new RepositoryStateWriteOptions
         {
             SyncStatus = statusWrite
         }, ct);

@@ -1,6 +1,9 @@
 @page "/workspaces/{WorkspaceId:int}/files"
 @rendermode InteractiveServer
 @using GrayMoon.App.Components.Shared
+@using GrayMoon.App.Components.Features
+@using GrayMoon.Application.Features
+@using GrayMoon.App.Services.Features
 @using GrayMoon.App.Models
 @using GrayMoon.App.Models.Api
 @using GrayMoon.App.Repositories
@@ -15,6 +18,8 @@
 @inject IWorkspaceFileOperations FileOperations
 @inject IServiceScopeFactory ServiceScopeFactory
 @inject WorkspaceService WorkspaceService
+@inject IWorkspaceContextPathResolver PathResolver
+@inject WorkspaceContextNavigationService ContextNavigation
 @inject IToastService ToastService
 @inject ILogger<WorkspaceFiles> Logger
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
@@ -27,6 +32,7 @@
             <div class="workspace-repos-title-row">
                 <h2 class="workspace-repos-title">Files</h2>
                 <p class="text-muted mb-0 workspace-repos-subtitle workspace-files__subtitle">
+                    <WorkspaceSubtitleName Name="@(workspace?.Name)" />
                     @if (!isLoading && files.Count > 0)
                     {
                         var fileSuffix = HasSearchFilter ? " found" : "";
@@ -44,8 +50,11 @@
                 </p>
                 <span class="workspace-repos-title-spacer"></span>
             </div>
-            <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
-                <div class="workspace-grid-search-wrapper">
+            <div class="d-flex gap-2 align-items-center workspace-repos-header-actions flex-wrap">
+                <WorkspaceContextBar WorkspaceId="WorkspaceId"
+                                     WorkspaceName="@(workspace?.Name)"
+                                     SelectedContextId="_selectedContextId"
+                                     SelectedContextIdChanged="OnSelectedContextChangedAsync">
                     <FilterSearchInput @bind-Value="searchTerm"
                                        InputId="workspace-files-search"
                                        InputAdditionalClass="workspace-grid-search"
@@ -53,7 +62,7 @@
                                        Disabled="@(isLoading || files.Count == 0)"
                                        OnKeyDown="OnSearchKeyDown"
                                        OnClear="ClearSearchFilter" />
-                </div>
+                </WorkspaceContextBar>
                 <button class="btn btn-outline-primary" @onclick="UpdateVersionsAsync"
                         disabled="@(fileVersionConfigs.Count == 0)" title="Update versions in all configured files">
                     Update
@@ -151,12 +160,14 @@
 
 <AddFilesModal IsVisible="@showFileModal"
                 WorkspaceId="WorkspaceId"
+                ContextId="_selectedContextId!.Value"
                 WorkspaceRepos="@workspaceRepos"
                 OnAdd="OnFilesAdded"
                 OnCancel="CloseAddFilesModal" />
 
 <VersionConfigModal IsVisible="@showVersionConfigModal"
                     WorkspaceId="WorkspaceId"
+                    ContextId="_selectedContextId!.Value"
                     File="@configuringFile"
                     WorkspaceRepos="@workspaceRepos"
                     CurrentPattern="@currentConfigPattern"
@@ -165,7 +176,7 @@
 
 <ViewFileModal IsVisible="@showViewFileModal"
                File="@(viewingFile!)"
-               WorkspaceName="@(workspace?.Name)"
+               WorkspaceName="@contextFolderName"
                WorkspaceRoot="@workspaceRoot"
                IsConfigured="@(viewingFile != null && fileVersionConfigs.ContainsKey(viewingFile.FileId))"
                OnClose="CloseViewFileModal"
@@ -176,6 +187,10 @@
 @code {
     [Parameter] public int WorkspaceId { get; set; }
 
+    [SupplyParameterFromQuery(Name = "context")]
+    public int? ContextQuery { get; set; }
+
+    private WorkspaceFeatureContextId? _selectedContextId;
     private WorkspaceModel? workspace;
     private List<WorkspaceFileDto> files = new();
     private List<WorkspaceRepoItem> workspaceRepos = new();
@@ -189,6 +204,7 @@
     private bool showViewFileModal;
     private WorkspaceFileDto? viewingFile;
     private string? workspaceRoot;
+    private string? contextFolderName;
     private bool isUpdating;
     private string updateMessage = "";
     private CancellationTokenSource? _updateCts;
@@ -230,6 +246,14 @@
 
     protected override async Task OnInitializedAsync()
     {
+        var info = await ContextNavigation.ResolveForPageAsync(WorkspaceId, ContextQuery);
+        _selectedContextId = info.ContextId;
+        await LoadAsync();
+    }
+
+    private async Task OnSelectedContextChangedAsync(WorkspaceFeatureContextId contextId)
+    {
+        _selectedContextId = contextId;
         await LoadAsync();
     }
 
@@ -246,14 +270,27 @@
                 files = new List<WorkspaceFileDto>();
                 workspaceRepos = new List<WorkspaceRepoItem>();
                 workspaceRoot = null;
+                contextFolderName = null;
                 return;
             }
-            workspaceRoot = await WorkspaceService.GetRootPathForWorkspaceAsync(workspace, default);
+            if (_selectedContextId is null)
+            {
+                errorMessage = "No Feature context selected.";
+                return;
+            }
+            var (agentRoot, folderName) = await PathResolver.GetAgentWorkspaceArgsAsync(_selectedContextId.Value);
+            workspaceRoot = agentRoot;
+            contextFolderName = folderName;
             workspaceRepos = workspace.Repositories
                 .Where(r => r.Repository != null)
                 .Select(r => new WorkspaceRepoItem { RepositoryId = r.RepositoryId, RepositoryName = r.Repository!.RepositoryName })
                 .ToList();
             var list = await WorkspaceFileRepository.GetByWorkspaceIdAsync(WorkspaceId);
+            // Context-scoped (§7/AGENTS.md "Feature-context scoping"): IsMissingOnDisk is per-context state, not
+            // a single shared flag - a Feature must see its own worktree's missing-file answer, not the
+            // Workspace's (or another Feature's). Falls back to the shared WorkspaceFile row only for the
+            // special Workspace / files with no context-state row yet.
+            var missingFlags = await FileVersionService.GetMissingFlagsByFileIdAsync(WorkspaceId, _selectedContextId.Value);
             files = list.Select(f => new WorkspaceFileDto
             {
                 FileId = f.FileId,
@@ -262,7 +299,7 @@
                 RepositoryName = f.Repository?.RepositoryName,
                 FileName = f.FileName,
                 FilePath = f.FilePath,
-                IsMissingOnDisk = f.IsMissingOnDisk == true
+                IsMissingOnDisk = missingFlags.GetValueOrDefault(f.FileId) == true
             }).ToList();
             var configs = await VersionConfigRepository.GetByWorkspaceIdAsync(WorkspaceId);
             fileVersionConfigs = configs.ToDictionary(c => c.FileId, c => c.VersionPattern);
@@ -355,8 +392,8 @@
         await using var scope = ServiceScopeFactory.CreateAsyncScope();
         var fileVersionService = scope.ServiceProvider.GetRequiredService<WorkspaceFileVersionService>();
         var projectRepo = scope.ServiceProvider.GetRequiredService<WorkspaceProjectRepository>();
-        await fileVersionService.CheckAndPersistFileVersionStatusAsync(WorkspaceId, forceFresh: true);
-        await projectRepo.RecomputeAndPersistRepositoryDependencyStatsAsync(WorkspaceId);
+        await fileVersionService.CheckAndPersistFileVersionStatusAsync(WorkspaceId, _selectedContextId!.Value, forceFresh: true);
+        await projectRepo.RecomputeAndPersistRepositoryDependencyStatsAsync(WorkspaceId, _selectedContextId!.Value.Value);
         await LoadAsync();
     }
 
@@ -371,7 +408,7 @@
         StateHasChanged();
         try
         {
-            var result = await FileOperations.UpdateVersionsAsync(WorkspaceId, _updateCts.Token, checkAfter: true);
+            var result = await FileOperations.UpdateVersionsAsync(WorkspaceId, _selectedContextId!.Value, _updateCts.Token, checkAfter: true);
             if (result.Error == null)
                 await LoadAsync();
             if (result.Error != null)

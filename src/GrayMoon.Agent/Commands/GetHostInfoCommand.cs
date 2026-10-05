@@ -13,11 +13,18 @@ public sealed class GetHostInfoCommand(ICommandLineService commandLine) : IComma
         var gitVersion = await GetVersionAsync("git", "--version", null, cancellationToken);
         var gitVersionToolVersion = await GetVersionAsync("dotnet", "gitversion version", null, cancellationToken);
 
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (string.IsNullOrWhiteSpace(userProfile))
+            userProfile = null;
+        else
+            userProfile = userProfile.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
         return new GetHostInfoResponse
         {
             DotnetVersion = dotnetVersion,
             GitVersion = gitVersion,
-            GitVersionToolVersion = gitVersionToolVersion
+            GitVersionToolVersion = gitVersionToolVersion,
+            UserProfilePath = userProfile
         };
     }
 

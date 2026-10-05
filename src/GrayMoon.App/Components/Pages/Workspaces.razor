@@ -19,6 +19,11 @@
 @inject IAgentBridge AgentBridge
 @inject AgentConnectionTracker AgentConnectionTracker
 @inject ILogger<Workspaces> Logger
+@inject WorkspaceContextNavigationService ContextNavigation
+@using GrayMoon.App.Services.Features
+@using GrayMoon.Application
+@using GrayMoon.Application.Features
+@inject IWorkspaceFeatureOperations FeatureOperations
 
 <PageTitle>Workspaces - GrayMoon</PageTitle>
 
@@ -127,7 +132,7 @@
                                                     }
                                                 </button>
                                                 <NavLink class="link-primary text-decoration-none"
-                                                         href="@($"workspaces/{workspace.WorkspaceId}")">
+                                                         href="@WorkspaceEntryHref(workspace.WorkspaceId)">
                                                     <strong>@workspace.Name</strong>
                                                 </NavLink>
                                                 @if (workspace.IsDefault)
@@ -172,7 +177,8 @@
                WorkspacePath="@GetWorkspacePath()"
                DirectoryAlreadyExists="@directoryExists"
                ExistingRepositoryCount="@existingRepositoryCount"
-               IsNameDisabled="false"
+               IsNameDisabled="@(editingWorkspaceId != null && editingWorkspaceHasFeatures)"
+               NameDisabledHint="@(editingWorkspaceHasFeatures ? "Rename and root changes are not possible while Features exist. Remove Features first." : null)"
                IsSaving="@isSaving"
                IsCheckingDirectory="@isLoadingDirectoryInfo"
                ErrorMessage="@editorErrorMessage"
@@ -212,10 +218,14 @@
                 <div class="modal-body">
                     <p class="mb-2">Remove workspace <strong>@workspaceToDelete?.Name</strong>?</p>
                     <p class="mb-0 text-muted">Only the GrayMoon workspace will be removed. Repositories on disk will stay untouched.</p>
+                    @if (deleteBlockedMessage != null)
+                    {
+                        <div class="alert alert-warning mt-3 mb-0" role="alert">@deleteBlockedMessage</div>
+                    }
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" @onclick="CloseDeleteModal">Cancel</button>
-                    <button type="button" class="btn btn-danger" data-default-action @onclick="DeleteWorkspaceAsync" disabled="@isDeleting">
+                    <button type="button" class="btn btn-danger" data-default-action @onclick="DeleteWorkspaceAsync" disabled="@(isDeleting || deleteBlockedMessage != null)">
                         @if (isDeleting)
                         {
                             <span class="spinner-border spinner-border-sm me-2"></span>
@@ -232,6 +242,7 @@
 
 @code {
     private List<WorkspaceModel>? workspaces;
+    private Dictionary<int, string> workspaceEntryHrefs = new();
     private string searchTerm = string.Empty;
     private int repositoriesModalRefreshGeneration;
     private string? errorMessage;
@@ -298,6 +309,8 @@
     private string editorTitle = "Add Workspace";
     private int? editingWorkspaceId;
     private string? editingWorkspaceRootPath;
+    private bool editingWorkspaceHasFeatures;
+    private string? deleteBlockedMessage;
     private HashSet<int> editingWorkspaceRepositoryIds = new();
     private WorkspaceModel? workspaceToDelete;
     private HashSet<int> selectedRepositoryIds = new();
@@ -347,25 +360,46 @@
             await WorkspaceService.GetRootPathAsync();
     }
 
+    private string WorkspaceEntryHref(int workspaceId)
+        => workspaceEntryHrefs.TryGetValue(workspaceId, out var href)
+            ? href
+            : $"workspaces/{workspaceId}";
+
     private async Task LoadWorkspacesAsync()
     {
         try
         {
             errorMessage = null;
             workspaces = await WorkspaceRepository.GetAllAsync();
+            await LoadWorkspaceEntryHrefsAsync(workspaces);
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error loading workspaces");
             errorMessage = "Failed to load workspaces. Please try again later.";
             workspaces = new List<WorkspaceModel>();
+            workspaceEntryHrefs = new();
         }
+    }
+
+    private async Task LoadWorkspaceEntryHrefsAsync(IReadOnlyList<WorkspaceModel> items)
+    {
+        var hrefs = new Dictionary<int, string>(items.Count);
+        foreach (var workspace in items)
+        {
+            hrefs[workspace.WorkspaceId] = await ContextNavigation.BuildWorkspaceEntryHrefAsync(
+                workspace.WorkspaceId,
+                $"workspaces/{workspace.WorkspaceId}");
+        }
+
+        workspaceEntryHrefs = hrefs;
     }
 
     private async Task ShowCreateModalAsync()
     {
         editingWorkspaceId = null;
         editingWorkspaceRootPath = null;
+        editingWorkspaceHasFeatures = false;
         editorTitle = "Add Workspace";
         workspaceName = string.Empty;
         directoryExists = false;
@@ -402,6 +436,10 @@
         editingWorkspaceRepositoryIds = workspace.Repositories
             .Select(link => link.RepositoryId)
             .ToHashSet();
+
+        var features = await FeatureOperations.ListFeaturesAsync(workspaceId);
+        editingWorkspaceHasFeatures = features.Count > 0;
+
         showEditorModal = true;
         await LoadDirectoryInfoAsync();
     }
@@ -581,16 +619,25 @@
             await _deleteModalElement.FocusAsync();
     }
 
-    private void ShowDeleteModal(WorkspaceModel workspace)
+    private async Task ShowDeleteModal(WorkspaceModel workspace)
     {
         workspaceToDelete = workspace;
+        deleteBlockedMessage = null;
         showDeleteModal = true;
+
+        // A Workspace that still has Features cannot be deleted; say so up front instead of after Remove.
+        var features = await FeatureOperations.ListFeaturesAsync(workspace.WorkspaceId);
+        if (features.Count > 0 && workspaceToDelete == workspace)
+        {
+            deleteBlockedMessage = WorkspaceRepository.WorkspaceDeleteBlockedByFeaturesMessage;
+        }
     }
 
     private void CloseDeleteModal()
     {
         showDeleteModal = false;
         workspaceToDelete = null;
+        deleteBlockedMessage = null;
     }
 
     private async Task HandleDeleteModalKeyDown(KeyboardEventArgs e)
@@ -607,7 +654,7 @@
 
     private async Task DeleteWorkspaceAsync()
     {
-        if (workspaceToDelete == null)
+        if (workspaceToDelete == null || deleteBlockedMessage != null)
         {
             return;
         }
@@ -619,6 +666,11 @@
             await WorkspaceRepository.DeleteAsync(workspaceToDelete.WorkspaceId);
             CloseDeleteModal();
             await LoadWorkspacesAsync();
+        }
+        catch (InvalidOperationException ex) when (ex.Message == WorkspaceRepository.WorkspaceDeleteBlockedByFeaturesMessage)
+        {
+            // A Feature was created after the dialog opened; keep the dialog open and explain.
+            deleteBlockedMessage = ex.Message;
         }
         catch (Exception ex)
         {

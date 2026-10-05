@@ -1,7 +1,10 @@
 @using GrayMoon.App.Models
 @using GrayMoon.App.Services
+@using GrayMoon.App.Services.Features
 @using GrayMoon.App.Components.Shared
+@using GrayMoon.Application.Features
 @using Microsoft.AspNetCore.Components.Web
+@inject WorkspaceContextNavigationService ContextNavigation
 
 @if (Link?.Repository != null)
 {
@@ -69,6 +72,11 @@
                           title="Click to copy version">@Link.GitVersion</span>
                 </div>
             }
+            else if (Link.IsVersionUnresolved)
+            {
+                <span class="version-inner version-inner--unresolved"
+                      title="GitVersion could not compute a version for this repository (for example, it has no commits yet). The repository itself synced normally.">unresolved</span>
+            }
             else
             {
                 <span class="text-muted">&nbsp;</span>
@@ -97,6 +105,12 @@
             {
                 <span>&nbsp;</span>
             }
+            @if (!string.IsNullOrEmpty(OffFeatureBranchName))
+            {
+                <span class="badge bg-warning text-dark ms-1 off-feature-branch-badge @(ActionsDisabled ? "off-feature-branch-badge--disabled" : "")"
+                      @onclick="HandleBranchClick"
+                      title="@OffFeatureBranchTooltip">off feature branch</span>
+            }
         </td>
         <td class="col-metrics col-divergence col-pr text-center">
             <div class="metrics-grid">
@@ -106,14 +120,20 @@
                                     BranchName="@Link.BranchName"
                                     RepositoryUrl="@RepositoryUrlHelper.GetRepositoryUrl(repo.CloneUrl)"
                                     DefaultBranchName="@Link.DefaultBranchName"
+                                    ComparisonBaseBranchName="@Link.ParentBranchName"
                                     IsOnTag="@Link.IsOnTag"
+                                    IsPrMergeBlocked="@(PrInfo != null
+                                        && string.Equals(PrInfo.State, "open", StringComparison.OrdinalIgnoreCase)
+                                        && PrInfo.Mergeable == false)"
                                     OnUpdateBranchClick="@OnUpdateBranchClick" />
                 </span>
                 <span class="metrics-block metrics-pr text-nowrap">
                     <PRBadge PullRequest="@PrInfo"
                             UncommittedChangedFileCount="@Link.UncommittedChangedFileCount"
-                            ChangesUrl="@($"/workspaces/{WorkspaceId}/changes?q={Uri.EscapeDataString($"repo:{repo.RepositoryName}")}")"
+                            ChangesUrl="@ContextNavigation.AppendContextQuery($"/workspaces/{WorkspaceId}/changes?q={Uri.EscapeDataString($"repo:{repo.RepositoryName}")}", SelectedContextId, IsSpecialWorkspace)"
                             DefaultBranchAheadCommits="@Link.DefaultBranchAheadCommits"
+                            HeadCommit="@Link.HeadCommit"
+                            FeatureBaseCommitSha="@Link.FeatureBaseCommitSha"
                             IsPrVerified="@IsPrVerified"
                             IsOnTag="@Link.IsOnTag"
                             HasNewerTag="@(Link.HasNewerTag == true)"
@@ -414,6 +434,10 @@
 
 @code {
     [Parameter] public int WorkspaceId { get; set; }
+    /// <summary>Current Feature/Workspace context so the uncommitted-changes badge keeps the user on the same context.</summary>
+    [Parameter] public WorkspaceFeatureContextId? SelectedContextId { get; set; }
+    /// <summary>When true, omit <c>?context=</c> (Workspace is the default URL form).</summary>
+    [Parameter] public bool IsSpecialWorkspace { get; set; } = true;
     /// <summary>Absolute-index stripe class (virtual-row-odd / virtual-row-even) so striping stays stable while scrolling.</summary>
     [Parameter] public string? RowCssClass { get; set; }
     [Parameter] public WorkspaceRepositoryLink? Link { get; set; }
@@ -439,6 +463,8 @@
 
     [Parameter] public EventCallback OnVersionClick { get; set; }
     [Parameter] public EventCallback OnVersionMouseLeave { get; set; }
+    /// <summary>Feature branch this repository should be on when it has drifted off it (I4); null in the Workspace or when it is on its Feature branch.</summary>
+    [Parameter] public string? OffFeatureBranchName { get; set; }
     [Parameter] public EventCallback OnBranchClick { get; set; }
     [Parameter] public EventCallback OnDependencyBadgeClick { get; set; }
     [Parameter] public EventCallback OnCustomDependenciesClick { get; set; }
@@ -476,6 +502,17 @@
         ProjectType.Library    => "bi-layers",
         _                      => "bi-question-circle"
     };
+
+    private string OffFeatureBranchTooltip
+    {
+        get
+        {
+            var current = !string.IsNullOrEmpty(Link?.BranchName) ? Link.BranchName
+                : !string.IsNullOrEmpty(Link?.CheckedOutTag) ? Link.CheckedOutTag
+                : "a detached commit";
+            return $"This repository is on {current}, not on {OffFeatureBranchName}. Click to return.";
+        }
+    }
 
     private async Task HandleBranchClick()
     {

@@ -7,6 +7,8 @@ public sealed class RefreshRepositoriesResult
     public IReadOnlyList<RenamedRepositoryInfo> RenamedRepositories { get; init; } = [];
     /// <summary>Maps old (deleted) RepositoryId to the surviving canonical RepositoryId for any repository that was merged during rename reconciliation. Empty when no merges occurred.</summary>
     public IReadOnlyDictionary<int, int> MergedRepositoryIdMap { get; init; } = new Dictionary<int, int>();
+    /// <summary>Repositories no longer returned by the provider but kept because a Feature still uses them. Empty when nothing was kept.</summary>
+    public IReadOnlyList<KeptRepositoryForFeaturesInfo> KeptForFeatures { get; init; } = [];
 }
 
 /// <summary>Error for a single connector when fetching its repositories.</summary>
@@ -22,4 +24,13 @@ public sealed class RenamedRepositoryInfo
     public string OldName { get; init; } = string.Empty;
     public string NewName { get; init; } = string.Empty;
     public string? OrgName { get; init; }
+}
+
+/// <summary>Describes a repository that is no longer returned by its provider but was kept because a Feature still uses it.</summary>
+public sealed class KeptRepositoryForFeaturesInfo
+{
+    public int RepositoryId { get; init; }
+    public string RepositoryName { get; init; } = string.Empty;
+    public string? OrgName { get; init; }
+    public IReadOnlyList<string> FeatureNames { get; init; } = [];
 }

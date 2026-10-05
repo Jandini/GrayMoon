@@ -1,7 +1,8 @@
 /**
  * Render a dependency graph with Cytoscape (dark scheme).
+ * Node types use distinct shapes and soft fills so they stay readable without neon borders.
  * @param {string} containerId - Id of the div element to render into
- * @param {Array<{id: string, label: string}>} nodes - Nodes with id and label
+ * @param {Array<{id: string, label: string, nodeType?: string}>} nodes - Nodes with id, label, and optional nodeType
  * @param {Array<{source: string, target: string}>} edges - Edges with source and target node ids
  * @param {string[]} [roots] - Optional node ids to use as roots (no incoming edges). Layout flows from these for a clear hierarchy.
  */
@@ -16,7 +17,7 @@ window.renderCytoscapeGraph = function (containerId, nodes, edges, roots) {
         return { data: { id: 'e' + i, source: String(e.source), target: String(e.target) } };
     });
 
-    container.style.backgroundColor = '#1a1a1a';
+    container.style.backgroundColor = '#141416';
 
     if (typeof cytoscapeDagre !== 'undefined') cytoscape.use(cytoscapeDagre);
 
@@ -27,45 +28,94 @@ window.renderCytoscapeGraph = function (containerId, nodes, edges, roots) {
             {
                 selector: 'node',
                 style: {
-                    'shape': 'rectangle',
-                    'background-color': '#27272a',
+                    'shape': 'round-rectangle',
+                    'background-color': '#2a2a2e',
+                    'background-opacity': 1,
                     'label': 'data(label)',
-                    'color': '#fafafa',
+                    'color': '#e4e4e7',
                     'text-valign': 'center',
                     'text-halign': 'center',
                     'font-size': '11px',
+                    'font-weight': 500,
                     'text-wrap': 'wrap',
-                    'text-max-width': '120px',
-                    'padding': '1px',
-                    'border-width': 1,
-                    'border-color': '#d946ef',
+                    'text-max-width': '118px',
+                    'text-outline-color': '#18181b',
+                    'text-outline-width': 1.5,
+                    'text-outline-opacity': 0.55,
+                    'padding': '6px',
+                    'border-width': 1.5,
+                    'border-color': '#52525b',
+                    'border-opacity': 0.9,
                     'width': 140,
-                    'height': 40
+                    'height': 42
                 }
             },
             {
+                /* Apps / hosts - rounded card */
                 selector: 'node[nodeType = "service"]',
                 style: {
-                    'border-color': '#ffb454',
-                    'border-width': 1
+                    'shape': 'round-rectangle',
+                    'background-color': '#3b2f1e',
+                    'border-color': '#c9842f',
+                    'color': '#fde68a'
                 }
             },
             {
+                /* NuGet packages - squat hexagon (almost square, mild side chamfers) */
                 selector: 'node[nodeType = "package"]',
                 style: {
-                    'border-color': '#39bae6',
-                    'border-width': 1
+                    'shape': 'polygon',
+                    'shape-polygon-points': '-0.92 -1  0.92 -1  1 0  0.92 1  -0.92 1  -1 0',
+                    'background-color': '#16353f',
+                    'border-color': '#38bdf8',
+                    'color': '#bae6fd',
+                    'width': 148,
+                    'height': 44
+                }
+            },
+            {
+                /* Shared libraries - clean rectangle */
+                selector: 'node[nodeType = "library"]',
+                style: {
+                    'shape': 'rectangle',
+                    'background-color': '#1e293b',
+                    'border-color': '#64748b',
+                    'color': '#cbd5e1'
+                }
+            },
+            {
+                /* Executables / tools - cut corners */
+                selector: 'node[nodeType = "executable"]',
+                style: {
+                    'shape': 'cut-rectangle',
+                    'background-color': '#1a2e24',
+                    'border-color': '#4ade80',
+                    'color': '#bbf7d0'
+                }
+            },
+            {
+                /* Tests - diamond stands apart from runtime nodes */
+                selector: 'node[nodeType = "test"]',
+                style: {
+                    'shape': 'diamond',
+                    'background-color': '#2e1f3d',
+                    'border-color': '#c084fc',
+                    'color': '#e9d5ff',
+                    'width': 130,
+                    'height': 56,
+                    'text-max-width': '90px'
                 }
             },
             {
                 selector: 'edge',
                 style: {
-                    'width': 1.5,
-                    'line-color': '#71717a',
+                    'width': 1.75,
+                    'line-color': '#52525b',
                     'target-arrow-color': '#71717a',
                     'target-arrow-shape': 'triangle',
                     'curve-style': 'bezier',
-                    'arrow-scale': 0.85
+                    'arrow-scale': 0.9,
+                    'opacity': 0.85
                 }
             }
         ],
@@ -126,3 +176,4 @@ window.destroyCytoscapeGraph = function (containerId) {
         window[key] = null;
     }
 };
+

@@ -6,6 +6,7 @@
 @using GrayMoon.App.Services.Queries
 @using GrayMoon.App.Components.Shared
 @using GrayMoon.App.Components.Modals
+@using GrayMoon.App.Components.Features
 @using Microsoft.AspNetCore.Components.Web
 @using Microsoft.AspNetCore.SignalR.Client
 @using System.Text.Json
@@ -16,12 +17,24 @@
 <div class="container-fluid page-container grid-page">
     <div class="grid-page-header">
         <WorkspaceRepositoriesHeader WorkspaceName="@(workspace?.Name)"
+                                    WorkspaceId="WorkspaceId"
+                                    SelectedContextId="_selectedContextId"
+                                    IsFeatureContext="_isFeatureContext"
+                                    IsReadOnlyContext="_isReadOnlyContext"
+                                    OnSelectedContextChanged="OnSelectedContextChangedAsync"
+                                    OnRequestCreateFeature="OnRequestCreateFeatureAsync"
+                                    OnRequestRemoveFeature="OnRequestRemoveFeatureFromSelectorAsync"
+                                    OnRemoveFeature="OnRemoveFeatureAsync"
+                                    OnShowFeatureStatus="() => OpenFeatureStatusPanel()"
                                     RepositoriesCount="@(_headerState?.TotalCount ?? 0)"
+                                    CountReady="@(hasLoadedOnce && !isInitialLoading)"
                                     HasFilter="@HasSearchFilter"
                                     FilteredCount="@(totalCount ?? 0)"
                                     SearchTerm="@searchTerm"
                                     HasUnmatchedDependencies="@hasUnmatchedDependencies"
                                     HasCreatablePr="@hasCreatablePr"
+                                    HasOpenPr="@hasOpenPr"
+                                    AllFeaturePrsCompleted="@allFeaturePrsCompleted"
                                     IsPushRecommended="@isPushRecommended"
                                     HasIncomingCommits="@hasIncomingCommits"
                                     IsOutOfSync="@isOutOfSync"
@@ -56,12 +69,33 @@
                                     OnSearchChanged="OnSearchChanged"
                                     OnClearSearch="ClearSearchFilter"
                                     OnSearchKeyDown="OnSearchKeyDown" />
+        <CreateFeatureModal IsVisible="_createFeatureModalVisible"
+                            WorkspaceId="WorkspaceId"
+                            InitialName="@_createFeatureInitialName"
+                            WorkspaceBranchName="@_createFeatureWorkspaceBranch"
+                            OnCancel="() => _createFeatureModalVisible = false"
+                            OnCreated="OnFeatureCreatedAsync" />
+        <RemoveFeatureModal IsVisible="_removeFeatureModalVisible"
+                            FeatureContextId="_removeFeatureContextId"
+                            InitialPlan="_removeFeaturePlan"
+                            OnCancel="OnRemoveFeatureCancelAsync"
+                            OnRemoved="OnFeatureRemovedAsync" />
+        <FeatureStatusPanel IsVisible="_featureStatusPanelVisible"
+                            FeatureContextId="_featureStatusContextId"
+                            OnClose="OnFeatureStatusCloseAsync"
+                            OnContinueRemoval="OnRequestRemoveFeatureFromSelectorAsync"
+                            OnRequestRemove="OnRequestRemoveFeatureFromSelectorAsync"
+                            OnChanged="OnFeatureStatusChangedAsync" />
+        @if (_isReadOnlyContext)
+        {
+            <div class="page-warning-callout" role="status">This Feature needs attention. Use Repair to continue.</div>
+        }
         @if (errorMessage != null)
         {
             <div class="page-error-callout repo-error-line" role="alert">@errorMessage</div>
         }
     </div>
-    @if (workspace != null)
+    @if (workspace != null && hasLoadedOnce && !isInitialLoading)
     {
         <div class="grid-page-body">
             <div class="card page-card mb-4">
@@ -75,7 +109,7 @@
                                 <th class="col-branch">Branch</th>
                                 <th class="col-metrics text-center">
                                     <div class="metrics-grid-header">
-                                        <span class="metrics-block metrics-divergence" title="Commits behind | ahead default branch" aria-label="Commits behind | ahead default branch">
+                                        <span class="metrics-block metrics-divergence" title="@(_isFeatureContext ? "Commits behind | ahead parent branch" : "Commits behind | ahead default branch")" aria-label="@(_isFeatureContext ? "Commits behind | ahead parent branch" : "Commits behind | ahead default branch")">
                                             <i class="bi bi-arrow-left-right header-icon"></i>
                                         </span>
                                         <span class="metrics-block metrics-pr" title="Pull Request" aria-label="Pull Request">
@@ -84,7 +118,7 @@
                                         <span class="metrics-block metrics-deps" title="Dependencies" aria-label="Dependencies">
                                             <i class="bi bi-diagram-3 header-icon"></i>
                                         </span>
-                                        <span class="metrics-block metrics-commits" title="Outgoing ↑ Incoming ↓ commits" aria-label="Outgoing up / Incoming down commits">
+                                        <span class="metrics-block metrics-commits" title="Outgoing â†‘ Incoming â†“ commits" aria-label="Outgoing up / Incoming down commits">
                                             <i class="bi bi-arrow-down-up header-icon"></i>
                                         </span>
                                         <span class="metrics-block metrics-status" title="Status" aria-label="Status">
@@ -95,15 +129,7 @@
                             </tr>
                         </thead>
                         <tbody @ref="_tbodyRef" class="repositories-virtual-tbody">
-                            @if (isInitialLoading && _slots.Count == 0)
-                            {
-                                <tr>
-                                    <td colspan="@TableColSpan" class="text-center text-muted py-4">
-                                        Loading workspace...
-                                    </td>
-                                </tr>
-                            }
-                            else if (hasLoadedOnce && (_headerState?.TotalCount ?? 0) == 0 && !HasSearchFilter)
+                            @if ((_headerState?.TotalCount ?? 0) == 0 && !HasSearchFilter)
                             {
                                 <tr>
                                     <td colspan="@TableColSpan" class="text-center text-muted py-4">
@@ -140,6 +166,7 @@
                                                                            Group="@levelGroup"
                                                                            RepositoryCount="@slot.LevelRepoCount"
                                                                            ActionsDisabled="@IsLevelActionsDisabled(slot.LevelKey)"
+                                                                           IsFeatureContext="@_isFeatureContext"
                                                                            OnReturnToDefault="async () => await ReturnToDefaultForLevelAsync(slot.LevelKey)"
                                                                            OnSyncCommits="async () => await SyncCommitsForLevelAsync(slot.LevelKey)"
                                                                            OnOpenPr="async () => await OpenPullRequestDialogForLevelAsync(slot.LevelKey)"
@@ -159,6 +186,8 @@
                                     {
                                         <WorkspaceRepositoriesRow @key="@($"row-{slot.WorkspaceRepositoryId}")"
                                                                   WorkspaceId="@WorkspaceId"
+                                                                  SelectedContextId="_selectedContextId"
+                                                                  IsSpecialWorkspace="@(!_isFeatureContext)"
                                                                   RowCssClass="@StripeClass(slot.StripeIndex)"
                                                                   Link="@wr"
                                                                   PrInfo="@GetPrInfoForRepository(wr.RepositoryId)"
@@ -178,6 +207,7 @@
                                                                   ColSpan="@TableColSpan"
                                                                   OnVersionClick="() => CopyVersionToClipboard(wr.GitVersion!)"
                                                                   OnVersionMouseLeave="() => OnVersionMouseLeave(wr.GitVersion!)"
+                                                                  OffFeatureBranchName="@GetOffFeatureBranchName(wr)"
                                                                   OnBranchClick="() => ShowSwitchBranchModal(wr.RepositoryId, wr.BranchName, wr.Repository?.CloneUrl)"
                                                                   OnUpdateBranchClick="() => ShowUpdateBranchModal(wr.RepositoryId)"
                                                                   OnDependencyBadgeClick="() => OnDependencyBadgeClick(wr.RepositoryId, wr.UnmatchedDeps ?? 0)"
@@ -250,6 +280,11 @@
 <SwitchBranchModal IsVisible="@_switchBranchModal.IsVisible"
                    WorkspaceId="@WorkspaceId"
                    RepositoryId="@_switchBranchModal.RepositoryId"
+                   WorkspaceRepositoryId="@_switchBranchModal.WorkspaceRepositoryId"
+                   ViewingContextId="@_selectedContextId"
+                   IsFeatureContext="@_isFeatureContext"
+                   FeatureBranchName="@GetSwitchBranchModalFeatureBranchName()"
+                   PinnedTag="@GetSwitchBranchModalPinnedTag()"
                    RepositoryName="@_switchBranchModal.RepositoryName"
                    CurrentBranch="@_switchBranchModal.CurrentBranch"
                    RepositoryUrl="@_switchBranchModal.RepositoryUrl"
@@ -260,7 +295,8 @@
                    OnBranchChanged="@OnBranchChangedAsync"
                    OnCheckoutBranch="@CheckoutBranchAsync"
                    OnReturnToDefault="@ReturnToDefaultFromModalAsync"
-                   OnCreateBranch="@CreateSingleBranchAsync" />
+                   OnCreateBranch="@CreateSingleBranchAsync"
+                   OnRequestFeatureCleanup="@OnRequestFeatureCleanupFromBranchModalAsync" />
 
 <UpdateBranchModal IsVisible="@_updateBranchModal.IsVisible"
                   RepositoryName="@_updateBranchModal.RepositoryName"
@@ -352,6 +388,7 @@
 <NewPullRequestModal IsVisible="@_newPrModal.IsVisible"
                      IsBusy="@IsJobRunning"
                      WorkspaceId="@WorkspaceId"
+                     ContextId="@(_selectedContextId ?? default)"
                      Targets="@_newPrModal.Targets"
                      OnCreate="HandleCreatePullRequestsAsync"
                      OnCancel="CloseNewPullRequestModal"
@@ -364,6 +401,7 @@
                             SelectedMethodChanged="SetBulkMergeMethod"
                             ReturnToDefaultAfterMerge="@BulkMergeReturnToDefault"
                             ReturnToDefaultAfterMergeChanged="SetBulkMergeReturnToDefault"
+                            ShowReturnToDefault="@(!_isFeatureContext)"
                             IsRunning="@_bulkMergeModal.IsRunning"
                             IsCoveredByOverlay="@(_bulkMergeModal.DrillInRepositoryId.HasValue && IsJobRunning)"
                             HasRun="@_bulkMergeModal.HasRun"
@@ -382,9 +420,10 @@
                        IsMerging="@_mergePrModal.IsMerging"
                        IsSyncingLocalState="@_mergePrModal.IsSyncingLocalState"
                        ErrorMessage="@_mergePrModal.ErrorMessage"
-                       ChangesUrl="@($"/workspaces/{WorkspaceId}/changes")"
-                       ActionsUrl="@($"/workspaces/{WorkspaceId}/actions")"
+                       ChangesUrl="@BuildContextScopedUrl($"/workspaces/{WorkspaceId}/changes")"
+                       ActionsUrl="@BuildContextScopedUrl($"/workspaces/{WorkspaceId}/actions")"
                        RepositoryName="@_mergePrModal.RepositoryName"
+                       ShowReturnToDefault="@(!_isFeatureContext)"
                        OnMerge="HandleMergeButtonClickedAsync"
                        OnClosePullRequest="HandleClosePullRequestClickedAsync"
                        OnCancel="CloseMergeModal"
@@ -411,10 +450,9 @@
                OnProceed="@OnUndoPushProceedAsync"
                OnCancel="@CloseUndoPushModal" />
 
-@if (isInitialLoading && !hasLoadedOnce)
-{
-    <LoadingOverlay IsVisible="true" PageScoped="true" Message="Loading workspace..." ShowCommandTerminal="false" />
-}
+@* Initial open uses thead + in-grid "Loading repositories..." (no overlay).
+   Push/Sync/etc. keep using BackgroundJobOverlay's terminal LoadingOverlay.
+   Fetch-repositories keeps its own overlay below. *@
 @if (ShowRepositoriesFetchOverlay)
 {
     <LoadingOverlay IsVisible="true" Message="@RepositoriesFetchOverlayMessage" ShowCommandTerminal="false"

@@ -81,6 +81,28 @@ function restoreHeadInjectionsIfMissing() {
     }
 }
 
+let enhancedLoadListenerAttached = false;
+
+// The <head> CSS loss above isn't limited to navigating away from this page and back - any enhanced
+// navigation (including clicking a nav link to the page you're ALREADY on, e.g. clicking "Changes"
+// while already viewing Changes) runs Blazor's documentUpdated callback, which re-diffs <head> and
+// strips Monaco's injected nodes exactly the same way. In that same-page case the GitDiffViewer Blazor
+// component is never disposed/recreated (same route, same component instance), so init()'s own
+// restoreHeadInjectionsIfMissing() call - which only runs on first render of a *new* component
+// instance - never fires again to put the CSS back, even though the already-live Monaco editor is
+// still sitting on screen using it. Hooking Blazor's global 'enhancedload' event (raised after every
+// enhanced-navigation document update, regardless of whether the component tree changed) closes that
+// gap: this listener is attached once at module scope - independent of any single editor's
+// mount/dispose - and keeps the CSS pinned back for as long as this module stays loaded.
+function ensureEnhancedLoadListenerAttached() {
+    if (enhancedLoadListenerAttached || !window.Blazor?.addEventListener) {
+        return;
+    }
+
+    enhancedLoadListenerAttached = true;
+    window.Blazor.addEventListener('enhancedload', restoreHeadInjectionsIfMissing);
+}
+
 // Without this, Monaco spawns its worker by wrapping vs/base/worker/workerMain.js in a Blob (for
 // cross-origin safety), which loses its real script location. workerMain.js is the AMD bootstrap - it
 // defines `define`/`require` inside the worker and then internally requires the actual language
@@ -219,6 +241,7 @@ export async function init(elementId, options) {
     // Put back whatever enhanced navigation stripped from <head> before Monaco (new or already-loaded)
     // gets used again on this mount - see trackHeadInjections()/restoreHeadInjectionsIfMissing() above.
     restoreHeadInjectionsIfMissing();
+    ensureEnhancedLoadListenerAttached();
 
     const container = document.getElementById(elementId);
     if (!container) {

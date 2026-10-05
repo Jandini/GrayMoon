@@ -44,8 +44,13 @@ public sealed class CommandDispatcher(
     ICommandHandler<StageGitChangesRequest, GitMutationResponse> stageGitChangesCommand,
     ICommandHandler<UnstageGitChangesRequest, GitMutationResponse> unstageGitChangesCommand,
     ICommandHandler<DiscardGitChangesRequest, GitMutationResponse> discardGitChangesCommand,
-    ICommandHandler<CommitGitChangesRequest, CommitGitChangesResponse> commitGitChangesCommand) : ICommandDispatcher
-{
+    ICommandHandler<CommitGitChangesRequest, CommitGitChangesResponse> commitGitChangesCommand,
+    ICommandHandler<ListGitWorktreesRequest, ListGitWorktreesResponse> listGitWorktreesCommand,
+    ICommandHandler<CreateGitWorktreeRequest, CreateGitWorktreeResponse> createGitWorktreeCommand,
+    ICommandHandler<RemoveGitWorktreeRequest, RemoveGitWorktreeResponse> removeGitWorktreeCommand,
+    ICommandHandler<GetGitVersionAtDefaultTipRequest, GetGitVersionAtDefaultTipResponse> getGitVersionAtDefaultTipCommand,
+    ICommandHandler<InspectWorktreeRequest, InspectWorktreeResponse> inspectWorktreeCommand) : ICommandDispatcher
+    {
     private readonly IReadOnlyDictionary<string, Func<object, CancellationToken, Task<object?>>> _executors = new Dictionary<string, Func<object, CancellationToken, Task<object?>>>(StringComparer.Ordinal)
     {
         ["SyncRepository"] = async (req, ct) => await syncRepositoryCommand.ExecuteAsync((SyncRepositoryRequest)req, ct),
@@ -55,6 +60,7 @@ public sealed class CommandDispatcher(
         ["EnsureWorkspace"] = async (req, ct) => await ensureWorkspaceCommand.ExecuteAsync((EnsureWorkspaceRequest)req, ct),
         ["GetWorkspaceRepositories"] = async (req, ct) => await getWorkspaceRepositoriesCommand.ExecuteAsync((GetWorkspaceRepositoriesRequest)req, ct),
         ["GetRepositoryVersion"] = async (req, ct) => await getRepositoryVersionCommand.ExecuteAsync((GetRepositoryVersionRequest)req, ct),
+        ["GetGitVersionAtDefaultTip"] = async (req, ct) => await getGitVersionAtDefaultTipCommand.ExecuteAsync((GetGitVersionAtDefaultTipRequest)req, ct),
         ["GetWorkspaceExists"] = async (req, ct) => await getWorkspaceExistsCommand.ExecuteAsync((GetWorkspaceExistsRequest)req, ct),
         ["GetHostInfo"] = async (req, ct) => await getHostInfoCommand.ExecuteAsync((GetHostInfoRequest)req, ct),
         ["SyncRepositoryDependencies"] = async (req, ct) => await syncRepositoryDependenciesCommand.ExecuteAsync((SyncRepositoryDependenciesRequest)req, ct),
@@ -87,6 +93,10 @@ public sealed class CommandDispatcher(
         ["UnstageGitChanges"] = async (req, ct) => await unstageGitChangesCommand.ExecuteAsync((UnstageGitChangesRequest)req, ct),
         ["DiscardGitChanges"] = async (req, ct) => await discardGitChangesCommand.ExecuteAsync((DiscardGitChangesRequest)req, ct),
         ["CommitGitChanges"] = async (req, ct) => await commitGitChangesCommand.ExecuteAsync((CommitGitChangesRequest)req, ct),
+        [AgentHubMethods.ListGitWorktrees] = async (req, ct) => await listGitWorktreesCommand.ExecuteAsync((ListGitWorktreesRequest)req, ct),
+        [AgentHubMethods.CreateGitWorktree] = async (req, ct) => await createGitWorktreeCommand.ExecuteAsync((CreateGitWorktreeRequest)req, ct),
+        [AgentHubMethods.RemoveGitWorktree] = async (req, ct) => await removeGitWorktreeCommand.ExecuteAsync((RemoveGitWorktreeRequest)req, ct),
+        [AgentHubMethods.InspectWorktree] = async (req, ct) => await inspectWorktreeCommand.ExecuteAsync((InspectWorktreeRequest)req, ct),
     };
 
     public Task<object?> ExecuteAsync(string commandName, object request, CancellationToken cancellationToken = default)

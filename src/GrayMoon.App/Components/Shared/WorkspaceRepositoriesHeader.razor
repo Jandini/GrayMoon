@@ -1,11 +1,13 @@
 @using Microsoft.AspNetCore.Components.Web
+@using GrayMoon.App.Components.Features
+@using GrayMoon.Application.Features
 
 <div class="workspace-repos-header">
     <div class="workspace-repos-title-row">
         <h2 class="workspace-repos-title">Repositories</h2>
         <p class="text-muted mb-0 workspace-repos-subtitle">
-            <NavLink href="workspaces" class="workspaces-breadcrumb-link" style="color: var(--text-muted) !important;">workspace</NavLink><span> | </span>
-            @if (RepositoriesCount > 0)
+            <WorkspaceSubtitleName Name="@WorkspaceName" />
+            @if (CountReady && RepositoriesCount > 0)
             {
                 var suffix = HasFilter ? " found" : "";
                 var count = HasFilter ? FilteredCount : RepositoriesCount;
@@ -13,7 +15,7 @@
                     @($"{count} {(count == 1 ? "repository" : "repositories")}{suffix}")
                 </span>
             }
-            else if (WorkspaceName != null)
+            else if (CountReady && WorkspaceName != null)
             {
                 <span class="repositories-count-link" @onclick="@(() => OnShowRepositories.InvokeAsync())" @onclick:preventDefault>0 repositories</span>
             }
@@ -35,7 +37,13 @@
         }
     </div>
     <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
-        <div class="workspace-grid-search-wrapper">
+        <WorkspaceContextBar WorkspaceId="WorkspaceId"
+                             WorkspaceName="@WorkspaceName"
+                             SelectedContextId="SelectedContextId"
+                             SelectedContextIdChanged="OnSelectedContextChanged"
+                             OnRequestCreateFeature="OnRequestCreateFeature"
+                             OnRequestRemoveFeature="OnRequestRemoveFeature"
+                             Disabled="@(IsSyncing || IsUpdating || IsPushing)">
             <FilterSearchInput Value="@(SearchTerm ?? string.Empty)"
                                ValueChanged="OnSearchValueChangedAsync"
                                InputId="workspace-repos-search"
@@ -43,17 +51,23 @@
                                Placeholder="Search repositories…"
                                OnKeyDown="OnSearchKeyDown"
                                OnClear="OnClearSearch" />
-        </div>
+        </WorkspaceContextBar>
         <div class="btn-group position-relative">
-            <button class="btn @(HasCreatablePr ? "btn-warning" : "btn-outline-secondary")"
+            <button class="btn @(HasCreatablePr ? "btn-warning" : "btn-outline-secondary") text-nowrap"
                     @onclick="HandleBranchPrimaryClick"
                     @onclick:stopPropagation
                     disabled="@BranchActionsDisabled">
-                @(HasCreatablePr ? "Create PR" : "Branch")
+                @(PrimaryAction switch
+                {
+                    HeaderPrimaryAction.CreatePr => "Create PR",
+                    HeaderPrimaryAction.Remove => "Remove",
+                    HeaderPrimaryAction.Feature => "Feature",
+                    _ => "Branch",
+                })
             </button>
             <button type="button"
                     class="btn btn-outline-secondary dropdown-toggle dropdown-toggle-split"
-                    aria-label="Toggle Branch menu"
+                    aria-label="@(IsFeatureContext ? "Toggle Feature menu" : "Toggle Branch menu")"
                     aria-expanded="@(_branchMenuOpen ? "true" : "false")"
                     @onclick="ToggleBranchMenu"
                     @onclick:stopPropagation
@@ -65,49 +79,70 @@
                 <div class="branch-menu-backdrop" @onclick="CloseBranchMenu"></div>
                 <ul class="dropdown-menu show shadow branch-menu-list workspace-repository-actions-menu"
                     role="menu">
+                    @if (!IsFeatureContext)
+                    {
+                        <li>
+                            <button class="dropdown-item" type="button"
+                                    role="menuitem"
+                                    @onclick="HandlePrepareWorkspaceClick"
+                                    disabled="@BranchActionsDisabled">
+                                Prepare Workspace
+                            </button>
+                        </li>
+                        <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                        <li>
+                            <button class="dropdown-item" type="button"
+                                    role="menuitem"
+                                    @onclick="HandleNewBranchClick"
+                                    disabled="@BranchActionsDisabled">
+                                New Branch
+                            </button>
+                        </li>
+                        <li>
+                            <button class="dropdown-item" type="button"
+                                    role="menuitem"
+                                    @onclick="HandleSwitchBranchClick"
+                                    disabled="@BranchActionsDisabled">
+                                Switch Branch
+                            </button>
+                        </li>
+                        <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                    }
                     <li>
-                        <button class="dropdown-item" type="button"
-                                role="menuitem"
-                                @onclick="HandlePrepareWorkspaceClick"
-                                disabled="@BranchActionsDisabled">
-                            Prepare Workspace
-                        </button>
-                    </li>
-                    <li><hr class="dropdown-divider branch-menu-divider" /></li>
-                    <li>
-                        <button class="dropdown-item" type="button"
-                                role="menuitem"
-                                @onclick="HandleNewBranchClick"
-                                disabled="@BranchActionsDisabled">
-                            New Branch
-                        </button>
-                    </li>
-                    <li>
-                        <button class="dropdown-item" type="button"
-                                role="menuitem"
-                                @onclick="HandleSwitchBranchClick"
-                                disabled="@BranchActionsDisabled">
-                            Switch Branch
-                        </button>
-                    </li>
-                    <li><hr class="dropdown-divider branch-menu-divider" /></li>
-                    <li>
-                        <button class="dropdown-item" type="button"
+                        <button class="dropdown-item text-nowrap" type="button"
                                 role="menuitem"
                                 @onclick="HandleNewPullRequestClick"
                                 disabled="@BranchActionsDisabled">
                             Create PR
                         </button>
                     </li>
-                    <li><hr class="dropdown-divider branch-menu-divider" /></li>
-                    <li>
-                        <button class="dropdown-item" type="button"
-                                role="menuitem"
-                                @onclick="HandleReturnToDefaultClick"
-                                disabled="@BranchActionsDisabled">
-                            Return to Default
-                        </button>
-                    </li>
+                    @if (!IsFeatureContext)
+                    {
+                        <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                        <li>
+                            <button class="dropdown-item" type="button"
+                                    role="menuitem"
+                                    @onclick="HandleReturnToDefaultClick"
+                                    disabled="@BranchActionsDisabled">
+                                Return to Default
+                            </button>
+                        </li>
+                    }
+                    @* Status and repair is reachable only through the "Repair" primary button (replaces Sync)
+                       while the Feature actually NeedsRepair - never from this menu, so a healthy Feature
+                       never exposes Roll back / Remove-via-repair. *@
+                    @if (IsFeatureContext)
+                    {
+                        <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                        <li>
+                            <button class="dropdown-item" type="button"
+                                    role="menuitem"
+                                    @onclick="HandleRemoveFeatureClick"
+                                    disabled="@BranchActionsDisabled">
+                                Remove Feature
+                            </button>
+                        </li>
+                    }
                 </ul>
             }
         </div>
@@ -198,7 +233,7 @@
                     Update
                 </button>
                 <button type="button"
-                        class="btn @(HasUnmatchedDependencies ? "btn-outline-secondary" : "btn-outline-secondary") dropdown-toggle dropdown-toggle-split"
+                        class="btn btn-outline-secondary dropdown-toggle dropdown-toggle-split"
                         aria-label="Toggle Update menu"
                         aria-expanded="@(_updateMenuOpen ? "true" : "false")"
                         @onclick="ToggleUpdateMenu"
@@ -244,7 +279,7 @@
             {
                 <button class="btn btn-danger"
                         @onclick="@(() => OnPull.InvokeAsync())"
-                        disabled="@(WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || IsCommitSyncing || AgentTasksPendingCount > 0)">
+                        disabled="@(PushDisabled || IsCommitSyncing)">
                     Pull
                 </button>
             }
@@ -254,7 +289,7 @@
                     <button class="btn btn-warning"
                             @onclick="@(() => OnPush.InvokeAsync())"
                             @onclick:stopPropagation
-                            disabled="@(WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0)">
+                            disabled="@PushDisabled">
                         Push
                     </button>
                     <button type="button"
@@ -263,7 +298,7 @@
                             aria-expanded="@(_pushMenuOpen ? "true" : "false")"
                             @onclick="TogglePushMenu"
                             @onclick:stopPropagation
-                            disabled="@(WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0)">
+                            disabled="@PushDisabled">
                         <span class="visually-hidden">Toggle Dropdown</span>
                     </button>
                     @if (_pushMenuOpen)
@@ -272,7 +307,7 @@
                         <ul class="dropdown-menu show shadow branch-menu-list workspace-repository-actions-menu" role="menu">
                             <li>
                                 <button class="dropdown-item" type="button" role="menuitem"
-                                        disabled="@(WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0)"
+                                        disabled="@PushDisabled"
                                         @onclick="() => { ClosePushMenu(); _ = OnUndoPush.InvokeAsync(); }">
                                     Undo Push Commits
                                 </button>
@@ -285,12 +320,24 @@
             {
                 <button class="btn btn-outline-secondary"
                         @onclick="@(() => OnPush.InvokeAsync())"
-                        disabled="@(WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0)">
+                        disabled="@PushDisabled">
                     Push
                 </button>
             }
         }
-        @if (HasRepositoryErrors)
+        @if (IsReadOnlyContext)
+        {
+            @* Feature NeedsRepair: Sync/Fetch/Restore stay disabled (C3), so the primary control becomes
+               "Repair" and opens the same Status and repair dialog as the Feature menu item. *@
+            <button type="button"
+                    class="btn btn-warning"
+                    @onclick="HandleRepairClick"
+                    @onclick:stopPropagation
+                    disabled="@(IsSyncing || IsUpdating || IsPushing)">
+                Repair
+            </button>
+        }
+        else if (HasRepositoryErrors)
         {
                 <button type="button"
                     class="btn btn-primary"
@@ -356,13 +403,29 @@
 
 @code {
     [Parameter] public string? WorkspaceName { get; set; }
+    [Parameter] public int WorkspaceId { get; set; }
+    [Parameter] public WorkspaceFeatureContextId? SelectedContextId { get; set; }
+    [Parameter] public bool IsFeatureContext { get; set; }
+    /// <summary>True when the selected Feature is NeedsRepair - Sync/Push/Update/Prepare stay disabled (C3).</summary>
+    [Parameter] public bool IsReadOnlyContext { get; set; }
+    [Parameter] public EventCallback OnShowFeatureStatus { get; set; }
+    [Parameter] public EventCallback<WorkspaceFeatureContextId> OnSelectedContextChanged { get; set; }
+    [Parameter] public EventCallback<string> OnRequestCreateFeature { get; set; }
+    [Parameter] public EventCallback<WorkspaceFeatureContextId> OnRequestRemoveFeature { get; set; }
+    [Parameter] public EventCallback OnRemoveFeature { get; set; }
     [Parameter] public int RepositoriesCount { get; set; }
+    /// <summary>False while the repository list is still loading — avoids flashing "0 repositories" before header state arrives.</summary>
+    [Parameter] public bool CountReady { get; set; }
     [Parameter] public bool HasFilter { get; set; }
     [Parameter] public int FilteredCount { get; set; }
     [Parameter] public string? SearchTerm { get; set; }
     [Parameter] public bool HasUnmatchedDependencies { get; set; }
-    /// <summary>True when at least one repository would show the yellow "create" PR badge — primary Branch control becomes yellow "Create PR".</summary>
+    /// <summary>True when at least one repository would show the yellow "create" PR badge — primary Branch/Feature control becomes yellow "Create PR".</summary>
     [Parameter] public bool HasCreatablePr { get; set; }
+    /// <summary>True when at least one repository has an open pull request. Combined with Feature context to decide whether the primary control shows Remove.</summary>
+    [Parameter] public bool HasOpenPr { get; set; }
+    /// <summary>True when the Feature has at least one PR, every PR is merged or closed, and no repo has commits outside a PR (E2). Ignored for the Workspace.</summary>
+    [Parameter] public bool AllFeaturePrsCompleted { get; set; }
     [Parameter] public bool IsPushRecommended { get; set; }
     [Parameter] public bool HasIncomingCommits { get; set; }
     [Parameter] public bool? IsOutOfSync { get; set; }
@@ -406,16 +469,59 @@
     private bool _pushMenuOpen;
 
     private bool SyncDisabled =>
-        IsSyncing || IsUpdating || IsPushing || IsRestoringPackages || RepositoriesCount == 0;
+        IsReadOnlyContext || IsSyncing || IsUpdating || IsPushing || IsRestoringPackages || RepositoriesCount == 0;
 
     private bool UpdateDisabled =>
-        WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0;
+        IsReadOnlyContext || WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0;
 
     private bool BranchActionsDisabled =>
-        IsSyncing || IsUpdating || IsPushing || RepositoriesCount == 0 || AgentTasksPendingCount > 0;
+        IsReadOnlyContext || IsSyncing || IsUpdating || IsPushing || RepositoriesCount == 0 || AgentTasksPendingCount > 0;
 
     private bool BranchMenuToggleDisabled =>
-        IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0;
+        IsReadOnlyContext || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0;
+
+    private bool PushDisabled =>
+        IsReadOnlyContext || WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0;
+
+    /// <summary>
+    /// The header's primary button always shows the next useful action (E2):
+    /// Create PR (if creatable) &gt; Remove (if the Feature's PRs are all merged or closed) &gt; Feature / Branch.
+    /// A fresh Feature with no commits and no PR shows "Feature", never "Remove".
+    /// </summary>
+    internal enum HeaderPrimaryAction
+    {
+        CreatePr,
+        Remove,
+        Feature,
+        Branch,
+    }
+
+    /// <summary>
+    /// Pure rule for <see cref="HeaderPrimaryAction"/>. <paramref name="allFeaturePrsCompleted"/> is only
+    /// consulted for a Feature context; the Workspace never shows "Remove" (R-E2).
+    /// </summary>
+    internal static HeaderPrimaryAction DeterminePrimaryAction(
+        bool isFeatureContext,
+        bool hasCreatablePr,
+        bool allFeaturePrsCompleted)
+    {
+        if (hasCreatablePr)
+        {
+            return HeaderPrimaryAction.CreatePr;
+        }
+
+        if (!isFeatureContext)
+        {
+            return HeaderPrimaryAction.Branch;
+        }
+
+        return allFeaturePrsCompleted ? HeaderPrimaryAction.Remove : HeaderPrimaryAction.Feature;
+    }
+
+    private HeaderPrimaryAction PrimaryAction =>
+        DeterminePrimaryAction(IsFeatureContext, HasCreatablePr, AllFeaturePrsCompleted);
+
+    private bool ShowRemoveFeaturePrimary => PrimaryAction == HeaderPrimaryAction.Remove;
 
     private void ToggleBranchMenu()
     {
@@ -447,6 +553,12 @@
     {
         CloseSyncMenu();
         await OnClearErrors.InvokeAsync();
+    }
+
+    private async Task HandleRepairClick()
+    {
+        CloseSyncMenu();
+        await OnShowFeatureStatus.InvokeAsync();
     }
 
     private async Task HandleSyncPrimaryClick()
@@ -527,11 +639,29 @@
 
     private async Task HandleBranchPrimaryClick()
     {
-        CloseBranchMenu();
+        // Yellow "Create PR" hint: same shortcut in Workspace and Feature.
         if (HasCreatablePr)
+        {
+            CloseBranchMenu();
             await OnNewPullRequest.InvokeAsync();
-        else
-            await OnShowBranch.InvokeAsync();
+            return;
+        }
+
+        if (ShowRemoveFeaturePrimary)
+        {
+            await HandleRemoveFeatureClick();
+            return;
+        }
+
+        if (IsFeatureContext)
+        {
+            // No Branch dialog for a Feature — open the Feature menu (Remove Feature, Create PR, …).
+            ToggleBranchMenu();
+            return;
+        }
+
+        CloseBranchMenu();
+        await OnShowBranch.InvokeAsync();
     }
 
     private async Task HandlePrepareWorkspaceClick()
@@ -562,6 +692,12 @@
     {
         CloseBranchMenu();
         await OnReturnToDefault.InvokeAsync();
+    }
+
+    private async Task HandleRemoveFeatureClick()
+    {
+        CloseBranchMenu();
+        await OnRemoveFeature.InvokeAsync();
     }
 
     private async Task OnSearchValueChangedAsync(string value)

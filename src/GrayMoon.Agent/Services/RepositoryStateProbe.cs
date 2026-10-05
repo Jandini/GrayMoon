@@ -40,6 +40,8 @@ public sealed class RepositoryStateProbe(IGitService git, ICsProjFileService csP
 
         var hasBranch = currentTag == null && !string.IsNullOrWhiteSpace(branch) && branch != "-";
 
+        var headCommit = await git.GetHeadCommitAsync(repoPath, ct);
+
         CommitCountsProbeResult counts = CommitCountsProbeResult.Unknown;
         int? defaultBehind = null;
         int? defaultAhead = null;
@@ -47,10 +49,14 @@ public sealed class RepositoryStateProbe(IGitService git, ICsProjFileService csP
         if (hasBranch)
         {
             counts = await git.ProbeCommitCountsAsync(repoPath, branch!, defaultRef, ct);
-            var (behind, ahead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, defaultRef, ct);
+            // Feature ahead/behind: explicit override, else worktree-persisted Feature parent, else default.
+            var divergenceRef = git.ToOriginBranchRef(options.DivergenceBaseOriginRef)
+                ?? git.ToOriginBranchRef(await git.GetDivergenceBaseBranchAsync(repoPath, ct))
+                ?? defaultRef;
+            var (behind, ahead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, ct);
             defaultBehind = behind;
             defaultAhead = ahead;
-            vsDefaultProbed = defaultRef != null;
+            vsDefaultProbed = divergenceRef != null;
         }
 
         List<string>? localBranches = null;
@@ -81,6 +87,7 @@ public sealed class RepositoryStateProbe(IGitService git, ICsProjFileService csP
         {
             BranchName = hasBranch ? branch : null,
             CheckedOutTag = currentTag,
+            HeadCommit = headCommit,
             GitVersion = gitVersion,
             DefaultBranchName = defaultBranchName,
             OutgoingCommits = counts.Outgoing,
@@ -94,7 +101,9 @@ public sealed class RepositoryStateProbe(IGitService git, ICsProjFileService csP
             Projects = projects,
             ErrorMessage = options.ErrorMessage,
             IdentityProbed = true,
-            GitVersionProbed = options.IncludeGitVersion && gitVersion != null,
+            // A GitVersion run that failed is a probe result too: it clears the stored version, which the grid then
+            // shows as unresolved, instead of leaving a stale number from before the failure.
+            GitVersionProbed = options.IncludeGitVersion,
             // On a tag there is nothing to count, and the app clears those columns from the tag state
             // itself, so reporting the group as probed keeps the two paths consistent.
             CommitCountsProbed = !hasBranch || (counts.CountsProbed && vsDefaultProbed),

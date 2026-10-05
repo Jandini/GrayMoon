@@ -186,6 +186,101 @@ public sealed class WorkspaceProjectRepositoryGeneratedPackageTests
         Assert.Equal("3.4.5", required.Version);
         Assert.Equal(nugetConnector.ConnectorId, required.MatchedConnectorId);
     }
+
+    [Fact]
+    public async Task SyncGeneratedPackageDependenciesAsync_removes_feature_scoped_generated_duplicates()
+    {
+        await using var ctx = await GeneratedPackageTestContext.CreateAsync();
+        await using var scope = ctx.CreateScope();
+        var repo = ctx.Repo(scope);
+        var db = ctx.Db(scope);
+
+        await repo.SyncGeneratedPackageDependenciesAsync(ctx.WorkspaceId, [ctx.MakeInfo()]);
+        var specialGenerated = await db.WorkspaceProjects.SingleAsync(p => p.IsGenerated);
+
+        // Simulate legacy Feature seed that cloned the generated row into another context.
+        var featureContext = new WorkspaceFeatureContext
+        {
+            WorkspaceId = ctx.WorkspaceId,
+            Kind = WorkspaceFeatureContextKind.Feature,
+            CreatedAt = DateTime.UtcNow,
+            IsInSync = true
+        };
+        db.WorkspaceFeatureContexts.Add(featureContext);
+        await db.SaveChangesAsync();
+        db.WorkspaceProjects.Add(new WorkspaceProject
+        {
+            WorkspaceId = ctx.WorkspaceId,
+            WorkspaceFeatureContextId = featureContext.WorkspaceFeatureContextId,
+            RepositoryId = ctx.ProducerRepositoryId,
+            ProjectName = PackageName,
+            ProjectType = ProjectType.Package,
+            ProjectFilePath = "",
+            TargetFramework = "",
+            PackageId = PackageName,
+            IsGenerated = true
+        });
+        await db.SaveChangesAsync();
+        Assert.Equal(2, await db.WorkspaceProjects.CountAsync(p => p.IsGenerated));
+
+        // Must not throw ArgumentException (duplicate key) and must collapse to the special-context row.
+        await repo.SyncGeneratedPackageDependenciesAsync(ctx.WorkspaceId, [ctx.MakeInfo()]);
+
+        var remaining = await db.WorkspaceProjects.Where(p => p.IsGenerated).ToListAsync();
+        Assert.Single(remaining);
+        Assert.Equal(ctx.SpecialContextId, remaining[0].WorkspaceFeatureContextId);
+        Assert.Equal(specialGenerated.ProjectId, remaining[0].ProjectId);
+    }
+
+    [Fact]
+    public async Task SyncGeneratedPackageDependenciesAsync_assigns_special_context_on_create()
+    {
+        await using var ctx = await GeneratedPackageTestContext.CreateAsync();
+        await using var scope = ctx.CreateScope();
+        await ctx.Repo(scope).SyncGeneratedPackageDependenciesAsync(ctx.WorkspaceId, [ctx.MakeInfo()]);
+
+        var generated = await ctx.Db(scope).WorkspaceProjects.SingleAsync(p => p.IsGenerated);
+        Assert.Equal(ctx.SpecialContextId, generated.WorkspaceFeatureContextId);
+    }
+
+    [Fact]
+    public async Task SyncGeneratedPackageDependenciesAsync_creates_edges_for_each_context_consumer()
+    {
+        await using var ctx = await GeneratedPackageTestContext.CreateAsync();
+        await using var scope = ctx.CreateScope();
+        var db = ctx.Db(scope);
+
+        var featureContext = new WorkspaceFeatureContext
+        {
+            WorkspaceId = ctx.WorkspaceId,
+            Kind = WorkspaceFeatureContextKind.Feature,
+            CreatedAt = DateTime.UtcNow,
+            IsInSync = true
+        };
+        db.WorkspaceFeatureContexts.Add(featureContext);
+        await db.SaveChangesAsync();
+
+        var featureConsumer = new WorkspaceProject
+        {
+            WorkspaceId = ctx.WorkspaceId,
+            WorkspaceFeatureContextId = featureContext.WorkspaceFeatureContextId,
+            RepositoryId = ctx.ConsumerRepositoryId,
+            ProjectName = "Consumer",
+            ProjectType = ProjectType.Library,
+            ProjectFilePath = GeneratedPackageTestContext.ConsumerProjectFilePath,
+            TargetFramework = "net10.0"
+        };
+        db.WorkspaceProjects.Add(featureConsumer);
+        await db.SaveChangesAsync();
+
+        await ctx.Repo(scope).SyncGeneratedPackageDependenciesAsync(ctx.WorkspaceId, [ctx.MakeInfo()]);
+
+        var generated = await db.WorkspaceProjects.SingleAsync(p => p.IsGenerated);
+        var edges = await db.ProjectDependencies.Where(d => d.ReferencedProjectId == generated.ProjectId).ToListAsync();
+        Assert.Equal(2, edges.Count);
+        Assert.Contains(edges, e => e.DependentProjectId == ctx.ConsumerProjectId);
+        Assert.Contains(edges, e => e.DependentProjectId == featureConsumer.ProjectId);
+    }
 }
 
 /// <summary>In-memory SQLite DI context seeded with a producer repo (no physical project) and a consumer repo with one real .csproj-backed project, for generated-package tests.</summary>
@@ -201,6 +296,7 @@ public sealed class GeneratedPackageTestContext : IAsyncDisposable
     public int ProducerRepositoryId { get; private set; }
     public int ConsumerRepositoryId { get; private set; }
     public int ConsumerProjectId { get; private set; }
+    public int SpecialContextId { get; private set; }
 
     private GeneratedPackageTestContext(SqliteConnection connection, ServiceProvider provider)
     {
@@ -258,9 +354,24 @@ public sealed class GeneratedPackageTestContext : IAsyncDisposable
             new WorkspaceRepositoryLink { WorkspaceId = workspace.WorkspaceId, RepositoryId = consumer.RepositoryId });
         await db.SaveChangesAsync();
 
+        // Pre-create the special Workspace context so it has a stable id that matches what
+        // WorkspaceProjectRepository's internal ResolveSpecialWorkspaceContextIdAsync resolves to,
+        // and seed the real project against that context (mirroring how the app always writes an
+        // explicit context id, never a null one, once a repository sync has run).
+        var specialContext = new WorkspaceFeatureContext
+        {
+            WorkspaceId = workspace.WorkspaceId,
+            Kind = WorkspaceFeatureContextKind.Workspace,
+            CreatedAt = DateTime.UtcNow,
+            IsInSync = true
+        };
+        db.WorkspaceFeatureContexts.Add(specialContext);
+        await db.SaveChangesAsync();
+
         var consumerProject = new WorkspaceProject
         {
             WorkspaceId = workspace.WorkspaceId,
+            WorkspaceFeatureContextId = specialContext.WorkspaceFeatureContextId,
             RepositoryId = consumer.RepositoryId,
             ProjectName = "Consumer",
             ProjectType = ProjectType.Library,
@@ -274,6 +385,7 @@ public sealed class GeneratedPackageTestContext : IAsyncDisposable
         ProducerRepositoryId = producer.RepositoryId;
         ConsumerRepositoryId = consumer.RepositoryId;
         ConsumerProjectId = consumerProject.ProjectId;
+        SpecialContextId = specialContext.WorkspaceFeatureContextId;
     }
 
     public AsyncServiceScope CreateScope() => _provider.CreateAsyncScope();

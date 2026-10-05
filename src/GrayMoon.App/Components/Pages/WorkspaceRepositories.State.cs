@@ -12,6 +12,11 @@ public sealed partial class WorkspaceRepositories
     private const int VirtualOverscanSlots = 24;
     private const int VirtualInitialViewportSlots = 48;
     private int _scrollGeneration;
+    /// <summary>
+    /// Bumped on Feature/Workspace context switch. Background job UI writes (e.g. sync live git info)
+    /// capture the generation at job start and ignore updates if the user switched context meanwhile.
+    /// </summary>
+    private int _contextGeneration;
     private readonly DebouncedQueryLoader _queryLoader = new();
     private readonly Dictionary<int, WorkspaceRepositoryLink> _linkByRepoId = new();
     private readonly Dictionary<int, WorkspaceRepositoryLink> _linkByWrlId = new();
@@ -44,6 +49,8 @@ public sealed partial class WorkspaceRepositories
     private bool HasRepositories => (_headerState?.TotalCount ?? 0) > 0;
     private bool hasUnmatchedDependencies => _headerState?.HasUnmatchedDependencies ?? false;
     private bool hasCreatablePr => _headerState?.HasCreatablePr ?? false;
+    private bool hasOpenPr => _headerState?.HasOpenPr ?? false;
+    private bool allFeaturePrsCompleted => _headerState?.AllFeaturePrsCompleted ?? false;
     private bool isPushRecommended => _headerState?.IsPushRecommended ?? false;
     private int? lowestLevelNeedingWork => _headerState?.LowestLevelNeedingWork;
     private bool hasTaggedRepos => _headerState?.HasTaggedRepos ?? false;
@@ -81,13 +88,13 @@ public sealed partial class WorkspaceRepositories
     /// <summary>True when either the repos page or the floating notification panel has a job for this workspace.</summary>
     private bool IsBackgroundJobRunning => IsJobRunning || JobService.IsRunning(WorkspacePanelJobKey);
     /// <summary>
-    /// True when a loading overlay is actually on this page. <see cref="IsJobRunning"/> is also true
+    /// True when a loading overlay is actually on this page. Initial grid load no longer uses an overlay
+    /// (thead stays visible with an in-grid message). <see cref="IsJobRunning"/> is also true
     /// for a mutation started on another workspace route (e.g. a Changes commit), and
     /// BackgroundJobOverlay only attaches on the originating path - so that flag must not hide the header spinner here.
     /// </summary>
     private bool IsPageOverlayVisible =>
-        (isInitialLoading && !hasLoadedOnce)
-        || ShowRepositoriesFetchOverlay
+        ShowRepositoriesFetchOverlay
         || JobService.GetJob(PageJobKey) is { State: BackgroundJobState.Running };
     private bool _pendingRefreshAfterJob;
     private int AgentTasksPendingCount => AgentQueueStateService.GetPendingCountForWorkspace(WorkspaceId);
@@ -119,7 +126,8 @@ public sealed partial class WorkspaceRepositories
         {
             return link;
         }
-        var dto = await LinkListQueryService.GetSnapshotAsync(WorkspaceId, repositoryId);
+        var dto = await LinkListQueryService.GetSnapshotAsync(
+            WorkspaceId, repositoryId, _selectedContextId, !_isFeatureContext);
         if (dto is null)
         {
             return null;
@@ -130,7 +138,7 @@ public sealed partial class WorkspaceRepositories
     }
     private async Task<IReadOnlyList<WorkspaceRepositoryLink>> GetAllLinksForOperationAsync()
     {
-        var snapshots = await LinkListQueryService.GetAllSnapshotsAsync(WorkspaceId);
+        var snapshots = await LinkListQueryService.GetAllSnapshotsAsync(WorkspaceId, _selectedContextId, !_isFeatureContext);
         return snapshots.Select(WorkspaceRepositoryLinkListMapper.ToLink).ToList();
     }
 
@@ -147,7 +155,7 @@ public sealed partial class WorkspaceRepositories
             return new Dictionary<int, FreshLinkState>();
 
         var wanted = repositoryIds.ToHashSet();
-        var snapshots = await LinkListQueryService.GetAllSnapshotsAsync(WorkspaceId);
+        var snapshots = await LinkListQueryService.GetAllSnapshotsAsync(WorkspaceId, _selectedContextId, !_isFeatureContext);
         return snapshots
             .Where(dto => wanted.Contains(dto.RepositoryId))
             .ToDictionary(
@@ -170,10 +178,11 @@ public sealed partial class WorkspaceRepositories
             && !string.Equals(Link.BranchName, Link.DefaultBranchName, StringComparison.Ordinal);
     }
     private Task<IReadOnlyList<int>> GetRepositoryIdsAtLevelAsync(int? levelKey) =>
-        LinkListQueryService.GetRepositoryIdsAtLevelAsync(WorkspaceId, levelKey, _effectiveSearch);
+        LinkListQueryService.GetRepositoryIdsAtLevelAsync(
+            WorkspaceId, levelKey, _effectiveSearch, _selectedContextId, !_isFeatureContext);
     private WorkspaceRepositoryLink? FindLink(IReadOnlyList<WorkspaceRepositoryLink> links, int repositoryId) =>
         links.FirstOrDefault(w => w.RepositoryId == repositoryId);
-    private void ClearGridState()
+    private void ClearGridState(bool clearHeaderState = true)
     {
         _slots.Clear();
         _linkByRepoId.Clear();
@@ -185,7 +194,10 @@ public sealed partial class WorkspaceRepositories
         _topSpacerPx = 0;
         _bottomSpacerPx = 0;
         totalCount = null;
-        _headerState = null;
+        // Keep header action flags (Create PR / Branch / …) during context reload so the primary
+        // button does not flash to a different label while the new header state is in flight.
+        if (clearHeaderState)
+            _headerState = null;
         _tooltipLoadedRepoIds.Clear();
         _tooltipLoadInFlight.Clear();
         _mismatchedDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<DependencyMismatchLine>>();

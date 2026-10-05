@@ -1,0 +1,20 @@
+---
+description: Update ../GrayMoon.Desktop/README.md's "Recent GrayMoon changes" when a user-facing feature changes
+alwaysApply: true
+---
+
+# Desktop README when features change
+
+When you add a user-facing feature or change how an existing one behaves,
+update the sibling `../GrayMoon.Desktop/README.md` **Recent GrayMoon changes**
+section in the same turn (that file lives in the Desktop repo, not this one).
+
+- **New feature** - add a bullet at the top of the list.
+- **Existing feature** - edit the matching bullet instead of adding a
+  duplicate.
+- Match the existing style: `- **Short title** - one paragraph of what the
+  user sees and how it works.`
+- Skip internal-only refactors, tests, docs-only edits, or plumbing with no
+  user-visible behavior change.
+- Do not create a Desktop commit unless the user asks. If that README
+  changed, give a second short commit message labeled for GrayMoon.Desktop.

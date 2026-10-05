@@ -432,7 +432,8 @@ public sealed partial class WorkspaceRepositories
 
     private Task HandleMergeRequestedAsync(MergePullRequestChoice choice)
     {
-        if (choice.ReturnToDefault)
+        var returnToDefault = !_isFeatureContext && choice.ReturnToDefault;
+        if (returnToDefault)
         {
             var prNumber = _mergePrModal.PrNumber;
             ShowConfirm(
@@ -516,7 +517,7 @@ public sealed partial class WorkspaceRepositories
                     });
 
                     var syncResult = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, UnattendedReturnToDefaultResult>(
-                        svc => svc.ReturnToDefaultAsync(WorkspaceId, [repositoryId], job.ToOperationProgress(), ct));
+                        svc => svc.ReturnToDefaultAsync(WorkspaceId, RequireSelectedContextId(), [repositoryId], job.ToOperationProgress(), ct));
 
                     SafeInvoke(() =>
                     {

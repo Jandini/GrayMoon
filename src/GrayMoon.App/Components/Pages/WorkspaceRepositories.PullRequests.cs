@@ -30,8 +30,21 @@ public sealed partial class WorkspaceRepositories
     private Task OpenPullRequestDialogForRepositoriesAsync(IReadOnlyList<WorkspaceRepositoryLink> links)
         => OpenPullRequestDialogCoreAsync(links);
 
-    private Task OpenPullRequestDialogCoreAsync(IEnumerable<WorkspaceRepositoryLink> links)
+    private async Task OpenPullRequestDialogCoreAsync(IEnumerable<WorkspaceRepositoryLink> links)
     {
+        IReadOnlyDictionary<int, string?> parentByRepoId = new Dictionary<int, string?>();
+        if (_isFeatureContext && _selectedContextId is { } featureContextId)
+        {
+            try
+            {
+                parentByRepoId = await FeatureOperations.GetParentBranchNamesByRepositoryIdAsync(featureContextId);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Failed to load Feature parent branches for New PR");
+            }
+        }
+
         var targets = new List<NewPrTargetRepo>();
         foreach (var wr in links)
         {
@@ -41,26 +54,37 @@ public sealed partial class WorkspaceRepositories
             if (string.IsNullOrWhiteSpace(wr.BranchName)) continue;
             if (string.IsNullOrWhiteSpace(wr.DefaultBranchName)) continue;
             if (string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal)) continue;
-            if ((wr.DefaultBranchAheadCommits ?? 0) <= 0) continue;
+            // Feature Create PR targets the parent branch - require ahead of that base
+            // (DefaultBranchAheadCommits is vs parent on Feature contexts).
+            if ((wr.DefaultBranchAheadCommits ?? 0) <= 0
+                && (string.IsNullOrWhiteSpace(wr.FeatureBaseCommitSha)
+                    || string.IsNullOrWhiteSpace(wr.HeadCommit)
+                    || string.Equals(wr.HeadCommit.Trim(), wr.FeatureBaseCommitSha.Trim(), StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
             if (!RepositoryUrlHelper.TryParseGitHubOwnerRepo(repo.CloneUrl, out var owner, out var repoName) || owner == null || repoName == null)
                 continue;
 
             var hasOpenPr = wr.PullRequest != null && string.Equals(wr.PullRequest.State, "open", StringComparison.OrdinalIgnoreCase);
             if (hasOpenPr) continue;
 
+            parentByRepoId.TryGetValue(wr.RepositoryId, out var parentBranch);
+
             targets.Add(new NewPrTargetRepo(
                 RepositoryId: wr.RepositoryId,
                 Owner: owner,
                 RepositoryName: repoName,
                 HeadBranch: wr.BranchName!,
-                BaseBranch: wr.DefaultBranchName!,
+                DefaultBranch: wr.DefaultBranchName!,
+                ParentBranchName: parentBranch,
                 CloneUrl: repo.CloneUrl));
         }
 
         if (targets.Count == 0)
         {
             ToastService.Show("No eligible repositories to create a pull request from.");
-            return Task.CompletedTask;
+            return;
         }
 
         _newPrModal = new NewPullRequestModalState
@@ -69,7 +93,6 @@ public sealed partial class WorkspaceRepositories
             Targets = targets
         };
         StateHasChanged();
-        return Task.CompletedTask;
     }
 
     private void CloseNewPullRequestModal()
@@ -79,7 +102,34 @@ public sealed partial class WorkspaceRepositories
         StateHasChanged();
     }
 
-    private async Task HandleNewPrOpenInGitHubAsync()
+    /// <summary>
+    /// Refreshes PR state for the given repositories from GitHub, branching on the currently selected context
+    /// (§3.2/item 6): a Feature context writes into its own <see cref="WorkspaceRepositoryContextPullRequest"/>
+    /// projection via <see cref="WorkspacePullRequestService.RefreshContextPullRequestsAsync"/>, keyed off that
+    /// context's own checked-out branch (from <see cref="IWorkspaceRepositoryLinkListQueryService"/>), instead of
+    /// unconditionally calling the legacy special-Workspace overload that reads the shared link's branch.
+    /// </summary>
+    private async Task RefreshPullRequestsForContextAsync(IReadOnlyList<int> repositoryIds, bool force, CancellationToken cancellationToken)
+    {
+        if (repositoryIds.Count == 0) return;
+
+        if (!_isFeatureContext || _selectedContextId is not { } contextId)
+        {
+            await WorkspacePageService.WorkspacePullRequestService.RefreshPullRequestsAsync(
+                WorkspaceId, repositoryIds, force: force, cancellationToken: cancellationToken);
+            return;
+        }
+
+        var wanted = repositoryIds.ToHashSet();
+        var branchByRepositoryId = (await LinkListQueryService.GetAllSnapshotsAsync(WorkspaceId, _selectedContextId, isSpecialWorkspace: false))
+            .Where(dto => wanted.Contains(dto.RepositoryId))
+            .ToDictionary(dto => dto.RepositoryId, dto => dto.BranchName);
+
+        await WorkspacePageService.WorkspacePullRequestService.RefreshContextPullRequestsAsync(
+            WorkspaceId, contextId.Value, branchByRepositoryId, force: force, cancellationToken: cancellationToken);
+    }
+
+    private async Task HandleNewPrOpenInGitHubAsync(IReadOnlyDictionary<int, string> baseByRepositoryId)
     {
         var targets = _newPrModal.Targets;
         if (targets.Count == 0) return;
@@ -89,7 +139,10 @@ public sealed partial class WorkspaceRepositories
         {
             var repoUrl = RepositoryUrlHelper.GetRepositoryUrl(t.CloneUrl);
             if (string.IsNullOrEmpty(repoUrl)) continue;
-            urls.Add($"{repoUrl}/compare/{t.BaseBranch}...{Uri.EscapeDataString(t.HeadBranch)}");
+            var baseBranch = baseByRepositoryId.TryGetValue(t.RepositoryId, out var selected) && !string.IsNullOrWhiteSpace(selected)
+                ? selected
+                : t.DefaultBranch;
+            urls.Add($"{repoUrl}/compare/{Uri.EscapeDataString(baseBranch)}...{Uri.EscapeDataString(t.HeadBranch)}");
         }
         if (urls.Count == 0)
         {
@@ -122,19 +175,36 @@ public sealed partial class WorkspaceRepositories
             return Task.CompletedTask;
         }
 
-        var requests = targets.Select(t => new CreatePullRequestRequest
+        var requests = new List<CreatePullRequestRequest>();
+        foreach (var t in targets)
         {
-            RepositoryId = t.RepositoryId,
-            Owner = t.Owner,
-            RepositoryName = t.RepositoryName,
-            HeadBranch = t.HeadBranch,
-            BaseBranch = t.BaseBranch,
-            Title = form.Title,
-            Body = form.Body,
-            IsDraft = form.IsDraft,
-            Reviewers = form.Reviewers,
-            TeamReviewers = form.TeamReviewers
-        }).ToList();
+            if (!form.BaseBranchByRepositoryId.TryGetValue(t.RepositoryId, out var baseBranch)
+                || string.IsNullOrWhiteSpace(baseBranch))
+            {
+                ToastService.ShowError($"Target branch is required for {t.RepositoryName}.");
+                return Task.CompletedTask;
+            }
+
+            if (string.Equals(baseBranch, t.HeadBranch, StringComparison.Ordinal))
+            {
+                ToastService.ShowError($"Source and target branch cannot be the same for {t.RepositoryName}.");
+                return Task.CompletedTask;
+            }
+
+            requests.Add(new CreatePullRequestRequest
+            {
+                RepositoryId = t.RepositoryId,
+                Owner = t.Owner,
+                RepositoryName = t.RepositoryName,
+                HeadBranch = t.HeadBranch,
+                BaseBranch = baseBranch,
+                Title = form.Title,
+                Body = form.Body,
+                IsDraft = form.IsDraft,
+                Reviewers = form.Reviewers,
+                TeamReviewers = form.TeamReviewers
+            });
+        }
 
         var repoIdsToPush = form.RepositoryIdsToPush.ToHashSet();
         var draftSuffix = form.IsDraft ? " as draft" : string.Empty;
@@ -167,7 +237,7 @@ public sealed partial class WorkspaceRepositories
 
                 var pushResult = await ScopedExecutor.ExecuteAsync<IWorkspacePushOperations, OperationResult>(svc =>
                     svc.PushAsync(
-                        WorkspaceId,
+                        WorkspaceId, RequireSelectedContextId(),
                         repoIdsToPush,
                         synchronizedPush: false,
                         requiredPackageIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase),
@@ -256,12 +326,10 @@ public sealed partial class WorkspaceRepositories
             {
                 try
                 {
-                    var freshPrs = await ScopedExecutor.ExecuteAsync<WorkspacePullRequestService, IReadOnlyDictionary<int, PullRequestInfo?>>(async svc =>
-                    {
-                        await svc.RefreshPullRequestsAsync(WorkspaceId, refreshedIds, cancellationToken: ct);
-                        return await svc.GetPersistedPullRequestsForWorkspaceAsync(WorkspaceId, ct);
-                    });
-                    SafeInvoke(() => { prByRepositoryId = freshPrs; });
+                    // Context-aware: for a Feature this persists into that context's own PR projection instead
+                    // of the legacy per-link row (§3.2/item 6). RefreshFromSync below re-reads via the
+                    // context-aware Project(...) overlay, so no separate prByRepositoryId snapshot is needed here.
+                    await RefreshPullRequestsForContextAsync(refreshedIds, force: true, ct);
                 }
                 catch (Exception ex)
                 {
@@ -309,7 +377,13 @@ public sealed partial class WorkspaceRepositories
         foreach (var wr in group)
         {
             var verified = prByRepositoryId.TryGetValue(wr.RepositoryId, out var pr);
-            if (PRBadge.ShowsCreateBadge(wr.IsOnTag, verified, pr, wr.DefaultBranchAheadCommits))
+            if (PRBadge.ShowsCreateBadge(
+                    wr.IsOnTag,
+                    verified,
+                    pr,
+                    wr.DefaultBranchAheadCommits,
+                    wr.HeadCommit,
+                    wr.FeatureBaseCommitSha))
                 return true;
         }
         return false;

@@ -2,17 +2,20 @@ using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using Microsoft.Extensions.Options;
 
+using GrayMoon.Application.Features;
+
 namespace GrayMoon.App.Services.Orchestration;
 
 public sealed class WorkspaceUndoPushHandler(
     IAgentBridge agentBridge,
     WorkspaceRepository workspaceRepo,
-    WorkspaceService workspaceService,
     IOptions<WorkspaceOptions> options,
+    IWorkspaceContextPathResolver pathResolver,
     ILogger<WorkspaceUndoPushHandler> logger)
 {
     public async Task<IReadOnlyList<(int RepositoryId, bool Success, string? Error)>> RunUndoPushAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlyList<WorkspaceRepositoryLink> repos,
         bool keepChanges,
         IProgress<OperationProgress>? progress,
@@ -29,7 +32,7 @@ public sealed class WorkspaceUndoPushHandler(
         if (workspace == null)
             return Array.Empty<(int, bool, string?)>();
 
-        var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, ct);
+        var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, ct);
 
         var total = targets.Count;
         var completedCount = 0;
@@ -44,7 +47,7 @@ public sealed class WorkspaceUndoPushHandler(
             {
                 var args = new
                 {
-                    workspaceName = workspace.Name,
+                    workspaceName = workspaceFolderName,
                     repositoryId = wr.RepositoryId,
                     repositoryName = wr.Repository?.RepositoryName,
                     workspaceId,

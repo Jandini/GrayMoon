@@ -9,13 +9,14 @@ using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Services.Git;
 
 public sealed partial class WorkspaceGitService
 {
     /// <summary>Refreshes branches for a single repository by calling the agent directly. Routes CommandOutput to TerminalSinkContext when called within a background job.</summary>
-    public async Task<bool> RefreshBranchesForRepositoryAsync(int repositoryId, int workspaceId, CancellationToken cancellationToken = default)
+    public async Task<bool> RefreshBranchesForRepositoryAsync(int repositoryId, int workspaceId, WorkspaceFeatureContextId contextId, CancellationToken cancellationToken = default)
     {
         var repo = await _repositoryRepository.GetByIdAsync(repositoryId, cancellationToken);
         if (repo == null) return false;
@@ -27,10 +28,10 @@ public sealed partial class WorkspaceGitService
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null) return false;
 
-        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
         var response = await _agentBridge.SendCommandAsync("RefreshBranches", new
         {
-            workspaceName = workspace.Name,
+            workspaceName = workspaceFolderName,
             repositoryId = repo.RepositoryId,
             repositoryName = repo.RepositoryName,
             workspaceRoot
@@ -60,9 +61,9 @@ public sealed partial class WorkspaceGitService
         return true;
     }
 
-    public async Task RefreshBranchesAndBroadcastAsync(int repositoryId, int workspaceId, CancellationToken cancellationToken = default)
+    public async Task RefreshBranchesAndBroadcastAsync(int repositoryId, int workspaceId, WorkspaceFeatureContextId contextId, CancellationToken cancellationToken = default)
     {
-        await RefreshBranchesForRepositoryAsync(repositoryId, workspaceId, cancellationToken);
+        await RefreshBranchesForRepositoryAsync(repositoryId, workspaceId, contextId, cancellationToken);
         if (_hubContext != null)
             await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken: cancellationToken);
     }
@@ -90,6 +91,7 @@ public sealed partial class WorkspaceGitService
     /// <summary>Creates a new branch in all workspace repos (in parallel), then checks it out. baseBranch is "__default__" to use each repo's default, or a branch name. When <paramref name="repositoryIds"/> is set, only those repos are included. When <paramref name="syncState"/> is true, hooks are suppressed and the agent returns full state inline so the app can persist it without waiting for async hook syncs.</summary>
     public async Task<IReadOnlyDictionary<int, string>> CreateBranchesAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         string newBranchName,
         string baseBranch,
         Action<int, int>? onProgress = null,
@@ -116,11 +118,13 @@ public sealed partial class WorkspaceGitService
             return new Dictionary<int, string>();
 
         var errors = new ConcurrentDictionary<int, string>();
+        var branchNameByRepoId = new ConcurrentDictionary<int, string>();
+        var syncResponseByRepoId = new ConcurrentDictionary<int, CreateBranchResponse>();
         var useDefaultBase = string.Equals(baseBranch, "__default__", StringComparison.OrdinalIgnoreCase);
         var completedCount = 0;
         var totalCount = links.Count;
         using var semaphore = new SemaphoreSlim(_maxConcurrent);
-        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
 
         // Prefetch all default branches before the parallel section to avoid concurrent DbContext reads
         Dictionary<int, string>? defaultBranchByWrId = null;
@@ -157,7 +161,7 @@ public sealed partial class WorkspaceGitService
 
                 var args = new
                 {
-                    workspaceName = workspace.Name,
+                    workspaceName = workspaceFolderName,
                     repositoryName = repo.RepositoryName,
                     newBranchName,
                     baseBranchName,
@@ -171,25 +175,13 @@ public sealed partial class WorkspaceGitService
 
                 if (success)
                 {
-                    wr.BranchName = createResponse?.Branch ?? newBranchName;
+                    // Record results only - do not mutate wr/DbContext here (it is being shared across
+                    // parallel tasks, and a Feature context's branch/version state must land on its own
+                    // WorkspaceRepositoryContextState, not unconditionally on the shared link). Applied
+                    // via WorkspaceRepositoryStateWriter in a sequential pass below.
+                    branchNameByRepoId[wr.RepositoryId] = createResponse?.Branch ?? newBranchName;
                     if (syncState && createResponse != null)
-                    {
-                        // Hooks were suppressed - persist all state returned inline so the next
-                        // step (dependency update) sees a complete, consistent database.
-                        wr.CheckedOutTag = null;
-                        if (createResponse.Version != null)
-                            wr.GitVersion = createResponse.Version;
-                        if (createResponse.OutgoingCommits.HasValue)
-                            wr.OutgoingCommits = createResponse.OutgoingCommits;
-                        if (createResponse.IncomingCommits.HasValue)
-                            wr.IncomingCommits = createResponse.IncomingCommits;
-                        if (createResponse.HasUpstream.HasValue)
-                            wr.BranchHasUpstream = createResponse.HasUpstream;
-                        if (createResponse.DefaultBranchBehind.HasValue)
-                            wr.DefaultBranchBehindCommits = createResponse.DefaultBranchBehind;
-                        if (createResponse.DefaultBranchAhead.HasValue)
-                            wr.DefaultBranchAheadCommits = createResponse.DefaultBranchAhead;
-                    }
+                        syncResponseByRepoId[wr.RepositoryId] = createResponse;
                 }
                 else
                 {
@@ -206,11 +198,49 @@ public sealed partial class WorkspaceGitService
         }
 
         await Task.WhenAll(links.Select(ProcessOne));
-        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        // EF Core not thread-safe; apply all state writes sequentially after the parallel agent calls.
+        // WorkspaceRepositoryStateWriter scopes every write to the given context (mirroring onto the
+        // shared WorkspaceRepositoryLink only for the special Workspace), so a Feature's branch creation
+        // never overwrites the Workspace's own branch/version display and always leaves the Feature's own
+        // context state populated - which downstream context-scoped dependency-update-plan reads depend on.
+        foreach (var wr in links)
+        {
+            if (!branchNameByRepoId.TryGetValue(wr.RepositoryId, out var branchName))
+                continue;
+
+            syncResponseByRepoId.TryGetValue(wr.RepositoryId, out var createResponse);
+
+            // Hooks were suppressed when syncState is set - persist all state returned inline so the next
+            // step (dependency update) sees a complete, consistent database for this context.
+            var snapshot = new RepositoryStateSnapshot
+            {
+                IdentityProbed = true,
+                BranchName = branchName,
+                CheckedOutTag = null,
+                GitVersionProbed = !string.IsNullOrWhiteSpace(createResponse?.Version),
+                GitVersion = createResponse?.Version,
+                CommitCountsProbed = createResponse != null,
+                OutgoingCommits = createResponse?.OutgoingCommits,
+                IncomingCommits = createResponse?.IncomingCommits,
+                DefaultBranchBehind = createResponse?.DefaultBranchBehind,
+                DefaultBranchAhead = createResponse?.DefaultBranchAhead,
+                UpstreamProbed = createResponse?.HasUpstream.HasValue == true,
+                HasUpstream = createResponse?.HasUpstream,
+            };
+
+            await _stateWriter.ApplyAsync(contextId, workspaceId, wr.RepositoryId, snapshot, new RepositoryStateWriteOptions
+            {
+                SyncStatus = SyncStatusWrite.Leave,
+            }, cancellationToken);
+        }
 
         // Persist the new branch for each repo where creation succeeded (so it appears in branch lists without a manual refresh)
-        foreach (var wr in links.Where(wr => wr.BranchName == newBranchName))
+        foreach (var (repositoryId, branchName) in branchNameByRepoId)
         {
+            if (branchName != newBranchName)
+                continue;
+            var wr = links.First(l => l.RepositoryId == repositoryId);
             await EnsureLocalBranchPersistedAsync(wr.WorkspaceRepositoryId, newBranchName, cancellationToken);
         }
 

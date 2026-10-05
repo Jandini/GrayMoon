@@ -6,30 +6,23 @@ The App sends local-work commands to the Worker through SignalR.
 
 Conceptually:
 
-```text
-Blazor / application operation
-        │
-        ▼
-AgentBridge.SendCommandAsync
-        │
-        │ RequestCommand(requestId, commandName, JSON)
-        ▼
-AgentHub / connected Worker
-        │
-        ▼
-Worker command queue
-        │
-        ▼
-typed command handler
-        │
-        ▼
-ResponseCommand(requestId, JSON)
-        │
-        ▼
-AgentResponseDelivery
-        │
-        ▼
-awaiting App caller
+```mermaid
+sequenceDiagram
+  participant UI as Blazor / application operation
+  participant Bridge as AgentBridge
+  participant Hub as AgentHub
+  participant Queue as Agent command queue
+  participant Handler as typed command handler
+  participant Delivery as AgentResponseDelivery
+
+  UI->>Bridge: SendCommandAsync
+  Bridge->>Hub: RequestCommand(requestId, name, JSON)
+  Hub->>Queue: enqueue
+  Queue->>Handler: execute
+  Handler->>Hub: ResponseCommand(requestId, JSON)
+  Hub->>Delivery: complete
+  Delivery->>Bridge: unblock awaiter
+  Bridge->>UI: result
 ```
 
 A unique request ID correlates response and caller.
@@ -44,16 +37,18 @@ The Worker uses separate bounded queues for different command categories.
 
 Current architecture:
 
-```text
-main pool
-- most commands and mutations
-
-read/status pool
-- GetGitChangeStatus
-
-diff pool
-- GetGitFileDiff
+```mermaid
+flowchart LR
+  In["Incoming commands"] --> Route{"route by name"}
+  Route -->|"most mutations"| Main["main pool"]
+  Route -->|"GetGitChangeStatus, ListGitWorktrees"| Read["read/status pool"]
+  Route -->|"GetGitFileDiff"| Diff["diff pool"]
+  Main -.-> Cap["bounded concurrency"]
+  Read -.-> Cap
+  Diff -.-> Cap
 ```
+
+Routing is by command name in `SignalRConnectionHostedService` (`ReadOnlyCommands`, `DiffCommands`); everything else goes to the main pool. Defaults: main `ProcessorCount * 2`, read 8, diff 4 (`AgentOptions`).
 
 This isolation matters.
 
@@ -65,11 +60,20 @@ Do not collapse these pools into one queue without a deliberate performance rede
 
 ## 3. App-side operation locking
 
-GrayMoon currently treats Workspace mutations as exclusive.
+`WorkspaceOperationRunner` is the process-wide mutation coordinator. It implements both `IWorkspaceOperationRunner` and the hierarchical `IWorkspaceOperationLock`.
 
-`WorkspaceOperationRunner` is the process-wide mutation coordinator.
+The lock has two levels:
 
-A second conflicting Workspace mutation should not start while another mutation is active.
+```text
+structural (TryStartStructural)   whole Workspace; refused while any context mutation runs
+context    (TryStartContext)      one per WorkspaceFeatureContextId; refused while a structural one runs
+```
+
+Mutations in different contexts (the special Workspace and Feature A, or Feature A and Feature B) can run concurrently. A second mutation in the same context does not start; the caller attaches to the running one.
+
+Create Feature and Remove Feature are structural (`create-feature`, `remove-feature`). The legacy `TryStart` entry point is treated as structural.
+
+`BackgroundJobService` picks the level from the job key: keys shaped `/workspaces/{id}/ctx/{contextId}/...` (`WorkspaceJobKeys.ContextOverlayKey`) take a context lock; other `/workspaces/{id}...` keys take the structural lock.
 
 This protects multi-step orchestration from overlapping writes and Git operations.
 
@@ -118,12 +122,14 @@ Synchronized push and dependency update work by dependency level.
 
 Pattern:
 
-```text
-level 1 in parallel
-wait for completion / package publication
-level 2 in parallel
-wait
-...
+```mermaid
+flowchart TB
+  L1["Level 1 in parallel"]
+  W1["Wait for completion / package publication"]
+  L2["Level 2 in parallel"]
+  W2["Wait"]
+  Ln["Level N ..."]
+  L1 --> W1 --> L2 --> W2 --> Ln
 ```
 
 Dependency ordering is a business rule, not a performance detail.
@@ -138,41 +144,40 @@ Hooks report local Git events even when changes were initiated outside GrayMoon.
 
 End-to-end:
 
-```text
-developer commits/checks out/merges/pushes in IDE or CLI
-        │
-        ▼
-Git hook
-        │ HTTP POST to loopback Worker listener
-        ▼
-HookListenerHostedService
-        │
-        ▼
-notify job / hook dispatcher
-        │
-        ▼
-GitVersion / branch / commit-count work
-        │
-        ▼
-RepositorySyncNotification
-        │ SignalR SyncCommand
-        ▼
-GrayMoon.App SyncCommandHandler
-        │
-        ▼
-WorkspaceRepositoryStateWriter
-        │
-        ▼
-batch/derived-state recomputation
-        │
-        ▼
-WorkspaceSyncHub broadcast
-        │
-        ▼
-browser reloads persisted state
+```mermaid
+sequenceDiagram
+  participant Dev as IDE / CLI
+  participant Hook as Git hook
+  participant Listen as HookListenerHostedService
+  participant Agent as Agent notify job
+  participant App as SyncCommandHandler
+  participant Writer as WorkspaceRepositoryStateWriter
+  participant Hub as WorkspaceSyncHub
+  participant Browser as Browser circuit
+
+  Dev->>Hook: commit / checkout / merge / push
+  Hook->>Listen: HTTP POST loopback
+  Listen->>Agent: notify job
+  Agent->>App: SignalR SyncCommand
+  App->>Writer: partial persist
+  Writer->>Hub: broadcast
+  Hub->>Browser: reload persisted state
 ```
 
 Hook notification failure must not break the Git operation that triggered the hook.
+
+### Context attribution
+
+Feature worktrees share the hooks directory of the main checkout, so the hook script also sends `repositoryPath` (`git rev-parse --show-toplevel`). `WorkspaceHookContextAttributor` matches that path against the special Workspace checkout and the Feature worktree paths:
+
+```text
+matches the Workspace checkout   -> special Workspace context
+matches one Feature worktree     -> that Feature context
+unknown or ambiguous path        -> notification skipped (never defaulted to the Workspace)
+no path (hook from older Worker) -> special Workspace context
+```
+
+`CreateGitWorktree` rewrites the hooks of the main checkout before `git worktree add`, so the `post-checkout` hook fired by the new worktree is attributed correctly.
 
 ---
 
@@ -201,16 +206,15 @@ Git Changes uses filesystem watchers on the Worker.
 
 Important components include:
 
-```text
-GitRepositoryWatcher
-GitRepositoryWatcherManager
-GitChangesRepositoryRegistry
-GitStatusRefreshCoordinator
-GitChangesSnapshotCache
-GitChangesSnapshotPublisher
-GitChangesMonitoringBackgroundService
-WorkspaceGitChangesWriteQueue
-GitChangesSnapshotPushHandler
+```mermaid
+flowchart LR
+  Watch["GitRepositoryWatcher"] --> Mgr["GitRepositoryWatcherManager"]
+  Mgr --> Reg["GitChangesRepositoryRegistry"]
+  Watch -->|"dirty"| Coord["GitStatusRefreshCoordinator"]
+  Coord --> Cache["GitChangesSnapshotCache"]
+  Cache --> Pub["GitChangesSnapshotPublisher"]
+  Pub -->|"SignalR"| Queue["WorkspaceGitChangesWriteQueue"]
+  Queue --> Handler["GitChangesSnapshotPushHandler"]
 ```
 
 ### Watcher lifecycle
@@ -235,6 +239,8 @@ The Worker can push a fresh snapshot without waiting for an explicit page reques
 
 The App validates version ordering and persists through the single write queue.
 
+After a snapshot commits, `GitChangesSnapshotPushHandler` publishes to `IWorkspaceGitChangesNotifier`, the in-process singleton fan-out for persisted snapshot changes, next to the `ContextGitChangesUpdated` SignalR broadcast. Unlinking repositories from a Workspace publishes too, with the all-contexts sentinel. Circuit-side consumers such as the Changes nav dot subscribe to it instead of opening their own hub connection.
+
 ---
 
 ## 10. Git Changes activity tracking
@@ -257,13 +263,15 @@ An explicit refresh ultimately requests a new Worker status scan.
 
 When the snapshot returns:
 
-```text
-Worker snapshot
-→ App write queue
-→ SQLite
-→ GitChangesUpdated broadcast
-→ page re-reads
+```mermaid
+flowchart LR
+  A["Agent snapshot"] --> B["App write queue"]
+  B --> C["SQLite"]
+  C --> D["ContextGitChangesUpdated broadcast"]
+  D --> E["page re-reads"]
 ```
+
+`GitChangesSnapshotPushHandler` resolves the context from the reported repository path, writes the context tables, and broadcasts `ContextGitChangesUpdated(workspaceId, contextId, repositoryId)`. For the special Workspace context it also writes the legacy tables and broadcasts `GitChangesUpdated(workspaceId, repositoryId)`.
 
 The UI remains projection-driven.
 
@@ -358,6 +366,20 @@ updates UI
 ```
 
 This avoids sending large domain graphs through browser broadcast events.
+
+Current `WorkspaceSyncHub` events:
+
+```text
+ContextRepositorySynced(workspaceId, contextId, repositoryId)
+ContextSynced(workspaceId, contextId)
+ContextGitChangesUpdated(workspaceId, contextId, repositoryId)
+RepositorySynced(workspaceId, repositoryId)       legacy
+WorkspaceSynced(workspaceId)                      legacy
+GitChangesUpdated(workspaceId, repositoryId)      legacy, special Workspace only
+RepositoryError(workspaceId, repositoryId, message)
+```
+
+The hook path (`SyncCommandHandler`) sends the legacy `RepositorySynced` / `WorkspaceSynced` only for the special Workspace context. Many mutation paths (for example `WorkspaceStateRecomputeScope.CompleteAsync` and branch operations) still send `WorkspaceSynced` regardless of context, so context-aware listeners must filter by the selected context and treat `WorkspaceSynced` as a coarse invalidation.
 
 ---
 

@@ -12,4 +12,8 @@ public sealed class GetHostInfoResponse
 
     [JsonPropertyName("gitVersionToolVersion")]
     public string? GitVersionToolVersion { get; set; }
+
+    /// <summary>Agent host user profile directory (e.g. C:\Users\name). Used to default Feature worktree storage.</summary>
+    [JsonPropertyName("userProfilePath")]
+    public string? UserProfilePath { get; set; }
 }

@@ -409,6 +409,12 @@
     padding-right: 1rem;
 }
 
+/* Direct child of the pre-run footer (not wrapped in .bulk-merge-pr-footer-actions).
+   margin-left: auto keeps it on the right when the return-to-default checkbox is hidden. */
+::deep .bulk-merge-pr-modal-footer > .merge-pr-btn-github {
+    margin-left: auto;
+}
+
 ::deep .merge-pr-return-default-check .form-check-input:not(:checked) {
     background-color: #6c757d;
     border-color: #6c757d;
@@ -424,6 +430,7 @@
     align-items: center;
     gap: 0.5rem;
     flex: 0 0 auto;
+    margin-left: auto;
 }
 
 /*

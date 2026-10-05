@@ -5,6 +5,7 @@ using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
+using GrayMoon.Application.Features;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
@@ -25,6 +26,8 @@ public sealed class WorkspacePushService(
     WorkspaceStateRecomputeScope recomputeScope,
     AppDbContext dbContext,
     Microsoft.Extensions.Options.IOptions<WorkspaceOptions> workspaceOptions,
+    IWorkspaceFeatureContextResolver contextResolver,
+    IWorkspaceContextPathResolver pathResolver,
     ILogger<WorkspacePushService> logger,
     IHubContext<WorkspaceSyncHub>? hubContext = null,
     PackageRegistrySyncService? packageRegistrySyncService = null,
@@ -43,6 +46,8 @@ public sealed class WorkspacePushService(
     private readonly WorkspaceRepositoryStateWriter _stateWriter = stateWriter ?? throw new ArgumentNullException(nameof(stateWriter));
     private readonly WorkspaceStateRecomputeScope _recomputeScope = recomputeScope ?? throw new ArgumentNullException(nameof(recomputeScope));
     private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+    private readonly IWorkspaceFeatureContextResolver _contextResolver = contextResolver ?? throw new ArgumentNullException(nameof(contextResolver));
+    private readonly IWorkspaceContextPathResolver _pathResolver = pathResolver ?? throw new ArgumentNullException(nameof(pathResolver));
     private readonly ILogger<WorkspacePushService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly int _maxConcurrent = Math.Max(1, workspaceOptions?.Value?.MaxParallelOperations ?? 16);
     private readonly IHubContext<WorkspaceSyncHub>? _hubContext = hubContext;
@@ -54,10 +59,17 @@ public sealed class WorkspacePushService(
     private readonly GhaWorkflowLiveFeedService? _ghaWorkflowLiveFeedService = ghaWorkflowLiveFeedService;
     private readonly OverlayCommandTerminalService? _overlayCommandTerminalService = overlayCommandTerminalService;
 
-    /// <summary>Gets the push plan: all workspace repos by dependency level. Used to show multi-level push dialog and push with dependency synchronization.</summary>
+    /// <summary>Gets the push plan for the special Workspace context: all workspace repos by dependency level. Legacy overload for callers without a context id.</summary>
     public async Task<(IReadOnlyList<PushRepoPayload> Payload, bool IsMultiLevel)> GetPushPlanAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
-        var payload = await _workspaceDependencyService.GetPushPlanPayloadAsync(workspaceId, cancellationToken);
+        var contextId = await _contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+        return await GetPushPlanAsync(workspaceId, contextId.Value, cancellationToken);
+    }
+
+    /// <summary>Gets the push plan scoped to <paramref name="workspaceFeatureContextId"/>: that context's own repos by dependency level. Used to show multi-level push dialog and push with dependency synchronization.</summary>
+    public async Task<(IReadOnlyList<PushRepoPayload> Payload, bool IsMultiLevel)> GetPushPlanAsync(int workspaceId, int workspaceFeatureContextId, CancellationToken cancellationToken = default)
+    {
+        var payload = await _workspaceDependencyService.GetPushPlanPayloadAsync(workspaceId, workspaceFeatureContextId, cancellationToken);
         if (payload.Count == 0)
             return (payload, false);
         var levels = payload.Select(p => p.DependencyLevel ?? 0).Distinct().ToList();
@@ -77,6 +89,7 @@ public sealed class WorkspacePushService(
     /// </summary>
     public async Task RunPushAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlySet<int>? repoIdsToPush = null,
         Action<string>? onProgressMessage = null,
         Action<int, string>? onRepoError = null,
@@ -99,8 +112,9 @@ public sealed class WorkspacePushService(
         if (workspace == null)
             throw new InvalidOperationException($"Workspace {workspaceId} not found.");
 
-        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
-        await _workspaceService.CreateDirectoryAsync(workspace.Name, workspaceRoot, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var configuredRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        await _workspaceService.CreateDirectoryAsync(workspace.Name, configuredRoot, cancellationToken);
 
         if (!packageRegistriesAlreadySynced)
         {
@@ -109,7 +123,7 @@ public sealed class WorkspacePushService(
                 await _packageRegistrySyncService.SyncWorkspacePackageRegistriesAsync(workspaceId, cancellationToken: cancellationToken);
         }
 
-        var fullPayload = await _workspaceDependencyService.GetPushPlanPayloadAsync(workspaceId, cancellationToken);
+        var fullPayload = await _workspaceDependencyService.GetPushPlanPayloadAsync(workspaceId, contextId.Value, cancellationToken);
         var payload = repoIdsToPush is { Count: > 0 }
             ? fullPayload.Where(p => repoIdsToPush.Contains(p.RepoId)).ToList()
             : fullPayload;
@@ -158,8 +172,8 @@ public sealed class WorkspacePushService(
         if (!synchronizedPushPossible || _nuGetService == null || _connectorRepository == null)
         {
             onProgressMessage?.Invoke("Pushing all repositories...");
-            await PushReposAsync(workspace, payload, bearerByRepoId, onProgressMessage, onRepoError, onAppSideComplete, cancellationToken: cancellationToken);
-            await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, payload, cancellationToken);
+            await PushReposAsync(workspace, contextId, payload, bearerByRepoId, onProgressMessage, onRepoError, onAppSideComplete, cancellationToken: cancellationToken);
+            await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, contextId, payload, cancellationToken);
             return;
         }
 
@@ -348,6 +362,7 @@ public sealed class WorkspacePushService(
             {
                 levelFailures = await PushReposAsync(
                     workspace,
+                    contextId,
                     reposAtLevel,
                     bearerByRepoId,
                     levelProgress,
@@ -362,7 +377,7 @@ public sealed class WorkspacePushService(
                 onLevelError?.Invoke(level, ex.Message);
                 return;
             }
-            await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, reposAtLevel, cancellationToken);
+            await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, contextId, reposAtLevel, cancellationToken);
             if (levelFailures.Count > 0)
             {
                 _logger.LogWarning(
@@ -397,7 +412,7 @@ public sealed class WorkspacePushService(
                 runId, workspaceId, level, reposAtLevel.Count);
         }
 
-        await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, payload, cancellationToken);
+        await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, contextId, payload, cancellationToken);
 
         _logger.LogInformation(
             "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: RunPushAsync finished. TotalPushed={TotalPushed}",
@@ -407,6 +422,7 @@ public sealed class WorkspacePushService(
     /// <summary>Pushed a single repository's current branch with upstream (-u). Used when the user clicks the "not-upstreamed" badge.</summary>
     public async Task<(bool Success, string? ErrorMessage)> PushSingleRepositoryWithUpstreamAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         string? branchName,
         Action<string>? onProgressMessage = null,
@@ -432,7 +448,7 @@ public sealed class WorkspacePushService(
             return (false, "Repository is pinned to a tag. Checkout a branch before pushing.");
 
         var repo = link.Repository;
-        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
 
         onProgressMessage?.Invoke(link.BranchHasUpstream == true ? "Pushing..." : "Pushing upstream...");
 
@@ -441,7 +457,7 @@ public sealed class WorkspacePushService(
 
         var args = new
         {
-            workspaceName = workspace.Name,
+            workspaceName = workspaceFolderName,
             repositoryId = repo.RepositoryId,
             repositoryName = repo.RepositoryName,
             bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
@@ -456,11 +472,11 @@ public sealed class WorkspacePushService(
         {
             var rawErr = response.Error ?? AgentResponseJson.DeserializeAgentResponse<PushRepositoryResponse>(response.Data!)?.ErrorMessage;
             if (PushErrorFormatter.IsNonFastForwardRejection(rawErr))
-                await FetchAfterRejectionAsync(workspaceId, repositoryId, repo.RepositoryName, workspace.Name, workspaceRoot, cancellationToken);
+                await FetchAfterRejectionAsync(workspaceId, contextId, repositoryId, repo.RepositoryName, workspace.Name, workspaceRoot, cancellationToken);
             return (false, PushErrorFormatter.Format(rawErr));
         }
 
-        await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId,
+        await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, contextId,
             [new PushRepoPayload(repositoryId, repo.RepositoryName, link.DependencyLevel, [])],
             cancellationToken);
         return (true, null);
@@ -469,6 +485,7 @@ public sealed class WorkspacePushService(
     /// <summary>Pushes a set of repos in dependency level order (lowest first) with upstream, without waiting for packages in registry.</summary>
     public async Task RunPushReposInLevelOrderAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlySet<int> repoIds,
         Action<string>? onProgressMessage = null,
         Action<int, string>? onRepoError = null,
@@ -482,7 +499,7 @@ public sealed class WorkspacePushService(
         if (workspace == null)
             throw new InvalidOperationException($"Workspace {workspaceId} not found.");
 
-        var fullPayload = await _workspaceDependencyService.GetPushPlanPayloadAsync(workspaceId, cancellationToken);
+        var fullPayload = await _workspaceDependencyService.GetPushPlanPayloadAsync(workspaceId, contextId.Value, cancellationToken);
         var payload = fullPayload.Where(p => repoIds.Contains(p.RepoId)).ToList();
         if (payload.Count == 0)
         {
@@ -522,11 +539,11 @@ public sealed class WorkspacePushService(
             if (reposAtLevel.Count == 0) continue;
             var levelProgress = onProgressMessage == null ? (Action<string>?)null : msg => onProgressMessage($"{msg}\nLevel {level}");
             levelProgress?.Invoke($"Pushing {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")}...");
-            await PushReposAsync(workspace, reposAtLevel, bearerByRepoId, levelProgress, onRepoError, onAppSideComplete: null, cancellationToken: cancellationToken);
-            await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, reposAtLevel, cancellationToken);
+            await PushReposAsync(workspace, contextId, reposAtLevel, bearerByRepoId, levelProgress, onRepoError, onAppSideComplete: null, cancellationToken: cancellationToken);
+            await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, contextId, reposAtLevel, cancellationToken);
         }
 
-        await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, payload, cancellationToken);
+        await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, contextId, payload, cancellationToken);
         if (_hubContext != null)
             await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
     }
@@ -534,6 +551,7 @@ public sealed class WorkspacePushService(
     /// <summary>Pushes a set of repos in parallel (up to MaxParallelOperations concurrency), without dependency ordering or waiting for packages.</summary>
     public async Task RunPushReposParallelAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlySet<int> repoIds,
         Action<string>? onProgressMessage = null,
         Action<int, string>? onRepoError = null,
@@ -548,7 +566,7 @@ public sealed class WorkspacePushService(
         if (workspace == null)
             throw new InvalidOperationException($"Workspace {workspaceId} not found.");
 
-        var fullPayload = await _workspaceDependencyService.GetPushPlanPayloadAsync(workspaceId, cancellationToken);
+        var fullPayload = await _workspaceDependencyService.GetPushPlanPayloadAsync(workspaceId, contextId.Value, cancellationToken);
         var payload = fullPayload.Where(p => repoIds.Contains(p.RepoId)).ToList();
         if (payload.Count == 0)
         {
@@ -581,8 +599,8 @@ public sealed class WorkspacePushService(
         }
 
         onProgressMessage?.Invoke($"Pushing {payload.Count} {(payload.Count == 1 ? "repository" : "repositories")}...");
-        await PushReposAsync(workspace, payload, bearerByRepoId, onProgressMessage, onRepoError, onAppSideComplete, cancellationToken: cancellationToken);
-        await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, payload, cancellationToken);
+        await PushReposAsync(workspace, contextId, payload, bearerByRepoId, onProgressMessage, onRepoError, onAppSideComplete, cancellationToken: cancellationToken);
+        await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, contextId, payload, cancellationToken);
     }
 
     private async Task<bool> DiscoverRunningWorkflowsForLevelAsync(
@@ -813,6 +831,7 @@ public sealed class WorkspacePushService(
 
     private async Task<IReadOnlyList<(int RepoId, string Error)>> PushReposAsync(
         Workspace workspace,
+        WorkspaceFeatureContextId contextId,
         IReadOnlyList<PushRepoPayload> repos,
         IReadOnlyDictionary<int, string?> bearerByRepoId,
         Action<string>? onProgressMessage,
@@ -825,7 +844,7 @@ public sealed class WorkspacePushService(
         var finished = 0;
         var total = repos.Count;
         using var semaphore = new SemaphoreSlim(_maxConcurrent);
-        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
         var rejectedRepos = new System.Collections.Concurrent.ConcurrentBag<(int RepoId, string RepoName)>();
         var failures = new System.Collections.Concurrent.ConcurrentBag<(int RepoId, string Error)>();
         var pushTasks = repos.Select(async repo =>
@@ -840,7 +859,7 @@ public sealed class WorkspacePushService(
 
                     var args = new
                     {
-                        workspaceName = workspace.Name,
+                        workspaceName = workspaceFolderName,
                         repositoryId = repo.RepoId,
                         repositoryName = repo.RepoName,
                         bearerToken = bearerByRepoId.GetValueOrDefault(repo.RepoId),
@@ -886,11 +905,18 @@ public sealed class WorkspacePushService(
         });
         await Task.WhenAll(pushTasks);
         foreach (var (repoId, repoName) in rejectedRepos)
-            await FetchAfterRejectionAsync(workspace.WorkspaceId, repoId, repoName, workspace.Name, workspaceRoot, cancellationToken);
+            await FetchAfterRejectionAsync(workspace.WorkspaceId, contextId, repoId, repoName, workspace.Name, workspaceRoot, cancellationToken);
         return failures.ToList();
     }
 
-    private async Task FetchAfterRejectionAsync(int workspaceId, int repositoryId, string repoName, string workspaceName, string? workspaceRoot, CancellationToken cancellationToken)
+    private async Task FetchAfterRejectionAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        int repositoryId,
+        string repoName,
+        string workspaceName,
+        string? workspaceRoot,
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -901,7 +927,7 @@ public sealed class WorkspacePushService(
                 repositoryName = repoName,
                 workspaceRoot
             }, cancellationToken);
-            await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId,
+            await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, contextId,
                 [new PushRepoPayload(repositoryId, repoName, null, [])],
                 cancellationToken);
         }
@@ -911,7 +937,7 @@ public sealed class WorkspacePushService(
         }
     }
 
-    private async Task UpdateCommitCountsAndUpstreamAfterPushAsync(int workspaceId, IReadOnlyList<PushRepoPayload> repos, CancellationToken cancellationToken)
+    private async Task UpdateCommitCountsAndUpstreamAfterPushAsync(int workspaceId, WorkspaceFeatureContextId contextId, IReadOnlyList<PushRepoPayload> repos, CancellationToken cancellationToken)
     {
         if (repos.Count == 0) return;
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
@@ -947,7 +973,7 @@ public sealed class WorkspacePushService(
             wr.BranchHasUpstream = true;
         }
 
-        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
 
         var tagPinnedInLinks = links
             .Where(l => !string.IsNullOrWhiteSpace(l.CheckedOutTag))
@@ -961,7 +987,7 @@ public sealed class WorkspacePushService(
             {
                 var response = await _agentBridge.SendCommandAsync("GetCommitCounts", new
                 {
-                    workspaceName = workspace.Name,
+                    workspaceName = workspaceFolderName,
                     repositoryName = repo.RepoName,
                     workspaceRoot
                 }, cancellationToken);
@@ -981,7 +1007,7 @@ public sealed class WorkspacePushService(
         // transient agent hiccup.
         foreach (var r in results.Where(r => r.Data != null))
         {
-            await _stateWriter.ApplyAsync(workspaceId, r.RepoId, new RepositoryStateSnapshot
+            await _stateWriter.ApplyAsync(contextId, workspaceId, r.RepoId, new RepositoryStateSnapshot
             {
                 OutgoingCommits = r.Data!.OutgoingCommits,
                 IncomingCommits = r.Data.IncomingCommits,
@@ -993,7 +1019,12 @@ public sealed class WorkspacePushService(
             }, cancellationToken: cancellationToken);
         }
 
-        await _recomputeScope.CompleteAsync(workspaceId, cancellationToken);
+        await _recomputeScope.CompleteAsync(workspaceId, contextId, cancellationToken);
     }
-}
 
+    private Task<(string WorkspaceRoot, string WorkspaceFolderName)> ResolveAgentPathArgsAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        CancellationToken cancellationToken)
+        => _pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
+}

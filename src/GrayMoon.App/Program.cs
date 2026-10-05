@@ -18,7 +18,9 @@ using GrayMoon.App.Services.Orchestration;
 using GrayMoon.App.Services.Queries;
 using GrayMoon.App.Services.Security;
 using GrayMoon.App.Services.Ui;
+using GrayMoon.App.Services.Features;
 using GrayMoon.App.Services.Workspaces;
+using GrayMoon.Application.Features;
 using GrayMoon.Common;
 using GrayMoon.Common.Git;
 using Microsoft.AspNetCore.DataProtection;
@@ -69,6 +71,7 @@ try
     builder.Services.Configure<WorkspaceOptions>(builder.Configuration.GetSection("Workspace"));
     builder.Services.Configure<GitChangesOptions>(builder.Configuration.GetSection("GitChanges"));
     builder.Services.Configure<AgentBridgeOptions>(builder.Configuration.GetSection(AgentBridgeOptions.SectionName));
+    builder.Services.Configure<SecurityOptions>(builder.Configuration.GetSection(SecurityOptions.SectionName));
 
     // Add services to the container.
     builder.Services.AddRazorComponents()
@@ -124,6 +127,18 @@ try
     builder.Services.AddScoped<SyncCommandHandler>();
     builder.Services.AddScoped<IAgentBridge, AgentBridge>();
     builder.Services.AddScoped<WorkspaceService>();
+    builder.Services.AddScoped<IWorkspaceFeatureContextResolver, WorkspaceFeatureContextResolver>();
+    builder.Services.AddScoped<IWorkspaceContextPathResolver, WorkspaceContextPathResolver>();
+    builder.Services.AddScoped<IWorkspaceSelectedFeatureContextService, WorkspaceSelectedFeatureContextService>();
+    builder.Services.AddScoped<IWorkspaceHookContextAttributor, WorkspaceHookContextAttributor>();
+    builder.Services.AddScoped<IWorkspaceFeatureOperations, WorkspaceFeatureOperations>();
+    builder.Services.AddSingleton<IWorkspaceFeatureReconciler, WorkspaceFeatureReconciler>();
+    builder.Services.AddHostedService(sp => (WorkspaceFeatureReconciler)sp.GetRequiredService<IWorkspaceFeatureReconciler>());
+    builder.Services.AddScoped<WorkspaceContextNavigationService>();
+    builder.Services.AddScoped<IWorkspaceExternalWorktreeOperations, WorkspaceExternalWorktreeOperations>();
+    builder.Services.AddScoped<IWorkspaceNativeLaunchService, WorkspaceNativeLaunchService>();
+    builder.Services.AddScoped<IWorkspaceBranchOccupancyService, WorkspaceBranchOccupancyService>();
+    builder.Services.AddScoped<IFeatureBranchGuard, FeatureBranchGuard>();
     builder.Services.AddScoped<WorkspaceGitService>();
     builder.Services.AddScoped<ConnectorHealthService>();
     builder.Services.AddScoped<HomeNavAttentionMonitor>();
@@ -170,6 +185,7 @@ try
     builder.Services.AddScoped<WorkspaceBranchHandler>();
     builder.Services.AddScoped<PrepareWorkspaceOrchestrator>();
     builder.Services.AddSingleton<IWorkspaceOperationRunner, WorkspaceOperationRunner>();
+    builder.Services.AddSingleton<IWorkspaceOperationLock>(sp => (IWorkspaceOperationLock)sp.GetRequiredService<IWorkspaceOperationRunner>());
     builder.Services.AddScoped<IBackgroundJobService, BackgroundJobService>();
     builder.Services.AddScoped<IWorkspacePageService, WorkspacePageService>();
     builder.Services.AddScoped<IWorkspaceTopBarService, WorkspaceTopBarService>();
@@ -177,14 +193,26 @@ try
 
     builder.Services.AddScoped<IWorkspaceGitChangesReadService, WorkspaceGitChangesReadService>();
     builder.Services.AddScoped<IGitChangesAgentClient, GitChangesAgentClient>();
+    builder.Services.AddSingleton<MarkdownProseDiffService>();
+    builder.Services.AddScoped<MarkdownImageEmbedder>();
+    builder.Services.AddHttpClient(nameof(MarkdownImageEmbedder))
+        .ConfigureHttpClient(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(15);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GrayMoon-MarkdownPreview/1.0");
+        });
+
     builder.Services.AddScoped<GitChangesSnapshotPushHandler>();
+    builder.Services.AddSingleton<IWorkspaceGitChangesNotifier, WorkspaceGitChangesNotifier>();
     builder.Services.AddScoped<WorkspaceGitChangesSelectionMemory>();
     builder.Services.AddScoped<WorkspaceGitChangesCommitMessageMemory>();
     builder.Services.AddScoped<WorkspaceGitChangesPushAfterCommitMemory>();
     builder.Services.AddSingleton<IWorkspaceGitChangesActivityTracker, WorkspaceGitChangesActivityTracker>();
+    builder.Services.AddSingleton<IWorkspaceGitChangesMonitoringPause, WorkspaceGitChangesMonitoringPause>();
     builder.Services.AddSingleton<IGitChangesWorkspaceScanner, GitChangesWorkspaceScanner>();
     builder.Services.AddSingleton<IGitChangesLineStatsRefresh, GitChangesLineStatsRefresh>();
     builder.Services.AddScoped<IWorkspaceGitChangesActivation, WorkspaceGitChangesActivation>();
+    builder.Services.AddScoped<WorkspaceGitChangesRouteActivity>();
 
     builder.Services.AddSingleton<ICommandLineService, CommandLineService>();
     builder.Services.AddSingleton<IScopedServiceExecutor, ScopedServiceExecutor>();
@@ -192,6 +220,11 @@ try
     // Token protection
     builder.Services.AddSingleton<ITokenEncryptionKeyProvider, TokenEncryptionKeyProvider>();
     builder.Services.AddSingleton<ITokenProtector, AesGcmTokenProtector>();
+
+    // Worker secret (F2) and one-time pairing codes
+    builder.Services.AddSingleton<IWorkerSecretSeenStore, DbWorkerSecretSeenStore>();
+    builder.Services.AddSingleton<WorkerSecretService>();
+    builder.Services.AddSingleton<WorkerPairingService>();
 
     // Background services
     builder.Services.AddSingleton<SyncBackgroundService>();
@@ -251,7 +284,12 @@ try
         ConnectorHelpers.InitializeTokenProtector(tokenProtector);
 
         dbContext.Database.EnsureCreated();
-        await Migrations.RunAllAsync(dbContext);
+        await Migrations.RunAllAsync(dbContext, app.Logger);
+
+        var keyProvider = services.GetRequiredService<ITokenEncryptionKeyProvider>();
+        await TokenReencryptionService.ReencryptLegacyTokensAsync(dbContext, tokenProtector, keyProvider, app.Logger);
+
+        await services.GetRequiredService<WorkerSecretService>().InitializeAsync();
 
         await dbContext.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;");
         await dbContext.Database.ExecuteSqlRawAsync("PRAGMA busy_timeout=5000;");
@@ -264,14 +302,7 @@ try
         services.GetRequiredService<DesktopTopBarState>().LoadSilently(topBarVisible);
     }
 
-    static string? GetDatabasePath(string connectionString)
-    {
-        const string prefix = "Data Source=";
-        var idx = connectionString.IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
-        if (idx < 0) return null;
-        var path = connectionString[(idx + prefix.Length)..].Trim();
-        return string.IsNullOrEmpty(path) ? null : path;
-    }
+    static string? GetDatabasePath(string connectionString) => DatabasePathResolver.GetDatabasePath(connectionString);
 
     // Configure the HTTP request pipeline.
     if (!app.Environment.IsDevelopment())
@@ -287,6 +318,11 @@ try
     {
         app.UseHttpsRedirection();
     }
+
+    // F3: cross-site/rebinding check, before routing reaches any API endpoint or hub.
+    app.UseMiddleware<RequestSecurityMiddleware>();
+    // F2: Worker secret on /hub/agent and /repos/{id}/connector.
+    app.UseMiddleware<WorkerSecretMiddleware>();
 
     app.UseStaticFiles();
     app.UseAntiforgery();
@@ -310,6 +346,11 @@ try
 
     await app.RunAsync();
     return 0;
+}
+catch (DatabaseMigrationException dbEx)
+{
+    Log.Fatal(dbEx, "Database migration failed at startup: {Message}", dbEx.Message);
+    return 1;
 }
 catch (Exception ex)
 {

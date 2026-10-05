@@ -12,10 +12,19 @@ public sealed class WorkspaceActionService(
     /// <summary>Coalesces concurrent <see cref="FetchAndPersistAsync"/> callers for the same row (multiple open tabs, grid auto-poll overlapping push discovery) onto one in-flight GitHub fetch.</summary>
     private static readonly ConcurrentDictionary<int, Task<IReadOnlyList<ActionStatusInfo>?>> InFlightFetches = new();
 
+    /// <summary>Same coalescing as <see cref="InFlightFetches"/>, keyed by (ContextId, WorkspaceRepositoryId) for <see cref="FetchAndPersistContextAsync"/>.</summary>
+    private static readonly ConcurrentDictionary<(int ContextId, int WorkspaceRepositoryId), Task<IReadOnlyList<ActionStatusInfo>?>> InFlightContextFetches = new();
+
     /// <summary>Returns persisted action state for the workspace keyed by RepositoryId. Used when building the grid from cache.</summary>
     public async Task<IReadOnlyDictionary<int, RepositoryActionsPersistedState>> GetPersistedActionsForWorkspaceAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
         return await actionRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
+    }
+
+    /// <summary>Context-aware counterpart of <see cref="GetPersistedActionsForWorkspaceAsync"/> for a Feature context (§18/§2.2).</summary>
+    public async Task<IReadOnlyDictionary<int, RepositoryActionsPersistedState>> GetPersistedActionsForWorkspaceContextAsync(int workspaceId, int contextId, CancellationToken cancellationToken = default)
+    {
+        return await actionRepository.GetByWorkspaceIdContextAsync(workspaceId, contextId, cancellationToken);
     }
 
     /// <summary>
@@ -63,6 +72,56 @@ public sealed class WorkspaceActionService(
             return null;
 
         await actionRepository.UpsertAsync(workspaceRepositoryId, workflows, branch, cancellationToken);
+        return workflows;
+    }
+
+    /// <summary>
+    /// Context-aware counterpart of <see cref="FetchAndPersistAsync"/>: fetches CI status per workflow for
+    /// <paramref name="branch"/> (the Feature context's own checked-out branch, not the special Workspace's)
+    /// and persists into <see cref="GrayMoon.App.Models.WorkspaceRepositoryContextAction"/> for that context - §18/§2.2.
+    /// </summary>
+    public Task<IReadOnlyList<ActionStatusInfo>?> FetchAndPersistContextAsync(
+        int contextId,
+        int workspaceRepositoryId,
+        GitHubRepositoryEntry repository,
+        string branch,
+        CancellationToken cancellationToken = default)
+    {
+        var key = (contextId, workspaceRepositoryId);
+        if (InFlightContextFetches.TryGetValue(key, out var existing) && !existing.IsCompleted)
+            return existing;
+
+        var fetchTask = FetchAndPersistContextCoreAsync(contextId, workspaceRepositoryId, repository, branch, cancellationToken);
+        InFlightContextFetches[key] = fetchTask;
+        return AwaitAndClearInFlightContextAsync(key, fetchTask);
+    }
+
+    private static async Task<IReadOnlyList<ActionStatusInfo>?> AwaitAndClearInFlightContextAsync(
+        (int ContextId, int WorkspaceRepositoryId) key,
+        Task<IReadOnlyList<ActionStatusInfo>?> fetchTask)
+    {
+        try
+        {
+            return await fetchTask.ConfigureAwait(false);
+        }
+        finally
+        {
+            InFlightContextFetches.TryRemove(new KeyValuePair<(int, int), Task<IReadOnlyList<ActionStatusInfo>?>>(key, fetchTask));
+        }
+    }
+
+    private async Task<IReadOnlyList<ActionStatusInfo>?> FetchAndPersistContextCoreAsync(
+        int contextId,
+        int workspaceRepositoryId,
+        GitHubRepositoryEntry repository,
+        string branch,
+        CancellationToken cancellationToken)
+    {
+        var workflows = await gitHubActionsService.GetWorkflowStatusesForBranchAsync(repository, branch, cancellationToken);
+        if (workflows == null)
+            return null;
+
+        await actionRepository.UpsertContextAsync(contextId, workspaceRepositoryId, workflows, branch, cancellationToken);
         return workflows;
     }
 }

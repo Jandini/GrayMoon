@@ -10,6 +10,8 @@
 @inject IAgentBridge AgentBridge
 @inject ConnectorHealthService ConnectorHealthService
 @inject ConnectorRepository ConnectorRepository
+@inject WorkspaceContextNavigationService ContextNavigation
+@using GrayMoon.App.Services.Features
 <PageTitle>Home - GrayMoon</PageTitle>
 
 @if (!showHome)
@@ -246,7 +248,11 @@ else
                 "sessionStorage.setItem",
                 DefaultWorkspaceRedirectKey,
                 "true");
-            NavigationManager.NavigateTo($"/workspaces/{defaultWorkspace.WorkspaceId}", replace: true);
+            NavigationManager.NavigateTo(
+                await ContextNavigation.BuildWorkspaceEntryHrefAsync(
+                    defaultWorkspace.WorkspaceId,
+                    $"/workspaces/{defaultWorkspace.WorkspaceId}"),
+                replace: true);
             return;
         }
 

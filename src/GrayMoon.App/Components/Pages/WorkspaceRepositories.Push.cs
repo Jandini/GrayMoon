@@ -16,9 +16,11 @@ public sealed partial class WorkspaceRepositories
 
         try
         {
+            var contextId = RequireSelectedContextId();
             var allLinks = await GetAllLinksForOperationAsync();
             var plan = await PushOperations.GetPlanAsync(
                 WorkspaceId,
+                contextId,
                 cancellationToken: CancellationToken.None);
             if (!plan.HasUnpushed || plan.RepositoryIds.Count == 0)
             {
@@ -33,6 +35,7 @@ public sealed partial class WorkspaceRepositories
                 .ToHashSet();
             var depInfo = await WorkspaceDependencyService.GetPushDependencyInfoForRepoSetAsync(
                 WorkspaceId,
+                contextId.Value,
                 repoIdsWithUnpushed,
                 CancellationToken.None);
             if (depInfo == null)
@@ -105,6 +108,7 @@ public sealed partial class WorkspaceRepositories
                 .ToHashSet();
             var depInfo = await WorkspaceDependencyService.GetPushDependencyInfoForRepoAsync(
                 WorkspaceId,
+                RequireSelectedContextId().Value,
                 repositoryId,
                 CancellationToken.None);
 
@@ -183,7 +187,7 @@ public sealed partial class WorkspaceRepositories
     {
         await using var planScope = ServiceScopeFactory.CreateAsyncScope();
         var planOps = planScope.ServiceProvider.GetRequiredService<IWorkspacePushOperations>();
-        var plan = await planOps.GetPlanAsync(WorkspaceId, maxLevel, ct);
+        var plan = await planOps.GetPlanAsync(WorkspaceId, RequireSelectedContextId(), maxLevel, ct);
         if (!plan.HasUnpushed || plan.RepositoryIds.Count == 0)
         {
             SafeInvoke(() => ToastService.Show(emptyMessage));
@@ -206,7 +210,7 @@ public sealed partial class WorkspaceRepositories
         {
             var result = await ScopedExecutor.ExecuteAsync<IWorkspacePushOperations, OperationResult>(svc =>
                 svc.PushAsync(
-                    WorkspaceId,
+                    WorkspaceId, RequireSelectedContextId(),
                     repoIds,
                     synchronizedPush,
                     requiredPackageIds,
@@ -275,7 +279,7 @@ public sealed partial class WorkspaceRepositories
         StartPageJob("Setting upstream...", async (job, ct) =>
         {
             var result = await ScopedExecutor.ExecuteAsync<IWorkspacePushOperations, OperationResult>(
-                svc => svc.PushSingleAsync(WorkspaceId, repositoryId, branchName, job.ToOperationProgress(), ct));
+                svc => svc.PushSingleAsync(WorkspaceId, RequireSelectedContextId(), repositoryId, branchName, job.ToOperationProgress(), ct));
 
             if (result.Success)
             {
@@ -315,7 +319,7 @@ public sealed partial class WorkspaceRepositories
         try
         {
             var count = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, int>(
-                svc => svc.RestorePackagesAsync(WorkspaceId, job.ToOperationProgress(), ct));
+                svc => svc.RestorePackagesAsync(WorkspaceId, RequireSelectedContextId(), job.ToOperationProgress(), ct));
 
             SafeInvoke(() =>
             {
@@ -354,7 +358,7 @@ public sealed partial class WorkspaceRepositories
         {
             job.ReportProgress("Restoring packages...");
             var count = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, int>(
-                svc => svc.RestoreSyncedPackagesAsync(WorkspaceId, repoIds, job.ToOperationProgress(), ct));
+                svc => svc.RestoreSyncedPackagesAsync(WorkspaceId, RequireSelectedContextId(), repoIds, job.ToOperationProgress(), ct));
 
             SafeInvoke(() =>
             {
@@ -381,7 +385,7 @@ public sealed partial class WorkspaceRepositories
         try
         {
             var count = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, int>(
-                svc => svc.RestoreSyncedPackagesAsync(WorkspaceId, syncedRepoIds, job.ToOperationProgress(), ct));
+                svc => svc.RestoreSyncedPackagesAsync(WorkspaceId, RequireSelectedContextId(), syncedRepoIds, job.ToOperationProgress(), ct));
 
             SafeInvoke(() =>
             {

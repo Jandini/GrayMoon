@@ -423,3 +423,6 @@ db/
 
 /.cursor/verify-out-deps
 /.cursor/verify-out-connectors-repos
+
+# Ad hoc test log files left at the repo root
+test-*.txt

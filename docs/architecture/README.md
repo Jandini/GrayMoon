@@ -1,7 +1,7 @@
 # GrayMoon Current Architecture
 
-**State documented:** GrayMoon before worktree-backed Features  
-**Code baseline reviewed through:** `b10994375a8fd7711a92e34dc4f82070e992ea46`  
+**State documented:** GrayMoon with worktree-backed Features  
+**Code baseline reviewed through:** `b10994375a8fd7711a92e34dc4f82070e992ea46` (original set); Feature updates reviewed against `a06fe3344b4bfe10f282fd667b39fdcbd56f41fc`  
 **Runtime:** .NET 10, ASP.NET Core / Blazor Server, EF Core 10, SQLite, GrayMoon.Agent .NET 10
 
 This folder is the current-state architecture reference for GrayMoon.
@@ -15,7 +15,7 @@ The purpose is to answer four questions for a developer joining the project:
 3. How are those capabilities implemented?
 4. What architectural rules must be preserved when GrayMoon evolves?
 
-This documentation intentionally describes **the current product without worktree-backed Features**. A Workspace currently has one physical checkout per repository. That single-checkout assumption is expected to change in the future Feature/worktree project, but all current user-facing behavior documented here is the compatibility baseline unless a later approved design explicitly changes it.
+A Workspace has one main checkout per repository (the special **Workspace** context) and zero or more **Features**. A Feature is a named set of `git worktree` checkouts, one per Workspace repository, on a branch of the same name. Every Workspace page shows one context at a time. Sections that still say "the Workspace" without qualification describe the special Workspace context.
 
 ## Reading order
 
@@ -39,8 +39,7 @@ Read these documents in order:
 6. [06 - Developer Extension Guide](06-developer-extension-guide.md)  
    Rules for adding or changing functionality without violating GrayMoon architecture.
 
-7. [DELETE-MANIFEST](DELETE-MANIFEST.md)  
-   The recommended cleanup of the existing `docs/` tree after this replacement set is accepted.
+The worktree Feature design and review notes under `docs/worktree/` are historical design records, not current-state references. Where they disagree with this folder or the code, the code wins.
 
 ## GrayMoon in one paragraph
 
@@ -50,42 +49,59 @@ GrayMoon is a control plane for multi-repository .NET development. A Workspace g
 
 GrayMoon is a two-process system:
 
-```text
-GrayMoon.App
-- UI
-- orchestration
-- SQLite
-- GitHub / connector API calls
-- application services
-- browser notifications
+```mermaid
+flowchart TB
+  subgraph AppSide["GrayMoon.App"]
+    UI["UI / Blazor"]
+    Orch["Orchestration"]
+    DB["SQLite"]
+    GH["GitHub / connectors"]
+    Hub["AgentHub + WorkspaceSyncHub<br/>(+ DesktopNotificationHub in Desktop mode)"]
+  end
 
-        SignalR
+  subgraph AgentSide["GrayMoon.Agent"]
+    Git["Local Git"]
+    FS["Filesystem"]
+    GV["GitVersion"]
+    GC["Git Changes"]
+    Hooks["Hook listener"]
+    Restore["dotnet restore"]
+  end
 
-GrayMoon.Agent
-- local Git
-- GitVersion
-- repository filesystem
-- project discovery
-- dotnet restore
-- Git Changes status/diff/mutations
-- Git hook listener
+  UI --> Orch
+  Orch --> DB
+  Orch --> GH
+  Orch --> Hub
+  Hub <-->|"SignalR"| Git
+  Hub <--> FS
+  Hub <--> GV
+  Hub <--> GC
+  Hub <--> Hooks
+  Hub <--> Restore
 ```
 
 GrayMoon.App must not directly operate the developer's local repositories.
 
 ## Current Workspace model
 
-Today:
-
-```text
-Workspace
-├─ RepoA working tree
-├─ RepoB working tree
-├─ RepoC working tree
-└─ ...
+```mermaid
+flowchart TB
+  WS["Workspace"]
+  SC["Workspace context<br/>(main checkouts under RootPath)"]
+  F1["Feature context 'feat-x'<br/>(worktrees under ManagedFeatureStorageRoot\\feat-x)"]
+  A["RepoA"]
+  B["RepoB"]
+  A1["RepoA worktree"]
+  B1["RepoB worktree"]
+  WS --> SC
+  WS --> F1
+  SC --> A
+  SC --> B
+  F1 --> A1
+  F1 --> B1
 ```
 
-Each `WorkspaceRepositoryLink` represents membership plus the current persisted checkout projection for that repository.
+Each `WorkspaceRepositoryLink` represents membership plus the persisted checkout projection of the special Workspace context. Each context, including the special one, also has its own per-context projection rows keyed by `WorkspaceFeatureContextId` (see 03, section 22).
 
 Important current derived state includes:
 
@@ -103,20 +119,27 @@ Git Changes status
 configured-file mismatch state
 ```
 
-The future worktree project will move many of these observations behind an execution-context model. Until that migration is complete, this documentation is the current behavior baseline.
+These observations are tracked per context. Operations always receive an explicit `WorkspaceFeatureContextId`; the selected context is carried in the page URL (`?context=<id>`; a bare Workspace URL falls back to the remembered selection, then the special Workspace).
 
 ## Core user surfaces
 
 A Workspace exposes:
 
-```text
-Repositories
-Changes
-Projects
-Packages
-Files
-Deps
-Actions
+```mermaid
+flowchart LR
+  Repos["Repositories"]
+  Changes["Changes"]
+  Projects["Projects"]
+  Packages["Packages"]
+  Files["Files"]
+  Deps["Deps"]
+  Actions["Actions"]
+  Repos --- Changes
+  Repos --- Projects
+  Repos --- Packages
+  Repos --- Files
+  Repos --- Deps
+  Repos --- Actions
 ```
 
 The Repositories page is the main operational dashboard. The remaining pages provide focused views over source control, project/package discovery, configured files, dependency relationships, and GitHub workflow state.
@@ -133,7 +156,8 @@ GrayMoon's differentiating workflows are:
 - multi-repository Git Changes;
 - PR creation and merge across repositories;
 - live GitHub Actions visibility;
-- hook-driven local state synchronization.
+- hook-driven local state synchronization;
+- worktree-backed Features that run the same workflows in parallel, isolated checkouts.
 
 ## Documentation policy going forward
 

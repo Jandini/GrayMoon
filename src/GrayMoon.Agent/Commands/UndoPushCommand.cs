@@ -58,8 +58,10 @@ public sealed class UndoPushCommand(IGitService git, IHubConnectionProvider hubP
             if (connection?.State != HubConnectionState.Connected) return;
 
             var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, CancellationToken.None);
+            var divergenceRef = git.ToOriginBranchRef(await git.GetDivergenceBaseBranchAsync(repoPath, CancellationToken.None))
+                ?? defaultRef;
             var (outgoing, incoming, hasUpstream) = await git.GetCommitCountsAsync(repoPath, branch, defaultRef, CancellationToken.None);
-            var (defaultBehind, defaultAhead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, defaultRef, CancellationToken.None);
+            var (defaultBehind, defaultAhead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, CancellationToken.None);
             var (versionResult, _) = await git.GetVersionAsync(repoPath, nonNormalize: true, CancellationToken.None);
             var version = versionResult?.InformationalVersion ?? "-";
             var versionBranch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? branch;
@@ -68,6 +70,9 @@ public sealed class UndoPushCommand(IGitService git, IHubConnectionProvider hubP
             {
                 WorkspaceId = workspaceId,
                 RepositoryId = repositoryId,
+                // Required for Feature attribution - null path is treated as special Workspace and
+                // would mirror this worktree's branch onto the shared WorkspaceRepositoryLink.
+                RepositoryPath = repoPath,
                 Version = version,
                 Branch = versionBranch,
                 OutgoingCommits = outgoing,

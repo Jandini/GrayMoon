@@ -7,8 +7,10 @@ using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
+using GrayMoon.App.Services.Agent;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Services.Git;
 
@@ -16,6 +18,7 @@ public sealed partial class WorkspaceGitService
 {
     public async Task<IReadOnlyDictionary<int, RepoGitVersionInfo>> SyncAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         Action<int, int, int, RepoGitVersionInfo>? onProgress = null,
         Action? onAppSideComplete = null,
         IReadOnlyList<int>? repositoryIds = null,
@@ -29,8 +32,9 @@ public sealed partial class WorkspaceGitService
         if (workspace == null)
             throw new InvalidOperationException($"Workspace {workspaceId} not found.");
 
-        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
-        await _workspaceService.CreateDirectoryAsync(workspace.Name, workspaceRoot, cancellationToken);
+        var configuredRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        await _workspaceService.CreateDirectoryAsync(workspace.Name, configuredRoot, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
 
         var repos = workspace.Repositories
             .Select(link => link.Repository)
@@ -53,6 +57,8 @@ public sealed partial class WorkspaceGitService
                 repos.Select(r => r.RepositoryId), cancellationToken);
         }
 
+        var divergenceByRepoId = await GetDivergenceBaseBranchesByRepositoryIdAsync(contextId, cancellationToken);
+
         var completedCount = 0;
         var totalCount = repos.Count;
         using var semaphore = new SemaphoreSlim(_maxConcurrent);
@@ -62,15 +68,17 @@ public sealed partial class WorkspaceGitService
             await semaphore.WaitAsync(cancellationToken);
             try
             {
+                divergenceByRepoId.TryGetValue(repo.RepositoryId, out var divergenceBaseBranch);
                 var args = new
                 {
-                    workspaceName = workspace.Name,
+                    workspaceName = workspaceFolderName,
                     repositoryId = repo.RepositoryId,
                     repositoryName = repo.RepositoryName,
                     cloneUrl = repo.CloneUrl,
                     bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
                     workspaceId,
-                    workspaceRoot
+                    workspaceRoot,
+                    divergenceBaseBranch
                 };
                 var response = await _agentBridge.SendCommandAsync("SyncRepository", args, cancellationToken);
                 var info = ParseSyncRepositoryResponse(response);
@@ -88,7 +96,9 @@ public sealed partial class WorkspaceGitService
 
         var results = await Task.WhenAll(syncTasks);
 
-        await PersistVersionsAsync(workspaceId, results, persistDependencyLevel: !skipDependencyLevelPersistence, cancellationToken);
+        await PersistVersionsAsync(workspaceId, contextId, results, persistDependencyLevel: !skipDependencyLevelPersistence, cancellationToken);
+
+        await ApplyDefaultTipVersionsForMergedFeatureReposAsync(workspaceId, contextId, cancellationToken);
 
         bool isInSync;
         if (repositoryIds != null && repositoryIds.Count > 0)
@@ -106,14 +116,14 @@ public sealed partial class WorkspaceGitService
         await _workspaceRepository.UpdateSyncMetadataAsync(workspaceId, DateTime.UtcNow, isInSync);
 
         if (_fileVersionService != null)
-            await _fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, cancellationToken);
+            await _fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, contextId, cancellationToken);
 
         _logger.LogDebug("Sync completed for workspace {WorkspaceName}", workspace.Name);
         return results.ToDictionary(r => r.RepositoryId, r => r.info);
     }
 
     /// <summary>Refreshes version for a single repo and persists. Returns (success, errorMessage) for caller to report and optionally stop workflow.</summary>
-    public async Task<(bool Success, string? ErrorMessage)> SyncSingleRepositoryAsync(int repositoryId, int workspaceId, CancellationToken cancellationToken = default)
+    public async Task<(bool Success, string? ErrorMessage)> SyncSingleRepositoryAsync(int repositoryId, int workspaceId, WorkspaceFeatureContextId contextId, CancellationToken cancellationToken = default)
     {
         var repo = await _repositoryRepository.GetByIdAsync(repositoryId, cancellationToken);
         if (repo == null)
@@ -134,8 +144,17 @@ public sealed partial class WorkspaceGitService
         if (workspace == null)
             return (false, "Workspace not found.");
 
-        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
-        var response = await _agentBridge.SendCommandAsync("RefreshRepositoryVersion", new { workspaceName = workspace.Name, repositoryName = repo.RepositoryName, repositoryId = repo.RepositoryId, workspaceRoot }, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var divergenceByRepoId = await GetDivergenceBaseBranchesByRepositoryIdAsync(contextId, cancellationToken);
+        divergenceByRepoId.TryGetValue(repo.RepositoryId, out var divergenceBaseBranch);
+        var response = await _agentBridge.SendCommandAsync("RefreshRepositoryVersion", new
+        {
+            workspaceName = workspaceFolderName,
+            repositoryName = repo.RepositoryName,
+            repositoryId = repo.RepositoryId,
+            workspaceRoot,
+            divergenceBaseBranch
+        }, cancellationToken);
         if (!response.Success)
         {
             var err = response.Error ?? "Refresh version failed.";
@@ -145,7 +164,7 @@ public sealed partial class WorkspaceGitService
 
         var info = ParseRefreshRepositoryVersionResponse(response);
 
-        await PersistVersionsAsync(workspaceId, [(repo.RepositoryId, info)], true, cancellationToken);
+        await PersistVersionsAsync(workspaceId, contextId, [(repo.RepositoryId, info)], true, cancellationToken);
 
         var allLinks = await _dbContext.WorkspaceRepositories
             .Where(wr => wr.WorkspaceId == workspaceId)
@@ -155,9 +174,9 @@ public sealed partial class WorkspaceGitService
         await _workspaceRepository.UpdateSyncMetadataAsync(workspaceId, DateTime.UtcNow, isInSync);
 
         if (_fileVersionService != null)
-            await _fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, cancellationToken);
+            await _fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, contextId, cancellationToken);
 
-        await _workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, cancellationToken);
+        await _workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, contextId.Value, cancellationToken);
 
         if (_hubContext != null)
             await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
@@ -166,6 +185,7 @@ public sealed partial class WorkspaceGitService
 
     public async Task<IReadOnlyDictionary<int, RepoSyncStatus>> GetRepoSyncStatusAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         Action<int, RepoSyncStatus>? onProgress = null,
         CancellationToken cancellationToken = default)
     {
@@ -178,14 +198,14 @@ public sealed partial class WorkspaceGitService
         if (workspaceRepos.Count == 0)
             return result;
 
-        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
         foreach (var wr in workspaceRepos)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var repo = wr.Repository;
             if (repo == null) continue;
 
-            var response = await _agentBridge.SendCommandAsync("GetRepositoryVersion", new { workspaceName = workspace.Name, repositoryName = repo.RepositoryName, workspaceRoot }, cancellationToken);
+            var response = await _agentBridge.SendCommandAsync("GetRepositoryVersion", new { workspaceName = workspaceFolderName, repositoryName = repo.RepositoryName, workspaceRoot }, cancellationToken);
             RepoSyncStatus status;
             if (!response.Success || response.Data == null)
                 status = RepoSyncStatus.Error;
@@ -202,15 +222,19 @@ public sealed partial class WorkspaceGitService
     }
 
     /// <summary>
-    /// Closes out a user action: recomputes workspace-wide file-version and dependency stats, then
-    /// broadcasts WorkspaceSynced once so the grid refreshes. Call exactly once per action, after every
+    /// Closes out a user action: recomputes file-version and dependency stats for the given context, then
+    /// broadcasts sync once so the grid refreshes. Call exactly once per action, after every
     /// repository in the batch has been written.
     /// </summary>
-    public Task RecomputeAndBroadcastWorkspaceSyncedAsync(int workspaceId, CancellationToken cancellationToken = default)
-        => _recomputeScope.CompleteAsync(workspaceId, cancellationToken);
+    public Task RecomputeAndBroadcastWorkspaceSyncedAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        CancellationToken cancellationToken = default)
+        => _recomputeScope.CompleteAsync(workspaceId, contextId, cancellationToken);
 
     private async Task PersistVersionsAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IEnumerable<(int RepoId, RepoGitVersionInfo info)> results,
         bool persistDependencyLevel = true,
         CancellationToken cancellationToken = default)
@@ -223,7 +247,7 @@ public sealed partial class WorkspaceGitService
         foreach (var (repoId, info) in resultList)
         {
             var snapshot = info.Snapshot ?? SnapshotFromFlatInfo(info);
-            await _stateWriter.ApplyAsync(workspaceId, repoId, snapshot, new RepositoryStateWriteOptions
+            await _stateWriter.ApplyAsync(contextId, workspaceId, repoId, snapshot, new RepositoryStateWriteOptions
             {
                 SyncStatus = SyncStatusWrite.Derive,
                 ReconcilePullRequest = true,
@@ -233,13 +257,13 @@ public sealed partial class WorkspaceGitService
         // The writer already merged each repository's projects; the dependency edges still have to be
         // merged as one batch so the level computation sees the whole graph at once.
         var syncResults = resultList.Select(r => (r.RepoId, r.info.ProjectsDetail)).ToList();
-        await _workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(workspaceId, syncResults, persistDependencyLevel, cancellationToken);
+        await _workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(workspaceId, syncResults, contextId.Value, persistDependencyLevel, cancellationToken);
 
         // Partial sync (single repo or whole level): merge uses persistDependencyLevel false so Persist is not
         // called with a partial uniqueEdges graph. Recompute from full ProjectDependencies in DB so every
         // WorkspaceRepositoryLink gets correct DependencyLevel/Dependencies/UnmatchedDeps without syncing other repos.
         if (!persistDependencyLevel)
-            await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
+            await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, contextId, cancellationToken);
 
         _logger.LogInformation("Persistence: saved WorkspaceRepository link versions. WorkspaceId={WorkspaceId}, RepoCount={RepoCount}",
             workspaceId, resultList.Count);
@@ -276,5 +300,98 @@ public sealed partial class WorkspaceGitService
             BranchesProbed = info.LocalBranches != null || info.RemoteBranches != null || info.Tags != null,
             ProjectsProbed = info.ProjectsDetail != null,
         };
+    }
+
+    /// <summary>
+    /// For Feature contexts: when a repo's Feature PR is merged, replace context GitVersion with the
+    /// InformationalVersion of <c>origin/{default}</c> tip so Update Dependencies writes default-branch
+    /// version strings into higher-level csprojs (no checkout of main required).
+    /// </summary>
+    private async Task ApplyDefaultTipVersionsForMergedFeatureReposAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        CancellationToken cancellationToken)
+    {
+        var info = await _contextResolver.GetRequiredAsync(contextId, workspaceId, cancellationToken);
+        if (info.IsSpecialWorkspace)
+            return;
+
+        var mergedRepoWrlIds = await _dbContext.WorkspaceRepositoryContextPullRequests
+            .AsNoTracking()
+            .Where(p => p.WorkspaceFeatureContextId == contextId.Value && p.MergedAt != null)
+            .Select(p => p.WorkspaceRepositoryId)
+            .ToListAsync(cancellationToken);
+        if (mergedRepoWrlIds.Count == 0)
+            return;
+
+        var links = await _dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Include(l => l.Repository)
+            .Where(l => l.WorkspaceId == workspaceId && mergedRepoWrlIds.Contains(l.WorkspaceRepositoryId))
+            .ToListAsync(cancellationToken);
+        if (links.Count == 0)
+            return;
+
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspaceId, contextId, cancellationToken);
+        foreach (var link in links)
+        {
+            var repoName = link.Repository?.RepositoryName;
+            if (string.IsNullOrWhiteSpace(repoName))
+                continue;
+
+            var response = await _agentBridge.SendCommandAsync(
+                "GetGitVersionAtDefaultTip",
+                new { workspaceName = workspaceFolderName, repositoryName = repoName, workspaceRoot },
+                cancellationToken);
+            if (!response.Success || response.Data == null)
+            {
+                _logger.LogDebug(
+                    "GetGitVersionAtDefaultTip failed for {Repo} in Feature context {ContextId}: {Error}",
+                    repoName, contextId.Value, response.Error);
+                continue;
+            }
+
+            var payload = AgentResponseJson.DeserializeAgentResponse<DefaultTipVersionAgentResponse>(response.Data);
+            if (payload is not { Success: true } || string.IsNullOrWhiteSpace(payload.Version))
+            {
+                _logger.LogDebug(
+                    "GetGitVersionAtDefaultTip returned no version for {Repo}: {Error}",
+                    repoName, payload?.ErrorMessage);
+                continue;
+            }
+
+            var state = await _dbContext.WorkspaceRepositoryContextStates
+                .FirstOrDefaultAsync(
+                    s => s.WorkspaceFeatureContextId == contextId.Value
+                         && s.WorkspaceRepositoryId == link.WorkspaceRepositoryId,
+                    cancellationToken);
+            if (state == null)
+                continue;
+
+            if (string.Equals(state.GitVersion, payload.Version, StringComparison.Ordinal))
+                continue;
+
+            state.GitVersion = payload.Version;
+            _logger.LogInformation(
+                "Feature context {ContextId}: set GitVersion for {Repo} from origin/{DefaultBranch} tip to {Version}",
+                contextId.Value, repoName, payload.DefaultBranch, payload.Version);
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private sealed class DefaultTipVersionAgentResponse
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("success")]
+        public bool Success { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("version")]
+        public string? Version { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("defaultBranch")]
+        public string? DefaultBranch { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("errorMessage")]
+        public string? ErrorMessage { get; set; }
     }
 }

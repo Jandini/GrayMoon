@@ -1,4 +1,5 @@
 using GrayMoon.App.Models.Api;
+using GrayMoon.Application.Features;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
@@ -23,9 +24,11 @@ public static class WorkspaceEndpoints
     private static async Task<Results<Ok<List<WorkspaceFileDto>>, NotFound>> GetWorkspaceFiles(
         int workspaceId,
         IWorkspaceFileOperations operations,
+        IWorkspaceFeatureContextResolver contextResolver,
         CancellationToken cancellationToken)
     {
-        var files = await operations.ListAsync(workspaceId, cancellationToken);
+        var contextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+        var files = await operations.ListAsync(workspaceId, contextId, cancellationToken);
         return files == null ? TypedResults.NotFound() : TypedResults.Ok(files);
     }
 
@@ -46,9 +49,11 @@ public static class WorkspaceEndpoints
         string? pattern,
         string? repositoryName,
         IWorkspaceFileOperations operations,
+        IWorkspaceFeatureContextResolver contextResolver,
         CancellationToken cancellationToken)
     {
-        var (found, agentConnected, data, error) = await operations.SearchAsync(workspaceId, pattern, repositoryName, cancellationToken);
+        var contextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+        var (found, agentConnected, data, error) = await operations.SearchAsync(workspaceId, contextId, pattern, repositoryName, cancellationToken);
         if (!found)
             return TypedResults.NotFound();
         if (!agentConnected || data == null)

@@ -12,4 +12,8 @@ public sealed class RefreshRepositoryVersionRequest : WorkspaceCommandRequest
 
     [JsonPropertyName("repositoryId")]
     public int RepositoryId { get; set; }
+
+    /// <summary>Optional Feature parent branch for ahead/behind; see <see cref="SyncRepositoryRequest.DivergenceBaseBranch"/>.</summary>
+    [JsonPropertyName("divergenceBaseBranch")]
+    public string? DivergenceBaseBranch { get; set; }
 }

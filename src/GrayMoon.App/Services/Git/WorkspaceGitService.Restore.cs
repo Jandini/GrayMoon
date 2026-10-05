@@ -9,6 +9,7 @@ using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Services.Git;
 
@@ -18,11 +19,11 @@ public sealed partial class WorkspaceGitService
     /// Fires <c>dotnet restore --force --no-cache &lt;project.csproj&gt;</c> for each specified project file.
     /// Best-effort: errors are logged and swallowed so the caller's workflow is never interrupted.
     /// </summary>
-    public async Task RestoreDependenciesAsync(int workspaceId, IEnumerable<(string RepoName, IReadOnlyList<string> ProjectPaths)> repos, CancellationToken cancellationToken)
+    public async Task RestoreDependenciesAsync(int workspaceId, WorkspaceFeatureContextId contextId, IEnumerable<(string RepoName, IReadOnlyList<string> ProjectPaths)> repos, CancellationToken cancellationToken)
     {
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null) return;
-        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
         var tasks = repos
             .Where(r => r.ProjectPaths.Count > 0)
             .Select(async r =>
@@ -31,7 +32,7 @@ public sealed partial class WorkspaceGitService
                 {
                     await _agentBridge.SendCommandAsync(
                         "DotnetRestore",
-                        new { workspaceName = workspace.Name, repositoryName = r.RepoName, projectPaths = r.ProjectPaths, workspaceRoot },
+                        new { workspaceName = workspaceFolderName, repositoryName = r.RepoName, projectPaths = r.ProjectPaths, workspaceRoot },
                         cancellationToken);
                 }
                 catch (OperationCanceledException) { throw; }
@@ -50,6 +51,7 @@ public sealed partial class WorkspaceGitService
     /// </summary>
     public async Task<int> RestoreAllWorkspacePackagesAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         Action<string> setProgress,
         CancellationToken cancellationToken)
     {
@@ -67,7 +69,7 @@ public sealed partial class WorkspaceGitService
             .Select(l => l.RepositoryId)
             .ToHashSet();
 
-        var projects = await _workspaceProjectRepository.GetByWorkspaceIdAsync(workspaceId);
+        var projects = await _workspaceProjectRepository.GetByWorkspaceIdAsync(workspaceId, (WorkspaceFeatureContextId?)contextId);
         var repoGroups = projects
             .Where(p => p.Repository != null
                         && !string.IsNullOrWhiteSpace(p.ProjectFilePath)
@@ -80,12 +82,13 @@ public sealed partial class WorkspaceGitService
         if (totalCount == 0)
             return 0;
 
-        await RestoreDependenciesAsync(workspaceId, repoGroups, cancellationToken);
+        await RestoreDependenciesAsync(workspaceId, contextId, repoGroups, cancellationToken);
         return totalCount;
     }
 
     public async Task<int> RestoreSyncedWorkspacePackagesAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlySet<int> syncedRepoIds,
         Action<string> setProgress,
         CancellationToken cancellationToken)
@@ -107,7 +110,7 @@ public sealed partial class WorkspaceGitService
             .Select(l => l.RepositoryId)
             .ToHashSet();
 
-        var projects = await _workspaceProjectRepository.GetByWorkspaceIdAsync(workspaceId);
+        var projects = await _workspaceProjectRepository.GetByWorkspaceIdAsync(workspaceId, (WorkspaceFeatureContextId?)contextId);
         var repoGroups = projects
             .Where(p => p.Repository != null
                         && !string.IsNullOrWhiteSpace(p.ProjectFilePath)
@@ -121,7 +124,7 @@ public sealed partial class WorkspaceGitService
         if (totalCount == 0)
             return 0;
 
-        await RestoreDependenciesAsync(workspaceId, repoGroups, cancellationToken);
+        await RestoreDependenciesAsync(workspaceId, contextId, repoGroups, cancellationToken);
         return totalCount;
     }
 }

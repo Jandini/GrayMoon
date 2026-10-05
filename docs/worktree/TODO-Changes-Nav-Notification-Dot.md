@@ -1,7 +1,7 @@
 # TODO: Changes nav notification dot
 
-Status: **deferred** - pulled from the `install-worker` release, to be built on `worktree`
-(or after `worktree` merges to `main`).
+Status: **implemented** on `change-watcher` with option 1 (selected context); manual
+verification (section 7) pending. Originally pulled from the `install-worker` release.
 
 ## Goal
 

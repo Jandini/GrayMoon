@@ -1,4 +1,5 @@
-using GrayMoon.App.Services;
+﻿using GrayMoon.App.Services;
+using GrayMoon.App.Services.Git;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace GrayMoon.App.Tests;
@@ -37,7 +38,8 @@ public sealed class SyncWorkspaceUpstreamTests
 
         await using var scope = ctx.CreateScope();
         var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-        await git.SyncAsync(ctx.WorkspaceId);
+        var special = await ctx.GetSpecialContextIdAsync();
+        await git.SyncAsync(ctx.WorkspaceId, special);
 
         var link = await ctx.ReadLinkAsync();
         Assert.Equal("main", link.BranchName);
@@ -53,7 +55,8 @@ public sealed class SyncWorkspaceUpstreamTests
 
         await using var scope = ctx.CreateScope();
         var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-        await git.SyncAsync(ctx.WorkspaceId);
+        var special = await ctx.GetSpecialContextIdAsync();
+        await git.SyncAsync(ctx.WorkspaceId, special);
 
         var link = await ctx.ReadLinkAsync();
         Assert.False(link.BranchHasUpstream);

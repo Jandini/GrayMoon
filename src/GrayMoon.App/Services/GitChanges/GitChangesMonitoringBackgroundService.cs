@@ -1,4 +1,5 @@
 using GrayMoon.Common.Git;
+using GrayMoon.Application.Features;
 using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services.GitChanges;
@@ -6,21 +7,23 @@ namespace GrayMoon.App.Services.GitChanges;
 /// <summary>
 /// Owns the Git Changes background monitoring policy. Per the feature's design, a repository's
 /// Agent-side <c>FileSystemWatcher</c> lease belongs to the workspace background service, not the
-/// browser page - opening or closing Repositories or Changes must never directly start or stop
-/// monitoring. This sweep periodically calls <c>GetGitChangeStatus</c> for every repository in every
-/// <i>actively viewed</i> workspace (per <see cref="IWorkspaceGitChangesActivityTracker"/>) - not every
+/// browser page - navigating among workspace pages must never directly start or stop monitoring.
+/// This sweep periodically calls <c>GetGitChangeStatus</c> for every repository in every
+/// <i>active</i> workspace (per <see cref="IWorkspaceGitChangesActivityTracker"/>) - not every
 /// workspace in the database - which both seeds/renews the Agent's <c>GitRepositoryWatcherManager</c>
 /// lease (idle grace period is <see cref="GitChangesOptions.WatcherIdleGraceMinutes"/>) and keeps the
-/// persisted SQLite projection fresh while a workspace is in view. Workspaces with no recent viewer fall
-/// out of scope on their own once <see cref="GitChangesOptions.WorkspaceActivityGraceMinutes"/> elapses,
-/// so this never blasts every repository across every workspace regardless of whether anyone is looking.
-/// The actual per-workspace scan (also used for on-open warm-up and manual Refresh) lives in
+/// persisted SQLite projection fresh while a workspace is in view anywhere in GrayMoon. Workspaces with
+/// no recent viewer fall out of scope on their own once
+/// <see cref="GitChangesOptions.WorkspaceActivityGraceMinutes"/> elapses, so this never blasts every
+/// repository across every workspace regardless of whether anyone is looking. The actual per-workspace
+/// scan (also used for on-entry warm-up and manual Refresh) lives in
 /// <see cref="IGitChangesWorkspaceScanner"/>.
 /// </summary>
 public sealed class GitChangesMonitoringBackgroundService(
     IServiceScopeFactory scopeFactory,
     IGitChangesWorkspaceScanner scanner,
     IWorkspaceGitChangesActivityTracker activityTracker,
+    IWorkspaceGitChangesMonitoringPause monitoringPause,
     AgentConnectionTracker connectionTracker,
     IOptions<GitChangesOptions> gitChangesOptions,
     ILogger<GitChangesMonitoringBackgroundService> logger) : BackgroundService
@@ -104,6 +107,7 @@ public sealed class GitChangesMonitoringBackgroundService(
             return;
         }
 
+        var contextResolver = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureContextResolver>();
         var activeWorkspaceIds = activityTracker.GetActiveWorkspaceIds();
         if (activeWorkspaceIds.Count == 0)
         {
@@ -119,7 +123,19 @@ public sealed class GitChangesMonitoringBackgroundService(
 
             try
             {
-                await scanner.ScanWorkspaceAsync(workspaceId, cancellationToken);
+                var contexts = await contextResolver.ListForWorkspaceAsync(workspaceId, cancellationToken);
+                foreach (var ctx in contexts)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    // D2: a Feature context being removed is paused here so the sweep never asks the
+                    // Agent to scan a worktree that Remove Feature is deleting at the same time. The
+                    // special Workspace context is never paused, so its own monitoring is unaffected.
+                    if (monitoringPause.IsPaused(ctx.ContextId.Value))
+                        continue;
+
+                    await scanner.ScanWorkspaceAsync(workspaceId, ctx.ContextId, cancellationToken);
+                }
             }
             catch (OperationCanceledException)
             {

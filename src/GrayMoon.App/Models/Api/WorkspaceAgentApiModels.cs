@@ -49,6 +49,12 @@ public sealed class AgentGetFileContentsResponse
     [JsonPropertyName("content")]
     public string? Content { get; set; }
 
+    [JsonPropertyName("contentBase64")]
+    public string? ContentBase64 { get; set; }
+
+    [JsonPropertyName("contentType")]
+    public string? ContentType { get; set; }
+
     [JsonPropertyName("errorMessage")]
     public string? ErrorMessage { get; set; }
 }
@@ -61,4 +67,11 @@ public sealed class ValidatePathAgentResponse
 
     [JsonPropertyName("errorMessage")]
     public string? ErrorMessage { get; set; }
+}
+
+/// <summary>Agent GetHostInfo response (subset used by App).</summary>
+public sealed class GetHostInfoAgentResponse
+{
+    [JsonPropertyName("userProfilePath")]
+    public string? UserProfilePath { get; set; }
 }

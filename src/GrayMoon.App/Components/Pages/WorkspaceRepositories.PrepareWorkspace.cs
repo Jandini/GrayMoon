@@ -57,7 +57,7 @@ public sealed partial class WorkspaceRepositories
             {
                 var updateResult = await ScopedExecutor.ExecuteAsync<IWorkspacePreparationOperations, DependencyUpdateRunResult>(
                     svc => svc.PrepareAsync(
-                        WorkspaceId,
+                        WorkspaceId, RequireSelectedContextId(),
                         request.NewBranchName,
                         request.BaseBranch,
                         tagFilteredRepoIds,

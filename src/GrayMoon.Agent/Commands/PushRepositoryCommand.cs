@@ -121,8 +121,10 @@ public sealed class PushRepositoryCommand(
             int? defaultAhead = null;
             if (!versionOnly)
             {
+                var divergenceRef = git.ToOriginBranchRef(await git.GetDivergenceBaseBranchAsync(repoPath, CancellationToken.None))
+                    ?? defaultRef;
                 (outgoing, incoming, hasUpstream) = await git.GetCommitCountsAsync(repoPath, branch, defaultRef, CancellationToken.None);
-                (defaultBehind, defaultAhead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, defaultRef, CancellationToken.None);
+                (defaultBehind, defaultAhead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, CancellationToken.None);
             }
 
             var (versionResult, _) = await git.GetVersionAsync(repoPath, nonNormalize: true, CancellationToken.None);
@@ -134,6 +136,9 @@ public sealed class PushRepositoryCommand(
             {
                 WorkspaceId = workspaceId,
                 RepositoryId = repositoryId,
+                // Required for Feature attribution - null path is treated as special Workspace and
+                // would mirror this worktree's branch onto the shared WorkspaceRepositoryLink.
+                RepositoryPath = repoPath,
                 Version = version,
                 Branch = versionBranch,
                 OutgoingCommits = outgoing,

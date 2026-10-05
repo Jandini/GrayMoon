@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using GrayMoon.Application.Features;
 using GrayMoon.Common.Git;
 using Microsoft.Extensions.Options;
 
@@ -26,6 +27,7 @@ public interface IGitChangesLineStatsRefresh
 
 public sealed class GitChangesLineStatsRefresh(
     IGitChangesWorkspaceScanner scanner,
+    IServiceScopeFactory scopeFactory,
     IOptions<GitChangesOptions> options,
     ILogger<GitChangesLineStatsRefresh> logger) : IGitChangesLineStatsRefresh
 {
@@ -82,8 +84,7 @@ public sealed class GitChangesLineStatsRefresh(
         var cts = new CancellationTokenSource();
         if (_repoDebounce.TryRemove(key, out var previous))
         {
-            previous.Cancel();
-            previous.Dispose();
+            CancelAndDispose(previous);
         }
 
         _repoDebounce[key] = cts;
@@ -102,7 +103,11 @@ public sealed class GitChangesLineStatsRefresh(
     {
         try
         {
-            await scanner.ScanWorkspaceAsync(workspaceId, CancellationToken.None, includeLineStats: true);
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var contextResolver = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureContextResolver>();
+            var contexts = await contextResolver.ListForWorkspaceAsync(workspaceId);
+            foreach (var ctx in contexts)
+                await scanner.ScanWorkspaceAsync(workspaceId, ctx.ContextId, CancellationToken.None, includeLineStats: true);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -132,11 +137,18 @@ public sealed class GitChangesLineStatsRefresh(
                 return;
             }
 
-            await scanner.ScanWorkspaceAsync(
-                key.WorkspaceId,
-                cts.Token,
-                includeLineStats: true,
-                repositoryId: key.RepositoryId);
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var contextResolver = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureContextResolver>();
+            var contexts = await contextResolver.ListForWorkspaceAsync(key.WorkspaceId, cts.Token);
+            foreach (var ctx in contexts)
+            {
+                await scanner.ScanWorkspaceAsync(
+                    key.WorkspaceId,
+                    ctx.ContextId,
+                    cts.Token,
+                    includeLineStats: true,
+                    repositoryId: key.RepositoryId);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -152,12 +164,12 @@ public sealed class GitChangesLineStatsRefresh(
         }
         finally
         {
-            if (_repoDebounce.TryGetValue(key, out var current) && ReferenceEquals(current, cts))
+            // Only dispose if we still own the slot. Cancel/replace already removed it and
+            // owns cancel+dispose — disposing here would race with their Cancel().
+            if (_repoDebounce.TryRemove(new KeyValuePair<RepoKey, CancellationTokenSource>(key, cts)))
             {
-                _repoDebounce.TryRemove(key, out _);
+                cts.Dispose();
             }
-
-            cts.Dispose();
         }
     }
 
@@ -195,9 +207,34 @@ public sealed class GitChangesLineStatsRefresh(
 
             if (_repoDebounce.TryRemove(key, out var cts))
             {
-                cts.Cancel();
-                cts.Dispose();
+                CancelAndDispose(cts);
             }
+        }
+    }
+
+    /// <summary>
+    /// Cancels then disposes a CTS after removing it from the debounce map.
+    /// Tolerates ObjectDisposedException if another path already disposed it.
+    /// </summary>
+    private static void CancelAndDispose(CancellationTokenSource cts)
+    {
+        try
+        {
+            if (!cts.IsCancellationRequested)
+            {
+                cts.Cancel();
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+
+        try
+        {
+            cts.Dispose();
+        }
+        catch (ObjectDisposedException)
+        {
         }
     }
 

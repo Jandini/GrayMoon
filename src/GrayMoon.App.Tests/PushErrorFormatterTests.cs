@@ -42,6 +42,42 @@ public sealed class PushErrorFormatterTests
     }
 
     [Fact]
+    public void Format_GH001_large_file_is_not_protected_branch()
+    {
+        const string raw =
+            "remote: error: GH001: Large files detected. You may want to try Git Large File Storage - https://git-lfs.github.com.\n" +
+            "remote: error: File assets/big.bin is 120.00 MB; this exceeds GitHub's file size limit of 100.00 MB\n" +
+            "To https://github.com/org/repo.git\n" +
+            " ! [remote rejected] feature -> feature (pre-receive hook declined)\n" +
+            "error: failed to push some refs";
+
+        var message = PushErrorFormatter.Format(raw);
+
+        Assert.False(PushErrorFormatter.IsProtectedBranchRejection(raw));
+        Assert.True(PushErrorFormatter.IsLargeFileRejection(raw));
+        Assert.StartsWith("Push rejected: file too large for GitHub.", message);
+        Assert.Contains("assets/big.bin", message);
+        Assert.Contains("120.00 MB", message);
+        Assert.DoesNotContain("protected", message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Format_generic_hook_declined_echoes_remote_detail()
+    {
+        const string raw =
+            "remote: error: Custom policy rejected this push.\n" +
+            " ! [remote rejected] feature -> feature (pre-receive hook declined)\n" +
+            "error: failed to push some refs";
+
+        var message = PushErrorFormatter.Format(raw);
+
+        Assert.False(PushErrorFormatter.IsProtectedBranchRejection(raw));
+        Assert.False(PushErrorFormatter.IsLargeFileRejection(raw));
+        Assert.Equal(raw, message);
+        Assert.DoesNotContain("protected", message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Format_null_is_generic_failure()
     {
         Assert.Equal("Push failed", PushErrorFormatter.Format(null));

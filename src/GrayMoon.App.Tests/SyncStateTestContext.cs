@@ -4,7 +4,12 @@ using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
+using GrayMoon.App.Services.Agent;
+using GrayMoon.App.Services.Features;
+using GrayMoon.App.Services.GitChanges;
+using GrayMoon.App.Services.Jobs;
 using GrayMoon.App.Services.Queries;
+using GrayMoon.Application.Features;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -39,7 +44,10 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         HubContext = hubContext;
     }
 
-    public static async Task<SyncStateTestContext> CreateAsync(string? userToken = null)
+    public static async Task<SyncStateTestContext> CreateAsync(
+        string? userToken = null,
+        Action<IServiceCollection>? configureServices = null,
+        Action<DbContextOptionsBuilder>? configureDb = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -58,9 +66,17 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddSingleton<IAgentBridge>(agentBridge);
         services.AddSingleton<IHubContext<WorkspaceSyncHub>>(hubContext);
 
-        services.AddDbContext<AppDbContext>(o => o.UseSqlite(connection), ServiceLifetime.Scoped);
-        services.AddDbContextFactory<AppDbContext>(o => o.UseSqlite(connection), ServiceLifetime.Singleton);
+        void ConfigureDb(DbContextOptionsBuilder o)
+        {
+            o.UseSqlite(connection);
+            configureDb?.Invoke(o);
+        }
 
+        services.AddDbContext<AppDbContext>(ConfigureDb, ServiceLifetime.Scoped);
+        services.AddDbContextFactory<AppDbContext>(ConfigureDb, ServiceLifetime.Singleton);
+
+        services.AddSingleton<IWorkspaceGitChangesNotifier, WorkspaceGitChangesNotifier>();
+        services.AddSingleton<IWorkspaceGitChangesMonitoringPause, WorkspaceGitChangesMonitoringPause>();
         services.AddScoped<AppSettingRepository>();
         services.AddScoped<ConnectorRepository>();
         services.AddScoped<GitHubRepositoryRepository>();
@@ -71,6 +87,16 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddScoped<WorkspaceRepositoryCustomDependencyRepository>();
 
         services.AddScoped<WorkspaceService>();
+        services.AddScoped<IWorkspaceFeatureContextResolver, WorkspaceFeatureContextResolver>();
+        services.AddScoped<IWorkspaceContextPathResolver, WorkspaceContextPathResolver>();
+        services.AddScoped<IWorkspaceSelectedFeatureContextService, WorkspaceSelectedFeatureContextService>();
+        services.AddScoped<IWorkspaceHookContextAttributor, WorkspaceHookContextAttributor>();
+        services.AddScoped<IWorkspaceFeatureOperations, WorkspaceFeatureOperations>();
+        services.AddScoped<IWorkspaceExternalWorktreeOperations, WorkspaceExternalWorktreeOperations>();
+        services.AddSingleton<AgentConnectionTracker>();
+        services.AddSingleton<IWorkspaceFeatureReconciler, WorkspaceFeatureReconciler>();
+        services.AddSingleton<IWorkspaceOperationRunner, WorkspaceOperationRunner>();
+        services.AddSingleton<IWorkspaceOperationLock>(sp => (IWorkspaceOperationLock)sp.GetRequiredService<IWorkspaceOperationRunner>());
         services.AddScoped<GitHubService>();
         services.AddScoped<GitHubPullRequestService>();
         services.AddScoped<GitHubPullRequestMergeService>();
@@ -88,7 +114,11 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddScoped<WorkspaceSyncHandler>();
         services.AddScoped<SyncCommandHandler>();
         services.AddScoped<WorkspaceBranchUpdateHandler>();
+        services.AddScoped<IFeatureBranchGuard, FeatureBranchGuard>();
         services.AddScoped<IWorkspaceBranchOperations, WorkspaceBranchOperations>();
+
+        // Last registration wins for GetRequiredService; tests can replace path resolution, etc.
+        configureServices?.Invoke(services);
 
         var provider = services.BuildServiceProvider();
 
@@ -126,8 +156,13 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         db.Repositories.Add(repository);
         await db.SaveChangesAsync();
 
-        var workspace = new Workspace { Name = "test-ws" };
+        var workspace = new Workspace { Name = "test-ws", RootPath = @"C:\gm-test-root" };
         db.Workspaces.Add(workspace);
+        db.Settings.Add(new Setting
+        {
+            Key = AppSettingRepository.FeatureStorageRootPathKey,
+            Value = @"C:\Users\test\.graymoon",
+        });
         await db.SaveChangesAsync();
 
         var link = new WorkspaceRepositoryLink
@@ -147,6 +182,8 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         };
         db.WorkspaceRepositories.Add(link);
         await db.SaveChangesAsync();
+
+        await Migrations.MigrateWorkspaceFeatureContextSchemaAsync(db);
 
         WorkspaceId = workspace.WorkspaceId;
         RepositoryId = repository.RepositoryId;
@@ -218,6 +255,13 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         await db.SaveChangesAsync();
     }
 
+    public async Task<WorkspaceFeatureContextId> GetSpecialContextIdAsync()
+    {
+        await using var scope = CreateScope();
+        var resolver = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureContextResolver>();
+        return await resolver.GetOrCreateSpecialWorkspaceContextIdAsync(WorkspaceId);
+    }
+
     public IReadOnlyList<(string Method, object?[] Args)> Broadcasts => HubContext.ClientsImpl.AllProxy.Sent;
 
     public async ValueTask DisposeAsync()
@@ -231,6 +275,7 @@ public sealed class SyncStateTestContext : IAsyncDisposable
 public sealed class FakeAgentBridge : IAgentBridge
 {
     private readonly Dictionary<string, Func<object, AgentCommandResponse>> _handlers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _callsLock = new();
 
     public bool IsAgentConnected { get; set; } = true;
     public List<(string Command, object Args)> Calls { get; } = [];
@@ -243,7 +288,8 @@ public sealed class FakeAgentBridge : IAgentBridge
 
     public Task<AgentCommandResponse> SendCommandAsync(string command, object args, CancellationToken cancellationToken = default)
     {
-        Calls.Add((command, args));
+        lock (_callsLock)
+            Calls.Add((command, args));
         if (_handlers.TryGetValue(command, out var handler))
             return Task.FromResult(handler(args));
         return Task.FromResult(new AgentCommandResponse(false, null, $"No canned response for '{command}'."));

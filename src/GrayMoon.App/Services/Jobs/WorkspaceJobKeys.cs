@@ -22,6 +22,26 @@ public static class WorkspaceJobKeys
         return int.TryParse(parts[1], out workspaceId) && workspaceId > 0;
     }
 
+    /// <summary>
+    /// Parses <c>/workspaces/{id}/ctx/{contextId}...</c> overlay keys.
+    /// </summary>
+    public static bool TryGetContextId(string jobKey, out int workspaceId, out int contextId)
+    {
+        workspaceId = 0;
+        contextId = 0;
+        if (string.IsNullOrWhiteSpace(jobKey) || IsScanKey(jobKey))
+            return false;
+
+        var parts = jobKey.Trim().Trim('/').ToLowerInvariant().Split('/');
+        if (parts.Length < 4 || parts[0] != "workspaces" || parts[2] != "ctx")
+            return false;
+
+        return int.TryParse(parts[1], out workspaceId)
+               && workspaceId > 0
+               && int.TryParse(parts[3], out contextId)
+               && contextId > 0;
+    }
+
     public static bool IsMutationKey(string jobKey, out int workspaceId)
         => TryGetWorkspaceId(jobKey, out workspaceId);
 
@@ -31,8 +51,14 @@ public static class WorkspaceJobKeys
     public static string RepositoriesOverlayKey(int workspaceId)
         => NormalizeOverlayKey($"/workspaces/{workspaceId}");
 
+    public static string ContextOverlayKey(int workspaceId, int contextId)
+        => NormalizeOverlayKey($"/workspaces/{workspaceId}/ctx/{contextId}");
+
     public static string GitChangesPageKey(int workspaceId)
         => NormalizeOverlayKey($"/workspaces/{workspaceId}/changes");
+
+    public static string ContextGitChangesPageKey(int workspaceId, int contextId)
+        => NormalizeOverlayKey($"/workspaces/{workspaceId}/ctx/{contextId}/changes");
 
     /// <summary>
     /// Non-overlay status-scan key shared by Repositories and Changes so an on-open warm-up
@@ -40,6 +66,9 @@ public static class WorkspaceJobKeys
     /// </summary>
     public static string GitChangesScanKey(int workspaceId)
         => GitChangesPageKey(workspaceId) + ":scan";
+
+    public static string ContextGitChangesScanKey(int workspaceId, int contextId)
+        => ContextGitChangesPageKey(workspaceId, contextId) + ":scan";
 
     public static bool OverlayMatches(string overlayKey, WorkspaceOperation operation)
         => TryGetWorkspaceId(overlayKey, out var workspaceId)

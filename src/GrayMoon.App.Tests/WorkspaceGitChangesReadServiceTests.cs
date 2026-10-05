@@ -1,5 +1,7 @@
-using GrayMoon.App.Hubs;
+﻿using GrayMoon.App.Hubs;
+using GrayMoon.App.Services.Features;
 using GrayMoon.App.Services.GitChanges;
+using GrayMoon.Application.Features;
 using GrayMoon.Common.Git;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -94,6 +96,73 @@ public class WorkspaceGitChangesReadServiceTests
         Assert.Equal(1, repo.StagedDeletions);
     }
 
+    [Fact]
+    public async Task HasAnyChanges_is_false_when_nothing_was_persisted()
+    {
+        await using var ctx = await GitChangesTestDbContext.CreateAsync();
+        var factory = new GitChangesTestDbContext.TestDbContextFactory(ctx.Options);
+        var contextId = await SpecialContextIdAsync(ctx, factory);
+
+        var readService = new WorkspaceGitChangesReadService(factory);
+
+        Assert.False(await readService.HasAnyChangesAsync(ctx.WorkspaceId, contextId, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task HasAnyChanges_is_false_for_a_clean_snapshot()
+    {
+        await using var ctx = await GitChangesTestDbContext.CreateAsync();
+        var factory = new GitChangesTestDbContext.TestDbContextFactory(ctx.Options);
+        await PersistSnapshotAsync(ctx, factory, 1);
+        var contextId = await SpecialContextIdAsync(ctx, factory);
+
+        var readService = new WorkspaceGitChangesReadService(factory);
+
+        Assert.False(await readService.HasAnyChangesAsync(ctx.WorkspaceId, contextId, CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData(GitChangeKind.None, GitChangeKind.Modified, false)]
+    [InlineData(GitChangeKind.Modified, GitChangeKind.None, false)]
+    [InlineData(GitChangeKind.None, GitChangeKind.None, true)]
+    public async Task HasAnyChanges_is_true_for_unstaged_staged_or_conflicted_files(
+        GitChangeKind index,
+        GitChangeKind worktree,
+        bool conflicted)
+    {
+        await using var ctx = await GitChangesTestDbContext.CreateAsync();
+        var factory = new GitChangesTestDbContext.TestDbContextFactory(ctx.Options);
+        await PersistSnapshotAsync(ctx, factory, 1,
+            new GitChangeEntry { Path = "file.txt", IndexChange = index, WorktreeChange = worktree, IsConflicted = conflicted });
+        var contextId = await SpecialContextIdAsync(ctx, factory);
+
+        var readService = new WorkspaceGitChangesReadService(factory);
+
+        Assert.True(await readService.HasAnyChangesAsync(ctx.WorkspaceId, contextId, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task HasAnyChanges_is_scoped_to_the_workspace_and_context()
+    {
+        await using var ctx = await GitChangesTestDbContext.CreateAsync();
+        var factory = new GitChangesTestDbContext.TestDbContextFactory(ctx.Options);
+        await PersistSnapshotAsync(ctx, factory, 1,
+            new GitChangeEntry { Path = "file.txt", WorktreeChange = GitChangeKind.Modified });
+        var contextId = await SpecialContextIdAsync(ctx, factory);
+
+        var readService = new WorkspaceGitChangesReadService(factory);
+
+        Assert.True(await readService.HasAnyChangesAsync(ctx.WorkspaceId, contextId, CancellationToken.None));
+        Assert.False(await readService.HasAnyChangesAsync(ctx.WorkspaceId + 1, contextId, CancellationToken.None));
+        Assert.False(await readService.HasAnyChangesAsync(
+            ctx.WorkspaceId, new WorkspaceFeatureContextId(contextId.Value + 1), CancellationToken.None));
+    }
+
+    private static Task<WorkspaceFeatureContextId> SpecialContextIdAsync(
+        GitChangesTestDbContext ctx,
+        GitChangesTestDbContext.TestDbContextFactory factory) =>
+        new WorkspaceFeatureContextResolver(factory).GetOrCreateSpecialWorkspaceContextIdAsync(ctx.WorkspaceId);
+
     private static Task PersistSnapshotAsync(
         GitChangesTestDbContext ctx,
         GitChangesTestDbContext.TestDbContextFactory factory,
@@ -112,7 +181,7 @@ public class WorkspaceGitChangesReadServiceTests
         int? stagedDeletions = null)
     {
         var hubContext = new FakeHubContext<WorkspaceSyncHub>();
-        var handler = new GitChangesSnapshotPushHandler(factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance, new NoopGitChangesLineStatsRefresh());
+        var handler = GitChangesPushHandlerTestFactory.Create(ctx, hubContext);
 
         await handler.HandleAsync(new GitChangesSnapshotNotification
         {

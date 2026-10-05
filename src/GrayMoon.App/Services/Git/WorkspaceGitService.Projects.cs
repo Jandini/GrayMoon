@@ -9,6 +9,7 @@ using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Services.Git;
 
@@ -17,6 +18,7 @@ public sealed partial class WorkspaceGitService
     /// <summary>Refreshes project and package reference data from .csproj files on disk (no git). Merges into WorkspaceProjects and ProjectDependencies. When <paramref name="repositoryIds"/> is set, only those repos are refreshed.</summary>
     public async Task RefreshWorkspaceProjectsAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         Action<int, int, int>? onProgress = null,
         Action<int, string>? onRepoError = null,
         IReadOnlySet<int>? repositoryIds = null,
@@ -56,14 +58,14 @@ public sealed partial class WorkspaceGitService
         var completedCount = 0;
         var totalCount = repos.Count;
         using var semaphore = new SemaphoreSlim(_maxConcurrent);
-        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
 
         var syncResults = await Task.WhenAll(repos.Select(async repo =>
         {
             await semaphore.WaitAsync(cancellationToken);
             try
             {
-                var args = new { workspaceName = workspace.Name, repositoryName = repo.RepositoryName, workspaceRoot, maxParallelOperations = _maxConcurrent };
+                var args = new { workspaceName = workspaceFolderName, repositoryName = repo.RepositoryName, workspaceRoot, maxParallelOperations = _maxConcurrent };
                 var response = await _agentBridge.SendCommandAsync("RefreshRepositoryProjects", args, cancellationToken);
                 if (!response.Success)
                 {
@@ -88,7 +90,7 @@ public sealed partial class WorkspaceGitService
             .Select(r => (r.RepositoryId, (IReadOnlyList<SyncProjectInfo>)r.ProjectsDetail!))
             .ToList();
         if (repoProjectsToMerge.Count > 0)
-            await _workspaceProjectRepository.MergeWorkspaceProjectsBatchAsync(workspaceId, repoProjectsToMerge, cancellationToken);
+            await _workspaceProjectRepository.MergeWorkspaceProjectsBatchAsync(workspaceId, repoProjectsToMerge, contextId.Value, cancellationToken);
 
         var repoIdsToUpdate = syncResults.Select(r => r.RepositoryId).ToList();
         var linksToUpdate = await _dbContext.WorkspaceRepositories
@@ -103,7 +105,7 @@ public sealed partial class WorkspaceGitService
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         var resultsForDeps = syncResults.Select(r => (r.RepositoryId, r.ProjectsDetail)).ToList();
-        await _workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(workspaceId, resultsForDeps, persistDependencyLevel: true, cancellationToken);
+        await _workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(workspaceId, resultsForDeps, contextId.Value, persistDependencyLevel: true, cancellationToken);
 
         _logger.LogDebug("RefreshWorkspaceProjects completed for workspace {WorkspaceName}", workspace.Name);
     }
@@ -111,6 +113,7 @@ public sealed partial class WorkspaceGitService
     /// <summary>Refreshes project and package reference data for a single repository. Merges into WorkspaceProjects and ProjectDependencies for that repo only, then recomputes dependency stats. Returns true if refresh succeeded.</summary>
     public async Task<bool> RefreshSingleRepositoryProjectsAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         Action<int, string>? onRepoError = null,
         CancellationToken cancellationToken = default)
@@ -130,8 +133,8 @@ public sealed partial class WorkspaceGitService
         if (!string.IsNullOrWhiteSpace(linkForWorkspace?.CheckedOutTag))
             return false;
 
-        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
-        var args = new { workspaceName = workspace.Name, repositoryName = repo.RepositoryName, workspaceRoot, maxParallelOperations = _maxConcurrent };
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var args = new { workspaceName = workspaceFolderName, repositoryName = repo.RepositoryName, workspaceRoot, maxParallelOperations = _maxConcurrent };
         var response = await _agentBridge.SendCommandAsync("RefreshRepositoryProjects", args, cancellationToken);
         if (!response.Success)
         {
@@ -141,7 +144,7 @@ public sealed partial class WorkspaceGitService
 
         var projectsDetail = response.Data != null ? GetProjectsDetail(response.Data) : null;
         if (projectsDetail is { Count: > 0 })
-            await _workspaceProjectRepository.MergeWorkspaceProjectsAsync(workspaceId, repositoryId, projectsDetail, cancellationToken);
+            await _workspaceProjectRepository.MergeWorkspaceProjectsAsync(workspaceId, repositoryId, projectsDetail, contextId.Value, cancellationToken);
 
         var link = await _dbContext.WorkspaceRepositories
             .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId, cancellationToken);
@@ -151,7 +154,7 @@ public sealed partial class WorkspaceGitService
             await _dbContext.SaveChangesAsync(cancellationToken);
         }
 
-        await _workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(workspaceId, [(repositoryId, projectsDetail)], persistDependencyLevel: true, cancellationToken);
+        await _workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(workspaceId, [(repositoryId, projectsDetail)], contextId.Value, persistDependencyLevel: true, cancellationToken);
         _logger.LogDebug("RefreshSingleRepositoryProjects completed for workspace {WorkspaceName}, repo {RepositoryId}", workspace.Name, repositoryId);
         return true;
     }
@@ -159,6 +162,7 @@ public sealed partial class WorkspaceGitService
     /// <summary>Runs update for a single repository only: refresh that repo's projects, sync its dependencies, recompute and broadcast. Same behavior as Update but scoped to one repo (no commits). Stops on first error.</summary>
     public async Task RunUpdateSingleRepositoryAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         Action<string>? onProgressMessage = null,
         Action<int, string>? onRepoError = null,
@@ -176,20 +180,20 @@ public sealed partial class WorkspaceGitService
             return;
 
         onProgressMessage?.Invoke("Refreshing repository projects...");
-        var refreshOk = await RefreshSingleRepositoryProjectsAsync(workspaceId, repositoryId, onRepoError: onRepoError, cancellationToken: cancellationToken);
+        var refreshOk = await RefreshSingleRepositoryProjectsAsync(workspaceId, contextId, repositoryId, onRepoError: onRepoError, cancellationToken: cancellationToken);
         if (!refreshOk)
             return;
 
         onProgressMessage?.Invoke("Syncing dependencies...");
-        var syncedIds = await SyncDependenciesAsync(workspaceId, repoIdsToSync: new HashSet<int> { repositoryId }, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Synced dependencies {c} of {t}"), onRepoError: onRepoError, cancellationToken: cancellationToken);
-        await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
+        var syncedIds = await SyncDependenciesAsync(workspaceId, contextId, repoIdsToSync: new HashSet<int> { repositoryId }, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Synced dependencies {c} of {t}"), onRepoError: onRepoError, cancellationToken: cancellationToken);
+        await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, contextId, cancellationToken);
         _logger.LogDebug("RunUpdateSingleRepository completed for workspace {WorkspaceName}, repo {RepositoryId}, synced={Count}", workspace.Name, repositoryId, syncedIds.Count);
     }
 
-    /// <summary>Gets the list of repos that need dependency updates, with levels. Used to detect single vs multi-level and to drive update-with-commit flow. When <paramref name="repositoryIds"/> is set, only those repos are considered.</summary>
-    public async Task<(IReadOnlyList<SyncDependenciesRepoPayload> Payload, bool IsMultiLevel)> GetUpdatePlanAsync(int workspaceId, IReadOnlySet<int>? repositoryIds = null, CancellationToken cancellationToken = default)
+    /// <summary>Gets the list of repos that need dependency updates, with levels, scoped to <paramref name="contextId"/>. Used to detect single vs multi-level and to drive update-with-commit flow. When <paramref name="repositoryIds"/> is set, only those repos are considered.</summary>
+    public async Task<(IReadOnlyList<SyncDependenciesRepoPayload> Payload, bool IsMultiLevel)> GetUpdatePlanAsync(int workspaceId, WorkspaceFeatureContextId contextId, IReadOnlySet<int>? repositoryIds = null, CancellationToken cancellationToken = default)
     {
-        var payloads = await _workspaceProjectRepository.GetSyncDependenciesPayloadAsync(workspaceId, cancellationToken);
+        var payloads = await _workspaceProjectRepository.GetSyncDependenciesPayloadAsync(workspaceId, contextId.Value, cancellationToken);
         var tagPinnedIds = (await _dbContext.WorkspaceRepositories
             .AsNoTracking()
             .Where(wr => wr.WorkspaceId == workspaceId && !string.IsNullOrWhiteSpace(wr.CheckedOutTag))
@@ -212,6 +216,7 @@ public sealed partial class WorkspaceGitService
     /// <summary>Syncs dependency versions in .csproj files to match the current version of each referenced package source. Only repos with at least one mismatched dependency are updated. When <paramref name="repoIdsToSync"/> is set, only those repos are synced. Returns the set of repo IDs where the agent reported UpdatedCount &gt; 0.</summary>
     public async Task<IReadOnlySet<int>> SyncDependenciesAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         Action<int, int, int>? onProgress = null,
         Action<int, string>? onRepoError = null,
         IReadOnlySet<int>? repoIdsToSync = null,
@@ -224,7 +229,7 @@ public sealed partial class WorkspaceGitService
         if (workspace == null)
             throw new InvalidOperationException($"Workspace {workspaceId} not found.");
 
-        var payloads = await _workspaceProjectRepository.GetSyncDependenciesPayloadAsync(workspaceId, cancellationToken);
+        var payloads = await _workspaceProjectRepository.GetSyncDependenciesPayloadAsync(workspaceId, contextId.Value, cancellationToken);
         var tagPinnedIds = (await _dbContext.WorkspaceRepositories
             .AsNoTracking()
             .Where(wr => wr.WorkspaceId == workspaceId && !string.IsNullOrWhiteSpace(wr.CheckedOutTag))
@@ -248,7 +253,7 @@ public sealed partial class WorkspaceGitService
         var totalCount = toSync.Count;
         var failedRepoIds = new ConcurrentDictionary<int, bool>();
         var syncedRepoIds = new ConcurrentDictionary<int, bool>();
-        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
 
         var repoTasks = toSync.Select(async repo =>
         {
@@ -264,7 +269,7 @@ public sealed partial class WorkspaceGitService
 
             var args = new
             {
-                workspaceName = workspace.Name,
+                workspaceName = workspaceFolderName,
                 repositoryName = repo.RepoName,
                 projectUpdates,
                 workspaceRoot
@@ -296,12 +301,12 @@ public sealed partial class WorkspaceGitService
             .SelectMany(r => r.ProjectUpdates.SelectMany(p => p.PackageUpdates.Select(u => (r.RepoId, p.ProjectPath, u.PackageId, u.NewVersion))))
             .ToList();
         if (updatesToPersist.Count > 0)
-            await _workspaceProjectRepository.UpdateProjectDependencyVersionsAsync(workspaceId, updatesToPersist, cancellationToken);
+            await _workspaceProjectRepository.UpdateProjectDependencyVersionsAsync(workspaceId, updatesToPersist, contextId.Value, cancellationToken);
 
         if (_fileVersionService != null)
-            await _fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, cancellationToken);
+            await _fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, contextId, cancellationToken);
 
-        await _workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, cancellationToken);
+        await _workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, contextId.Value, cancellationToken);
 
         _logger.LogDebug("Sync dependencies completed for workspace {WorkspaceName}. Synced {SyncedCount} repos (with changes), persisted {UpdateCount} versions", workspace.Name, syncedRepoIds.Count, updatesToPersist.Count);
         return syncedRepoIds.Keys.ToHashSet();

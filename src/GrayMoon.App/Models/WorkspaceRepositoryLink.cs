@@ -35,6 +35,15 @@ public class WorkspaceRepositoryLink
     [NotMapped]
     public bool IsOnTag => !string.IsNullOrWhiteSpace(CheckedOutTag);
 
+    /// <summary>
+    /// True when the repository has been synced (it has a branch or a tag) yet has no GitVersion, which means
+    /// GitVersion could not compute one. A repository that has not been synced has neither, so this stays false.
+    /// </summary>
+    [NotMapped]
+    public bool IsVersionUnresolved =>
+        string.IsNullOrWhiteSpace(GitVersion)
+        && (!string.IsNullOrWhiteSpace(BranchName) || IsOnTag);
+
     /// <summary>True when the repository is on a tag and at least one newer tag exists (i.e. the checked-out tag is not the most recently created). Null when unknown or not on a tag. Updated when tags are fetched during checkout sync.</summary>
     public bool? HasNewerTag { get; set; }
 
@@ -103,6 +112,67 @@ public class WorkspaceRepositoryLink
     [NotMapped]
     public int UncommittedChangedFileCount { get; set; }
 
+    /// <summary>HEAD SHA for the viewed context. Not a link column - filled from context state for Feature Create PR.</summary>
+    [NotMapped]
+    public string? HeadCommit { get; set; }
+
+    /// <summary>Feature creation tip SHA when viewing a Feature. Not a link column.</summary>
+    [NotMapped]
+    public string? FeatureBaseCommitSha { get; set; }
+
+    /// <summary>Feature parent / PR-base branch when viewing a Feature. Not a link column.</summary>
+    [NotMapped]
+    public string? ParentBranchName { get; set; }
+
+    /// <summary>Tag the Feature repository is pinned to when viewing a Feature. Not a link column.</summary>
+    [NotMapped]
+    public string? FeaturePinnedTag { get; set; }
+
     /// <summary>Persisted Git Changes file rows for this workspace-repo link. Navigation only.</summary>
     public ICollection<WorkspaceGitChangeEntry> GitChangeEntries { get; set; } = new List<WorkspaceGitChangeEntry>();
+
+    /// <summary>
+    /// Shallow-clones this link with <see cref="BranchName"/> overridden - used by Feature-context-aware pages
+    /// (e.g. GitHub Actions, §18) that read most of their row shape off the special Workspace's link but need
+    /// the checked-out branch to reflect the viewed Feature context's own <c>WorkspaceRepositoryContextState</c>
+    /// instead. Does not deep-clone navigation collections.
+    /// </summary>
+    public WorkspaceRepositoryLink WithBranchOverride(string? branchName) => new()
+    {
+        WorkspaceRepositoryId = WorkspaceRepositoryId,
+        WorkspaceId = WorkspaceId,
+        Workspace = Workspace,
+        RepositoryId = RepositoryId,
+        Repository = Repository,
+        GitVersion = GitVersion,
+        BranchName = branchName,
+        CheckedOutTag = CheckedOutTag,
+        HasNewerTag = HasNewerTag,
+        DefaultBranchName = DefaultBranchName,
+        Projects = Projects,
+        OutgoingCommits = OutgoingCommits,
+        IncomingCommits = IncomingCommits,
+        DefaultBranchBehindCommits = DefaultBranchBehindCommits,
+        DefaultBranchAheadCommits = DefaultBranchAheadCommits,
+        BranchHasUpstream = BranchHasUpstream,
+        SyncStatus = SyncStatus,
+        DependencyLevel = DependencyLevel,
+        Dependencies = Dependencies,
+        UnmatchedDeps = UnmatchedDeps,
+        OutOfDateFileLines = OutOfDateFileLines,
+        OutOfDateFileRepos = OutOfDateFileRepos,
+        TotalFileConfigRepos = TotalFileConfigRepos,
+        HasSelfFileVersionToken = HasSelfFileVersionToken,
+        TotalFileLines = TotalFileLines,
+        RepositoryType = RepositoryType,
+        PullRequest = PullRequest,
+        Action = Action,
+        GitStatus = GitStatus,
+        UncommittedChangedFileCount = UncommittedChangedFileCount,
+        HeadCommit = HeadCommit,
+        FeatureBaseCommitSha = FeatureBaseCommitSha,
+        ParentBranchName = ParentBranchName,
+        FeaturePinnedTag = FeaturePinnedTag,
+        GitChangeEntries = GitChangeEntries,
+    };
 }

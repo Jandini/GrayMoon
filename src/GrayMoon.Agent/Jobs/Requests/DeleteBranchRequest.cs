@@ -22,5 +22,13 @@ public sealed class DeleteBranchRequest : WorkspaceCommandRequest
 
     [JsonPropertyName("bearerToken")]
     public string? BearerToken { get; set; }
+
+    /// <summary>
+    /// When set for a remote delete, the Worker fetches then deletes with
+    /// <c>--force-with-lease=refs/heads/&lt;branch&gt;:&lt;expectedSha&gt;</c> (D4). Null keeps the
+    /// legacy <c>push origin --delete</c> path for callers that do not send a lease tip.
+    /// </summary>
+    [JsonPropertyName("expectedSha")]
+    public string? ExpectedSha { get; set; }
 }
 

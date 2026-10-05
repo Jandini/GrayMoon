@@ -1,9 +1,12 @@
+using GrayMoon.Application.Features;
+
 namespace GrayMoon.Application;
 
 public interface IWorkspacePreparationOperations
 {
     Task<DependencyUpdateRunResult> PrepareAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         string newBranchName,
         string baseBranch,
         IReadOnlySet<int>? repositoryIds,

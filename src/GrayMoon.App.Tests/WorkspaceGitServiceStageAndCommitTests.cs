@@ -1,7 +1,8 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Services;
+using GrayMoon.App.Services.Git;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace GrayMoon.App.Tests;
@@ -25,7 +26,8 @@ public sealed class WorkspaceGitServiceStageAndCommitTests
                 [new SyncDependenciesProjectUpdate("src/A.csproj", [("Pkg", "1.0.0", "1.1.0")])])
         };
 
-        var results = await git.CommitDependencyUpdatesAsync(ctx.WorkspaceId, payload, skipHooks: true);
+        var special = await ctx.GetSpecialContextIdAsync();
+        var results = await git.CommitDependencyUpdatesAsync(ctx.WorkspaceId, special, payload, skipHooks: true);
 
         var result = Assert.Single(results);
         Assert.True(result.Committed);

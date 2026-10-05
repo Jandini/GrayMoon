@@ -1,4 +1,5 @@
 using GrayMoon.App.Data;
+using GrayMoon.Application.Features;
 using GrayMoon.Common.Git;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -19,6 +20,7 @@ public interface IGitChangesWorkspaceScanner
 {
     Task ScanWorkspaceAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken,
         Action<GitChangesWorkspaceScanProgress>? onProgress = null,
         bool includeLineStats = false,
@@ -32,6 +34,7 @@ public sealed class GitChangesWorkspaceScanner(
 {
     public async Task ScanWorkspaceAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken,
         Action<GitChangesWorkspaceScanProgress>? onProgress = null,
         bool includeLineStats = false,
@@ -45,7 +48,7 @@ public sealed class GitChangesWorkspaceScanner(
         }
 
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var workspaceService = scope.ServiceProvider.GetRequiredService<WorkspaceService>();
+        var pathResolver = scope.ServiceProvider.GetRequiredService<IWorkspaceContextPathResolver>();
         var agentClient = scope.ServiceProvider.GetRequiredService<IGitChangesAgentClient>();
         var writeQueue = scope.ServiceProvider.GetRequiredService<WorkspaceGitChangesWriteQueue>();
         var pushHandler = scope.ServiceProvider.GetRequiredService<GitChangesSnapshotPushHandler>();
@@ -63,6 +66,8 @@ public sealed class GitChangesWorkspaceScanner(
             .AsNoTracking()
             .ToListAsync(cancellationToken);
 
+        var (root, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
+
         var targets = new List<MonitorTarget>();
         foreach (var link in links)
         {
@@ -71,13 +76,20 @@ public sealed class GitChangesWorkspaceScanner(
                 continue;
             }
 
-            var root = await workspaceService.GetRootPathForWorkspaceAsync(link.Workspace, cancellationToken);
             if (string.IsNullOrWhiteSpace(root))
             {
                 continue;
             }
 
-            targets.Add(new MonitorTarget(root, link.Workspace.Name, link.Repository.RepositoryName, link.WorkspaceId, link.RepositoryId));
+            var repositoryPath = await pathResolver.GetRepositoryPathAsync(
+                contextId, link.WorkspaceRepositoryId, cancellationToken);
+            targets.Add(new MonitorTarget(
+                root,
+                workspaceFolderName,
+                link.Repository.RepositoryName,
+                link.WorkspaceId,
+                link.RepositoryId,
+                repositoryPath));
         }
 
         if (targets.Count == 0)
@@ -107,6 +119,7 @@ public sealed class GitChangesWorkspaceScanner(
                     {
                         WorkspaceId = target.WorkspaceId,
                         RepositoryId = target.RepositoryId,
+                        RepositoryPath = target.RepositoryPath,
                         Snapshot = result.Snapshot,
                     };
 
@@ -150,5 +163,11 @@ public sealed class GitChangesWorkspaceScanner(
         await Task.WhenAll(tasks);
     }
 
-    private sealed record MonitorTarget(string Root, string WorkspaceName, string RepositoryName, int WorkspaceId, int RepositoryId);
+    private sealed record MonitorTarget(
+        string Root,
+        string WorkspaceName,
+        string RepositoryName,
+        int WorkspaceId,
+        int RepositoryId,
+        string RepositoryPath);
 }

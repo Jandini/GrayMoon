@@ -8,6 +8,8 @@ using GrayMoon.App.Repositories;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
+using GrayMoon.Application.Features;
+
 namespace GrayMoon.App.Services.Orchestration;
 
 /// <summary>
@@ -19,15 +21,16 @@ public sealed class WorkspaceBranchUpdateHandler(
     IAgentBridge agentBridge,
     WorkspaceRepository workspaceRepository,
     GitHubRepositoryRepository repoRepository,
-    WorkspaceService workspaceService,
     ConnectorHealthService connectorHealthService,
     AppDbContext dbContext,
     WorkspaceRepositoryStateWriter stateWriter,
     IHubContext<WorkspaceSyncHub> hubContext,
+    IWorkspaceContextPathResolver pathResolver,
     ILogger<WorkspaceBranchUpdateHandler> logger)
 {
     public async Task<UpdateBranchFromDefaultResult> UpdateBranchFromDefaultAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         CancellationToken cancellationToken)
     {
@@ -51,17 +54,37 @@ public sealed class WorkspaceBranchUpdateHandler(
         {
             await connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepositoryId, cancellationToken);
 
-            var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
             var defaultBranchName = await dbContext.RepositoryBranches
                 .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && rb.IsDefault && !rb.IsTag)
                 .Select(rb => rb.BranchName)
                 .FirstOrDefaultAsync(cancellationToken) ?? "main";
 
+            // Feature: merge from the Feature parent (PR base), not the repository default.
+            var parentBranch = await (
+                from r in dbContext.WorkspaceFeatureRepositories.AsNoTracking()
+                where r.WorkspaceFeatureContextId == contextId.Value
+                    && r.WorkspaceRepositoryId == wr.WorkspaceRepositoryId
+                select r.ParentBranchName
+            ).FirstOrDefaultAsync(cancellationToken);
+            if (!string.IsNullOrWhiteSpace(parentBranch))
+                defaultBranchName = parentBranch.Trim();
+
+            // Prefer Feature context checkout branch when present.
+            var currentBranchName = await dbContext.WorkspaceRepositoryContextStates
+                .AsNoTracking()
+                .Where(s => s.WorkspaceFeatureContextId == contextId.Value
+                    && s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId)
+                .Select(s => s.BranchName)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (string.IsNullOrWhiteSpace(currentBranchName))
+                currentBranchName = wr.BranchName;
+
             var args = new
             {
-                workspaceName = workspace.Name,
+                workspaceName = workspaceFolderName,
                 repositoryName = repo.RepositoryName,
-                currentBranchName = wr.BranchName,
+                currentBranchName,
                 defaultBranchName,
                 bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
                 workspaceRoot
@@ -85,7 +108,7 @@ public sealed class WorkspaceBranchUpdateHandler(
             {
                 // A merge from default only moves commit counts; branch identity, version and projects are
                 // untouched, so no other group is marked probed and none of those columns is rewritten.
-                await stateWriter.ApplyAsync(workspaceId, repositoryId, new RepositoryStateSnapshot
+                await stateWriter.ApplyAsync(contextId, workspaceId, repositoryId, new RepositoryStateSnapshot
                 {
                     OutgoingCommits = updateResponse.OutgoingCommits,
                     IncomingCommits = updateResponse.IncomingCommits,

@@ -1,3 +1,5 @@
+using GrayMoon.Application.Features;
+
 namespace GrayMoon.Application;
 
 public sealed record WorkspacePushPlan(
@@ -9,17 +11,20 @@ public interface IWorkspacePushOperations
 {
     Task<WorkspacePushPlan> GetPlanAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int? maxLevel = null,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Lightweight check (no dependency-package lookup) for which of the given repositories have unpushed commits or a branch never pushed upstream.</summary>
+    /// <summary>Lightweight check (no dependency-package lookup) for which of the given repositories have unpushed commits or a branch never pushed upstream, scoped to <paramref name="contextId"/>.</summary>
     Task<IReadOnlySet<int>> GetRepositoryIdsNeedingPushAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlySet<int> repositoryIds,
         CancellationToken cancellationToken = default);
 
     Task<OperationResult> PushAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlySet<int> repositoryIds,
         bool synchronizedPush,
         IReadOnlySet<string> requiredPackageIds,
@@ -31,12 +36,14 @@ public interface IWorkspacePushOperations
 
     Task<OperationResult> PushPendingAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         bool synchronizedPush,
         IProgress<OperationProgress>? progress = null,
         CancellationToken cancellationToken = default);
 
     Task<OperationResult> PushSingleAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         string? branchName,
         IProgress<OperationProgress>? progress = null,

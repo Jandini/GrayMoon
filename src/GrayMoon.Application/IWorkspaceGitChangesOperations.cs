@@ -1,14 +1,16 @@
 using GrayMoon.App.Services.GitChanges;
+using GrayMoon.Application.Features;
 using GrayMoon.Common.Git;
 
 namespace GrayMoon.Application;
 
 public interface IWorkspaceGitChangesOperations
 {
-    Task<WorkspaceGitChangesView?> GetAsync(int workspaceId, CancellationToken cancellationToken);
+    Task<WorkspaceGitChangesView?> GetAsync(int workspaceId, WorkspaceFeatureContextId contextId, CancellationToken cancellationToken);
 
     Task<GitChangesCommitResult> CommitAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         string commitMessage,
         bool stageAllFirst,
@@ -16,6 +18,7 @@ public interface IWorkspaceGitChangesOperations
 
     Task<GitChangesMutationResult> StageAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         GitChangeOperationScope scope,
         IReadOnlyList<string> paths,
@@ -23,6 +26,7 @@ public interface IWorkspaceGitChangesOperations
 
     Task<GitChangesMutationResult> UnstageAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         int repositoryId,
         GitChangeOperationScope scope,
         IReadOnlyList<string> paths,

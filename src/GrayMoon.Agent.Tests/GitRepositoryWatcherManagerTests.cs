@@ -28,6 +28,41 @@ public sealed class GitRepositoryWatcherManagerTests : IDisposable
         new(coordinator, new GitChangesSnapshotCache(), new GitChangesRepositoryRegistry(), Options.Create(options), NullLoggerFactory.Instance, NullLogger<GitRepositoryWatcherManager>.Instance);
 
     [Fact]
+    public void Acquiring_sets_coverage_started_at()
+    {
+        var fake = new FakeRepositoryGitChangesService();
+        var options = new GitChangesOptions();
+        using var coordinator = CreateCoordinator(fake, options);
+        using var manager = CreateManager(coordinator, options);
+
+        using var lease = manager.Acquire(_tempDir);
+
+        Assert.True(manager.TryGetCoverage(_tempDir, out var coverage));
+        Assert.NotNull(coverage);
+        Assert.Null(coverage!.EndedAt);
+        Assert.True(coverage.StartedAt <= DateTimeOffset.UtcNow);
+        Assert.True(coverage.StartedAt > DateTimeOffset.UtcNow.AddMinutes(-1));
+    }
+
+    [Fact]
+    public void Renewing_a_lease_after_release_keeps_the_watcher_alive()
+    {
+        var fake = new FakeRepositoryGitChangesService();
+        var options = new GitChangesOptions();
+        using var coordinator = CreateCoordinator(fake, options);
+        using var manager = CreateManager(coordinator, options);
+
+        var lease1 = manager.Acquire(_tempDir);
+        lease1.Dispose();
+        Assert.Equal(1, manager.ActiveWatcherCount);
+
+        using var lease2 = manager.Acquire(_tempDir);
+        Assert.Equal(1, manager.ActiveWatcherCount);
+        Assert.True(manager.TryGetCoverage(_tempDir, out var coverage));
+        Assert.Null(coverage!.EndedAt);
+    }
+
+    [Fact]
     public void Acquiring_the_same_repository_twice_creates_only_one_watcher()
     {
         var fake = new FakeRepositoryGitChangesService();

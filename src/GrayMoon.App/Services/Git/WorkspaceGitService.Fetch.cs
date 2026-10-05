@@ -9,6 +9,7 @@ using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Services.Git;
 
@@ -22,6 +23,7 @@ public sealed partial class WorkspaceGitService
     /// </summary>
     public async Task<IReadOnlyDictionary<int, string>> QuickFetchAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlyCollection<int>? repositoryIds = null,
         Action<int, int>? onProgress = null,
         CancellationToken cancellationToken = default)
@@ -33,7 +35,7 @@ public sealed partial class WorkspaceGitService
         if (workspace == null)
             throw new InvalidOperationException($"Workspace {workspaceId} not found.");
 
-        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
 
         var links = workspace.Repositories
             .Where(l => l.Repository != null && (repositoryIds == null || repositoryIds.Contains(l.RepositoryId)))
@@ -43,6 +45,8 @@ public sealed partial class WorkspaceGitService
             return new Dictionary<int, string>();
 
         _logger.LogInformation("Quick Fetch triggered. Workspace={WorkspaceName}, RepoCount={Count}", workspace.Name, links.Count);
+
+        var divergenceByRepoId = await GetDivergenceBaseBranchesByRepositoryIdAsync(contextId, cancellationToken);
 
         var completedCount = 0;
         var totalCount = links.Count;
@@ -54,14 +58,16 @@ public sealed partial class WorkspaceGitService
             await semaphore.WaitAsync(cancellationToken);
             try
             {
+                divergenceByRepoId.TryGetValue(repo.RepositoryId, out var divergenceBaseBranch);
                 var args = new
                 {
-                    workspaceName = workspace.Name,
+                    workspaceName = workspaceFolderName,
                     repositoryId = repo.RepositoryId,
                     repositoryName = repo.RepositoryName,
                     bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
                     workspaceId,
-                    workspaceRoot
+                    workspaceRoot,
+                    divergenceBaseBranch
                 };
                 var response = await _agentBridge.SendCommandAsync("FetchCommits", args, cancellationToken);
                 var data = response.Data != null
@@ -82,27 +88,25 @@ public sealed partial class WorkspaceGitService
 
         var results = await Task.WhenAll(fetchTasks);
 
-        // Update commit-count fields on WorkspaceRepositoryLink rows.
-        // EF Core not thread-safe; query sequentially after the parallel fetch.
-        var repoIds = results.Select(r => r.RepositoryId).ToList();
-        var wrLinks = await _dbContext.WorkspaceRepositories
-            .Where(wr => wr.WorkspaceId == workspaceId && repoIds.Contains(wr.RepositoryId))
-            .ToListAsync(cancellationToken);
-
+        // Persist commit counts into the selected context (Feature or Workspace) via the state writer.
         foreach (var (_, repoId, data, error) in results)
         {
             if (data == null || !string.IsNullOrWhiteSpace(error)) continue;
-            var wr = wrLinks.FirstOrDefault(w => w.RepositoryId == repoId);
-            if (wr == null) continue;
 
-            if (data.OutgoingCommits.HasValue) wr.OutgoingCommits = data.OutgoingCommits;
-            if (data.IncomingCommits.HasValue) wr.IncomingCommits = data.IncomingCommits;
-            if (data.HasUpstream.HasValue) wr.BranchHasUpstream = data.HasUpstream.Value;
-            if (data.DefaultBranchBehind.HasValue) wr.DefaultBranchBehindCommits = data.DefaultBranchBehind;
-            if (data.DefaultBranchAhead.HasValue) wr.DefaultBranchAheadCommits = data.DefaultBranchAhead;
+            await _stateWriter.ApplyAsync(contextId, workspaceId, repoId, new RepositoryStateSnapshot
+            {
+                OutgoingCommits = data.OutgoingCommits,
+                IncomingCommits = data.IncomingCommits,
+                DefaultBranchBehind = data.DefaultBranchBehind,
+                DefaultBranchAhead = data.DefaultBranchAhead,
+                HasUpstream = data.HasUpstream,
+                CommitCountsProbed = data.OutgoingCommits.HasValue
+                    || data.IncomingCommits.HasValue
+                    || data.DefaultBranchBehind.HasValue
+                    || data.DefaultBranchAhead.HasValue,
+                UpstreamProbed = data.HasUpstream.HasValue,
+            }, cancellationToken: cancellationToken);
         }
-
-        await _dbContext.SaveChangesAsync(cancellationToken);
 
         // Update RepositoryBranch tag rows and HasNewerTag. Pass localBranches/remoteBranches as null so
         // existing branch rows are not touched - only tag rows are refreshed.

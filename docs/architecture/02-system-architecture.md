@@ -4,32 +4,34 @@
 
 GrayMoon is a distributed local-development application with a strict App/Worker boundary.
 
-```text
-Browser
-   │
-   │ Blazor Server circuit
-   ▼
-GrayMoon.App
-   ├─ UI and page orchestration
-   ├─ GrayMoon.Application implementations
-   ├─ SQLite / EF Core
-   ├─ GitHub and registry connectors
-   ├─ REST API
-   ├─ AgentHub
-   ├─ WorkspaceSyncHub
-   └─ optional Desktop integration
-          │
-          │ SignalR
-          ▼
-GrayMoon.Agent
-   ├─ Git commands
-   ├─ GitVersion
-   ├─ filesystem
-   ├─ project discovery
-   ├─ dotnet restore
-   ├─ Git Changes
-   ├─ file watchers
-   └─ local hook listener
+```mermaid
+flowchart TB
+  Browser["Browser / WebView2"]
+  Browser -->|"Blazor Server circuit"| App
+
+  subgraph App["GrayMoon.App"]
+    UI["UI and page orchestration"]
+    Appl["GrayMoon.Application implementations"]
+    SQLite["SQLite / EF Core"]
+    Conn["GitHub and registry connectors"]
+    REST["REST API"]
+    AgentHub["AgentHub"]
+    SyncHub["WorkspaceSyncHub"]
+    DesktopOpt["optional Desktop integration"]
+  end
+
+  subgraph Agent["GrayMoon.Agent"]
+    GitCmd["Git commands"]
+    GitVer["GitVersion"]
+    Filesys["filesystem"]
+    Discover["project discovery"]
+    Dotnet["dotnet restore"]
+    GitChg["Git Changes"]
+    Watch["file watchers"]
+    HookL["local hook listener"]
+  end
+
+  App <-->|"SignalR"| Agent
 ```
 
 This separation is foundational.
@@ -109,6 +111,21 @@ OperationResult
 operation DTOs
 automation-friendly contracts
 ```
+
+`GrayMoon.Application/Features` holds the Feature context contracts:
+
+```text
+WorkspaceFeatureContextId            execution identity (readonly record struct)
+IWorkspaceFeatureOperations          create / analyze remove / remove Feature
+IWorkspaceFeatureContextResolver     special Workspace context, context info
+IWorkspaceContextPathResolver        repository path for a context (main checkout or worktree)
+IWorkspaceHookContextAttributor      repository path -> context for hook and watcher notifications
+IWorkspaceSelectedFeatureContextService   last selected context (navigation only)
+IWorkspaceExternalWorktreeOperations  clean up non-Feature worktrees
+IWorkspaceOperationLock              hierarchical structural/context lock
+```
+
+Most `IWorkspace*Operations` methods take an explicit `WorkspaceFeatureContextId`.
 
 Blazor pages and REST endpoints should use this boundary instead of reaching directly into orchestration internals where a suitable application operation exists.
 
@@ -204,6 +221,8 @@ IWorkspaceGitChangesOperations
 IWorkspaceFileOperations
 IWorkspacePreparationOperations
 IWorkspaceCatalogOperations
+IWorkspaceFeatureOperations
+IWorkspaceExternalWorktreeOperations
 ```
 
 This matters because domain behavior should not be encoded only in a Razor page.
@@ -324,6 +343,23 @@ Owns persisted current-branch PR refresh and reconciliation.
 
 Own GitHub Actions persistence and refresh logic.
 
+### Feature services
+
+`src/GrayMoon.App/Services/Features`:
+
+```text
+WorkspaceFeatureOperations          Create / Remove Feature orchestration, initial context seeding
+WorkspaceFeatureContextResolver     special Workspace context lookup/creation, context info
+WorkspaceContextPathResolver        per-context repository paths
+WorkspaceHookContextAttributor      maps reported repository paths to contexts
+WorkspaceSelectedFeatureContextService / WorkspaceContextNavigationService   ?context=<id> and the remembered selection
+WorkspaceBranchOccupancyService     which branches are checked out by a Feature or other worktree
+WorkspaceExternalWorktreeOperations cleanup of external (non-Feature) worktrees
+WorkspaceNativeLaunchService        paths for the Desktop "Open in..." flyout
+```
+
+Feature worktree paths are composed in the App with `\` separators (`{ManagedFeatureStorageRoot}\{FeatureName}\{RepositoryName}`), independent of the App's own OS, because they must match the path the Worker sees. Features are therefore built around a Windows Worker; a Linux Worker (`graymoon-worker-linux.zip`) is not a documented Feature target.
+
 ---
 
 ## 8. Orchestration layer
@@ -332,14 +368,20 @@ GrayMoon has workflows that span many repositories and therefore cannot be expre
 
 Examples:
 
-```text
-PrepareWorkspaceOrchestrator
-DependencyUpdateOrchestrator
-PushOrchestrator / WorkspacePushService
-WorkspaceCommitSyncHandler
-WorkspaceBranchUpdateHandler
-WorkspaceSyncHandler
-WorkspaceUndoPushHandler
+```mermaid
+flowchart TB
+  Prep["PrepareWorkspaceOrchestrator"]
+  Dep["DependencyUpdateOrchestrator"]
+  Push["PushOrchestrator / WorkspacePushService"]
+  Sync["WorkspaceCommitSyncHandler / WorkspaceSyncHandler"]
+  Branch["WorkspaceBranchUpdateHandler"]
+  Undo["WorkspaceUndoPushHandler"]
+  Prep --> AgentOps["Agent local operations"]
+  Dep --> AgentOps
+  Push --> AgentOps
+  Sync --> AgentOps
+  Branch --> AgentOps
+  Undo --> AgentOps
 ```
 
 Orchestrators own:
@@ -434,10 +476,12 @@ A separate Workspace synchronization hub broadcasts server-side state changes to
 Typical concepts include:
 
 ```text
-WorkspaceSynced
-RepositorySynced
-GitChangesUpdated
+ContextSynced / ContextRepositorySynced / ContextGitChangesUpdated   (carry a contextId)
+WorkspaceSynced / RepositorySynced / GitChangesUpdated               (legacy, Workspace-level)
+RepositoryError
 ```
+
+See `04-runtime-communication-and-concurrency.md` section 17 for which events are sent per context.
 
 Pages debounce refreshes and often reload only the affected rows.
 
@@ -449,7 +493,7 @@ Browser broadcasts are notifications to re-read persisted state, not authoritati
 
 Long-running Workspace operations must survive page navigation correctly.
 
-The process-wide `WorkspaceOperationRunner` owns mutation exclusivity.
+The process-wide `WorkspaceOperationRunner` owns mutation exclusivity. It is hierarchical: structural operations lock the whole Workspace, ordinary operations lock one Feature context (see `04-runtime-communication-and-concurrency.md` section 3).
 
 `BackgroundJobService` provides circuit/page overlay handles over those operations.
 
@@ -472,7 +516,11 @@ window context/title
 open local repository folder
 Explorer/native shell actions
 clipboard/external URL integration
+open a context or repository in Cursor, Claude CLI, VS Code, Visual Studio, Terminal
+install host prerequisites and the Worker
 ```
+
+Desktop mode maps an extra hub, `DesktopNotificationHub` at `/hubs/desktop`, for native notifications, Workspace window context, and the Top Bar preference.
 
 GrayMoon.App remains the core application.
 
@@ -501,6 +549,10 @@ create/merge PRs
 Git Changes read/stage/unstage/commit
 update file versions
 ```
+
+All Workspace REST endpoints currently resolve and act on the special Workspace context (`GetOrCreateSpecialWorkspaceContextIdAsync`). There are no Feature endpoints yet.
+
+The REST API has no authentication; it relies on the deployment being local or otherwise network-restricted.
 
 The REST layer should delegate to the same Application operations used by the UI.
 

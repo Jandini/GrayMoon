@@ -105,9 +105,11 @@
         });
     }
 
-    // Ctrl/Cmd+Enter in the commit textarea clicks the visible Commit button (Commit Staged or
-    // Commit All). Capture-phase preventDefault stops the newline before Blazor Server can see the
-    // key; a C# @onkeydown handler would be too late and would also round-trip every keystroke.
+    // Ctrl/Cmd+Enter in the commit textarea clicks the visible primary Commit button (Commit Staged
+    // when staged files exist, otherwise Commit All). The primary is the first enabled button in
+    // .git-changes-workspace-commit__buttons. Capture-phase preventDefault stops the newline before
+    // Blazor Server can see the key; a C# @onkeydown handler would be too late and would also
+    // round-trip every keystroke.
     function initCommitMessageShortcut(el) {
         if (el.dataset.commitShortcutInit === '1') return;
         el.dataset.commitShortcutInit = '1';
@@ -115,7 +117,7 @@
             if (e.repeat || !((e.ctrlKey || e.metaKey) && e.key === 'Enter')) return;
             e.preventDefault();
             const button = el.closest('.git-changes-workspace-commit')
-                ?.querySelector('.git-changes-workspace-commit__actions button:not([disabled])');
+                ?.querySelector('.git-changes-workspace-commit__buttons button:not([disabled])');
             button?.click();
         }, true);
     }
@@ -131,4 +133,41 @@
 
     const observer = new MutationObserver(initAll);
     observer.observe(document.body, { childList: true, subtree: true });
+})();
+
+/* Esc restores the Git Changes file tree when review-expand has hidden it. */
+(function () {
+    let handler = null;
+
+    window.graymoonGitChangesBindDiffReviewEscape = function (dotNetRef) {
+        window.graymoonGitChangesUnbindDiffReviewEscape();
+        handler = function (e) {
+            if (e.key !== 'Escape' || e.repeat) {
+                return;
+            }
+            // Mermaid lightbox and Bootstrap dialogs own Escape first.
+            if (document.getElementById('gm-mermaid-lightbox')) {
+                return;
+            }
+            if (document.querySelector('.modal.show')) {
+                return;
+            }
+            const target = e.target;
+            if (target && typeof target.closest === 'function'
+                && target.closest('textarea, input:not([type="checkbox"]):not([type="radio"]), select, [contenteditable="true"]')) {
+                return;
+            }
+            e.preventDefault();
+            e.stopPropagation();
+            dotNetRef.invokeMethodAsync('CollapseDiffReviewFromEscapeAsync');
+        };
+        document.addEventListener('keydown', handler, true);
+    };
+
+    window.graymoonGitChangesUnbindDiffReviewEscape = function () {
+        if (handler) {
+            document.removeEventListener('keydown', handler, true);
+            handler = null;
+        }
+    };
 })();

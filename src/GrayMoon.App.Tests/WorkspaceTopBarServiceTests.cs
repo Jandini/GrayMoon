@@ -4,6 +4,7 @@ using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
+using GrayMoon.App.Services.GitChanges;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -64,6 +65,7 @@ public sealed class WorkspaceTopBarServiceTests
             new GitChangesTestDbContext.TestDbContextFactory(
                 new DbContextOptionsBuilder<AppDbContext>().UseSqlite(dbContext.Database.GetDbConnection()).Options),
             workspaceService,
+            new WorkspaceGitChangesNotifier(NullLogger<WorkspaceGitChangesNotifier>.Instance),
             NullLogger<WorkspaceRepository>.Instance);
     }
 

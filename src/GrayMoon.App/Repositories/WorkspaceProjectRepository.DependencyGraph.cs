@@ -1,11 +1,12 @@
 using GrayMoon.App.Models;
+using GrayMoon.Application.Features;
 using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Repositories;
 
 public sealed partial class WorkspaceProjectRepository
 {
-    /// <summary>Returns the dependency graph for the workspace: nodes (projects with labels) and edges. Suitable for Cytoscape (nodes + edges).</summary>
+    /// <summary>Returns the dependency graph for the workspace: nodes (projects with labels) and edges, across every Feature context. Prefer the context-scoped overload below.</summary>
     public async Task<ProjectDependencyGraph> GetDependencyGraphAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
         var projects = await GetByWorkspaceIdAsync(workspaceId, cancellationToken);
@@ -23,7 +24,25 @@ public sealed partial class WorkspaceProjectRepository
         return new ProjectDependencyGraph(nodes, edgeList);
     }
 
-    /// <summary>Returns repository-level dependency graph (nodes = repos, edges = repo depends on repo). Includes project-derived, file-config, and custom dependency edges. For Cytoscape.</summary>
+    /// <summary>Returns the dependency graph for the workspace scoped to a single context (null reproduces the legacy, unscoped behavior above). Suitable for Cytoscape (nodes + edges).</summary>
+    public async Task<ProjectDependencyGraph> GetDependencyGraphAsync(int workspaceId, WorkspaceFeatureContextId? contextId, CancellationToken cancellationToken = default)
+    {
+        var projects = await GetByWorkspaceIdAsync(workspaceId, contextId, cancellationToken);
+        var edges = await GetDependencyEdgesAsync(workspaceId, contextId, cancellationToken);
+
+        var nodes = projects.Select(p => new ProjectDependencyNode(
+            p.ProjectId,
+            p.PackageId ?? p.ProjectName,
+            p.PackageId,
+            p.ProjectName,
+            p.Repository?.RepositoryName ?? "")).ToList();
+
+        var edgeList = edges.Select(e => new ProjectDependencyEdge(e.DependentProjectId, e.ReferencedProjectId)).ToList();
+
+        return new ProjectDependencyGraph(nodes, edgeList);
+    }
+
+    /// <summary>Returns repository-level dependency graph (nodes = repos, edges = repo depends on repo) across every Feature context. Includes project-derived, file-config, and custom dependency edges. Prefer the context-scoped overload below.</summary>
     public async Task<RepositoryDependencyGraph> GetRepositoryDependencyGraphAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
         var links = await dbContext.WorkspaceRepositories
@@ -60,6 +79,55 @@ public sealed partial class WorkspaceProjectRepository
             uniqueEdges,
             byProject,
             cancellationToken);
+
+        var repoNodes = links
+            .Where(wr => wr.Repository != null && !string.IsNullOrEmpty(wr.Repository.RepositoryName))
+            .Select(wr => new RepositoryDependencyNode(wr.RepositoryId, wr.Repository!.RepositoryName!, wr.RepositoryType))
+            .ToList();
+
+        var edgeList = edgeSets.All.Select(e => new RepositoryDependencyEdge(e.DepRepoId, e.RefRepoId)).ToList();
+
+        return new RepositoryDependencyGraph(repoNodes, edgeList);
+    }
+
+    /// <summary>Returns repository-level dependency graph scoped to a single context (null reproduces the legacy, unscoped behavior above): the project graph, dependency levels and unmatched-dependency comparisons feeding it all read that context's own data, never a Feature falling back to the Workspace's shared rows. For Cytoscape.</summary>
+    public async Task<RepositoryDependencyGraph> GetRepositoryDependencyGraphAsync(int workspaceId, WorkspaceFeatureContextId? contextId, CancellationToken cancellationToken = default)
+    {
+        var links = await dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Include(wr => wr.Repository)
+            .Where(wr => wr.WorkspaceId == workspaceId)
+            .ToListAsync(cancellationToken);
+        if (links.Count == 0) return new RepositoryDependencyGraph(new List<RepositoryDependencyNode>(), new List<RepositoryDependencyEdge>());
+
+        var repoIdsInWorkspace = links.Select(l => l.RepositoryId).ToHashSet();
+        var nameToRepoId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var wr in links)
+        {
+            if (wr.Repository != null && !string.IsNullOrEmpty(wr.Repository.RepositoryName))
+            {
+                var name = wr.Repository.RepositoryName.Trim();
+                if (!nameToRepoId.ContainsKey(name))
+                    nameToRepoId[name] = wr.RepositoryId;
+            }
+        }
+
+        var projects = await GetByWorkspaceIdAsync(workspaceId, contextId, cancellationToken);
+        var byProject = projects.ToDictionary(p => p.ProjectId);
+        var projectEdges = await GetDependencyEdgesAsync(workspaceId, contextId, cancellationToken);
+        var uniqueEdges = projectEdges
+            .Where(e => byProject.ContainsKey(e.DependentProjectId) && byProject.ContainsKey(e.ReferencedProjectId))
+            .Select(e => (e.DependentProjectId, e.ReferencedProjectId, (string?)null))
+            .ToList();
+
+        var edgeSets = await BuildRepoDependencyEdgeSetsAsync(
+            workspaceId,
+            repoIdsInWorkspace,
+            nameToRepoId,
+            uniqueEdges,
+            byProject,
+            cancellationToken,
+            contextId?.Value);
 
         var repoNodes = links
             .Where(wr => wr.Repository != null && !string.IsNullOrEmpty(wr.Repository.RepositoryName))
@@ -260,7 +328,8 @@ public sealed partial class WorkspaceProjectRepository
         Dictionary<string, int> nameToRepoId,
         List<(int DependentProjectId, int ReferencedProjectId, string? Version)> uniqueEdges,
         Dictionary<int, WorkspaceProject> byProject,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int? workspaceFeatureContextId = null)
     {
         // Split project-derived edges into real (physical .csproj to .csproj) and generated-package edges (the
         // referenced project is a virtual/generated WorkspaceProject inferred from a configured .csproj version
@@ -282,9 +351,44 @@ public sealed partial class WorkspaceProjectRepository
 
         var fileConfigRepoEdges = new HashSet<(int DepRepoId, int RefRepoId)>();
         var configs = await versionConfigRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
+
+        // Context-scoped "missing on disk" check (§7/AGENTS.md "Feature-context scoping") when a context was
+        // supplied: WorkspaceFile.IsMissingOnDisk alone is the special Workspace's own answer, so a Feature's
+        // file-config dependency edges must instead read that Feature's own WorkspaceFileContextState row
+        // (falling back to the shared flag only when no such row exists and this is the special Workspace).
+        // Callers that did not pass a context (existing dependency-graph-visualization call sites, unchanged
+        // in this pass) keep the legacy shared-flag-only behavior.
+        Dictionary<int, bool?>? missingFlagsByFileId = null;
+        if (workspaceFeatureContextId is int ctxId)
+        {
+            var isSpecialWorkspace = await dbContext.WorkspaceFeatureContexts
+                .AsNoTracking()
+                .Where(c => c.WorkspaceFeatureContextId == ctxId)
+                .Select(c => c.Kind == WorkspaceFeatureContextKind.Workspace)
+                .FirstOrDefaultAsync(cancellationToken);
+            var fileIds = configs.Where(c => c.File != null).Select(c => c.File!.FileId).Distinct().ToList();
+            var states = await dbContext.WorkspaceFileContextStates
+                .AsNoTracking()
+                .Where(s => s.WorkspaceFeatureContextId == ctxId && fileIds.Contains(s.FileId))
+                .ToDictionaryAsync(s => s.FileId, cancellationToken);
+            missingFlagsByFileId = new Dictionary<int, bool?>();
+            foreach (var fileId in fileIds)
+            {
+                if (states.TryGetValue(fileId, out var state))
+                    missingFlagsByFileId[fileId] = state.IsMissingOnDisk;
+                else if (isSpecialWorkspace)
+                    missingFlagsByFileId[fileId] = configs.First(c => c.File!.FileId == fileId).File!.IsMissingOnDisk;
+                else
+                    missingFlagsByFileId[fileId] = null;
+            }
+        }
+
         foreach (var cfg in configs)
         {
-            if (cfg.File?.IsMissingOnDisk == true) continue;
+            var isMissing = missingFlagsByFileId != null
+                ? cfg.File != null && (missingFlagsByFileId.GetValueOrDefault(cfg.File.FileId) == true)
+                : cfg.File?.IsMissingOnDisk == true;
+            if (isMissing) continue;
             var fileRepoId = cfg.File?.RepositoryId;
             if (!fileRepoId.HasValue || fileRepoId.Value == 0 || !repoIdsInWorkspace.Contains(fileRepoId.Value)) continue;
             var dependentRepoId = fileRepoId.Value;

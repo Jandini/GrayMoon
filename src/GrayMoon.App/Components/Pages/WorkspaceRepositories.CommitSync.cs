@@ -104,7 +104,7 @@ public sealed partial class WorkspaceRepositories
         StartPageJob("Synchronizing commits...", async (job, ct) =>
         {
             var result = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, OperationResult>(svc =>
-                svc.PullAsync(WorkspaceId, repositoryId, job.ToOperationProgress(), ct));
+                svc.PullAsync(WorkspaceId, RequireSelectedContextId(), repositoryId, job.ToOperationProgress(), ct));
             ApplyPullResult(result);
             if (result.Success)
                 SafeInvoke(() => ClearRepositoryError(repositoryId));
@@ -128,7 +128,7 @@ public sealed partial class WorkspaceRepositories
         StartPageJob("Synchronizing commits...", async (job, ct) =>
         {
             var result = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, OperationResult>(svc =>
-                svc.PullLevelAsync(WorkspaceId, repositoryIds, job.ToOperationProgress(), ct));
+                svc.PullLevelAsync(WorkspaceId, RequireSelectedContextId(), repositoryIds, job.ToOperationProgress(), ct));
             ApplyPullResult(result);
             SafeInvoke(() =>
             {

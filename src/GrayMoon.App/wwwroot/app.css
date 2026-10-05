@@ -511,6 +511,12 @@ select:disabled,
 .workspace-repos-header .workspace-repos-title-row .workspace-repos-subtitle {
     flex: 0 0 auto;
 }
+/* Bolder and a step lighter than muted subtitle, but not as bright as the page title. */
+.workspace-repos-subtitle .workspace-subtitle-name {
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-inline-end: 0.5em;
+}
 .workspace-repos-header .workspace-repos-title-row .workspace-repos-title-spacer {
     flex: 1 1 auto;
     min-width: 0;
@@ -813,6 +819,18 @@ select:disabled,
 .gm-callout--warning {
     background: rgba(251, 191, 36, 0.22);
     box-shadow: inset 3px 0 0 #fbbf24;
+    color: #fff;
+}
+
+.gm-callout--success {
+    background: rgba(52, 211, 153, 0.18);
+    box-shadow: inset 3px 0 0 #34d399;
+    color: #fff;
+}
+
+.gm-callout--info {
+    background: rgba(79, 193, 255, 0.15);
+    box-shadow: inset 3px 0 0 var(--info);
     color: #fff;
 }
 
@@ -1156,7 +1174,9 @@ input[list] {
     color: var(--text-primary);
 }
 
-.dropdown-item:hover {
+.dropdown-item:hover,
+.dropdown-item:focus,
+.dropdown-item:focus-visible {
     background-color: var(--bg-hover);
     color: var(--text-primary);
 }
@@ -1299,7 +1319,7 @@ table.resizable-columns th:hover .resize-handle::after {
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
-/* Yellow actionable style for the behind count when update-branch is available */
+/* Gray actionable behind count (update-from-default available). Yellow only when PR is not mergeable. */
 .repositories-table td.col-divergence .divergence-link.divergence-link-behind--actionable,
 .repositories-table td.col-divergence .divergence-link.divergence-link-behind--actionable:link,
 .repositories-table td.col-divergence .divergence-link.divergence-link-behind--actionable:visited,
@@ -1307,9 +1327,9 @@ table.resizable-columns th:hover .resize-handle::after {
 .repositories-table td.col-divergence .divergence-link.divergence-link-behind--actionable:focus-visible,
 .repositories-table td.col-divergence .divergence-link.divergence-link-behind--actionable:hover,
 .repositories-table td.col-divergence .divergence-link.divergence-link-behind--actionable:active {
-    background-color: #ffc107;
-    color: #000 !important;
-    border-color: #ffc107;
+    background-color: #6c757d;
+    color: #fff !important;
+    border-color: #6c757d;
     font-weight: 500;
     /* Reset button defaults */
     font-size: inherit;
@@ -1320,6 +1340,26 @@ table.resizable-columns th:hover .resize-handle::after {
 
 .repositories-table td.col-divergence .divergence-link.divergence-link-behind--actionable:hover,
 .repositories-table td.col-divergence .divergence-link.divergence-link-behind--actionable:focus-visible {
+    background-color: #5a6268;
+    border-color: #545b62;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+/* Yellow when open PR is not mergeable — update-from-default may clear the conflict. */
+.repositories-table td.col-divergence .divergence-link.divergence-link-behind--actionable.divergence-link-behind--conflict,
+.repositories-table td.col-divergence .divergence-link.divergence-link-behind--actionable.divergence-link-behind--conflict:link,
+.repositories-table td.col-divergence .divergence-link.divergence-link-behind--actionable.divergence-link-behind--conflict:visited,
+.repositories-table td.col-divergence .divergence-link.divergence-link-behind--actionable.divergence-link-behind--conflict:focus,
+.repositories-table td.col-divergence .divergence-link.divergence-link-behind--actionable.divergence-link-behind--conflict:focus-visible,
+.repositories-table td.col-divergence .divergence-link.divergence-link-behind--actionable.divergence-link-behind--conflict:hover,
+.repositories-table td.col-divergence .divergence-link.divergence-link-behind--actionable.divergence-link-behind--conflict:active {
+    background-color: #ffc107;
+    color: #000 !important;
+    border-color: #ffc107;
+}
+
+.repositories-table td.col-divergence .divergence-link.divergence-link-behind--actionable.divergence-link-behind--conflict:hover,
+.repositories-table td.col-divergence .divergence-link.divergence-link-behind--actionable.divergence-link-behind--conflict:focus-visible {
     background-color: #e0a800;
     border-color: #d39e00;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);

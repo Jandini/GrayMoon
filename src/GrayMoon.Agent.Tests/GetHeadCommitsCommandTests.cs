@@ -45,10 +45,18 @@ public sealed class GetHeadCommitsCommandTests : IDisposable
         Assert.True(response.Commits.ContainsKey("RepoA"));
         Assert.True(response.Commits.ContainsKey("RepoB"));
         Assert.Equal(40, response.Commits["RepoA"].Length);
+        Assert.NotNull(response.Branches);
+        Assert.True(response.Branches!.ContainsKey("RepoA"));
+        Assert.False(string.IsNullOrWhiteSpace(response.Branches["RepoA"]));
         var revParseCalls = _recorder.Calls.Count(c =>
             c.Arguments.Contains("rev-parse", StringComparison.OrdinalIgnoreCase)
             && c.Arguments.Contains("HEAD", StringComparison.OrdinalIgnoreCase));
         Assert.Equal(2, revParseCalls);
+        var branchShowCalls = _recorder.Calls.Count(c =>
+            c.Arguments.Contains("branch --show-current", StringComparison.OrdinalIgnoreCase)
+            || (c.Arguments.Contains("branch", StringComparison.OrdinalIgnoreCase)
+                && c.Arguments.Contains("--show-current", StringComparison.OrdinalIgnoreCase)));
+        Assert.Equal(2, branchShowCalls);
     }
     [Fact]
     public async Task Unborn_repository_omits_commit()
