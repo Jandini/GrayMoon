@@ -275,9 +275,14 @@ public sealed class WorkspaceRepositoryStateWriter(
         // default branch to be out of sync with, so a completed sync must not leave the repository on NeedsSync.
         var remoteIsEmpty = snapshot.RemoteBranches is { Count: 0 };
 
+        // Hook notifications (a commit made in a terminal) say nothing about the remote's branches, so they cannot
+        // learn a default branch. They must not take away an in-sync status an earlier full sync established.
+        var knowsNothingAboutRemote = snapshot.RemoteBranches is null;
+        var keepsEarlierSync = knowsNothingAboutRemote && state.SyncStatus == RepoSyncStatus.InSync;
+
         state.SyncStatus = !hasIdentity
             ? RepoSyncStatus.Error
-            : hasDefaultBranch || remoteIsEmpty ? RepoSyncStatus.InSync : RepoSyncStatus.NeedsSync;
+            : hasDefaultBranch || remoteIsEmpty || keepsEarlierSync ? RepoSyncStatus.InSync : RepoSyncStatus.NeedsSync;
     }
 
     private async Task ApplyProjectsAsync(

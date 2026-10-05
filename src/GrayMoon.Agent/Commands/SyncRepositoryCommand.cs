@@ -2,6 +2,7 @@ using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Jobs.Requests;
 using GrayMoon.Agent.Jobs.Response;
 using GrayMoon.Agent.Models;
+using GrayMoon.Agent.Services;
 
 namespace GrayMoon.Agent.Commands;
 
@@ -63,16 +64,11 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
             GitVersionResult? vr;
             (vr, versionError) = await git.GetVersionAsync(repoPath, cancellationToken);
             if (vr != null)
-            {
                 version = vr.InformationalVersion ?? "-";
-                branch = vr.BranchName ?? vr.EscapedBranchName ?? "-";
-            }
-            else
-            {
-                // GitVersion could not compute a version (an empty repository has no commits for it to read,
-                // for one). That must not cost the repository its identity: the branch does not depend on it.
-                branch = await git.GetCurrentBranchNameAsync(repoPath, cancellationToken) ?? "-";
-            }
+
+            // GitVersion may fail (an empty repository has no commits for it to read, a path over the Windows
+            // limit breaks it). That must not cost the repository its identity: the branch does not depend on it.
+            branch = await git.ResolveBranchAsync(vr, repoPath, cancellationToken) ?? "-";
 
             // Detect tag/detached HEAD; if on a tag we don't have a real branch so wipe the GitVersion branch echo.
             var currentTag = await git.GetCheckedOutTagAsync(repoPath, cancellationToken);

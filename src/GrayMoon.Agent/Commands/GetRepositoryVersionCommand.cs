@@ -1,6 +1,7 @@
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Jobs.Requests;
 using GrayMoon.Agent.Jobs.Response;
+using GrayMoon.Agent.Services;
 
 namespace GrayMoon.Agent.Commands;
 
@@ -20,11 +21,9 @@ public sealed class GetRepositoryVersionCommand(IGitService git) : ICommandHandl
         if (exists)
         {
             var (vr, _) = await git.GetVersionAsync(repoPath, cancellationToken);
-            if (vr != null)
-            {
-                version = vr.InformationalVersion;
-                branch = vr.BranchName ?? vr.EscapedBranchName;
-            }
+            version = vr?.InformationalVersion;
+            // A GitVersion failure leaves the version unresolved; it must not cost the repository its branch.
+            branch = await git.ResolveBranchAsync(vr, repoPath, cancellationToken);
         }
 
         return new GetRepositoryVersionResponse { Exists = exists, Version = version, Branch = branch };

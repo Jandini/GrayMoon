@@ -286,6 +286,33 @@ public sealed class WorkspaceRepositoryStateWriterTests
         Assert.Equal(RepoSyncStatus.NeedsSync, (await ctx.ReadLinkAsync()).SyncStatus);
     }
 
+    /// <summary>
+    /// A commit made in a terminal arrives through a hook, which reports nothing about the remote's branches. On a
+    /// repository whose remote is empty it must not flip the Sync button back to red after a completed full sync.
+    /// </summary>
+    [Fact]
+    public async Task A_hook_notification_keeps_an_empty_remote_repository_in_sync()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await ctx.MutateLinkAsync(l => l.DefaultBranchName = null);
+
+        await ApplyAsync(
+            ctx,
+            new RepositoryStateSnapshot { BranchName = "main", GitVersion = "0.1.0", GitVersionProbed = true, IdentityProbed = true, RemoteBranches = [] },
+            Derive);
+        Assert.Equal(RepoSyncStatus.InSync, (await ctx.ReadLinkAsync()).SyncStatus);
+
+        // The post-commit hook: new version, same branch, no word about the remote.
+        await ApplyAsync(
+            ctx,
+            new RepositoryStateSnapshot { BranchName = "main", GitVersion = "0.1.0+2", GitVersionProbed = true, IdentityProbed = true },
+            Derive);
+
+        var link = await ctx.ReadLinkAsync();
+        Assert.Equal(RepoSyncStatus.InSync, link.SyncStatus);
+        Assert.Equal("0.1.0+2", link.GitVersion);
+    }
+
     [Fact]
     public async Task Repository_without_a_known_default_branch_still_needs_sync_when_remote_branches_are_unknown()
     {

@@ -10,6 +10,12 @@ public sealed class RepositorySyncNotification
     public int RepositoryId { get; init; }
     public string Version { get; init; } = "-";
     public string Branch { get; init; } = "-";
+    /// <summary>
+    /// True when the agent ran GitVersion and it failed, so <see cref="Version"/> is "-" because the version could not be
+    /// computed, not because the agent did not look. The app clears the stored version (shown as unresolved) instead of
+    /// keeping a stale one. Agents that predate this field send false, which keeps the old behaviour.
+    /// </summary>
+    public bool GitVersionFailed { get; init; }
     /// <summary>Tag the repository is currently checked out at (detached HEAD on a tag). Null when on a branch.</summary>
     public string? Tag { get; init; }
     public int? OutgoingCommits { get; init; }

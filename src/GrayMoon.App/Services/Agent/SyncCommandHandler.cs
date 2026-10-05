@@ -180,7 +180,8 @@ public sealed class SyncCommandHandler(
             Projects = n.Projects,
             ErrorMessage = n.ErrorMessage,
             IdentityProbed = true,
-            GitVersionProbed = n.Version != "-",
+            // A reported GitVersion failure is a probe result too: it clears the stored version (shown as unresolved).
+            GitVersionProbed = n.Version != "-" || n.GitVersionFailed,
             CommitCountsProbed = !onTag && (n.OutgoingCommits.HasValue || n.IncomingCommits.HasValue),
             UpstreamProbed = !onTag && n.HasUpstream.HasValue,
             // The flat shape has no local-branch or tag list, and its remote list is pruned separately.

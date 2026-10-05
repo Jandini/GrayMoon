@@ -101,7 +101,9 @@ public sealed class RepositoryStateProbe(IGitService git, ICsProjFileService csP
             Projects = projects,
             ErrorMessage = options.ErrorMessage,
             IdentityProbed = true,
-            GitVersionProbed = options.IncludeGitVersion && gitVersion != null,
+            // A GitVersion run that failed is a probe result too: it clears the stored version, which the grid then
+            // shows as unresolved, instead of leaving a stale number from before the failure.
+            GitVersionProbed = options.IncludeGitVersion,
             // On a tag there is nothing to count, and the app clears those columns from the tag state
             // itself, so reporting the group as probed keeps the two paths consistent.
             CommitCountsProbed = !hasBranch || (counts.CountsProbed && vsDefaultProbed),
