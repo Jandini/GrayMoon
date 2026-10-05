@@ -317,6 +317,42 @@
     padding-right: 2rem;
 }
 
+.workspace-feature-selector__launch-item,
+.workspace-feature-selector__repo-item {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+/* Fixed-size slot so labels line up across rows regardless of icon type (SVG brand logo or glyph). */
+.workspace-feature-selector__launch-icon {
+    flex: 0 0 1.1rem;
+    width: 1.1rem;
+    height: 1.1rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    object-fit: contain;
+}
+
+.workspace-feature-selector__launch-icon--glyph {
+    font-size: 1.05rem;
+    line-height: 1;
+}
+
+.workspace-feature-selector__launch-icon--folder {
+    font-size: 1rem;
+    line-height: 1;
+    color: #e3b341;
+}
+
+.workspace-feature-selector__repo-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* Chevron stays invisible until the tool row is hovered; the repo list opens only when the
    chevron (flyout) itself is hovered — clicking the label still opens the whole context root. */
 .workspace-feature-selector__repo-flyout {

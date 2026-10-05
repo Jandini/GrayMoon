@@ -148,26 +148,26 @@
                     <ul class="dropdown-menu show shadow workspace-feature-selector__submenu" role="menu">
                         @if (_toolAvailability?.Cursor == true)
                         {
-                            @LaunchToolItem("openInCursor", "Cursor")
+                            @LaunchToolItem("openInCursor", "Cursor", imageSrc: "icons/cursor.svg")
                         }
                         @if (_toolAvailability?.ClaudeCli == true)
                         {
-                            @LaunchToolItem("openInClaudeCli", "Claude CLI")
+                            @LaunchToolItem("openInClaudeCli", "Claude CLI", imageSrc: "icons/claude.svg")
                         }
                         @if (_toolAvailability?.VsCode == true)
                         {
-                            @LaunchToolItem("openInVsCode", "VS Code")
+                            @LaunchToolItem("openInVsCode", "VS Code", imageSrc: "icons/visualstudiocode.svg")
                         }
                         @if (_toolAvailability?.VisualStudio == true)
                         {
-                            @LaunchToolItem("openInVisualStudio", "Visual Studio")
+                            @LaunchToolItem("openInVisualStudio", "Visual Studio", imageSrc: "icons/visualstudio.svg")
                         }
                         @if (HasAnyIdeAvailable)
                         {
                             <li><hr class="dropdown-divider branch-menu-divider" /></li>
                         }
-                        @LaunchToolItem("openInTerminal", "Terminal")
-                        @LaunchToolItem("showInExplorer", "Explorer")
+                        @LaunchToolItem("openInTerminal", "Terminal", iconClass: "bi-terminal-fill")
+                        @LaunchToolItem("showInExplorer", "Explorer", iconClass: "bi-folder2-open")
                     </ul>
                 </li>
             }
@@ -272,14 +272,22 @@
         </li>
     };
 
-    private RenderFragment LaunchToolItem(string method, string label) => __builder =>
+    private RenderFragment LaunchToolItem(string method, string label, string? imageSrc = null, string? iconClass = null) => __builder =>
     {
         <li class="workspace-feature-selector__launch-row">
             <button type="button"
                     class="dropdown-item workspace-feature-selector__launch-item"
                     role="menuitem"
                     @onclick="() => LaunchAsync(method)">
-                @label
+                @if (!string.IsNullOrEmpty(imageSrc))
+                {
+                    <img src="@imageSrc" alt="" class="workspace-feature-selector__launch-icon" aria-hidden="true" />
+                }
+                else if (!string.IsNullOrEmpty(iconClass))
+                {
+                    <i class="bi @iconClass workspace-feature-selector__launch-icon workspace-feature-selector__launch-icon--glyph" aria-hidden="true"></i>
+                }
+                <span>@label</span>
             </button>
             @if (_repositories.Count > 0)
             {
@@ -294,11 +302,12 @@
                             var repoPath = repo.Path;
                             <li>
                                 <button type="button"
-                                        class="dropdown-item"
+                                        class="dropdown-item workspace-feature-selector__repo-item"
                                         role="menuitem"
                                         title="@repoPath"
                                         @onclick="() => LaunchAsync(method, repoPath)">
-                                    @repo.RepositoryName
+                                    <i class="bi bi-folder-fill workspace-feature-selector__launch-icon workspace-feature-selector__launch-icon--folder" aria-hidden="true"></i>
+                                    <span class="workspace-feature-selector__repo-name">@repo.RepositoryName</span>
                                 </button>
                             </li>
                         }
