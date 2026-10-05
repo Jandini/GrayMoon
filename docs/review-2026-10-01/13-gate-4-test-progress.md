@@ -11,6 +11,22 @@ How to use: tick a box when the **Expected** result happened. If it did not, lea
 
 Status values: `TODO`, `PASS`, `FAIL`, `SKIPPED`.
 
+## What's left (updated 2026-10-05)
+
+Implementation work on worktree Features is done - every unit in `06-worktree-release-implementation-plan.md` is `DONE`, `MOVED` or `DROPPED` except R1, R4 and the two gates below. This file now stays open on its own: there is no more dedicated GATE-4 test session planned. Tick a box below whenever it naturally comes up while using GrayMoon for other work, in any order, and leave the rest of this document as the record of what has already passed.
+
+- [ ] Step 3 - **Open in...**: all 6 tools (Claude CLI, Terminal, VS Code, Cursor, Visual Studio, Explorer), once for a Workspace repo and once for a Feature, on a Workspace path that has a space
+- [ ] Step 5 - **Worker reinstall**: reinstall the Worker from GrayMoon, confirm the "Reinstall the Worker" notice is gone and Sync still works; then the two secret checks that only mean something once a reinstalled Worker has presented its secret (`http://localhost:8384/repos/1/connector` in a browser: 403; `curl http://localhost:8384/repos/1/connector`: 401)
+- [ ] Step 8 - the three remaining **Workspace-edit** lines: delete the connector of `gate4-b`'s repositories (expect refusal, nothing deleted); remove `gate4-b`, then rename the Workspace (expect it works); Remove Workspace on a Feature-less test Workspace (expect it deletes)
+- [ ] Step 9 - **Linux Worker** (skip with a reason if you have none)
+- [ ] Step 10 - run **WORKSPACE-SMOKE**
+- [ ] Retest on a new build - the **empty-repo / red Sync button** fix (the 5 lines under "Retest: empty repository and the red Sync button" below)
+- [ ] Retest on a new build - the **long-path GitVersion crash and branch-fallback** fix (re-run step 6 and 7b; a 260+ character path should show a red `unresolved` version, never a lost branch)
+- [ ] Retest on a new build - the **delete-branch false-refusal** fix (Issue H below: create a branch in every repository, switch one repository back to `main`, delete the new branch from the Switch Branch dialog; expect no "Cannot delete the current branch")
+- [ ] Reply **PASSED** in chat once every box above is checked or SKIPPED with a reason (the agent then sets GATE-4 to PASSED in `06` and starts R1)
+
+Everything else - steps 1, 2, 4, 6, 7 and 7b - is already closed (agent-checked); the sections below are the detailed record, not open work.
+
 ## Summary
 
 | Step | Area | Status | Notes |
@@ -214,7 +230,7 @@ Technical state, checked by the agent:
 
 What still stands between this branch and the merge (from the tracker in `06`):
 
-- [ ] GATE-4: finish the owner steps in this file (3 Open in..., 5 reinstall and the two checks after it, 8 connector delete and the last two lines, 9 Linux, 10 WORKSPACE-SMOKE) and the retest of the empty-repo fix on a new build. Steps 1, 2, 6, 7 and 7b are closed (agent-checked live on Workspace DeepSpace)
+- [ ] GATE-4: see "What's left" at the top of this file for the exact owner steps and retests still open
 - [ ] R1: user guide, troubleshooting (with the downgrade note), operations, changelog, "superseded" banners on the old design docs (starts after GATE-4)
 - [ ] R4: full regression run, checklist walk, then Publish-GrayMoonBundle.ps1 (final task, runs once)
 - [ ] GATE-5: release candidate sign-off, including WORKSPACE-SMOKE on the release build
@@ -259,6 +275,7 @@ Notes:
 | F | log | Once, a unique-constraint error inserting the Git Changes snapshot (`WorkspaceGitContextRepositoryStatuses`), caught and not user visible: two writers race in `GitChangesSnapshotPushHandler` (probably also the cause of E) | v1.1, non-blocking |
 | G | 2 | After Remove with "Delete remote Feature branches", the Workspace repo still lists `origin/gate4-br` until a fetch with prune | v1.1 |
 | H | branch dialog | Owner report 2026-10-05: created a branch in all repositories, switched one repository back to main, then deleting the new branch from the switch-branch dialog said "Cannot delete the current branch" although the repository was on main. Cause: the delete check read the branch from a link tracked by the page's long-lived database context, which still held the old branch (the sync had saved main through another context). Worker was never called. | Fixed in code (fresh read), regression tests added; needs a check on a new build |
+| I | step 2 / 8 | Remove Feature dialog could say "This feature is finished and safe to remove." right above a warning that uncommitted changes or unmerged commits would be force-deleted (Completed classification only reflects pull-request state, not dirty/unmerged work). Dialog title also had no indication of which Feature it was for. | Fixed in code same day (owner, commit "Improve remove feature dialog"): headline now reads "...but it still has work that hasn't been saved. Review before removing." and renders as a warning when this applies; title shows the Feature name as a subtitle. No dedicated retest step - will be seen naturally the next time Remove is opened on a Feature with unsaved work. |
 
 ## Final result
 

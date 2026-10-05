@@ -2,6 +2,8 @@
 
 This folder is a full review of GrayMoon and GrayMoon.Desktop, focused on closing the first release of worktree Features. Every finding in the detailed documents carries file and line evidence. Reviewed at GrayMoon `a06fe33` and GrayMoon.Desktop `8c4fb90`, both on branch `opus-review`.
 
+> **Status (2026-10-05):** the roadmap below was the starting point. Implementation closed every item it describes (`06-worktree-release-implementation-plan.md` tracks each one; see its status callout). What is left before release is owner testing (tracked live in `13-gate-4-test-progress.md`), the docs unit `R1`, the regression-and-checklist unit `R4`, and the two sign-off gates `GATE-4`/`GATE-5`. The "not ready to release" verdict just below describes the state *before* this work, not the current state.
+
 | Doc | Contents |
 |---|---|
 | [01-documentation-audit.md](01-documentation-audit.md) | What was changed in the existing docs (20 files), the remaining gaps, and places where the code contradicts the docs |
