@@ -72,6 +72,11 @@
                           title="Click to copy version">@Link.GitVersion</span>
                 </div>
             }
+            else if (Link.IsVersionUnresolved)
+            {
+                <span class="version-inner version-inner--unresolved"
+                      title="GitVersion could not compute a version for this repository (for example, it has no commits yet). The repository itself synced normally.">unresolved</span>
+            }
             else
             {
                 <span class="text-muted">&nbsp;</span>

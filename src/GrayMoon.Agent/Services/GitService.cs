@@ -147,7 +147,8 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
                 var error = BuildProcessError(stderr, stdout, $"{toolName} exited with code {exitCode}");
                 if (manifestExists)
                     logger.LogWarning("{ToolName} failed in {ElapsedMs}ms in {RepoPath}. Tool manifest exists, but failure does not look like a missing local tool; skipping 'dotnet tool restore'. ExitCode={ExitCode}", toolName, sw.ElapsedMilliseconds, repoPath, exitCode);
-                logger.LogError("{ToolName} failed in {ElapsedMs}ms. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", toolName, sw.ElapsedMilliseconds, exitCode, stdout, stderr);
+                // A warning, not an error: the repository keeps syncing with an unresolved version.
+                logger.LogWarning("{ToolName} failed in {ElapsedMs}ms. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", toolName, sw.ElapsedMilliseconds, exitCode, stdout, stderr);
                 return (null, error);
             }
         }

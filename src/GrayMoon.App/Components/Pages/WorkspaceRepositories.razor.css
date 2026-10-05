@@ -870,6 +870,16 @@
     border-color: #5a6268;
 }
 
+/* Version GitVersion could not compute: same box as the version, in red, and nothing to copy or highlight. */
+::deep .repositories-table .version-inner.version-inner--unresolved,
+::deep .repositories-table .version-inner.version-inner--unresolved:hover {
+    color: var(--bs-danger, #dc3545);
+    background-color: transparent;
+    border-color: transparent;
+    box-shadow: none;
+    cursor: default;
+}
+
 /* Workspaces breadcrumb link - same gray as "X repositories", override global a color */
 .grid-page-header .text-muted a.workspaces-breadcrumb-link,
 .grid-page-header .text-muted a.workspaces-breadcrumb-link:hover,

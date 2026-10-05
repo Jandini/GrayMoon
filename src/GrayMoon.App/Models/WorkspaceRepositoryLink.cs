@@ -35,6 +35,15 @@ public class WorkspaceRepositoryLink
     [NotMapped]
     public bool IsOnTag => !string.IsNullOrWhiteSpace(CheckedOutTag);
 
+    /// <summary>
+    /// True when the repository has been synced (it has a branch or a tag) yet has no GitVersion, which means
+    /// GitVersion could not compute one. A repository that has not been synced has neither, so this stays false.
+    /// </summary>
+    [NotMapped]
+    public bool IsVersionUnresolved =>
+        string.IsNullOrWhiteSpace(GitVersion)
+        && (!string.IsNullOrWhiteSpace(BranchName) || IsOnTag);
+
     /// <summary>True when the repository is on a tag and at least one newer tag exists (i.e. the checked-out tag is not the most recently created). Null when unknown or not on a tag. Updated when tags are fetched during checkout sync.</summary>
     public bool? HasNewerTag { get; set; }
 

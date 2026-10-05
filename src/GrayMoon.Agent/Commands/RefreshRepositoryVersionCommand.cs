@@ -26,6 +26,11 @@ public sealed class RefreshRepositoryVersionCommand(IGitService git, IAgentToken
                 version = vr.InformationalVersion ?? "-";
                 branch = vr.BranchName ?? vr.EscapedBranchName ?? "-";
             }
+            else
+            {
+                // A GitVersion failure leaves the version unresolved; it must not cost the repository its branch.
+                branch = await git.GetCurrentBranchNameAsync(repoPath, cancellationToken) ?? "-";
+            }
 
             // Detect tag/detached HEAD; when on a tag we don't have a real branch.
             var currentTag = await git.GetCheckedOutTagAsync(repoPath, cancellationToken);

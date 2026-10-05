@@ -205,17 +205,99 @@ public sealed class WorkspaceRepositoryStateWriterTests
         Assert.Null(after.RepositoryType);
     }
 
+    private static readonly RepositoryStateWriteOptions Derive = new() { SyncStatus = SyncStatusWrite.Derive };
+
     [Fact]
-    public async Task Derived_sync_status_is_error_without_a_usable_version()
+    public async Task Derived_sync_status_is_error_without_a_branch_or_tag()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
 
         await ApplyAsync(
             ctx,
-            new RepositoryStateSnapshot { GitVersion = null, GitVersionProbed = true },
-            new RepositoryStateWriteOptions { SyncStatus = SyncStatusWrite.Derive });
+            new RepositoryStateSnapshot { BranchName = null, GitVersion = "1.0.0", GitVersionProbed = true, IdentityProbed = true },
+            Derive);
 
         Assert.Equal(RepoSyncStatus.Error, (await ctx.ReadLinkAsync()).SyncStatus);
+    }
+
+    /// <summary>
+    /// A repository whose GitVersion failed (an empty repository, a broken config) must not turn the
+    /// Workspace red: the version is unresolved, the sync itself succeeded.
+    /// </summary>
+    [Fact]
+    public async Task Failed_gitversion_does_not_make_the_repository_out_of_sync()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+
+        await ApplyAsync(
+            ctx,
+            new RepositoryStateSnapshot { BranchName = "main", GitVersion = null, GitVersionProbed = true, IdentityProbed = true },
+            Derive);
+
+        var link = await ctx.ReadLinkAsync();
+        Assert.Equal(RepoSyncStatus.InSync, link.SyncStatus);
+        Assert.Null(link.GitVersion);
+        Assert.Equal("main", link.BranchName);
+        Assert.True(link.IsVersionUnresolved);
+    }
+
+    [Fact]
+    public async Task Repository_on_an_empty_remote_is_in_sync_after_a_completed_sync()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await ctx.MutateLinkAsync(l => { l.DefaultBranchName = null; l.SyncStatus = RepoSyncStatus.NeedsSync; });
+
+        // An empty hosted repository: it has a local commit but the remote has no refs, so no default branch.
+        await ApplyAsync(
+            ctx,
+            new RepositoryStateSnapshot
+            {
+                BranchName = "main",
+                GitVersion = "0.1.0+0.Branch.main.Sha.abc",
+                GitVersionProbed = true,
+                IdentityProbed = true,
+                RemoteBranches = [],
+            },
+            Derive);
+
+        var link = await ctx.ReadLinkAsync();
+        Assert.Equal(RepoSyncStatus.InSync, link.SyncStatus);
+        Assert.False(link.IsVersionUnresolved);
+    }
+
+    [Fact]
+    public async Task Repository_without_a_known_default_branch_still_needs_sync_when_the_remote_has_branches()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await ctx.MutateLinkAsync(l => l.DefaultBranchName = null);
+
+        await ApplyAsync(
+            ctx,
+            new RepositoryStateSnapshot
+            {
+                BranchName = "main",
+                GitVersion = "1.0.0",
+                GitVersionProbed = true,
+                IdentityProbed = true,
+                RemoteBranches = ["develop"],
+            },
+            Derive);
+
+        Assert.Equal(RepoSyncStatus.NeedsSync, (await ctx.ReadLinkAsync()).SyncStatus);
+    }
+
+    [Fact]
+    public async Task Repository_without_a_known_default_branch_still_needs_sync_when_remote_branches_are_unknown()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await ctx.MutateLinkAsync(l => l.DefaultBranchName = null);
+
+        await ApplyAsync(
+            ctx,
+            new RepositoryStateSnapshot { BranchName = "main", GitVersion = "1.0.0", GitVersionProbed = true, IdentityProbed = true },
+            Derive);
+
+        Assert.Equal(RepoSyncStatus.NeedsSync, (await ctx.ReadLinkAsync()).SyncStatus);
     }
 
     [Fact]
