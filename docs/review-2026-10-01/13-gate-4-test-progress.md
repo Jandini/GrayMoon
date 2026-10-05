@@ -16,13 +16,13 @@ Status values: `TODO`, `PASS`, `FAIL`, `SKIPPED`.
 | Step | Area | Status | Notes |
 |---|---|---|---|
 | 1 | Feature names | PASS | Duplicate name is refused when Create is pressed, not while typing (owner accepted 2026-10-04: live check not needed) |
-| 2 | Header button | TODO | Fresh Feature label OK; merged half needs a real PR |
+| 2 | Header button | PASS | Fresh Feature reads "Feature"; after a real merged PR it reads "Remove" (Workspace DeepSpace, 2026-10-04) |
 | 3 | Open in... | TODO | |
 | 4 | Security (browser) | PASS | Agent-checked; REST script line is yours |
 | 5 | Worker reinstall and secret | TODO | Before-reinstall part done; reinstall and 401 checks are yours |
-| 6 | Hooks (G1) | TODO | |
-| 7 | Branch rules in a Feature | TODO | Dialog rules and off-branch badge OK; tag-pinned and Workspace Locals badge are yours |
-| 7b | Long paths (Windows) | TODO | core.longpaths=true and Create OK; deep-path repo is yours |
+| 6 | Hooks (G1) | PASS | Agent-checked on Workspace DeepSpace (a Deep test repo): all 10 lines OK |
+| 7 | Branch rules in a Feature | PASS | All lines checked, including tag-pinned and the Workspace Locals Feature badge |
+| 7b | Long paths (Windows) | PASS | Deep-path repo (over 260 characters): Create and Remove OK, no "Filename too long"; GitVersion fails on such paths (fixed in code, see Issues) |
 | 8 | Workspace edits with a Feature | TODO | Save, rename lock, delete dialog OK; connector delete and the last two lines are yours |
 | 9 | Linux Worker | TODO | |
 | 10 | WORKSPACE-SMOKE | TODO | |
@@ -45,12 +45,12 @@ Notes: Tried `Gate4-B` and `gate4-b` while `gate4-b` existed. While typing there
 
 ## 2. Header button
 
-Status: half done (the merged half needs a real merged PR) (agent-checked 2026-10-04 on Workspace Test, build .134)
+Status: PASS (agent-checked 2026-10-04: Workspace Test for the fresh Feature, Workspace DeepSpace with a real GitHub PR for the merged half, build .134)
 
 - [x] Fresh Feature: header button reads "Feature", not "Remove" (gate4-b, top right button reads Feature with a dropdown)
-- [ ] After its PRs are merged: header button reads "Remove"
+- [x] After its PRs are merged: header button reads "Remove" (Feature gate4-br on DeepSpace: header "Create PR" before the PR, "Feature" while PR #1 was open, "Remove" right after the in-app Squash and merge)
 
-Notes:
+Notes: Flow used: commit and push in the Feature folder, Sync, Create PR from the row badge (draft off), merge with the in-app merge chip, then Remove Feature. Remove dialog said "pull requests are merged, safe to remove", both "Delete local Feature branches" and "Delete remote Feature branches" were ticked; afterwards the worktree folder, the local branch and the GitHub branch were all gone and `main` on GitHub held the squash commit. Side finding: the merge dialog said "Local branch is not in sync, 1 uncommitted change" although `git status` was clean (stale Git Changes snapshot after a terminal commit; informational only, "Merge anyway" was needed). See Issues found.
 
 ## 3. Open in...
 
@@ -106,34 +106,34 @@ Notes: The last two secret checks are not meaningful until the Worker has been r
 
 ## 6. Hooks (G1)
 
-Status: TODO
+Status: PASS (agent-checked 2026-10-04 on Workspace DeepSpace, build .134)
 
 The cleanup steps moved to GATE-H in `12-hook-cleanup-plan.md`.
 
 Repo with `core.hooksPath`:
 
-- [ ] In a test repo run `git config core.hooksPath .husky`, then Sync
-- [ ] `.husky` contents are unchanged
-- [ ] No GrayMoon hooks written in `.husky`
-- [ ] One Warning in the Worker log
+- [x] In a test repo run `git config core.hooksPath .husky`, then Sync
+- [x] `.husky` contents are unchanged
+- [x] No GrayMoon hooks written in `.husky`
+- [x] One Warning in the Worker log
 
 Repo with your own hook:
 
-- [ ] Add your own `.git/hooks/pre-push` (for example `echo "user hook"`), then Sync
-- [ ] Your hook is now `.git/hooks/pre-push.replaced-by-graymoon` with its content intact
-- [ ] GrayMoon's own `pre-push` is in its place
-- [ ] Worker log has a Warning naming the rename
+- [x] Add your own `.git/hooks/pre-push` (for example `echo "user hook"`), then Sync
+- [x] Your hook is now `.git/hooks/pre-push.replaced-by-graymoon` with its content intact
+- [x] GrayMoon's own `pre-push` is in its place
+- [x] Worker log has a Warning naming the rename
 
 Repo where GrayMoon hooks already exist:
 
-- [ ] Commit from a terminal: the grid updates within seconds
-- [ ] Sync twice: the hook files are not rewritten the second time (modified time unchanged)
+- [x] Commit from a terminal: the grid updates within seconds (2.4 s, also on the over-260-character path)
+- [x] Sync twice: the hook files are not rewritten the second time (modified time unchanged)
 
-Notes:
+Notes: Done on the DeepSpace test repo (Deep). Round-2 finding while doing the terminal commit on the deep path: GitVersion crashed (LibGit2Sharp "path too long") and the hook flow dropped the repo's branch. Fixed in code (the branch now falls back to `git branch --show-current`, a failed GitVersion is reported as unresolved) with tests; the installed build .134 still has the old behaviour, so see the retest section.
 
 ## 7. Branch rules in a Feature
 
-Status: mostly PASS; tag-pinned and the Workspace Locals badge are left (agent-checked 2026-10-04 on Workspace Test, build .134)
+Status: PASS (agent-checked 2026-10-04 on Workspace Test, and the tag-pinned and Workspace Locals lines on Workspace DeepSpace, build .134)
 
 Create Feature `gate4-b` and open a repo's branch dialog.
 
@@ -144,23 +144,23 @@ Create Feature `gate4-b` and open a repo's branch dialog.
 - [x] Delete a throwaway branch from inside the Feature: the confirmation says branches are shared by the Workspace and all Features (read on 'develop', then Cancelled: "Branches are shared by the Workspace and every Feature of this repository. Deleting it removes it everywhere.")
 - [x] In a terminal, in that repo's Feature folder, run `git switch -c side`: within seconds the grid shows "off feature branch" (Janda.Backup.Sequential, seen within about 10 seconds)
 - [x] Click it and press "Return to Feature branch": the repo is back on `gate4-b` and the badge is gone (the temporary branch 'side' was deleted afterwards)
-- [ ] Tag-pinned repo (if you have one): in the Feature, open its upgrade badge and check out a newer tag. It works and the repo stays on the tag
-- [ ] In the Workspace, open a repo's upgrade badge, then the Locals tab: branches held by a Feature show the Feature badge; everything else as before
+- [x] Tag-pinned repo (if you have one): in the Feature, open its upgrade badge and check out a newer tag. It works and the repo stays on the tag (gate4-tag pinned to v1.0.0, checked out v1.1.0, repo stayed detached on the tag)
+- [x] In the Workspace, open a repo's upgrade badge, then the Locals tab: branches held by a Feature show the Feature badge; everything else as before (the Feature's branch appears in the Locals list only after a Sync, see Issues)
 
-Notes: The branch dialog opens by clicking the branch name in the Branch column. Left for you: the tag-pinned repo, and the Workspace-side upgrade badge and Locals tab showing the Feature badge.
+Notes: The branch dialog opens by clicking the branch name in the Branch column.
 
 ## 7b. Long paths (Windows)
 
-Status: partly done (agent-checked 2026-10-04 on Workspace Test, build .134)
+Status: PASS (agent-checked 2026-10-04 on Workspace Test and on Workspace DeepSpace with a repo whose paths are over 260 characters, build .134)
 
 In a test repo commit a file nested deeper than 260 characters (or use a repo with a deep `node_modules`).
 
 - [x] Create a Feature: succeeds (gate4-b on 6 repos, 3.2 s; this is a normal repo, not a deep one)
-- [ ] No "Filename too long" in the Feature status panel
-- [ ] Remove the Feature: succeeds
+- [x] No "Filename too long" in the Feature status panel (deep-path Feature gate4-deep on DeepSpace)
+- [x] Remove the Feature: succeeds (gate4-deep: Remove finished, Outcome=Succeeded, 3.8 s, folder gone)
 - [x] `git config --local core.longpaths` in the primary checkout prints `true` (all 6 repos under C:\Workspace\Test)
 
-Notes: Still yours: a repo with a file path over 260 characters, and the Remove. The automated test GitServiceLongPathsTests covers create and remove with a 260+ character path and passes.
+Notes: Done on the DeepSpace test repo (Deep) with a committed directory tree deeper than 260 characters. core.longpaths=true was set automatically on the primary checkout. The automated test GitServiceLongPathsTests also covers create and remove with a 260+ character path and passes.
 
 ## 8. Workspace edits while a Feature exists
 
@@ -206,15 +206,15 @@ Technical state, checked by the agent:
 | Check | Result |
 |---|---|
 | Build, both repos | Clean, 0 warnings |
-| Tests, GrayMoon repo | Common 234 passed; App 801 passed; Agent 274 passed, 1 skipped on purpose (the GitVersion Feature-branch mismatch, v1.1) |
+| Tests, GrayMoon repo | Common 234 passed; App 812 passed; Agent 279 passed, 1 skipped on purpose (the GitVersion Feature-branch mismatch, v1.1). Run 2026-10-05 |
 | Tests, GrayMoon.Desktop repo | 199 passed |
 | Merge into main | Clean in both repos: main has not moved (GrayMoon is 134 commits ahead, Desktop is 54 ahead), no conflicts |
 | Part F items marked "release blocker" | None |
-| Uncommitted work | Only this file and the `00-README.md` index line |
+| Uncommitted work | The empty-repo and hook-flow fixes with their tests, this file, the `00-README.md` index line, the `06` changelog, and the Desktop README |
 
 What still stands between this branch and the merge (from the tracker in `06`):
 
-- [ ] GATE-4: finish the owner steps in this file (3, 5 reinstall and the two checks after it, 6, 9, the leftovers in 2, 7, 7b, 8). Step 1 is closed (duplicate name refused on Create is accepted)
+- [ ] GATE-4: finish the owner steps in this file (3 Open in..., 5 reinstall and the two checks after it, 8 connector delete and the last two lines, 9 Linux, 10 WORKSPACE-SMOKE) and the retest of the empty-repo fix on a new build. Steps 1, 2, 6, 7 and 7b are closed (agent-checked live on Workspace DeepSpace)
 - [ ] R1: user guide, troubleshooting (with the downgrade note), operations, changelog, "superseded" banners on the old design docs (starts after GATE-4)
 - [ ] R4: full regression run, checklist walk, then Publish-GrayMoonBundle.ps1 (final task, runs once)
 - [ ] GATE-5: release candidate sign-off, including WORKSPACE-SMOKE on the release build
@@ -234,7 +234,7 @@ Needs a build that contains the fix, then:
 - [ ] Push the commit, Sync: still blue, default branch shows `main`
 - [ ] Worker log: the GitVersion failure is a Warning, not an Error
 
-Notes: (your results here)
+Notes: (your results here) Agent check on the old build .134, Workspace DeepSpace (Deep): the Sync button went red to blue as soon as `main` was pushed, which confirms the root cause (an empty remote has no default branch). Bullets 1 to 4 will only be fully visible on a build with the fix.
 
 ---
 
@@ -243,7 +243,7 @@ Notes: (your results here)
 Not part of the plan's gate. While doing steps 7b and 8, watch the App log.
 
 - [x] `Feature Create started` and `finished ... Outcome=Succeeded`, with `DurationMs` (21:49: started, six per-repo Debug lines, finished DurationMs=3242)
-- [ ] `Feature Remove started` and `finished ... Outcome=Succeeded` (not run: gate4-b is still there)
+- [x] `Feature Remove started` and `finished ... Outcome=Succeeded` (DeepSpace: gate4-deep 3.8 s, gate4-br 5.4 s; Create of gate4-br 0.8 s)
 
 Notes:
 
@@ -251,7 +251,13 @@ Notes:
 
 | # | Step | What I saw | Severity (blocker / v1.1) |
 |---|---|---|---|
-| | | | |
+| A | 7b / empty repo | Red Sync button after a successful sync of an empty remote; GitVersion error wiped the branch | Fixed in code, needs retest on a new build |
+| B | 7b / 6 | GitVersion crashes on paths over 260 characters (LibGit2Sharp), including in the commit-hook flow, which lost the branch | Fixed in code (branch fallback, red `unresolved`), needs retest on a new build. The GitVersion tool itself ignores `core.longpaths`: v1.1 |
+| C | 6 | Hook notification carries no remote branch list, so an empty-remote repo flipped back to NeedsSync after a terminal commit | Fixed in code, with a test |
+| D | 7 | A new Feature's branch shows in the Workspace Locals list only after a Sync | v1.1 |
+| E | 2 | Merge dialog showed "1 uncommitted change" for a clean Feature worktree (stale Git Changes snapshot after a terminal commit; informational only, needs "Merge anyway") | v1.1 |
+| F | log | Once, a unique-constraint error inserting the Git Changes snapshot (`WorkspaceGitContextRepositoryStatuses`), caught and not user visible: two writers race in `GitChangesSnapshotPushHandler` (probably also the cause of E) | v1.1, non-blocking |
+| G | 2 | After Remove with "Delete remote Feature branches", the Workspace repo still lists `origin/gate4-br` until a fetch with prune | v1.1 |
 
 ## Final result
 
