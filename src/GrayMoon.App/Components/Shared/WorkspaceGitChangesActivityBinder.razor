@@ -2,7 +2,7 @@
 @inject NavigationManager NavigationManager
 @inject WorkspaceGitChangesRouteActivity RouteActivity
 @* No markup - mounted once per circuit (MainLayout.razor) so any /workspaces/{id}/... page keeps
-   Git Changes activity (and Agent watchers) warm without page-level activation leases. *@
+   Git Changes activity (and Worker watchers) warm without page-level activation leases. *@
 
 @code {
     protected override void OnInitialized()

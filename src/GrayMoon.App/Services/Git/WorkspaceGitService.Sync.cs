@@ -1,5 +1,5 @@
 using System.Collections.Concurrent;
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.Abstractions.Exceptions;
 using GrayMoon.Abstractions.Notifications;
 using GrayMoon.App.Data;
@@ -7,7 +7,7 @@ using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
-using GrayMoon.App.Services.Agent;
+using GrayMoon.App.Services.Worker;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using GrayMoon.Application.Features;
@@ -25,8 +25,8 @@ public sealed partial class WorkspaceGitService
         bool skipDependencyLevelPersistence = false,
         CancellationToken cancellationToken = default)
     {
-        if (!_agentBridge.IsAgentConnected)
-            throw new AgentNotConnectedException();
+        if (!_workerBridge.IsWorkerConnected)
+            throw new WorkerNotConnectedException();
 
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)
@@ -34,7 +34,7 @@ public sealed partial class WorkspaceGitService
 
         var configuredRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
         await _workspaceService.CreateDirectoryAsync(workspace.Name, configuredRoot, cancellationToken);
-        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
 
         var repos = workspace.Repositories
             .Select(link => link.Repository)
@@ -80,7 +80,7 @@ public sealed partial class WorkspaceGitService
                     workspaceRoot,
                     divergenceBaseBranch
                 };
-                var response = await _agentBridge.SendCommandAsync("SyncRepository", args, cancellationToken);
+                var response = await _workerBridge.SendCommandAsync("SyncRepository", args, cancellationToken);
                 var info = ParseSyncRepositoryResponse(response);
                 var count = Interlocked.Increment(ref completedCount);
                 onProgress?.Invoke(count, totalCount, repo.RepositoryId, info);
@@ -144,10 +144,10 @@ public sealed partial class WorkspaceGitService
         if (workspace == null)
             return (false, "Workspace not found.");
 
-        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
         var divergenceByRepoId = await GetDivergenceBaseBranchesByRepositoryIdAsync(contextId, cancellationToken);
         divergenceByRepoId.TryGetValue(repo.RepositoryId, out var divergenceBaseBranch);
-        var response = await _agentBridge.SendCommandAsync("RefreshRepositoryVersion", new
+        var response = await _workerBridge.SendCommandAsync("RefreshRepositoryVersion", new
         {
             workspaceName = workspaceFolderName,
             repositoryName = repo.RepositoryName,
@@ -198,14 +198,14 @@ public sealed partial class WorkspaceGitService
         if (workspaceRepos.Count == 0)
             return result;
 
-        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
         foreach (var wr in workspaceRepos)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var repo = wr.Repository;
             if (repo == null) continue;
 
-            var response = await _agentBridge.SendCommandAsync("GetRepositoryVersion", new { workspaceName = workspaceFolderName, repositoryName = repo.RepositoryName, workspaceRoot }, cancellationToken);
+            var response = await _workerBridge.SendCommandAsync("GetRepositoryVersion", new { workspaceName = workspaceFolderName, repositoryName = repo.RepositoryName, workspaceRoot }, cancellationToken);
             RepoSyncStatus status;
             if (!response.Success || response.Data == null)
                 status = RepoSyncStatus.Error;
@@ -332,14 +332,14 @@ public sealed partial class WorkspaceGitService
         if (links.Count == 0)
             return;
 
-        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspaceId, contextId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspaceId, contextId, cancellationToken);
         foreach (var link in links)
         {
             var repoName = link.Repository?.RepositoryName;
             if (string.IsNullOrWhiteSpace(repoName))
                 continue;
 
-            var response = await _agentBridge.SendCommandAsync(
+            var response = await _workerBridge.SendCommandAsync(
                 "GetGitVersionAtDefaultTip",
                 new { workspaceName = workspaceFolderName, repositoryName = repoName, workspaceRoot },
                 cancellationToken);
@@ -351,7 +351,7 @@ public sealed partial class WorkspaceGitService
                 continue;
             }
 
-            var payload = AgentResponseJson.DeserializeAgentResponse<DefaultTipVersionAgentResponse>(response.Data);
+            var payload = WorkerResponseJson.DeserializeWorkerResponse<DefaultTipVersionWorkerResponse>(response.Data);
             if (payload is not { Success: true } || string.IsNullOrWhiteSpace(payload.Version))
             {
                 _logger.LogDebug(
@@ -380,7 +380,7 @@ public sealed partial class WorkspaceGitService
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    private sealed class DefaultTipVersionAgentResponse
+    private sealed class DefaultTipVersionWorkerResponse
     {
         [System.Text.Json.Serialization.JsonPropertyName("success")]
         public bool Success { get; set; }

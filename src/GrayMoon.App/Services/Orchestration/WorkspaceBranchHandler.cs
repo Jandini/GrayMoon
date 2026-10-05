@@ -312,7 +312,7 @@ public sealed class WorkspaceBranchHandler(
     }
 
     private static BranchesResponse? TryReadRefreshBody(object? body)
-        => body as BranchesResponse ?? AgentResponseJson.DeserializeAgentResponse<BranchesResponse>(body);
+        => body as BranchesResponse ?? WorkerResponseJson.DeserializeWorkerResponse<BranchesResponse>(body);
 }
 
 public sealed record WorkspaceBranchBulkResult(

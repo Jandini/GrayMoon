@@ -17,21 +17,21 @@ if (-not $isAdmin) {
     return 1
 }
 
-$agentPath = Join-Path $env:ProgramFiles 'GrayMoon'
-$agentExe  = Join-Path $agentPath 'graymoon-worker.exe'
+$workerPath = Join-Path $env:ProgramFiles 'GrayMoon'
+$workerExe  = Join-Path $workerPath 'graymoon-worker.exe'
 
-if (Test-Path -LiteralPath $agentExe) {
+if (Test-Path -LiteralPath $workerExe) {
     Write-Host 'Removing service...' -ForegroundColor Yellow
-    & $agentExe uninstall
+    & $workerExe uninstall
     if ($LASTEXITCODE -ne 0) {
         Write-Host 'ERROR: Worker uninstall failed.' -ForegroundColor Red
         return
     }
 }
 
-if (Test-Path -LiteralPath $agentPath) {
+if (Test-Path -LiteralPath $workerPath) {
     Write-Host 'Removing installation directory...' -ForegroundColor Yellow
-    Remove-Item -LiteralPath $agentPath -Recurse -Force -ErrorAction Stop
+    Remove-Item -LiteralPath $workerPath -Recurse -Force -ErrorAction Stop
     Write-Host 'Installation directory removed.' -ForegroundColor Green
 }
 

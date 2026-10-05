@@ -28,12 +28,12 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
     [Inject] private IWorkspaceGitChangesReadService ReadService { get; set; } = default!;
     [Inject] private IWorkspaceGitChangesOperations GitChangesOperations { get; set; } = default!;
-    [Inject] private IGitChangesAgentClient AgentClient { get; set; } = default!;
+    [Inject] private IGitChangesWorkerClient WorkerClient { get; set; } = default!;
     [Inject] private GitChangesSnapshotPushHandler SnapshotPushHandler { get; set; } = default!;
     [Inject] private IDbContextFactory<AppDbContext> DbContextFactory { get; set; } = default!;
     [Inject] private WorkspaceService WorkspaceService { get; set; } = default!;
     [Inject] private IWorkspaceContextPathResolver PathResolver { get; set; } = default!;
-    [Inject] private IAgentBridge AgentBridge { get; set; } = default!;
+    [Inject] private IWorkerBridge WorkerBridge { get; set; } = default!;
     [Inject] private IToastService ToastService { get; set; } = default!;
     [Inject] private NavigationManager NavigationManager { get; set; } = default!;
     [Inject] private ILogger<WorkspaceGitChanges> Logger { get; set; } = default!;
@@ -163,7 +163,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     /// Runs the initial (or workspace-switch) load inline instead of a background job, so opening this
     /// page (including re-opening it with a remembered file selection) never shows the
     /// BackgroundJobOverlay's "Loading changes..." LoadingOverlay - the tree itself renders as soon as
-    /// the persisted projection is read, which is fast since it never sends an Agent command.
+    /// the persisted projection is read, which is fast since it never sends a Worker command.
     /// </summary>
     private void StartInitialLoadJob()
     {
@@ -175,7 +175,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         _initialLoadTask = LoadAsync();
     }
 
-    // Reads the persisted SQLite projection only - never sends an Agent command. Opening or reloading
+    // Reads the persisted SQLite projection only - never sends a Worker command. Opening or reloading
     // this page must never trigger a status scan.
     private async Task LoadAsync()
     {
@@ -215,8 +215,8 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             StateHasChanged();
         }
 
-        // Restoring a remembered file selection re-fetches its diff from the Agent, which can be slow
-        // (and, unlike the tree read above, is a real Agent command) - it must never gate the tree
+        // Restoring a remembered file selection re-fetches its diff from the Worker, which can be slow
+        // (and, unlike the tree read above, is a real Worker command) - it must never gate the tree
         // render above. TryRestoreSelectionAsync only does work when this page instance has no
         // selection yet (first load / workspace switch); later reloads triggered by Refresh or a
         // mutation already have a selection and return immediately.
@@ -236,7 +236,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     /// </summary>
     private void ManualRefreshAsync()
     {
-        if (!AgentBridge.IsAgentConnected)
+        if (!WorkerBridge.IsWorkerConnected)
         {
             ToastService.ShowError("Worker not connected. Start the GrayMoon Worker and try again.");
             return;
@@ -256,7 +256,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     {
         get
         {
-            if (AgentBridge.IsAgentConnected)
+            if (WorkerBridge.IsWorkerConnected)
             {
                 return null;
             }
@@ -367,7 +367,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
                 return;
             }
 
-            // Diff failed (agent offline, path gone after an external commit, etc.) - drop auto-selection
+            // Diff failed (worker offline, path gone after an external commit, etc.) - drop auto-selection
             // so the page stays on the empty "Select a file" placeholder instead of a stuck error pane.
             if (_diffError != null || _selectedDiff == null)
             {
@@ -614,7 +614,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
     private Task RunRepositoryScopedMutationJobAsync(int workspaceRepositoryId, bool isStage)
     {
-        if (!AgentBridge.IsAgentConnected)
+        if (!WorkerBridge.IsWorkerConnected)
         {
             ToastService.ShowError("Worker not connected. Start the GrayMoon Worker and try again.");
             return Task.CompletedTask;
@@ -654,7 +654,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
     private async Task RunMutationAsync(int workspaceRepositoryId, string rowKey, bool isDiscard, Func<string, string, string, int, Task> action)
     {
-        if (!AgentBridge.IsAgentConnected)
+        if (!WorkerBridge.IsWorkerConnected)
         {
             ToastService.ShowError("Worker not connected. Start the GrayMoon Worker and try again.");
             return;
@@ -695,7 +695,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     }
 
     /// <summary>
-    /// Persists a mutation's returned snapshot through the same handler used for Agent-pushed
+    /// Persists a mutation's returned snapshot through the same handler used for Worker-pushed
     /// snapshots, so stage/unstage/commit never create a separate optimistic front-end truth - the tree
     /// always re-renders from the persisted SQLite projection, reloaded once the write completes.
     /// <paramref name="reload"/> is false for multi-repository fan-out, which reloads once after every
@@ -754,7 +754,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             return null;
         }
 
-        var (root, folderName) = await PathResolver.GetAgentWorkspaceArgsAsync(_selectedContextId.Value);
+        var (root, folderName) = await PathResolver.GetWorkerWorkspaceArgsAsync(_selectedContextId.Value);
         return string.IsNullOrWhiteSpace(root) ? null : (root, folderName, link.Repository.RepositoryName, link.RepositoryId);
     }
 

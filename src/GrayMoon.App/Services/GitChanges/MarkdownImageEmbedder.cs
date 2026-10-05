@@ -12,7 +12,7 @@ namespace GrayMoon.App.Services.GitChanges;
 /// Rewrites relative (and remote) markdown image <c>src</c> values to data URIs so Preview can render
 /// them inside the App (no repository filesystem access; WebView2 also has no GitHub session cookies).
 /// </summary>
-public sealed class MarkdownImageEmbedder(IAgentBridge agentBridge, IHttpClientFactory httpClientFactory, ILogger<MarkdownImageEmbedder> logger)
+public sealed class MarkdownImageEmbedder(IWorkerBridge workerBridge, IHttpClientFactory httpClientFactory, ILogger<MarkdownImageEmbedder> logger)
 {
     private const int MaxImages = 24;
     private const long MaxRemoteBytes = 2 * 1024 * 1024;
@@ -154,7 +154,7 @@ public sealed class MarkdownImageEmbedder(IAgentBridge agentBridge, IHttpClientF
 
         try
         {
-            var resp = await agentBridge.SendCommandAsync(
+            var resp = await workerBridge.SendCommandAsync(
                 "GetFileContents",
                 new
                 {
@@ -171,7 +171,7 @@ public sealed class MarkdownImageEmbedder(IAgentBridge agentBridge, IHttpClientF
                 return null;
             }
 
-            var result = AgentResponseJson.DeserializeAgentResponse<AgentGetFileContentsResponse>(resp.Data);
+            var result = WorkerResponseJson.DeserializeWorkerResponse<WorkerGetFileContentsResponse>(resp.Data);
             if (result?.ErrorMessage != null || string.IsNullOrEmpty(result?.ContentBase64))
             {
                 return null;

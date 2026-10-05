@@ -395,7 +395,7 @@ public sealed class DependencyUpdateOrchestrator(
         string? commitMessageOverride = null,
         string? runId = null)
     {
-        // Only call agent for repos that actually have out-of-date version files.
+        // Only call worker for repos that actually have out-of-date version files.
         var fileRepoIds = outOfDateFileRepoIds.Count > 0
             ? (IReadOnlySet<int>)selectedRepositoryIds.Intersect(outOfDateFileRepoIds).ToHashSet()
             : (IReadOnlySet<int>)new HashSet<int>();

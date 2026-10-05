@@ -28,7 +28,7 @@ public sealed partial class WorkspaceGitChanges
     /// </summary>
     private void RunSelectedSectionMutationAsync(bool unstage)
     {
-        if (!AgentBridge.IsAgentConnected)
+        if (!WorkerBridge.IsWorkerConnected)
         {
             ToastService.ShowError("Worker not connected. Start the GrayMoon Worker and try again.");
             return;

@@ -85,7 +85,7 @@ public sealed class FeatureBranchGuardTests
 
         Assert.Equal(400, outcome.StatusCode);
         Assert.Contains(FeatureName, outcome.ErrorText);
-        Assert.Empty(ctx.AgentBridge.Calls);
+        Assert.Empty(ctx.WorkerBridge.Calls);
     }
 
     [Fact]
@@ -93,14 +93,14 @@ public sealed class FeatureBranchGuardTests
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
         var featureContext = await SeedFeatureAsync(ctx, pinnedTag: null);
-        ctx.AgentBridge.Respond("CheckoutBranch", new CheckoutBranchResponse { Success = true, CurrentBranch = FeatureName });
+        ctx.WorkerBridge.Respond("CheckoutBranch", new CheckoutBranchResponse { Success = true, CurrentBranch = FeatureName });
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceBranchOperations>();
 
         var outcome = await ops.CheckoutAsync(ctx.WorkspaceId, featureContext, ctx.RepositoryId, "origin/" + FeatureName, isTag: false);
 
         Assert.True(outcome.IsSuccessStatus);
-        Assert.Single(ctx.AgentBridge.Calls, c => c.Command == "CheckoutBranch");
+        Assert.Single(ctx.WorkerBridge.Calls, c => c.Command == "CheckoutBranch");
     }
 
     [Fact]
@@ -118,7 +118,7 @@ public sealed class FeatureBranchGuardTests
         Assert.Equal(FeatureBranchPolicy.CreateBranchMessage, create.ErrorText);
         Assert.Equal(400, back.StatusCode);
         Assert.Equal(FeatureBranchPolicy.ReturnToDefaultMessage, back.ErrorText);
-        Assert.Empty(ctx.AgentBridge.Calls);
+        Assert.Empty(ctx.WorkerBridge.Calls);
     }
 
     [Fact]
@@ -126,7 +126,7 @@ public sealed class FeatureBranchGuardTests
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
         var featureContext = await SeedFeatureAsync(ctx, pinnedTag: "1.0.0");
-        ctx.AgentBridge.Respond("CheckoutTag", new CheckoutTagResponse { Success = true, CurrentTag = "2.0.0" });
+        ctx.WorkerBridge.Respond("CheckoutTag", new CheckoutTagResponse { Success = true, CurrentTag = "2.0.0" });
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceBranchOperations>();
 
@@ -142,7 +142,7 @@ public sealed class FeatureBranchGuardTests
     public async Task Workspace_checkout_still_reaches_the_Worker_with_the_same_arguments()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        ctx.AgentBridge.Respond("CheckoutBranch", new CheckoutBranchResponse { Success = true, CurrentBranch = "release/1" });
+        ctx.WorkerBridge.Respond("CheckoutBranch", new CheckoutBranchResponse { Success = true, CurrentBranch = "release/1" });
         var special = await ctx.GetSpecialContextIdAsync();
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceBranchOperations>();
@@ -150,7 +150,7 @@ public sealed class FeatureBranchGuardTests
         var outcome = await ops.CheckoutAsync(ctx.WorkspaceId, special, ctx.RepositoryId, "origin/release/1", isTag: false);
 
         Assert.True(outcome.IsSuccessStatus);
-        var call = Assert.Single(ctx.AgentBridge.Calls, c => c.Command == "CheckoutBranch");
+        var call = Assert.Single(ctx.WorkerBridge.Calls, c => c.Command == "CheckoutBranch");
         Assert.Equal("release/1", ReadArg(call.Args, "branchName"));
         Assert.Equal("graymoon-api", ReadArg(call.Args, "repositoryName"));
     }
@@ -159,7 +159,7 @@ public sealed class FeatureBranchGuardTests
     public async Task Workspace_create_branch_still_reaches_the_Worker_with_the_same_arguments()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        ctx.AgentBridge.Respond("CreateBranch", new CreateBranchResponse { Success = true, CurrentBranch = "topic" });
+        ctx.WorkerBridge.Respond("CreateBranch", new CreateBranchResponse { Success = true, CurrentBranch = "topic" });
         var special = await ctx.GetSpecialContextIdAsync();
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceBranchOperations>();
@@ -167,7 +167,7 @@ public sealed class FeatureBranchGuardTests
         var outcome = await ops.CreateBranchAsync(ctx.WorkspaceId, special, ctx.RepositoryId, "topic", "release/1");
 
         Assert.True(outcome.IsSuccessStatus);
-        var call = Assert.Single(ctx.AgentBridge.Calls, c => c.Command == "CreateBranch");
+        var call = Assert.Single(ctx.WorkerBridge.Calls, c => c.Command == "CreateBranch");
         Assert.Equal("topic", ReadArg(call.Args, "newBranchName"));
         Assert.Equal("release/1", ReadArg(call.Args, "baseBranchName"));
     }
@@ -176,7 +176,7 @@ public sealed class FeatureBranchGuardTests
     public async Task Workspace_return_to_default_still_reaches_the_Worker()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        ctx.AgentBridge.Respond("ReturnToDefaultBranch", new ReturnToDefaultBranchResponse
+        ctx.WorkerBridge.Respond("ReturnToDefaultBranch", new ReturnToDefaultBranchResponse
         {
             Success = true,
             CurrentBranch = "main",
@@ -193,7 +193,7 @@ public sealed class FeatureBranchGuardTests
         var outcome = await ops.ReturnToDefaultAsync(ctx.WorkspaceId, special, ctx.RepositoryId, "feature/x", false, true);
 
         Assert.True(outcome.IsSuccessStatus);
-        var call = Assert.Single(ctx.AgentBridge.Calls, c => c.Command == "ReturnToDefaultBranch");
+        var call = Assert.Single(ctx.WorkerBridge.Calls, c => c.Command == "ReturnToDefaultBranch");
         Assert.True((bool)call.Args.GetType().GetProperty("forceDeleteLocalBranch")!.GetValue(call.Args)!);
     }
 

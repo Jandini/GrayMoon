@@ -13,11 +13,11 @@ namespace GrayMoon.App.Services.Orchestration;
 
 /// <summary>
 /// Handles commit-sync (pull) operations for a workspace.
-/// Calls the agent directly so CommandOutput streams to TerminalSinkContext when invoked inside a background job.
+/// Calls the worker directly so CommandOutput streams to TerminalSinkContext when invoked inside a background job.
 /// Stateless; all UI state is provided by the caller via callbacks.
 /// </summary>
 public sealed class WorkspaceCommitSyncHandler(
-    IAgentBridge agentBridge,
+    IWorkerBridge workerBridge,
     WorkspaceRepository workspaceRepository,
     GitHubRepositoryRepository repoRepository,
     ConnectorHealthService connectorHealthService,
@@ -53,7 +53,7 @@ public sealed class WorkspaceCommitSyncHandler(
             return;
         }
 
-        if (!agentBridge.IsAgentConnected)
+        if (!workerBridge.IsWorkerConnected)
         {
             setPageError("Worker not connected. Start the GrayMoon Worker to sync repositories.");
             return;
@@ -62,7 +62,7 @@ public sealed class WorkspaceCommitSyncHandler(
         try
         {
             await connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepositoryId, cancellationToken);
-            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
+            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
             var divergenceBaseBranch = await (
                 from r in dbContext.WorkspaceFeatureRepositories.AsNoTracking()
                 join l in dbContext.WorkspaceRepositories.AsNoTracking()
@@ -81,7 +81,7 @@ public sealed class WorkspaceCommitSyncHandler(
                 divergenceBaseBranch
             };
 
-            var response = await agentBridge.SendCommandAsync("CommitSyncRepository", args, cancellationToken);
+            var response = await workerBridge.SendCommandAsync("CommitSyncRepository", args, cancellationToken);
 
             if (!response.Success)
             {
@@ -93,7 +93,7 @@ public sealed class WorkspaceCommitSyncHandler(
                 return;
             }
 
-            var result = AgentResponseJson.DeserializeAgentResponse<CommitSyncResponse>(response.Data);
+            var result = WorkerResponseJson.DeserializeWorkerResponse<CommitSyncResponse>(response.Data);
             await ApplyResultToDbAsync(dbContext, stateWriter, contextId, workspaceId, repositoryId, result, cancellationToken);
             await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
 
@@ -129,7 +129,7 @@ public sealed class WorkspaceCommitSyncHandler(
         if (repositoryIds.Count == 0)
             return;
 
-        if (!agentBridge.IsAgentConnected)
+        if (!workerBridge.IsWorkerConnected)
         {
             setPageError("Worker not connected. Start the GrayMoon Worker to sync repositories.");
             return;
@@ -142,7 +142,7 @@ public sealed class WorkspaceCommitSyncHandler(
             return;
         }
 
-        var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
         var total = repositoryIds.Count;
         var completedCount = 0;
 
@@ -186,7 +186,7 @@ public sealed class WorkspaceCommitSyncHandler(
                     divergenceBaseBranch
                 };
 
-                var response = await agentBridge.SendCommandAsync("CommitSyncRepository", args, cancellationToken);
+                var response = await workerBridge.SendCommandAsync("CommitSyncRepository", args, cancellationToken);
 
                 if (!response.Success)
                 {
@@ -198,7 +198,7 @@ public sealed class WorkspaceCommitSyncHandler(
                     return;
                 }
 
-                var result = AgentResponseJson.DeserializeAgentResponse<CommitSyncResponse>(response.Data);
+                var result = WorkerResponseJson.DeserializeWorkerResponse<CommitSyncResponse>(response.Data);
                 await ApplyResultToDbAsync(scopedDbContext, scopedStateWriter, contextId, workspaceId, repositoryId, result, cancellationToken);
                 await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
 
@@ -254,8 +254,8 @@ public sealed class WorkspaceCommitSyncHandler(
     }
 
     /// <summary>
-    /// A successful pull moves the branch, so the agent reports the whole count group (including the
-    /// comparison against the default branch) in <see cref="CommitSyncResponse.State"/>. Older agents and
+    /// A successful pull moves the branch, so the worker reports the whole count group (including the
+    /// comparison against the default branch) in <see cref="CommitSyncResponse.State"/>. Older workers and
     /// the failure paths only report outgoing and incoming, so those are mapped as a count-only snapshot
     /// that leaves the rest of the row untouched.
     /// </summary>

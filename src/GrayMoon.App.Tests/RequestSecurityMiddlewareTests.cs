@@ -20,34 +20,37 @@ public class RequestSecurityMiddlewareTests
         => Assert.True(RequestSecurityMiddleware.IsRestPath(path));
 
     [Theory]
-    [InlineData("/hub/agent")]
+    [InlineData("/hub/worker")]
+    [InlineData("/hub/agent")]   // legacy path kept for already-installed Workers
     [InlineData("/hubs/workspace-sync")]
     [InlineData("/_blazor")]
     public void IsRestPath_does_not_match_hub_paths(string path)
         => Assert.False(RequestSecurityMiddleware.IsRestPath(path));
 
-    [Fact]
-    public void IsHubPath_flags_agent_hub_specifically()
+    [Theory]
+    [InlineData("/hub/worker")]
+    [InlineData("/hub/agent")]   // legacy path kept for already-installed Workers
+    public void IsHubPath_flags_worker_hub_specifically(string path)
     {
-        Assert.True(RequestSecurityMiddleware.IsHubPath("/hub/agent", out var isAgentHub));
-        Assert.True(isAgentHub);
+        Assert.True(RequestSecurityMiddleware.IsHubPath(path, out var isWorkerHub));
+        Assert.True(isWorkerHub);
     }
 
     [Theory]
     [InlineData("/hubs/workspace-sync")]
     [InlineData("/hubs/desktop")]
     [InlineData("/_blazor")]
-    public void IsHubPath_matches_other_hubs_without_agent_flag(string path)
+    public void IsHubPath_matches_other_hubs_without_worker_flag(string path)
     {
-        Assert.True(RequestSecurityMiddleware.IsHubPath(path, out var isAgentHub));
-        Assert.False(isAgentHub);
+        Assert.True(RequestSecurityMiddleware.IsHubPath(path, out var isWorkerHub));
+        Assert.False(isWorkerHub);
     }
 
     [Fact]
     public void IsHubPath_does_not_match_rest_paths()
     {
-        Assert.False(RequestSecurityMiddleware.IsHubPath("/api/workspaces", out var isAgentHub));
-        Assert.False(isAgentHub);
+        Assert.False(RequestSecurityMiddleware.IsHubPath("/api/workspaces", out var isWorkerHub));
+        Assert.False(isWorkerHub);
     }
 
     // --- REST rule -------------------------------------------------------------
@@ -146,11 +149,11 @@ public class RequestSecurityMiddlewareTests
     // --- Hub rule ----------------------------------------------------------------
 
     [Fact]
-    public void HubOrigin_any_origin_on_agent_hub_is_blocked()
+    public void HubOrigin_any_origin_on_worker_hub_is_blocked()
     {
         var allowed = RequestSecurityMiddleware.IsHubOriginAllowed(
             origin: "http://localhost:8384",
-            isAgentHub: true,
+            isWorkerHub: true,
             requestHost: "localhost",
             forwardedHost: NoForwardedHost,
             allowedOrigins: NoAllowedOrigins);
@@ -163,7 +166,7 @@ public class RequestSecurityMiddlewareTests
     {
         var allowed = RequestSecurityMiddleware.IsHubOriginAllowed(
             origin: "http://localhost:8384",
-            isAgentHub: false,
+            isWorkerHub: false,
             requestHost: "localhost",
             forwardedHost: NoForwardedHost,
             allowedOrigins: NoAllowedOrigins);
@@ -176,7 +179,7 @@ public class RequestSecurityMiddlewareTests
     {
         var allowed = RequestSecurityMiddleware.IsHubOriginAllowed(
             origin: "http://evil.example.com",
-            isAgentHub: false,
+            isWorkerHub: false,
             requestHost: "localhost",
             forwardedHost: NoForwardedHost,
             allowedOrigins: NoAllowedOrigins);
@@ -259,12 +262,14 @@ public class RequestSecurityMiddlewareTests
         Assert.True(flag.Called);
     }
 
-    [Fact]
-    public async Task Middleware_hub_agent_with_any_origin_is_403()
+    [Theory]
+    [InlineData("/hub/worker")]
+    [InlineData("/hub/agent")]   // legacy path kept for already-installed Workers
+    public async Task Middleware_hub_worker_with_any_origin_is_403(string path)
     {
         var (middleware, flag) = CreateMiddlewareWithFlag();
         var context = new DefaultHttpContext();
-        context.Request.Path = "/hub/agent";
+        context.Request.Path = path;
         context.Request.Method = "GET";
         context.Request.Host = new HostString("localhost");
         context.Request.Headers.Origin = "http://localhost";
@@ -275,12 +280,14 @@ public class RequestSecurityMiddlewareTests
         Assert.Equal(StatusCodes.Status403Forbidden, context.Response.StatusCode);
     }
 
-    [Fact]
-    public async Task Middleware_hub_agent_without_origin_connects()
+    [Theory]
+    [InlineData("/hub/worker")]
+    [InlineData("/hub/agent")]   // legacy path kept for already-installed Workers
+    public async Task Middleware_hub_worker_without_origin_connects(string path)
     {
         var (middleware, flag) = CreateMiddlewareWithFlag();
         var context = new DefaultHttpContext();
-        context.Request.Path = "/hub/agent";
+        context.Request.Path = path;
         context.Request.Method = "GET";
 
         await middleware.InvokeAsync(context);

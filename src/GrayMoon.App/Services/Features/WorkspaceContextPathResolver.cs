@@ -27,9 +27,9 @@ public sealed class WorkspaceContextPathResolver(
         // Prefer persisted root unless it is a drive-root .graymoon path (legacy bug: C:\.graymoon\...).
         // Persisted roots stay put when the global Feature storage setting changes.
         if (!string.IsNullOrWhiteSpace(workspace.ManagedFeatureStorageRoot)
-            && !AgentPath.IsLegacyWindowsDriveRootGraymoonPath(workspace.ManagedFeatureStorageRoot))
+            && !WorkerPath.IsLegacyWindowsDriveRootGraymoonPath(workspace.ManagedFeatureStorageRoot))
         {
-            return AgentPath.Combine(workspace.ManagedFeatureStorageRoot, featureName);
+            return WorkerPath.Combine(workspace.ManagedFeatureStorageRoot, featureName);
         }
 
         var storageRoot = await workspaceService.ResolveFeatureStorageRootPathAsync(
@@ -37,10 +37,10 @@ public sealed class WorkspaceContextPathResolver(
             cancellationToken);
         if (string.IsNullOrWhiteSpace(storageRoot))
             throw new InvalidOperationException(
-                "Feature storage root is not configured. Set it on the Settings page (or connect the Agent so the host user profile can be used as the default).");
+                "Feature storage root is not configured. Set it on the Settings page (or connect the Worker so the host user profile can be used as the default).");
 
-        var derivedFeaturesRoot = AgentPath.Combine(storageRoot, workspace.Name, "features");
-        return AgentPath.Combine(derivedFeaturesRoot, featureName);
+        var derivedFeaturesRoot = WorkerPath.Combine(storageRoot, workspace.Name, "features");
+        return WorkerPath.Combine(derivedFeaturesRoot, featureName);
     }
 
     public async Task<string> GetRepositoryPathAsync(
@@ -73,31 +73,31 @@ public sealed class WorkspaceContextPathResolver(
 
             if (featureRepo is not null && !string.IsNullOrWhiteSpace(featureRepo.WorktreePath))
             {
-                // A Windows Agent/git may persist worktree paths with forward slashes (e.g.
-                // C:/Users/...); AgentPath.Normalize fixes that to '\' while leaving an
+                // A Windows Worker/git may persist worktree paths with forward slashes (e.g.
+                // C:/Users/...); WorkerPath.Normalize fixes that to '\' while leaving an
                 // already-POSIX path (a Linux/macOS Worker) untouched.
-                return AgentPath.Normalize(featureRepo.WorktreePath);
+                return WorkerPath.Normalize(featureRepo.WorktreePath);
             }
         }
 
         var contextRoot = await GetContextRootAsync(contextId, cancellationToken);
-        return AgentPath.Combine(contextRoot, repoName);
+        return WorkerPath.Combine(contextRoot, repoName);
     }
 
-    public async Task<(string AgentWorkspaceRoot, string AgentWorkspaceFolderName)> GetAgentWorkspaceArgsAsync(
+    public async Task<(string WorkerWorkspaceRoot, string WorkerWorkspaceFolderName)> GetWorkerWorkspaceArgsAsync(
         WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken = default)
     {
         var contextRoot = await GetContextRootAsync(contextId, cancellationToken);
-        // The context root is Agent/Worker-host-shaped (Windows or POSIX), which may differ from
+        // The context root is Worker-host-shaped (Windows or POSIX), which may differ from
         // the App's own OS (e.g. App in Linux Docker, Worker on Windows) - never use host Path.*.
-        var folderName = AgentPath.GetFileName(contextRoot);
+        var folderName = WorkerPath.GetFileName(contextRoot);
         if (string.IsNullOrWhiteSpace(folderName))
-            throw new InvalidOperationException($"Cannot derive agent folder name from context root '{contextRoot}'.");
+            throw new InvalidOperationException($"Cannot derive worker folder name from context root '{contextRoot}'.");
 
-        var parent = AgentPath.GetDirectoryName(contextRoot);
+        var parent = WorkerPath.GetDirectoryName(contextRoot);
         if (string.IsNullOrWhiteSpace(parent))
-            throw new InvalidOperationException($"Cannot derive agent parent root from context root '{contextRoot}'.");
+            throw new InvalidOperationException($"Cannot derive worker parent root from context root '{contextRoot}'.");
 
         return (parent, folderName);
     }

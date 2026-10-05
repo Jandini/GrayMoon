@@ -129,7 +129,7 @@ public sealed class RemoveFeatureRepositoryPlan
     public string? WorktreePath { get; init; }
     public bool WorktreeExists { get; init; }
     /// <summary>
-    /// True when the Agent could not confirm the worktree's disk state (not connected, old Worker,
+    /// True when the Worker could not confirm the worktree's disk state (not connected, old Worker,
     /// or InspectWorktree failed). Unknown is distinct from Missing: the folder may still exist.
     /// </summary>
     public bool WorktreeStatusUnknown { get; init; }
@@ -145,12 +145,12 @@ public sealed class RemoveFeatureRepositoryPlan
     public bool LiveStatusEstablished { get; init; }
     public int? OutgoingCommits { get; init; }
     public bool HasUpstream { get; init; }
-    /// <summary>Commits on HEAD not on the default branch, live from the Agent. Null means unknown, never treated as zero.</summary>
+    /// <summary>Commits on HEAD not on the default branch, live from the Worker. Null means unknown, never treated as zero.</summary>
     public int? AheadOfDefault { get; init; }
     public int? PullRequestNumber { get; init; }
     public string? PullRequestState { get; init; }
     public bool? PullRequestMerged { get; init; }
-    /// <summary>True when the worktree is locked (<c>git worktree lock</c>), live from the Agent. False on an older Worker that does not report this (D5).</summary>
+    /// <summary>True when the worktree is locked (<c>git worktree lock</c>), live from the Worker. False on an older Worker that does not report this (D5).</summary>
     public bool IsLocked { get; init; }
     /// <summary>Optional lock reason when <see cref="IsLocked"/> is true.</summary>
     public string? LockReason { get; init; }
@@ -163,7 +163,7 @@ public sealed class RemoveFeatureRepositoryPlan
     /// </summary>
     public string? FeatureBranchName { get; init; }
 
-    /// <summary>Live current branch short name from the Agent; null when detached or unknown.</summary>
+    /// <summary>Live current branch short name from the Worker; null when detached or unknown.</summary>
     public string? CheckedOutBranch { get; init; }
 
     /// <summary>
@@ -173,19 +173,19 @@ public sealed class RemoveFeatureRepositoryPlan
     /// </summary>
     public bool IsOffFeatureBranch { get; init; }
 
-    /// <summary>True when <see cref="FeatureBranchName"/> exists as a ref, live from the Agent. Null when there is no Feature branch to check, or unknown (older Worker).</summary>
+    /// <summary>True when <see cref="FeatureBranchName"/> exists as a ref, live from the Worker. Null when there is no Feature branch to check, or unknown (older Worker).</summary>
     public bool? FeatureBranchExists { get; init; }
 
-    /// <summary>Commits on the Feature branch not on the default branch, live from the Agent. Null means unknown, never treated as zero (09 SB-2).</summary>
+    /// <summary>Commits on the Feature branch not on the default branch, live from the Worker. Null means unknown, never treated as zero (09 SB-2).</summary>
     public int? FeatureBranchAheadOfDefault { get; init; }
 
-    /// <summary>True when the Feature branch has a configured upstream, live from the Agent. Null when unknown.</summary>
+    /// <summary>True when the Feature branch has a configured upstream, live from the Worker. Null when unknown.</summary>
     public bool? FeatureBranchHasUpstream { get; init; }
 
-    /// <summary>Commits on the Feature branch not on its upstream, live from the Agent. Null when unknown.</summary>
+    /// <summary>Commits on the Feature branch not on its upstream, live from the Worker. Null when unknown.</summary>
     public int? FeatureBranchAheadOfUpstream { get; init; }
 
-    /// <summary>SHA of the Feature branch tip, live from the Agent. Used for lease-based remote delete (D4). Null when unknown or missing.</summary>
+    /// <summary>SHA of the Feature branch tip, live from the Worker. Used for lease-based remote delete (D4). Null when unknown or missing.</summary>
     public string? FeatureBranchSha { get; init; }
 
     /// <summary>

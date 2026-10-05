@@ -44,7 +44,7 @@ public static class WorkspaceEndpoints
         return TypedResults.Ok<object>(new { added });
     }
 
-    private static async Task<Results<Ok<AgentSearchFilesResponse>, BadRequest<ProblemDetails>, NotFound>> SearchWorkspaceFiles(
+    private static async Task<Results<Ok<WorkerSearchFilesResponse>, BadRequest<ProblemDetails>, NotFound>> SearchWorkspaceFiles(
         int workspaceId,
         string? pattern,
         string? repositoryName,
@@ -53,10 +53,10 @@ public static class WorkspaceEndpoints
         CancellationToken cancellationToken)
     {
         var contextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
-        var (found, agentConnected, data, error) = await operations.SearchAsync(workspaceId, contextId, pattern, repositoryName, cancellationToken);
+        var (found, workerConnected, data, error) = await operations.SearchAsync(workspaceId, contextId, pattern, repositoryName, cancellationToken);
         if (!found)
             return TypedResults.NotFound();
-        if (!agentConnected || data == null)
+        if (!workerConnected || data == null)
             return TypedResults.BadRequest(new ProblemDetails { Title = error ?? "Search failed." });
         return TypedResults.Ok(data);
     }

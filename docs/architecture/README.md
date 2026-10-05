@@ -2,7 +2,7 @@
 
 **State documented:** GrayMoon with worktree-backed Features  
 **Code baseline reviewed through:** `b10994375a8fd7711a92e34dc4f82070e992ea46` (original set); Feature updates reviewed against `a06fe3344b4bfe10f282fd667b39fdcbd56f41fc`  
-**Runtime:** .NET 10, ASP.NET Core / Blazor Server, EF Core 10, SQLite, GrayMoon.Agent .NET 10
+**Runtime:** .NET 10, ASP.NET Core / Blazor Server, EF Core 10, SQLite, GrayMoon.Worker .NET 10
 
 This folder is the current-state architecture reference for GrayMoon.
 
@@ -43,7 +43,7 @@ The worktree Feature design and review notes under `docs/worktree/` are historic
 
 ## GrayMoon in one paragraph
 
-GrayMoon is a control plane for multi-repository .NET development. A Workspace groups related Git repositories, discovers their projects and package relationships, calculates dependency levels, coordinates branch and Git operations across them, updates package and configured-file versions, restores and pushes in dependency order, tracks pull requests and GitHub Actions, and provides a multi-repository Git Changes experience. GrayMoon.App owns orchestration and persisted state. GrayMoon.Agent (the Worker, executable `graymoon-worker`) runs on the developer machine and owns all local Git and filesystem work.
+GrayMoon is a control plane for multi-repository .NET development. A Workspace groups related Git repositories, discovers their projects and package relationships, calculates dependency levels, coordinates branch and Git operations across them, updates package and configured-file versions, restores and pushes in dependency order, tracks pull requests and GitHub Actions, and provides a multi-repository Git Changes experience. GrayMoon.App owns orchestration and persisted state. GrayMoon.Worker (the Worker, executable `graymoon-worker`) runs on the developer machine and owns all local Git and filesystem work.
 
 ## The most important architecture rule
 
@@ -56,10 +56,10 @@ flowchart TB
     Orch["Orchestration"]
     DB["SQLite"]
     GH["GitHub / connectors"]
-    Hub["AgentHub + WorkspaceSyncHub<br/>(+ DesktopNotificationHub in Desktop mode)"]
+    Hub["WorkerHub + WorkspaceSyncHub<br/>(+ DesktopNotificationHub in Desktop mode)"]
   end
 
-  subgraph AgentSide["GrayMoon.Agent"]
+  subgraph WorkerSide["GrayMoon.Worker"]
     Git["Local Git"]
     FS["Filesystem"]
     GV["GitVersion"]

@@ -161,6 +161,8 @@ public partial class AppDbContext
             entity.Property(s => s.HeadCommit).HasMaxLength(64);
             entity.Property(s => s.LastErrorCode).HasMaxLength(100);
             entity.Property(s => s.LastErrorMessage).HasMaxLength(2000);
+            // Persisted column name predates the Agent -> Worker rename; do not change it (existing databases).
+            entity.Property(s => s.WorkerScannedAt).HasColumnName("AgentScannedAt");
             entity.HasOne(s => s.WorkspaceFeatureContext)
                 .WithMany()
                 .HasForeignKey(s => s.WorkspaceFeatureContextId)

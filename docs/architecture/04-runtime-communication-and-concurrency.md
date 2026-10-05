@@ -9,11 +9,11 @@ Conceptually:
 ```mermaid
 sequenceDiagram
   participant UI as Blazor / application operation
-  participant Bridge as AgentBridge
-  participant Hub as AgentHub
-  participant Queue as Agent command queue
+  participant Bridge as WorkerBridge
+  participant Hub as WorkerHub
+  participant Queue as Worker command queue
   participant Handler as typed command handler
-  participant Delivery as AgentResponseDelivery
+  participant Delivery as WorkerResponseDelivery
 
   UI->>Bridge: SendCommandAsync
   Bridge->>Hub: RequestCommand(requestId, name, JSON)
@@ -48,7 +48,7 @@ flowchart LR
   Diff -.-> Cap
 ```
 
-Routing is by command name in `SignalRConnectionHostedService` (`ReadOnlyCommands`, `DiffCommands`); everything else goes to the main pool. Defaults: main `ProcessorCount * 2`, read 8, diff 4 (`AgentOptions`).
+Routing is by command name in `SignalRConnectionHostedService` (`ReadOnlyCommands`, `DiffCommands`); everything else goes to the main pool. Defaults: main `ProcessorCount * 2`, read 8, diff 4 (`WorkerOptions`).
 
 This isolation matters.
 
@@ -149,7 +149,7 @@ sequenceDiagram
   participant Dev as IDE / CLI
   participant Hook as Git hook
   participant Listen as HookListenerHostedService
-  participant Agent as Agent notify job
+  participant Worker as Worker notify job
   participant App as SyncCommandHandler
   participant Writer as WorkspaceRepositoryStateWriter
   participant Hub as WorkspaceSyncHub
@@ -157,8 +157,8 @@ sequenceDiagram
 
   Dev->>Hook: commit / checkout / merge / push
   Hook->>Listen: HTTP POST loopback
-  Listen->>Agent: notify job
-  Agent->>App: SignalR SyncCommand
+  Listen->>Worker: notify job
+  Worker->>App: SignalR SyncCommand
   App->>Writer: partial persist
   Writer->>Hub: broadcast
   Hub->>Browser: reload persisted state
@@ -265,7 +265,7 @@ When the snapshot returns:
 
 ```mermaid
 flowchart LR
-  A["Agent snapshot"] --> B["App write queue"]
+  A["Worker snapshot"] --> B["App write queue"]
   B --> C["SQLite"]
   C --> D["ContextGitChangesUpdated broadcast"]
   D --> E["page re-reads"]

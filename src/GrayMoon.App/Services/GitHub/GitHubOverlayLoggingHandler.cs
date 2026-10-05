@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 
 namespace GrayMoon.App.Services.GitHub;
 
@@ -36,7 +36,7 @@ internal sealed partial class GitHubOverlayLoggingHandler : DelegatingHandler
         var method = request.Method.Method;
         var path = SafePath(request.RequestUri);
 
-        TryAppend(AgentCommandStreamKind.Stdout, $"-> {method} {path}");
+        TryAppend(WorkerCommandStreamKind.Stdout, $"-> {method} {path}");
 
         try
         {
@@ -45,8 +45,8 @@ internal sealed partial class GitHubOverlayLoggingHandler : DelegatingHandler
 
             // 304 is a cache hit, not an error; IsSuccessStatusCode is 2xx-only.
             var responseKind = (int)response.StatusCode < 400
-                ? AgentCommandStreamKind.CommandLine
-                : AgentCommandStreamKind.Stderr;
+                ? WorkerCommandStreamKind.CommandLine
+                : WorkerCommandStreamKind.Stderr;
 
             // Append the status line immediately - this fires Changed so Blazor gets a render slot
             // before the caller's continuation (which often closes the overlay) runs.
@@ -56,7 +56,7 @@ internal sealed partial class GitHubOverlayLoggingHandler : DelegatingHandler
             // the status line above has a chance to render before the overlay is dismissed.
             var bodyPreview = await TryReadBodyPreviewAsync(response, cancellationToken);
             if (!string.IsNullOrEmpty(bodyPreview))
-                TryAppend(AgentCommandStreamKind.CommandLine, $"   {bodyPreview}");
+                TryAppend(WorkerCommandStreamKind.CommandLine, $"   {bodyPreview}");
 
             return response;
         }
@@ -68,7 +68,7 @@ internal sealed partial class GitHubOverlayLoggingHandler : DelegatingHandler
         {
             sw.Stop();
             TryAppend(
-                AgentCommandStreamKind.Stderr,
+                WorkerCommandStreamKind.Stderr,
                 $"<- FAILED {ex.GetType().Name} ({sw.ElapsedMilliseconds}ms)");
             throw;
         }
@@ -134,7 +134,7 @@ internal sealed partial class GitHubOverlayLoggingHandler : DelegatingHandler
         return false;
     }
 
-    private void TryAppend(AgentCommandStreamKind kind, string text)
+    private void TryAppend(WorkerCommandStreamKind kind, string text)
     {
         try
         {

@@ -6,7 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace GrayMoon.App.Tests;
 
 /// <summary>
-/// Characterisation tests for the agent hook flow. These pin the semantics the grid depends on:
+/// Characterisation tests for the worker hook flow. These pin the semantics the grid depends on:
 /// tag pinning wipes the branch-scoped badge fields, a real branch clears the tag fields, and
 /// both the per-repository and workspace-level broadcasts fire.
 /// </summary>

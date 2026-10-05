@@ -1,5 +1,5 @@
 using System.Collections.Concurrent;
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.Abstractions.Exceptions;
 using GrayMoon.Abstractions.Notifications;
 using GrayMoon.App.Data;
@@ -14,7 +14,7 @@ using Microsoft.EntityFrameworkCore;
 namespace GrayMoon.App.Services.Git;
 
 public sealed partial class WorkspaceGitService(
-    IAgentBridge agentBridge,
+    IWorkerBridge workerBridge,
     WorkspaceService workspaceService,
     WorkspaceRepository workspaceRepository,
     GitHubRepositoryRepository repositoryRepository,
@@ -36,7 +36,7 @@ public sealed partial class WorkspaceGitService(
     ConnectorHealthService? connectorHealthService = null,
     WorkspaceFileVersionService? fileVersionService = null)
 {
-    private readonly IAgentBridge _agentBridge = agentBridge ?? throw new ArgumentNullException(nameof(agentBridge));
+    private readonly IWorkerBridge _workerBridge = workerBridge ?? throw new ArgumentNullException(nameof(workerBridge));
     private readonly WorkspaceService _workspaceService = workspaceService ?? throw new ArgumentNullException(nameof(workspaceService));
     private readonly WorkspaceRepository _workspaceRepository = workspaceRepository ?? throw new ArgumentNullException(nameof(workspaceRepository));
     private readonly GitHubRepositoryRepository _repositoryRepository = repositoryRepository ?? throw new ArgumentNullException(nameof(repositoryRepository));

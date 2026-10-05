@@ -159,7 +159,7 @@
     private ElementReference searchInputRef;
     private string searchPattern = "";
     private string? selectedRepositoryName;
-    private AgentSearchFilesResponse? searchResults;
+    private WorkerSearchFilesResponse? searchResults;
     private string? searchError;
     private bool isSearching;
     private HashSet<(string RepositoryName, string FilePath)> selectedKeys = new();
@@ -212,7 +212,7 @@
                 if (trimmed == "*")
                 {
                     searchError = "Enter a file name or pattern. Searching all files is not allowed.";
-                    searchResults = new AgentSearchFilesResponse { Files = new List<AgentSearchFileItemDto>() };
+                    searchResults = new WorkerSearchFilesResponse { Files = new List<WorkerSearchFileItemDto>() };
                 }
                 else
                 {
@@ -265,19 +265,19 @@
             if (data != null)
             {
                 searchResults = data;
-                if (searchResults?.Files == null) searchResults = new AgentSearchFilesResponse { Files = new List<AgentSearchFileItemDto>() };
+                if (searchResults?.Files == null) searchResults = new WorkerSearchFilesResponse { Files = new List<WorkerSearchFileItemDto>() };
             }
             else
             {
                 searchError = "Search failed. Is the worker running?";
-                searchResults = new AgentSearchFilesResponse { Files = new List<AgentSearchFileItemDto>() };
+                searchResults = new WorkerSearchFilesResponse { Files = new List<WorkerSearchFileItemDto>() };
             }
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "File search failed");
             searchError = ex.Message;
-            searchResults = new AgentSearchFilesResponse { Files = new List<AgentSearchFileItemDto>() };
+            searchResults = new WorkerSearchFilesResponse { Files = new List<WorkerSearchFileItemDto>() };
         }
         finally
         {

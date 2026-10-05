@@ -43,7 +43,7 @@ public sealed class WorkspacePendingActionsService
         _notifications.RemoveAll(n => n.WorkspaceId == workspaceId);
         Changed?.Invoke();
     }
-    /// <summary>Reloads the workspace's current repository links and recomputes the notification for it immediately, so callers that just changed repository membership (e.g. removing a repository from a workspace) don't have to wait for the next Agent-driven WorkspaceSynced hub event.</summary>
+    /// <summary>Reloads the workspace's current repository links and recomputes the notification for it immediately, so callers that just changed repository membership (e.g. removing a repository from a workspace) don't have to wait for the next Worker-driven WorkspaceSynced hub event.</summary>
     public async Task RefreshAsync(int workspaceId, WorkspaceRepository workspaceRepository, WorkspaceProjectRepository workspaceProjectRepository)
     {
         var workspace = await workspaceRepository.GetByIdAsync(workspaceId);

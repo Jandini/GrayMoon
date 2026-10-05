@@ -1,4 +1,4 @@
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.Application.Features;
@@ -18,7 +18,7 @@ public sealed class CreateFeatureIntentAtomicityTests
 
         // Count matches (one repo) but SHA is blank - previously passed the Count check,
         // saved Feature + context, then returned HeadCommitsIncomplete and left ghost rows.
-        ctx.AgentBridge.Respond(AgentHubMethods.GetHeadCommits, new
+        ctx.WorkerBridge.Respond(WorkerHubMethods.GetHeadCommits, new
         {
             commits = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
@@ -55,7 +55,7 @@ public sealed class CreateFeatureIntentAtomicityTests
         await using var ctx = await SyncStateTestContext.CreateAsync(configureDb: o =>
             o.AddInterceptors(new ThrowOnFeatureRepositoryInsertInterceptor()));
 
-        ctx.AgentBridge.Respond(AgentHubMethods.GetHeadCommits, new
+        ctx.WorkerBridge.Respond(WorkerHubMethods.GetHeadCommits, new
         {
             commits = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
@@ -66,7 +66,7 @@ public sealed class CreateFeatureIntentAtomicityTests
                 ["graymoon-api"] = "develop",
             },
         });
-        ctx.AgentBridge.Respond(AgentHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:\wt" });
+        ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:\wt" });
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -93,7 +93,7 @@ public sealed class CreateFeatureIntentAtomicityTests
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
 
-        ctx.AgentBridge.Respond(AgentHubMethods.GetHeadCommits, new
+        ctx.WorkerBridge.Respond(WorkerHubMethods.GetHeadCommits, new
         {
             commits = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
@@ -105,7 +105,7 @@ public sealed class CreateFeatureIntentAtomicityTests
             },
         });
         // Echo success without overriding WorktreePath so the intent-built path stays on the row.
-        ctx.AgentBridge.Respond(AgentHubMethods.CreateGitWorktree, new { success = true });
+        ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, new { success = true });
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -119,7 +119,7 @@ public sealed class CreateFeatureIntentAtomicityTests
         const string expected =
             @"C:\Users\test\.graymoon\test-ws\features\feature\path-shape\graymoon-api";
 
-        var createCall = Assert.Single(ctx.AgentBridge.Calls, c => c.Command == AgentHubMethods.CreateGitWorktree);
+        var createCall = Assert.Single(ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.CreateGitWorktree);
         var args = System.Text.Json.JsonSerializer.SerializeToElement(createCall.Args);
         Assert.Equal(expected, args.GetProperty("worktreePath").GetString());
 
@@ -143,7 +143,7 @@ public sealed class CreateFeatureIntentAtomicityTests
         await using var ctx = await SyncStateTestContext.CreateAsync(configureDb: o =>
             o.AddInterceptors(new ThrowOnFeatureRepositoryModifyInterceptor()));
 
-        ctx.AgentBridge.Respond(AgentHubMethods.GetHeadCommits, new
+        ctx.WorkerBridge.Respond(WorkerHubMethods.GetHeadCommits, new
         {
             commits = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
@@ -154,7 +154,7 @@ public sealed class CreateFeatureIntentAtomicityTests
                 ["graymoon-api"] = "develop",
             },
         });
-        ctx.AgentBridge.Respond(AgentHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:\wt" });
+        ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:\wt" });
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();

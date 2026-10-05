@@ -1,4 +1,4 @@
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services.Features;
@@ -75,14 +75,14 @@ public sealed class WorkspaceFeatureReconcilerTests
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
         await SeedFeatureAsync(ctx, WorkspaceFeatureLifecycleState.Ready, WorkspaceFeatureRepositoryState.Ready);
-        ctx.AgentBridge.Respond(AgentHubMethods.ListGitWorktrees, new
+        ctx.WorkerBridge.Respond(WorkerHubMethods.ListGitWorktrees, new
         {
             worktrees = new[]
             {
                 new { worktreePath = @"C:\gm-test-root\test-ws\graymoon-api", branchName = "main", isBare = false },
             },
         });
-        ctx.AgentBridge.Respond(AgentHubMethods.InspectWorktree, new
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, new
         {
             exists = false,
             isDirty = (bool?)null,
@@ -106,20 +106,20 @@ public sealed class WorkspaceFeatureReconcilerTests
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
         await SeedFeatureAsync(ctx, WorkspaceFeatureLifecycleState.NeedsRepair, WorkspaceFeatureRepositoryState.Removed);
-        ctx.AgentBridge.Respond(AgentHubMethods.ListGitWorktrees, new
+        ctx.WorkerBridge.Respond(WorkerHubMethods.ListGitWorktrees, new
         {
             worktrees = new[]
             {
                 new { worktreePath = @"C:\gm-test-root\test-ws\graymoon-api", branchName = "main", isBare = false },
             },
         });
-        ctx.AgentBridge.Respond(AgentHubMethods.InspectWorktree, new { exists = false });
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, new { exists = false });
 
         await ReconcileAsync(ctx);
 
         var row = await ReadRepoRowAsync(ctx);
         Assert.Equal(WorkspaceFeatureRepositoryState.Removed, row.State);
-        Assert.DoesNotContain(ctx.AgentBridge.Calls, c => c.Command == AgentHubMethods.InspectWorktree);
+        Assert.DoesNotContain(ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.InspectWorktree);
     }
 
     [Fact]
@@ -128,7 +128,7 @@ public sealed class WorkspaceFeatureReconcilerTests
         await using var ctx = await SyncStateTestContext.CreateAsync();
         await SeedFeatureAsync(ctx, WorkspaceFeatureLifecycleState.Ready, WorkspaceFeatureRepositoryState.Ready);
         const string orphan = @"C:\Users\test\.graymoon\test-ws\features\feat-reconcile\orphan-repo";
-        ctx.AgentBridge.Respond(AgentHubMethods.ListGitWorktrees, new
+        ctx.WorkerBridge.Respond(WorkerHubMethods.ListGitWorktrees, new
         {
             worktrees = new object[]
             {
@@ -143,7 +143,7 @@ public sealed class WorkspaceFeatureReconcilerTests
         var feature = await ReadFeatureAsync(ctx);
         Assert.Equal(WorkspaceFeatureLifecycleState.NeedsRepair, feature.LifecycleState);
         Assert.Equal(WorkspaceFeatureReconciler.UntrackedWorktreeError(orphan), feature.LastError);
-        Assert.DoesNotContain(ctx.AgentBridge.Calls, c => c.Command == AgentHubMethods.RemoveGitWorktree);
+        Assert.DoesNotContain(ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.RemoveGitWorktree);
     }
 
     [Fact]
@@ -152,7 +152,7 @@ public sealed class WorkspaceFeatureReconcilerTests
         await using var ctx = await SyncStateTestContext.CreateAsync();
         await SeedFeatureAsync(ctx, WorkspaceFeatureLifecycleState.Ready, WorkspaceFeatureRepositoryState.Ready);
         const string stray = @"C:\Users\test\.graymoon\test-ws\features\stray-folder\repo";
-        ctx.AgentBridge.Respond(AgentHubMethods.ListGitWorktrees, new
+        ctx.WorkerBridge.Respond(WorkerHubMethods.ListGitWorktrees, new
         {
             worktrees = new object[]
             {
@@ -176,7 +176,7 @@ public sealed class WorkspaceFeatureReconcilerTests
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
         await SeedFeatureAsync(ctx, WorkspaceFeatureLifecycleState.Ready, WorkspaceFeatureRepositoryState.Ready);
-        ctx.AgentBridge.Respond(AgentHubMethods.ListGitWorktrees, new
+        ctx.WorkerBridge.Respond(WorkerHubMethods.ListGitWorktrees, new
         {
             worktrees = new[]
             {
@@ -190,7 +190,7 @@ public sealed class WorkspaceFeatureReconcilerTests
         var row = await ReadRepoRowAsync(ctx);
         Assert.Equal(WorkspaceFeatureLifecycleState.Ready, feature.LifecycleState);
         Assert.Equal(WorkspaceFeatureRepositoryState.Ready, row.State);
-        Assert.DoesNotContain(ctx.AgentBridge.Calls, c => c.Command == AgentHubMethods.InspectWorktree);
+        Assert.DoesNotContain(ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.InspectWorktree);
     }
 
     [Fact]
@@ -198,7 +198,7 @@ public sealed class WorkspaceFeatureReconcilerTests
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
         await SeedFeatureAsync(ctx, WorkspaceFeatureLifecycleState.NeedsRepair, WorkspaceFeatureRepositoryState.Pending);
-        ctx.AgentBridge.Respond(AgentHubMethods.ListGitWorktrees, new
+        ctx.WorkerBridge.Respond(WorkerHubMethods.ListGitWorktrees, new
         {
             worktrees = new[]
             {
@@ -218,13 +218,13 @@ public sealed class WorkspaceFeatureReconcilerTests
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
         await SeedFeatureAsync(ctx, WorkspaceFeatureLifecycleState.Creating, WorkspaceFeatureRepositoryState.Pending);
-        ctx.AgentBridge.IsAgentConnected = false;
+        ctx.WorkerBridge.IsWorkerConnected = false;
 
         await ReconcileAsync(ctx);
 
         var feature = await ReadFeatureAsync(ctx);
         Assert.Equal(WorkspaceFeatureLifecycleState.Creating, feature.LifecycleState);
-        Assert.Empty(ctx.AgentBridge.Calls);
+        Assert.Empty(ctx.WorkerBridge.Calls);
     }
 
     [Fact]
@@ -232,7 +232,7 @@ public sealed class WorkspaceFeatureReconcilerTests
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
         await SeedFeatureAsync(ctx, WorkspaceFeatureLifecycleState.Ready, WorkspaceFeatureRepositoryState.Ready);
-        ctx.AgentBridge.Respond(AgentHubMethods.ListGitWorktrees, null, success: false, error: "git failed");
+        ctx.WorkerBridge.Respond(WorkerHubMethods.ListGitWorktrees, null, success: false, error: "git failed");
 
         await ReconcileAsync(ctx);
 
@@ -240,7 +240,7 @@ public sealed class WorkspaceFeatureReconcilerTests
         var row = await ReadRepoRowAsync(ctx);
         Assert.Equal(WorkspaceFeatureLifecycleState.Ready, feature.LifecycleState);
         Assert.Equal(WorkspaceFeatureRepositoryState.Ready, row.State);
-        Assert.DoesNotContain(ctx.AgentBridge.Calls, c => c.Command == AgentHubMethods.InspectWorktree);
+        Assert.DoesNotContain(ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.InspectWorktree);
     }
 
     [Fact]
@@ -254,7 +254,7 @@ public sealed class WorkspaceFeatureReconcilerTests
         await reconciler.ReconcileAsync();
         await reconciler.ReconcileAsync();
 
-        Assert.Equal(1, ctx.AgentBridge.Calls.Count(c => c.Command == AgentHubMethods.ListGitWorktrees));
+        Assert.Equal(1, ctx.WorkerBridge.Calls.Count(c => c.Command == WorkerHubMethods.ListGitWorktrees));
     }
 
     [Fact]
@@ -306,7 +306,7 @@ public sealed class WorkspaceFeatureReconcilerTests
 
     private static void StubHealthyList(SyncStateTestContext ctx)
     {
-        ctx.AgentBridge.Respond(AgentHubMethods.ListGitWorktrees, new
+        ctx.WorkerBridge.Respond(WorkerHubMethods.ListGitWorktrees, new
         {
             worktrees = new[]
             {

@@ -1,7 +1,7 @@
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
-using GrayMoon.App.Services.Agent;
+using GrayMoon.App.Services.Worker;
 using GrayMoon.Application.Features;
 using GrayMoon.Common.Git;
 using System.Diagnostics;
@@ -16,7 +16,7 @@ namespace GrayMoon.App.Services.Features;
 /// </summary>
 public sealed class WorkspaceFeatureReconciler(
     IServiceScopeFactory scopeFactory,
-    AgentConnectionTracker connectionTracker,
+    WorkerConnectionTracker connectionTracker,
     IWorkspaceOperationLock operationLock,
     ILogger<WorkspaceFeatureReconciler> logger) : IWorkspaceFeatureReconciler, IHostedService
 {
@@ -36,19 +36,19 @@ public sealed class WorkspaceFeatureReconciler(
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        connectionTracker.OnStateChanged(OnAgentStateChanged);
+        connectionTracker.OnStateChanged(OnWorkerStateChanged);
         return Task.CompletedTask;
     }
 
     public Task StopAsync(CancellationToken cancellationToken)
     {
-        connectionTracker.RemoveStateChanged(OnAgentStateChanged);
+        connectionTracker.RemoveStateChanged(OnWorkerStateChanged);
         return Task.CompletedTask;
     }
 
-    private void OnAgentStateChanged(AgentConnectionState state)
+    private void OnWorkerStateChanged(WorkerConnectionState state)
     {
-        if (state != AgentConnectionState.Online)
+        if (state != WorkerConnectionState.Online)
             return;
 
         _ = Task.Run(async () =>
@@ -79,8 +79,8 @@ public sealed class WorkspaceFeatureReconciler(
             }
 
             await using var scope = scopeFactory.CreateAsyncScope();
-            var agentBridge = scope.ServiceProvider.GetRequiredService<IAgentBridge>();
-            if (!agentBridge.IsAgentConnected)
+            var workerBridge = scope.ServiceProvider.GetRequiredService<IWorkerBridge>();
+            if (!workerBridge.IsWorkerConnected)
                 return;
 
             var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
@@ -93,7 +93,7 @@ public sealed class WorkspaceFeatureReconciler(
             try
             {
                 counts.Interrupted = await InterruptStuckFeaturesAsync(dbFactory, cancellationToken);
-                await ReconcileWorktreesAsync(dbFactory, pathResolver, contextResolver, agentBridge, counts, cancellationToken);
+                await ReconcileWorktreesAsync(dbFactory, pathResolver, contextResolver, workerBridge, counts, cancellationToken);
             }
             catch (Exception ex)
             {
@@ -168,7 +168,7 @@ public sealed class WorkspaceFeatureReconciler(
         IDbContextFactory<AppDbContext> dbFactory,
         IWorkspaceContextPathResolver pathResolver,
         IWorkspaceFeatureContextResolver contextResolver,
-        IAgentBridge agentBridge,
+        IWorkerBridge workerBridge,
         ReconcileCounts counts,
         CancellationToken cancellationToken)
     {
@@ -215,7 +215,7 @@ public sealed class WorkspaceFeatureReconciler(
                 continue;
             if (string.IsNullOrWhiteSpace(workspace.ManagedFeatureStorageRoot))
                 continue;
-            featureRootsByFeatureId[featureId] = AgentPath.Combine(
+            featureRootsByFeatureId[featureId] = WorkerPath.Combine(
                 workspace.ManagedFeatureStorageRoot,
                 ctx.WorkspaceFeature.Name);
         }
@@ -267,14 +267,14 @@ public sealed class WorkspaceFeatureReconciler(
 
                         try
                         {
-                            var listResp = await agentBridge.SendCommandAsync(
-                                AgentHubMethods.ListGitWorktrees,
+                            var listResp = await workerBridge.SendCommandAsync(
+                                WorkerHubMethods.ListGitWorktrees,
                                 new { mainRepositoryPath = mainPath },
                                 ct);
                             if (!listResp.Success || listResp.Data is null)
                                 return;
 
-                            var payload = AgentResponseJson.DeserializeAgentResponse<ListWorktreesAgentResponse>(listResp.Data);
+                            var payload = WorkerResponseJson.DeserializeWorkerResponse<ListWorktreesWorkerResponse>(listResp.Data);
                             var worktrees = (IReadOnlyList<GitWorktreeInfo>)(payload?.Worktrees ?? []);
                             lock (listByRepoId)
                                 listByRepoId[repoId] = worktrees;
@@ -346,7 +346,7 @@ public sealed class WorkspaceFeatureReconciler(
                     try
                     {
                         probe = await InspectWorktreeAsync(
-                            agentBridge,
+                            workerBridge,
                             await SafeMainPathAsync(pathResolver, special, row.WorkspaceRepositoryId, cancellationToken),
                             row.WorktreePath,
                             cancellationToken);
@@ -461,7 +461,7 @@ public sealed class WorkspaceFeatureReconciler(
     }
 
     private async Task<WorktreeProbe> InspectWorktreeAsync(
-        IAgentBridge agentBridge,
+        IWorkerBridge workerBridge,
         string? mainRepositoryPath,
         string? worktreePath,
         CancellationToken cancellationToken)
@@ -471,8 +471,8 @@ public sealed class WorkspaceFeatureReconciler(
 
         try
         {
-            var response = await agentBridge.SendCommandAsync(
-                AgentHubMethods.InspectWorktree,
+            var response = await workerBridge.SendCommandAsync(
+                WorkerHubMethods.InspectWorktree,
                 new { mainRepositoryPath, worktreePath },
                 cancellationToken);
             if (!response.Success)
@@ -481,7 +481,7 @@ public sealed class WorkspaceFeatureReconciler(
             if (IsUnknownCommandError(response.Error))
                 return WorktreeProbe.Unknown;
 
-            var payload = AgentResponseJson.DeserializeAgentResponse<InspectWorktreeAgentResponse>(response.Data);
+            var payload = WorkerResponseJson.DeserializeWorkerResponse<InspectWorktreeWorkerResponse>(response.Data);
             if (payload is null || !string.IsNullOrWhiteSpace(payload.Error))
                 return WorktreeProbe.Unknown;
 
@@ -494,7 +494,7 @@ public sealed class WorkspaceFeatureReconciler(
         }
     }
 
-    internal static string NormalizePathKey(string path) => AgentPath.Normalize(path);
+    internal static string NormalizePathKey(string path) => WorkerPath.Normalize(path);
 
     internal static bool PathsEqualNormalized(string? left, string? right)
     {
@@ -510,7 +510,7 @@ public sealed class WorkspaceFeatureReconciler(
 
         var p = NormalizePathKey(path);
         var r = NormalizePathKey(root);
-        var sep = AgentPath.IsPosix(r) ? '/' : '\\';
+        var sep = WorkerPath.IsPosix(r) ? '/' : '\\';
         return p.Equals(r, StringComparison.OrdinalIgnoreCase)
             || p.StartsWith(r + sep, StringComparison.OrdinalIgnoreCase);
     }
@@ -528,7 +528,7 @@ public sealed class WorkspaceFeatureReconciler(
         Missing,
     }
 
-    private sealed class ListWorktreesAgentResponse
+    private sealed class ListWorktreesWorkerResponse
     {
         [System.Text.Json.Serialization.JsonPropertyName("worktrees")]
         public List<GitWorktreeInfo>? Worktrees { get; set; }

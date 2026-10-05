@@ -68,9 +68,9 @@
                 <div class="mb-0">
                     <label class="form-label fw-semibold" for="featureStorageRootPath">Feature storage root</label>
                     <p class="text-muted small mb-2">
-                        Where GrayMoon creates Feature worktrees on the Agent host
+                        Where GrayMoon creates Feature worktrees on the Worker host
                         (under this folder as workspace\features\feature).
-                        Defaults to the Agent machine's user profile <span class="font-monospace">\.graymoon</span>
+                        Defaults to the Worker machine's user profile <span class="font-monospace">\.graymoon</span>
                         so the App can run in a container. Changing this does not move existing Features.
                     </p>
                     <div class="input-group">
@@ -82,14 +82,14 @@
                                @bind:event="oninput"
                                @onkeydown="OnFeatureStorageRootKeyDownAsync" />
                         <button class="btn btn-outline-secondary" type="button"
-                                @onclick="UseAgentFeatureStorageDefaultAsync"
-                                disabled="@(isSavingFeature || isResolvingAgentDefault)"
-                                title="Ask the connected Agent for the host user profile and append \.graymoon">
-                            @if (isResolvingAgentDefault)
+                                @onclick="UseWorkerFeatureStorageDefaultAsync"
+                                disabled="@(isSavingFeature || isResolvingWorkerDefault)"
+                                title="Ask the connected Worker for the host user profile and append \.graymoon">
+                            @if (isResolvingWorkerDefault)
                             {
                                 <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
                             }
-                            Use Agent default
+                            Use Worker default
                         </button>
                         <button class="btn btn-primary" type="button" @onclick="SaveFeatureStorageRootPathAsync" disabled="@isSavingFeature">
                             @if (isSavingFeature)
@@ -100,9 +100,9 @@
                         </button>
                     </div>
 
-                    @if (featureSaveSuccess.HasValue || featurePathValidation == false || !string.IsNullOrEmpty(featureAgentDefaultMessage))
+                    @if (featureSaveSuccess.HasValue || featurePathValidation == false || !string.IsNullOrEmpty(featureWorkerDefaultMessage))
                     {
-                        <div class="mt-2 small @(featurePathValidation == false ? "text-danger" : featureSaveSuccess == true || !string.IsNullOrEmpty(featureAgentDefaultMessage) ? "text-success" : "text-danger")">
+                        <div class="mt-2 small @(featurePathValidation == false ? "text-danger" : featureSaveSuccess == true || !string.IsNullOrEmpty(featureWorkerDefaultMessage) ? "text-success" : "text-danger")">
                             @if (featurePathValidation == false)
                             {
                                 <i class="bi bi-exclamation-circle me-1"></i>
@@ -118,10 +118,10 @@
                                 <i class="bi bi-exclamation-circle me-1"></i>
                                 <span>Failed to save. Please try again.</span>
                             }
-                            else if (!string.IsNullOrEmpty(featureAgentDefaultMessage))
+                            else if (!string.IsNullOrEmpty(featureWorkerDefaultMessage))
                             {
                                 <i class="bi bi-info-circle me-1"></i>
-                                <span>@featureAgentDefaultMessage</span>
+                                <span>@featureWorkerDefaultMessage</span>
                             }
                         </div>
                     }
@@ -233,11 +233,11 @@
 
     private string? featureStorageRootPath;
     private bool isSavingFeature;
-    private bool isResolvingAgentDefault;
+    private bool isResolvingWorkerDefault;
     private bool? featureSaveSuccess;
     private bool? featurePathValidation;
     private string? featurePathValidationMessage;
-    private string? featureAgentDefaultMessage;
+    private string? featureWorkerDefaultMessage;
 
     private bool terminalShowByDefault;
     private bool terminalTransparentBackdrop = true;
@@ -250,11 +250,11 @@
         featureStorageRootPath = await AppSettingRepository.GetValueAsync(AppSettingRepository.FeatureStorageRootPathKey);
         if (string.IsNullOrWhiteSpace(featureStorageRootPath))
         {
-            var agentDefault = await WorkspaceService.TryGetAgentDefaultFeatureStorageRootAsync();
-            if (!string.IsNullOrWhiteSpace(agentDefault))
+            var workerDefault = await WorkspaceService.TryGetWorkerDefaultFeatureStorageRootAsync();
+            if (!string.IsNullOrWhiteSpace(workerDefault))
             {
-                featureStorageRootPath = agentDefault;
-                featureAgentDefaultMessage = "Suggested from the connected Agent host user profile. Save to keep it.";
+                featureStorageRootPath = workerDefault;
+                featureWorkerDefaultMessage = "Suggested from the connected Worker host user profile. Save to keep it.";
             }
         }
 
@@ -317,29 +317,29 @@
             await SaveFeatureStorageRootPathAsync();
     }
 
-    private async Task UseAgentFeatureStorageDefaultAsync()
+    private async Task UseWorkerFeatureStorageDefaultAsync()
     {
-        isResolvingAgentDefault = true;
-        featureAgentDefaultMessage = null;
+        isResolvingWorkerDefault = true;
+        featureWorkerDefaultMessage = null;
         featureSaveSuccess = null;
         featurePathValidation = null;
         featurePathValidationMessage = null;
         try
         {
-            var agentDefault = await WorkspaceService.TryGetAgentDefaultFeatureStorageRootAsync();
-            if (string.IsNullOrWhiteSpace(agentDefault))
+            var workerDefault = await WorkspaceService.TryGetWorkerDefaultFeatureStorageRootAsync();
+            if (string.IsNullOrWhiteSpace(workerDefault))
             {
                 featurePathValidation = false;
-                featurePathValidationMessage = "Could not resolve the Agent host user profile. Connect the Agent and try again.";
+                featurePathValidationMessage = "Could not resolve the Worker host user profile. Connect the Worker and try again.";
                 return;
             }
 
-            featureStorageRootPath = agentDefault;
-            featureAgentDefaultMessage = "Filled from the Agent host user profile. Click Save to apply.";
+            featureStorageRootPath = workerDefault;
+            featureWorkerDefaultMessage = "Filled from the Worker host user profile. Click Save to apply.";
         }
         finally
         {
-            isResolvingAgentDefault = false;
+            isResolvingWorkerDefault = false;
         }
     }
 
@@ -387,7 +387,7 @@
         featureSaveSuccess = null;
         featurePathValidation = null;
         featurePathValidationMessage = null;
-        featureAgentDefaultMessage = null;
+        featureWorkerDefaultMessage = null;
 
         try
         {

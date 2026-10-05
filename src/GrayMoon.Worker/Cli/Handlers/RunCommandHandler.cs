@@ -1,0 +1,210 @@
+using System.Reflection;
+using GrayMoon.Worker.Abstractions;
+using GrayMoon.Common;
+using GrayMoon.Common.Git;
+using GrayMoon.Worker.Commands;
+using GrayMoon.Worker.Hosted;
+using GrayMoon.Worker.Hub;
+using GrayMoon.Worker.Jobs.Requests;
+using GrayMoon.Worker.Jobs.Response;
+using GrayMoon.Worker.Logging;
+using GrayMoon.Worker.Platform.Windows;
+using GrayMoon.Worker.Queue;
+using GrayMoon.Worker.Services;
+using GrayMoon.Worker.Services.GitChanges;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Serilog;
+using Serilog.Sinks.SystemConsole.Themes;
+
+namespace GrayMoon.Worker.Cli;
+
+internal static class RunCommandHandler
+{
+    /// <summary>
+    /// Builds and runs the worker host with the given options (defaults from appsettings, overridden by CLI).
+    /// </summary>
+    public static async Task<int> RunAsync(WorkerOptions options, CancellationToken cancellationToken = default)
+    {
+        // Refresh process PATH from the current machine/user environment before any git/dotnet
+        // commands run. Windows services often inherit a stale SCM PATH snapshot.
+        if (OperatingSystem.IsWindows())
+            HostEnvironmentPath.RefreshProcessPath();
+
+        var appConfig = new ConfigurationBuilder()
+            .SetBasePath(AppContext.BaseDirectory)
+            .AddApplicationSettings()
+            .Build();
+
+        var version = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0";
+        Log.Information(
+            "GrayMoon Worker. Version: {Version}. AppHubUrl: {AppHubUrl}, ListenPort: {ListenPort}, MaxConcurrentCommands: {MaxConcurrentCommands}, MaxConcurrentReadCommands: {MaxConcurrentReadCommands}, MaxConcurrentDiffCommands: {MaxConcurrentDiffCommands}",
+            version, options.AppHubUrl, options.ListenPort, options.MaxConcurrentCommands, options.MaxConcurrentReadCommands, options.MaxConcurrentDiffCommands);
+
+        var builder = Host.CreateApplicationBuilder(args: Array.Empty<string>());
+        builder.Configuration.Sources.Insert(0, new ChainedConfigurationSource { Configuration = appConfig });
+
+        // Derive a default AppApiBaseUrl from AppHubUrl when not explicitly configured.
+        // Example: AppHubUrl = "http://host.docker.internal:8384/hub/worker"
+        // -> AppApiBaseUrl = "http://host.docker.internal:8384"
+        string? defaultAppApiBaseUrl = null;
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(options.AppHubUrl))
+            {
+                var hubUri = new Uri(options.AppHubUrl, UriKind.Absolute);
+                var builderUri = new UriBuilder(hubUri.Scheme, hubUri.Host, hubUri.Port);
+                defaultAppApiBaseUrl = builderUri.Uri.ToString().TrimEnd('/');
+            }
+        }
+        catch
+        {
+            // Fallback: leave AppApiBaseUrl unset; token provider will log and skip remote calls when missing.
+        }
+
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            [$"{WorkerOptions.SectionName}:{nameof(WorkerOptions.AppHubUrl)}"] = options.AppHubUrl,
+            [$"{WorkerOptions.SectionName}:{nameof(WorkerOptions.AppApiBaseUrl)}"] = defaultAppApiBaseUrl,
+            [$"{WorkerOptions.SectionName}:{nameof(WorkerOptions.ListenPort)}"] = options.ListenPort.ToString(),
+            [$"{WorkerOptions.SectionName}:{nameof(WorkerOptions.MaxConcurrentCommands)}"] = options.MaxConcurrentCommands.ToString(),
+        });
+
+        builder.Services.Configure<WorkerOptions>(builder.Configuration.GetSection(WorkerOptions.SectionName));
+        builder.Services.Configure<GitChangesOptions>(builder.Configuration.GetSection($"{WorkerOptions.SectionName}:GitChanges"));
+        builder.Services.Configure<GitProcessOptions>(builder.Configuration.GetSection($"{WorkerOptions.SectionName}:GitProcess"));
+        // ProcessExecutionOptions.DefaultTimeoutSeconds mirrors GitProcessOptions.DefaultTimeoutSeconds -
+        // same "GitProcess" section, so CommandLineService's own fallback timeout stays in sync with the
+        // tier GitProcessRunner resolves for local/fast git operations.
+        builder.Services.Configure<ProcessExecutionOptions>(builder.Configuration.GetSection($"{WorkerOptions.SectionName}:GitProcess"));
+
+        var logDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "GrayMoon", "logs");
+        Directory.CreateDirectory(logDirectory);
+        var logFilePath = Path.Combine(logDirectory, "graymoon-worker-.log");
+
+        builder.Logging.ClearProviders();
+        builder.Logging.AddSerilog(new LoggerConfiguration()
+            .MinimumLevel.Debug()
+            .Enrich.WithMachineName()
+            .Enrich.FromLogContext()
+            .WriteTo.Sink(new OverlayStreamSerilogSink(), Serilog.Events.LogEventLevel.Error)
+            .WriteTo.Console(
+                theme: AnsiConsoleTheme.Code,
+                outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
+            .WriteTo.File(
+                path: logFilePath,
+                rollingInterval: RollingInterval.Day,
+                retainedFileCountLimit: 30,
+                outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} {Level:u3}] [{MachineName}] {Message:lj}{NewLine}{Exception}")
+            .CreateLogger(), dispose: true);
+
+        builder.Services.AddSingleton<IHubConnectionProvider, HubConnectionProvider>();
+        builder.Services.AddSingleton<TrackedJobQueue>();
+        builder.Services.AddSingleton<IJobQueue>(sp => sp.GetRequiredService<TrackedJobQueue>());
+        builder.Services.AddSingleton<IWorkerQueueTracker>(sp => sp.GetRequiredService<TrackedJobQueue>());
+        builder.Services.AddSingleton<ReadJobQueue>();
+        builder.Services.AddSingleton<IReadJobQueue>(sp => sp.GetRequiredService<ReadJobQueue>());
+        builder.Services.AddSingleton<DiffJobQueue>();
+        builder.Services.AddSingleton<IDiffJobQueue>(sp => sp.GetRequiredService<DiffJobQueue>());
+        builder.Services.AddSingleton<CommandJobCancellationRegistry>();
+        builder.Services.AddSingleton<ICommandLineService, CommandLineService>();
+        builder.Services.AddSingleton<GitProcessRunner>();
+        builder.Services.AddSingleton<IGitService, GitService>();
+        builder.Services.AddSingleton<GitRemoteIntegrateService>();
+        builder.Services.AddSingleton<IWorkerSecretProvider, WorkerSecretProvider>();
+        builder.Services.AddSingleton<IWorkerTokenProvider, WorkerTokenProvider>();
+        builder.Services.AddSingleton<ICsProjFileParser, CsProjFileParser>();
+        builder.Services.AddSingleton<ICsProjFileService, CsProjFileService>();
+        builder.Services.AddSingleton<IRepositoryStateProbe, RepositoryStateProbe>();
+        builder.Services.AddSingleton<IWorkspaceFileSearchService, WorkspaceFileSearchService>();
+        builder.Services.AddSingleton<CommandJobFactory>();
+        builder.Services.AddSingleton<ICommandDispatcher, CommandDispatcher>();
+
+        builder.Services.AddSingleton<IRepositoryGitChangesService, GitCliRepositoryGitChangesService>();
+        builder.Services.AddSingleton<GitChangesSnapshotCache>();
+        builder.Services.AddSingleton<GitChangesRepositoryRegistry>();
+        builder.Services.AddSingleton<GitStatusRefreshCoordinator>();
+        builder.Services.AddSingleton<GitRepositoryWatcherManager>();
+        builder.Services.AddHostedService<GitChangesSnapshotPublisher>();
+
+        builder.Services.AddSingleton<ICommandHandler<SyncRepositoryRequest, SyncRepositoryResponse>, SyncRepositoryCommand>();
+        builder.Services.AddSingleton<ICommandHandler<RefreshRepositoryVersionRequest, RefreshRepositoryVersionResponse>, RefreshRepositoryVersionCommand>();
+        builder.Services.AddSingleton<ICommandHandler<GetCommitCountsRequest, GetCommitCountsResponse>, GetCommitCountsCommand>();
+        builder.Services.AddSingleton<ICommandHandler<EnsureWorkspaceRequest, EnsureWorkspaceResponse>, EnsureWorkspaceCommand>();
+        builder.Services.AddSingleton<ICommandHandler<GetWorkspaceRepositoriesRequest, GetWorkspaceRepositoriesResponse>, GetWorkspaceRepositoriesCommand>();
+        builder.Services.AddSingleton<ICommandHandler<GetRepositoryVersionRequest, GetRepositoryVersionResponse>, GetRepositoryVersionCommand>();
+        builder.Services.AddSingleton<ICommandHandler<GetWorkspaceExistsRequest, GetWorkspaceExistsResponse>, GetWorkspaceExistsCommand>();
+        builder.Services.AddSingleton<ICommandHandler<GetHostInfoRequest, GetHostInfoResponse>, GetHostInfoCommand>();
+        builder.Services.AddSingleton<ICommandHandler<SyncRepositoryDependenciesRequest, SyncRepositoryDependenciesResponse>, SyncRepositoryDependenciesCommand>();
+        builder.Services.AddSingleton<ICommandHandler<RefreshRepositoryProjectsRequest, RefreshRepositoryProjectsResponse>, RefreshRepositoryProjectsCommand>();
+        builder.Services.AddSingleton<ICommandHandler<CommitSyncRepositoryRequest, CommitSyncRepositoryResponse>, CommitSyncRepositoryCommand>();
+        builder.Services.AddSingleton<ICommandHandler<GetBranchesRequest, GetBranchesResponse>, GetBranchesCommand>();
+        builder.Services.AddSingleton<ICommandHandler<CheckoutBranchRequest, CheckoutBranchResponse>, CheckoutBranchCommand>();
+        builder.Services.AddSingleton<ICommandHandler<CheckoutTagRequest, CheckoutTagResponse>, CheckoutTagCommand>();
+        builder.Services.AddSingleton<ICommandHandler<ReturnToDefaultBranchRequest, ReturnToDefaultBranchResponse>, ReturnToDefaultBranchCommand>();
+        builder.Services.AddSingleton<ICommandHandler<RefreshBranchesRequest, RefreshBranchesResponse>, RefreshBranchesCommand>();
+        builder.Services.AddSingleton<ICommandHandler<CreateBranchRequest, CreateBranchResponse>, CreateBranchCommand>();
+        builder.Services.AddSingleton<ICommandHandler<SetUpstreamBranchRequest, SetUpstreamBranchResponse>, SetUpstreamBranchCommand>();
+        builder.Services.AddSingleton<ICommandHandler<DeleteBranchRequest, DeleteBranchResponse>, DeleteBranchCommand>();
+        builder.Services.AddSingleton<ICommandHandler<StageAndCommitRequest, StageAndCommitResponse>, StageAndCommitCommand>();
+        builder.Services.AddSingleton<ICommandHandler<PushRepositoryRequest, PushRepositoryResponse>, PushRepositoryCommand>();
+        builder.Services.AddSingleton<ICommandHandler<SearchFilesRequest, SearchFilesResponse>, SearchFilesCommand>();
+        builder.Services.AddSingleton<ICommandHandler<UpdateFileVersionsRequest, UpdateFileVersionsResponse>, UpdateFileVersionsCommand>();
+        builder.Services.AddSingleton<ICommandHandler<CheckFileVersionsRequest, CheckFileVersionsResponse>, CheckFileVersionsCommand>();
+        builder.Services.AddSingleton<ICommandHandler<GetHeadCommitsRequest, GetHeadCommitsResponse>, GetHeadCommitsCommand>();
+        builder.Services.AddSingleton<ICommandHandler<ResolveGeneratedPackageReferencesRequest, ResolveGeneratedPackageReferencesResponse>, ResolveGeneratedPackageReferencesCommand>();
+        builder.Services.AddSingleton<ICommandHandler<GetFileContentsRequest, GetFileContentsResponse>, GetFileContentsCommand>();
+        builder.Services.AddSingleton<ICommandHandler<ValidatePathRequest, ValidatePathResponse>, ValidatePathCommand>();
+        builder.Services.AddSingleton<ICommandHandler<DotnetRestoreRequest, DotnetRestoreResponse>, DotnetRestoreCommand>();
+        builder.Services.AddSingleton<ICommandHandler<UndoPushRequest, UndoPushResponse>, UndoPushCommand>();
+        builder.Services.AddSingleton<ICommandHandler<SelfUpdateRequest, SelfUpdateResponse>, SelfUpdateCommand>();
+        builder.Services.AddSingleton<ICommandHandler<UpdateBranchFromDefaultRequest, UpdateBranchFromDefaultResponse>, UpdateBranchFromDefaultCommand>();
+        builder.Services.AddSingleton<ICommandHandler<FetchCommitsRequest, FetchCommitsResponse>, FetchCommitsCommand>();
+        builder.Services.AddSingleton<ICommandHandler<GetGitChangeStatusRequest, GetGitChangeStatusResponse>, GetGitChangeStatusCommand>();
+        builder.Services.AddSingleton<ICommandHandler<GetGitFileDiffRequest, GetGitFileDiffResponse>, GetGitFileDiffCommand>();
+        builder.Services.AddSingleton<ICommandHandler<StageGitChangesRequest, GitMutationResponse>, StageGitChangesCommand>();
+        builder.Services.AddSingleton<ICommandHandler<UnstageGitChangesRequest, GitMutationResponse>, UnstageGitChangesCommand>();
+        builder.Services.AddSingleton<ICommandHandler<DiscardGitChangesRequest, GitMutationResponse>, DiscardGitChangesCommand>();
+        builder.Services.AddSingleton<ICommandHandler<CommitGitChangesRequest, CommitGitChangesResponse>, CommitGitChangesCommand>();
+        builder.Services.AddSingleton<ICommandHandler<ListGitWorktreesRequest, ListGitWorktreesResponse>, ListGitWorktreesCommand>();
+        builder.Services.AddSingleton<ICommandHandler<CreateGitWorktreeRequest, CreateGitWorktreeResponse>, CreateGitWorktreeCommand>();
+        builder.Services.AddSingleton<ICommandHandler<RemoveGitWorktreeRequest, RemoveGitWorktreeResponse>, RemoveGitWorktreeCommand>();
+        builder.Services.AddSingleton<ICommandHandler<InspectWorktreeRequest, InspectWorktreeResponse>, InspectWorktreeCommand>();
+        builder.Services.AddSingleton<ICommandHandler<GetGitVersionAtDefaultTipRequest, GetGitVersionAtDefaultTipResponse>, GetGitVersionAtDefaultTipCommand>();
+        builder.Services.AddSingleton<CheckoutHookSyncCommand>();
+        builder.Services.AddSingleton<CommitHookSyncCommand>();
+        builder.Services.AddSingleton<MergeHookSyncCommand>();
+        builder.Services.AddSingleton<PushHookSyncCommand>();
+        builder.Services.AddSingleton<INotifySyncHandler, HookSyncDispatcher>();
+
+        builder.Services.AddHostedService<SignalRConnectionHostedService>();
+        builder.Services.AddHostedService<HookListenerHostedService>();
+        builder.Services.AddHostedService<MainJobBackgroundService>();
+        builder.Services.AddHostedService<ReadJobBackgroundService>();
+        builder.Services.AddHostedService<DiffJobBackgroundService>();
+
+        if (OperatingSystem.IsWindows())
+            builder.Services.AddWindowsService();
+        if (OperatingSystem.IsLinux())
+            builder.Services.AddSystemd();
+
+        var host = builder.Build();
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        Console.CancelKeyPress += (_, e) =>
+        {
+            if (!cts.IsCancellationRequested)
+            {
+                host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("GrayMoon.Worker.Run")
+                    .LogWarning("User break (Ctrl+C) detected. Shutting down gracefully...");
+                cts.Cancel();
+                e.Cancel = true;
+            }
+        };
+
+        await host.RunAsync(cts.Token).ConfigureAwait(false);
+        return 0;
+    }
+}

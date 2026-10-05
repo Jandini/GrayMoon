@@ -278,8 +278,8 @@
                 errorMessage = "No Feature context selected.";
                 return;
             }
-            var (agentRoot, folderName) = await PathResolver.GetAgentWorkspaceArgsAsync(_selectedContextId.Value);
-            workspaceRoot = agentRoot;
+            var (workerRoot, folderName) = await PathResolver.GetWorkerWorkspaceArgsAsync(_selectedContextId.Value);
+            workspaceRoot = workerRoot;
             contextFolderName = folderName;
             workspaceRepos = workspace.Repositories
                 .Where(r => r.Repository != null)

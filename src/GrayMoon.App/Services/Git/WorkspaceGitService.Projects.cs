@@ -1,5 +1,5 @@
 using System.Collections.Concurrent;
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.Abstractions.Exceptions;
 using GrayMoon.Abstractions.Notifications;
 using GrayMoon.App.Data;
@@ -24,7 +24,7 @@ public sealed partial class WorkspaceGitService
         IReadOnlySet<int>? repositoryIds = null,
         CancellationToken cancellationToken = default)
     {
-        if (!_agentBridge.IsAgentConnected)
+        if (!_workerBridge.IsWorkerConnected)
             throw new InvalidOperationException("Worker not connected. Start the GrayMoon Worker to refresh projects.");
 
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
@@ -58,7 +58,7 @@ public sealed partial class WorkspaceGitService
         var completedCount = 0;
         var totalCount = repos.Count;
         using var semaphore = new SemaphoreSlim(_maxConcurrent);
-        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
 
         var syncResults = await Task.WhenAll(repos.Select(async repo =>
         {
@@ -66,7 +66,7 @@ public sealed partial class WorkspaceGitService
             try
             {
                 var args = new { workspaceName = workspaceFolderName, repositoryName = repo.RepositoryName, workspaceRoot, maxParallelOperations = _maxConcurrent };
-                var response = await _agentBridge.SendCommandAsync("RefreshRepositoryProjects", args, cancellationToken);
+                var response = await _workerBridge.SendCommandAsync("RefreshRepositoryProjects", args, cancellationToken);
                 if (!response.Success)
                 {
                     onRepoError?.Invoke(repo.RepositoryId, response.Error ?? "Refresh projects failed");
@@ -118,7 +118,7 @@ public sealed partial class WorkspaceGitService
         Action<int, string>? onRepoError = null,
         CancellationToken cancellationToken = default)
     {
-        if (!_agentBridge.IsAgentConnected)
+        if (!_workerBridge.IsWorkerConnected)
             throw new InvalidOperationException("Worker not connected. Start the GrayMoon Worker to refresh projects.");
 
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
@@ -133,9 +133,9 @@ public sealed partial class WorkspaceGitService
         if (!string.IsNullOrWhiteSpace(linkForWorkspace?.CheckedOutTag))
             return false;
 
-        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
         var args = new { workspaceName = workspaceFolderName, repositoryName = repo.RepositoryName, workspaceRoot, maxParallelOperations = _maxConcurrent };
-        var response = await _agentBridge.SendCommandAsync("RefreshRepositoryProjects", args, cancellationToken);
+        var response = await _workerBridge.SendCommandAsync("RefreshRepositoryProjects", args, cancellationToken);
         if (!response.Success)
         {
             onRepoError?.Invoke(repositoryId, response.Error ?? "Refresh projects failed");
@@ -168,7 +168,7 @@ public sealed partial class WorkspaceGitService
         Action<int, string>? onRepoError = null,
         CancellationToken cancellationToken = default)
     {
-        if (!_agentBridge.IsAgentConnected)
+        if (!_workerBridge.IsWorkerConnected)
             throw new InvalidOperationException("Worker not connected.");
 
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
@@ -213,7 +213,7 @@ public sealed partial class WorkspaceGitService
         return (withUpdates, isMultiLevel);
     }
 
-    /// <summary>Syncs dependency versions in .csproj files to match the current version of each referenced package source. Only repos with at least one mismatched dependency are updated. When <paramref name="repoIdsToSync"/> is set, only those repos are synced. Returns the set of repo IDs where the agent reported UpdatedCount &gt; 0.</summary>
+    /// <summary>Syncs dependency versions in .csproj files to match the current version of each referenced package source. Only repos with at least one mismatched dependency are updated. When <paramref name="repoIdsToSync"/> is set, only those repos are synced. Returns the set of repo IDs where the worker reported UpdatedCount &gt; 0.</summary>
     public async Task<IReadOnlySet<int>> SyncDependenciesAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
@@ -222,7 +222,7 @@ public sealed partial class WorkspaceGitService
         IReadOnlySet<int>? repoIdsToSync = null,
         CancellationToken cancellationToken = default)
     {
-        if (!_agentBridge.IsAgentConnected)
+        if (!_workerBridge.IsWorkerConnected)
             throw new InvalidOperationException("Worker not connected. Start the GrayMoon Worker to sync dependencies.");
 
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
@@ -253,7 +253,7 @@ public sealed partial class WorkspaceGitService
         var totalCount = toSync.Count;
         var failedRepoIds = new ConcurrentDictionary<int, bool>();
         var syncedRepoIds = new ConcurrentDictionary<int, bool>();
-        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
 
         var repoTasks = toSync.Select(async repo =>
         {
@@ -275,7 +275,7 @@ public sealed partial class WorkspaceGitService
                 workspaceRoot
             };
 
-            var response = await _agentBridge.SendCommandAsync("SyncRepositoryDependencies", args, cancellationToken);
+            var response = await _workerBridge.SendCommandAsync("SyncRepositoryDependencies", args, cancellationToken);
             if (!response.Success)
             {
                 failedRepoIds.TryAdd(repo.RepoId, true);
@@ -284,7 +284,7 @@ public sealed partial class WorkspaceGitService
             else
             {
                 var syncResponse = response.Data != null
-                    ? AgentResponseJson.DeserializeAgentResponse<SyncRepositoryDependenciesResponse>(response.Data)
+                    ? WorkerResponseJson.DeserializeWorkerResponse<SyncRepositoryDependenciesResponse>(response.Data)
                     : null;
                 if (syncResponse?.UpdatedCount > 0)
                     syncedRepoIds.TryAdd(repo.RepoId, true);

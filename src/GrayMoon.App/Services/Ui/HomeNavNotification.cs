@@ -1,4 +1,4 @@
-using GrayMoon.App.Services.Agent;
+using GrayMoon.App.Services.Worker;
 
 namespace GrayMoon.App.Services.Ui;
 
@@ -9,14 +9,14 @@ namespace GrayMoon.App.Services.Ui;
 public static class HomeNavNotification
 {
     public static bool ShouldShow(
-        AgentConnectionState state,
+        WorkerConnectionState state,
         bool selfUpdateInProgress,
         bool hostPrerequisitesMissing,
         bool connectorsRequired) =>
         connectorsRequired || WorkerRequiresAttention(state, selfUpdateInProgress, hostPrerequisitesMissing);
 
     public static bool WorkerRequiresAttention(
-        AgentConnectionState state,
+        WorkerConnectionState state,
         bool selfUpdateInProgress,
         bool hostPrerequisitesMissing)
     {
@@ -25,9 +25,9 @@ public static class HomeNavNotification
 
         return state switch
         {
-            AgentConnectionState.VersionMismatch => true,
-            AgentConnectionState.Offline => true,
-            AgentConnectionState.Online => hostPrerequisitesMissing,
+            WorkerConnectionState.VersionMismatch => true,
+            WorkerConnectionState.Offline => true,
+            WorkerConnectionState.Online => hostPrerequisitesMissing,
             _ => false
         };
     }
@@ -39,7 +39,7 @@ public static class HomeNavNotification
         !hasConnectors || anyUsedConnectorUnhealthy;
 
     public static string Title(
-        AgentConnectionState state,
+        WorkerConnectionState state,
         bool selfUpdateInProgress,
         bool hostPrerequisitesMissing,
         bool hasConnectors,
@@ -50,8 +50,8 @@ public static class HomeNavNotification
         {
             parts.Add(state switch
             {
-                AgentConnectionState.VersionMismatch => "Worker update available",
-                AgentConnectionState.Offline => "Worker installation required",
+                WorkerConnectionState.VersionMismatch => "Worker update available",
+                WorkerConnectionState.Offline => "Worker installation required",
                 _ => "Worker prerequisites required"
             });
         }

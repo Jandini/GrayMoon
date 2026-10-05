@@ -3,7 +3,7 @@ using GrayMoon.Abstractions.Notifications;
 
 namespace GrayMoon.App.Models.Api;
 
-/// <summary>Response from POST /api/commitsync. Agent may send PascalCase; use case-insensitive deserialization.</summary>
+/// <summary>Response from POST /api/commitsync. Worker may send PascalCase; use case-insensitive deserialization.</summary>
 public sealed class CommitSyncResponse
 {
     [JsonPropertyName("success")]
@@ -36,7 +36,7 @@ public sealed class CommitSyncResponse
     [JsonPropertyName("errorMessage")]
     public string? ErrorMessage { get; set; }
 
-    /// <summary>Full post-pull state. Null from agents that predate it, in which case only the flat count fields are usable.</summary>
+    /// <summary>Full post-pull state. Null from workers that predate it, in which case only the flat count fields are usable.</summary>
     [JsonPropertyName("state")]
     public RepositoryStateSnapshot? State { get; set; }
 }

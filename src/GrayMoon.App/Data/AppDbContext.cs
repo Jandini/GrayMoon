@@ -420,6 +420,8 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
             entity.Property(s => s.HeadCommit).HasMaxLength(64);
             entity.Property(s => s.LastErrorCode).HasMaxLength(100);
             entity.Property(s => s.LastErrorMessage).HasMaxLength(2000);
+            // Persisted column name predates the Agent -> Worker rename; do not change it (existing databases).
+            entity.Property(s => s.WorkerScannedAt).HasColumnName("AgentScannedAt");
         });
 
         modelBuilder.Entity<WorkspaceGitChangeEntry>(entity =>

@@ -7,7 +7,7 @@ public static class ApiEndpointRegistration
     public static IEndpointRouteBuilder MapApiEndpoints(this IEndpointRouteBuilder routes)
     {
         routes.MapAboutEndpoints();
-        routes.MapAgentEndpoints();
+        routes.MapWorkerEndpoints();
         routes.MapSyncEndpoints();
         routes.MapConnectorEndpoints();
         routes.MapBranchEndpoints();

@@ -1,5 +1,5 @@
 using System.Collections.Concurrent;
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.Abstractions.Exceptions;
 using GrayMoon.Abstractions.Notifications;
 using GrayMoon.App.Data;
@@ -15,7 +15,7 @@ namespace GrayMoon.App.Services.Git;
 
 public sealed partial class WorkspaceGitService
 {
-    /// <summary>Refreshes branches for a single repository by calling the agent directly. Routes CommandOutput to TerminalSinkContext when called within a background job.</summary>
+    /// <summary>Refreshes branches for a single repository by calling the worker directly. Routes CommandOutput to TerminalSinkContext when called within a background job.</summary>
     public async Task<bool> RefreshBranchesForRepositoryAsync(int repositoryId, int workspaceId, WorkspaceFeatureContextId contextId, CancellationToken cancellationToken = default)
     {
         var repo = await _repositoryRepository.GetByIdAsync(repositoryId, cancellationToken);
@@ -28,8 +28,8 @@ public sealed partial class WorkspaceGitService
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null) return false;
 
-        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
-        var response = await _agentBridge.SendCommandAsync("RefreshBranches", new
+        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var response = await _workerBridge.SendCommandAsync("RefreshBranches", new
         {
             workspaceName = workspaceFolderName,
             repositoryId = repo.RepositoryId,
@@ -39,7 +39,7 @@ public sealed partial class WorkspaceGitService
 
         if (!response.Success) return false;
 
-        var refreshResponse = AgentResponseJson.DeserializeAgentResponse<BranchesResponse>(response.Data);
+        var refreshResponse = WorkerResponseJson.DeserializeWorkerResponse<BranchesResponse>(response.Data);
         if (refreshResponse == null) return false;
 
         var localBranches = refreshResponse.LocalBranches.Where(b => !string.IsNullOrWhiteSpace(b)).ToList();
@@ -48,7 +48,7 @@ public sealed partial class WorkspaceGitService
 
         await PersistBranchesAsync(wr.WorkspaceRepositoryId, localBranches, remoteBranches, refreshResponse.DefaultBranch, tags, refreshResponse.CurrentTag, cancellationToken);
 
-        // BranchHasUpstream is only written from the agent's own git-config probe. Deriving it here by
+        // BranchHasUpstream is only written from the worker's own git-config probe. Deriving it here by
         // matching the branch name against the remote list said "has upstream" for any branch that merely
         // shares a name with a remote ref, which is how a freshly checked-out default branch could end up
         // with the upstream badge instead of its commit counts.
@@ -88,7 +88,7 @@ public sealed partial class WorkspaceGitService
         CancellationToken cancellationToken = default)
         => _branchWriter.PersistAsync(workspaceRepositoryId, localBranches, remoteBranches, defaultBranchName, tags, currentTag, cancellationToken);
 
-    /// <summary>Creates a new branch in all workspace repos (in parallel), then checks it out. baseBranch is "__default__" to use each repo's default, or a branch name. When <paramref name="repositoryIds"/> is set, only those repos are included. When <paramref name="syncState"/> is true, hooks are suppressed and the agent returns full state inline so the app can persist it without waiting for async hook syncs.</summary>
+    /// <summary>Creates a new branch in all workspace repos (in parallel), then checks it out. baseBranch is "__default__" to use each repo's default, or a branch name. When <paramref name="repositoryIds"/> is set, only those repos are included. When <paramref name="syncState"/> is true, hooks are suppressed and the worker returns full state inline so the app can persist it without waiting for async hook syncs.</summary>
     public async Task<IReadOnlyDictionary<int, string>> CreateBranchesAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
@@ -99,7 +99,7 @@ public sealed partial class WorkspaceGitService
         bool syncState = false,
         CancellationToken cancellationToken = default)
     {
-        if (!_agentBridge.IsAgentConnected)
+        if (!_workerBridge.IsWorkerConnected)
             throw new InvalidOperationException("Worker not connected. Start the GrayMoon Worker to create branches.");
 
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
@@ -124,7 +124,7 @@ public sealed partial class WorkspaceGitService
         var completedCount = 0;
         var totalCount = links.Count;
         using var semaphore = new SemaphoreSlim(_maxConcurrent);
-        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
 
         // Prefetch all default branches before the parallel section to avoid concurrent DbContext reads
         Dictionary<int, string>? defaultBranchByWrId = null;
@@ -169,8 +169,8 @@ public sealed partial class WorkspaceGitService
                     repositoryId = wr.RepositoryId,
                     skipHooks = syncState
                 };
-                var response = await _agentBridge.SendCommandAsync("CreateBranch", args, cancellationToken);
-                var createResponse = AgentResponseJson.DeserializeAgentResponse<CreateBranchResponse>(response.Data);
+                var response = await _workerBridge.SendCommandAsync("CreateBranch", args, cancellationToken);
+                var createResponse = WorkerResponseJson.DeserializeWorkerResponse<CreateBranchResponse>(response.Data);
                 var success = createResponse?.Success ?? response.Success;
 
                 if (success)
@@ -199,7 +199,7 @@ public sealed partial class WorkspaceGitService
 
         await Task.WhenAll(links.Select(ProcessOne));
 
-        // EF Core not thread-safe; apply all state writes sequentially after the parallel agent calls.
+        // EF Core not thread-safe; apply all state writes sequentially after the parallel worker calls.
         // WorkspaceRepositoryStateWriter scopes every write to the given context (mirroring onto the
         // shared WorkspaceRepositoryLink only for the special Workspace), so a Feature's branch creation
         // never overwrites the Workspace's own branch/version display and always leaves the Feature's own

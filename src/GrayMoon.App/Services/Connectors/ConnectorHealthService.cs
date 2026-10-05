@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Services.Connectors;
 
-/// <summary>Helper/service for connector health: determines whether tokens are used, and enforces health before agent operations.</summary>
+/// <summary>Helper/service for connector health: determines whether tokens are used, and enforces health before worker operations.</summary>
 public sealed class ConnectorHealthService(AppDbContext dbContext, ILogger<ConnectorHealthService> logger)
 {
     /// <summary>

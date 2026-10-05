@@ -7,7 +7,7 @@ namespace GrayMoon.App.Services.Application;
 
 public sealed class WorkspaceGitChangesOperations(
     IWorkspaceGitChangesReadService readService,
-    IGitChangesAgentClient agentClient,
+    IGitChangesWorkerClient workerClient,
     WorkspaceRepository workspaceRepository,
     IWorkspaceContextPathResolver pathResolver) : IWorkspaceGitChangesOperations
 {
@@ -31,7 +31,7 @@ public sealed class WorkspaceGitChangesOperations(
         bool stageAllFirst,
         CancellationToken cancellationToken)
         => WithResolvedRepo(workspaceId, contextId, repositoryId, cancellationToken, (root, workspaceName, repoName) =>
-            agentClient.CommitAsync(root, workspaceName, repoName, commitMessage, stageAllFirst, cancellationToken));
+            workerClient.CommitAsync(root, workspaceName, repoName, commitMessage, stageAllFirst, cancellationToken));
 
     public Task<GitChangesMutationResult> StageAsync(
         int workspaceId,
@@ -41,7 +41,7 @@ public sealed class WorkspaceGitChangesOperations(
         IReadOnlyList<string> paths,
         CancellationToken cancellationToken)
         => WithResolvedRepo(workspaceId, contextId, repositoryId, cancellationToken, (root, workspaceName, repoName) =>
-            agentClient.StageAsync(root, workspaceName, repoName, scope, paths, cancellationToken));
+            workerClient.StageAsync(root, workspaceName, repoName, scope, paths, cancellationToken));
 
     public Task<GitChangesMutationResult> UnstageAsync(
         int workspaceId,
@@ -51,7 +51,7 @@ public sealed class WorkspaceGitChangesOperations(
         IReadOnlyList<string> paths,
         CancellationToken cancellationToken)
         => WithResolvedRepo(workspaceId, contextId, repositoryId, cancellationToken, (root, workspaceName, repoName) =>
-            agentClient.UnstageAsync(root, workspaceName, repoName, scope, paths, cancellationToken));
+            workerClient.UnstageAsync(root, workspaceName, repoName, scope, paths, cancellationToken));
 
     private async Task<T> WithResolvedRepo<T>(
         int workspaceId,
@@ -70,7 +70,7 @@ public sealed class WorkspaceGitChangesOperations(
         if (string.IsNullOrWhiteSpace(repoName))
             return Fail<T>("Repository is not in the given workspace.");
 
-        var (root, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
+        var (root, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
         if (string.IsNullOrWhiteSpace(root))
             return Fail<T>("Workspace root is not configured.");
 

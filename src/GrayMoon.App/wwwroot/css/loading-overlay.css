@@ -293,7 +293,7 @@
   line-height: 1.1rem;
 }
 
-/* Spinner with optional pending-agent-tasks count inside the ring */
+/* Spinner with optional pending-worker-tasks count inside the ring */
 .loading-overlay-spinner-wrap {
   position: relative;
   width: 3rem;

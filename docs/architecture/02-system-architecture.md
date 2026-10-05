@@ -15,12 +15,12 @@ flowchart TB
     SQLite["SQLite / EF Core"]
     Conn["GitHub and registry connectors"]
     REST["REST API"]
-    AgentHub["AgentHub"]
+    WorkerHub["WorkerHub"]
     SyncHub["WorkspaceSyncHub"]
     DesktopOpt["optional Desktop integration"]
   end
 
-  subgraph Agent["GrayMoon.Agent"]
+  subgraph Worker["GrayMoon.Worker"]
     GitCmd["Git commands"]
     GitVer["GitVersion"]
     Filesys["filesystem"]
@@ -31,14 +31,14 @@ flowchart TB
     HookL["local hook listener"]
   end
 
-  App <-->|"SignalR"| Agent
+  App <-->|"SignalR"| Worker
 ```
 
 This separation is foundational.
 
 GrayMoon.App normally runs in Docker and cannot assume access to the developer's local repository paths.
 
-GrayMoon.Agent (the Worker, packaged as `graymoon-worker`) runs on the developer host and performs operations against the real working copies.
+GrayMoon.Worker (the Worker, packaged as `graymoon-worker`) runs on the developer host and performs operations against the real working copies.
 
 ---
 
@@ -66,9 +66,9 @@ Desktop-mode integration
 
 The App must not run local Git directly.
 
-### GrayMoon.Agent
+### GrayMoon.Worker
 
-`src/GrayMoon.Agent`
+`src/GrayMoon.Worker`
 
 Responsibilities:
 
@@ -152,14 +152,14 @@ common Git models
 
 ### Test projects
 
-The repository has dedicated test projects for Common, Worker (GrayMoon.Agent), and App behavior.
+The repository has dedicated test projects for Common, Worker (GrayMoon.Worker), and App behavior.
 
 The standard development contract is:
 
 ```text
 dotnet build GrayMoon.slnx
 dotnet test src/GrayMoon.Common.Tests/GrayMoon.Common.Tests.csproj
-dotnet test src/GrayMoon.Agent.Tests/GrayMoon.Agent.Tests.csproj
+dotnet test src/GrayMoon.Worker.Tests/GrayMoon.Worker.Tests.csproj
 dotnet test src/GrayMoon.App.Tests/GrayMoon.App.Tests.csproj
 ```
 
@@ -376,12 +376,12 @@ flowchart TB
   Sync["WorkspaceCommitSyncHandler / WorkspaceSyncHandler"]
   Branch["WorkspaceBranchUpdateHandler"]
   Undo["WorkspaceUndoPushHandler"]
-  Prep --> AgentOps["Agent local operations"]
-  Dep --> AgentOps
-  Push --> AgentOps
-  Sync --> AgentOps
-  Branch --> AgentOps
-  Undo --> AgentOps
+  Prep --> WorkerOps["Worker local operations"]
+  Dep --> WorkerOps
+  Push --> WorkerOps
+  Sync --> WorkerOps
+  Branch --> WorkerOps
+  Undo --> WorkerOps
 ```
 
 Orchestrators own:
@@ -401,7 +401,7 @@ The Worker remains responsible for concrete local operations.
 
 ## 9. App-Worker bridge
 
-`AgentBridge` sends commands over `AgentHub`.
+`WorkerBridge` sends commands over `WorkerHub`.
 
 The App generates a request ID and waits through a response-delivery mechanism.
 

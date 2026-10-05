@@ -3,10 +3,10 @@ using System.Text.Json.Serialization;
 namespace GrayMoon.Common.Git;
 
 /// <summary>
-/// Payload for the unsolicited Agent to App <c>GitChangesSnapshotUpdated</c> SignalR push (see
-/// <c>AgentHubMethods.GitChangesSnapshotUpdated</c> in GrayMoon.Abstractions). Lives in GrayMoon.Common,
-/// not GrayMoon.Agent, because both the Agent (sender) and the App (receiver) already reference Common -
-/// no per-process DTO duplication needed for this one, unlike the Agent-local command request/response types.
+/// Payload for the unsolicited Worker to App <c>GitChangesSnapshotUpdated</c> SignalR push (see
+/// <c>WorkerHubMethods.GitChangesSnapshotUpdated</c> in GrayMoon.Abstractions). Lives in GrayMoon.Common,
+/// not GrayMoon.Worker, because both the Worker (sender) and the App (receiver) already reference Common -
+/// no per-process DTO duplication needed for this one, unlike the Worker-local command request/response types.
 /// </summary>
 public sealed class GitChangesSnapshotNotification
 {

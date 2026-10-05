@@ -1,4 +1,4 @@
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 
 namespace GrayMoon.App.Services.Jobs;
 
@@ -17,7 +17,7 @@ public sealed class JobTerminalBuffer
             return _lines.ToArray();
     }
 
-    public void Append(AgentCommandStreamLine line)
+    public void Append(WorkerCommandStreamLine line)
     {
         lock (_lock)
         {
@@ -29,9 +29,9 @@ public sealed class JobTerminalBuffer
         Changed?.Invoke();
     }
 
-    public void Append(string? streamLabel, AgentCommandStreamKind kind, string text)
+    public void Append(string? streamLabel, WorkerCommandStreamKind kind, string text)
     {
-        Append(new AgentCommandStreamLine(streamLabel, kind, text));
+        Append(new WorkerCommandStreamLine(streamLabel, kind, text));
     }
 
     public void Clear()

@@ -1,6 +1,6 @@
 namespace GrayMoon.App.Models;
 
-/// <summary>Project kind for SDK-style projects (matches Agent CsProjFileInfo).</summary>
+/// <summary>Project kind for SDK-style projects (matches Worker CsProjFileInfo).</summary>
 public enum ProjectType
 {
     Executable = 0,

@@ -7,8 +7,8 @@
   <Folder Name="/src/">
     <Project Path="src/GrayMoon.Abstractions/GrayMoon.Abstractions.csproj" />
     <Project Path="src/GrayMoon.Application/GrayMoon.Application.csproj" />
-    <Project Path="src/GrayMoon.Agent/GrayMoon.Agent.csproj" />
-    <Project Path="src/GrayMoon.Agent.Tests/GrayMoon.Agent.Tests.csproj" />
+    <Project Path="src/GrayMoon.Worker/GrayMoon.Worker.csproj" />
+    <Project Path="src/GrayMoon.Worker.Tests/GrayMoon.Worker.Tests.csproj" />
     <Project Path="src/GrayMoon.App.Tests/GrayMoon.App.Tests.csproj" />
     <Project Path="src/GrayMoon.App/GrayMoon.App.csproj" />
     <Project Path="src/GrayMoon.Common.Tests/GrayMoon.Common.Tests.csproj" />

@@ -1,10 +1,11 @@
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
+using GrayMoon.App.Hubs;
 using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services.Security;
 
 /// <summary>
-/// Only the real Worker may connect to <c>/hub/agent</c> or fetch a token from <c>/repos/{id}/connector</c> (F2).
+/// Only the real Worker may connect to <c>/hub/worker</c> or fetch a token from <c>/repos/{id}/connector</c> (F2).
 ///
 /// - A <b>wrong</b> secret is always rejected (401).
 /// - A <b>missing</b> secret is accepted with a warning until some Worker has proved it has the secret
@@ -63,7 +64,7 @@ public sealed class WorkerSecretMiddleware(
                     return;
                 }
 
-                if (kind == ProtectedPath.AgentHub && secrets.NoteUnsecuredWorker())
+                if (kind == ProtectedPath.WorkerHub && secrets.NoteUnsecuredWorker())
                     logger.LogWarning("A Worker connected without a worker secret. Reinstall the Worker from GrayMoon > Worker to finish securing GrayMoon.");
 
                 await next(context);
@@ -74,15 +75,15 @@ public sealed class WorkerSecretMiddleware(
     internal enum ProtectedPath
     {
         None,
-        AgentHub,
+        WorkerHub,
         Connector,
         Pair
     }
 
     internal static ProtectedPath Classify(string path)
     {
-        if (path.StartsWith("/hub/agent", StringComparison.OrdinalIgnoreCase))
-            return ProtectedPath.AgentHub;
+        if (WorkerHubRoutes.IsWorkerHubPath(path))
+            return ProtectedPath.WorkerHub;
 
         if (path.Equals("/api/worker/pair", StringComparison.OrdinalIgnoreCase))
             return ProtectedPath.Pair;

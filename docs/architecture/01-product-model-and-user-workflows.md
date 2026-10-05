@@ -159,7 +159,7 @@ Home
 Workspaces
 Repositories   (all repositories known from connectors, /repositories)
 Connectors
-Worker         (/agent)
+Worker         (/worker)
 Settings
 ```
 

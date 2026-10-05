@@ -1669,7 +1669,7 @@
         }
         else
         {
-            var data = body as BranchesResponse ?? AgentResponseJson.DeserializeAgentResponse<BranchesResponse>(body);
+            var data = body as BranchesResponse ?? WorkerResponseJson.DeserializeWorkerResponse<BranchesResponse>(body);
             if (data != null)
             {
                 local = data.LocalBranches;

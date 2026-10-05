@@ -1,0 +1,307 @@
+using System.Reflection;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using GrayMoon.Abstractions.Worker;
+using GrayMoon.Worker.Abstractions;
+using GrayMoon.Worker.Hub;
+using GrayMoon.Worker.Services;
+using Microsoft.AspNetCore.SignalR.Client;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+
+namespace GrayMoon.Worker.Hosted;
+
+/// <summary>Custom retry policy that retries every 5 seconds indefinitely.</summary>
+internal sealed class FiveSecondRetryPolicy : IRetryPolicy
+{
+    public TimeSpan? NextRetryDelay(RetryContext retryContext)
+    {
+        // First retry immediately, then every 5 seconds
+        return retryContext.PreviousRetryCount == 0
+            ? TimeSpan.Zero
+            : TimeSpan.FromSeconds(5);
+    }
+}
+
+public sealed class SignalRConnectionHostedService(
+    IHubConnectionProvider hubProvider,
+    IJobQueue jobQueue,
+    IReadJobQueue readJobQueue,
+    IDiffJobQueue diffJobQueue,
+    CommandJobFactory commandJobFactory,
+    CommandJobCancellationRegistry cancellationRegistry,
+    IWorkerSecretProvider workerSecretProvider,
+    IOptions<WorkerOptions> options,
+    ILogger<SignalRConnectionHostedService> logger) : IHostedService, IAsyncDisposable
+{
+    /// <summary>Commands that only read repository state (never touch the index or working tree) and can
+    /// run on the dedicated read pool instead of queuing behind long-running writes.</summary>
+    private static readonly HashSet<string> ReadOnlyCommands = ["GetGitChangeStatus", WorkerHubMethods.ListGitWorktrees, WorkerHubMethods.InspectWorktree];
+
+    /// <summary>Diff commands get their own dedicated pool, separate from <see cref="ReadOnlyCommands"/>,
+    /// so opening a diff never queues behind a workspace status rescan (which can fan out many
+    /// GetGitChangeStatus calls) or any other command.</summary>
+    private static readonly HashSet<string> DiffCommands = ["GetGitFileDiff"];
+
+    private readonly WorkerOptions _options = options.Value;
+    private HubConnection? _connection;
+    private CancellationTokenSource? _hostCts;
+
+    private async Task ReportSemVerAsync(CancellationToken cancellationToken)
+    {
+        if (_connection == null) return;
+
+        var workerSemVer = Assembly.GetExecutingAssembly()
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+            ?.InformationalVersion ?? "0.0.0";
+
+        try
+        {
+            await _connection.InvokeAsync(WorkerHubMethods.ReportSemVer, workerSemVer, cancellationToken);
+            logger.LogInformation("Reported worker SemVer: {SemVer}", workerSemVer);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to report SemVer to hub");
+        }
+    }
+
+    public async Task StartAsync(CancellationToken cancellationToken)
+    {
+        _hostCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        var workerSecret = workerSecretProvider.GetSecret();
+        if (string.IsNullOrEmpty(workerSecret))
+            logger.LogWarning("No worker secret is configured. Connecting without one; reinstall the Worker from GrayMoon > Worker to finish securing GrayMoon.");
+
+        _connection = new HubConnectionBuilder()
+            .WithUrl(_options.AppHubUrl, httpOptions =>
+            {
+                if (!string.IsNullOrEmpty(workerSecret))
+                    httpOptions.Headers[WorkerSecretHeader.Name] = workerSecret;
+            })
+            .WithAutomaticReconnect(new FiveSecondRetryPolicy())
+            .AddJsonProtocol(options =>
+            {
+                options.PayloadSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+                options.PayloadSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.Never;
+            })
+            .Build();
+
+        _connection.On<string, string, JsonElement?>(WorkerHubMethods.RequestCommand, async (requestId, command, args) =>
+        {
+            logger.LogDebug("RequestCommand {RequestId} received: {Command}", requestId, command);
+            logger.LogTrace("RequestCommand {RequestId} request content: {Args}", requestId, args.HasValue ? args.Value.GetRawText() : "null");
+            try
+            {
+                var hostToken = _hostCts?.Token ?? CancellationToken.None;
+                var jobCts = cancellationRegistry.Register(requestId, hostToken);
+                if (jobCts.IsCancellationRequested)
+                {
+                    logger.LogDebug("RequestCommand {RequestId} already cancelled; skipping enqueue", requestId);
+                    if (_connection?.State == HubConnectionState.Connected)
+                    {
+                        var cancelled = new WorkerCommandResponse(false, null, "Command cancelled.");
+                        await _connection.InvokeAsync(WorkerHubMethods.ResponseCommand, requestId, cancelled, CancellationToken.None);
+                    }
+                    cancellationRegistry.Unregister(requestId);
+                    return;
+                }
+
+                var envelope = commandJobFactory.CreateCommandJob(requestId, command, args);
+                var targetQueue = DiffCommands.Contains(command)
+                    ? (IJobQueue)diffJobQueue
+                    : ReadOnlyCommands.Contains(command) ? (IJobQueue)readJobQueue : jobQueue;
+                await targetQueue.EnqueueAsync(envelope, jobCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                logger.LogDebug("RequestCommand {RequestId} enqueue cancelled", requestId);
+                cancellationRegistry.Unregister(requestId);
+                if (_connection?.State == HubConnectionState.Connected)
+                {
+                    try
+                    {
+                        var cancelled = new WorkerCommandResponse(false, null, "Command cancelled.");
+                        await _connection.InvokeAsync(WorkerHubMethods.ResponseCommand, requestId, cancelled, CancellationToken.None);
+                    }
+                    catch (Exception sendEx)
+                    {
+                        logger.LogDebug(sendEx, "Failed to send cancelled response for {RequestId}", requestId);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                cancellationRegistry.Unregister(requestId);
+                logger.LogError(ex, "Failed to enqueue command {Command} (RequestId={RequestId})", command, requestId);
+                if (_connection?.State == HubConnectionState.Connected)
+                {
+                    try
+                    {
+                        var errorResponse = new WorkerCommandResponse(false, null, ex.Message);
+                        await _connection.InvokeAsync(WorkerHubMethods.ResponseCommand, requestId, errorResponse, CancellationToken.None);
+                    }
+                    catch (Exception sendEx)
+                    {
+                        logger.LogWarning(sendEx, "Failed to send error response for {RequestId}", requestId);
+                    }
+                }
+            }
+        });
+
+        _connection.On<string>(WorkerHubMethods.CancelCommand, requestId =>
+        {
+            logger.LogDebug("CancelCommand {RequestId} received", requestId);
+            cancellationRegistry.Cancel(requestId);
+            return Task.CompletedTask;
+        });
+
+        _connection.Reconnecting += error =>
+        {
+            logger.LogWarning(error, "Connection lost. Reconnecting to hub at {Url}...", _options.AppHubUrl);
+            return Task.CompletedTask;
+        };
+
+        _connection.Reconnected += async connectionId =>
+        {
+            logger.LogInformation("Reconnected to hub at {Url} (ConnectionId: {ConnectionId})", _options.AppHubUrl, connectionId);
+            await ReportSemVerAsync(CancellationToken.None);
+        };
+
+        _connection.Closed += async error =>
+        {
+            if (cancellationToken.IsCancellationRequested) return;
+            logger.LogWarning(error, "Connection closed. Will attempt to reconnect in 5 seconds...");
+            // Start a background task to reconnect if automatic reconnect didn't work
+            _ = Task.Run(async () => await ReconnectLoopAsync(cancellationToken), CancellationToken.None);
+            await Task.CompletedTask;
+        };
+
+        ((HubConnectionProvider)hubProvider).Connection = _connection;
+
+        await ConnectWithRetryAsync(cancellationToken);
+    }
+
+    private async Task ConnectWithRetryAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                if (_connection == null) break;
+
+                var state = _connection.State;
+                if (state == HubConnectionState.Connected)
+                {
+                    logger.LogInformation("Already connected to hub at {Url}", _options.AppHubUrl);
+                    await ReportSemVerAsync(cancellationToken);
+                    return;
+                }
+
+                await _connection.StartAsync(cancellationToken);
+                logger.LogInformation("Connected to hub at {Url}", _options.AppHubUrl);
+                await ReportSemVerAsync(cancellationToken);
+                return;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to connect to hub. Retrying in 5s...");
+                await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+            }
+        }
+    }
+
+    private async Task ReconnectLoopAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                if (_connection == null) break;
+
+                HubConnectionState state;
+                try
+                {
+                    state = _connection.State;
+                }
+                catch (ObjectDisposedException)
+                {
+                    logger.LogDebug("Connection was disposed. Exiting reconnect loop.");
+                    return;
+                }
+
+                if (state == HubConnectionState.Connected)
+                {
+                    logger.LogInformation("Connection restored. Stopping reconnect loop.");
+                    return;
+                }
+
+                if (state == HubConnectionState.Disconnected)
+                {
+                    logger.LogInformation("Attempting to reconnect to hub at {Url}...", _options.AppHubUrl);
+                    await _connection.StartAsync(cancellationToken);
+                    logger.LogInformation("Successfully reconnected to hub at {Url}", _options.AppHubUrl);
+                    await ReportSemVerAsync(cancellationToken);
+                    return;
+                }
+
+                // If we're in Connecting or Reconnecting state, wait a bit
+                await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (ObjectDisposedException)
+            {
+                logger.LogDebug("Connection was disposed. Exiting reconnect loop.");
+                return;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Reconnection attempt failed. Will retry in 5 seconds...");
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+            }
+        }
+    }
+
+    public async Task StopAsync(CancellationToken cancellationToken)
+    {
+        if (_hostCts != null)
+        {
+            await _hostCts.CancelAsync();
+            _hostCts.Dispose();
+            _hostCts = null;
+        }
+
+        if (_connection != null)
+        {
+            await _connection.StopAsync(cancellationToken);
+            logger.LogInformation("Disconnected from hub");
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hostCts != null)
+        {
+            _hostCts.Dispose();
+            _hostCts = null;
+        }
+
+        if (_connection != null)
+        {
+            await _connection.DisposeAsync();
+        }
+    }
+}

@@ -1,4 +1,4 @@
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.Application.Features;
@@ -7,7 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace GrayMoon.App.Tests;
 
-/// <summary>Feature creation persists ParentBranchName from the same agent HEAD snapshot as BaseCommitSha.</summary>
+/// <summary>Feature creation persists ParentBranchName from the same worker HEAD snapshot as BaseCommitSha.</summary>
 public sealed class CreateFeatureParentBranchTests
 {
     [Fact]
@@ -43,7 +43,7 @@ public sealed class CreateFeatureParentBranchTests
             await db.SaveChangesAsync();
         }
 
-        ctx.AgentBridge.Respond(AgentHubMethods.GetHeadCommits, new
+        ctx.WorkerBridge.Respond(WorkerHubMethods.GetHeadCommits, new
         {
             commits = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
@@ -56,7 +56,7 @@ public sealed class CreateFeatureParentBranchTests
                 ["graymoon-ui"] = "release/3.0",
             },
         });
-        ctx.AgentBridge.Respond(AgentHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:\wt" });
+        ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:\wt" });
 
         await using var opsScope = ctx.CreateScope();
         var ops = opsScope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -78,7 +78,7 @@ public sealed class CreateFeatureParentBranchTests
             link.DefaultBranchName = "main";
         });
 
-        ctx.AgentBridge.Respond(AgentHubMethods.GetHeadCommits, new
+        ctx.WorkerBridge.Respond(WorkerHubMethods.GetHeadCommits, new
         {
             commits = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
@@ -89,7 +89,7 @@ public sealed class CreateFeatureParentBranchTests
                 ["graymoon-api"] = "develop",
             },
         });
-        ctx.AgentBridge.Respond(AgentHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:\wt" });
+        ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:\wt" });
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -105,7 +105,7 @@ public sealed class CreateFeatureParentBranchTests
 
         Assert.Equal("develop", row.ParentBranchName);
         Assert.Equal("abc123def456abc123def456abc123def456abc1", row.BaseCommitSha);
-        Assert.DoesNotContain(ctx.AgentBridge.Calls, c =>
+        Assert.DoesNotContain(ctx.WorkerBridge.Calls, c =>
             c.Command.Contains("Checkout", StringComparison.OrdinalIgnoreCase));
     }
 
@@ -119,7 +119,7 @@ public sealed class CreateFeatureParentBranchTests
             link.DefaultBranchName = "main";
         });
 
-        ctx.AgentBridge.Respond(AgentHubMethods.GetHeadCommits, new
+        ctx.WorkerBridge.Respond(WorkerHubMethods.GetHeadCommits, new
         {
             commits = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
@@ -127,7 +127,7 @@ public sealed class CreateFeatureParentBranchTests
             },
             branches = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
         });
-        ctx.AgentBridge.Respond(AgentHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:\wt" });
+        ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:\wt" });
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -155,7 +155,7 @@ public sealed class CreateFeatureParentBranchTests
             link.DefaultBranchName = "main";
         });
 
-        ctx.AgentBridge.Respond(AgentHubMethods.GetHeadCommits, new
+        ctx.WorkerBridge.Respond(WorkerHubMethods.GetHeadCommits, new
         {
             commits = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
@@ -167,14 +167,14 @@ public sealed class CreateFeatureParentBranchTests
                 ["graymoon-api"] = "1.2.0",
             },
         });
-        ctx.AgentBridge.Respond(AgentHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:\wt" });
+        ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:\wt" });
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
         var result = await ops.CreateFeatureAsync(ctx.WorkspaceId, "feature/tagged", WorkspaceFeatureBaseKindApplication.CurrentWorkspace);
         Assert.True(result.Success, result.Error);
 
-        var createCall = Assert.Single(ctx.AgentBridge.Calls, c => c.Command == AgentHubMethods.CreateGitWorktree);
+        var createCall = Assert.Single(ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.CreateGitWorktree);
         var args = System.Text.Json.JsonSerializer.SerializeToElement(createCall.Args);
         Assert.True(args.GetProperty("detach").GetBoolean());
         Assert.Equal(System.Text.Json.JsonValueKind.Null, args.GetProperty("branchName").ValueKind);

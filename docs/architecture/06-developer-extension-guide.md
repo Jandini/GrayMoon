@@ -6,7 +6,7 @@ Before changing behavior, classify the feature.
 
 ### Local Git/filesystem behavior
 
-Belongs in `GrayMoon.Agent`.
+Belongs in `GrayMoon.Worker`.
 
 Examples:
 
@@ -352,16 +352,16 @@ Shared Git execution should use the common Git/command abstraction rather than s
 Adding a Worker command touches:
 
 ```text
-GrayMoon.Agent/Jobs/Requests + Jobs/Response   DTOs
-GrayMoon.Agent/Commands                        ICommandHandler<TRequest, TResponse>
+GrayMoon.Worker/Jobs/Requests + Jobs/Response   DTOs
+GrayMoon.Worker/Commands                        ICommandHandler<TRequest, TResponse>
 Cli/Handlers/RunCommandHandler.cs              DI registration
 Services/CommandDispatcher.cs                  executor entry
 Services/CommandJobFactory.cs                  DeserializeRequest case
 Hosted/SignalRConnectionHostedService.cs       ReadOnlyCommands / DiffCommands, only if not a main-pool command
-GrayMoon.Abstractions/Agent/AgentHubMethods.cs optional name constant
+GrayMoon.Abstractions/Worker/WorkerHubMethods.cs optional name constant
 ```
 
-The `.claude/skills/add-agent-command` skill walks through these steps.
+The `.claude/skills/add-worker-command` skill walks through these steps.
 
 ---
 

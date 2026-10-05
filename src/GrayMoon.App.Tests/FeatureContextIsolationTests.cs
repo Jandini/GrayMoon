@@ -1,4 +1,4 @@
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
@@ -139,8 +139,8 @@ public sealed class FeatureContextIsolationTests
         workspace.ManagedFeatureStorageRoot = @"C:\Workspace\.graymoon\test-ws\features";
         await seedDb.SaveChangesAsync();
 
-        var (specialRoot, specialFolder) = await pathResolver.GetAgentWorkspaceArgsAsync(special);
-        var (featureRoot, featureFolder) = await pathResolver.GetAgentWorkspaceArgsAsync(feature);
+        var (specialRoot, specialFolder) = await pathResolver.GetWorkerWorkspaceArgsAsync(special);
+        var (featureRoot, featureFolder) = await pathResolver.GetWorkerWorkspaceArgsAsync(feature);
 
         Assert.Equal("test-ws", specialFolder);
         Assert.Equal("feat-path", featureFolder);
@@ -278,9 +278,9 @@ public sealed class FeatureContextIsolationTests
     }
 
     [Fact]
-    public async Task Agent_default_feature_storage_root_follows_posix_user_profile_shape()
+    public async Task Worker_default_feature_storage_root_follows_posix_user_profile_shape()
     {
-        // No explicit "which OS is the Worker" field is used - the Agent's own UserProfilePath
+        // No explicit "which OS is the Worker" field is used - the Worker's own UserProfilePath
         // already starts with '/' for a Linux/macOS Worker, which is enough to pick '/' joins.
         await using var ctx = await SyncStateTestContext.CreateAsync();
         await using var scope = ctx.CreateScope();
@@ -289,9 +289,9 @@ public sealed class FeatureContextIsolationTests
 
         await settings.SetValueAsync(AppSettingRepository.FeatureStorageRootPathKey, null);
         workspaceService.ClearCachedFeatureStorageRootPath();
-        ctx.AgentBridge.Respond("GetHostInfo", new { userProfilePath = "/home/dev" });
+        ctx.WorkerBridge.Respond("GetHostInfo", new { userProfilePath = "/home/dev" });
 
-        var root = await workspaceService.TryGetAgentDefaultFeatureStorageRootAsync();
+        var root = await workspaceService.TryGetWorkerDefaultFeatureStorageRootAsync();
         Assert.Equal("/home/dev/.graymoon", root);
     }
 
@@ -357,7 +357,7 @@ public sealed class FeatureContextIsolationTests
             await db.SaveChangesAsync();
         }
 
-        ctx.AgentBridge.Respond(AgentHubMethods.GetHeadCommits, new
+        ctx.WorkerBridge.Respond(WorkerHubMethods.GetHeadCommits, new
         {
             commits = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
@@ -368,7 +368,7 @@ public sealed class FeatureContextIsolationTests
                 ["graymoon-api"] = "main",
             },
         });
-        ctx.AgentBridge.Respond(AgentHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:\wt" });
+        ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:\wt" });
 
         await using var opsScope = ctx.CreateScope();
         var ops = opsScope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -384,8 +384,8 @@ public sealed class FeatureContextIsolationTests
             updated.ManagedFeatureStorageRoot.Replace('/', '\\')
                 .StartsWith(@"C:\.graymoon", StringComparison.OrdinalIgnoreCase));
 
-        // Agent receives the configured storage path (CreateGitWorktree response may overwrite the stored path).
-        var createCall = Assert.Single(ctx.AgentBridge.Calls, c => c.Command == AgentHubMethods.CreateGitWorktree);
+        // Worker receives the configured storage path (CreateGitWorktree response may overwrite the stored path).
+        var createCall = Assert.Single(ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.CreateGitWorktree);
         var worktreePathProp = createCall.Args.GetType().GetProperty("worktreePath");
         Assert.NotNull(worktreePathProp);
         var requestedPath = Assert.IsType<string>(worktreePathProp!.GetValue(createCall.Args));

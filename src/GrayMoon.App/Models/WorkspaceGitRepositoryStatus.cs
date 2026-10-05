@@ -4,8 +4,8 @@ namespace GrayMoon.App.Models;
 
 /// <summary>
 /// Persisted read model for one repository's latest Git Changes status - the App's SQLite projection of
-/// an Agent-reported <see cref="GrayMoon.Common.Git.GitChangeSnapshot"/>. Git and the Agent remain
-/// authoritative; this is a durable cache the Git Changes page reads without ever contacting the Agent.
+/// a Worker-reported <see cref="GrayMoon.Common.Git.GitChangeSnapshot"/>. Git and the Worker remain
+/// authoritative; this is a durable cache the Git Changes page reads without ever contacting the Worker.
 /// </summary>
 [Table("WorkspaceGitRepositoryStatus")]
 public sealed class WorkspaceGitRepositoryStatus
@@ -35,7 +35,7 @@ public sealed class WorkspaceGitRepositoryStatus
     public int? StagedInsertions { get; set; }
     public int? StagedDeletions { get; set; }
 
-    public DateTimeOffset AgentScannedAt { get; set; }
+    public DateTimeOffset WorkerScannedAt { get; set; }
     public DateTimeOffset PersistedAt { get; set; }
 
     public string? LastErrorCode { get; set; }

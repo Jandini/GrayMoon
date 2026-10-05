@@ -12,7 +12,7 @@ namespace GrayMoon.Abstractions.Notifications;
 /// </para>
 /// <para>
 /// Every marker is a non-nullable <see cref="bool"/> defaulting to <c>false</c>, so a payload from
-/// an agent that predates this type deserialises to "nothing was probed" and therefore cannot
+/// a worker that predates this type deserialises to "nothing was probed" and therefore cannot
 /// erase state. Commands that genuinely do not inspect a group (for example a branch-list refresh
 /// that never counts commits) leave its marker false for the same reason.
 /// </para>

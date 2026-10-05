@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Data;
 using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
@@ -15,7 +15,7 @@ using Microsoft.EntityFrameworkCore;
 namespace GrayMoon.App.Services.Workspaces;
 
 public sealed class WorkspaceFileVersionService(
-    IAgentBridge agentBridge,
+    IWorkerBridge workerBridge,
     WorkspaceRepository workspaceRepository,
     WorkspaceProjectRepository workspaceProjectRepository,
     WorkspaceFileVersionConfigRepository versionConfigRepository,
@@ -108,7 +108,7 @@ public sealed class WorkspaceFileVersionService(
     /// <summary>
     /// For every file in the workspace that has a version pattern configured:
     ///   1. Resolves the current version for each repo from the workspace's repository links (DB state); no GitVersion is run.
-    ///   2. Calls UpdateFileVersions on the agent with those versions in the request to perform the in-place substitution.
+    ///   2. Calls UpdateFileVersions on the worker with those versions in the request to perform the in-place substitution.
     /// When <paramref name="selectedRepositoryIds"/> is set, only files in those repositories are updated.
     /// By default, version-pattern token lines are also filtered to selected repo names; set
     /// <paramref name="filterPatternTokensToSelectedRepositories"/> to false to keep all token lines
@@ -137,7 +137,7 @@ public sealed class WorkspaceFileVersionService(
     {
         var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null) return (0, 0, "Workspace not found.", []);
-        if (!agentBridge.IsAgentConnected) return (0, 0, "Worker is not connected.", []);
+        if (!workerBridge.IsWorkerConnected) return (0, 0, "Worker is not connected.", []);
 
         var configs = await versionConfigRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
         if (configs.Count == 0) return (0, 0, "No version configurations found. Use Configure on a file first.", []);
@@ -173,7 +173,7 @@ public sealed class WorkspaceFileVersionService(
             patternsForResolve.Add(pattern);
         }
 
-        var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
         var tokenValues = await ResolveTokenValuesAsync(workspace, contextId, workspaceRoot, workspaceFolderName, patternsForResolve, cancellationToken);
 
         // Update each configured file
@@ -202,7 +202,7 @@ public sealed class WorkspaceFileVersionService(
 
             try
             {
-                var resp = await agentBridge.SendCommandAsync("UpdateFileVersions", new
+                var resp = await workerBridge.SendCommandAsync("UpdateFileVersions", new
                 {
                     workspaceName = workspaceFolderName,
                     repositoryName = file.Repository.RepositoryName,
@@ -214,7 +214,7 @@ public sealed class WorkspaceFileVersionService(
 
                 if (resp.Success && resp.Data != null)
                 {
-                    var result = AgentResponseJson.DeserializeAgentResponse<AgentUpdateFileVersionsResponse>(resp.Data);
+                    var result = WorkerResponseJson.DeserializeWorkerResponse<WorkerUpdateFileVersionsResponse>(resp.Data);
                     var updatedForFile = result?.UpdatedCount ?? 0;
                     totalUpdated += updatedForFile;
                     if (updatedForFile > 0 && file.FilePath != null)
@@ -287,7 +287,7 @@ public sealed class WorkspaceFileVersionService(
 
     /// <summary>
     /// Resolves all token values for the given patterns: GitVersion and branch from workspace links,
-    /// commit SHAs via one batched Agent <c>GetHeadCommits</c> call for repositories that need them.
+    /// commit SHAs via one batched Worker <c>GetHeadCommits</c> call for repositories that need them.
     /// </summary>
     private async Task<Dictionary<string, string>> ResolveTokenValuesAsync(
         Workspace workspace,
@@ -375,11 +375,11 @@ public sealed class WorkspaceFileVersionService(
                 "Workspace root is not configured; skipping {Count} :commit token(s).",
                 commitRepos.Count);
         }
-        else if (commitRepos.Count > 0 && agentBridge.IsAgentConnected)
+        else if (commitRepos.Count > 0 && workerBridge.IsWorkerConnected)
         {
             try
             {
-                var resp = await agentBridge.SendCommandAsync(AgentHubMethods.GetHeadCommits, new
+                var resp = await workerBridge.SendCommandAsync(WorkerHubMethods.GetHeadCommits, new
                 {
                     workspaceName = workspaceFolderName,
                     workspaceRoot,
@@ -388,7 +388,7 @@ public sealed class WorkspaceFileVersionService(
 
                 if (resp.Success && resp.Data != null)
                 {
-                    var result = AgentResponseJson.DeserializeAgentResponse<GetHeadCommitsAgentResponse>(resp.Data);
+                    var result = WorkerResponseJson.DeserializeWorkerResponse<GetHeadCommitsWorkerResponse>(resp.Data);
                     var commits = new Dictionary<string, string>(
                         result?.Commits ?? [],
                         StringComparer.OrdinalIgnoreCase);
@@ -424,14 +424,14 @@ public sealed class WorkspaceFileVersionService(
         return tokenValues;
     }
 
-    private sealed class GetHeadCommitsAgentResponse
+    private sealed class GetHeadCommitsWorkerResponse
     {
         [System.Text.Json.Serialization.JsonPropertyName("commits")]
         public Dictionary<string, string>? Commits { get; set; }
     }
 
     /// <summary>
-    /// Reads all configured version files via the agent, compares current values to expected repo GitVersions,
+    /// Reads all configured version files via the worker, compares current values to expected repo GitVersions,
     /// and persists the results to WorkspaceFileLineStatuses and WorkspaceRepositoryLink file-config counters.
     /// Called at the same trigger points as csproj dependency stat recomputation.
     /// Concurrent callers for the same workspace coalesce onto one in-flight check unless <paramref name="forceFresh"/> is true.
@@ -515,7 +515,7 @@ public sealed class WorkspaceFileVersionService(
         var sw = Stopwatch.StartNew();
         logger.LogDebug("CheckAndPersist starting for workspace {WorkspaceId} context {ContextId}", workspaceId, contextId.Value);
 
-        if (!agentBridge.IsAgentConnected)
+        if (!workerBridge.IsWorkerConnected)
             return;
 
         var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
@@ -543,7 +543,7 @@ public sealed class WorkspaceFileVersionService(
             }
         }
 
-        var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
         var patterns = configs
             .Where(c => c.File?.Repository != null)
             .Select(c => c.VersionPattern)
@@ -598,14 +598,14 @@ public sealed class WorkspaceFileVersionService(
 
         try
         {
-            var agentSw = Stopwatch.StartNew();
-            var resp = await agentBridge.SendCommandAsync("CheckFileVersions", new
+            var workerSw = Stopwatch.StartNew();
+            var resp = await workerBridge.SendCommandAsync("CheckFileVersions", new
             {
                 workspaceName = workspaceFolderName,
                 workspaceRoot,
                 files = items
             }, cancellationToken);
-            logger.LogDebug("CheckAndPersist CheckFileVersions agent call completed for workspace {WorkspaceId} in {ElapsedMs}ms", workspaceId, agentSw.ElapsedMilliseconds);
+            logger.LogDebug("CheckAndPersist CheckFileVersions worker call completed for workspace {WorkspaceId} in {ElapsedMs}ms", workspaceId, workerSw.ElapsedMilliseconds);
 
             if (!resp.Success || resp.Data == null)
             {
@@ -613,7 +613,7 @@ public sealed class WorkspaceFileVersionService(
                 return;
             }
 
-            var result = AgentResponseJson.DeserializeAgentResponse<CheckFileVersionsAgentResponse>(resp.Data);
+            var result = WorkerResponseJson.DeserializeWorkerResponse<CheckFileVersionsWorkerResponse>(resp.Data);
             if (result?.Files == null) return;
 
             var fileByRepoAndPath = trackedFiles.ToDictionary(
@@ -730,18 +730,18 @@ public sealed class WorkspaceFileVersionService(
 
     /// <summary>
     /// Detects virtual/generated NuGet package dependencies from configured .csproj version files: for every
-    /// configured file whose path is a .csproj, asks the agent to resolve which PackageReference (Include name)
+    /// configured file whose path is a .csproj, asks the worker to resolve which PackageReference (Include name)
     /// each version-pattern line refers to (via the real .csproj's XML-based PackageReference parsing, not
     /// line-based text matching), resolves the producer repository from the pattern's repo-name token, and syncs
     /// the resulting generated <see cref="WorkspaceProject"/>/<see cref="ProjectDependency"/> rows.
-    /// Returns true if the agent call succeeded (regardless of whether any generated dependency changed).
+    /// Returns true if the worker call succeeded (regardless of whether any generated dependency changed).
     /// </summary>
     public async Task<bool> SyncGeneratedPackageDependenciesAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken = default)
     {
-        if (!agentBridge.IsAgentConnected) return false;
+        if (!workerBridge.IsWorkerConnected) return false;
 
         var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null) return false;
@@ -773,7 +773,7 @@ public sealed class WorkspaceFileVersionService(
             }
         }
 
-        var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
 
         var requestItems = csprojConfigs
             .Select(cfg => new
@@ -786,7 +786,7 @@ public sealed class WorkspaceFileVersionService(
 
         try
         {
-            var resp = await agentBridge.SendCommandAsync(AgentHubMethods.ResolveGeneratedPackageReferences, new
+            var resp = await workerBridge.SendCommandAsync(WorkerHubMethods.ResolveGeneratedPackageReferences, new
             {
                 workspaceName = workspaceFolderName,
                 workspaceRoot,
@@ -799,7 +799,7 @@ public sealed class WorkspaceFileVersionService(
                 return false;
             }
 
-            var result = AgentResponseJson.DeserializeAgentResponse<ResolveGeneratedPackageReferencesAgentResponse>(resp.Data);
+            var result = WorkerResponseJson.DeserializeWorkerResponse<ResolveGeneratedPackageReferencesWorkerResponse>(resp.Data);
             if (result?.Files == null)
                 return false;
 
@@ -839,20 +839,20 @@ public sealed class WorkspaceFileVersionService(
         }
     }
 
-    private sealed class ResolveGeneratedPackageReferencesAgentResponse
+    private sealed class ResolveGeneratedPackageReferencesWorkerResponse
     {
         [System.Text.Json.Serialization.JsonPropertyName("files")]
-        public List<ResolveGeneratedPackageReferencesAgentFileResult>? Files { get; set; }
+        public List<ResolveGeneratedPackageReferencesWorkerFileResult>? Files { get; set; }
     }
 
-    private sealed class ResolveGeneratedPackageReferencesAgentFileResult
+    private sealed class ResolveGeneratedPackageReferencesWorkerFileResult
     {
         [System.Text.Json.Serialization.JsonPropertyName("repositoryName")] public string? RepositoryName { get; set; }
         [System.Text.Json.Serialization.JsonPropertyName("filePath")] public string? FilePath { get; set; }
-        [System.Text.Json.Serialization.JsonPropertyName("packages")] public List<ResolveGeneratedPackageReferencesAgentPackageEntry>? Packages { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("packages")] public List<ResolveGeneratedPackageReferencesWorkerPackageEntry>? Packages { get; set; }
     }
 
-    private sealed class ResolveGeneratedPackageReferencesAgentPackageEntry
+    private sealed class ResolveGeneratedPackageReferencesWorkerPackageEntry
     {
         [System.Text.Json.Serialization.JsonPropertyName("repoNameToken")] public string? RepoNameToken { get; set; }
         [System.Text.Json.Serialization.JsonPropertyName("packageName")] public string? PackageName { get; set; }
@@ -1091,7 +1091,7 @@ public sealed class WorkspaceFileVersionService(
     /// <summary>
     /// Checks which pattern lines from <paramref name="pattern"/> cannot be matched in the actual file on disk.
     /// Used by the version config dialog to highlight pattern lines that no longer exist in the file.
-    /// Returns token names (repo names) whose pattern line was not found. Returns empty if the agent is
+    /// Returns token names (repo names) whose pattern line was not found. Returns empty if the worker is
     /// not connected, the file is missing, or the call fails.
     /// </summary>
     public async Task<IReadOnlyList<string>> ValidatePatternAgainstFileAsync(
@@ -1102,7 +1102,7 @@ public sealed class WorkspaceFileVersionService(
         string? pattern,
         CancellationToken cancellationToken = default)
     {
-        if (!agentBridge.IsAgentConnected) return [];
+        if (!workerBridge.IsWorkerConnected) return [];
         if (string.IsNullOrWhiteSpace(pattern) || string.IsNullOrWhiteSpace(repositoryName) || string.IsNullOrWhiteSpace(filePath))
             return [];
 
@@ -1111,8 +1111,8 @@ public sealed class WorkspaceFileVersionService(
 
         try
         {
-            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
-            var resp = await agentBridge.SendCommandAsync("CheckFileVersions", new
+            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
+            var resp = await workerBridge.SendCommandAsync("CheckFileVersions", new
             {
                 workspaceName = workspaceFolderName,
                 workspaceRoot,
@@ -1130,7 +1130,7 @@ public sealed class WorkspaceFileVersionService(
 
             if (!resp.Success || resp.Data == null) return [];
 
-            var result = AgentResponseJson.DeserializeAgentResponse<CheckFileVersionsAgentResponse>(resp.Data);
+            var result = WorkerResponseJson.DeserializeWorkerResponse<CheckFileVersionsWorkerResponse>(resp.Data);
             var fileResult = result?.Files?.FirstOrDefault();
             if (fileResult == null || fileResult.FileMissing) return [];
 
@@ -1144,13 +1144,13 @@ public sealed class WorkspaceFileVersionService(
         }
     }
 
-    private sealed class CheckFileVersionsAgentResponse
+    private sealed class CheckFileVersionsWorkerResponse
     {
         [System.Text.Json.Serialization.JsonPropertyName("files")]
-        public List<CheckFileVersionsAgentFileResult>? Files { get; set; }
+        public List<CheckFileVersionsWorkerFileResult>? Files { get; set; }
     }
 
-    private sealed class CheckFileVersionsAgentFileResult
+    private sealed class CheckFileVersionsWorkerFileResult
     {
         [System.Text.Json.Serialization.JsonPropertyName("repositoryName")] public string? RepositoryName { get; set; }
         [System.Text.Json.Serialization.JsonPropertyName("filePath")] public string? FilePath { get; set; }
@@ -1158,11 +1158,11 @@ public sealed class WorkspaceFileVersionService(
         [System.Text.Json.Serialization.JsonPropertyName("totalMatchedLines")] public int TotalMatchedLines { get; set; }
         [System.Text.Json.Serialization.JsonPropertyName("expectedTokenCount")] public int ExpectedTokenCount { get; set; }
         [System.Text.Json.Serialization.JsonPropertyName("fileMissing")] public bool FileMissing { get; set; }
-        [System.Text.Json.Serialization.JsonPropertyName("outOfDateLines")] public List<CheckFileVersionsAgentOutOfDateLine>? OutOfDateLines { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("outOfDateLines")] public List<CheckFileVersionsWorkerOutOfDateLine>? OutOfDateLines { get; set; }
         [System.Text.Json.Serialization.JsonPropertyName("notMatchedTokens")] public List<string>? NotMatchedTokens { get; set; }
     }
 
-    private sealed class CheckFileVersionsAgentOutOfDateLine
+    private sealed class CheckFileVersionsWorkerOutOfDateLine
     {
         [System.Text.Json.Serialization.JsonPropertyName("tokenName")] public string? TokenName { get; set; }
         [System.Text.Json.Serialization.JsonPropertyName("currentValue")] public string? CurrentValue { get; set; }

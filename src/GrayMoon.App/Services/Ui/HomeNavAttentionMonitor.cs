@@ -1,6 +1,6 @@
 using System.Text.Json;
 using GrayMoon.App.Repositories;
-using GrayMoon.App.Services.Agent;
+using GrayMoon.App.Services.Worker;
 using GrayMoon.App.Services.Connectors;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Routing;
@@ -8,14 +8,14 @@ using Microsoft.AspNetCore.Components.Routing;
 namespace GrayMoon.App.Services.Ui;
 
 /// <summary>
-/// Circuit-scoped source for <c>AgentUpgradeNotificationDot</c>. One instance owns the
+/// Circuit-scoped source for <c>WorkerUpgradeNotificationDot</c>. One instance owns the
 /// worker, prerequisite, and connector checks so the static nav can host the same
 /// interactive dot the worktree branch uses.
 /// </summary>
 public sealed class HomeNavAttentionMonitor : IDisposable
 {
-    private readonly AgentConnectionTracker _agentConnectionTracker;
-    private readonly IAgentBridge _agentBridge;
+    private readonly WorkerConnectionTracker _workerConnectionTracker;
+    private readonly IWorkerBridge _workerBridge;
     private readonly ConnectorRepository _connectorRepository;
     private readonly ConnectorHealthService _connectorHealthService;
     private readonly HostPrerequisiteInstallService _hostPrerequisiteInstall;
@@ -31,16 +31,16 @@ public sealed class HomeNavAttentionMonitor : IDisposable
     private bool _hostPrerequisitesMissing;
 
     public HomeNavAttentionMonitor(
-        AgentConnectionTracker agentConnectionTracker,
-        IAgentBridge agentBridge,
+        WorkerConnectionTracker workerConnectionTracker,
+        IWorkerBridge workerBridge,
         ConnectorRepository connectorRepository,
         ConnectorHealthService connectorHealthService,
         HostPrerequisiteInstallService hostPrerequisiteInstall,
         NavigationManager navigationManager,
         ILogger<HomeNavAttentionMonitor> logger)
     {
-        _agentConnectionTracker = agentConnectionTracker;
-        _agentBridge = agentBridge;
+        _workerConnectionTracker = workerConnectionTracker;
+        _workerBridge = workerBridge;
         _connectorRepository = connectorRepository;
         _connectorHealthService = connectorHealthService;
         _hostPrerequisiteInstall = hostPrerequisiteInstall;
@@ -51,14 +51,14 @@ public sealed class HomeNavAttentionMonitor : IDisposable
     public event Action? Changed;
 
     public bool ShowDot => HomeNavNotification.ShouldShow(
-        _agentConnectionTracker.State,
-        _agentConnectionTracker.IsSelfUpdateInProgress,
+        _workerConnectionTracker.State,
+        _workerConnectionTracker.IsSelfUpdateInProgress,
         _hostPrerequisitesMissing,
         HomeNavNotification.ConnectorsRequired(_hasConnectors, _anyUsedConnectorUnhealthy));
 
     public string Title => HomeNavNotification.Title(
-        _agentConnectionTracker.State,
-        _agentConnectionTracker.IsSelfUpdateInProgress,
+        _workerConnectionTracker.State,
+        _workerConnectionTracker.IsSelfUpdateInProgress,
         _hostPrerequisitesMissing,
         _hasConnectors,
         _anyUsedConnectorUnhealthy);
@@ -70,7 +70,7 @@ public sealed class HomeNavAttentionMonitor : IDisposable
 
         _started = true;
         _ignoreInitialState = true;
-        _agentConnectionTracker.OnStateChanged(OnAgentStateChanged);
+        _workerConnectionTracker.OnStateChanged(OnWorkerStateChanged);
         _ignoreInitialState = false;
         _navigationManager.LocationChanged += OnLocationChanged;
         _hostPrerequisiteInstall.Changed += OnHostPrerequisitesChanged;
@@ -84,25 +84,25 @@ public sealed class HomeNavAttentionMonitor : IDisposable
 
         _disposed = true;
         Interlocked.Increment(ref _hostInfoGeneration);
-        _agentConnectionTracker.RemoveStateChanged(OnAgentStateChanged);
+        _workerConnectionTracker.RemoveStateChanged(OnWorkerStateChanged);
         _navigationManager.LocationChanged -= OnLocationChanged;
         _hostPrerequisiteInstall.Changed -= OnHostPrerequisitesChanged;
     }
 
-    private void OnAgentStateChanged(AgentConnectionState state)
+    private void OnWorkerStateChanged(WorkerConnectionState state)
     {
         if (_ignoreInitialState || _disposed)
             return;
 
-        _ = OnAgentStateChangedAsync(state);
+        _ = OnWorkerStateChangedAsync(state);
     }
 
-    private async Task OnAgentStateChangedAsync(AgentConnectionState state)
+    private async Task OnWorkerStateChangedAsync(WorkerConnectionState state)
     {
         if (_disposed)
             return;
 
-        if (state != AgentConnectionState.Online)
+        if (state != WorkerConnectionState.Online)
         {
             Interlocked.Increment(ref _hostInfoGeneration);
             _hostPrerequisitesMissing = false;
@@ -127,7 +127,7 @@ public sealed class HomeNavAttentionMonitor : IDisposable
         if (_disposed || _hostPrerequisiteInstall.IsInstalling)
             return;
 
-        if (_agentConnectionTracker.State != AgentConnectionState.Online)
+        if (_workerConnectionTracker.State != WorkerConnectionState.Online)
             return;
 
         _ = RefreshHostPrerequisitesAsync();
@@ -139,7 +139,7 @@ public sealed class HomeNavAttentionMonitor : IDisposable
         if (_disposed)
             return;
 
-        if (_agentConnectionTracker.State == AgentConnectionState.Online)
+        if (_workerConnectionTracker.State == WorkerConnectionState.Online)
             await RefreshHostPrerequisitesAsync();
     }
 
@@ -149,7 +149,7 @@ public sealed class HomeNavAttentionMonitor : IDisposable
         if (_disposed || !_hostPrerequisitesMissing)
             return;
 
-        if (_agentConnectionTracker.State == AgentConnectionState.Online)
+        if (_workerConnectionTracker.State == WorkerConnectionState.Online)
             await RefreshHostPrerequisitesAsync();
     }
 
@@ -210,7 +210,7 @@ public sealed class HomeNavAttentionMonitor : IDisposable
         if (generation != Volatile.Read(ref _hostInfoGeneration) || _disposed)
             return;
 
-        var nowMissing = _agentConnectionTracker.State == AgentConnectionState.Online && missing;
+        var nowMissing = _workerConnectionTracker.State == WorkerConnectionState.Online && missing;
         if (_hostPrerequisitesMissing == nowMissing)
             return;
 
@@ -220,12 +220,12 @@ public sealed class HomeNavAttentionMonitor : IDisposable
 
     private async Task<bool> QueryHostPrerequisitesMissingAsync()
     {
-        if (!_agentBridge.IsAgentConnected)
+        if (!_workerBridge.IsWorkerConnected)
             return false;
 
         try
         {
-            var response = await _agentBridge.SendCommandAsync("GetHostInfo", new { }, CancellationToken.None);
+            var response = await _workerBridge.SendCommandAsync("GetHostInfo", new { }, CancellationToken.None);
             if (!response.Success || response.Data is null)
                 return false;
 

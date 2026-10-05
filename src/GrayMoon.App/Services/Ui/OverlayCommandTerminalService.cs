@@ -1,8 +1,8 @@
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 
 namespace GrayMoon.App.Services.Ui;
 
-/// <summary>Bounded in-memory log for the loading-overlay terminal (agent command streams may interleave).</summary>
+/// <summary>Bounded in-memory log for the loading-overlay terminal (worker command streams may interleave).</summary>
 public sealed class OverlayCommandTerminalService
 {
     private const int MaxLines = 800;
@@ -17,7 +17,7 @@ public sealed class OverlayCommandTerminalService
             return _lines.ToList();
     }
 
-    public void Append(AgentCommandStreamLine line)
+    public void Append(WorkerCommandStreamLine line)
     {
         lock (_lock)
         {
@@ -29,9 +29,9 @@ public sealed class OverlayCommandTerminalService
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
-    public void Append(string? streamLabel, AgentCommandStreamKind kind, string text)
+    public void Append(string? streamLabel, WorkerCommandStreamKind kind, string text)
     {
-        Append(new AgentCommandStreamLine(streamLabel, kind, text));
+        Append(new WorkerCommandStreamLine(streamLabel, kind, text));
     }
 
     public void Clear()
@@ -43,4 +43,4 @@ public sealed class OverlayCommandTerminalService
     }
 }
 
-public sealed record OverlayTerminalLine(string? StreamLabel, AgentCommandStreamKind Kind, string Text);
+public sealed record OverlayTerminalLine(string? StreamLabel, WorkerCommandStreamKind Kind, string Text);

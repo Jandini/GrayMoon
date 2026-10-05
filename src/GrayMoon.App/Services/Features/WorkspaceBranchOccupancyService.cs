@@ -1,6 +1,6 @@
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Data;
-using GrayMoon.App.Services.Agent;
+using GrayMoon.App.Services.Worker;
 using GrayMoon.Application.Features;
 using GrayMoon.Common.Git;
 using Microsoft.EntityFrameworkCore;
@@ -15,7 +15,7 @@ public sealed class WorkspaceBranchOccupancyService(
     IDbContextFactory<AppDbContext> dbContextFactory,
     IWorkspaceContextPathResolver pathResolver,
     IWorkspaceFeatureContextResolver contextResolver,
-    IAgentBridge agentBridge) : IWorkspaceBranchOccupancyService
+    IWorkerBridge workerBridge) : IWorkspaceBranchOccupancyService
 {
     public async Task<IReadOnlyDictionary<string, BranchOccupancyBadge>> GetBadgesForRepositoryAsync(
         int workspaceId,
@@ -27,15 +27,15 @@ public sealed class WorkspaceBranchOccupancyService(
         var mainPath = await pathResolver.GetRepositoryPathAsync(special, workspaceRepositoryId, cancellationToken);
         var currentPath = await pathResolver.GetRepositoryPathAsync(viewingContextId, workspaceRepositoryId, cancellationToken);
 
-        var listResp = await agentBridge.SendCommandAsync(
-            AgentHubMethods.ListGitWorktrees,
+        var listResp = await workerBridge.SendCommandAsync(
+            WorkerHubMethods.ListGitWorktrees,
             new { mainRepositoryPath = mainPath },
             cancellationToken);
 
         IReadOnlyList<GitWorktreeInfo> worktrees = [];
         if (listResp.Success && listResp.Data != null)
         {
-            var payload = AgentResponseJson.DeserializeAgentResponse<ListWorktreesAgentResponse>(listResp.Data);
+            var payload = WorkerResponseJson.DeserializeWorkerResponse<ListWorktreesWorkerResponse>(listResp.Data);
             worktrees = payload?.Worktrees ?? [];
         }
 
@@ -48,7 +48,7 @@ public sealed class WorkspaceBranchOccupancyService(
 
         var byPath = featureRows
             .Where(r => !string.IsNullOrWhiteSpace(r.WorktreePath))
-            .GroupBy(r => AgentPath.Normalize(r.WorktreePath!), StringComparer.OrdinalIgnoreCase)
+            .GroupBy(r => WorkerPath.Normalize(r.WorktreePath!), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
         var result = new Dictionary<string, BranchOccupancyBadge>(StringComparer.OrdinalIgnoreCase);
@@ -69,8 +69,8 @@ public sealed class WorkspaceBranchOccupancyService(
             }
             else if (kind == GitWorktreeBranchOccupancyKind.OccupiedElsewhere)
             {
-                var pathKey = AgentPath.Normalize(wt.WorktreePath ?? "");
-                var mainKey = AgentPath.Normalize(mainPath ?? "");
+                var pathKey = WorkerPath.Normalize(wt.WorktreePath ?? "");
+                var mainKey = WorkerPath.Normalize(mainPath ?? "");
                 if (byPath.TryGetValue(pathKey, out var owned))
                 {
                     badge = BranchOccupancyKind.Feature;
@@ -184,7 +184,7 @@ public sealed class BranchOccupancyBadge
     public WorkspaceFeatureContextId? ContextId { get; init; }
 }
 
-file sealed class ListWorktreesAgentResponse
+file sealed class ListWorktreesWorkerResponse
 {
     public bool Success { get; set; }
     public List<GitWorktreeInfo>? Worktrees { get; set; }

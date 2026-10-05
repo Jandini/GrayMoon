@@ -97,7 +97,7 @@ public sealed partial class WorkspaceRepositories
         ShowRepositoriesFetchOverlay
         || JobService.GetJob(PageJobKey) is { State: BackgroundJobState.Running };
     private bool _pendingRefreshAfterJob;
-    private int AgentTasksPendingCount => AgentQueueStateService.GetPendingCountForWorkspace(WorkspaceId);
+    private int WorkerTasksPendingCount => WorkerQueueStateService.GetPendingCountForWorkspace(WorkspaceId);
     private const int RefreshDebounceMs = 200;
     private CancellationTokenSource? _refreshDebounceCts;
     private readonly object _refreshDebounceLock = new();

@@ -8,7 +8,7 @@ public static class DesktopHostingExtensions
 {
     /// <summary>
     /// Fixed loopback port used in desktop mode. A stable port (rather than an OS-assigned
-    /// ephemeral one) is required so an installed GrayMoon Agent Windows Service - whose
+    /// ephemeral one) is required so an installed GrayMoon Worker Windows Service - whose
     /// --hub-url is baked into its static service command line at install time - keeps
     /// working across GrayMoon.App/Desktop restarts and machine reboots without needing to
     /// be reinstalled. Matches the port already used by the App's Docker/dev-mode hosting.
@@ -36,7 +36,7 @@ public static class DesktopHostingExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrEmpty(pipeName);
 
-        // Bind only to loopback, on a fixed port so an installed Agent service's baked-in
+        // Bind only to loopback, on a fixed port so an installed Worker service's baked-in
         // hub URL stays valid across restarts. Single-instance is enforced by GrayMoon.Desktop's
         // SingleInstanceService, so only one GrayMoon.App process should ever bind this port.
         builder.UseUrls($"http://127.0.0.1:{DesktopPort}");

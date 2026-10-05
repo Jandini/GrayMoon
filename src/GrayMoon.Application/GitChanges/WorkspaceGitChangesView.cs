@@ -40,7 +40,7 @@ public sealed record WorkspaceGitChangesRepositoryView
     /// <summary>Persisted staged deletions. Null until a user-visible scan computed them.</summary>
     public int? StagedDeletions { get; init; }
 
-    public DateTimeOffset? AgentScannedAt { get; init; }
+    public DateTimeOffset? WorkerScannedAt { get; init; }
     public DateTimeOffset? PersistedAt { get; init; }
 
     public string? LastErrorCode { get; init; }

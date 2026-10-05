@@ -1,5 +1,5 @@
 using System.Collections.Concurrent;
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.Abstractions.Exceptions;
 using GrayMoon.Abstractions.Notifications;
 using GrayMoon.App.Data;
@@ -23,14 +23,14 @@ public sealed partial class WorkspaceGitService
     {
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null) return;
-        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
         var tasks = repos
             .Where(r => r.ProjectPaths.Count > 0)
             .Select(async r =>
             {
                 try
                 {
-                    await _agentBridge.SendCommandAsync(
+                    await _workerBridge.SendCommandAsync(
                         "DotnetRestore",
                         new { workspaceName = workspaceFolderName, repositoryName = r.RepoName, projectPaths = r.ProjectPaths, workspaceRoot },
                         cancellationToken);
@@ -55,8 +55,8 @@ public sealed partial class WorkspaceGitService
         Action<string> setProgress,
         CancellationToken cancellationToken)
     {
-        if (!_agentBridge.IsAgentConnected)
-            throw new AgentNotConnectedException();
+        if (!_workerBridge.IsWorkerConnected)
+            throw new WorkerNotConnectedException();
 
         setProgress("Restoring packages...");
 
@@ -93,8 +93,8 @@ public sealed partial class WorkspaceGitService
         Action<string> setProgress,
         CancellationToken cancellationToken)
     {
-        if (!_agentBridge.IsAgentConnected)
-            throw new AgentNotConnectedException();
+        if (!_workerBridge.IsWorkerConnected)
+            throw new WorkerNotConnectedException();
 
         if (syncedRepoIds.Count == 0)
             return 0;

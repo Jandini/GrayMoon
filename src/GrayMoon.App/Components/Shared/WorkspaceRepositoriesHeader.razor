@@ -25,14 +25,14 @@
             }
         </p>
         <span class="workspace-repos-title-spacer"></span>
-        @if (AgentTasksPendingCount > 0)
+        @if (WorkerTasksPendingCount > 0)
         {
-            <span class="workspace-repos-agent-tasks text-muted d-inline-flex align-items-center gap-1">
+            <span class="workspace-repos-worker-tasks text-muted d-inline-flex align-items-center gap-1">
                 @if (!IsOverlayVisible)
                 {
                     <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
                 }
-                Worker is completing @AgentTasksPendingCount task@(AgentTasksPendingCount == 1 ? "" : "s")
+                Worker is completing @WorkerTasksPendingCount task@(WorkerTasksPendingCount == 1 ? "" : "s")
             </span>
         }
     </div>
@@ -434,7 +434,7 @@
     [Parameter] public bool IsPushing { get; set; }
     [Parameter] public bool IsCommitSyncing { get; set; }
     [Parameter] public bool IsRestoringPackages { get; set; }
-    [Parameter] public int AgentTasksPendingCount { get; set; }
+    [Parameter] public int WorkerTasksPendingCount { get; set; }
     [Parameter] public bool IsOverlayVisible { get; set; }
 
     [Parameter] public EventCallback OnShowRepositories { get; set; }
@@ -472,16 +472,16 @@
         IsReadOnlyContext || IsSyncing || IsUpdating || IsPushing || IsRestoringPackages || RepositoriesCount == 0;
 
     private bool UpdateDisabled =>
-        IsReadOnlyContext || WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0;
+        IsReadOnlyContext || WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || WorkerTasksPendingCount > 0;
 
     private bool BranchActionsDisabled =>
-        IsReadOnlyContext || IsSyncing || IsUpdating || IsPushing || RepositoriesCount == 0 || AgentTasksPendingCount > 0;
+        IsReadOnlyContext || IsSyncing || IsUpdating || IsPushing || RepositoriesCount == 0 || WorkerTasksPendingCount > 0;
 
     private bool BranchMenuToggleDisabled =>
-        IsReadOnlyContext || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0;
+        IsReadOnlyContext || IsSyncing || IsUpdating || IsPushing || WorkerTasksPendingCount > 0;
 
     private bool PushDisabled =>
-        IsReadOnlyContext || WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0;
+        IsReadOnlyContext || WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || WorkerTasksPendingCount > 0;
 
     /// <summary>
     /// The header's primary button always shows the next useful action (E2):

@@ -4,7 +4,7 @@
 @using GrayMoon.App.Components.Shared
 @using GrayMoon.App.Repositories
 @using GrayMoon.App.Services
-@inject AgentConnectionTracker AgentConnectionTracker
+@inject WorkerConnectionTracker WorkerConnectionTracker
 @inject AppSettingRepository AppSettingRepository
 @inject CommandTerminalOverlayPreferenceService CommandTerminalOverlayPreference
 @inject LoadingOverlayUiSettingsService LoadingOverlayUiSettings
@@ -47,7 +47,7 @@
                     @version
                 </span>
             }
-            <AgentStatusBadge />
+            <WorkerStatusBadge />
             </div>
         </div>
 
@@ -84,7 +84,7 @@
             ? typeof(Program).Assembly.GetName().Version?.ToString()
             : informationalVersion;
 
-        AgentConnectionTracker.OnStateChanged((sync) => { _ = InvokeAsync(StateHasChanged); });
+        WorkerConnectionTracker.OnStateChanged((sync) => { _ = InvokeAsync(StateHasChanged); });
 
         var showTerminal = await AppSettingRepository.GetBoolAsync(AppSettingRepository.TerminalShowByDefaultKey, defaultValue: true);
         CommandTerminalOverlayPreference.IsVisible = showTerminal;

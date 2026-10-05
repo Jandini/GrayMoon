@@ -1,5 +1,5 @@
 using System.Collections.Concurrent;
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.Abstractions.Exceptions;
 using GrayMoon.Abstractions.Notifications;
 using GrayMoon.App.Data;
@@ -34,7 +34,7 @@ public sealed partial class WorkspaceGitService
             .ToList();
     }
 
-    private static RepoGitVersionInfo ParseSyncRepositoryResponse(AgentCommandResponse response)
+    private static RepoGitVersionInfo ParseSyncRepositoryResponse(WorkerCommandResponse response)
     {
         if (!response.Success || response.Data == null)
             return new RepoGitVersionInfo { Version = "-", Branch = "-", ErrorMessage = response.Error ?? "Sync failed" };
@@ -100,7 +100,7 @@ public sealed partial class WorkspaceGitService
         };
     }
 
-    private static RepoGitVersionInfo ParseRefreshRepositoryVersionResponse(AgentCommandResponse response)
+    private static RepoGitVersionInfo ParseRefreshRepositoryVersionResponse(WorkerCommandResponse response)
     {
         if (!response.Success || response.Data == null)
             return new RepoGitVersionInfo { Version = "-", Branch = "-" };
@@ -147,16 +147,16 @@ public sealed partial class WorkspaceGitService
         };
     }
 
-    /// <summary>Reads the agent's git-config upstream answer plus whether it actually resolved it, so an agent that omits both leaves the persisted flag alone.</summary>
+    /// <summary>Reads the worker's git-config upstream answer plus whether it actually resolved it, so a worker that omits both leaves the persisted flag alone.</summary>
     private static (bool? HasUpstream, bool UpstreamProbed) GetUpstream(object data)
     {
-        var r = AgentResponseJson.DeserializeAgentResponse<AgentVersionBranchResponse>(data);
+        var r = WorkerResponseJson.DeserializeWorkerResponse<WorkerVersionBranchResponse>(data);
         return (r?.HasUpstream, r?.UpstreamProbed ?? false);
     }
 
     private static (bool? HasUpstream, IReadOnlyList<string>? RemoteBranches, IReadOnlyList<string>? LocalBranches) GetRefreshBranchesAndUpstream(object data)
     {
-        var r = AgentResponseJson.DeserializeAgentResponse<AgentVersionBranchResponse>(data);
+        var r = WorkerResponseJson.DeserializeWorkerResponse<WorkerVersionBranchResponse>(data);
         var remote = r?.RemoteBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList();
         var local = r?.LocalBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList();
         return (r?.HasUpstream, remote?.Count > 0 ? remote : null, local?.Count > 0 ? local : null);
@@ -164,7 +164,7 @@ public sealed partial class WorkspaceGitService
 
     private static (string version, string branch, string? tag, string? gitVersionError, string? gitFetchError, bool commandSucceeded) GetVersionBranch(object data)
     {
-        var r = AgentResponseJson.DeserializeAgentResponse<AgentVersionBranchResponse>(data);
+        var r = WorkerResponseJson.DeserializeWorkerResponse<WorkerVersionBranchResponse>(data);
         // Commands that do not report their own result are treated as successful, which is what they were before.
         var commandSucceeded = r?.Success ?? true;
         return (r?.Version ?? "-", r?.Branch ?? "-", string.IsNullOrWhiteSpace(r?.Tag) ? null : r!.Tag, r?.GitVersionError, r?.GitFetchError, commandSucceeded);
@@ -183,7 +183,7 @@ public sealed partial class WorkspaceGitService
 
     private static int? GetProjects(object data)
     {
-        var r = AgentResponseJson.DeserializeAgentResponse<AgentSyncProjectsResponse>(data);
+        var r = WorkerResponseJson.DeserializeWorkerResponse<WorkerSyncProjectsResponse>(data);
         var projects = r?.Projects;
         if (projects == null) return null;
         return projects.Count > 0 ? projects.Count : null;
@@ -191,13 +191,13 @@ public sealed partial class WorkspaceGitService
 
     private static (int? Outgoing, int? Incoming, int? DefaultBehind, int? DefaultAhead) GetCommitCounts(object data)
     {
-        var r = AgentResponseJson.DeserializeAgentResponse<AgentCommitCountsResponse>(data);
+        var r = WorkerResponseJson.DeserializeWorkerResponse<WorkerCommitCountsResponse>(data);
         return (r?.OutgoingCommits, r?.IncomingCommits, r?.DefaultBranchBehind, r?.DefaultBranchAhead);
     }
 
     private static (IReadOnlyList<string>? LocalBranches, IReadOnlyList<string>? RemoteBranches, string? DefaultBranch, IReadOnlyList<string>? Tags, string? CurrentTag) GetBranches(object data)
     {
-        var r = AgentResponseJson.DeserializeAgentResponse<AgentBranchesResponse>(data);
+        var r = WorkerResponseJson.DeserializeWorkerResponse<WorkerBranchesResponse>(data);
         var local = r?.LocalBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList();
         var remote = r?.RemoteBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList();
         var defaultBranch = !string.IsNullOrWhiteSpace(r?.DefaultBranch) ? r.DefaultBranch : null;
@@ -218,19 +218,19 @@ public sealed partial class WorkspaceGitService
 
     private static IReadOnlyList<SyncProjectInfo>? GetProjectsDetail(object data)
     {
-        var r = AgentResponseJson.DeserializeAgentResponse<AgentSyncProjectsResponse>(data);
+        var r = WorkerResponseJson.DeserializeWorkerResponse<WorkerSyncProjectsResponse>(data);
         return GetProjectsDetail(r?.Projects);
     }
 
     /// <summary>
     /// Whether the response carried a project list at all. <see cref="GetProjectsDetail(object)"/> folds an
-    /// empty list into null, which cannot be told apart from "the agent never scanned"; a probe marker needs
+    /// empty list into null, which cannot be told apart from "the worker never scanned"; a probe marker needs
     /// exactly that distinction.
     /// </summary>
     private static bool HasProjectsBlock(object data)
-        => AgentResponseJson.DeserializeAgentResponse<AgentSyncProjectsResponse>(data)?.Projects != null;
+        => WorkerResponseJson.DeserializeWorkerResponse<WorkerSyncProjectsResponse>(data)?.Projects != null;
 
-    private static IReadOnlyList<SyncProjectInfo>? GetProjectsDetail(List<AgentProjectDto>? projects)
+    private static IReadOnlyList<SyncProjectInfo>? GetProjectsDetail(List<WorkerProjectDto>? projects)
     {
         if (projects == null || projects.Count == 0) return null;
         var list = new List<SyncProjectInfo>();
@@ -238,7 +238,7 @@ public sealed partial class WorkspaceGitService
         {
             if (string.IsNullOrWhiteSpace(p.Name)) continue;
             var projectType = p.ProjectType >= 0 && p.ProjectType <= 4 ? (ProjectType)p.ProjectType : ProjectType.Library;
-            var packageRefs = (p.PackageReferences ?? new List<AgentPackageRefDto>())
+            var packageRefs = (p.PackageReferences ?? new List<WorkerPackageRefDto>())
                 .Where(pr => !string.IsNullOrWhiteSpace(pr.Name))
                 .Select(pr => new SyncPackageReference(pr.Name!.Trim(), pr.Version ?? ""))
                 .ToList();
@@ -255,7 +255,7 @@ public sealed partial class WorkspaceGitService
 
     private static RepoSyncStatus ParseGetRepositoryVersionToStatus(object data, string? persistedVersion, string? persistedBranch)
     {
-        var r = AgentResponseJson.DeserializeAgentResponse<AgentGetRepositoryVersionResponse>(data);
+        var r = WorkerResponseJson.DeserializeWorkerResponse<WorkerGetRepositoryVersionResponse>(data);
         if (r == null || !r.Exists)
             return RepoSyncStatus.NotCloned;
         if (string.IsNullOrEmpty(r.Version) || string.IsNullOrEmpty(r.Branch))

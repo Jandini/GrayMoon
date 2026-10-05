@@ -52,7 +52,7 @@ public sealed class WorkspaceStateRecomputeScope(
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                // A file-version check needs the agent; losing it must not also lose the dependency recompute.
+                // A file-version check needs the worker; losing it must not also lose the dependency recompute.
                 logger.LogError(ex, "File version check failed for workspace {WorkspaceId} context {ContextId}", workspaceId, contextId.Value);
             }
         }

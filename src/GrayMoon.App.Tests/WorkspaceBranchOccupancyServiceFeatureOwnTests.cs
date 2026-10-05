@@ -1,4 +1,4 @@
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services.Features;
@@ -33,7 +33,7 @@ public sealed class WorkspaceBranchOccupancyServiceFeatureOwnTests
 
         // Neither Feature's branch is currently checked out anywhere - both repositories have
         // drifted off their own branch, which is exactly when the special-case second loop fires.
-        ctx.AgentBridge.Respond(AgentHubMethods.ListGitWorktrees, new
+        ctx.WorkerBridge.Respond(WorkerHubMethods.ListGitWorktrees, new
         {
             worktrees = new[]
             {
@@ -72,7 +72,7 @@ public sealed class WorkspaceBranchOccupancyServiceFeatureOwnTests
         await SeedFeatureRepositoryAsync(db, contextA, ctx.WorkspaceRepositoryId, @"C:\gm-test-root\.graymoon\test-ws\features\feat-a\graymoon-api");
         await SeedFeatureRepositoryAsync(db, contextB, ctx.WorkspaceRepositoryId, @"C:\gm-test-root\.graymoon\test-ws\features\feat-b\graymoon-api");
 
-        ctx.AgentBridge.Respond(AgentHubMethods.ListGitWorktrees, new
+        ctx.WorkerBridge.Respond(WorkerHubMethods.ListGitWorktrees, new
         {
             worktrees = new[]
             {

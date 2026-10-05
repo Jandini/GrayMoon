@@ -1,4 +1,4 @@
-using GrayMoon.App.Services.Agent;
+using GrayMoon.App.Services.Worker;
 using GrayMoon.App.Services.Jobs;
 using GrayMoon.App.Services.Ui;
 using GrayMoon.Application.Features;
@@ -7,7 +7,7 @@ namespace GrayMoon.App.Services.GitChanges;
 
 /// <summary>
 /// Leases Git Changes activity for a workspace while any GrayMoon page under that workspace is open,
-/// so background monitoring sweeps it and Agent-side watchers stay warm. A cold start (workspace
+/// so background monitoring sweeps it and Worker-side watchers stay warm. A cold start (workspace
 /// not already active) kicks off one circuit-scoped warm-up scan under
 /// <see cref="WorkspaceJobKeys.GitChangesScanKey"/> instead of waiting for the next periodic sweep.
 /// Called from the layout route binder, not from individual workspace pages.
@@ -20,7 +20,7 @@ public interface IWorkspaceGitChangesActivation
 public sealed class WorkspaceGitChangesActivation(
     IWorkspaceGitChangesActivityTracker activityTracker,
     IGitChangesWorkspaceScanner scanner,
-    IAgentBridge agentBridge,
+    IWorkerBridge workerBridge,
     IBackgroundJobService jobService,
     IToastService toastService,
     IServiceScopeFactory scopeFactory,
@@ -31,7 +31,7 @@ public sealed class WorkspaceGitChangesActivation(
         var wasActive = activityTracker.IsActive(workspaceId);
         var lease = activityTracker.Subscribe(workspaceId);
 
-        if (wasActive || !agentBridge.IsAgentConnected)
+        if (wasActive || !workerBridge.IsWorkerConnected)
         {
             return lease;
         }

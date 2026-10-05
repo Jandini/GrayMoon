@@ -1,4 +1,4 @@
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.Abstractions.Notifications;
 using GrayMoon.App.Data;
 using GrayMoon.App.Hubs;
@@ -17,7 +17,7 @@ namespace GrayMoon.App.Services.Workspaces;
 /// Stateless (no UI state); caller owns CTS / progress / toast.
 /// </summary>
 public sealed class WorkspacePushService(
-    IAgentBridge agentBridge,
+    IWorkerBridge workerBridge,
     WorkspaceService workspaceService,
     WorkspaceRepository workspaceRepository,
     WorkspaceDependencyService workspaceDependencyService,
@@ -38,7 +38,7 @@ public sealed class WorkspacePushService(
     GhaWorkflowLiveFeedService? ghaWorkflowLiveFeedService = null,
     OverlayCommandTerminalService? overlayCommandTerminalService = null)
 {
-    private readonly IAgentBridge _agentBridge = agentBridge ?? throw new ArgumentNullException(nameof(agentBridge));
+    private readonly IWorkerBridge _workerBridge = workerBridge ?? throw new ArgumentNullException(nameof(workerBridge));
     private readonly WorkspaceService _workspaceService = workspaceService ?? throw new ArgumentNullException(nameof(workspaceService));
     private readonly WorkspaceRepository _workspaceRepository = workspaceRepository ?? throw new ArgumentNullException(nameof(workspaceRepository));
     private readonly WorkspaceDependencyService _workspaceDependencyService = workspaceDependencyService ?? throw new ArgumentNullException(nameof(workspaceDependencyService));
@@ -105,14 +105,14 @@ public sealed class WorkspacePushService(
             "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: RunPushAsync starting. Scope={Scope}",
             runId, workspaceId, repoIdsToPush == null ? "all repos" : $"{repoIdsToPush.Count} repo(s): [{string.Join(",", repoIdsToPush)}]");
 
-        if (!_agentBridge.IsAgentConnected)
+        if (!_workerBridge.IsWorkerConnected)
             throw new InvalidOperationException("Worker not connected. Start the GrayMoon Worker to push.");
 
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)
             throw new InvalidOperationException($"Workspace {workspaceId} not found.");
 
-        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
         var configuredRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
         await _workspaceService.CreateDirectoryAsync(workspace.Name, configuredRoot, cancellationToken);
 
@@ -428,7 +428,7 @@ public sealed class WorkspacePushService(
         Action<string>? onProgressMessage = null,
         CancellationToken cancellationToken = default)
     {
-        if (!_agentBridge.IsAgentConnected)
+        if (!_workerBridge.IsWorkerConnected)
             return (false, "Worker not connected. Start the GrayMoon Worker to push.");
 
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
@@ -448,7 +448,7 @@ public sealed class WorkspacePushService(
             return (false, "Repository is pinned to a tag. Checkout a branch before pushing.");
 
         var repo = link.Repository;
-        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
 
         onProgressMessage?.Invoke(link.BranchHasUpstream == true ? "Pushing..." : "Pushing upstream...");
 
@@ -466,11 +466,11 @@ public sealed class WorkspacePushService(
             branchName = string.IsNullOrWhiteSpace(branchName) ? null : branchName.Trim()
         };
 
-        var response = await _agentBridge.SendCommandAsync("PushRepository", args, cancellationToken);
-        var success = response.Success && response.Data != null && AgentResponseJson.DeserializeAgentResponse<PushRepositoryResponse>(response.Data) is { Success: true };
+        var response = await _workerBridge.SendCommandAsync("PushRepository", args, cancellationToken);
+        var success = response.Success && response.Data != null && WorkerResponseJson.DeserializeWorkerResponse<PushRepositoryResponse>(response.Data) is { Success: true };
         if (!success)
         {
-            var rawErr = response.Error ?? AgentResponseJson.DeserializeAgentResponse<PushRepositoryResponse>(response.Data!)?.ErrorMessage;
+            var rawErr = response.Error ?? WorkerResponseJson.DeserializeWorkerResponse<PushRepositoryResponse>(response.Data!)?.ErrorMessage;
             if (PushErrorFormatter.IsNonFastForwardRejection(rawErr))
                 await FetchAfterRejectionAsync(workspaceId, contextId, repositoryId, repo.RepositoryName, workspace.Name, workspaceRoot, cancellationToken);
             return (false, PushErrorFormatter.Format(rawErr));
@@ -492,7 +492,7 @@ public sealed class WorkspacePushService(
         Action<int, string>? onLevelError = null,
         CancellationToken cancellationToken = default)
     {
-        if (!_agentBridge.IsAgentConnected)
+        if (!_workerBridge.IsWorkerConnected)
             throw new InvalidOperationException("Worker not connected. Start the GrayMoon Worker to push.");
 
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
@@ -559,7 +559,7 @@ public sealed class WorkspacePushService(
         Action? onAppSideComplete = null,
         CancellationToken cancellationToken = default)
     {
-        if (!_agentBridge.IsAgentConnected)
+        if (!_workerBridge.IsWorkerConnected)
             throw new InvalidOperationException("Worker not connected. Start the GrayMoon Worker to push.");
 
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
@@ -681,7 +681,7 @@ public sealed class WorkspacePushService(
                     WorkflowDisplayName = status.WorkflowName
                 };
 
-                _overlayCommandTerminalService?.Append($"gha:{entry.RepositoryName}", AgentCommandStreamKind.Stdout, $"Run #{status.RunId.Value} - subscribing to job updates...");
+                _overlayCommandTerminalService?.Append($"gha:{entry.RepositoryName}", WorkerCommandStreamKind.Stdout, $"Run #{status.RunId.Value} - subscribing to job updates...");
             }
         }
 
@@ -705,7 +705,7 @@ public sealed class WorkspacePushService(
 
             var label = $"gha:{feed.RepositoryName}";
             foreach (var line in update.NewLines)
-                _overlayCommandTerminalService.Append(label, AgentCommandStreamKind.Stdout, line);
+                _overlayCommandTerminalService.Append(label, WorkerCommandStreamKind.Stdout, line);
         }
     }
 
@@ -746,7 +746,7 @@ public sealed class WorkspacePushService(
             if (!repoNameById.TryGetValue(kvp.Key, out var repositoryName)) return;
             try
             {
-                await _agentBridge.SendCommandAsync(
+                await _workerBridge.SendCommandAsync(
                     "DotnetRestore",
                     new { workspaceName, repositoryName, projectPaths = kvp.Value, workspaceRoot },
                     cancellationToken);
@@ -812,7 +812,7 @@ public sealed class WorkspacePushService(
             if (!repoNameById.TryGetValue(kvp.Key, out var repositoryName)) return;
             try
             {
-                await _agentBridge.SendCommandAsync(
+                await _workerBridge.SendCommandAsync(
                     "DotnetRestore",
                     new { workspaceName, repositoryName, projectPaths = (IReadOnlyList<string>)kvp.Value, workspaceRoot },
                     cancellationToken);
@@ -844,7 +844,7 @@ public sealed class WorkspacePushService(
         var finished = 0;
         var total = repos.Count;
         using var semaphore = new SemaphoreSlim(_maxConcurrent);
-        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
         var rejectedRepos = new System.Collections.Concurrent.ConcurrentBag<(int RepoId, string RepoName)>();
         var failures = new System.Collections.Concurrent.ConcurrentBag<(int RepoId, string Error)>();
         var pushTasks = repos.Select(async repo =>
@@ -867,11 +867,11 @@ public sealed class WorkspacePushService(
                         workspaceRoot,
                         refreshVersionAfterPush
                     };
-                    var response = await _agentBridge.SendCommandAsync("PushRepository", args, cancellationToken);
-                    var success = response.Success && response.Data != null && AgentResponseJson.DeserializeAgentResponse<PushRepositoryResponse>(response.Data) is { Success: true };
+                    var response = await _workerBridge.SendCommandAsync("PushRepository", args, cancellationToken);
+                    var success = response.Success && response.Data != null && WorkerResponseJson.DeserializeWorkerResponse<PushRepositoryResponse>(response.Data) is { Success: true };
                     if (!success)
                     {
-                        var rawErr = response.Error ?? AgentResponseJson.DeserializeAgentResponse<PushRepositoryResponse>(response.Data!)?.ErrorMessage;
+                        var rawErr = response.Error ?? WorkerResponseJson.DeserializeWorkerResponse<PushRepositoryResponse>(response.Data!)?.ErrorMessage;
                         if (PushErrorFormatter.IsNonFastForwardRejection(rawErr))
                             rejectedRepos.Add((repo.RepoId, repo.RepoName));
                         var formatted = PushErrorFormatter.Format(rawErr);
@@ -920,7 +920,7 @@ public sealed class WorkspacePushService(
     {
         try
         {
-            await _agentBridge.SendCommandAsync("RefreshBranches", new
+            await _workerBridge.SendCommandAsync("RefreshBranches", new
             {
                 workspaceName,
                 repositoryId,
@@ -973,7 +973,7 @@ public sealed class WorkspacePushService(
             wr.BranchHasUpstream = true;
         }
 
-        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
 
         var tagPinnedInLinks = links
             .Where(l => !string.IsNullOrWhiteSpace(l.CheckedOutTag))
@@ -985,26 +985,26 @@ public sealed class WorkspacePushService(
         {
             try
             {
-                var response = await _agentBridge.SendCommandAsync("GetCommitCounts", new
+                var response = await _workerBridge.SendCommandAsync("GetCommitCounts", new
                 {
                     workspaceName = workspaceFolderName,
                     repositoryName = repo.RepoName,
                     workspaceRoot
                 }, cancellationToken);
                 if (!response.Success || response.Data == null)
-                    return (RepoId: repo.RepoId, Data: (AgentCommitCountsResponse?)null);
-                return (RepoId: repo.RepoId, Data: AgentResponseJson.DeserializeAgentResponse<AgentCommitCountsResponse>(response.Data));
+                    return (RepoId: repo.RepoId, Data: (WorkerCommitCountsResponse?)null);
+                return (RepoId: repo.RepoId, Data: WorkerResponseJson.DeserializeWorkerResponse<WorkerCommitCountsResponse>(response.Data));
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "GetCommitCounts failed for repo {RepoId} ({RepoName})", repo.RepoId, repo.RepoName);
-                return (RepoId: repo.RepoId, Data: (AgentCommitCountsResponse?)null);
+                return (RepoId: repo.RepoId, Data: (WorkerCommitCountsResponse?)null);
             }
         }));
 
         // A failed or missing response leaves the persisted counts alone: nothing is marked probed, so the
         // writer has nothing to replace. Overwriting them with nulls would blank the badges after a
-        // transient agent hiccup.
+        // transient worker hiccup.
         foreach (var r in results.Where(r => r.Data != null))
         {
             await _stateWriter.ApplyAsync(contextId, workspaceId, r.RepoId, new RepositoryStateSnapshot
@@ -1022,9 +1022,9 @@ public sealed class WorkspacePushService(
         await _recomputeScope.CompleteAsync(workspaceId, contextId, cancellationToken);
     }
 
-    private Task<(string WorkspaceRoot, string WorkspaceFolderName)> ResolveAgentPathArgsAsync(
+    private Task<(string WorkspaceRoot, string WorkspaceFolderName)> ResolveWorkerPathArgsAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken)
-        => _pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
+        => _pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
 }

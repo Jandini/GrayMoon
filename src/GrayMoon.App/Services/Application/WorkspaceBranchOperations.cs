@@ -13,7 +13,7 @@ using Microsoft.EntityFrameworkCore;
 namespace GrayMoon.App.Services.Application;
 
 public sealed class WorkspaceBranchOperations(
-    IAgentBridge agentBridge,
+    IWorkerBridge workerBridge,
     WorkspaceRepository workspaceRepository,
     GitHubRepositoryRepository repoRepository,
     AppDbContext dbContext,
@@ -44,7 +44,7 @@ public sealed class WorkspaceBranchOperations(
         int repositoryId,
         CancellationToken cancellationToken)
     {
-        var resolved = await TryResolveLinkedRepoAsync(workspaceId, repositoryId, requireAgent: false, cancellationToken);
+        var resolved = await TryResolveLinkedRepoAsync(workspaceId, repositoryId, requireWorker: false, cancellationToken);
         if (resolved.Error != null)
             return resolved.Error;
 
@@ -76,7 +76,7 @@ public sealed class WorkspaceBranchOperations(
                 .OrderBy(b => b)
                 .ToList();
 
-            // Tags are persisted with SortIndex matching the agent's "newest first" (creator-date descending) order.
+            // Tags are persisted with SortIndex matching the worker's "newest first" (creator-date descending) order.
             var tags = rows
                 .Where(b => b.IsTag)
                 .OrderBy(b => b.SortIndex)
@@ -160,7 +160,7 @@ public sealed class WorkspaceBranchOperations(
 
     public async Task<BranchHttpOutcome> RefreshBranchesAsync(int workspaceId, WorkspaceFeatureContextId contextId, int repositoryId, CancellationToken cancellationToken = default)
     {
-        var resolved = await TryResolveLinkedRepoAsync(workspaceId, repositoryId, requireAgent: true, cancellationToken);
+        var resolved = await TryResolveLinkedRepoAsync(workspaceId, repositoryId, requireWorker: true, cancellationToken);
         if (resolved.Error != null)
             return resolved.Error;
 
@@ -170,7 +170,7 @@ public sealed class WorkspaceBranchOperations(
 
         try
         {
-            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
+            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
             var args = new
             {
                 workspaceName = workspaceFolderName,
@@ -178,9 +178,9 @@ public sealed class WorkspaceBranchOperations(
                 repositoryName = repo.RepositoryName,
                 workspaceRoot
             };
-            var response = await agentBridge.SendCommandAsync("RefreshBranches", args, cancellationToken);
+            var response = await workerBridge.SendCommandAsync("RefreshBranches", args, cancellationToken);
 
-            var refreshResponse = AgentResponseJson.DeserializeAgentResponse<BranchesResponse>(response.Data);
+            var refreshResponse = WorkerResponseJson.DeserializeWorkerResponse<BranchesResponse>(response.Data);
             if (refreshResponse?.Success == false)
                 return BranchHttpOutcome.Problem(refreshResponse.ErrorMessage ?? "Failed to refresh branches", 500);
 
@@ -200,7 +200,7 @@ public sealed class WorkspaceBranchOperations(
                     tags,
                     refreshResponse.CurrentTag,
                     cancellationToken);
-                // Only the agent's git-config probe may set this. Matching the branch name against the
+                // Only the worker's git-config probe may set this. Matching the branch name against the
                 // remote list marked any same-named branch as having an upstream, which showed the upstream
                 // badge on branches that had never been pushed.
                 if (refreshResponse.UpstreamProbed && string.IsNullOrWhiteSpace(refreshResponse.CurrentTag))
@@ -239,7 +239,7 @@ public sealed class WorkspaceBranchOperations(
         if (refusal != null)
             return BranchHttpOutcome.BadRequest(refusal);
 
-        var resolved = await TryResolveLinkedRepoAsync(workspaceId, repositoryId, requireAgent: true, cancellationToken);
+        var resolved = await TryResolveLinkedRepoAsync(workspaceId, repositoryId, requireWorker: true, cancellationToken);
         if (resolved.Error != null)
             return resolved.Error;
 
@@ -249,7 +249,7 @@ public sealed class WorkspaceBranchOperations(
 
         try
         {
-            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
+            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
 
             if (isTag)
             {
@@ -261,8 +261,8 @@ public sealed class WorkspaceBranchOperations(
                     tagName = branchName,
                     workspaceRoot
                 };
-                var tagResponse = await agentBridge.SendCommandAsync("CheckoutTag", tagArgs, cancellationToken);
-                var tagCheckout = AgentResponseJson.DeserializeAgentResponse<CheckoutTagResponse>(tagResponse.Data);
+                var tagResponse = await workerBridge.SendCommandAsync("CheckoutTag", tagArgs, cancellationToken);
+                var tagCheckout = WorkerResponseJson.DeserializeWorkerResponse<CheckoutTagResponse>(tagResponse.Data);
                 var tagSuccess = tagCheckout?.Success ?? tagResponse.Success;
                 var tagError = tagCheckout?.ErrorMessage ?? tagResponse.Error ?? "Failed to checkout tag";
 
@@ -291,9 +291,9 @@ public sealed class WorkspaceBranchOperations(
                 branchName,
                 workspaceRoot
             };
-            var response = await agentBridge.SendCommandAsync("CheckoutBranch", args, cancellationToken);
+            var response = await workerBridge.SendCommandAsync("CheckoutBranch", args, cancellationToken);
 
-            var checkoutResponse = AgentResponseJson.DeserializeAgentResponse<CheckoutBranchResponse>(response.Data);
+            var checkoutResponse = WorkerResponseJson.DeserializeWorkerResponse<CheckoutBranchResponse>(response.Data);
             var commandSuccess = checkoutResponse?.Success ?? response.Success;
             var errorMessage = checkoutResponse?.ErrorMessage ?? response.Error ?? "Failed to checkout branch";
 
@@ -342,7 +342,7 @@ public sealed class WorkspaceBranchOperations(
         if (refusal != null)
             return BranchHttpOutcome.BadRequest(refusal);
 
-        var resolved = await TryResolveLinkedRepoAsync(workspaceId, repositoryId, requireAgent: true, cancellationToken);
+        var resolved = await TryResolveLinkedRepoAsync(workspaceId, repositoryId, requireWorker: true, cancellationToken);
         if (resolved.Error != null)
             return resolved.Error;
 
@@ -501,7 +501,7 @@ public sealed class WorkspaceBranchOperations(
         if (refusal != null)
             return BranchHttpOutcome.BadRequest(refusal);
 
-        var resolved = await TryResolveLinkedRepoAsync(workspaceId, repositoryId, requireAgent: true, cancellationToken);
+        var resolved = await TryResolveLinkedRepoAsync(workspaceId, repositoryId, requireWorker: true, cancellationToken);
         if (resolved.Error != null)
             return resolved.Error;
 
@@ -525,7 +525,7 @@ public sealed class WorkspaceBranchOperations(
                 baseBranchName = baseBranch;
             }
 
-            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
+            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
             var args = new
             {
                 workspaceName = workspaceFolderName,
@@ -534,9 +534,9 @@ public sealed class WorkspaceBranchOperations(
                 baseBranchName,
                 workspaceRoot
             };
-            var response = await agentBridge.SendCommandAsync("CreateBranch", args, cancellationToken);
+            var response = await workerBridge.SendCommandAsync("CreateBranch", args, cancellationToken);
 
-            var createResponse = AgentResponseJson.DeserializeAgentResponse<CreateBranchResponse>(response.Data);
+            var createResponse = WorkerResponseJson.DeserializeWorkerResponse<CreateBranchResponse>(response.Data);
             var success = createResponse?.Success ?? response.Success;
             var errorMessage = createResponse?.ErrorMessage ?? response.Error;
 
@@ -580,7 +580,7 @@ public sealed class WorkspaceBranchOperations(
         if (workspaceId <= 0 || repositoryId <= 0 || string.IsNullOrWhiteSpace(branchName))
             return BranchHttpOutcome.BadRequest("workspaceId, repositoryId, and branchName are required.");
 
-        var resolved = await TryResolveLinkedRepoAsync(workspaceId, repositoryId, requireAgent: true, cancellationToken);
+        var resolved = await TryResolveLinkedRepoAsync(workspaceId, repositoryId, requireWorker: true, cancellationToken);
         if (resolved.Error != null)
             return resolved.Error;
 
@@ -590,7 +590,7 @@ public sealed class WorkspaceBranchOperations(
 
         try
         {
-            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
+            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
             var args = new
             {
                 workspaceName = workspaceFolderName,
@@ -599,9 +599,9 @@ public sealed class WorkspaceBranchOperations(
                 workspaceRoot,
                 repositoryId
             };
-            var response = await agentBridge.SendCommandAsync("SetUpstreamBranch", args, cancellationToken);
+            var response = await workerBridge.SendCommandAsync("SetUpstreamBranch", args, cancellationToken);
 
-            var upstreamResponse = AgentResponseJson.DeserializeAgentResponse<SetUpstreamBranchResponse>(response.Data);
+            var upstreamResponse = WorkerResponseJson.DeserializeWorkerResponse<SetUpstreamBranchResponse>(response.Data);
             var success = upstreamResponse?.Success ?? response.Success;
             var errorMessage = upstreamResponse?.ErrorMessage ?? response.Error;
 
@@ -648,7 +648,7 @@ public sealed class WorkspaceBranchOperations(
         if (workspaceId <= 0 || repositoryId <= 0 || string.IsNullOrWhiteSpace(branchName))
             return BranchHttpOutcome.BadRequest("workspaceId, repositoryId, and branchName are required.");
 
-        var resolved = await TryResolveLinkedRepoAsync(workspaceId, repositoryId, requireAgent: false, cancellationToken);
+        var resolved = await TryResolveLinkedRepoAsync(workspaceId, repositoryId, requireWorker: false, cancellationToken);
         if (resolved.Error != null)
             return resolved.Error;
 
@@ -664,12 +664,12 @@ public sealed class WorkspaceBranchOperations(
                 return BranchHttpOutcome.BadRequest("Cannot delete the current branch. Check out another branch first.");
         }
 
-        if (!agentBridge.IsAgentConnected)
+        if (!workerBridge.IsWorkerConnected)
             return BranchHttpOutcome.Problem("Worker not connected.", 503);
 
         try
         {
-            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
+            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
             var args = new
             {
                 workspaceName = workspaceFolderName,
@@ -680,9 +680,9 @@ public sealed class WorkspaceBranchOperations(
                 bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
                 workspaceRoot
             };
-            var response = await agentBridge.SendCommandAsync("DeleteBranch", args, cancellationToken);
+            var response = await workerBridge.SendCommandAsync("DeleteBranch", args, cancellationToken);
 
-            var deleteResponse = AgentResponseJson.DeserializeAgentResponse<DeleteBranchResponse>(response.Data);
+            var deleteResponse = WorkerResponseJson.DeserializeWorkerResponse<DeleteBranchResponse>(response.Data);
             var success = deleteResponse?.Success ?? response.Success;
             var errorMessage = deleteResponse?.ErrorMessage ?? response.Error;
 
@@ -736,7 +736,7 @@ public sealed class WorkspaceBranchOperations(
         if (err.Contains("not found", StringComparison.OrdinalIgnoreCase))
             return BranchHttpOutcome.NotFound(err);
         if (err.Contains("Worker not connected", StringComparison.OrdinalIgnoreCase)
-            || err.Contains("Agent not connected", StringComparison.OrdinalIgnoreCase))
+            || err.Contains("Worker not connected", StringComparison.OrdinalIgnoreCase))
             return BranchHttpOutcome.Problem("Worker not connected.", 503);
         if (err.Contains("unexpected", StringComparison.OrdinalIgnoreCase))
             return BranchHttpOutcome.Problem("An error occurred while updating branch from default", 500);
@@ -797,7 +797,7 @@ public sealed class WorkspaceBranchOperations(
     private async Task<(BranchHttpOutcome? Error, Workspace? Workspace, Repository? Repo, WorkspaceRepositoryLink? Link)> TryResolveLinkedRepoAsync(
         int workspaceId,
         int repositoryId,
-        bool requireAgent,
+        bool requireWorker,
         CancellationToken cancellationToken)
     {
         var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
@@ -813,7 +813,7 @@ public sealed class WorkspaceBranchOperations(
         if (wr == null)
             return (BranchHttpOutcome.NotFound("Repository is not in the given workspace."), null, null, null);
 
-        if (requireAgent && !agentBridge.IsAgentConnected)
+        if (requireWorker && !workerBridge.IsWorkerConnected)
             return (BranchHttpOutcome.Problem("Worker not connected.", 503), null, null, null);
 
         return (null, workspace, repo, wr);

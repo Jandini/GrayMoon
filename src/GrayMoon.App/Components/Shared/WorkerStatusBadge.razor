@@ -1,0 +1,102 @@
+@using GrayMoon.App.Services
+@using GrayMoon.Abstractions.Worker
+@using GrayMoon.App.Services.Security
+@inject WorkerSecretService WorkerSecret
+@inject WorkerConnectionTracker WorkerConnectionTracker
+@inject WorkerQueueStateService WorkerQueueStateService
+@inject IWorkerBridge WorkerBridge
+@inject NavigationManager NavigationManager
+@inject IToastService ToastService
+@rendermode @(new InteractiveServerRenderMode(prerender: true))
+
+@if (State == WorkerConnectionState.VersionMismatch && !IsUpdating)
+{
+    <a class="@BadgeClassFull"
+       title="@TitleText"
+       style="cursor: pointer; display: inline-flex; align-items: center; vertical-align: middle; @BadgeStyle"
+       @onclick="StartUpdateAsync">
+        update
+    </a>
+}
+else
+{
+    <a href="/worker" class="@BadgeClassFull"
+       title="@TitleText"
+       style="cursor: pointer; display: inline-flex; align-items: center; vertical-align: middle; @BadgeStyle">
+        @StateLabel
+    </a>
+}
+
+@implements IDisposable
+
+@code {
+    private WorkerConnectionState State => WorkerConnectionTracker.State;
+    private string? WorkerSemVer => WorkerConnectionTracker.WorkerSemVer;
+    private bool IsUpdating => WorkerConnectionTracker.IsSelfUpdateInProgress;
+
+    protected override void OnInitialized()
+    {
+        WorkerConnectionTracker.OnStateChanged(state => { _ = InvokeAsync(StateHasChanged); });
+        WorkerQueueStateService.OnQueueStateChanged(OnQueueStateChanged);
+    }
+
+    private void OnQueueStateChanged(object? sender, EventArgs e) => _ = InvokeAsync(StateHasChanged);
+
+    private async Task StartUpdateAsync()
+    {
+        WorkerConnectionTracker.BeginSelfUpdate();
+        StateHasChanged();
+        var installUrl = NavigationManager.BaseUri.TrimEnd('/') + "/api/worker/install";
+        var response = await WorkerBridge.SendCommandAsync(WorkerHubMethods.SelfUpdate, new { installUrl }, CancellationToken.None);
+        if (!response.Success)
+        {
+            StateHasChanged();
+            ToastService.ShowError("Worker update failed.");
+            NavigationManager.NavigateTo("/worker");
+        }
+    }
+
+    private string BadgeClass => State switch
+    {
+        WorkerConnectionState.Online => "bg-success",
+        WorkerConnectionState.Offline => "bg-danger",
+        WorkerConnectionState.Connecting => "bg-secondary",
+        WorkerConnectionState.VersionMismatch => "bg-danger",
+        _ => "bg-secondary"
+    };
+
+    private string BadgeStyle => State switch
+    {
+        WorkerConnectionState.Online => "background-color: #198754 !important;",
+        WorkerConnectionState.Offline => "background-color: #dc3545 !important; color: #fff !important;",
+        WorkerConnectionState.VersionMismatch => "background-color: #dc3545 !important; color: #fff !important;",
+        _ => ""
+    };
+
+    private string BadgeClassFull => $"badge {BadgeClass} text-decoration-none ms-2";
+
+    private string StateLabel => IsUpdating
+        ? "installing"
+        : State switch
+        {
+            WorkerConnectionState.Online => WorkerQueueStateService.GetTotalPendingCount() > 0 ? "running" : "online",
+            WorkerConnectionState.Offline => "offline",
+            WorkerConnectionState.Connecting => "connecting",
+            WorkerConnectionState.VersionMismatch => "update",
+            _ => "offline"
+        };
+
+    private string TitleText => IsUpdating
+        ? "Worker is installing an update."
+        : State switch
+        {
+            WorkerConnectionState.VersionMismatch => $"Worker version mismatch. Worker version: {WorkerSemVer ?? "unknown"}. Click to update.",
+            WorkerConnectionState.Online => (WorkerQueueStateService.GetTotalPendingCount() > 0 ? "Worker is running tasks" : "Worker connection status:  online")
+                + (WorkerSecret.UnsecuredWorkerConnected ? ". Reinstall the Worker to finish securing GrayMoon." : string.Empty),
+            WorkerConnectionState.Offline => "Worker connection status:  offline",
+            WorkerConnectionState.Connecting => "Worker connection status:  connecting",
+            _ => "Worker connection status:  unknown"
+        };
+
+    public void Dispose() => WorkerQueueStateService.RemoveQueueStateChanged(OnQueueStateChanged);
+}

@@ -4,10 +4,10 @@ using GrayMoon.Common.Git;
 namespace GrayMoon.App.Services.GitChanges;
 
 /// <summary>
-/// Decouples incoming Agent Git Changes snapshot pushes from the SignalR hub invocation slot and
+/// Decouples incoming Worker Git Changes snapshot pushes from the SignalR hub invocation slot and
 /// serializes all resulting SQLite writes through one background worker - mirrors
-/// <see cref="AgentSyncNotificationQueue"/>'s existing shape for the same reason: up to 16 repositories
-/// may be scanned concurrently on the Agent, but SQLite has limited write concurrency.
+/// <see cref="WorkerSyncNotificationQueue"/>'s existing shape for the same reason: up to 16 repositories
+/// may be scanned concurrently on the Worker, but SQLite has limited write concurrency.
 /// </summary>
 public sealed class WorkspaceGitChangesWriteQueue(
     IServiceScopeFactory scopeFactory,

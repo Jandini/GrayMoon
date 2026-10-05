@@ -184,7 +184,7 @@ public sealed partial class WorkspaceGitChanges
                 return;
             }
 
-            var (root, folderName) = await PathResolver.GetAgentWorkspaceArgsAsync(_selectedContextId.Value);
+            var (root, folderName) = await PathResolver.GetWorkerWorkspaceArgsAsync(_selectedContextId.Value);
             if (requestVersion != _diffRequestVersion)
             {
                 return;
@@ -203,7 +203,7 @@ public sealed partial class WorkspaceGitChanges
                 // File content, not a command log - never let this leak into a background job's
                 // LoadingOverlay terminal, even when LoadDiffAsync runs inside one (e.g. restoring a
                 // remembered selection right after a Refresh job's reload).
-                result = await AgentClient.GetDiffAsync(
+                result = await WorkerClient.GetDiffAsync(
                     root, folderName, link.Repository.RepositoryName, row.FilePath!, comparison, CancellationToken.None);
             }
 

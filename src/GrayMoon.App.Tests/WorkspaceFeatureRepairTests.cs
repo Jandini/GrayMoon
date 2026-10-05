@@ -1,4 +1,4 @@
-using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services.Features;
@@ -22,15 +22,15 @@ public sealed class WorkspaceFeatureRepairTests
         var featureContextId = await SeedBrokenFeatureWithTwoReposAsync(ctx);
 
         var firstRepairPass = true;
-        ctx.AgentBridge.Respond(AgentHubMethods.CreateGitWorktree, args =>
+        ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, args =>
         {
             if (firstRepairPass)
-                return new AgentCommandResponse(false, null, "simulated create failure");
+                return new WorkerCommandResponse(false, null, "simulated create failure");
             var path = GetWorktreePath(args);
             var wtPath = path.Contains("graymoon-web", StringComparison.OrdinalIgnoreCase)
                 ? WebWorktreePath
                 : ApiWorktreePath;
-            return new AgentCommandResponse(true, new { success = true, worktreePath = wtPath }, null);
+            return new WorkerCommandResponse(true, new { success = true, worktreePath = wtPath }, null);
         });
 
         await using var scope = ctx.CreateScope();
@@ -41,13 +41,13 @@ public sealed class WorkspaceFeatureRepairTests
         Assert.Equal(2, first.Repositories.Count(r => r.Outcome == FeatureRepositoryOperationOutcome.Failed));
 
         firstRepairPass = false;
-        ctx.AgentBridge.Respond(AgentHubMethods.CreateGitWorktree, args =>
+        ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, args =>
         {
             var path = GetWorktreePath(args);
             var wtPath = path.Contains("graymoon-web", StringComparison.OrdinalIgnoreCase)
                 ? WebWorktreePath
                 : ApiWorktreePath;
-            return new AgentCommandResponse(true, new { success = true, worktreePath = wtPath }, null);
+            return new WorkerCommandResponse(true, new { success = true, worktreePath = wtPath }, null);
         });
 
         var second = await ops.RepairFeatureAsync(featureContextId);
@@ -60,7 +60,7 @@ public sealed class WorkspaceFeatureRepairTests
         Assert.Equal(WorkspaceFeatureLifecycleState.Ready, feature.LifecycleState);
         Assert.True(await db.WorkspaceRepositoryContextStates.AnyAsync(
             s => s.WorkspaceFeatureContextId == featureContextId.Value));
-        Assert.Equal(4, ctx.AgentBridge.Calls.Count(c => c.Command == AgentHubMethods.CreateGitWorktree));
+        Assert.Equal(4, ctx.WorkerBridge.Calls.Count(c => c.Command == WorkerHubMethods.CreateGitWorktree));
     }
 
     [Fact]
@@ -76,8 +76,8 @@ public sealed class WorkspaceFeatureRepairTests
 
         Assert.True(result.Success, result.Error);
         Assert.DoesNotContain(
-            ctx.AgentBridge.Calls,
-            c => c.Command == AgentHubMethods.CreateGitWorktree);
+            ctx.WorkerBridge.Calls,
+            c => c.Command == WorkerHubMethods.CreateGitWorktree);
         Assert.All(result.Repositories, r => Assert.Equal(FeatureRepositoryOperationOutcome.Skipped, r.Outcome));
 
         await using var read = ctx.CreateScope();
@@ -111,12 +111,12 @@ public sealed class WorkspaceFeatureRepairTests
         await using var ctx = await SyncStateTestContext.CreateAsync();
         var featureContextId = await SeedBrokenFeatureWithTwoReposAsync(ctx);
 
-        ctx.AgentBridge.Respond(AgentHubMethods.CreateGitWorktree, args =>
+        ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, args =>
         {
             var path = GetWorktreePath(args);
             if (path.Contains("graymoon-web", StringComparison.OrdinalIgnoreCase))
-                return new AgentCommandResponse(false, null, "web worktree failed");
-            return new AgentCommandResponse(true, new { success = true, worktreePath = ApiWorktreePath }, null);
+                return new WorkerCommandResponse(false, null, "web worktree failed");
+            return new WorkerCommandResponse(true, new { success = true, worktreePath = ApiWorktreePath }, null);
         });
 
         await using var scope = ctx.CreateScope();
@@ -139,11 +139,11 @@ public sealed class WorkspaceFeatureRepairTests
         await using var ctx = await SyncStateTestContext.CreateAsync();
         var featureContextId = await SeedRemovableFeatureWithTwoReposAsync(ctx);
 
-        ctx.AgentBridge.Respond(AgentHubMethods.InspectWorktree, CleanInspectWorktree());
-        ctx.AgentBridge.Respond(AgentHubMethods.ListGitWorktrees, args =>
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree());
+        ctx.WorkerBridge.Respond(WorkerHubMethods.ListGitWorktrees, args =>
         {
             var main = GetMainRepositoryPath(args);
-            return new AgentCommandResponse(true, new
+            return new WorkerCommandResponse(true, new
             {
                 worktrees = new object[]
                 {
@@ -153,16 +153,16 @@ public sealed class WorkspaceFeatureRepairTests
                 },
             }, null);
         });
-        ctx.AgentBridge.Respond(AgentHubMethods.RemoveGitWorktree, new { success = true });
-        ctx.AgentBridge.Respond("DeleteBranch", new { success = true });
+        ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new { success = true });
+        ctx.WorkerBridge.Respond("DeleteBranch", new { success = true });
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
         var result = await ops.RollbackFeatureAsync(featureContextId);
 
         Assert.True(result.Success, result.Error);
-        Assert.Equal(2, ctx.AgentBridge.Calls.Count(c => c.Command == AgentHubMethods.RemoveGitWorktree));
-        Assert.Equal(2, ctx.AgentBridge.Calls.Count(c => c.Command == "DeleteBranch"));
+        Assert.Equal(2, ctx.WorkerBridge.Calls.Count(c => c.Command == WorkerHubMethods.RemoveGitWorktree));
+        Assert.Equal(2, ctx.WorkerBridge.Calls.Count(c => c.Command == "DeleteBranch"));
 
         await using var read = ctx.CreateScope();
         var db = read.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -177,7 +177,7 @@ public sealed class WorkspaceFeatureRepairTests
         await using var ctx = await SyncStateTestContext.CreateAsync();
         var featureContextId = await SeedRemovableFeatureWithTwoReposAsync(ctx);
 
-        ctx.AgentBridge.Respond(AgentHubMethods.InspectWorktree, new
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, new
         {
             exists = true,
             isDirty = true,
@@ -190,7 +190,7 @@ public sealed class WorkspaceFeatureRepairTests
 
         Assert.False(result.Success);
         Assert.Contains("uncommitted", result.Error ?? "", StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain(ctx.AgentBridge.Calls, c => c.Command == AgentHubMethods.RemoveGitWorktree);
+        Assert.DoesNotContain(ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.RemoveGitWorktree);
 
         await using var read = ctx.CreateScope();
         var db = read.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -228,7 +228,7 @@ public sealed class WorkspaceFeatureRepairTests
         Assert.False(rollback.Success);
         Assert.Contains("Continue removal", rollback.Error);
 
-        Assert.DoesNotContain(ctx.AgentBridge.Calls, c => c.Command == AgentHubMethods.CreateGitWorktree);
+        Assert.DoesNotContain(ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.CreateGitWorktree);
     }
 
     [Fact]
@@ -238,11 +238,11 @@ public sealed class WorkspaceFeatureRepairTests
         var featureContextId = await SeedRemovableFeatureAsync(ctx, featureName: "main");
         const string mainFeatureWorktree = @"C:\gm-test-root\.graymoon\test-ws\features\main\graymoon-api";
 
-        ctx.AgentBridge.Respond(AgentHubMethods.InspectWorktree, CleanInspectWorktree());
-        ctx.AgentBridge.Respond(AgentHubMethods.ListGitWorktrees, args =>
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree());
+        ctx.WorkerBridge.Respond(WorkerHubMethods.ListGitWorktrees, args =>
         {
             var main = GetMainRepositoryPath(args);
-            return new AgentCommandResponse(true, new
+            return new WorkerCommandResponse(true, new
             {
                 worktrees = new object[]
                 {
@@ -251,15 +251,15 @@ public sealed class WorkspaceFeatureRepairTests
                 },
             }, null);
         });
-        ctx.AgentBridge.Respond(AgentHubMethods.RemoveGitWorktree, new { success = true });
-        ctx.AgentBridge.Respond("DeleteBranch", new { success = true });
+        ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new { success = true });
+        ctx.WorkerBridge.Respond("DeleteBranch", new { success = true });
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
         var result = await ops.RollbackFeatureAsync(featureContextId);
 
         Assert.True(result.Success, result.Error);
-        Assert.DoesNotContain(ctx.AgentBridge.Calls, c => c.Command == "DeleteBranch");
+        Assert.DoesNotContain(ctx.WorkerBridge.Calls, c => c.Command == "DeleteBranch");
         var repoResult = Assert.Single(result.Repositories);
         Assert.Equal(FeatureRepositoryOperationOutcome.Skipped, repoResult.Outcome);
     }

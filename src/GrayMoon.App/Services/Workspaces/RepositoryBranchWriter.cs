@@ -40,7 +40,7 @@ public sealed class RepositoryBranchWriter(AppDbContext dbContext, ILogger<Repos
             .ToListAsync(cancellationToken);
 
         var fetchedRefs = new HashSet<(string Name, bool IsRemote, bool IsTag)>();
-        // Tracks the agent-provided rank for tags so we can persist "newest first" order; branches default to 0.
+        // Tracks the worker-provided rank for tags so we can persist "newest first" order; branches default to 0.
         var sortIndexByRef = new Dictionary<(string Name, bool IsRemote, bool IsTag), int>();
         if (localBranches != null)
         {
@@ -116,7 +116,7 @@ public sealed class RepositoryBranchWriter(AppDbContext dbContext, ILogger<Repos
             dbContext.RepositoryBranches.RemoveRange(toRemove);
         }
 
-        // Update WorkspaceRepositoryLink.CheckedOutTag from the agent-reported value when tags were refreshed.
+        // Update WorkspaceRepositoryLink.CheckedOutTag from the worker-reported value when tags were refreshed.
         if (tags != null)
         {
             var link = await dbContext.WorkspaceRepositories

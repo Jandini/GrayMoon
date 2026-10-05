@@ -7,7 +7,7 @@ namespace GrayMoon.App.Services.Application;
 public sealed class WorkspaceFileOperations(
     WorkspaceRepository workspaceRepository,
     WorkspaceFileRepository fileRepository,
-    IAgentBridge agentBridge,
+    IWorkerBridge workerBridge,
     WorkspaceFileVersionService fileVersionService,
     WorkspaceGitService workspaceGitService,
     IWorkspaceContextPathResolver pathResolver) : IWorkspaceFileOperations
@@ -58,7 +58,7 @@ public sealed class WorkspaceFileOperations(
         return (true, accepted.Count);
     }
 
-    public async Task<(bool Found, bool AgentConnected, AgentSearchFilesResponse? Data, string? Error)> SearchAsync(
+    public async Task<(bool Found, bool WorkerConnected, WorkerSearchFilesResponse? Data, string? Error)> SearchAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         string? pattern,
@@ -69,12 +69,12 @@ public sealed class WorkspaceFileOperations(
         if (workspace == null)
             return (false, true, null, null);
 
-        if (!agentBridge.IsAgentConnected)
+        if (!workerBridge.IsWorkerConnected)
             return (true, false, null, "Worker not connected. Start the GrayMoon Worker to search files.");
 
-        var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
         var searchPattern = string.IsNullOrWhiteSpace(pattern) ? "*" : pattern.Trim();
-        var response = await agentBridge.SendCommandAsync("SearchFiles", new
+        var response = await workerBridge.SendCommandAsync("SearchFiles", new
         {
             workspaceName = workspaceFolderName,
             repositoryName = string.IsNullOrWhiteSpace(repositoryName) ? null : repositoryName.Trim(),
@@ -85,8 +85,8 @@ public sealed class WorkspaceFileOperations(
         if (!response.Success || response.Data == null)
             return (true, true, null, response.Error ?? "Search failed.");
 
-        var data = AgentResponseJson.DeserializeAgentResponse<AgentSearchFilesResponse>(response.Data)
-            ?? new AgentSearchFilesResponse { Files = [] };
+        var data = WorkerResponseJson.DeserializeWorkerResponse<WorkerSearchFilesResponse>(response.Data)
+            ?? new WorkerSearchFilesResponse { Files = [] };
         return (true, true, data, null);
     }
 

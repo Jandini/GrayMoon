@@ -70,7 +70,7 @@
             if (el && el.scrollIntoView)
                 el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
         };
-        window.getAgentDownloadInfo = () => {
+        window.getWorkerDownloadInfo = () => {
             const ua = navigator.userAgent.toLowerCase();
             const platform = (navigator.platform || '').toLowerCase();
             const isWindows = /win(dows|32|64|ce)/.test(ua) || platform.indexOf('win') === 0;
@@ -81,8 +81,8 @@
             const url = path.startsWith('http') ? path : (window.location.origin + path);
             return { url, filename };
         };
-        window.graymoonDownloadAgent = () => {
-            const { url, filename } = window.getAgentDownloadInfo();
+        window.graymoonDownloadWorker = () => {
+            const { url, filename } = window.getWorkerDownloadInfo();
             const a = document.createElement('a');
             a.href = url;
             a.download = filename;
