@@ -14,7 +14,7 @@ It must be possible to stop work here and resume later without reconstructing st
 | | |
 |---|---|
 | Project status | IN PROGRESS |
-| Current phase | Wave 1 (Units C, E) integrated; Wave 2 (Unit D) is next |
+| Current phase | Wave 1 (Units C, E) integrated; Wave 2 (Units D, F, G, J) in progress in parallel |
 | Phases planned in detail | 1, 2, 3; Unit E of 5 |
 | Phases not yet designed | 4, 5 (Units F, G, H), 6 |
 | Last verified | 2026-10-06, after Wave 1 integration. Build clean / 0 warnings. App 904/904, Worker 312 + 1 pre-existing skip, Common 234/234. |
@@ -42,7 +42,7 @@ create/edit controls are Unit H.
 | 2 | Worker sync decoupling, version provider, hook capability resolution | DONE (Unit B) |
 | 3 | App persistence / dependency recompute gating | DONE (Unit C) |
 | 4 | Push / update / restore strategies | READY (Unit D) |
-| 5 | UX: create/edit, grid, navigation, CI provider boundary | Unit E DONE; F, G TODO |
+| 5 | UX: create/edit, grid, navigation, CI provider boundary, host readiness | Unit E DONE; F, G, J IN PROGRESS; H TODO |
 | 6 | Profile transitions, stale derived state, final regression | TODO (Units H, I) |
 
 ### Phase 3-6 sequencing, re-planned from the integrated state
@@ -52,10 +52,9 @@ Phases 1 and 2 are complete, so the remaining units were re-sequenced against wh
 | Wave | Units | Why together |
 |---|---|---|
 | 1 | **C** (.NET enrichment and recompute) and **E** (CI provider boundary), in parallel | Both depend only on finished work and are file-disjoint: C lives in the project/dependency/recompute layer, E in the GitHub/Actions layer. E is the larger unknown, so starting it early de-risks Phase 5. |
-| 2 | **D** (push/update/restore) | Needs C's dependency gating to exist before push can branch on it. |
-| 3 | **F** (grid/header UX) and **G** (navigation and page access), in parallel | Both are presentation over C's and E's capabilities. They touch different files, but both read the same resolver, so they land after both suppliers. |
-| 4 | **H** (create/edit and transitions) | The first user-visible change, and deliberately last: until it ships, no user can create anything but a .NET Dependency Workspace, so every earlier wave is safe to land incrementally. |
-| 5 | **I** (regression and assurance) | Verification over the whole feature, including the owner's manual Feature pass. |
+| 2 | **D** (push/update/restore), **F** (grid/header UX), **G** (navigation and page access) and **J** (host readiness), in parallel | D needed C's gating; F and G needed C's and E's capabilities; all three suppliers are integrated. The four are file-disjoint by assignment: D owns services and Worker requests, F the grid and header Razor files, G the nav, page guards and `Program.cs`, J the host-prerequisite code. Merge order D, F, G, J. Originally D was Wave 2 and F+G Wave 3; they were merged into one wave once Wave 1 showed the capability contracts were already complete. |
+| 3 | **H** (create/edit and transitions) | The first user-visible change, and deliberately last: until it ships, no user can create anything but a .NET Dependency Workspace, so every earlier wave is safe to land incrementally. |
+| 4 | **I** (regression and assurance) | Verification over the whole feature, including the owner's manual Feature pass. |
 
 Two things changed in the plan as a result of Phase 1-2:
 
@@ -741,6 +740,29 @@ nothing current for them to show.
 
 **Acceptance.** Basic hides Projects/Packages/Dependencies; .NET Dependency shows them; Actions depends
 only on the CI provider; direct navigation cannot bypass the rules; Files remains available for Basic.
+
+---
+
+## Unit J - Host readiness requirements
+
+| | |
+|---|---|
+| Owner | unassigned |
+| Status | IN PROGRESS |
+| Dependencies | Unit A (DONE) |
+
+Added by the owner after Wave 1: prompt section 15 (Worker/environment readiness UX) was not assigned to
+any unit.
+
+**Scope.** Make host-prerequisite *requirement evaluation* capability-aware without removing host-info
+probing. Git is always required; the .NET SDK and GitVersion are required only when some workspace
+needs them. A missing .NET SDK or GitVersion must not mark the host, the Worker page, the Home page or the
+nav attention indicator as broken when no workspace profile uses them. Code: `HostPrerequisiteState`,
+`HostPrerequisiteInstallService`, `HomeNavAttentionMonitor`, `Worker.razor`, `Home.razor`, and the readiness
+parts of `WorkspaceService`.
+
+**Acceptance.** Basic + None needs only Git; Basic + GitVersion needs Git plus what the GitVersion path
+actually requires; .NET Dependency needs Git, the .NET SDK and GitVersion; probing is unchanged.
 
 ---
 
