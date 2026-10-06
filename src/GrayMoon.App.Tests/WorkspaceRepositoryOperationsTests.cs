@@ -99,6 +99,7 @@ public sealed class WorkspaceRepositoryOperationsTests
         Assert.Equal(root.CloneUrl, args.GetProperty("cloneUrl").GetString());
         Assert.Equal(ManifestTestFixture.WorkspaceFolder, args.GetProperty("workspaceName").GetString());
         Assert.Equal(ManifestTestFixture.WorkspaceRoot, args.GetProperty("workspaceRoot").GetString());
+        Assert.False(args.GetProperty("requireEmptyRoot").GetBoolean());
     }
 
     [Fact]

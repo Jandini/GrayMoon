@@ -134,18 +134,42 @@ public sealed partial class WorkspaceGitService
         if (_fileVersionService != null)
             await _fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, contextId, cancellationToken);
 
-        // D8: a full Sync in the special Workspace context re-checks the Workspace definition when a Workspace repository exists.
-        if (_scopeFactory is not null
-            && workspace.Repositories.Any(l => l.Role == WorkspaceRepositoryRole.Workspace)
-            && (await _contextResolver.GetRequiredAsync(contextId, workspaceId, cancellationToken)).IsSpecialWorkspace)
-        {
-            WorkspaceManifestHooks.DetectDriftInBackground(_scopeFactory, _logger, workspaceId);
-        }
+        // D8: a Sync in the special Workspace context re-checks the Workspace definition when the synced set
+        // (the whole workspace, or a subset) includes the Workspace-role repository.
+        var syncedRepositoryIds = repos.Select(r => r.RepositoryId).ToHashSet();
+        await TriggerManifestDriftCheckAsync(
+            workspace.Repositories.Any(l => l.Role == WorkspaceRepositoryRole.Workspace && syncedRepositoryIds.Contains(l.RepositoryId)),
+            workspaceId,
+            contextId,
+            cancellationToken);
 
         _logger.LogDebug("Sync completed for workspace {WorkspaceName}", workspace.Name);
         return results.ToDictionary(r => r.RepositoryId, r => r.info);
     }
 
+    /// <summary>
+    /// Fire-and-forget Workspace definition drift check (D8). Runs only in the special Workspace context and only
+    /// when the sync included the Workspace-role repository; never throws.
+    /// </summary>
+    private async Task TriggerManifestDriftCheckAsync(
+        bool includesWorkspaceRepository,
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        CancellationToken cancellationToken)
+    {
+        if (_scopeFactory is null || !includesWorkspaceRepository)
+            return;
+
+        try
+        {
+            if ((await _contextResolver.GetRequiredAsync(contextId, workspaceId, cancellationToken)).IsSpecialWorkspace)
+                WorkspaceManifestHooks.DetectDriftInBackground(_scopeFactory, _logger, workspaceId);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Could not schedule Workspace definition drift detection. WorkspaceId={WorkspaceId}", workspaceId);
+        }
+    }
     /// <summary>Refreshes version for a single repo and persists. Returns (success, errorMessage) for caller to report and optionally stop workflow.</summary>
     public async Task<(bool Success, string? ErrorMessage)> SyncSingleRepositoryAsync(int repositoryId, int workspaceId, WorkspaceFeatureContextId contextId, CancellationToken cancellationToken = default)
     {
@@ -207,6 +231,12 @@ public sealed partial class WorkspaceGitService
             await _fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, contextId, cancellationToken);
 
         await _recomputeScope.RecomputeDependencyStatsAsync(workspaceId, contextId, cancellationToken);
+
+        await TriggerManifestDriftCheckAsync(
+            workspace.Repositories.Any(l => l.Role == WorkspaceRepositoryRole.Workspace && l.RepositoryId == repo.RepositoryId),
+            workspaceId,
+            contextId,
+            cancellationToken);
 
         if (_hubContext != null)
             await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
