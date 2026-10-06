@@ -2,6 +2,7 @@ using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Jobs.Requests;
 using GrayMoon.Worker.Jobs.Response;
 using Microsoft.Extensions.Logging;
+using GrayMoon.Worker.Services;
 
 namespace GrayMoon.Worker.Commands;
 
@@ -46,7 +47,7 @@ public sealed class GetHeadCommitsCommand(IGitService git, ILogger<GetHeadCommit
             await semaphore.WaitAsync(cancellationToken);
             try
             {
-                var repoPath = Path.Combine(workspacePath, repoName);
+                var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repoName, request.WorkspaceRepositoryName);
                 var sha = await git.GetHeadCommitAsync(repoPath, cancellationToken);
                 if (!string.IsNullOrWhiteSpace(sha))
                     commits[repoName] = sha;

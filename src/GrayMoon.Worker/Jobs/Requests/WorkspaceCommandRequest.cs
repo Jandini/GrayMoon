@@ -13,6 +13,14 @@ public abstract class WorkspaceCommandRequest
     [JsonPropertyName("workspaceRoot")]
     public string? WorkspaceRoot { get; set; }
 
+    /// <summary>
+    /// Name of the repository whose working tree is the context root itself (the Workspace-role
+    /// repository). Null when the Workspace has no Workspace repository. An old App never sends
+    /// this and every repository then resolves to a subfolder, which is today's behaviour.
+    /// </summary>
+    [JsonPropertyName("workspaceRepositoryName")]
+    public string? WorkspaceRepositoryName { get; set; }
+
     /// <summary>Optional. Max parallel operations for this request (e.g. repo discovery, csproj parsing). When set by the app, worker uses it; otherwise uses a default (e.g. 8).</summary>
     [JsonPropertyName("maxParallelOperations")]
     public int? MaxParallelOperations { get; set; }

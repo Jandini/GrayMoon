@@ -28,7 +28,7 @@ public sealed class SyncRepositoryCommand(
         var capabilities = request.EffectiveCapabilities;
 
         var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
-        var repoPath = Path.Combine(workspacePath, repositoryName);
+        var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
 
         git.CreateDirectory(workspacePath);
 
@@ -154,7 +154,9 @@ public sealed class SyncRepositoryCommand(
             // Stage 3: optional project enrichment. Left null when the profile does not discover .NET
             // projects - an empty list would tell the app this repository genuinely has none, and it would
             // prune every persisted project row.
-            if (capabilities.ShouldDiscoverProjects)
+            var discoverProjects = request.EffectiveCapabilities.ShouldDiscoverProjects
+                && !WorkerRepositoryPaths.IsWorkspaceRepository(repositoryName, request.WorkspaceRepositoryName);
+            if (discoverProjects)
                 projects = await csProjFileService.FindAsync(repoPath, cancellationToken);
 
             return new SyncRepositoryResponse

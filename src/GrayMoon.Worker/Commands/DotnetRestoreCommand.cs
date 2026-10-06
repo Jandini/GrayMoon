@@ -3,6 +3,7 @@ using GrayMoon.Worker.Jobs.Requests;
 using GrayMoon.Worker.Jobs.Response;
 using GrayMoon.Common;
 using Microsoft.Extensions.Logging;
+using GrayMoon.Worker.Services;
 
 namespace GrayMoon.Worker.Commands;
 
@@ -17,7 +18,7 @@ public sealed class DotnetRestoreCommand(IGitService git, ICommandLineService co
             var repositoryName = request.RepositoryName ?? throw new ArgumentException("repositoryName required");
 
             var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
-            var repoPath = Path.Combine(workspacePath, repositoryName);
+            var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
 
             if (!git.DirectoryExists(repoPath))
                 return new DotnetRestoreResponse { Success = true };

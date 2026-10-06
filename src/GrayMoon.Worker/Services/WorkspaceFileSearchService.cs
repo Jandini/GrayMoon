@@ -90,6 +90,8 @@ public sealed class WorkspaceFileSearchService : IWorkspaceFileSearchService
                 var dirName = Path.GetFileName(subDir);
                 if (IsSkippedDirectory(dirName))
                     continue;
+                if (currentDir == repoRoot && WorkerRepositoryPaths.HasGitMetadata(subDir))
+                    continue;
                 EnumerateMatchingFiles(repoRoot, subDir, repositoryName, pattern, results, cancellationToken);
             }
         }

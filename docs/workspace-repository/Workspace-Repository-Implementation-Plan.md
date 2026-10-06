@@ -461,7 +461,7 @@ Commit message: Add Role to WorkspaceRepositoryLink with strict migration step 5
 | | |
 |---|---|
 | Owner | subagent |
-| Status | TODO |
+| Status | REVIEW |
 | Dependencies | O |
 | Decisions | D1, D2, D6 |
 
@@ -527,7 +527,39 @@ src/GrayMoon.Worker.Tests/WorkspaceRepositoryDiscoveryGateTests.cs    (new)
 **Handoff log.**
 
 ```text
-(empty)
+Date: 2026-10-06
+Status after this handoff: REVIEW
+Decision: the owner approved extending W1's owned files with src\GrayMoon.Worker\Abstractions\IRepositoryStateProbe.cs, src\GrayMoon.Worker\Services\RepositoryStateProbe.cs and Worker.Tests probe stubs, to finish the step 4 probe gate.
+Files changed (full paths), all under C:\Users\matth\.graymoon\GrayMoon\features\workspace-as-git-repository\W1\:
+  src\GrayMoon.Worker\Jobs\Requests\WorkspaceCommandRequest.cs
+  src\GrayMoon.Worker\Services\WorkerRepositoryPaths.cs (new)
+  src\GrayMoon.Worker\Services\WorkspaceFileSearchService.cs
+  src\GrayMoon.Worker\Services\RepositoryStateProbe.cs
+  src\GrayMoon.Worker\Abstractions\IRepositoryStateProbe.cs
+  src\GrayMoon.Worker\Jobs\Response\GetHostInfoResponse.cs
+  src\GrayMoon.Worker.Tests\WorkerRepositoryPathsTests.cs (new)
+  src\GrayMoon.Worker.Tests\WorkspaceRepositoryDiscoveryGateTests.cs (new)
+  src\GrayMoon.Worker\Commands\*.cs: 33 files (Path line; discoverProjects gate in SyncRepositoryCommand, RefreshRepositoryProjectsCommand, PushRepositoryCommand; IsWorkspaceRepository passed to the probe in ReturnToDefaultBranchCommand; HasGitMetadata move in GetWorkspaceRepositoriesCommand; SupportedFeatures in GetHostInfoCommand)
+  docs\workspace-repository\Workspace-Repository-Implementation-Plan.md (W1 section only)
+Search counts before/after (for replace-all steps): before 34, after 1 (GetWorkspaceRepositoriesCommand only; the plan said about 35)
+Build: dotnet build GrayMoon.slnx -> warnings: 0, errors: 0
+Tests: Worker 329/329 (+1 skipped; was 320 + 1 skipped)
+New tests added (names): WorkerRepositoryPathsTests: Resolve_returns_subfolder_when_no_workspace_repository, Resolve_returns_workspace_path_for_workspace_repository_case_insensitive, Resolve_returns_subfolder_for_other_repository_when_workspace_repository_set, HasGitMetadata_true_for_dir_and_file, GetHostInfo_response_contains_workspaceRepository_feature; WorkspaceRepositoryDiscoveryGateTests: Workspace_repository_never_calls_the_csproj_scanner_and_reports_no_projects, Other_repository_still_calls_the_csproj_scanner_when_a_workspace_repository_is_set, Probe_discovers_projects_only_when_not_the_workspace_repository (theory, 2 cases)
+Deviations from the steps (and why):
+  - Probe gate implemented as a new RepositoryStateProbeOptions.IsWorkspaceRepository init member (default false) instead of a method parameter: it keeps the IRepositoryStateProbe signature, all existing callers and the StubRepositoryStateProbe unchanged. The probe ANDs !options.IsWorkspaceRepository into its ShouldDiscoverProjects read.
+  - Probe callers: only ReturnToDefaultBranchCommand has both IncludeProjects and a request name, so it passes WorkerRepositoryPaths.IsWorkspaceRepository(repositoryName, request.WorkspaceRepositoryName). CommitSyncRepositoryCommand and RefreshBranchesCommand never set IncludeProjects, so they were left alone. The four hook sync commands have no request name and rely on the default false (equivalent to passing false).
+  - Step 4 CommitSyncRepositoryCommand: it never reads ShouldDiscoverProjects, so there was nothing to replace.
+  - Step 4 PushRepositoryCommand: BuildPostOperationNotificationAsync has no repositoryName local, so the gate uses request.RepositoryName ?? string.Empty.
+  - Step 5: the nested-repo skip applies only to immediate children of the repository root, as the plan says.
+  - The GetHostInfoCommand test lives in WorkerRepositoryPathsTests.cs (only two new test files were owned for tests).
+  - Added "using GrayMoon.Worker.Services;" to 28 command files and "using GrayMoon.Abstractions.Worker;" to GetHostInfoCommand so they compile.
+Discoveries (coupling, surprises, things that look wrong but were left alone):
+  - Hook sync for the Workspace repository still discovers projects (no request.WorkspaceRepositoryName on hook payloads). App-side projection ignores it because Unit E hides projects for Role == Workspace. Acceptable for v1.
+  - SearchFilesCommand and IWorkspaceFileSearchService still do Path.Combine(workspacePath, repositoryName) internally, so a search scoped to the Workspace repository name finds no folder. Not owned by W1.
+  - WorkspaceFileSearchService skips any root-level child containing .git, so submodule folders of any repository are also skipped (as the plan words it).
+  - (Recorded here, not in the global Discoveries section, because W1 may edit only its own section.)
+Follow-ups for the owner: none beyond the Discoveries above.
+Commit message: feat(worker): resolve Workspace repository path, gate project discovery incl. probe, advertise workspaceRepository feature
 ```
 
 ---
