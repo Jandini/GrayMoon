@@ -1,9 +1,13 @@
 # GrayMoon Workspace as a Git Repository
 
-**Status:** Design proposal  
+**Status:** Design proposal, reviewed against code on 2026-10-06  
 **Target:** Post workspace-profiles implementation  
 **Code baseline reviewed:** `Jandini/GrayMoon` default branch at `a6d951d8ffd8713b36d79ff6b5ea6a2fc60b6843`  
 **Date:** 2026-10-06
+
+> **Read with:** `Workspace-Repository-Design-Supplement-v3.1.md` (binding decisions D1-D15; wins over this document where they differ) and `Workspace-Repository-Design-Review-2026-10-06.md` (why those decisions exist). Execution state lives in `Workspace-Repository-Implementation-Plan.md`.
+>
+> The main corrections the supplement makes to this document: the Worker, not the App, derives repository paths (section 17 is App-only as written; see D1); the App cannot write `.graymoon.json` or `.gitignore` (sections 16 and 26; see D5); a local-only Workspace repository is not representable in v1 (section 29.1; see D3); conversion of a non-empty root is the normal case, not a deferred one (sections 29.2 and 29.4; see D4); connector identity is derived from `Connector.ApiBaseUrl` (section 10; see D11); manifest drift is detected by read-and-compare after Workspace-repository operations, not by the watcher (section 34.7; see D8).
 
 ---
 
@@ -1949,33 +1953,33 @@ not credentials.
 
 ## 37. Failure handling
 
-### 36.1 Invalid authoritative manifest
+### 37.1 Invalid authoritative manifest
 
 Report validation error.
 
 Do not partially apply membership or connector changes.
 
-### 36.2 Invalid Feature manifest
+### 37.2 Invalid Feature manifest
 
 Do not affect runtime state.
 
 It remains a Git file change.
 
-### 36.3 Missing connector on restore
+### 37.3 Missing connector on restore
 
 Pause only the affected resolution path and ask user to connect/select connector.
 
 Do not fabricate credentials.
 
-### 36.4 Missing repository on restore
+### 37.4 Missing repository on restore
 
 Continue where possible and report unresolved repository.
 
-### 36.5 Workspace repository Git failure
+### 37.5 Workspace repository Git failure
 
 Scope failure to that repository where possible.
 
-### 36.6 Feature root failure
+### 37.6 Feature root failure
 
 If Workspace worktree creation fails:
 
@@ -1987,7 +1991,7 @@ If Workspace worktree creation fails:
 
 ## 38. Migration
 
-### 37.1 Existing database
+### 38.1 Existing database
 
 Add `Role` default:
 
@@ -1997,11 +2001,11 @@ Source
 
 No existing Workspace becomes Git-backed automatically.
 
-### 37.2 Fresh database
+### 38.2 Fresh database
 
 Same default.
 
-### 37.3 Existing root `.git`
+### 38.3 Existing root `.git`
 
 Do not auto-adopt during migration.
 
@@ -2011,7 +2015,7 @@ Offer explicit action later.
 
 ## 39. APIs and domain boundaries
 
-### 38.1 Repository role
+### 39.1 Repository role
 
 Add:
 
@@ -2019,7 +2023,7 @@ Add:
 WorkspaceRepositoryRole
 ```
 
-### 38.2 URL identity service
+### 39.2 URL identity service
 
 Introduce one centralized abstraction for URL canonicalization/matching.
 
@@ -2038,7 +2042,7 @@ Responsibilities:
 
 Do not spread URL matching logic through repositories/pages.
 
-### 38.3 Manifest service
+### 39.3 Manifest service
 
 Add:
 
@@ -2054,7 +2058,7 @@ Responsibilities:
 - compare/write;
 - reconciliation differences.
 
-### 38.4 Workspace repository orchestration
+### 39.4 Workspace repository orchestration
 
 Add:
 
@@ -2133,6 +2137,8 @@ Do not automatically mutate Workspace composition during checkout.
 ---
 
 ## 43. Recommended implementation phases
+
+> Superseded by the unit map in `Workspace-Repository-Implementation-Plan.md`. The list below misses the Worker work that must come first (path contract, compatibility flag, attach and write-file commands - supplement D1, D2, D4, D5). Kept for the rationale of each phase.
 
 ### Phase A - persistence and role
 
@@ -2316,13 +2322,16 @@ Do not include:
 - secret synchronization;
 - multiple Workspace repositories;
 - submodules;
-- auto-committing manifest changes.
+- auto-committing manifest changes;
+- a local-only Workspace repository with no remote (supplement D3);
+- automatic import of unknown repositories from GitHub during restore (supplement D14);
+- applying a drifted manifest to the database (supplement D8).
 
 ---
 
 ## 46. Rejected alternatives
 
-### 45.1 Provider repository IDs in manifest
+### 46.1 Provider repository IDs in manifest
 
 Rejected.
 
@@ -2335,13 +2344,13 @@ connectorUrl
 repositoryUrl
 ```
 
-### 45.2 GrayMoon persistence IDs in manifest
+### 46.2 GrayMoon persistence IDs in manifest
 
 Rejected.
 
 Different installations will generate different local IDs.
 
-### 45.3 Connector display name as identity
+### 46.3 Connector display name as identity
 
 Rejected.
 
@@ -2349,7 +2358,7 @@ Display names are user-editable.
 
 Use normalized connector URL.
 
-### 45.4 `cloneUrl`
+### 46.4 `cloneUrl`
 
 Rejected as manifest terminology.
 
@@ -2361,7 +2370,7 @@ repositoryUrl
 
 because it represents the repository resource, not just the clone operation.
 
-### 45.5 Derive connector by naive repository URL prefix
+### 46.5 Derive connector by naive repository URL prefix
 
 Rejected.
 
@@ -2369,31 +2378,31 @@ SSH and provider-specific URL forms break simple prefix assumptions.
 
 Keep `connectorUrl` explicit.
 
-### 45.6 Hidden Workspace Git repository
+### 46.6 Hidden Workspace Git repository
 
 Rejected.
 
 Use the existing first-class repository infrastructure.
 
-### 45.7 `WorkspaceType.Git`
+### 46.7 `WorkspaceType.Git`
 
 Rejected.
 
 Git backing is independent of Workspace profile.
 
-### 45.8 Optional Workspace repository in Features
+### 46.8 Optional Workspace repository in Features
 
 Rejected.
 
 Workspace-level files must always be live and branchable in Features.
 
-### 45.9 Project/copy Workspace AI files into Features
+### 46.9 Project/copy Workspace AI files into Features
 
 Rejected.
 
 A real Workspace-repository worktree provides correct Git semantics directly.
 
-### 45.10 Apply Feature `.graymoon.json` immediately
+### 46.10 Apply Feature `.graymoon.json` immediately
 
 Rejected.
 
