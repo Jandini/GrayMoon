@@ -102,6 +102,14 @@ public sealed class WorkspaceContextPathResolver(
         return (parent, folderName);
     }
 
+    public async Task<WorkerWorkspaceArgs> GetWorkerArgsAsync(
+        WorkspaceFeatureContextId contextId,
+        CancellationToken cancellationToken = default)
+    {
+        var (root, folder) = await GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
+        return new WorkerWorkspaceArgs(root, folder, null);
+    }
+
     private async Task<string> ResolveSpecialWorkspaceFolderAsync(
         string workspaceName,
         Models.Workspace workspace,

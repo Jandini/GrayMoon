@@ -19,9 +19,9 @@ It must be possible to stop work here and resume later without reconstructing st
 | | |
 |---|---|
 | Project status | READY |
-| Current phase | Wave 0 - Unit O (owner contracts) is READY to start |
+| Current phase | Wave 0 complete (Unit O DONE). Wave 1 (A, W1, B) is READY to start |
 | Units planned in detail | O, A, W1, B, C, W2, D, E, F, G, I |
-| Last verified | 2026-10-06, baseline `f7f94ce` before any unit: `dotnet build GrayMoon.slnx` 0 warnings; App 999/999, Worker 318 + 1 pre-existing skip, Common 236/236. Every file path named in the units was checked to exist. |
+| Last verified | 2026-10-06, after Unit O on `c0bfb2a` + O: `dotnet build GrayMoon.slnx` 0 warnings; App 1007/1007, Worker 320/320 + 1 pre-existing skip, Common 236/236. The baseline moved from `f7f94ce` (App 999, Worker 318) to `c0bfb2a` because `origin/main` (Worker Windows-service password change) was merged into this branch; the owner accepted the new numbers. Original plan baseline `f7f94ce`: `dotnet build GrayMoon.slnx` 0 warnings; App 999/999, Worker 318 + 1 pre-existing skip, Common 236/236. Every file path named in the units was checked to exist. |
 
 **What works today.** Nothing of this feature. A Workspace is a folder containing one subfolder per repository; the Worker derives every repository path as `<root>\<WorkspaceName>\<RepositoryName>`; Features create one worktree per repository under `<FeatureStorageRoot>\<Feature>\<RepositoryName>`.
 
@@ -162,7 +162,7 @@ Select-String -Path <file> -Pattern "[\u2013\u2014]"
 | | |
 |---|---|
 | Owner | owner |
-| Status | READY |
+| Status | DONE |
 | Dependencies | none |
 | Decisions | D1, D2, D4, D5, D15 |
 
@@ -291,7 +291,28 @@ src/GrayMoon.Abstractions/Worker/WorkerFeatures.cs                         (new)
 **Handoff log.**
 
 ```text
-(empty)
+Date: 2026-10-06
+Status after this handoff: DONE
+Files changed (full paths):
+  src/GrayMoon.App/Models/WorkspaceRepositoryRole.cs (new)
+  src/GrayMoon.Application/Features/WorkerWorkspaceArgs.cs (new)
+  src/GrayMoon.Application/Features/IWorkspaceContextPathResolver.cs (GetWorkerArgsAsync added; tuple method kept)
+  src/GrayMoon.App/Services/Features/WorkspaceContextPathResolver.cs (GetWorkerArgsAsync wraps the tuple method, null name)
+  src/GrayMoon.Application/WorkspaceManifest/WorkspaceManifest.cs (new)
+  src/GrayMoon.Application/WorkspaceManifest/IWorkspaceManifestService.cs (new)
+  src/GrayMoon.Application/WorkspaceManifest/WorkspaceManifestDrift.cs (new)
+  src/GrayMoon.Application/Workspaces/IWorkspaceRepositoryOperations.cs (new)
+  src/GrayMoon.Abstractions/Worker/WorkerHubMethods.cs (two constants)
+  src/GrayMoon.Abstractions/Worker/WorkerFeatures.cs (new)
+  docs/workspace-repository/Workspace-Repository-Implementation-Plan.md (status)
+Search counts before/after (for replace-all steps): n/a
+Build: dotnet build GrayMoon.slnx -> warnings: 0, errors: 0
+Tests: App 1007/1007, Worker 320/320 (+1 skipped), Common 236/236
+New tests added (names): none (contracts only)
+Deviations from the steps (and why): none. Baseline numbers differ from the plan header (see Overall status).
+Discoveries (coupling, surprises, things that look wrong but were left alone): none. WorkspaceContextPathResolver is the only implementer of IWorkspaceContextPathResolver.
+Follow-ups for the owner: none
+Commit message: Add the contracts for the Workspace repository feature
 ```
 
 ---
