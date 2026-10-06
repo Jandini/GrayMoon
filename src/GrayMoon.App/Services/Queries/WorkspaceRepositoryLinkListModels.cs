@@ -6,7 +6,9 @@ public sealed record WorkspaceRepositoryLinkListCursor(
     int DependencyLevelSortKey,
     int RepositoryTypeSortKey,
     int DependenciesSortKey,
-    int WorkspaceRepositoryId);
+    int WorkspaceRepositoryId,
+    /// <summary>0 for the Workspace-role row (always first), 1 for every other row.</summary>
+    int RoleSortKey = 1);
 
 public sealed record WorkspaceRepositoryLinkListRequest(
     int WorkspaceId,
@@ -53,7 +55,9 @@ public sealed record WorkspaceRepositoryLinkListItemDto(
     /// <summary>Feature parent / PR-base branch when viewing a Feature; null for Workspace or when unknown.</summary>
     string? ParentBranchName = null,
     /// <summary>Tag the Feature repository is pinned to when viewing a Feature; null for Workspace or an unpinned repository.</summary>
-    string? FeaturePinnedTag = null);
+    string? FeaturePinnedTag = null,
+    /// <summary>Role of the repository in this Workspace (shared across contexts); the Workspace-role row sorts first and is never in a level group.</summary>
+    WorkspaceRepositoryRole Role = WorkspaceRepositoryRole.Source);
 
 public sealed record WorkspaceRepositoryLinkListPageResult(
     IReadOnlyList<WorkspaceRepositoryLinkListItemDto> Items,
@@ -91,4 +95,5 @@ public sealed record WorkspaceRepositoryHeaderStateDto(
 public sealed record WorkspaceRepositoryLinkIndexEntry(
     int WorkspaceRepositoryId,
     int RepositoryId,
-    int? DependencyLevel);
+    int? DependencyLevel,
+    WorkspaceRepositoryRole Role = WorkspaceRepositoryRole.Source);

@@ -31,6 +31,10 @@
 @using GrayMoon.Application.WorkspaceManifest
 @inject IWorkspaceManifestService ManifestService
 @inject IToastService ToastService
+@using GrayMoon.App.Data
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<AppDbContext> DbContextFactory
+@inject GrayMoon.Application.Workspaces.IWorkspaceRepositoryOperations WorkspaceRepositoryOperations
 
 <PageTitle>Workspaces - GrayMoon</PageTitle>
 
@@ -194,6 +198,11 @@
                UseGitHubActionsChanged="value => editorUseGitHubActions = value"
                IsTypeDisabled="@(editingWorkspaceId != null && editingWorkspaceHasFeatures)"
                TypeDisabledHint="@(editingWorkspaceHasFeatures ? "Rename and root changes are not possible while Features exist. Remove Features first." : null)"
+               WorkspaceRepositoryId="@editorWorkspaceRepositoryId"
+               WorkspaceRepositoryIdChanged="value => editorWorkspaceRepositoryId = value"
+               WorkspaceRepositoryChoices="@editorWorkspaceRepositoryChoices"
+               IsWorkspaceRepositoryDisabled="@(editingWorkspaceId != null && editingWorkspaceHasFeatures)"
+               WorkspaceRepositoryDisabledHint="@(editingWorkspaceHasFeatures ? WorkspaceRepositoryFeaturesExistMessage : null)"
                IsSaving="@isSaving"
                IsCheckingDirectory="@isLoadingDirectoryInfo"
                ErrorMessage="@editorErrorMessage"
@@ -209,6 +218,7 @@
 <WorkspaceRepositoriesModal IsVisible="@showRepositoriesModal"
                             Title="@($"Select repositories for {repositoriesModalWorkspaceName}")"
                             SelectedRepositoryIds="@selectedRepositoryIds"
+                            ExcludedRepositoryIds="@excludedRepositoryIds"
                             HasConnectors="@hasConnectors"
                             IsSaving="@isSavingRepositories"
                             IsFetching="@isPersisting"
@@ -328,10 +338,15 @@
     private WorkspaceType editorType = WorkspaceType.DotNetDependency;
     private bool editorUseGitVersion = true;
     private bool editorUseGitHubActions = true;
+    private int? editorWorkspaceRepositoryId;
+    private int? editingWorkspaceRepositoryOriginalId;
+    private IReadOnlyList<WorkspaceModal.WorkspaceRepositoryChoice> editorWorkspaceRepositoryChoices = Array.Empty<WorkspaceModal.WorkspaceRepositoryChoice>();
+    private const string WorkspaceRepositoryFeaturesExistMessage = "Rename and root changes are not possible while Features exist. Remove Features first.";
     private string? deleteBlockedMessage;
     private HashSet<int> editingWorkspaceRepositoryIds = new();
     private WorkspaceModel? workspaceToDelete;
     private HashSet<int> selectedRepositoryIds = new();
+    private HashSet<int> excludedRepositoryIds = new();
     private int? fetchedRepositoryCount;
     private CancellationTokenSource? _fetchRepositoriesCts;
     private bool directoryExists;
@@ -431,6 +446,9 @@
         editorType = WorkspaceType.DotNetDependency;
         editorUseGitVersion = true;
         editorUseGitHubActions = true;
+        editorWorkspaceRepositoryId = null;
+        editingWorkspaceRepositoryOriginalId = null;
+        editorWorkspaceRepositoryChoices = await LoadWorkspaceRepositoryChoicesAsync(new HashSet<int>());
         editorTitle = "Add Workspace";
         workspaceName = string.Empty;
         directoryExists = false;
@@ -477,6 +495,14 @@
         editorType = workspace.Type;
         editorUseGitVersion = workspace.VersioningMode == WorkspaceVersioningMode.GitVersion;
         editorUseGitHubActions = workspace.CiProvider == WorkspaceCiProvider.GitHubActions;
+        var workspaceRepositoryLink = workspace.Repositories.FirstOrDefault(l => l.Role == WorkspaceRepositoryRole.Workspace);
+        editingWorkspaceRepositoryOriginalId = workspaceRepositoryLink?.RepositoryId;
+        editorWorkspaceRepositoryId = workspaceRepositoryLink?.RepositoryId;
+        editorWorkspaceRepositoryChoices = await LoadWorkspaceRepositoryChoicesAsync(
+            workspace.Repositories
+                .Where(l => l.Role != WorkspaceRepositoryRole.Workspace)
+                .Select(l => l.RepositoryId)
+                .ToHashSet());
 
         directoryExists = false;
         existingRepositoryCount = 0;
@@ -497,7 +523,13 @@
         repositoriesModalWorkspaceName = workspace.Name;
         repositoriesModalErrorMessage = null;
         repositoriesModalRenameWarnings = null;
+        // The Workspace repository is neither selectable nor removable in the membership modal (D13).
         selectedRepositoryIds = workspace.Repositories
+            .Where(link => link.Role != WorkspaceRepositoryRole.Workspace)
+            .Select(link => link.RepositoryId)
+            .ToHashSet();
+        excludedRepositoryIds = workspace.Repositories
+            .Where(link => link.Role == WorkspaceRepositoryRole.Workspace)
             .Select(link => link.RepositoryId)
             .ToHashSet();
 
@@ -585,6 +617,14 @@
                     editorUseGitHubActions ? WorkspaceCiProvider.GitHubActions : WorkspaceCiProvider.None);
                 editingWorkspaceId = workspace.WorkspaceId;
 
+                var createWorkspaceRepositoryError = await ApplyWorkspaceRepositoryChangeAsync(workspace.WorkspaceId);
+                if (createWorkspaceRepositoryError is not null)
+                {
+                    editorErrorMessage = createWorkspaceRepositoryError;
+                    ToastService.ShowError(createWorkspaceRepositoryError);
+                    return;
+                }
+
                 if (existingRepositoryCount > 0)
                     await TrySuggestImportsAsync(workspace.WorkspaceId, workspace.Name);
             }
@@ -601,6 +641,14 @@
                     editorUseGitHubActions ? WorkspaceCiProvider.GitHubActions : WorkspaceCiProvider.None);
                 await SyncWorkspaceDefinitionAsync(editingWorkspaceId.Value);
                 await PendingActionsService.RefreshAsync(editingWorkspaceId.Value, WorkspaceRepository, WorkspaceProjectRepository);
+
+                var editWorkspaceRepositoryError = await ApplyWorkspaceRepositoryChangeAsync(editingWorkspaceId.Value);
+                if (editWorkspaceRepositoryError is not null)
+                {
+                    editorErrorMessage = editWorkspaceRepositoryError;
+                    ToastService.ShowError(editWorkspaceRepositoryError);
+                    return;
+                }
             }
 
             if (!showImportModal)
@@ -976,6 +1024,80 @@
             showImportModal = false;
             CloseEditorModal();
             await LoadWorkspacesAsync();
+        }
+    }
+
+    /// <summary>
+    /// Imported repositories offered by the "Workspace repository" select: everything that is not a Source of this
+    /// Workspace (D13). Uses a short-lived factory context (AGENTS.md DbContext handling).
+    /// </summary>
+    private async Task<IReadOnlyList<WorkspaceModal.WorkspaceRepositoryChoice>> LoadWorkspaceRepositoryChoicesAsync(
+        IReadOnlySet<int> sourceRepositoryIds)
+    {
+        try
+        {
+            await using var db = await DbContextFactory.CreateDbContextAsync();
+            var rows = await db.Repositories.AsNoTracking()
+                .Where(r => r.Connector != null && r.Connector.ConnectorType == ConnectorType.GitHub)
+                .Select(r => new { r.RepositoryId, r.RepositoryName, r.OrgName })
+                .ToListAsync();
+            return WorkspaceModal.BuildWorkspaceRepositoryChoices(
+                rows.Select(r => (r.RepositoryId, r.RepositoryName, r.OrgName)),
+                sourceRepositoryIds);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load repositories for the Workspace repository select.");
+            return Array.Empty<WorkspaceModal.WorkspaceRepositoryChoice>();
+        }
+    }
+
+    private async Task<int?> GetCurrentWorkspaceRepositoryIdAsync(int workspaceId)
+    {
+        await using var db = await DbContextFactory.CreateDbContextAsync();
+        return await db.WorkspaceRepositories.AsNoTracking()
+            .Where(l => l.WorkspaceId == workspaceId && l.Role == WorkspaceRepositoryRole.Workspace)
+            .Select(l => (int?)l.RepositoryId)
+            .FirstOrDefaultAsync();
+    }
+
+    /// <summary>
+    /// Applies a changed "Workspace repository" selection after the Workspace itself is saved (D13): disable the old
+    /// one, then enable the new one. Returns the error to show, or null when nothing was wrong (including no change).
+    /// The saved link state is re-read afterwards so a retry starts from what is actually in the database.
+    /// </summary>
+    private async Task<string?> ApplyWorkspaceRepositoryChangeAsync(int workspaceId)
+    {
+        if (editorWorkspaceRepositoryId == editingWorkspaceRepositoryOriginalId)
+            return null;
+
+        if (editingWorkspaceHasFeatures)
+            return WorkspaceRepositoryFeaturesExistMessage;
+
+        try
+        {
+            if (editingWorkspaceRepositoryOriginalId is not null)
+            {
+                var disabled = await WorkspaceRepositoryOperations.DisableWorkspaceRepositoryAsync(workspaceId);
+                editingWorkspaceRepositoryOriginalId = await GetCurrentWorkspaceRepositoryIdAsync(workspaceId);
+                if (!disabled.Success)
+                    return disabled.Error ?? "Could not disable the Workspace repository.";
+            }
+
+            if (editorWorkspaceRepositoryId is { } repositoryId)
+            {
+                var enabled = await WorkspaceRepositoryOperations.EnableWorkspaceRepositoryAsync(workspaceId, repositoryId);
+                editingWorkspaceRepositoryOriginalId = await GetCurrentWorkspaceRepositoryIdAsync(workspaceId);
+                if (!enabled.Success)
+                    return enabled.Error ?? "Could not enable the Workspace repository.";
+            }
+
+            return null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogError(ex, "Changing the Workspace repository failed for workspace {WorkspaceId}", workspaceId);
+            return ex.Message;
         }
     }
 

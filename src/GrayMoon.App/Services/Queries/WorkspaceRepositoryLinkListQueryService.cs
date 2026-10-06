@@ -268,7 +268,8 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
                 .Select(wr => new WorkspaceRepositoryLinkIndexEntry(
                     wr.WorkspaceRepositoryId,
                     wr.RepositoryId,
-                    wr.DependencyLevel))
+                    wr.DependencyLevel,
+                    wr.Role))
                 .ToListAsync(cancellationToken);
         }
 
@@ -280,7 +281,8 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
                 db.WorkspaceRepositoryContextStates
                     .Where(s => s.WorkspaceFeatureContextId == cid && s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId)
                     .Select(s => s.DependencyLevel)
-                    .FirstOrDefault()))
+                    .FirstOrDefault(),
+                wr.Role))
             .ToListAsync(cancellationToken);
     }
 
@@ -329,7 +331,7 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
         if (isSpecialWorkspace || contextId is null)
         {
             return await query
-                .Where(wr => wr.DependencyLevel == levelKey)
+                .Where(wr => wr.Role != WorkspaceRepositoryRole.Workspace && wr.DependencyLevel == levelKey)
                 .OrderBy(wr => wr.WorkspaceRepositoryId)
                 .Select(wr => wr.RepositoryId)
                 .ToListAsync(cancellationToken);
@@ -337,6 +339,7 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
 
         var cid = contextId.Value.Value;
         return await query
+            .Where(wr => wr.Role != WorkspaceRepositoryRole.Workspace)
             .Where(wr => db.WorkspaceRepositoryContextStates
                 .Where(s => s.WorkspaceFeatureContextId == cid && s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId)
                 .Select(s => s.DependencyLevel)
@@ -448,7 +451,8 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
         if (isSpecialWorkspace || contextId is null)
         {
             return query
-                .OrderByDescending(wr => wr.DependencyLevel ?? int.MinValue)
+                .OrderBy(wr => wr.Role == WorkspaceRepositoryRole.Workspace ? 0 : 1)
+                .ThenByDescending(wr => wr.DependencyLevel ?? int.MinValue)
                 .ThenBy(wr => wr.RepositoryType == ProjectType.Service ? 0
                     : wr.RepositoryType == ProjectType.Package ? 1
                     : wr.RepositoryType == ProjectType.Executable ? 2
@@ -464,7 +468,8 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
             .Where(s => s.WorkspaceFeatureContextId == cid);
 
         return query
-            .OrderByDescending(wr => (states
+            .OrderBy(wr => wr.Role == WorkspaceRepositoryRole.Workspace ? 0 : 1)
+            .ThenByDescending(wr => (states
                 .Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId)
                 .Select(s => s.DependencyLevel)
                 .FirstOrDefault()) ?? int.MinValue)
@@ -495,6 +500,16 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
         {
             return query;
         }
+
+        // The Workspace-role row sorts before everything (ApplySort), and a Workspace has at most one.
+        // A cursor on it resumes at the first Source row; a cursor on a Source row never returns it again.
+        if (cursor.RoleSortKey == 0)
+        {
+            return query.Where(wr => wr.Role != WorkspaceRepositoryRole.Workspace
+                || wr.WorkspaceRepositoryId > cursor.WorkspaceRepositoryId);
+        }
+
+        query = query.Where(wr => wr.Role != WorkspaceRepositoryRole.Workspace);
 
         if (isSpecialWorkspace || contextId is null)
         {
@@ -609,7 +624,9 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
                 wr.GitChangeEntries.Count(),
                 HeadCommit: null,
                 FeatureBaseCommitSha: null,
-                ParentBranchName: null));
+                ParentBranchName: null,
+                FeaturePinnedTag: null,
+                Role: wr.Role));
         }
 
         var cid = contextId.Value.Value;
@@ -661,7 +678,8 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
             HeadCommit: x.state != null ? x.state.HeadCommit : null,
             FeatureBaseCommitSha: x.featureRepo != null ? x.featureRepo.BaseCommitSha : null,
             ParentBranchName: x.featureRepo != null ? x.featureRepo.ParentBranchName : null,
-            FeaturePinnedTag: x.featureRepo != null ? x.featureRepo.PinnedTag : null));
+            FeaturePinnedTag: x.featureRepo != null ? x.featureRepo.PinnedTag : null,
+            Role: x.wr.Role));
     }
 
     private static WorkspaceRepositoryLinkListCursor ToCursor(WorkspaceRepositoryLinkListItemDto dto) =>
@@ -669,6 +687,7 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
             dto.DependencyLevel ?? int.MinValue,
             WorkspaceRepositoryLinkSearchExpressions.GetRepositoryTypeSortKey(dto.RepositoryType),
             dto.Dependencies ?? int.MinValue,
-            dto.WorkspaceRepositoryId);
+            dto.WorkspaceRepositoryId,
+            dto.Role == WorkspaceRepositoryRole.Workspace ? 0 : 1);
 }
 
