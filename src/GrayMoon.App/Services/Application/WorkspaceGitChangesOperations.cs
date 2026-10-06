@@ -30,8 +30,8 @@ public sealed class WorkspaceGitChangesOperations(
         string commitMessage,
         bool stageAllFirst,
         CancellationToken cancellationToken)
-        => WithResolvedRepo(workspaceId, contextId, repositoryId, cancellationToken, (root, workspaceName, repoName) =>
-            workerClient.CommitAsync(root, workspaceName, repoName, commitMessage, stageAllFirst, cancellationToken));
+        => WithResolvedRepo(workspaceId, contextId, repositoryId, cancellationToken, (root, workspaceName, repoName, workspaceRepositoryName) =>
+            workerClient.CommitAsync(root, workspaceName, repoName, workspaceRepositoryName, commitMessage, stageAllFirst, cancellationToken));
 
     public Task<GitChangesMutationResult> StageAsync(
         int workspaceId,
@@ -40,8 +40,8 @@ public sealed class WorkspaceGitChangesOperations(
         GitChangeOperationScope scope,
         IReadOnlyList<string> paths,
         CancellationToken cancellationToken)
-        => WithResolvedRepo(workspaceId, contextId, repositoryId, cancellationToken, (root, workspaceName, repoName) =>
-            workerClient.StageAsync(root, workspaceName, repoName, scope, paths, cancellationToken));
+        => WithResolvedRepo(workspaceId, contextId, repositoryId, cancellationToken, (root, workspaceName, repoName, workspaceRepositoryName) =>
+            workerClient.StageAsync(root, workspaceName, repoName, workspaceRepositoryName, scope, paths, cancellationToken));
 
     public Task<GitChangesMutationResult> UnstageAsync(
         int workspaceId,
@@ -50,15 +50,15 @@ public sealed class WorkspaceGitChangesOperations(
         GitChangeOperationScope scope,
         IReadOnlyList<string> paths,
         CancellationToken cancellationToken)
-        => WithResolvedRepo(workspaceId, contextId, repositoryId, cancellationToken, (root, workspaceName, repoName) =>
-            workerClient.UnstageAsync(root, workspaceName, repoName, scope, paths, cancellationToken));
+        => WithResolvedRepo(workspaceId, contextId, repositoryId, cancellationToken, (root, workspaceName, repoName, workspaceRepositoryName) =>
+            workerClient.UnstageAsync(root, workspaceName, repoName, workspaceRepositoryName, scope, paths, cancellationToken));
 
     private async Task<T> WithResolvedRepo<T>(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         int repositoryId,
         CancellationToken cancellationToken,
-        Func<string, string, string, Task<T>> action)
+        Func<string, string, string, string?, Task<T>> action)
         where T : new()
     {
         var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
@@ -70,11 +70,14 @@ public sealed class WorkspaceGitChangesOperations(
         if (string.IsNullOrWhiteSpace(repoName))
             return Fail<T>("Repository is not in the given workspace.");
 
-        var (root, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
+        var workerArgs = await pathResolver.GetWorkerArgsAsync(contextId, cancellationToken);
+        var root = workerArgs.WorkspaceRoot;
+        var workspaceFolderName = workerArgs.WorkspaceFolderName;
+        var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
         if (string.IsNullOrWhiteSpace(root))
             return Fail<T>("Workspace root is not configured.");
 
-        return await action(root, workspaceFolderName, repoName);
+        return await action(root, workspaceFolderName, repoName, workspaceRepositoryName);
     }
 
     private static T Fail<T>(string error) where T : new()

@@ -72,14 +72,18 @@ public sealed class WorkspaceFileOperations(
         if (!workerBridge.IsWorkerConnected)
             return (true, false, null, "Worker not connected. Start the GrayMoon Worker to search files.");
 
-        var (workspaceRoot, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
+        var workerArgs = await pathResolver.GetWorkerArgsAsync(contextId, cancellationToken);
+        var workspaceRoot = workerArgs.WorkspaceRoot;
+        var workspaceFolderName = workerArgs.WorkspaceFolderName;
+        var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
         var searchPattern = string.IsNullOrWhiteSpace(pattern) ? "*" : pattern.Trim();
         var response = await workerBridge.SendCommandAsync("SearchFiles", new
         {
             workspaceName = workspaceFolderName,
             repositoryName = string.IsNullOrWhiteSpace(repositoryName) ? null : repositoryName.Trim(),
             searchPattern,
-            workspaceRoot
+            workspaceRoot,
+            workspaceRepositoryName
         }, cancellationToken);
 
         if (!response.Success || response.Data == null)

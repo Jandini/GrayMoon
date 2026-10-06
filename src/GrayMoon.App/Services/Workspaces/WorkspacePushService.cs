@@ -119,7 +119,10 @@ public sealed class WorkspacePushService(
         if (workspace == null)
             throw new InvalidOperationException($"Workspace {workspaceId} not found.");
 
-        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workerArgs = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workspaceRoot = workerArgs.WorkspaceRoot;
+        var workspaceFolderName = workerArgs.WorkspaceFolderName;
+        var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
         var configuredRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
         await _workspaceService.CreateDirectoryAsync(workspace.Name, configuredRoot, cancellationToken);
 
@@ -373,8 +376,8 @@ public sealed class WorkspacePushService(
                 try
                 {
                     var restoreFailed = syncedRepoIds is { Count: > 0 }
-                        ? await RestoreUpdatedReposAtLevelAsync(workspaceId, workspace.Name, workspaceRoot, reposAtLevel, syncedRepoIds, onRepoError, cancellationToken)
-                        : await TryRestoreReposAtLevelAsync(workspaceId, workspace.Name, workspaceRoot, reposAtLevel, onRepoError, cancellationToken);
+                        ? await RestoreUpdatedReposAtLevelAsync(workspaceId, workspace.Name, workspaceRoot, workspaceRepositoryName, reposAtLevel, syncedRepoIds, onRepoError, cancellationToken)
+                        : await TryRestoreReposAtLevelAsync(workspaceId, workspace.Name, workspaceRoot, workspaceRepositoryName, reposAtLevel, onRepoError, cancellationToken);
                     if (restoreFailed)
                         return;
                 }
@@ -429,7 +432,10 @@ public sealed class WorkspacePushService(
             return (false, "Repository is pinned to a tag. Checkout a branch before pushing.");
 
         var repo = link.Repository;
-        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workerArgs = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workspaceRoot = workerArgs.WorkspaceRoot;
+        var workspaceFolderName = workerArgs.WorkspaceFolderName;
+        var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
 
         onProgressMessage?.Invoke(link.BranchHasUpstream == true ? "Pushing..." : "Pushing upstream...");
 
@@ -445,6 +451,7 @@ public sealed class WorkspacePushService(
             bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
             workspaceId,
             workspaceRoot,
+            workspaceRepositoryName,
             branchName = string.IsNullOrWhiteSpace(branchName) ? null : branchName.Trim(),
             capabilities
         };
@@ -455,7 +462,7 @@ public sealed class WorkspacePushService(
         {
             var rawErr = response.Error ?? WorkerResponseJson.DeserializeWorkerResponse<PushRepositoryResponse>(response.Data!)?.ErrorMessage;
             if (PushErrorFormatter.IsNonFastForwardRejection(rawErr))
-                await FetchAfterRejectionAsync(workspaceId, contextId, repositoryId, repo.RepositoryName, workspace.Name, workspaceRoot, cancellationToken);
+                await FetchAfterRejectionAsync(workspaceId, contextId, repositoryId, repo.RepositoryName, workspace.Name, workspaceRoot, workspaceRepositoryName, cancellationToken);
             return (false, PushErrorFormatter.Format(rawErr));
         }
 
@@ -629,6 +636,7 @@ public sealed class WorkspacePushService(
         int workspaceId,
         string workspaceName,
         string? workspaceRoot,
+        string? workspaceRepositoryName,
         IReadOnlyList<PushRepoPayload> repos,
         IReadOnlySet<int> syncedRepoIds,
         Action<int, string>? onRepoError,
@@ -664,7 +672,7 @@ public sealed class WorkspacePushService(
             {
                 await _workerBridge.SendCommandAsync(
                     "DotnetRestore",
-                    new { workspaceName, repositoryName, projectPaths = kvp.Value, workspaceRoot },
+                    new { workspaceName, repositoryName, projectPaths = kvp.Value, workspaceRoot, workspaceRepositoryName },
                     cancellationToken);
             }
             catch (OperationCanceledException) { throw; }
@@ -683,6 +691,7 @@ public sealed class WorkspacePushService(
         int workspaceId,
         string workspaceName,
         string? workspaceRoot,
+        string? workspaceRepositoryName,
         IReadOnlyList<PushRepoPayload> repos,
         Action<int, string>? onRepoError,
         CancellationToken cancellationToken)
@@ -730,7 +739,7 @@ public sealed class WorkspacePushService(
             {
                 await _workerBridge.SendCommandAsync(
                     "DotnetRestore",
-                    new { workspaceName, repositoryName, projectPaths = (IReadOnlyList<string>)kvp.Value, workspaceRoot },
+                    new { workspaceName, repositoryName, projectPaths = (IReadOnlyList<string>)kvp.Value, workspaceRoot, workspaceRepositoryName },
                     cancellationToken);
             }
             catch (OperationCanceledException) { throw; }
@@ -762,7 +771,10 @@ public sealed class WorkspacePushService(
         using var semaphore = new SemaphoreSlim(_maxConcurrent);
         // The health check reads through the scoped AppDbContext, which must not be used by two pushes at once.
         using var healthCheckLock = new SemaphoreSlim(1, 1);
-        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workerArgs = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workspaceRoot = workerArgs.WorkspaceRoot;
+        var workspaceFolderName = workerArgs.WorkspaceFolderName;
+        var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
         var capabilities = await ResolveRepositoryOperationCapabilitiesAsync(workspace.WorkspaceId, cancellationToken);
         var rejectedRepos = new System.Collections.Concurrent.ConcurrentBag<(int RepoId, string RepoName)>();
         var failures = new System.Collections.Concurrent.ConcurrentBag<(int RepoId, string Error)>();
@@ -794,6 +806,7 @@ public sealed class WorkspacePushService(
                         bearerToken = bearerByRepoId.GetValueOrDefault(repo.RepoId),
                         workspaceId = workspace.WorkspaceId,
                         workspaceRoot,
+                        workspaceRepositoryName,
                         refreshVersionAfterPush,
                         capabilities
                     };
@@ -835,7 +848,7 @@ public sealed class WorkspacePushService(
         });
         await Task.WhenAll(pushTasks);
         foreach (var (repoId, repoName) in rejectedRepos)
-            await FetchAfterRejectionAsync(workspace.WorkspaceId, contextId, repoId, repoName, workspace.Name, workspaceRoot, cancellationToken);
+            await FetchAfterRejectionAsync(workspace.WorkspaceId, contextId, repoId, repoName, workspace.Name, workspaceRoot, workspaceRepositoryName, cancellationToken);
         return failures.ToList();
     }
 
@@ -849,6 +862,7 @@ public sealed class WorkspacePushService(
         string repoName,
         string workspaceName,
         string? workspaceRoot,
+        string? workspaceRepositoryName,
         CancellationToken cancellationToken)
     {
         try
@@ -858,7 +872,8 @@ public sealed class WorkspacePushService(
                 workspaceName,
                 repositoryId,
                 repositoryName = repoName,
-                workspaceRoot
+                workspaceRoot,
+                workspaceRepositoryName
             }, cancellationToken);
             await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, contextId,
                 [new PushRepoPayload(repositoryId, repoName, null, [])],
@@ -906,7 +921,10 @@ public sealed class WorkspacePushService(
             wr.BranchHasUpstream = true;
         }
 
-        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workerArgs = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workspaceRoot = workerArgs.WorkspaceRoot;
+        var workspaceFolderName = workerArgs.WorkspaceFolderName;
+        var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
 
         var tagPinnedInLinks = links
             .Where(l => !string.IsNullOrWhiteSpace(l.CheckedOutTag))
@@ -922,7 +940,8 @@ public sealed class WorkspacePushService(
                 {
                     workspaceName = workspaceFolderName,
                     repositoryName = repo.RepoName,
-                    workspaceRoot
+                    workspaceRoot,
+                    workspaceRepositoryName
                 }, cancellationToken);
                 if (!response.Success || response.Data == null)
                     return (RepoId: repo.RepoId, Data: (WorkerCommitCountsResponse?)null);
@@ -955,9 +974,9 @@ public sealed class WorkspacePushService(
         await _recomputeScope.CompleteAsync(workspaceId, contextId, cancellationToken);
     }
 
-    private Task<(string WorkspaceRoot, string WorkspaceFolderName)> ResolveWorkerPathArgsAsync(
+    private Task<WorkerWorkspaceArgs> ResolveWorkerPathArgsAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken)
-        => _pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
+        => _pathResolver.GetWorkerArgsAsync(contextId, cancellationToken);
 }

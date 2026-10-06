@@ -54,7 +54,10 @@ public sealed class WorkspaceBranchUpdateHandler(
         {
             await connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepositoryId, cancellationToken);
 
-            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
+            var workerArgs = await pathResolver.GetWorkerArgsAsync(contextId, cancellationToken);
+            var workspaceRoot = workerArgs.WorkspaceRoot;
+            var workspaceFolderName = workerArgs.WorkspaceFolderName;
+            var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
             var defaultBranchName = await dbContext.RepositoryBranches
                 .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && rb.IsDefault && !rb.IsTag)
                 .Select(rb => rb.BranchName)
@@ -87,7 +90,8 @@ public sealed class WorkspaceBranchUpdateHandler(
                 currentBranchName,
                 defaultBranchName,
                 bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
-                workspaceRoot
+                workspaceRoot,
+                workspaceRepositoryName
             };
 
             // WorkerBridge.SendCommandAsync reads TerminalSinkContext.Current (set by BackgroundJobService.StartJob)

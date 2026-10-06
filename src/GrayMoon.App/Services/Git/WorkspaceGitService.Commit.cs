@@ -43,7 +43,10 @@ public sealed partial class WorkspaceGitService
             return reposToCommit.Select(r => (r.RepoId, false, (string?)"Workspace not found.")).ToList();
 
         var total = reposToCommit.Count;
-        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workerArgs = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workspaceRoot = workerArgs.WorkspaceRoot;
+        var workspaceFolderName = workerArgs.WorkspaceFolderName;
+        var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
         var completed = 0;
         var semaphore = new SemaphoreSlim(_maxConcurrent);
 
@@ -88,6 +91,7 @@ public sealed partial class WorkspaceGitService
                     commitMessage,
                     pathsToStage,
                     workspaceRoot,
+                    workspaceRepositoryName,
                     skipHooks
                 };
                 var response = await _workerBridge.SendCommandAsync("StageAndCommit", args, cancellationToken);
@@ -138,7 +142,10 @@ public sealed partial class WorkspaceGitService
         if (workspace == null)
             return reposAndPaths.Select(r => (r.RepoId, false, (string?)"Workspace not found.")).ToList();
 
-        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workerArgs = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workspaceRoot = workerArgs.WorkspaceRoot;
+        var workspaceFolderName = workerArgs.WorkspaceFolderName;
+        var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
         var total = reposAndPaths.Count;
         var completed = 0;
         var semaphore = new SemaphoreSlim(_maxConcurrent);
@@ -165,6 +172,7 @@ public sealed partial class WorkspaceGitService
                     commitMessage,
                     pathsToStage,
                     workspaceRoot,
+                    workspaceRepositoryName,
                     skipHooks
                 };
                 var response = await _workerBridge.SendCommandAsync("StageAndCommit", args, cancellationToken);
