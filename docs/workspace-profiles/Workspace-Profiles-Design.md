@@ -7,8 +7,8 @@ the code.
 Companion: `Workspace-Profiles-Implementation-Plan.md` (execution state).
 
 Status: Phases 1-4, the CI provider boundary (section 11a), host readiness (section 11b), the
-Repositories grid (section 10a) and page access (section 11) are implemented. Create/edit and profile
-transitions (section 10) are not.
+Repositories grid (section 10a), page access (section 11), and create/edit plus profile transitions
+(section 10) are implemented. Remaining work is regression and Feature assurance (Unit I).
 
 ---
 
@@ -487,8 +487,13 @@ first."). GrayMoon already freezes repository membership and name/root edits und
 this is consistent rather than new - and it removes most of the profile-transition lifecycle problem
 instead of solving it.
 
-Remaining transition behaviour (Basic to .NET activating discovery, .NET to Basic retiring derived state,
-versioning toggles invalidating stale version display) is Phase 6.
+Remaining transition behaviour is implemented with the modal: Basic to .NET leaves discovery to the
+next sync (producers are already gated on `DiscoversDotNetProjects`); .NET to Basic deletes project
+rows, dependency edges, and derived level/type/count columns on links and context states. Versioning
+off leaves GitVersion and `{@Repo}` configs in place; readers already treat them as not applicable.
+CI off leaves Actions rows. The Worker's in-process capability cache is not invalidated by a profile
+save; the next App command for that workspace re-warms it. Git hooks in that window can still see the
+previous profile.
 
 ## 10a. Repositories grid and header
 

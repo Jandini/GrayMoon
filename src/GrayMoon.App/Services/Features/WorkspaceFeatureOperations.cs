@@ -1165,6 +1165,7 @@ public sealed class WorkspaceFeatureOperations(
 
         try
         {
+            var capabilities = await capabilitiesResolver.GetAsync(workspaceId, cancellationToken);
             var response = await workerBridge.SendCommandAsync(
                 "GetGitChangeStatus",
                 new
@@ -1174,7 +1175,8 @@ public sealed class WorkspaceFeatureOperations(
                     repositoryName = repoName,
                     workspaceId,
                     repositoryId = repositoryId.Value,
-                    includeLineStats = false
+                    includeLineStats = false,
+                    capabilities = capabilities.ToRepositoryOperationCapabilities()
                 },
                 cancellationToken);
 

@@ -60,7 +60,9 @@ public sealed class CreateBranchCommand(IGitService git, IWorkerTokenProvider to
                 fetchError = err;
         }
 
-        var (versionResult, _) = await git.GetVersionAsync(repoPath, nonNormalize: true, cancellationToken);
+        var (versionResult, _) = request.EffectiveCapabilities.ShouldCalculateVersion
+            ? await git.GetVersionAsync(repoPath, nonNormalize: true, cancellationToken)
+            : (null, null);
         var version = versionResult?.InformationalVersion ?? "-";
         var branch = await git.ResolveBranchAsync(versionResult, repoPath, cancellationToken) ?? "-";
 

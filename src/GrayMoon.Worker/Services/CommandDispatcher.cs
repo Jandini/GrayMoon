@@ -140,6 +140,9 @@ public sealed class CommandDispatcher(
             case ReturnToDefaultBranchRequest r:
                 capabilityProvider.Remember(r.WorkspaceId, r.Capabilities);
                 break;
+            case CreateBranchRequest r:
+                capabilityProvider.Remember(r.WorkspaceId, r.Capabilities);
+                break;
             case CreateGitWorktreeRequest { WorkspaceId: { } worktreeWorkspaceId } r:
                 capabilityProvider.Remember(worktreeWorkspaceId, r.Capabilities);
                 break;

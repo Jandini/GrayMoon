@@ -14,10 +14,10 @@ It must be possible to stop work here and resume later without reconstructing st
 | | |
 |---|---|
 | Project status | IN PROGRESS |
-| Current phase | Wave 2 (Units D, F, G, J) merged; next is Unit H (create/edit and transitions) |
-| Phases planned in detail | 1, 2, 3, 4; Phase 5 except H |
-| Phases not yet designed | 5 (Unit H remaining), 6 |
-| Last verified | 2026-10-06, after Wave 2 merge. `dotnet build GrayMoon.slnx` 0 warnings. App 991/991, Worker 318 + 1 pre-existing skip, Common 234/234. |
+| Current phase | Wave 3: Unit H (create/edit and transitions) complete; next is Unit I |
+| Phases planned in detail | 1, 2, 3, 4, 5 |
+| Phases not yet designed | 6 |
+| Last verified | 2026-10-06, Unit H. `dotnet build GrayMoon.slnx` 0 warnings. App 999/999, Worker 318 + 1 pre-existing skip, Common 236/236. |
 
 **What works today.** A Workspace carries three independent persisted axes, every pre-profile Workspace
 was migrated to the .NET triple, and the Worker honours the profile on every entry point it owns: a
@@ -31,8 +31,11 @@ The Repositories grid is one page that renders less for Basic (no version column
 level grouping, no dependency header actions). Projects/Packages/Dependencies nav and routes exist only
 for .NET Dependency; Actions follows the CI setting and an unavailable page stays on its URL with a
 standard gate. Host readiness requires Git always, and the .NET SDK / GitVersion only when some
-workspace uses them. Nothing else is user-visible yet: there is still no way to create anything but a
-.NET Dependency Workspace, because the create/edit controls are Unit H.
+workspace uses them. The workspace modal now has a type radio pair plus GitVersion and GitHub Actions
+checkboxes. Choosing a type applies that type's defaults; the user can override either axis. Type
+changes are refused while Features exist, with the same wording as rename and root. Switching .NET to
+Basic clears derived project, edge and level state; versioning and CI toggles leave GitVersion, `{@Repo}`
+and Actions rows for readers to ignore.
 
 **Integration method.** Parallel units run in separate git worktrees on their own branches
 (`wp/unit-<id>`), so two agents never build the same tree. The owner merges them into
@@ -46,8 +49,8 @@ workspace uses them. Nothing else is user-visible yet: there is still no way to 
 | 2 | Worker sync decoupling, version provider, hook capability resolution | DONE (Unit B) |
 | 3 | App persistence / dependency recompute gating | DONE (Unit C) |
 | 4 | Push / update / restore strategies | DONE (Unit D) |
-| 5 | UX: create/edit, grid, navigation, CI provider boundary, host readiness | Units E, F, G, J DONE; H TODO |
-| 6 | Profile transitions, stale derived state, final regression | TODO (Units H, I) |
+| 5 | UX: create/edit, grid, navigation, CI provider boundary, host readiness | DONE (Units E, F, G, H, J) |
+| 6 | Final regression and Feature assurance | TODO (Unit I) |
 
 ### Phase 3-6 sequencing, re-planned from the integrated state
 
@@ -1031,8 +1034,8 @@ readiness evaluation to change.
 
 | | |
 |---|---|
-| Owner | unassigned |
-| Status | TODO |
+| Owner | owner |
+| Status | DONE |
 | Dependencies | Unit A |
 
 **Scope.** The three modal controls (design document section 10), and the transition lifecycle.
@@ -1041,28 +1044,25 @@ Simplicity is a hard requirement: three controls in the existing modal, no setti
 matrix, no new list badges, no new UI primitives. Type changes are blocked while Features exist, reusing
 the existing disabled-field mechanism and wording.
 
-**Input from Wave 1.** Switching a workspace to Basic leaves its previously persisted projects, edges,
-levels and generated packages in place, and nothing recomputes or clears them any more, because every
-producer is now gated. The .NET to Basic transition must clear them, or every reader must stop reading
-them. Switching versioning off leaves `{@Repo}` patterns in place; they are skipped, not failed.
+**What shipped.**
 
-**Input from Wave 2.**
-
-- Basic push, update and restore ignore leftover project rows, but the Repositories page and
-  `WorkspaceActionNotificationPanel` still read `WorkspaceDependencyService` for push badges and still
-  title update jobs "Updating dependencies...". Hide or switch those to the strategy on
-  `UsesDependencyAwarePush` / `UsesPackageRestore` / `UsesDependencyAwareUpdate`.
-- `WorkspacePackages.razor` still calls `SyncWorkspacePackageRegistriesAsync` directly; the page is
-  gated, so this is only reachable for .NET Dependency.
-- The Worker's capability cache keeps the old profile until the next command for that workspace
-  re-warms it. Git hooks between a type switch and that command still see the old profile; H should
-  force a refresh or document the window.
-- `CreateBranchCommand.cs` still launches GitVersion with no capabilities.
-- `WorkspaceFeatureOperations` still sends `GetGitChangeStatus` without capabilities.
+- `WorkspaceModal` has type radios and GitVersion / GitHub Actions checkboxes. Choosing a type applies
+  `WorkspaceProfileDefaults`; either axis can then be overridden. Create still opens on the .NET triple.
+  Type is disabled while Features exist, with the rename/root freeze wording.
+- `WorkspaceRepository.UpdateAsync` takes the profile triple and runs `WorkspaceProfileTransition.ApplyAsync`
+  in the existing transaction. .NET to Basic deletes `WorkspaceProjects`, `ProjectDependencies`, and
+  derived level/type/count columns on links and context states. Versioning off and CI off leave
+  GitVersion, `{@Repo}` and Actions rows.
+- Repositories push, restore, and update job titles, the notification panel, and the HTTP update
+  endpoint follow `UsesDependencyAwarePush` / `UsesPackageRestore` / `UsesDependencyAwareUpdate`.
+- `CreateBranch` now carries `workspaceId` and capabilities; GitVersion is skipped when
+  `ShouldCalculateVersion` is false. Feature `GetGitChangeStatus` sends capabilities.
+- Worker capability cache: documented, not invalidated on save. The next App command re-warms it.
 
 **Acceptance.** An existing workspace opens with .NET Dependency / GitVersion / GitHub Actions selected;
-Basic to .NET activates enrichment safely; .NET to Basic cannot leave dependency UI or behaviour active;
-versioning toggles handle stale version state; CI toggling does not disturb Git or PR state.
+Basic to .NET activates enrichment on the next sync; .NET to Basic cannot leave dependency UI or
+behaviour active; versioning toggles leave stale version rows for derived display; CI toggling does not
+disturb Git or PR state.
 
 ---
 
@@ -1104,14 +1104,12 @@ A design that works for the special Workspace context but breaks Feature worktre
 
 **Carried in from Wave 2.**
 
-- Page push badges still query `WorkspaceDependencyService` (`WorkspaceRepositories.Push.cs`,
-  `WorkspaceActionNotificationPanel.razor`) and can show stale required packages on a workspace that
-  used to be .NET.
-- `CreateBranchCommand.cs` still launches GitVersion for a Basic workspace without versioning.
-- `WorkspaceFeatureOperations` sends `GetGitChangeStatus` without capabilities.
+- `WorkspacePackages.razor` still calls `SyncWorkspacePackageRegistriesAsync` directly; the page is
+  gated to .NET Dependency, so this is only reachable there.
 - `WorkspacePushService.RunPushReposInLevelOrderAsync` has no callers.
 - Parallel-push connector health is now serialized (was a second-operation-on-the-same-context bug).
   Confirm it under a real multi-repo push.
+- After a profile change the nav rebuilds on the next location change; no live subscription.
 
 ---
 
@@ -1119,6 +1117,7 @@ A design that works for the special Workspace context but breaks Feature worktre
 
 Architectural findings that changed the design. Newest first.
 
+| 2026-10-06 | Profile save does not invalidate the Worker's in-process capability cache. | Documented: the next App command re-warms it. Git hooks in that window can still see the previous profile. A dedicated Invalidate command is deferred. |
 | 2026-10-06 | On Linux, <c>Process.Start("dotnet-gitversion")</c> throws <c>Win32Exception</c> when the tool is not on PATH. The Worker treated that as a crashed hook instead of a failed version probe. | `CommandLineService` now returns exit -1 with the start error, matching the documented "failed to start" result. GitVersion-gated tests still skip on CI that has no tool. |
 | 2026-10-06 | A parallel push ran `ConnectorHealthService` from several repositories at once on the same DbContext (`WorkspacePushService` / `ConnectorHealthService`). | Serialized in Unit D. Pre-existing concurrency bug, not profile-specific. |
 | 2026-10-06 | The Repositories page and the action panel still read push-dependency info from `WorkspaceDependencyService`, not the push strategy. Restore and update job titles are similarly page-side. | Harmless until Unit H can create a Basic workspace. Then hide or switch those reads. |

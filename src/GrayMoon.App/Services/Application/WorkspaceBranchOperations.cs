@@ -7,6 +7,7 @@ using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services.Features;
 using GrayMoon.Application.Features;
+using GrayMoon.Application.Workspaces;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
@@ -26,6 +27,7 @@ public sealed class WorkspaceBranchOperations(
     IWorkspaceFeatureContextResolver contextResolver,
     IWorkspaceContextPathResolver pathResolver,
     IFeatureBranchGuard featureBranchGuard,
+    IWorkspaceCapabilitiesResolver capabilitiesResolver,
     ILogger<WorkspaceBranchOperations> logger) : IWorkspaceBranchOperations
 {
     public Task<BranchHttpOutcome> GetBranchesAsync(int workspaceId, int repositoryId, CancellationToken cancellationToken = default)
@@ -526,13 +528,16 @@ public sealed class WorkspaceBranchOperations(
             }
 
             var (workspaceRoot, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
+            var capabilities = (await capabilitiesResolver.GetAsync(workspaceId, cancellationToken)).ToRepositoryOperationCapabilities();
             var args = new
             {
                 workspaceName = workspaceFolderName,
                 repositoryName = repo.RepositoryName,
                 newBranchName,
                 baseBranchName,
-                workspaceRoot
+                workspaceRoot,
+                workspaceId,
+                capabilities
             };
             var response = await workerBridge.SendCommandAsync("CreateBranch", args, cancellationToken);
 

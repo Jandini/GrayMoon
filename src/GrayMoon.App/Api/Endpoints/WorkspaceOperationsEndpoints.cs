@@ -2,6 +2,7 @@ using GrayMoon.App.Models;
 using GrayMoon.App.Services.GitChanges;
 using GrayMoon.App.Services.Queries;
 using GrayMoon.Application.Features;
+using GrayMoon.Application.Workspaces;
 using GrayMoon.Common.Git;
 
 namespace GrayMoon.App.Api.Endpoints;
@@ -77,14 +78,18 @@ public static class WorkspaceOperationsEndpoints
         });
     }
 
-    private static Task<IResult> Update(
+    private static async Task<IResult> Update(
         int workspaceId,
         UpdateWorkspaceApiRequest? body,
         IWorkspaceUpdateOperations operations,
         IWorkspaceFeatureContextResolver contextResolver,
+        IWorkspaceCapabilitiesResolver capabilitiesResolver,
         IWorkspaceOperationRunner runner,
         CancellationToken cancellationToken)
-        => WorkspaceCommandHttp.RunExclusiveAsync(runner, workspaceId, "Updating dependencies...", async (progress, ct) =>
+    {
+        var capabilities = await capabilitiesResolver.GetAsync(workspaceId, cancellationToken);
+        var jobTitle = capabilities.UsesDependencyAwareUpdate ? "Updating dependencies..." : "Updating version files...";
+        return await WorkspaceCommandHttp.RunExclusiveAsync(runner, workspaceId, jobTitle, async (progress, ct) =>
         {
             var contextId = await SpecialContextAsync(workspaceId, contextResolver, ct);
             var result = await operations.UpdateAsync(
@@ -102,6 +107,7 @@ public static class WorkspaceOperationsEndpoints
                 ? Results.Ok(new { success = true })
                 : Results.BadRequest(new { success = false, error = "Update failed." });
         }, cancellationToken);
+    }
 
     private static Task<IResult> Push(
         int workspaceId,
