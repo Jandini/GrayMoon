@@ -114,6 +114,7 @@ try
     builder.Services.AddSingleton<DesktopTopBarState>();
     builder.Services.AddSingleton<WorkerConnectionTracker>();
     builder.Services.AddScoped<HostPrerequisiteInstallService>();
+    builder.Services.AddScoped<HostPrerequisiteRequirementsProvider>();
     builder.Services.AddScoped<WorkerInstallService>();
     builder.Services.AddHostedService<WorkerUpdateDesktopNotifier>();
     builder.Services.AddSingleton<WorkerQueueStateService>();

@@ -20,6 +20,7 @@ public sealed class HostPrerequisiteInstallService(
     private readonly object _gate = new();
     private DotNetObjectReference<HostPrerequisiteInstallService>? _desktopBridgeRef;
     private string? _pendingRequestId;
+    private IReadOnlyList<string> _requestedIds = [];
     private bool _isInstalling;
     private bool _disposed;
 
@@ -46,6 +47,7 @@ public sealed class HostPrerequisiteInstallService(
             if (_disposed || _isInstalling)
                 return;
             _isInstalling = true;
+            _requestedIds = missingPrerequisiteIds.ToArray();
         }
 
         RaiseChanged();
@@ -117,8 +119,11 @@ public sealed class HostPrerequisiteInstallService(
         {
             await WaitForWorkerReadyAsync(ReconnectTimeout);
             var versions = await TryLoadHostVersionsAsync();
+            IReadOnlyList<string> requestedIds;
+            lock (_gate)
+                requestedIds = _requestedIds;
 
-            if (versions is not null && !HostPrerequisiteState.AnyMissing(versions))
+            if (versions is not null && StillMissing(versions, requestedIds).Length == 0)
             {
                 toastService.Show("Host prerequisites installed.");
             }
@@ -128,7 +133,7 @@ public sealed class HostPrerequisiteInstallService(
             }
             else
             {
-                toastService.ShowError(BuildFailureDetail(versions, failedPrerequisiteIds, message));
+                toastService.ShowError(BuildFailureDetail(versions, requestedIds, failedPrerequisiteIds, message));
             }
         }
         finally
@@ -222,8 +227,18 @@ public sealed class HostPrerequisiteInstallService(
         }
     }
 
-    private static string BuildFailureDetail(
+    /// <summary>
+    /// Requested prerequisites that are still missing. Judged against what this install was asked to do, not
+    /// against every probed tool, so an optional tool the user did not install never reads as a failure.
+    /// </summary>
+    internal static string[] StillMissing(HostPrerequisiteVersions versions, IReadOnlyList<string> requestedIds) =>
+        HostPrerequisiteState.GetMissingIds(versions)
+            .Where(id => requestedIds.Contains(id, StringComparer.Ordinal))
+            .ToArray();
+
+    internal static string BuildFailureDetail(
         HostPrerequisiteVersions? versions,
+        IReadOnlyList<string> requestedIds,
         string[]? failedPrerequisiteIds,
         string? message)
     {
@@ -233,7 +248,7 @@ public sealed class HostPrerequisiteInstallService(
             .ToArray();
         var remaining = versions is null
             ? namedFailures
-            : HostPrerequisiteState.GetMissingIds(versions).Select(HostPrerequisiteState.DisplayName).ToArray();
+            : StillMissing(versions, requestedIds).Select(HostPrerequisiteState.DisplayName).ToArray();
 
         if (remaining.Length > 0)
             return $"Still missing: {string.Join(", ", remaining)}.";

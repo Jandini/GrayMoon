@@ -10,6 +10,7 @@
 @inject IWorkerBridge WorkerBridge
 @inject ConnectorHealthService ConnectorHealthService
 @inject ConnectorRepository ConnectorRepository
+@inject HostPrerequisiteRequirementsProvider HostRequirementsProvider
 @inject WorkspaceContextNavigationService ContextNavigation
 @using GrayMoon.App.Services.Features
 <PageTitle>Home - GrayMoon</PageTitle>
@@ -210,10 +211,12 @@ else
             if (dto is null)
                 return false;
 
-            return HostPrerequisiteState.AnyMissing(new HostPrerequisiteVersions(
-                dto.DotnetVersion,
-                dto.GitVersion,
-                dto.GitVersionToolVersion));
+            var versions = new HostPrerequisiteVersions(dto.DotnetVersion, dto.GitVersion, dto.GitVersionToolVersion);
+            if (!HostPrerequisiteState.AnyMissing(versions))
+                return false;
+
+            var requirements = await HostRequirementsProvider.GetAsync();
+            return HostPrerequisiteState.AnyRequiredMissing(versions, requirements);
         }
         catch (Exception)
         {
