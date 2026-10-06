@@ -1,4 +1,5 @@
 using GrayMoon.Abstractions.Notifications;
+using GrayMoon.Abstractions.Workspaces;
 using GrayMoon.App.Api.Endpoints;
 using GrayMoon.App.Data;
 using GrayMoon.App.Hubs;
@@ -6,6 +7,7 @@ using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services.Features;
+using GrayMoon.App.Services.WorkspaceManifest;
 using GrayMoon.Application.Features;
 using GrayMoon.Application.Workspaces;
 using Microsoft.AspNetCore.SignalR;
@@ -28,6 +30,7 @@ public sealed class WorkspaceBranchOperations(
     IWorkspaceContextPathResolver pathResolver,
     IFeatureBranchGuard featureBranchGuard,
     IWorkspaceCapabilitiesResolver capabilitiesResolver,
+    IServiceScopeFactory scopeFactory,
     ILogger<WorkspaceBranchOperations> logger) : IWorkspaceBranchOperations
 {
     public Task<BranchHttpOutcome> GetBranchesAsync(int workspaceId, int repositoryId, CancellationToken cancellationToken = default)
@@ -290,6 +293,8 @@ public sealed class WorkspaceBranchOperations(
 
                 await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
 
+                await TriggerManifestDriftCheckAsync(wr, workspaceId, contextId, cancellationToken);
+
                 return BranchHttpOutcome.Ok(new CheckoutBranchApiResult(true, null) { CurrentBranch = null });
             }
 
@@ -328,12 +333,38 @@ public sealed class WorkspaceBranchOperations(
 
             await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
 
+            await TriggerManifestDriftCheckAsync(wr, workspaceId, contextId, cancellationToken);
+
             return BranchHttpOutcome.Ok(new CheckoutBranchApiResult(true, null) { CurrentBranch = checkoutResponse?.CurrentBranch });
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Error checking out branch for repository {RepositoryId}", repositoryId);
             return BranchHttpOutcome.Problem("An error occurred while checking out branch", 500);
+        }
+    }
+
+    /// <summary>
+    /// D8: a checkout of the Workspace-role repository changes the Workspace definition on disk, so drift is re-checked.
+    /// Special Workspace context only (Features never run drift detection). Failure-isolated: never throws.
+    /// </summary>
+    private async Task TriggerManifestDriftCheckAsync(
+        WorkspaceRepositoryLink wr,
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        CancellationToken cancellationToken)
+    {
+        if (wr.Role != WorkspaceRepositoryRole.Workspace)
+            return;
+
+        try
+        {
+            if ((await contextResolver.GetRequiredAsync(contextId, workspaceId, cancellationToken)).IsSpecialWorkspace)
+                WorkspaceManifestHooks.DetectDriftInBackground(scopeFactory, logger, workspaceId);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Could not schedule Workspace definition drift detection. WorkspaceId={WorkspaceId}", workspaceId);
         }
     }
 

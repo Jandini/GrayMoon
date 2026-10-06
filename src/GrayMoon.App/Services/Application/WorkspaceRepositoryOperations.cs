@@ -395,28 +395,17 @@ public sealed class WorkspaceRepositoryOperations(
         var (_, args) = await GetSpecialContextArgsAsync(workspaceId, cancellationToken);
         var response = await workerBridge.SendCommandAsync(
             WorkerHubMethods.AttachWorkspaceRepository,
-            requireEmptyRoot
-                ? new
-                {
-                    workspaceName = args.WorkspaceFolderName,
-                    workspaceRoot = args.WorkspaceRoot,
-                    workspaceRepositoryName = args.WorkspaceRepositoryName,
-                    cloneUrl,
-                    bearerToken,
-                    workspaceId,
-                    repositoryId,
-                    requireEmptyRoot = true,
-                }
-                : (object)new
-                {
-                    workspaceName = args.WorkspaceFolderName,
-                    workspaceRoot = args.WorkspaceRoot,
-                    workspaceRepositoryName = args.WorkspaceRepositoryName,
-                    cloneUrl,
-                    bearerToken,
-                    workspaceId,
-                    repositoryId,
-                },
+            new
+            {
+                workspaceName = args.WorkspaceFolderName,
+                workspaceRoot = args.WorkspaceRoot,
+                workspaceRepositoryName = args.WorkspaceRepositoryName,
+                cloneUrl,
+                bearerToken,
+                workspaceId,
+                repositoryId,
+                requireEmptyRoot,
+            },
             cancellationToken);
 
         if (!response.Success)
