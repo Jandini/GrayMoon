@@ -1,4 +1,5 @@
 using GrayMoon.Abstractions.Notifications;
+using GrayMoon.Abstractions.Workspaces;
 using GrayMoon.Worker.Models;
 
 namespace GrayMoon.Worker.Abstractions;
@@ -43,6 +44,13 @@ public sealed class RepositoryStateProbeOptions
     /// <summary>Scan the working tree for .csproj files.</summary>
     public bool IncludeProjects { get; init; }
 
+    /// <summary>
+    /// Count commits against the upstream and the divergence base. On by default, unlike the other groups,
+    /// because almost every caller wants them. The pre-push hook is the exception: it runs before the push
+    /// data is transferred, so counts read then are stale and must not be reported as probed.
+    /// </summary>
+    public bool IncludeCommitCounts { get; init; } = true;
+
     /// <summary>Pre-resolved "origin/&lt;default&gt;" ref, so the probe does not resolve it again.</summary>
     public string? DefaultBranchOriginRef { get; init; }
 
@@ -57,4 +65,11 @@ public sealed class RepositoryStateProbeOptions
 
     /// <summary>Non-fatal error to carry on the snapshot, e.g. a fetch that failed before the probe ran.</summary>
     public string? ErrorMessage { get; init; }
+
+    /// <summary>
+    /// Which optional enrichment the workspace's profile activates. A group the capabilities switch off is
+    /// skipped even when the <c>Include*</c> flag above asks for it, and its probe marker stays false. Null
+    /// means "not stated" and keeps the pre-profile behaviour of honouring the flags as given.
+    /// </summary>
+    public RepositoryOperationCapabilities? Capabilities { get; init; }
 }

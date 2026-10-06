@@ -16,116 +16,118 @@
 
 <PageTitle>Packages - GrayMoon</PageTitle>
 
-<div class="container-fluid page-container grid-page">
-    <div class="grid-page-header">
-        <div class="workspace-repos-header workspace-packages-header">
-            <div class="workspace-repos-title-row">
-                <h2 class="workspace-repos-title">Packages</h2>
-                <p class="text-muted mb-0 workspace-repos-subtitle workspace-packages__subtitle">
-                    <WorkspaceSubtitleName Name="@(workspace?.Name)" />
-                    @if (!isLoading && packages.Count > 0)
-                    {
-                        var pkgSuffix = HasSearchFilter ? " found" : "";
-                        var pkgCount = HasSearchFilter ? FilteredPackageCount : packages.Count;
-                        <span>@($"{pkgCount} {(pkgCount == 1 ? "package" : "packages")}{pkgSuffix}")</span>
-                    }
-                    else if (!isLoading && workspace != null)
-                    {
-                        <span>0 packages</span>
-                    }
-                    else if (isLoading)
-                    {
-                        <span>&nbsp;</span>
-                    }
-                </p>
-                <span class="workspace-repos-title-spacer"></span>
+<WorkspacePageGate Page="WorkspacePage.Packages" WorkspaceId="WorkspaceId" Outcome="_pageAccess" ContextQuery="ContextQuery">
+    <div class="container-fluid page-container grid-page">
+        <div class="grid-page-header">
+            <div class="workspace-repos-header workspace-packages-header">
+                <div class="workspace-repos-title-row">
+                    <h2 class="workspace-repos-title">Packages</h2>
+                    <p class="text-muted mb-0 workspace-repos-subtitle workspace-packages__subtitle">
+                        <WorkspaceSubtitleName Name="@(workspace?.Name)" />
+                        @if (!isLoading && packages.Count > 0)
+                        {
+                            var pkgSuffix = HasSearchFilter ? " found" : "";
+                            var pkgCount = HasSearchFilter ? FilteredPackageCount : packages.Count;
+                            <span>@($"{pkgCount} {(pkgCount == 1 ? "package" : "packages")}{pkgSuffix}")</span>
+                        }
+                        else if (!isLoading && workspace != null)
+                        {
+                            <span>0 packages</span>
+                        }
+                        else if (isLoading)
+                        {
+                            <span>&nbsp;</span>
+                        }
+                    </p>
+                    <span class="workspace-repos-title-spacer"></span>
+                </div>
+                <div class="d-flex gap-2 align-items-center workspace-repos-header-actions flex-wrap">
+                    <WorkspaceContextBar WorkspaceId="WorkspaceId"
+                                         WorkspaceName="@(workspace?.Name)"
+                                         SelectedContextId="_selectedContextId"
+                                         SelectedContextIdChanged="OnSelectedContextChangedAsync">
+                        <FilterSearchInput @bind-Value="searchTerm"
+                                           InputId="workspace-packages-search"
+                                           InputAdditionalClass="workspace-grid-search"
+                                           Placeholder="Search package id..."
+                                           Disabled="@(isLoading || packages.Count == 0)"
+                                           OnKeyDown="OnSearchKeyDown"
+                                           OnClear="ClearSearchFilter" />
+                    </WorkspaceContextBar>
+                    <button class="btn btn-outline-primary"
+                            @onclick="SyncRegistriesAsync"
+                            disabled="@(isSyncingRegistries || packages.Count == 0)">
+                        Sync registries
+                    </button>
+                </div>
             </div>
-            <div class="d-flex gap-2 align-items-center workspace-repos-header-actions flex-wrap">
-                <WorkspaceContextBar WorkspaceId="WorkspaceId"
-                                     WorkspaceName="@(workspace?.Name)"
-                                     SelectedContextId="_selectedContextId"
-                                     SelectedContextIdChanged="OnSelectedContextChangedAsync">
-                    <FilterSearchInput @bind-Value="searchTerm"
-                                       InputId="workspace-packages-search"
-                                       InputAdditionalClass="workspace-grid-search"
-                                       Placeholder="Search package id..."
-                                       Disabled="@(isLoading || packages.Count == 0)"
-                                       OnKeyDown="OnSearchKeyDown"
-                                       OnClear="ClearSearchFilter" />
-                </WorkspaceContextBar>
-                <button class="btn btn-outline-primary"
-                        @onclick="SyncRegistriesAsync"
-                        disabled="@(isSyncingRegistries || packages.Count == 0)">
-                    Sync registries
-                </button>
-            </div>
+            @if (errorMessage != null)
+            {
+                <div class="gm-callout gm-callout--error" role="alert">@errorMessage</div>
+            }
         </div>
-        @if (errorMessage != null)
+        @if (errorMessage == null)
         {
-            <div class="gm-callout gm-callout--error" role="alert">@errorMessage</div>
-        }
-    </div>
-    @if (errorMessage == null)
-    {
-        <div class="grid-page-body">
-            <div class="card page-card mb-4">
-                <div class="card-body p-0">
-                    <div class="table-responsive">
-                        <table class="table table-striped table-hover mb-0 packages-table resizable-columns" data-workspace-id="@WorkspaceId">
-                            <thead class="table-dark">
-                                <tr>
-                                    <th class="col-packageid">Package Id</th>
-                                    <th class="col-framework">Framework</th>
-                                    <th class="col-registry">Registry</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                @if (isLoading)
-                                {
+            <div class="grid-page-body">
+                <div class="card page-card mb-4">
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-striped table-hover mb-0 packages-table resizable-columns" data-workspace-id="@WorkspaceId">
+                                <thead class="table-dark">
                                     <tr>
-                                        <td colspan="3" class="text-center text-muted py-4">
-                                            Loading packages...
-                                        </td>
+                                        <th class="col-packageid">Package Id</th>
+                                        <th class="col-framework">Framework</th>
+                                        <th class="col-registry">Registry</th>
                                     </tr>
-                                }
-                                else if (packages.Count == 0)
-                                {
-                                    <tr>
-                                        <td colspan="3" class="text-center text-muted py-4">
-                                            No NuGet packages in this workspace. Sync repositories to discover package projects.
-                                        </td>
-                                    </tr>
-                                }
-                                else if (NoPackagesMatchSearch)
-                                {
-                                    <tr>
-                                        <td colspan="3" class="text-center text-muted py-4">
-                                            No packages match your search.
-                                        </td>
-                                    </tr>
-                                }
-                                else
-                                {
-                                    @foreach (var p in FilteredPackages)
+                                </thead>
+                                <tbody>
+                                    @if (isLoading)
                                     {
                                         <tr>
-                                            <td class="col-packageid"><strong>@(p.PackageId ?? "-")</strong></td>
-                                            <td class="col-framework"><span class="badge bg-secondary">@(p.TargetFramework ?? "-")</span></td>
-                                            <td class="col-registry text-muted">@(p.MatchedConnector?.ConnectorName ?? "-")</td>
+                                            <td colspan="3" class="text-center text-muted py-4">
+                                                Loading packages...
+                                            </td>
                                         </tr>
                                     }
-                                }
-                            </tbody>
-                        </table>
+                                    else if (packages.Count == 0)
+                                    {
+                                        <tr>
+                                            <td colspan="3" class="text-center text-muted py-4">
+                                                No NuGet packages in this workspace. Sync repositories to discover package projects.
+                                            </td>
+                                        </tr>
+                                    }
+                                    else if (NoPackagesMatchSearch)
+                                    {
+                                        <tr>
+                                            <td colspan="3" class="text-center text-muted py-4">
+                                                No packages match your search.
+                                            </td>
+                                        </tr>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var p in FilteredPackages)
+                                        {
+                                            <tr>
+                                                <td class="col-packageid"><strong>@(p.PackageId ?? "-")</strong></td>
+                                                <td class="col-framework"><span class="badge bg-secondary">@(p.TargetFramework ?? "-")</span></td>
+                                                <td class="col-registry text-muted">@(p.MatchedConnector?.ConnectorName ?? "-")</td>
+                                            </tr>
+                                        }
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
-    }
-</div>
+        }
+    </div>
 
-<LoadingOverlay IsVisible="@isLoading" Message="Loading packages..." />
-<LoadingOverlay IsVisible="@isSyncingRegistries" Message="Syncing registries..." />
+    <LoadingOverlay IsVisible="@isLoading" Message="Loading packages..." />
+    <LoadingOverlay IsVisible="@isSyncingRegistries" Message="Syncing registries..." />
+</WorkspacePageGate>
 
 @code {
     [Parameter] public int WorkspaceId { get; set; }
@@ -134,7 +136,9 @@
     public int? ContextQuery { get; set; }
 
     [Inject] private WorkspaceContextNavigationService ContextNavigation { get; set; } = default!;
+    [Inject] private IWorkspacePageAccessResolver PageAccess { get; set; } = default!;
 
+    private WorkspacePageAccessOutcome? _pageAccess;
     private WorkspaceFeatureContextId? _selectedContextId;
     private WorkspaceModel? workspace;
     private List<WorkspaceProject> packages = new();
@@ -179,9 +183,12 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var info = await ContextNavigation.ResolveForPageAsync(WorkspaceId, ContextQuery);
-        _selectedContextId = info.ContextId;
-        await LoadAsync();
+        _pageAccess = await PageAccess.LoadIfAvailableAsync(WorkspaceId, WorkspacePage.Packages, async () =>
+        {
+            var info = await ContextNavigation.ResolveForPageAsync(WorkspaceId, ContextQuery);
+            _selectedContextId = info.ContextId;
+            await LoadAsync();
+        });
     }
 
     private async Task OnSelectedContextChangedAsync(WorkspaceFeatureContextId contextId)
@@ -221,7 +228,7 @@
 
     private async Task SyncRegistriesAsync()
     {
-        if (workspace == null || isSyncingRegistries || packages.Count == 0) return;
+        if (_pageAccess != WorkspacePageAccessOutcome.Available || workspace == null || isSyncingRegistries || packages.Count == 0) return;
         try
         {
             isSyncingRegistries = true;

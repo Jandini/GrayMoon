@@ -8,12 +8,24 @@ using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services.Features;
 using GrayMoon.Application.Features;
+using GrayMoon.Application.Workspaces;
 using GrayMoon.Common.FileVersions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Services.Workspaces;
 
+/// <summary>
+/// Generic file versioning - token substitution and out-of-date checks over configured workspace files -
+/// plus, for a workspace that uses the dependency graph, the .NET-specific interpretation of configured
+/// <c>.csproj</c> version files as generated NuGet packages.
+/// </summary>
+/// <remarks>
+/// The generic half works for every workspace type, except that the default <c>{@Repo}</c> token resolves the
+/// repository's GitVersion and is therefore not applicable unless the workspace
+/// <see cref="WorkspaceCapabilities.UsesRepositoryVersioning"/>. <c>{@Repo:branch}</c> and
+/// <c>{@Repo:commit}</c> always apply.
+/// </remarks>
 public sealed class WorkspaceFileVersionService(
     IWorkerBridge workerBridge,
     WorkspaceRepository workspaceRepository,
@@ -23,8 +35,22 @@ public sealed class WorkspaceFileVersionService(
     IHubContext<WorkspaceSyncHub> hubContext,
     IWorkspaceContextPathResolver pathResolver,
     IWorkspaceFeatureContextResolver contextResolver,
+    IWorkspaceCapabilitiesResolver capabilitiesResolver,
     ILogger<WorkspaceFileVersionService> logger)
 {
+    /// <summary>Why a <c>{@Repo}</c> token is rejected in a workspace without repository versioning.</summary>
+    public const string RepositoryVersioningRequiredMessage =
+        "requires repository versioning (GitVersion) to be enabled for this workspace";
+
+    /// <summary>
+    /// The tokens in <paramref name="pattern"/> that cannot resolve in a workspace whose repository versioning is
+    /// off: every default <c>{@Repo}</c> GitVersion token. Empty when versioning is on.
+    /// </summary>
+    public static IReadOnlyList<FileVersionToken> GetTokensRequiringRepositoryVersioning(string? pattern, bool usesRepositoryVersioning)
+        => usesRepositoryVersioning
+            ? []
+            : FileVersionTokenParser.ExtractTokens(pattern).Where(t => t.Kind == FileVersionTokenKind.GitVersion).ToList();
+
     private static readonly ConcurrentDictionary<string, object> CheckLocks = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, Task?> InFlightChecks = new(StringComparer.Ordinal);
 
@@ -174,7 +200,9 @@ public sealed class WorkspaceFileVersionService(
         }
 
         var (workspaceRoot, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
-        var tokenValues = await ResolveTokenValuesAsync(workspace, contextId, workspaceRoot, workspaceFolderName, patternsForResolve, cancellationToken);
+        var capabilities = await capabilitiesResolver.GetAsync(workspaceId, cancellationToken);
+        var tokenValues = await ResolveTokenValuesAsync(
+            workspace, contextId, capabilities.UsesRepositoryVersioning, workspaceRoot, workspaceFolderName, patternsForResolve, cancellationToken);
 
         // Update each configured file
         var totalUpdated = 0;
@@ -288,10 +316,13 @@ public sealed class WorkspaceFileVersionService(
     /// <summary>
     /// Resolves all token values for the given patterns: GitVersion and branch from workspace links,
     /// commit SHAs via one batched Worker <c>GetHeadCommits</c> call for repositories that need them.
+    /// GitVersion tokens get no value when <paramref name="usesRepositoryVersioning"/> is false, so they are
+    /// neither substituted nor checked - not applicable, rather than a missing version.
     /// </summary>
     private async Task<Dictionary<string, string>> ResolveTokenValuesAsync(
         Workspace workspace,
         WorkspaceFeatureContextId contextId,
+        bool usesRepositoryVersioning,
         string? workspaceRoot,
         string workspaceFolderName,
         IEnumerable<string?> patterns,
@@ -346,7 +377,11 @@ public sealed class WorkspaceFileVersionService(
             switch (token.Kind)
             {
                 case FileVersionTokenKind.GitVersion:
-                    if (!string.IsNullOrEmpty(gitVersion))
+                    if (!usesRepositoryVersioning)
+                        logger.LogDebug(
+                            "Token {TokenKey} {Reason}; it is not applicable and will be skipped.",
+                            token.TokenKey, RepositoryVersioningRequiredMessage);
+                    else if (!string.IsNullOrEmpty(gitVersion))
                         tokenValues[token.TokenKey] = gitVersion;
                     else
                         logger.LogWarning(
@@ -522,8 +557,9 @@ public sealed class WorkspaceFileVersionService(
         if (workspace == null) return;
 
         var contextInfo = await contextResolver.GetRequiredAsync(contextId, workspaceId, cancellationToken);
+        var capabilities = await capabilitiesResolver.GetAsync(workspaceId, cancellationToken);
 
-        if (await SyncGeneratedPackageDependenciesAsync(workspaceId, contextId, cancellationToken))
+        if (await SyncGeneratedPackageDependenciesAsync(workspaceId, contextId, cancellationToken) && capabilities.UsesDependencyGraph)
             await workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, contextId.Value, cancellationToken);
 
         var configs = await versionConfigRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
@@ -548,7 +584,8 @@ public sealed class WorkspaceFileVersionService(
             .Where(c => c.File?.Repository != null)
             .Select(c => c.VersionPattern)
             .ToList();
-        var tokenValues = await ResolveTokenValuesAsync(workspace, contextId, workspaceRoot, workspaceFolderName, patterns, cancellationToken);
+        var tokenValues = await ResolveTokenValuesAsync(
+            workspace, contextId, capabilities.UsesRepositoryVersioning, workspaceRoot, workspaceFolderName, patterns, cancellationToken);
 
         var items = new List<object>();
         foreach (var cfg in configs)
@@ -713,7 +750,7 @@ public sealed class WorkspaceFileVersionService(
             await ApplyFileConfigLinkCountersAsync(
                 workspaceId, contextId, contextInfo.IsSpecialWorkspace, configs, nameToRepoId, repoOutOfDateTokens, cancellationToken);
 
-            if (missingFlagChanged)
+            if (missingFlagChanged && capabilities.UsesDependencyGraph)
                 await workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, contextId.Value, cancellationToken);
 
             await hubContext.Clients.All.SendAsync("ContextSynced", workspaceId, contextId.Value, cancellationToken);
@@ -735,6 +772,9 @@ public sealed class WorkspaceFileVersionService(
     /// line-based text matching), resolves the producer repository from the pattern's repo-name token, and syncs
     /// the resulting generated <see cref="WorkspaceProject"/>/<see cref="ProjectDependency"/> rows.
     /// Returns true if the worker call succeeded (regardless of whether any generated dependency changed).
+    /// Returns false without touching anything for a workspace that does not
+    /// <see cref="WorkspaceCapabilities.UsesGeneratedPackagesFromVersionFiles"/>: a configured version file is
+    /// then plain file versioning and never becomes a synthetic package or a dependency edge.
     /// </summary>
     public async Task<bool> SyncGeneratedPackageDependenciesAsync(
         int workspaceId,
@@ -745,6 +785,9 @@ public sealed class WorkspaceFileVersionService(
 
         var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null) return false;
+
+        var capabilities = await capabilitiesResolver.GetAsync(workspaceId, cancellationToken);
+        if (!capabilities.UsesGeneratedPackagesFromVersionFiles) return false;
 
         var configs = await versionConfigRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
         var missingFlags = await GetMissingFlagsByFileIdAsync(workspaceId, contextId, cancellationToken);
@@ -1022,7 +1065,8 @@ public sealed class WorkspaceFileVersionService(
     /// <summary>
     /// Returns per-repo (FileName, TokenName, Version) triples for the OK badge tooltip.
     /// Each entry represents a tracked token in a version file whose expected value equals the current workspace GitVersion.
-    /// Only repos present in <paramref name="repoVersionMap"/> contribute entries.
+    /// Only repos present in <paramref name="repoVersionMap"/> contribute entries, and none at all when the
+    /// workspace does not use repository versioning (a stale persisted GitVersion is not applicable then).
     /// </summary>
     public async Task<IReadOnlyDictionary<int, IReadOnlyList<(string FileName, string TokenName, string Version)>>> GetAllFileVersionLinesByRepoAsync(
         int workspaceId,
@@ -1030,6 +1074,9 @@ public sealed class WorkspaceFileVersionService(
         IReadOnlyDictionary<string, string> repoVersionMap,
         CancellationToken cancellationToken = default)
     {
+        if (!(await capabilitiesResolver.GetAsync(workspaceId, cancellationToken)).UsesRepositoryVersioning)
+            return new Dictionary<int, IReadOnlyList<(string, string, string)>>();
+
         var configs = await versionConfigRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
         ApplyMissingFlagOverlay(configs, await GetMissingFlagsByFileIdAsync(workspaceId, contextId, cancellationToken));
         var result = new Dictionary<int, List<(string FileName, string TokenName, string Version)>>();
@@ -1056,7 +1103,7 @@ public sealed class WorkspaceFileVersionService(
         return result.ToDictionary(kvp => kvp.Key, kvp => (IReadOnlyList<(string, string, string)>)kvp.Value);
     }
 
-    /// <summary>OK-badge file version lines for a single repository.</summary>
+    /// <summary>OK-badge file version lines for a single repository. Empty when the workspace does not use repository versioning.</summary>
     public async Task<IReadOnlyList<(string FileName, string TokenName, string Version)>> GetAllFileVersionLinesForRepoAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
@@ -1064,6 +1111,9 @@ public sealed class WorkspaceFileVersionService(
         IReadOnlyDictionary<string, string> repoVersionMap,
         CancellationToken cancellationToken = default)
     {
+        if (!(await capabilitiesResolver.GetAsync(workspaceId, cancellationToken)).UsesRepositoryVersioning)
+            return [];
+
         var configs = await versionConfigRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
         ApplyMissingFlagOverlay(configs, await GetMissingFlagsByFileIdAsync(workspaceId, contextId, cancellationToken));
         var list = new List<(string FileName, string TokenName, string Version)>();

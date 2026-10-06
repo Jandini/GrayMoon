@@ -3,6 +3,7 @@ using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.Application.Features;
+using GrayMoon.Application.Workspaces;
 using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Services.Workspaces;
@@ -13,7 +14,11 @@ public enum SyncStatusWrite
     /// <summary>Leave the persisted status alone (branch-only operations such as delete-branch or update-from-default).</summary>
     Leave,
 
-    /// <summary>Derive it from the snapshot: Error without a usable version, NeedsSync without a known default branch, otherwise InSync.</summary>
+    /// <summary>
+    /// Derive it from the snapshot: Error without a branch or tag, NeedsSync without a known default branch (unless
+    /// the remote is empty or a hook keeps an earlier InSync), otherwise InSync. The version is deliberately not
+    /// considered, so a workspace without repository versioning syncs to InSync like any other.
+    /// </summary>
     Derive,
 
     /// <summary>Force InSync.</summary>
@@ -59,6 +64,7 @@ public sealed class WorkspaceRepositoryStateWriter(
     WorkspaceProjectRepository workspaceProjectRepository,
     WorkspacePullRequestService pullRequestService,
     IWorkspaceFeatureContextResolver contextResolver,
+    IWorkspaceCapabilitiesResolver capabilitiesResolver,
     ILogger<WorkspaceRepositoryStateWriter> logger)
 {
     /// <summary>
@@ -197,7 +203,10 @@ public sealed class WorkspaceRepositoryStateWriter(
                 cancellationToken);
         }
 
-        if (snapshot.ProjectsProbed)
+        // Some Worker paths return projects without being asked (return-to-default, the hook fallback
+        // when capabilities cannot be resolved); a workspace that does not discover projects keeps none.
+        if (snapshot.ProjectsProbed
+            && (await capabilitiesResolver.GetAsync(workspaceId, cancellationToken)).DiscoversDotNetProjects)
             await ApplyProjectsAsync(contextId, workspaceId, repositoryId, wr, state, isSpecialWorkspace, snapshot, cancellationToken);
 
         if (options.ReconcilePullRequest)

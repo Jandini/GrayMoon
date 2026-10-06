@@ -10,6 +10,9 @@ public sealed partial class WorkspaceRepositories
     private UpdateModalState _updateAndPushModal = new();
     private LevelOnlyUpdateAndPushModalState _levelOnlyUpdateAndPushModal = new();
 
+    private string UpdateJobTitle =>
+        _presentation.ShowDependencyUpdateActions ? "Updating dependencies..." : "Updating version files...";
+
     /// <summary>Update button click: get update plan; if no updates, toast; else show modal (single vs multi-level).</summary>
     private async Task OnUpdateClickAsync()
     {
@@ -90,7 +93,7 @@ public sealed partial class WorkspaceRepositories
         if (workspace == null || !HasRepositories || IsJobRunning)
             return Task.CompletedTask;
 
-        StartPageJob("Updating dependencies...", async (job, ct) =>
+        StartPageJob(UpdateJobTitle, async (job, ct) =>
         {
             var updateResult = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, DependencyUpdateRunResult>(svc =>
                 svc.UpdateAsync(
@@ -359,7 +362,7 @@ public sealed partial class WorkspaceRepositories
         if (workspace == null || !HasRepositories || IsJobRunning)
             return Task.CompletedTask;
 
-        JobService.StartJob(PageJobKey, "Updating dependencies...", async (job, ct) =>
+        JobService.StartJob(PageJobKey, UpdateJobTitle, async (job, ct) =>
         {
             var runId = Guid.NewGuid().ToString("N")[..8];
             Logger.LogInformation("[PushUpdated {RunId}] Update & Push starting for workspace {WorkspaceId}", runId, WorkspaceId);

@@ -5,7 +5,10 @@ using GrayMoon.Worker.Services;
 
 namespace GrayMoon.Worker.Commands;
 
-public sealed class RefreshRepositoryVersionCommand(IGitService git, IWorkerTokenProvider tokenProvider) : ICommandHandler<RefreshRepositoryVersionRequest, RefreshRepositoryVersionResponse>
+public sealed class RefreshRepositoryVersionCommand(
+    IGitService git,
+    IWorkerTokenProvider tokenProvider,
+    IRepositoryVersionProviderFactory versionProviderFactory) : ICommandHandler<RefreshRepositoryVersionRequest, RefreshRepositoryVersionResponse>
 {
     public async Task<RefreshRepositoryVersionResponse> ExecuteAsync(RefreshRepositoryVersionRequest request, CancellationToken cancellationToken = default)
     {
@@ -21,12 +24,16 @@ public sealed class RefreshRepositoryVersionCommand(IGitService git, IWorkerToke
         int? incomingCommits = null;
         if (git.DirectoryExists(repoPath))
         {
-            var (vr, versionError) = await git.GetVersionAsync(repoPath, cancellationToken);
-            if (vr != null)
-                version = vr.InformationalVersion ?? "-";
+            var versionResult = await versionProviderFactory
+                .Create(request.EffectiveCapabilities)
+                .GetVersionAsync(repoPath, RepositoryVersionOptions.Default, cancellationToken);
+            var versionError = versionResult.Error;
+            if (versionResult.Probed)
+                version = versionResult.VersionOrPlaceholder;
 
-            // A GitVersion failure leaves the version unresolved; it must not cost the repository its branch.
-            branch = await git.ResolveBranchAsync(vr, repoPath, cancellationToken) ?? "-";
+            // A version provider that failed, or that is switched off, leaves the version unresolved; it must
+            // not cost the repository its branch.
+            branch = await git.ResolveBranchAsync(versionResult.Result, repoPath, cancellationToken) ?? "-";
 
             // Detect tag/detached HEAD; when on a tag we don't have a real branch.
             var currentTag = await git.GetCheckedOutTagAsync(repoPath, cancellationToken);

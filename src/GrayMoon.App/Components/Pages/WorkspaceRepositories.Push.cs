@@ -33,6 +33,12 @@ public sealed partial class WorkspaceRepositories
                 .Where(wr => !wr.IsOnTag && (wr.OutgoingCommits ?? 0) > 0)
                 .Select(wr => wr.RepositoryId)
                 .ToHashSet();
+            if (_capabilities is null || !_capabilities.UsesDependencyAwarePush)
+            {
+                await OnPushWithDependenciesProceedAsync(synchronizedPush: false);
+                return;
+            }
+
             var depInfo = await WorkspaceDependencyService.GetPushDependencyInfoForRepoSetAsync(
                 WorkspaceId,
                 contextId.Value,
@@ -106,6 +112,12 @@ public sealed partial class WorkspaceRepositories
                 .Where(wr => !wr.IsOnTag && (wr.OutgoingCommits ?? 0) > 0)
                 .Select(wr => wr.RepositoryId)
                 .ToHashSet();
+            if (_capabilities is null || !_capabilities.UsesDependencyAwarePush)
+            {
+                await PushSingleRepositoryWithUpstreamAsync(repositoryId, branchName);
+                return;
+            }
+
             var depInfo = await WorkspaceDependencyService.GetPushDependencyInfoForRepoAsync(
                 WorkspaceId,
                 RequireSelectedContextId().Value,
@@ -304,7 +316,7 @@ public sealed partial class WorkspaceRepositories
 
     private async Task RestorePackagesAsync()
     {
-        if (workspace == null || IsJobRunning)
+        if (workspace == null || IsJobRunning || !(_capabilities?.UsesPackageRestore ?? false))
             return;
 
         var allLinks = await GetAllLinksForOperationAsync();
@@ -349,7 +361,7 @@ public sealed partial class WorkspaceRepositories
 
     private async Task RestorePackagesLevelAsync(int? levelKey)
     {
-        if (workspace == null || IsJobRunning) return;
+        if (workspace == null || IsJobRunning || !(_capabilities?.UsesPackageRestore ?? false)) return;
         var repoIds = (await GetRepositoryIdsAtLevelAsync(levelKey)).ToHashSet();
         if (repoIds.Count == 0) return;
 

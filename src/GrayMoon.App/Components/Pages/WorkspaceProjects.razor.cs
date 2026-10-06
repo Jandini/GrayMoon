@@ -3,6 +3,7 @@ using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services.Features;
 using GrayMoon.App.Services.Queries;
+using GrayMoon.App.Services.Workspaces;
 using GrayMoon.Application.Features;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
@@ -20,11 +21,13 @@ public sealed partial class WorkspaceProjects : IAsyncDisposable, IDisposable
 
     [Inject] private IJSRuntime JSRuntime { get; set; } = default!;
     [Inject] private WorkspaceContextNavigationService ContextNavigation { get; set; } = default!;
+    [Inject] private IWorkspacePageAccessResolver PageAccess { get; set; } = default!;
 
     private readonly DebouncedQueryLoader _queryLoader = new();
     private readonly VirtualTableScrollState<WorkspaceProjectListItemDto> _virtual = new();
     private ElementReference _tbodyRef;
 
+    private WorkspacePageAccessOutcome? _pageAccess;
     private WorkspaceModel? workspace;
     private string? errorMessage;
     private bool isInitialLoading = true;
@@ -98,10 +101,13 @@ public sealed partial class WorkspaceProjects : IAsyncDisposable, IDisposable
 
         _loadedWorkspaceId = WorkspaceId;
         _loadedContextId = ContextQuery;
-        var info = await ContextNavigation.ResolveForPageAsync(WorkspaceId, ContextQuery);
-        _selectedContextId = info.ContextId;
-        await LoadWorkspaceHeaderAsync();
-        await ResetAndLoadFromTopAsync();
+        _pageAccess = await PageAccess.LoadIfAvailableAsync(WorkspaceId, WorkspacePage.Projects, async () =>
+        {
+            var info = await ContextNavigation.ResolveForPageAsync(WorkspaceId, ContextQuery);
+            _selectedContextId = info.ContextId;
+            await LoadWorkspaceHeaderAsync();
+            await ResetAndLoadFromTopAsync();
+        });
     }
 
     private async Task OnSelectedContextChangedAsync(WorkspaceFeatureContextId contextId)

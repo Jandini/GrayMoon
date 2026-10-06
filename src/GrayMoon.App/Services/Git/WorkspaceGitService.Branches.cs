@@ -125,6 +125,7 @@ public sealed partial class WorkspaceGitService
         var totalCount = links.Count;
         using var semaphore = new SemaphoreSlim(_maxConcurrent);
         var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var capabilities = (await _capabilitiesResolver.GetAsync(workspaceId, cancellationToken)).ToRepositoryOperationCapabilities();
 
         // Prefetch all default branches before the parallel section to avoid concurrent DbContext reads
         Dictionary<int, string>? defaultBranchByWrId = null;
@@ -167,7 +168,9 @@ public sealed partial class WorkspaceGitService
                     baseBranchName,
                     workspaceRoot,
                     repositoryId = wr.RepositoryId,
-                    skipHooks = syncState
+                    workspaceId,
+                    skipHooks = syncState,
+                    capabilities
                 };
                 var response = await _workerBridge.SendCommandAsync("CreateBranch", args, cancellationToken);
                 var createResponse = WorkerResponseJson.DeserializeWorkerResponse<CreateBranchResponse>(response.Data);

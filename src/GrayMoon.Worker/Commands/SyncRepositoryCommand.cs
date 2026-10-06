@@ -6,7 +6,16 @@ using GrayMoon.Worker.Services;
 
 namespace GrayMoon.Worker.Commands;
 
-public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService csProjFileService) : ICommandHandler<SyncRepositoryRequest, SyncRepositoryResponse>
+/// <summary>
+/// Synchronizes one repository in three stages: a common git snapshot that always runs, then optional
+/// version enrichment, then optional .NET project enrichment. The two optional stages are activated by the
+/// request's capabilities; when one is skipped its result is absent from the response rather than empty, so
+/// the app can tell "nobody looked" from "there is nothing there" and leaves that group of columns alone.
+/// </summary>
+public sealed class SyncRepositoryCommand(
+    IGitService git,
+    ICsProjFileService csProjFileService,
+    IRepositoryVersionProviderFactory versionProviderFactory) : ICommandHandler<SyncRepositoryRequest, SyncRepositoryResponse>
 {
     public async Task<SyncRepositoryResponse> ExecuteAsync(SyncRepositoryRequest request, CancellationToken cancellationToken = default)
     {
@@ -16,6 +25,7 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
         var cloneUrl = request.CloneUrl;
         var bearerToken = request.BearerToken;
         var workspaceId = request.WorkspaceId;
+        var capabilities = request.EffectiveCapabilities;
 
         var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = Path.Combine(workspacePath, repositoryName);
@@ -42,7 +52,8 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
         {
             await git.AddSafeDirectoryAsync(repoPath, cancellationToken);
 
-            // Ensure fetch completes before running GitVersion (which is invoked with /nofetch).
+            // Stage 1, part one of the common git snapshot: the fetch has to complete before any version
+            // provider runs, because GitVersion is invoked with /nofetch.
             var (fetchOk, fetchErr) = await git.FetchAsync(repoPath, includeTags: true, bearerToken, cancellationToken);
             fetchError = fetchErr;
             if (!fetchOk)
@@ -61,16 +72,23 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
                 };
             }
 
-            GitVersionResult? vr;
-            (vr, versionError) = await git.GetVersionAsync(repoPath, cancellationToken);
-            if (vr != null)
-                version = vr.InformationalVersion ?? "-";
+            // Stage 2: optional version enrichment. It is resolved here, ahead of the rest of the common
+            // snapshot, because the provider's own branch name wins over git's when it produced one and the
+            // commit counts below are taken against whichever name wins.
+            var versionResult = await versionProviderFactory
+                .Create(capabilities)
+                .GetVersionAsync(repoPath, RepositoryVersionOptions.Default, cancellationToken);
+            versionError = versionResult.Error;
+            if (versionResult.Probed)
+                version = versionResult.VersionOrPlaceholder;
 
-            // GitVersion may fail (an empty repository has no commits for it to read, a path over the Windows
-            // limit breaks it). That must not cost the repository its identity: the branch does not depend on it.
-            branch = await git.ResolveBranchAsync(vr, repoPath, cancellationToken) ?? "-";
+            // Stage 1, part two: identity, refs, divergence and upstream. Always runs, for every profile.
+            // The version provider may fail (an empty repository has no commits for it to read, a path over the
+            // Windows limit breaks it) or be switched off entirely. Neither may cost the repository its
+            // identity: the branch is a plain git fact.
+            branch = await git.ResolveBranchAsync(versionResult.Result, repoPath, cancellationToken) ?? "-";
 
-            // Detect tag/detached HEAD; if on a tag we don't have a real branch so wipe the GitVersion branch echo.
+            // Detect tag/detached HEAD; if on a tag we don't have a real branch so wipe the version branch echo.
             var currentTag = await git.GetCheckedOutTagAsync(repoPath, cancellationToken);
             // Always fetch the full tag list - fetch already ran with includeTags:true so local refs are current.
             var allTags = await git.GetTagsAsync(repoPath, cancellationToken);
@@ -81,7 +99,9 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
 
             // Tag checkouts need current hooks too: hooks are shared with linked Feature worktrees, and a
             // stale static-path hook attributes every Feature worktree event to the special Workspace.
-            if (version != "-" && (branch != "-" || currentTag != null))
+            // Only a valid checkout is required: a workspace that does not version its repositories resolves
+            // no version, and gating on one would leave it with no managed hooks at all.
+            if (branch != "-" || currentTag != null)
                 await git.WriteSyncHooksAsync(repoPath, workspaceId, repositoryId, cancellationToken);
 
             // Resolve default branch once; run commit counts and divergence in parallel when we have a branch.
@@ -131,7 +151,11 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
                 // If branch fetching fails, continue without branches (non-critical)
             }
 
-            projects = await csProjFileService.FindAsync(repoPath, cancellationToken);
+            // Stage 3: optional project enrichment. Left null when the profile does not discover .NET
+            // projects - an empty list would tell the app this repository genuinely has none, and it would
+            // prune every persisted project row.
+            if (capabilities.ShouldDiscoverProjects)
+                projects = await csProjFileService.FindAsync(repoPath, cancellationToken);
 
             return new SyncRepositoryResponse
             {

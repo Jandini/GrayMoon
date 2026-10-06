@@ -1,4 +1,6 @@
 @using GrayMoon.App.Models
+@using GrayMoon.Abstractions.Workspaces
+@using GrayMoon.App.Services.Workspaces
 
 @if (IsVisible)
 {
@@ -31,6 +33,49 @@
                                value="@WorkspacePath"
                                readonly
                                disabled />
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="form-label text-nowrap">Workspace type</div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="workspace-type" id="workspaceTypeDotNet"
+                                   checked="@(Type == WorkspaceType.DotNetDependency)"
+                                   disabled="@IsTypeDisabled"
+                                   @onchange="() => OnTypeChosenAsync(WorkspaceType.DotNetDependency)" />
+                            <label class="form-check-label" for="workspaceTypeDotNet">
+                                .NET Dependency
+                                <div class="form-text">Adds .NET projects, NuGet packages, dependency levels and package-aware push.</div>
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="workspace-type" id="workspaceTypeBasic"
+                                   checked="@(Type == WorkspaceType.Basic)"
+                                   disabled="@IsTypeDisabled"
+                                   @onchange="() => OnTypeChosenAsync(WorkspaceType.Basic)" />
+                            <label class="form-check-label" for="workspaceTypeBasic">
+                                Basic
+                                <div class="form-text">Git repositories, branches, Features, pull requests, changes and files.</div>
+                            </label>
+                        </div>
+                        @if (IsTypeDisabled && !string.IsNullOrWhiteSpace(TypeDisabledHint))
+                        {
+                            <div class="form-text">@TypeDisabledHint</div>
+                        }
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="workspaceUseGitVersion"
+                                   checked="@UseGitVersion"
+                                   @onchange="OnGitVersionChanged" />
+                            <label class="form-check-label text-nowrap" for="workspaceUseGitVersion">Calculate versions with GitVersion</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="workspaceUseGitHubActions"
+                                   checked="@UseGitHubActions"
+                                   @onchange="OnGitHubActionsChanged" />
+                            <label class="form-check-label text-nowrap" for="workspaceUseGitHubActions">GitHub Actions</label>
+                        </div>
                     </div>
 
                     @if (DirectoryAlreadyExists)
@@ -76,6 +121,14 @@
     [Parameter] public string? ErrorMessage { get; set; }
     [Parameter] public EventCallback OnSave { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
+    [Parameter] public WorkspaceType Type { get; set; } = WorkspaceType.DotNetDependency;
+    [Parameter] public EventCallback<WorkspaceType> TypeChanged { get; set; }
+    [Parameter] public bool UseGitVersion { get; set; } = true;
+    [Parameter] public EventCallback<bool> UseGitVersionChanged { get; set; }
+    [Parameter] public bool UseGitHubActions { get; set; } = true;
+    [Parameter] public EventCallback<bool> UseGitHubActionsChanged { get; set; }
+    [Parameter] public bool IsTypeDisabled { get; set; }
+    [Parameter] public string? TypeDisabledHint { get; set; }
 
     private bool _wasVisible;
 
@@ -109,4 +162,21 @@
         var value = e.Value?.ToString() ?? string.Empty;
         await WorkspaceNameChanged.InvokeAsync(value);
     }
+
+    private async Task OnTypeChosenAsync(WorkspaceType type)
+    {
+        if (IsTypeDisabled)
+            return;
+
+        var defaults = WorkspaceProfileDefaults.ForType(type);
+        await TypeChanged.InvokeAsync(type);
+        await UseGitVersionChanged.InvokeAsync(defaults.Versioning == WorkspaceVersioningMode.GitVersion);
+        await UseGitHubActionsChanged.InvokeAsync(defaults.Ci == WorkspaceCiProvider.GitHubActions);
+    }
+
+    private Task OnGitVersionChanged(ChangeEventArgs e) =>
+        UseGitVersionChanged.InvokeAsync(e.Value is true or "true" or "on");
+
+    private Task OnGitHubActionsChanged(ChangeEventArgs e) =>
+        UseGitHubActionsChanged.InvokeAsync(e.Value is true or "true" or "on");
 }

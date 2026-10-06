@@ -25,7 +25,11 @@ public sealed record HostPrerequisiteVersions(
     string? GitVersion,
     string? GitVersionToolVersion);
 
-/// <summary>Pure helpers for Host tab missing-state, notes, and Install All payload.</summary>
+/// <summary>
+/// Pure helpers for Host tab missing-state, notes, and Install All payload. <see cref="AnyMissing"/> and
+/// <see cref="GetMissingIds"/> describe what was probed; attention decisions use
+/// <see cref="AnyRequiredMissing"/> against the workspaces' <see cref="HostPrerequisiteRequirements"/>.
+/// </summary>
 public static class HostPrerequisiteState
 {
     public static bool IsMissing(string? version) => string.IsNullOrWhiteSpace(version);
@@ -47,10 +51,34 @@ public static class HostPrerequisiteState
         return ids;
     }
 
-    public static string Note(HostPrerequisiteVersions versions) =>
-        AnyMissing(versions)
-            ? "Install the missing prerequisites above."
-            : "All prerequisites are installed.";
+    /// <summary>
+    /// True only when a prerequisite some workspace actually needs is missing. This, not
+    /// <see cref="AnyMissing"/>, decides whether the host needs attention.
+    /// </summary>
+    public static bool AnyRequiredMissing(HostPrerequisiteVersions versions, HostPrerequisiteRequirements requirements) =>
+        GetMissingIds(versions).Any(requirements.IsRequired);
+
+    /// <summary>Missing prerequisites that no workspace needs: shown and installable, but informational.</summary>
+    public static IReadOnlyList<string> GetMissingOptionalIds(
+        HostPrerequisiteVersions versions,
+        HostPrerequisiteRequirements requirements) =>
+        GetMissingIds(versions).Where(id => !requirements.IsRequired(id)).ToList();
+
+    public static string Note(HostPrerequisiteVersions versions) => Note(versions, HostPrerequisiteRequirements.All);
+
+    public static string Note(HostPrerequisiteVersions versions, HostPrerequisiteRequirements requirements)
+    {
+        if (AnyRequiredMissing(versions, requirements))
+            return "Install the missing prerequisites above.";
+
+        var optional = GetMissingOptionalIds(versions, requirements);
+        if (optional.Count == 0)
+            return "All prerequisites are installed.";
+
+        var names = string.Join(" and ", optional.Select(DisplayName));
+        var verb = optional.Count == 1 ? "is" : "are";
+        return $"All required prerequisites are installed. {names} {verb} optional: no workspace uses {(optional.Count == 1 ? "it" : "them")}.";
+    }
 
     public static string CommandFor(string id) => id switch
     {

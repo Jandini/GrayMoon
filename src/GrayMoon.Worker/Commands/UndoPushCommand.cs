@@ -9,7 +9,11 @@ using Microsoft.Extensions.Logging;
 namespace GrayMoon.Worker.Commands;
 
 /// <summary>Resets the current branch to origin/branch (mixed or hard) to undo local outgoing commits.</summary>
-public sealed class UndoPushCommand(IGitService git, IHubConnectionProvider hubProvider, ILogger<UndoPushCommand> logger) : ICommandHandler<UndoPushRequest, UndoPushResponse>
+public sealed class UndoPushCommand(
+    IGitService git,
+    IRepositoryVersionProviderFactory versionProviderFactory,
+    IHubConnectionProvider hubProvider,
+    ILogger<UndoPushCommand> logger) : ICommandHandler<UndoPushRequest, UndoPushResponse>
 {
     public async Task<UndoPushResponse> ExecuteAsync(UndoPushRequest request, CancellationToken cancellationToken = default)
     {
@@ -45,49 +49,71 @@ public sealed class UndoPushCommand(IGitService git, IHubConnectionProvider hubP
         var (success, errorMessage) = await git.ResetToRemoteAsync(repoPath, branch, request.KeepChanges, request.BearerToken, cancellationToken);
 
         if (success)
-            _ = SendPostResetSyncAsync(request.WorkspaceId, request.RepositoryId, repoPath, branch);
+            _ = SendPostResetSyncAsync(request, repoPath, branch);
 
         return new UndoPushResponse { Success = success, ErrorMessage = success ? null : errorMessage };
     }
 
-    private async Task SendPostResetSyncAsync(int workspaceId, int repositoryId, string repoPath, string branch)
+    private async Task SendPostResetSyncAsync(UndoPushRequest request, string repoPath, string branch)
     {
         try
         {
             var connection = hubProvider.Connection;
             if (connection?.State != HubConnectionState.Connected) return;
 
-            var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, CancellationToken.None);
-            var divergenceRef = git.ToOriginBranchRef(await git.GetDivergenceBaseBranchAsync(repoPath, CancellationToken.None))
-                ?? defaultRef;
-            var (outgoing, incoming, hasUpstream) = await git.GetCommitCountsAsync(repoPath, branch, defaultRef, CancellationToken.None);
-            var (defaultBehind, defaultAhead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, CancellationToken.None);
-            var (versionResult, _) = await git.GetVersionAsync(repoPath, nonNormalize: true, CancellationToken.None);
-            var version = versionResult?.InformationalVersion ?? "-";
-            var versionBranch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? branch;
-
-            var notification = new RepositorySyncNotification
-            {
-                WorkspaceId = workspaceId,
-                RepositoryId = repositoryId,
-                // Required for Feature attribution - null path is treated as special Workspace and
-                // would mirror this worktree's branch onto the shared WorkspaceRepositoryLink.
-                RepositoryPath = repoPath,
-                Version = version,
-                Branch = versionBranch,
-                OutgoingCommits = outgoing,
-                IncomingCommits = incoming,
-                HasUpstream = hasUpstream,
-                DefaultBranchBehind = defaultBehind,
-                DefaultBranchAhead = defaultAhead,
-            };
+            var notification = await BuildPostResetNotificationAsync(request, repoPath, branch);
             await connection.InvokeAsync(WorkerHubMethods.SyncCommand, notification, CancellationToken.None);
             logger.LogInformation("Post-reset SyncCommand sent: workspace={WorkspaceId}, repo={RepoId}, outgoing={Outgoing}",
-                workspaceId, repositoryId, outgoing);
+                request.WorkspaceId, request.RepositoryId, notification.OutgoingCommits);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Post-reset SyncCommand failed for repo {RepoId}", repositoryId);
+            logger.LogWarning(ex, "Post-reset SyncCommand failed for repo {RepoId}", request.RepositoryId);
         }
+    }
+
+    internal async Task<RepositorySyncNotification> BuildPostResetNotificationAsync(UndoPushRequest request, string repoPath, string branch)
+    {
+        var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, CancellationToken.None);
+        var divergenceRef = git.ToOriginBranchRef(await git.GetDivergenceBaseBranchAsync(repoPath, CancellationToken.None))
+            ?? defaultRef;
+        var (outgoing, incoming, hasUpstream) = await git.GetCommitCountsAsync(repoPath, branch, defaultRef, CancellationToken.None);
+        var (defaultBehind, defaultAhead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, CancellationToken.None);
+        var versionResult = await versionProviderFactory
+            .Create(request.Capabilities)
+            .GetVersionAsync(repoPath, new RepositoryVersionOptions { NonNormalize = true }, CancellationToken.None);
+        var versionBranch = versionResult.Result?.BranchName ?? versionResult.Result?.EscapedBranchName ?? branch;
+
+        return new RepositorySyncNotification
+        {
+            WorkspaceId = request.WorkspaceId,
+            RepositoryId = request.RepositoryId,
+            // Required for Feature attribution - null path is treated as special Workspace and
+            // would mirror this worktree's branch onto the shared WorkspaceRepositoryLink.
+            RepositoryPath = repoPath,
+            Version = versionResult.VersionOrPlaceholder,
+            Branch = versionBranch,
+            OutgoingCommits = outgoing,
+            IncomingCommits = incoming,
+            HasUpstream = hasUpstream,
+            DefaultBranchBehind = defaultBehind,
+            DefaultBranchAhead = defaultAhead,
+            // This pass never scans the working tree, so the project marker stays false and the
+            // persisted project rows survive the reset.
+            State = new RepositoryStateSnapshot
+            {
+                BranchName = versionBranch,
+                GitVersion = versionResult.InformationalVersion,
+                OutgoingCommits = outgoing,
+                IncomingCommits = incoming,
+                DefaultBranchBehind = defaultBehind,
+                DefaultBranchAhead = defaultAhead,
+                HasUpstream = hasUpstream,
+                IdentityProbed = true,
+                GitVersionProbed = versionResult.Probed,
+                CommitCountsProbed = outgoing.HasValue || incoming.HasValue,
+                UpstreamProbed = true,
+            }
+        };
     }
 }

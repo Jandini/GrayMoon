@@ -20,7 +20,9 @@
 @inject WorkerConnectionTracker WorkerConnectionTracker
 @inject ILogger<Workspaces> Logger
 @inject WorkspaceContextNavigationService ContextNavigation
+@using GrayMoon.Abstractions.Workspaces
 @using GrayMoon.App.Services.Features
+@using GrayMoon.App.Services.Workspaces
 @using GrayMoon.Application
 @using GrayMoon.Application.Features
 @inject IWorkspaceFeatureOperations FeatureOperations
@@ -175,14 +177,22 @@
                WorkspaceName="@workspaceName"
                WorkspaceNameChanged="@OnWorkspaceNameChangedAsync"
                WorkspacePath="@GetWorkspacePath()"
-               DirectoryAlreadyExists="@directoryExists"
+               DirectoryAlreadyExists="@(editingWorkspaceId == null && directoryExists)"
                ExistingRepositoryCount="@existingRepositoryCount"
                IsNameDisabled="@(editingWorkspaceId != null && editingWorkspaceHasFeatures)"
                NameDisabledHint="@(editingWorkspaceHasFeatures ? "Rename and root changes are not possible while Features exist. Remove Features first." : null)"
+               Type="@editorType"
+               TypeChanged="value => editorType = value"
+               UseGitVersion="@editorUseGitVersion"
+               UseGitVersionChanged="value => editorUseGitVersion = value"
+               UseGitHubActions="@editorUseGitHubActions"
+               UseGitHubActionsChanged="value => editorUseGitHubActions = value"
+               IsTypeDisabled="@(editingWorkspaceId != null && editingWorkspaceHasFeatures)"
+               TypeDisabledHint="@(editingWorkspaceHasFeatures ? "Rename and root changes are not possible while Features exist. Remove Features first." : null)"
                IsSaving="@isSaving"
                IsCheckingDirectory="@isLoadingDirectoryInfo"
                ErrorMessage="@editorErrorMessage"
-               SaveDisabled="@(editingWorkspaceId == null && !WorkerBridge.IsWorkerConnected)"
+               SaveDisabled="@EditorSaveDisabled"
                OnSave="@SaveWorkspaceAsync"
                OnCancel="@CloseEditorModal" />
 
@@ -310,6 +320,9 @@
     private int? editingWorkspaceId;
     private string? editingWorkspaceRootPath;
     private bool editingWorkspaceHasFeatures;
+    private WorkspaceType editorType = WorkspaceType.DotNetDependency;
+    private bool editorUseGitVersion = true;
+    private bool editorUseGitHubActions = true;
     private string? deleteBlockedMessage;
     private HashSet<int> editingWorkspaceRepositoryIds = new();
     private WorkspaceModel? workspaceToDelete;
@@ -322,6 +335,7 @@
     private CancellationTokenSource? _directoryInfoDebounceCts;
     private bool isLoadingDirectoryInfo;
     private bool isDirectoryInfoDirty;
+    private int _directoryInfoRequestId;
     private bool showImportModal;
     private int importMatchingCount;
     private List<int> importRepositoryIds = new();
@@ -351,7 +365,16 @@
         _fetchRepositoriesCts?.Dispose();
         _directoryInfoCts?.Cancel();
         _directoryInfoCts?.Dispose();
+        _directoryInfoDebounceCts?.Cancel();
+        _directoryInfoDebounceCts?.Dispose();
     }
+
+    private bool EditorSaveDisabled =>
+        editingWorkspaceId == null
+        && (!WorkerBridge.IsWorkerConnected
+            || string.IsNullOrWhiteSpace(workspaceName)
+            || isDirectoryInfoDirty
+            || isLoadingDirectoryInfo);
 
     protected override async Task OnInitializedAsync()
     {
@@ -400,10 +423,15 @@
         editingWorkspaceId = null;
         editingWorkspaceRootPath = null;
         editingWorkspaceHasFeatures = false;
+        editorType = WorkspaceType.DotNetDependency;
+        editorUseGitVersion = true;
+        editorUseGitHubActions = true;
         editorTitle = "Add Workspace";
         workspaceName = string.Empty;
         directoryExists = false;
         existingRepositoryCount = 0;
+        isDirectoryInfoDirty = false;
+        isLoadingDirectoryInfo = false;
 
         if (!WorkerBridge.IsWorkerConnected)
         {
@@ -422,6 +450,8 @@
 
     private async Task ShowEditModalAsync(int workspaceId)
     {
+        _directoryInfoDebounceCts?.Cancel();
+        _directoryInfoCts?.Cancel();
         var workspace = await WorkspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)
         {
@@ -439,9 +469,15 @@
 
         var features = await FeatureOperations.ListFeaturesAsync(workspaceId);
         editingWorkspaceHasFeatures = features.Count > 0;
+        editorType = workspace.Type;
+        editorUseGitVersion = workspace.VersioningMode == WorkspaceVersioningMode.GitVersion;
+        editorUseGitHubActions = workspace.CiProvider == WorkspaceCiProvider.GitHubActions;
 
+        directoryExists = false;
+        existingRepositoryCount = 0;
+        isDirectoryInfoDirty = false;
+        isLoadingDirectoryInfo = false;
         showEditorModal = true;
-        await LoadDirectoryInfoAsync();
     }
 
     private async Task ShowAddRepositoriesModalAsync(int workspaceId)
@@ -477,6 +513,8 @@
 
     private void CloseEditorModal()
     {
+        _directoryInfoDebounceCts?.Cancel();
+        _directoryInfoCts?.Cancel();
         showEditorModal = false;
         editorErrorMessage = null;
     }
@@ -522,10 +560,8 @@
 
         try
         {
-            // Ensure directory info is up to date before saving
-            if (isDirectoryInfoDirty || isLoadingDirectoryInfo)
+            if (editingWorkspaceId == null && (isDirectoryInfoDirty || isLoadingDirectoryInfo))
             {
-                // Cancel any pending debounce and force an immediate refresh
                 _directoryInfoDebounceCts?.Cancel();
                 await LoadDirectoryInfoAsync();
             }
@@ -536,21 +572,29 @@
             if (editingWorkspaceId == null)
             {
                 Logger.LogInformation("User created workspace {WorkspaceName}", workspaceName);
-                var workspace = await WorkspaceRepository.AddAsync(workspaceName, []);
+                var workspace = await WorkspaceRepository.AddAsync(
+                    workspaceName,
+                    [],
+                    editorType,
+                    editorUseGitVersion ? WorkspaceVersioningMode.GitVersion : WorkspaceVersioningMode.None,
+                    editorUseGitHubActions ? WorkspaceCiProvider.GitHubActions : WorkspaceCiProvider.None);
                 editingWorkspaceId = workspace.WorkspaceId;
 
-                // If there are repositories on disk, attempt to match and prompt for import
                 if (existingRepositoryCount > 0)
                     await TrySuggestImportsAsync(workspace.WorkspaceId, workspace.Name);
             }
             else
             {
                 Logger.LogInformation("User edited workspace {WorkspaceName}", workspaceName);
-                await WorkspaceRepository.UpdateAsync(editingWorkspaceId.Value, workspaceName, editingWorkspaceRepositoryIds, editingWorkspaceRootPath);
+                await WorkspaceRepository.UpdateAsync(
+                    editingWorkspaceId.Value,
+                    workspaceName,
+                    editingWorkspaceRepositoryIds,
+                    editingWorkspaceRootPath,
+                    editorType,
+                    editorUseGitVersion ? WorkspaceVersioningMode.GitVersion : WorkspaceVersioningMode.None,
+                    editorUseGitHubActions ? WorkspaceCiProvider.GitHubActions : WorkspaceCiProvider.None);
                 await PendingActionsService.RefreshAsync(editingWorkspaceId.Value, WorkspaceRepository, WorkspaceProjectRepository);
-
-                if (existingRepositoryCount > 0)
-                    await TrySuggestImportsAsync(editingWorkspaceId.Value, workspaceName);
             }
 
             if (!showImportModal)
@@ -791,7 +835,11 @@
     private async Task OnWorkspaceNameChangedAsync(string value)
     {
         workspaceName = value;
+        if (editingWorkspaceId != null)
+            return;
+
         isDirectoryInfoDirty = true;
+        StateHasChanged();
 
         _directoryInfoDebounceCts?.Cancel();
         _directoryInfoDebounceCts = new CancellationTokenSource();
@@ -800,17 +848,18 @@
         try
         {
             await Task.Delay(200, ct);
-            // If not cancelled, run the actual check
             await LoadDirectoryInfoAsync();
         }
         catch (OperationCanceledException)
         {
-            // Swallow - a new name change will schedule a new check
         }
     }
 
     private async Task LoadDirectoryInfoAsync()
     {
+        if (editingWorkspaceId != null)
+            return;
+
         if (string.IsNullOrWhiteSpace(workspaceName))
         {
             directoryExists = false;
@@ -823,6 +872,7 @@
 
         _directoryInfoCts?.Cancel();
         _directoryInfoCts = new CancellationTokenSource();
+        var requestId = ++_directoryInfoRequestId;
         var ct = _directoryInfoCts.Token;
 
         try
@@ -837,14 +887,20 @@
         catch (Exception ex)
         {
             Logger.LogDebug(ex, "Failed to load directory info for {WorkspaceName}", workspaceName);
-            directoryExists = false;
-            existingRepositoryCount = 0;
+            if (requestId == _directoryInfoRequestId)
+            {
+                directoryExists = false;
+                existingRepositoryCount = 0;
+            }
         }
         finally
         {
-            isLoadingDirectoryInfo = false;
-            isDirectoryInfoDirty = false;
-            await InvokeAsync(StateHasChanged);
+            if (requestId == _directoryInfoRequestId)
+            {
+                isLoadingDirectoryInfo = false;
+                isDirectoryInfoDirty = false;
+                await InvokeAsync(StateHasChanged);
+            }
         }
     }
 

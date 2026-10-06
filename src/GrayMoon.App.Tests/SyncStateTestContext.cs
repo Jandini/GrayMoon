@@ -1,4 +1,5 @@
 using GrayMoon.Abstractions.Worker;
+using GrayMoon.Abstractions.Workspaces;
 using GrayMoon.App.Data;
 using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
@@ -9,7 +10,9 @@ using GrayMoon.App.Services.Features;
 using GrayMoon.App.Services.GitChanges;
 using GrayMoon.App.Services.Jobs;
 using GrayMoon.App.Services.Queries;
+using GrayMoon.App.Services.Workspaces;
 using GrayMoon.Application.Features;
+using GrayMoon.Application.Workspaces;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -87,6 +90,7 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddScoped<WorkspaceRepositoryCustomDependencyRepository>();
 
         services.AddScoped<WorkspaceService>();
+        services.AddScoped<IWorkspaceCapabilitiesResolver, WorkspaceCapabilitiesResolver>();
         services.AddScoped<IWorkspaceFeatureContextResolver, WorkspaceFeatureContextResolver>();
         services.AddScoped<IWorkspaceContextPathResolver, WorkspaceContextPathResolver>();
         services.AddScoped<IWorkspaceSelectedFeatureContextService, WorkspaceSelectedFeatureContextService>();
@@ -193,6 +197,21 @@ public sealed class SyncStateTestContext : IAsyncDisposable
     public AsyncServiceScope CreateScope() => _provider.CreateAsyncScope();
 
     public T Resolve<T>() where T : notnull => _provider.GetRequiredService<T>();
+
+    /// <summary>
+    /// The seeded workspace carries the model defaults (Basic, no versioning, no CI), which persist no
+    /// project state. Tests of .NET project and dependency behaviour switch to the migrated .NET triple.
+    /// </summary>
+    public async Task UseDotNetDependencyProfileAsync()
+    {
+        var factory = _provider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var workspace = await db.Workspaces.FirstAsync(w => w.WorkspaceId == WorkspaceId);
+        workspace.Type = WorkspaceType.DotNetDependency;
+        workspace.VersioningMode = WorkspaceVersioningMode.GitVersion;
+        workspace.CiProvider = WorkspaceCiProvider.GitHubActions;
+        await db.SaveChangesAsync();
+    }
 
     /// <summary>Reads the link fresh from its own context so tests never assert against a tracked instance the service under test still holds.</summary>
     public async Task<WorkspaceRepositoryLink> ReadLinkAsync()

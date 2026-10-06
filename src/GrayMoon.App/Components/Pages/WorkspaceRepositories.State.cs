@@ -2,6 +2,7 @@ using GrayMoon.App.Components.Shared;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services;
 using GrayMoon.App.Services.Queries;
+using GrayMoon.Application.Workspaces;
 using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
 namespace GrayMoon.App.Components.Pages;
@@ -23,6 +24,14 @@ public sealed partial class WorkspaceRepositories
     private readonly List<VirtualSlot> _slots = new();
     private readonly HashSet<int> _tooltipLoadInFlight = new();
     private Workspace? workspace;
+    /// <summary>
+    /// Profile-derived capabilities of the workspace being viewed. Resolved by workspace id: Features inherit
+    /// the parent Workspace's profile. Null until the first load, which the pre-profile defaults cover.
+    /// </summary>
+    private WorkspaceCapabilities? _capabilities;
+    private bool UsesRepositoryVersioning => _capabilities?.UsesRepositoryVersioning ?? true;
+    /// <summary>Grid and header presentation derived from <see cref="_capabilities"/>; rebuilt with them on every workspace load.</summary>
+    private WorkspaceGridPresentation _presentation = WorkspaceGridPresentation.Legacy;
     private WorkspaceRepositoryHeaderStateDto? _headerState;
     private IReadOnlyDictionary<int, PullRequestInfo?> prByRepositoryId = new Dictionary<int, PullRequestInfo?>();
     private string? errorMessage;
@@ -48,6 +57,7 @@ public sealed partial class WorkspaceRepositories
     private string ScrollStorageKey => $"graymoon:ws-repos-scroll:{WorkspaceId}";
     private bool HasRepositories => (_headerState?.TotalCount ?? 0) > 0;
     private bool hasUnmatchedDependencies => _headerState?.HasUnmatchedDependencies ?? false;
+    private bool hasOutOfDateFiles => _headerState?.HasOutOfDateFiles ?? false;
     private bool hasCreatablePr => _headerState?.HasCreatablePr ?? false;
     private bool hasOpenPr => _headerState?.HasOpenPr ?? false;
     private bool allFeaturePrsCompleted => _headerState?.AllFeaturePrsCompleted ?? false;
@@ -103,13 +113,13 @@ public sealed partial class WorkspaceRepositories
     private readonly object _refreshDebounceLock = new();
     private CancellationTokenSource? _backgroundWorkCts;
     private const string TagBlockedActionMessage = "Repository is on a tag; checkout a branch first.";
-    private const int TableColSpan = 4;
-    private enum VirtualSlotKind
+    private int TableColSpan => _presentation.ColumnCount;
+    internal enum VirtualSlotKind
     {
         LevelHeader,
         Row,
     }
-    private sealed record VirtualSlot(
+    internal sealed record VirtualSlot(
         VirtualSlotKind Kind,
         int? LevelKey,
         int WorkspaceRepositoryId,
@@ -210,9 +220,37 @@ public sealed partial class WorkspaceRepositories
     private void BuildSlots(IReadOnlyList<WorkspaceRepositoryLinkIndexEntry> index)
     {
         _slots.Clear();
+        _slots.AddRange(ComputeSlots(index, _presentation.GroupByDependencyLevel));
+    }
+
+    /// <summary>
+    /// Pure slot layout for the virtualized grid. With <paramref name="groupByDependencyLevel"/> every
+    /// dependency level (including the null "No dependencies" group) gets a header slot before its rows.
+    /// Without it the grid is a flat list of rows: no header slots at all, never a synthetic level group.
+    /// </summary>
+    internal static List<VirtualSlot> ComputeSlots(
+        IReadOnlyList<WorkspaceRepositoryLinkIndexEntry> index,
+        bool groupByDependencyLevel)
+    {
+        var slots = new List<VirtualSlot>(index.Count);
         if (index.Count == 0)
         {
-            return;
+            return slots;
+        }
+        if (!groupByDependencyLevel)
+        {
+            var flatStripeIndex = 0;
+            foreach (var entry in index)
+            {
+                slots.Add(new VirtualSlot(
+                    VirtualSlotKind.Row,
+                    null,
+                    entry.WorkspaceRepositoryId,
+                    entry.RepositoryId,
+                    0,
+                    flatStripeIndex++));
+            }
+            return slots;
         }
         var levelCounts = new Dictionary<int, int>();
         foreach (var entry in index)
@@ -228,7 +266,7 @@ public sealed partial class WorkspaceRepositories
             var levelKey = entry.DependencyLevel ?? int.MinValue;
             if (!hasPrevious || levelKey != previousLevel)
             {
-                _slots.Add(new VirtualSlot(
+                slots.Add(new VirtualSlot(
                     VirtualSlotKind.LevelHeader,
                     entry.DependencyLevel,
                     0,
@@ -238,7 +276,7 @@ public sealed partial class WorkspaceRepositories
                 previousLevel = levelKey;
                 hasPrevious = true;
             }
-            _slots.Add(new VirtualSlot(
+            slots.Add(new VirtualSlot(
                 VirtualSlotKind.Row,
                 entry.DependencyLevel,
                 entry.WorkspaceRepositoryId,
@@ -246,6 +284,7 @@ public sealed partial class WorkspaceRepositories
                 0,
                 stripeIndex++));
         }
+        return slots;
     }
 
     private static string StripeClass(int stripeIndex) => VirtualScrollUi.StripeClass(stripeIndex);

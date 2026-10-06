@@ -1,0 +1,45 @@
+@* Renders a gated workspace page's content only once its WorkspacePageAccess outcome is Available.
+   The page itself decides the outcome (IWorkspacePageAccessResolver.LoadIfAvailableAsync) before it loads
+   any data; this component only renders the result, so every gated page shows the same unavailable state. *@
+
+@if (Outcome == WorkspacePageAccessOutcome.Available)
+{
+    @ChildContent
+}
+else if (Outcome is { } outcome)
+{
+    <div class="container-fluid page-container grid-page">
+        <div class="grid-page-header">
+            <div class="workspace-repos-header">
+                <div class="workspace-repos-title-row">
+                    <h2 class="workspace-repos-title">@Page</h2>
+                </div>
+            </div>
+            <div class="gm-callout @(outcome == WorkspacePageAccessOutcome.WorkspaceNotFound ? "gm-callout--error" : "gm-callout--info")" role="status">
+                @WorkspacePageAccess.GetUnavailableMessage(Page, outcome)
+                @if (outcome == WorkspacePageAccessOutcome.NotAvailable)
+                {
+                    <a class="ms-1 text-nowrap" href="@RepositoriesHref">Back to Repositories</a>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public WorkspacePage Page { get; set; }
+
+    [Parameter, EditorRequired] public int WorkspaceId { get; set; }
+
+    /// <summary>Null while the page is still checking access; nothing renders until then.</summary>
+    [Parameter] public WorkspacePageAccessOutcome? Outcome { get; set; }
+
+    /// <summary>The page's <c>?context=</c> value, carried onto the Repositories link.</summary>
+    [Parameter] public int? ContextQuery { get; set; }
+
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private string RepositoriesHref => ContextQuery is > 0
+        ? $"workspaces/{WorkspaceId}?context={ContextQuery}"
+        : $"workspaces/{WorkspaceId}";
+}

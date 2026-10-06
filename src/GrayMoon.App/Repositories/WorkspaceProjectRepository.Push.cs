@@ -255,6 +255,29 @@ public sealed partial class WorkspaceProjectRepository
         return result.OrderBy(r => r.DependencyLevel ?? int.MaxValue).ThenBy(r => r.RepoName, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
+    /// <summary>Returns the plain push list for <paramref name="workspaceFeatureContextId"/>: every workspace repo except that context's tag-pinned ones, ordered by name, with no dependency level and no required packages. Reads no projects or dependency rows.</summary>
+    public async Task<List<PushRepoPayload>> GetPushPayloadWithoutDependenciesAsync(int workspaceId, int workspaceFeatureContextId, CancellationToken cancellationToken = default)
+    {
+        var links = await dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Include(wr => wr.Repository)
+            .Where(wr => wr.WorkspaceId == workspaceId)
+            .ToListAsync(cancellationToken);
+        if (links.Count == 0) return new List<PushRepoPayload>();
+
+        var checkedOutTagByRepo = await GetContextCheckedOutTagByRepoAsync(workspaceId, workspaceFeatureContextId, cancellationToken);
+        var result = new List<PushRepoPayload>();
+        foreach (var link in links)
+        {
+            if (!string.IsNullOrWhiteSpace(checkedOutTagByRepo.GetValueOrDefault(link.RepositoryId)))
+                continue;
+            var repoName = link.Repository?.RepositoryName ?? "";
+            if (string.IsNullOrEmpty(repoName)) continue;
+            result.Add(new PushRepoPayload(link.RepositoryId, repoName, null, Array.Empty<RequiredPackageForPush>()));
+        }
+        return result.OrderBy(r => r.RepoName, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
     /// <summary>Legacy overload for callers without a context id: resolves the special Workspace context.</summary>
     public async Task<PushDependencyInfoForRepo?> GetPushDependencyInfoForRepoAsync(int workspaceId, int repositoryId, CancellationToken cancellationToken = default)
     {

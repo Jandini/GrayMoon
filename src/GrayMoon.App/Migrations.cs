@@ -35,6 +35,7 @@ public static partial class Migrations
     {
         (2, "B2 orphan cleanup and WorkspaceProjects foreign key", dbContext => MigrateFeatureContextOrphanCleanupAndWorkspaceProjectsForeignKeyAsync(dbContext)),
         (3, "E1 case-insensitive Feature name index", dbContext => MigrateFeatureNameIndexCollationAsync(dbContext)),
+        (4, "Workspace profile columns", dbContext => MigrateWorkspaceProfileColumnsAsync(dbContext)),
     };
 
     public static async Task RunAllAsync(AppDbContext dbContext, ILogger? logger = null)
@@ -393,6 +394,68 @@ public static partial class Migrations
             // Table doesn't exist yet (fresh db, EnsureCreated will create it with the columns already present).
             logger.LogError(ex, "Legacy migration step MigrateWorkspaceGitRepositoryStatusLineStatsAsync failed; continuing startup.");
         }
+    }
+
+    /// <summary>
+    /// Adds the three Workspaces profile columns (Type, VersioningMode, CiProvider) and, on the one run that
+    /// creates them, backfills every existing row to the .NET triple
+    /// (DotNetDependency / GitVersion / GitHubActions).
+    ///
+    /// The backfill is a compatibility requirement, not a convenience: every Workspace that exists at the
+    /// moment the columns are created predates workspace profiles, so it must keep behaving as a .NET
+    /// Dependency + GitVersion + GitHub Actions Workspace with no user action. It therefore runs only on the
+    /// branch that just created the columns. Once the columns exist their values are the user's own choices,
+    /// and an unconditional UPDATE would stomp a Workspace deliberately switched to Basic on the next startup.
+    ///
+    /// On a brand-new database the columns already exist, because EnsureCreated() built them from the model
+    /// with the Basic/None/None model defaults; nothing is added and the backfill correctly does not run - and
+    /// even if it did, there are no rows yet.
+    ///
+    /// Workspace type is never inferred from whether projects currently exist: a .NET Workspace may legitimately
+    /// have none right now.
+    ///
+    /// This is strict step 4, so it deliberately has no try/catch - a failure must propagate to
+    /// <see cref="RunStrictStepAsync"/> so the step rolls back and startup stops.
+    /// </summary>
+    public static async Task MigrateWorkspaceProfileColumnsAsync(AppDbContext dbContext, ILogger? logger = null)
+    {
+        logger ??= NullLogger.Instance;
+
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != ConnectionState.Open)
+            await conn.OpenAsync();
+
+        var addedAny = false;
+        foreach (var columnName in new[] { "Type", "VersioningMode", "CiProvider" })
+            addedAny |= await AddWorkspaceProfileColumnIfMissingAsync(conn, columnName);
+
+        if (!addedAny)
+            return;
+
+        await using var backfillCmd = conn.CreateCommand();
+        backfillCmd.CommandText = "UPDATE Workspaces SET Type = 1, VersioningMode = 1, CiProvider = 1";
+        var backfilled = await backfillCmd.ExecuteNonQueryAsync();
+
+        logger.LogInformation(
+            "Backfilled {RowCount} pre-profile Workspace row(s) to DotNetDependency / GitVersion / GitHubActions.",
+            backfilled);
+    }
+
+    /// <summary>
+    /// Adds one Workspaces profile column when it is absent. Returns true only when the column was actually
+    /// created, which is what makes the profile backfill run exactly once.
+    /// </summary>
+    private static async Task<bool> AddWorkspaceProfileColumnIfMissingAsync(DbConnection conn, string columnName)
+    {
+        await using var checkCmd = conn.CreateCommand();
+        checkCmd.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('Workspaces') WHERE name = '{columnName}'";
+        if (Convert.ToInt32(await checkCmd.ExecuteScalarAsync()) > 0)
+            return false;
+
+        await using var alterCmd = conn.CreateCommand();
+        alterCmd.CommandText = $"ALTER TABLE Workspaces ADD COLUMN {columnName} INTEGER NOT NULL DEFAULT 0";
+        await alterCmd.ExecuteNonQueryAsync();
+        return true;
     }
 
     private static async Task AddNullableIntegerColumnIfMissingAsync(System.Data.Common.DbConnection conn, string tableName, string columnName)

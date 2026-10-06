@@ -3,6 +3,7 @@
 @using GrayMoon.App.Models
 @using GrayMoon.App.Repositories
 @using GrayMoon.Application.Features
+@using GrayMoon.Application.Workspaces
 @using Microsoft.AspNetCore.SignalR.Client
 @inject WorkspacePendingActionsService PendingActionsService
 @inject IServiceScopeFactory ServiceScopeFactory
@@ -556,10 +557,15 @@
         return StartUpdateJobAsync(workspaceId);
     }
 
-    private Task StartUpdateJobAsync(int workspaceId)
+    private static string UpdateJobTitle(WorkspaceCapabilities capabilities) =>
+        capabilities.UsesDependencyAwareUpdate ? "Updating dependencies..." : "Updating version files...";
+
+    private async Task StartUpdateJobAsync(int workspaceId)
     {
         PendingActionsService.Dismiss(workspaceId);
-        JobService.StartJob(WorkspaceJobKey(workspaceId), "Updating dependencies...", async (job, ct) =>
+        await using var titleScope = ServiceScopeFactory.CreateAsyncScope();
+        var capabilities = await titleScope.ServiceProvider.GetRequiredService<IWorkspaceCapabilitiesResolver>().GetAsync(workspaceId);
+        JobService.StartJob(WorkspaceJobKey(workspaceId), UpdateJobTitle(capabilities), async (job, ct) =>
         {
             try
             {
@@ -595,7 +601,6 @@
                 throw;
             }
         });
-        return Task.CompletedTask;
     }
 
     private Task RunUpdateAndPushAsync(WorkspaceNotification notification)
@@ -619,11 +624,13 @@
         return StartUpdateAndPushJobAsync(notification);
     }
 
-    private Task StartUpdateAndPushJobAsync(WorkspaceNotification notification)
+    private async Task StartUpdateAndPushJobAsync(WorkspaceNotification notification)
     {
         var workspaceId = notification.WorkspaceId;
         PendingActionsService.Dismiss(workspaceId);
-        JobService.StartJob(WorkspaceJobKey(workspaceId), "Updating dependencies...", async (job, ct) =>
+        await using var titleScope = ServiceScopeFactory.CreateAsyncScope();
+        var capabilities = await titleScope.ServiceProvider.GetRequiredService<IWorkspaceCapabilitiesResolver>().GetAsync(workspaceId);
+        JobService.StartJob(WorkspaceJobKey(workspaceId), UpdateJobTitle(capabilities), async (job, ct) =>
         {
             List<WorkspaceRepositoryLink> freshLinks;
             try
@@ -678,7 +685,6 @@
                 throw;
             }
         });
-        return Task.CompletedTask;
     }
 
     private Task RunLevelOnlyUpdateAndPushAsync(WorkspaceNotification n)
@@ -859,9 +865,7 @@
     {
         await using var scope = ServiceScopeFactory.CreateAsyncScope();
         var pushOps = scope.ServiceProvider.GetRequiredService<IWorkspacePushOperations>();
-                var contextId = await ResolveOperationContextAsync(scope.ServiceProvider, workspaceId, ct);
-        var depService = scope.ServiceProvider.GetRequiredService<WorkspaceDependencyService>();
-        var workspaceRepoForNeedPush = scope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
+        var contextId = await ResolveOperationContextAsync(scope.ServiceProvider, workspaceId, ct);
 
         var plan = await pushOps.GetPlanAsync(workspaceId, contextId, maxLevel, ct);
         if (!plan.HasUnpushed || plan.RepositoryIds.Count == 0)
@@ -870,17 +874,24 @@
             return;
         }
 
-        var repoIdsThatNeedPush = await workspaceRepoForNeedPush.GetRepositoryIdsThatNeedPushForNotificationAsync(
-            workspaceId, contextId.Value, links.Select(l => l.RepositoryId).ToHashSet(), maxLevel, includeNeverPushedUpstream: false, ct);
+        var capabilities = await scope.ServiceProvider.GetRequiredService<IWorkspaceCapabilitiesResolver>().GetAsync(workspaceId, ct);
         var pushRepoIds = plan.RepositoryIds;
-        var depInfo = await depService.GetPushDependencyInfoForRepoSetAsync(workspaceId, contextId.Value, pushRepoIds, ct);
-        bool synchronizedPush = WorkspaceDependencyService.ShouldShowSynchronizedPushModal(depInfo, repoIdsThatNeedPush);
-
-        var requiredPackageIds = depInfo?.PayloadForRepo?.RequiredPackages
-            .Select(r => r.PackageId?.Trim())
-            .Where(id => !string.IsNullOrEmpty(id))
-            .Cast<string>()
-            .ToHashSet(StringComparer.OrdinalIgnoreCase) ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var synchronizedPush = false;
+        var requiredPackageIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (capabilities.UsesDependencyAwarePush)
+        {
+            var depService = scope.ServiceProvider.GetRequiredService<WorkspaceDependencyService>();
+            var workspaceRepoForNeedPush = scope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
+            var repoIdsThatNeedPush = await workspaceRepoForNeedPush.GetRepositoryIdsThatNeedPushForNotificationAsync(
+                workspaceId, contextId.Value, links.Select(l => l.RepositoryId).ToHashSet(), maxLevel, includeNeverPushedUpstream: false, ct);
+            var depInfo = await depService.GetPushDependencyInfoForRepoSetAsync(workspaceId, contextId.Value, pushRepoIds, ct);
+            synchronizedPush = WorkspaceDependencyService.ShouldShowSynchronizedPushModal(depInfo, repoIdsThatNeedPush);
+            requiredPackageIds = depInfo?.PayloadForRepo?.RequiredPackages
+                .Select(r => r.PackageId?.Trim())
+                .Where(id => !string.IsNullOrEmpty(id))
+                .Cast<string>()
+                .ToHashSet(StringComparer.OrdinalIgnoreCase) ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
 
         var pushResult = await pushOps.PushAsync(
             workspaceId,
@@ -926,6 +937,13 @@
         try
         {
             await using var scope = ServiceScopeFactory.CreateAsyncScope();
+            var capabilities = await scope.ServiceProvider.GetRequiredService<IWorkspaceCapabilitiesResolver>().GetAsync(workspaceId);
+            if (!capabilities.UsesDependencyAwarePush)
+            {
+                await StartPushSingleRepoJobAsync(workspaceId, repo.RepositoryId, repo.BranchName);
+                return;
+            }
+
             var depService = scope.ServiceProvider.GetRequiredService<WorkspaceDependencyService>();
             var contextId = await ResolveOperationContextAsync(scope.ServiceProvider, workspaceId, CancellationToken.None);
             IReadOnlySet<int> repoIdsThatNeedPush;

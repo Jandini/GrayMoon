@@ -1,6 +1,8 @@
 @implements IDisposable
 @inject NavigationManager NavigationManager
 @inject NavbarCollapseService NavbarCollapse
+@inject IWorkspacePageAccessResolver PageAccess
+@inject ILogger<NavMenu> Logger
 @using GrayMoon.App.Services
 
 @* Always rendered - hidden purely via CSS (.page--topbar-hidden .sidebar .top-row in
@@ -52,19 +54,25 @@
                     </NavLink>
                 </div>
 
-                <div class="nav-item px-3" data-nav-label="Projects">
-                    <NavLink class="nav-link" href="@WorkspaceHref("projects")" Match="NavLinkMatch.All" aria-label="Projects">
-                        <i class="bi bi-journal-code" aria-hidden="true"></i>
-                        <span class="nav-link-text">Projects</span>
-                    </NavLink>
-                </div>
+                @if (IsShown(WorkspacePage.Projects))
+                {
+                    <div class="nav-item px-3" data-nav-label="Projects">
+                        <NavLink class="nav-link" href="@WorkspaceHref("projects")" Match="NavLinkMatch.All" aria-label="Projects">
+                            <i class="bi bi-journal-code" aria-hidden="true"></i>
+                            <span class="nav-link-text">Projects</span>
+                        </NavLink>
+                    </div>
+                }
 
-                <div class="nav-item px-3" data-nav-label="Packages">
-                    <NavLink class="nav-link" href="@WorkspaceHref("packages")" Match="NavLinkMatch.All" aria-label="Packages">
-                        <i class="bi bi-box-seam" aria-hidden="true"></i>
-                        <span class="nav-link-text">Packages</span>
-                    </NavLink>
-                </div>
+                @if (IsShown(WorkspacePage.Packages))
+                {
+                    <div class="nav-item px-3" data-nav-label="Packages">
+                        <NavLink class="nav-link" href="@WorkspaceHref("packages")" Match="NavLinkMatch.All" aria-label="Packages">
+                            <i class="bi bi-box-seam" aria-hidden="true"></i>
+                            <span class="nav-link-text">Packages</span>
+                        </NavLink>
+                    </div>
+                }
 
                 <div class="nav-item px-3" data-nav-label="Files">
                     <NavLink class="nav-link" href="@WorkspaceHref("files")" Match="NavLinkMatch.All" aria-label="Files">
@@ -73,19 +81,25 @@
                     </NavLink>
                 </div>
 
-                <div class="nav-item px-3" data-nav-label="Dependencies">
-                    <NavLink class="nav-link" href="@WorkspaceHref("dependencies")" Match="NavLinkMatch.All" aria-label="Dependencies">
-                        <i class="bi bi-diagram-3" aria-hidden="true"></i>
-                        <span class="nav-link-text">Deps</span>
-                    </NavLink>
-                </div>
+                @if (IsShown(WorkspacePage.Dependencies))
+                {
+                    <div class="nav-item px-3" data-nav-label="Dependencies">
+                        <NavLink class="nav-link" href="@WorkspaceHref("dependencies")" Match="NavLinkMatch.All" aria-label="Dependencies">
+                            <i class="bi bi-diagram-3" aria-hidden="true"></i>
+                            <span class="nav-link-text">Deps</span>
+                        </NavLink>
+                    </div>
+                }
 
-                <div class="nav-item px-3" data-nav-label="Actions">
-                    <NavLink class="nav-link" href="@WorkspaceHref("actions")" Match="NavLinkMatch.All" aria-label="Actions">
-                        <i class="bi bi-play-circle" aria-hidden="true"></i>
-                        <span class="nav-link-text">Actions</span>
-                    </NavLink>
-                </div>
+                @if (IsShown(WorkspacePage.Actions))
+                {
+                    <div class="nav-item px-3" data-nav-label="Actions">
+                        <NavLink class="nav-link" href="@WorkspaceHref("actions")" Match="NavLinkMatch.All" aria-label="Actions">
+                            <i class="bi bi-play-circle" aria-hidden="true"></i>
+                            <span class="nav-link-text">Actions</span>
+                        </NavLink>
+                    </div>
+                }
             }
             else
             {
@@ -153,6 +167,9 @@
     private int? workspaceId;
     private string contextQuerySuffix = "";
     private int? contextId;
+    private IReadOnlyList<WorkspacePage> availablePages = WorkspacePageAccess.GetAvailablePages(null);
+
+    private bool IsShown(WorkspacePage page) => availablePages.Contains(page);
 
     protected override async Task OnInitializedAsync()
     {
@@ -173,7 +190,7 @@
         return basePath + contextQuerySuffix;
     }
 
-    private Task UpdateWorkspaceContextAsync()
+    private async Task UpdateWorkspaceContextAsync()
     {
         var relativePath = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
         var pathAndQuery = relativePath.Split('#')[0];
@@ -201,6 +218,7 @@
         {
             isWorkspaceView = true;
             workspaceId = parsedId;
+            availablePages = await ResolveAvailablePagesAsync(parsedId);
         }
         else
         {
@@ -208,9 +226,25 @@
             workspaceId = null;
             contextQuerySuffix = "";
             contextId = null;
+            availablePages = WorkspacePageAccess.GetAvailablePages(null);
         }
 
-        return InvokeAsync(StateHasChanged);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    // Read from persisted state on every rebuild; this component never joins a circuit, so there is no live
+    // capability state to subscribe to. A failed lookup falls back to the always-available pages only.
+    private async Task<IReadOnlyList<WorkspacePage>> ResolveAvailablePagesAsync(int id)
+    {
+        try
+        {
+            return await PageAccess.GetAvailablePagesAsync(id);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Could not resolve navigation pages for workspace {WorkspaceId}", id);
+            return WorkspacePageAccess.GetAvailablePages(null);
+        }
     }
 
     public void Dispose()

@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
 using GrayMoon.Abstractions.Worker;
@@ -61,12 +62,12 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
         };
         ApplyNonInteractiveGitEnvironment(startInfo, fileName);
 
-        using var process = Process.Start(startInfo);
+        using var process = StartOrNull(startInfo, out var startFailure);
         if (process == null)
         {
             sw.Stop();
             logger.LogDebug("Command {Executable} {Parameters} completed in {ElapsedMs}ms (ExitCode=-1)", fileName, LogSafe.ForLog(arguments), sw.ElapsedMilliseconds);
-            return new CommandLineResult(-1, null, "Failed to start process");
+            return new CommandLineResult(-1, null, startFailure);
         }
 
         // Timeout and stream consumers must start before any stdin write: a child that emits stdout while
@@ -164,12 +165,12 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
             startInfo.ArgumentList.Add(argument);
         }
 
-        using var process = Process.Start(startInfo);
+        using var process = StartOrNull(startInfo, out var startFailure);
         if (process == null)
         {
             sw.Stop();
             logger.LogDebug("Command {Executable} {Parameters} completed in {ElapsedMs}ms (ExitCode=-1)", fileName, loggedArguments, sw.ElapsedMilliseconds);
-            return new CommandLineResult(-1, null, "Failed to start process");
+            return new CommandLineResult(-1, null, startFailure);
         }
 
         // See the string-stdin overload: consumers + timeout before stdin write avoid pipe deadlocks
@@ -220,6 +221,32 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
             MirrorCombinedOutputAsStderr(stdout, stderr);
 
         return new CommandLineResult(process.ExitCode, stdout, stderr);
+    }
+
+    /// <summary>
+    /// Starts the process, or returns null with a reason. A missing executable (typical for
+    /// <c>dotnet-gitversion</c> on a host that has not installed it) must not throw: callers treat
+    /// exit code -1 as "did not run", the same as <see cref="Process.Start(ProcessStartInfo)"/> returning null.
+    /// </summary>
+    private static Process? StartOrNull(ProcessStartInfo startInfo, out string failure)
+    {
+        try
+        {
+            var process = Process.Start(startInfo);
+            if (process is null)
+            {
+                failure = "Failed to start process";
+                return null;
+            }
+
+            failure = "";
+            return process;
+        }
+        catch (Exception ex) when (ex is Win32Exception or FileNotFoundException)
+        {
+            failure = ex.Message;
+            return null;
+        }
     }
 
     /// <summary>

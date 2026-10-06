@@ -4,7 +4,7 @@ using GrayMoon.Worker.Jobs.Response;
 
 namespace GrayMoon.Worker.Commands;
 
-public sealed class GetGitVersionAtDefaultTipCommand(IGitService git)
+public sealed class GetGitVersionAtDefaultTipCommand(IGitService git, IRepositoryVersionProvider versionProvider)
     : ICommandHandler<GetGitVersionAtDefaultTipRequest, GetGitVersionAtDefaultTipResponse>
 {
     public async Task<GetGitVersionAtDefaultTipResponse> ExecuteAsync(
@@ -48,8 +48,12 @@ public sealed class GetGitVersionAtDefaultTipCommand(IGitService git)
             };
         }
 
-        var (vr, error) = await git.GetVersionAsync(repoPath, nonNormalize: true, commitSha: sha, cancellationToken);
-        var version = vr?.InformationalVersion;
+        var versionResult = await versionProvider.GetVersionAsync(
+            repoPath,
+            new RepositoryVersionOptions { NonNormalize = true, CommitSha = sha },
+            cancellationToken);
+        var error = versionResult.Error;
+        var version = versionResult.InformationalVersion;
         if (string.IsNullOrWhiteSpace(version))
         {
             return new GetGitVersionAtDefaultTipResponse

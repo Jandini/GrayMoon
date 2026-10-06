@@ -49,7 +49,8 @@ public sealed class CommandDispatcher(
     ICommandHandler<CreateGitWorktreeRequest, CreateGitWorktreeResponse> createGitWorktreeCommand,
     ICommandHandler<RemoveGitWorktreeRequest, RemoveGitWorktreeResponse> removeGitWorktreeCommand,
     ICommandHandler<GetGitVersionAtDefaultTipRequest, GetGitVersionAtDefaultTipResponse> getGitVersionAtDefaultTipCommand,
-    ICommandHandler<InspectWorktreeRequest, InspectWorktreeResponse> inspectWorktreeCommand) : ICommandDispatcher
+    ICommandHandler<InspectWorktreeRequest, InspectWorktreeResponse> inspectWorktreeCommand,
+    IWorkspaceCapabilityProvider capabilityProvider) : ICommandDispatcher
     {
     private readonly IReadOnlyDictionary<string, Func<object, CancellationToken, Task<object?>>> _executors = new Dictionary<string, Func<object, CancellationToken, Task<object?>>>(StringComparer.Ordinal)
     {
@@ -101,8 +102,50 @@ public sealed class CommandDispatcher(
 
     public Task<object?> ExecuteAsync(string commandName, object request, CancellationToken cancellationToken = default)
     {
+        WarmWorkspaceCapabilities(request);
         if (_executors.TryGetValue(commandName, out var executor))
             return executor(request, cancellationToken);
         throw new NotSupportedException($"Unknown command: {commandName}");
+    }
+
+    /// <summary>
+    /// Every app-initiated command carries the workspace's capabilities, so this is the one place the worker
+    /// can learn them for free. The git hooks have no request of their own and read the cache this fills; a
+    /// cold miss costs them an HTTP call to the app.
+    /// </summary>
+    private void WarmWorkspaceCapabilities(object request)
+    {
+        // Only requests that identify a workspace can warm anything, which is why this is an explicit list
+        // rather than a check on the WorkspaceCommandRequest base class.
+        switch (request)
+        {
+            case SyncRepositoryRequest r:
+                capabilityProvider.Remember(r.WorkspaceId, r.Capabilities);
+                break;
+            case CommitSyncRepositoryRequest r:
+                capabilityProvider.Remember(r.WorkspaceId, r.Capabilities);
+                break;
+            case PushRepositoryRequest r:
+                capabilityProvider.Remember(r.WorkspaceId, r.Capabilities);
+                break;
+            case UndoPushRequest r:
+                capabilityProvider.Remember(r.WorkspaceId, r.Capabilities);
+                break;
+            case FetchCommitsRequest r:
+                capabilityProvider.Remember(r.WorkspaceId, r.Capabilities);
+                break;
+            case GetGitChangeStatusRequest r:
+                capabilityProvider.Remember(r.WorkspaceId, r.Capabilities);
+                break;
+            case ReturnToDefaultBranchRequest r:
+                capabilityProvider.Remember(r.WorkspaceId, r.Capabilities);
+                break;
+            case CreateBranchRequest r:
+                capabilityProvider.Remember(r.WorkspaceId, r.Capabilities);
+                break;
+            case CreateGitWorktreeRequest { WorkspaceId: { } worktreeWorkspaceId } r:
+                capabilityProvider.Remember(worktreeWorkspaceId, r.Capabilities);
+                break;
+        }
     }
 }

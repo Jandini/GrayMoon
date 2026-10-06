@@ -5,7 +5,11 @@ using GrayMoon.Worker.Services;
 
 namespace GrayMoon.Worker.Commands;
 
-public sealed class CommitSyncRepositoryCommand(IGitService git, GitRemoteIntegrateService remoteIntegrate, IRepositoryStateProbe stateProbe) : ICommandHandler<CommitSyncRepositoryRequest, CommitSyncRepositoryResponse>
+public sealed class CommitSyncRepositoryCommand(
+    IGitService git,
+    GitRemoteIntegrateService remoteIntegrate,
+    IRepositoryStateProbe stateProbe,
+    IRepositoryVersionProviderFactory versionProviderFactory) : ICommandHandler<CommitSyncRepositoryRequest, CommitSyncRepositoryResponse>
 {
     public async Task<CommitSyncRepositoryResponse> ExecuteAsync(CommitSyncRepositoryRequest request, CancellationToken cancellationToken = default)
     {
@@ -52,25 +56,25 @@ public sealed class CommitSyncRepositoryCommand(IGitService git, GitRemoteIntegr
                 {
                     Success = false,
                     MergeConflict = integrate.MergeConflict,
-                    Version = await ResolveVersionAsync(repoPath, cancellationToken),
+                    Version = await ResolveVersionAsync(repoPath, request, cancellationToken),
                     ErrorMessage = integrate.ErrorMessage
                 };
             }
 
-            return await BuildStateResponseAsync(repoPath, integrate.Branch, success: false, integrate.MergeConflict, integrate.ErrorMessage, cancellationToken);
+            return await BuildStateResponseAsync(repoPath, request, integrate.Branch, success: false, integrate.MergeConflict, integrate.ErrorMessage, cancellationToken);
         }
 
         var branch = integrate.Branch!;
         var outgoing = integrate.Outgoing;
 
         if (!outgoing.HasValue || outgoing.Value <= 0)
-            return await BuildStateResponseAsync(repoPath, branch, success: true, mergeConflict: false, errorMessage: null, cancellationToken);
+            return await BuildStateResponseAsync(repoPath, request, branch, success: true, mergeConflict: false, errorMessage: null, cancellationToken);
 
         var (pushSuccess, pushError) = await git.PushAsync(repoPath, branch, bearerToken, setTracking: false, ct: cancellationToken);
         if (!pushSuccess)
-            return await BuildStateResponseAsync(repoPath, branch, success: false, mergeConflict: false, pushError ?? "Push failed", cancellationToken);
+            return await BuildStateResponseAsync(repoPath, request, branch, success: false, mergeConflict: false, pushError ?? "Push failed", cancellationToken);
 
-        return await BuildStateResponseAsync(repoPath, branch, success: true, mergeConflict: false, errorMessage: null, cancellationToken);
+        return await BuildStateResponseAsync(repoPath, request, branch, success: true, mergeConflict: false, errorMessage: null, cancellationToken);
     }
 
     /// <summary>
@@ -80,6 +84,7 @@ public sealed class CommitSyncRepositoryCommand(IGitService git, GitRemoteIntegr
     /// </summary>
     private async Task<CommitSyncRepositoryResponse> BuildStateResponseAsync(
         string repoPath,
+        CommitSyncRepositoryRequest request,
         string branch,
         bool success,
         bool mergeConflict,
@@ -90,7 +95,8 @@ public sealed class CommitSyncRepositoryCommand(IGitService git, GitRemoteIntegr
         {
             IncludeGitVersion = true,
             BranchNameOverride = branch,
-            ErrorMessage = errorMessage
+            ErrorMessage = errorMessage,
+            Capabilities = request.Capabilities
         }, cancellationToken);
 
         return new CommitSyncRepositoryResponse
@@ -109,10 +115,12 @@ public sealed class CommitSyncRepositoryCommand(IGitService git, GitRemoteIntegr
         };
     }
 
-    private async Task<string> ResolveVersionAsync(string repoPath, CancellationToken cancellationToken)
+    private async Task<string> ResolveVersionAsync(string repoPath, CommitSyncRepositoryRequest request, CancellationToken cancellationToken)
     {
-        var (versionResult, _) = await git.GetVersionAsync(repoPath, cancellationToken);
-        return versionResult?.InformationalVersion ?? "-";
+        var versionResult = await versionProviderFactory
+            .Create(request.EffectiveCapabilities)
+            .GetVersionAsync(repoPath, RepositoryVersionOptions.Default, cancellationToken);
+        return versionResult.VersionOrPlaceholder;
     }
 }
 

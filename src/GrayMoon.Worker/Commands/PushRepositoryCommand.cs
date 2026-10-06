@@ -13,6 +13,7 @@ namespace GrayMoon.Worker.Commands;
 public sealed class PushRepositoryCommand(
     IGitService git,
     ICsProjFileService csProjFileService,
+    IRepositoryVersionProviderFactory versionProviderFactory,
     GitRemoteIntegrateService remoteIntegrate,
     IHubConnectionProvider hubProvider,
     ILogger<PushRepositoryCommand> logger) : ICommandHandler<PushRepositoryRequest, PushRepositoryResponse>
@@ -100,61 +101,92 @@ public sealed class PushRepositoryCommand(
     private Task SendPostOperationSyncIfRequestedAsync(PushRepositoryRequest request, string repoPath, string branch)
     {
         if (request.RefreshVersionAfterPush)
-            return SendPostOperationSyncAsync(request.WorkspaceId, request.RepositoryId, repoPath, branch, versionOnly: true);
+            return SendPostOperationSyncAsync(request, repoPath, branch, versionOnly: true);
 
-        _ = SendPostOperationSyncAsync(request.WorkspaceId, request.RepositoryId, repoPath, branch, versionOnly: false);
+        _ = SendPostOperationSyncAsync(request, repoPath, branch, versionOnly: false);
         return Task.CompletedTask;
     }
 
-    private async Task SendPostOperationSyncAsync(int workspaceId, int repositoryId, string repoPath, string branch, bool versionOnly)
+    private async Task SendPostOperationSyncAsync(PushRepositoryRequest request, string repoPath, string branch, bool versionOnly)
     {
         try
         {
             var connection = hubProvider.Connection;
             if (connection?.State != HubConnectionState.Connected) return;
 
-            var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, CancellationToken.None);
-            int? outgoing = null;
-            int? incoming = null;
-            bool? hasUpstream = null;
-            int? defaultBehind = null;
-            int? defaultAhead = null;
-            if (!versionOnly)
-            {
-                var divergenceRef = git.ToOriginBranchRef(await git.GetDivergenceBaseBranchAsync(repoPath, CancellationToken.None))
-                    ?? defaultRef;
-                (outgoing, incoming, hasUpstream) = await git.GetCommitCountsAsync(repoPath, branch, defaultRef, CancellationToken.None);
-                (defaultBehind, defaultAhead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, CancellationToken.None);
-            }
-
-            var (versionResult, _) = await git.GetVersionAsync(repoPath, nonNormalize: true, CancellationToken.None);
-            var version = versionResult?.InformationalVersion ?? "-";
-            var versionBranch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? branch;
-            var projects = await csProjFileService.FindAsync(repoPath, CancellationToken.None);
-
-            var notification = new RepositorySyncNotification
-            {
-                WorkspaceId = workspaceId,
-                RepositoryId = repositoryId,
-                // Required for Feature attribution - null path is treated as special Workspace and
-                // would mirror this worktree's branch onto the shared WorkspaceRepositoryLink.
-                RepositoryPath = repoPath,
-                Version = version,
-                Branch = versionBranch,
-                OutgoingCommits = outgoing,
-                IncomingCommits = incoming,
-                HasUpstream = hasUpstream,
-                DefaultBranchBehind = defaultBehind,
-                DefaultBranchAhead = defaultAhead,
-                Projects = RepositorySyncProjectMapper.ToNotifications(projects),
-            };
+            var notification = await BuildPostOperationNotificationAsync(request, repoPath, branch, versionOnly);
             await connection.InvokeAsync(WorkerHubMethods.SyncCommand, notification, CancellationToken.None);
             logger.LogInformation("Post-push SyncCommand sent: workspace={WorkspaceId}, repo={RepoId}, outgoing={Outgoing}, versionOnly={VersionOnly}",
-                workspaceId, repositoryId, outgoing, versionOnly);
+                request.WorkspaceId, request.RepositoryId, notification.OutgoingCommits, versionOnly);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Post-push SyncCommand failed for repo {RepoId}", repositoryId);
+            logger.LogWarning(ex, "Post-push SyncCommand failed for repo {RepoId}", request.RepositoryId);
         }
+    }
+
+    internal async Task<RepositorySyncNotification> BuildPostOperationNotificationAsync(PushRepositoryRequest request, string repoPath, string branch, bool versionOnly)
+    {
+        var capabilities = request.EffectiveCapabilities;
+        var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, CancellationToken.None);
+        int? outgoing = null;
+        int? incoming = null;
+        bool? hasUpstream = null;
+        int? defaultBehind = null;
+        int? defaultAhead = null;
+        if (!versionOnly)
+        {
+            var divergenceRef = git.ToOriginBranchRef(await git.GetDivergenceBaseBranchAsync(repoPath, CancellationToken.None))
+                ?? defaultRef;
+            (outgoing, incoming, hasUpstream) = await git.GetCommitCountsAsync(repoPath, branch, defaultRef, CancellationToken.None);
+            (defaultBehind, defaultAhead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, CancellationToken.None);
+        }
+
+        var versionResult = await versionProviderFactory
+            .Create(capabilities)
+            .GetVersionAsync(repoPath, new RepositoryVersionOptions { NonNormalize = true }, CancellationToken.None);
+        var versionBranch = versionResult.Result?.BranchName ?? versionResult.Result?.EscapedBranchName ?? branch;
+        List<RepositorySyncProjectNotification>? syncProjects = null;
+        var projectsProbed = capabilities.ShouldDiscoverProjects;
+        if (projectsProbed)
+        {
+            var projects = await csProjFileService.FindAsync(repoPath, CancellationToken.None);
+            syncProjects = RepositorySyncProjectMapper.ToNotifications(projects);
+        }
+
+        return new RepositorySyncNotification
+        {
+            WorkspaceId = request.WorkspaceId,
+            RepositoryId = request.RepositoryId,
+            // Required for Feature attribution - null path is treated as special Workspace and
+            // would mirror this worktree's branch onto the shared WorkspaceRepositoryLink.
+            RepositoryPath = repoPath,
+            Version = versionResult.VersionOrPlaceholder,
+            Branch = versionBranch,
+            OutgoingCommits = outgoing,
+            IncomingCommits = incoming,
+            HasUpstream = hasUpstream,
+            DefaultBranchBehind = defaultBehind,
+            DefaultBranchAhead = defaultAhead,
+            Projects = syncProjects,
+            // A version-only pass deliberately skips the counts, and a skipped enrichment step reports
+            // itself as not probed, so the persisted values survive.
+            State = new RepositoryStateSnapshot
+            {
+                BranchName = versionBranch,
+                GitVersion = versionResult.InformationalVersion,
+                OutgoingCommits = outgoing,
+                IncomingCommits = incoming,
+                DefaultBranchBehind = defaultBehind,
+                DefaultBranchAhead = defaultAhead,
+                HasUpstream = hasUpstream,
+                Projects = syncProjects,
+                IdentityProbed = true,
+                GitVersionProbed = versionResult.Probed,
+                CommitCountsProbed = outgoing.HasValue || incoming.HasValue,
+                UpstreamProbed = hasUpstream.HasValue,
+                ProjectsProbed = projectsProbed,
+            }
+        };
     }
 }

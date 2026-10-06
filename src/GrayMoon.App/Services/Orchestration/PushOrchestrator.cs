@@ -1,80 +1,38 @@
-using Microsoft.Extensions.DependencyInjection;
 using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Services.Orchestration;
 
 /// <summary>
-/// Push workflow orchestrator: optionally sync required package registries, then push repositories either
-/// dependency-synchronized (level-ordered with package wait) or non-synchronized (parallel).
-/// Stateless; all UI state is owned by the caller.
+/// Push workflow orchestrator: runs the push through the strategy the caller selected for the workspace and
+/// folds repository and level failures into one result. Stateless; all UI state is owned by the caller.
 /// </summary>
 public sealed class PushOrchestrator(
     WorkspacePushService workspacePushService,
-    IServiceProvider serviceProvider,
     ILogger<PushOrchestrator> logger)
 {
     public async Task<OperationResult> RunAsync(
-        int workspaceId,
-        WorkspaceFeatureContextId contextId,
-        IReadOnlySet<int> repoIds,
-        bool synchronizedPush,
-        IReadOnlySet<string> requiredPackageIds,
+        IWorkspacePushStrategy strategy,
+        WorkspacePushRun run,
         IProgress<OperationProgress>? progress = null,
         Action? onAppSideComplete = null,
-        IReadOnlySet<int>? syncedRepoIds = null,
-        CancellationToken cancellationToken = default,
-        string? runId = null,
-        bool restorePackages = true)
+        CancellationToken cancellationToken = default)
     {
         logger.LogInformation(
-            "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: starting push. Mode={Mode}, RepoCount={RepoCount}, RequiredPackages={RequiredPackages}",
-            runId, workspaceId, synchronizedPush ? "synchronized" : "parallel", repoIds.Count, requiredPackageIds.Count);
+            "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: starting push. Strategy={Strategy}, Mode={Mode}, RepoCount={RepoCount}, RequiredPackages={RequiredPackages}",
+            run.RunId, run.WorkspaceId, strategy.GetType().Name, run.SynchronizedPush ? "synchronized" : "parallel", run.RepositoryIds.Count, run.RequiredPackageIds.Count);
 
         var setProgress = progress.ToMessageAction();
         var repoErrors = new System.Collections.Concurrent.ConcurrentDictionary<int, string>();
         var levelErrors = new System.Collections.Concurrent.ConcurrentDictionary<int, string>();
         var sink = new OperationErrorSink(
-            workspaceId,
+            run.WorkspaceId,
             logger,
             (id, err) => repoErrors[id] = err,
             (level, err) => levelErrors[level] = err);
 
         try
         {
-            if (synchronizedPush)
-            {
-                setProgress("Syncing package registries for required packages...");
-                if (requiredPackageIds.Count > 0 && serviceProvider.GetService<PackageRegistrySyncService>() is { } syncService)
-                    await syncService.SyncRegistriesForPackageIdsAsync(workspaceId, requiredPackageIds, cancellationToken);
-
-                setProgress("Pushing synchronized...");
-                await workspacePushService.RunPushAsync(
-                    workspaceId,
-                    contextId,
-                    repoIds,
-                    setProgress,
-                    sink.Repository,
-                    sink.Level,
-                    onAppSideComplete,
-                    packageRegistriesAlreadySynced: requiredPackageIds.Count > 0,
-                    syncedRepoIds: syncedRepoIds,
-                    cancellationToken: cancellationToken,
-                    runId: runId,
-                    restorePackages: restorePackages);
-            }
-            else
-            {
-                setProgress("Pushing...");
-                await workspacePushService.RunPushReposParallelAsync(
-                    workspaceId,
-                    contextId,
-                    repoIds,
-                    setProgress,
-                    sink.Repository,
-                    sink.Level,
-                    onAppSideComplete: null,
-                    cancellationToken: cancellationToken);
-            }
+            await strategy.PushAsync(run, setProgress, sink.Repository, sink.Level, onAppSideComplete, cancellationToken);
         }
         catch (SynchronizedPushNotPossibleException)
         {
@@ -89,7 +47,7 @@ public sealed class PushOrchestrator(
             sink.Level(0, ex);
         }
 
-        logger.LogInformation("[PushOrchestrator {RunId}] Workspace {WorkspaceId}: push finished.", runId, workspaceId);
+        logger.LogInformation("[PushOrchestrator {RunId}] Workspace {WorkspaceId}: push finished.", run.RunId, run.WorkspaceId);
         return PushOperationResult.FromErrors(repoErrors, levelErrors);
     }
 

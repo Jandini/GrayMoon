@@ -10,3 +10,8 @@
 ::deep .modal-body {
     overflow-y: auto;
 }
+
+::deep .form-check-input:not(:checked) {
+    background-color: #6c757d;
+    border-color: #6c757d;
+}

@@ -258,7 +258,14 @@ public sealed partial class WorkspaceGitService
         var r = WorkerResponseJson.DeserializeWorkerResponse<WorkerGetRepositoryVersionResponse>(data);
         if (r == null || !r.Exists)
             return RepoSyncStatus.NotCloned;
-        if (string.IsNullOrEmpty(r.Version) || string.IsNullOrEmpty(r.Branch))
+        if (string.IsNullOrEmpty(r.Branch))
+            return RepoSyncStatus.VersionMismatch;
+        // A workspace that does not version its repositories has no version to compare, so only the branch
+        // decides. An older worker omits the flag, which still means it ran a provider and so an empty
+        // version is a failure.
+        if (r.VersionProbed == false)
+            return r.Branch == persistedBranch ? RepoSyncStatus.InSync : RepoSyncStatus.VersionMismatch;
+        if (string.IsNullOrEmpty(r.Version))
             return RepoSyncStatus.VersionMismatch;
         return (r.Version == persistedVersion && r.Branch == persistedBranch) ? RepoSyncStatus.InSync : RepoSyncStatus.VersionMismatch;
     }

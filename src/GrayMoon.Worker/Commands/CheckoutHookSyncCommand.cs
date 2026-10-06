@@ -12,7 +12,13 @@ namespace GrayMoon.Worker.Commands;
 /// upstream/default comparisons correct without paying the cost of a full fetch of all branches
 /// and tags (full fetch is done by Sync and branch list flows).
 /// </summary>
-public sealed class CheckoutHookSyncCommand(IGitService git, IRepositoryStateProbe stateProbe, IWorkerTokenProvider tokenProvider, IHubConnectionProvider hubProvider, ILogger<CheckoutHookSyncCommand> logger)
+public sealed class CheckoutHookSyncCommand(
+    IGitService git,
+    IRepositoryStateProbe stateProbe,
+    IWorkerTokenProvider tokenProvider,
+    IWorkspaceCapabilityProvider capabilityProvider,
+    IHubConnectionProvider hubProvider,
+    ILogger<CheckoutHookSyncCommand> logger)
 {
     public async Task ExecuteAsync(INotifyJob payload, CancellationToken cancellationToken = default)
     {
@@ -21,6 +27,9 @@ public sealed class CheckoutHookSyncCommand(IGitService git, IRepositoryStatePro
             logger.LogWarning("CheckoutHookSync job missing repositoryPath");
             return;
         }
+
+        // There is no app request to carry capabilities on this path, so they are resolved here.
+        var capabilities = await capabilityProvider.GetAsync(payload.WorkspaceId, cancellationToken);
 
         // Resolve default origin ref once so minimal fetch and the probe's commit-count calls share it.
         var defaultRef = await git.GetDefaultBranchOriginRefAsync(payload.RepositoryPath, cancellationToken);
@@ -59,7 +68,8 @@ public sealed class CheckoutHookSyncCommand(IGitService git, IRepositoryStatePro
             // Remote branches let the app prune deleted ones; the full branch/tag lists are the Sync flow's job.
             IncludeRemoteBranchesOnly = true,
             DefaultBranchOriginRef = defaultRef,
-            ErrorMessage = fetchError
+            ErrorMessage = fetchError,
+            Capabilities = capabilities
         }, cancellationToken);
 
         // When on a tag, fetch remote tags so the app can compare and show an "upgrade" badge.

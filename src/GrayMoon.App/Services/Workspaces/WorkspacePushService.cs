@@ -5,7 +5,10 @@ using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
+using GrayMoon.App.Services.Ci;
+using GrayMoon.Abstractions.Workspaces;
 using GrayMoon.Application.Features;
+using GrayMoon.Application.Workspaces;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
@@ -28,14 +31,14 @@ public sealed class WorkspacePushService(
     Microsoft.Extensions.Options.IOptions<WorkspaceOptions> workspaceOptions,
     IWorkspaceFeatureContextResolver contextResolver,
     IWorkspaceContextPathResolver pathResolver,
+    IWorkspaceCapabilitiesResolver capabilitiesResolver,
     ILogger<WorkspacePushService> logger,
     IHubContext<WorkspaceSyncHub>? hubContext = null,
     PackageRegistrySyncService? packageRegistrySyncService = null,
     NuGetService? nuGetService = null,
     ConnectorRepository? connectorRepository = null,
     ConnectorHealthService? connectorHealthService = null,
-    GitHubActionsService? gitHubActionsService = null,
-    GhaWorkflowLiveFeedService? ghaWorkflowLiveFeedService = null,
+    IWorkspaceCiProviderResolver? ciProviderResolver = null,
     OverlayCommandTerminalService? overlayCommandTerminalService = null)
 {
     private readonly IWorkerBridge _workerBridge = workerBridge ?? throw new ArgumentNullException(nameof(workerBridge));
@@ -48,6 +51,7 @@ public sealed class WorkspacePushService(
     private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
     private readonly IWorkspaceFeatureContextResolver _contextResolver = contextResolver ?? throw new ArgumentNullException(nameof(contextResolver));
     private readonly IWorkspaceContextPathResolver _pathResolver = pathResolver ?? throw new ArgumentNullException(nameof(pathResolver));
+    private readonly IWorkspaceCapabilitiesResolver _capabilitiesResolver = capabilitiesResolver ?? throw new ArgumentNullException(nameof(capabilitiesResolver));
     private readonly ILogger<WorkspacePushService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly int _maxConcurrent = Math.Max(1, workspaceOptions?.Value?.MaxParallelOperations ?? 16);
     private readonly IHubContext<WorkspaceSyncHub>? _hubContext = hubContext;
@@ -55,8 +59,7 @@ public sealed class WorkspacePushService(
     private readonly NuGetService? _nuGetService = nuGetService;
     private readonly ConnectorRepository? _connectorRepository = connectorRepository;
     private readonly ConnectorHealthService? _connectorHealthService = connectorHealthService;
-    private readonly GitHubActionsService? _gitHubActionsService = gitHubActionsService;
-    private readonly GhaWorkflowLiveFeedService? _ghaWorkflowLiveFeedService = ghaWorkflowLiveFeedService;
+    private readonly IWorkspaceCiProviderResolver? _ciProviderResolver = ciProviderResolver;
     private readonly OverlayCommandTerminalService? _overlayCommandTerminalService = overlayCommandTerminalService;
 
     /// <summary>Gets the push plan for the special Workspace context: all workspace repos by dependency level. Legacy overload for callers without a context id.</summary>
@@ -76,6 +79,10 @@ public sealed class WorkspacePushService(
         var isMultiLevel = levels.Count > 1;
         return (payload, isMultiLevel);
     }
+
+    /// <summary>Gets the plain push list scoped to <paramref name="workspaceFeatureContextId"/>: every non-tag-pinned repo, without dependency levels or required packages.</summary>
+    public async Task<IReadOnlyList<PushRepoPayload>> GetPushPayloadWithoutDependenciesAsync(int workspaceId, int workspaceFeatureContextId, CancellationToken cancellationToken = default)
+        => await _workspaceProjectRepository.GetPushPayloadWithoutDependenciesAsync(workspaceId, workspaceFeatureContextId, cancellationToken);
 
     /// <summary>
     /// Runs dependency-synchronized push: sync package registries (unless already done by caller), then push by level (lowest first).
@@ -180,6 +187,9 @@ public sealed class WorkspacePushService(
         var levelsAsc = payload.Select(p => p.DependencyLevel ?? 0).Distinct().OrderBy(x => x).ToList();
         var lastLevel = levelsAsc[^1];
         var pushedRepos = new List<PushRepoPayload>();
+        var ciProvider = _ciProviderResolver == null
+            ? NoCiProvider.Instance
+            : await _ciProviderResolver.GetForWorkspaceAsync(workspaceId, cancellationToken);
         _logger.LogInformation(
             "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: {LevelCount} level(s) to push: {Levels}",
             runId, workspaceId, levelsAsc.Count,
@@ -219,11 +229,7 @@ public sealed class WorkspacePushService(
                 var deadline = DateTime.UtcNow + totalTimeout;
                 var foundByIndex = new bool[totalDeps];
                 var foundLock = new object();
-                var ghaFeedByRunKey = new Dictionary<string, GhaWorkflowLiveFeedState>(StringComparer.Ordinal);
-                var noWorkflowRepoIds = new HashSet<int>();
-                var ghaDiscoveryEnabled = true;
-                var lastGhaDiscoveryUtc = DateTime.MinValue;
-                var lastGhaPollUtc = DateTime.MinValue;
+                var ciRunWatch = ciProvider.CreatePushRunWatch(_overlayCommandTerminalService);
                 int getFoundCount()
                 {
                     lock (foundLock) { return foundByIndex.Count(x => x); }
@@ -267,32 +273,7 @@ public sealed class WorkspacePushService(
                     var ss = totalSec % 60;
                     levelProgress?.Invoke($"{line1}\n{mm:D2}:{ss:D2}");
 
-                    if (_gitHubActionsService != null
-                        && _ghaWorkflowLiveFeedService != null
-                        && _overlayCommandTerminalService != null
-                        && ghaDiscoveryEnabled)
-                    {
-                        if ((DateTime.UtcNow - lastGhaDiscoveryUtc).TotalSeconds >= 6)
-                        {
-                            lastGhaDiscoveryUtc = DateTime.UtcNow;
-                            _ = await DiscoverRunningWorkflowsForLevelAsync(
-                                pushedRepos,
-                                links,
-                                ghaFeedByRunKey,
-                                noWorkflowRepoIds,
-                                linkedToken);
-
-                            // Permanently disable only when every previously-pushed repo is confirmed to have no workflows at all.
-                            if (pushedRepos.Count > 0 && pushedRepos.All(r => noWorkflowRepoIds.Contains(r.RepoId)))
-                                ghaDiscoveryEnabled = false;
-                        }
-
-                        if (ghaFeedByRunKey.Count > 0 && (DateTime.UtcNow - lastGhaPollUtc).TotalMilliseconds >= GhaWorkflowLiveFeedService.PollIntervalActiveMs)
-                        {
-                            lastGhaPollUtc = DateTime.UtcNow;
-                            await PumpGhaLiveFeedIntoOverlayAsync(ghaFeedByRunKey.Values, linkedToken);
-                        }
-                    }
+                    await ciRunWatch.TickAsync(pushedRepos, links, linkedToken);
 
                     if ((DateTime.UtcNow - lastPollUtc).TotalSeconds >= 2)
                     {
@@ -455,6 +436,7 @@ public sealed class WorkspacePushService(
         if (_connectorHealthService != null)
             await _connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepositoryId, cancellationToken);
 
+        var capabilities = await ResolveRepositoryOperationCapabilitiesAsync(workspaceId, cancellationToken);
         var args = new
         {
             workspaceName = workspaceFolderName,
@@ -463,7 +445,8 @@ public sealed class WorkspacePushService(
             bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
             workspaceId,
             workspaceRoot,
-            branchName = string.IsNullOrWhiteSpace(branchName) ? null : branchName.Trim()
+            branchName = string.IsNullOrWhiteSpace(branchName) ? null : branchName.Trim(),
+            capabilities
         };
 
         var response = await _workerBridge.SendCommandAsync("PushRepository", args, cancellationToken);
@@ -567,7 +550,46 @@ public sealed class WorkspacePushService(
             throw new InvalidOperationException($"Workspace {workspaceId} not found.");
 
         var fullPayload = await _workspaceDependencyService.GetPushPlanPayloadAsync(workspaceId, contextId.Value, cancellationToken);
-        var payload = fullPayload.Where(p => repoIds.Contains(p.RepoId)).ToList();
+        await RunPushReposParallelAsync(workspace, contextId, fullPayload, repoIds, onProgressMessage, onRepoError, onAppSideComplete, cancellationToken);
+    }
+
+    /// <summary>
+    /// Pushes the <paramref name="repoIds"/> subset of an already-built <paramref name="fullPayload"/> in parallel, without
+    /// dependency ordering or waiting for packages. Lets a caller that built the payload without dependency data push it
+    /// without this service reading any.
+    /// </summary>
+    public async Task RunPushReposParallelAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        IReadOnlyList<PushRepoPayload> fullPayload,
+        IReadOnlySet<int> repoIds,
+        Action<string>? onProgressMessage = null,
+        Action<int, string>? onRepoError = null,
+        Action? onAppSideComplete = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_workerBridge.IsWorkerConnected)
+            throw new InvalidOperationException("Worker not connected. Start the GrayMoon Worker to push.");
+
+        var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+            throw new InvalidOperationException($"Workspace {workspaceId} not found.");
+
+        await RunPushReposParallelAsync(workspace, contextId, fullPayload, repoIds, onProgressMessage, onRepoError, onAppSideComplete, cancellationToken);
+    }
+
+    private async Task RunPushReposParallelAsync(
+        Workspace workspace,
+        WorkspaceFeatureContextId contextId,
+        IReadOnlyList<PushRepoPayload> fullPayload,
+        IReadOnlySet<int> repoIds,
+        Action<string>? onProgressMessage,
+        Action<int, string>? onRepoError,
+        Action? onAppSideComplete,
+        CancellationToken cancellationToken)
+    {
+        var workspaceId = workspace.WorkspaceId;
+        IReadOnlyList<PushRepoPayload> payload = fullPayload.Where(p => repoIds.Contains(p.RepoId)).ToList();
         if (payload.Count == 0)
         {
             onProgressMessage?.Invoke("No repositories to push.");
@@ -601,112 +623,6 @@ public sealed class WorkspacePushService(
         onProgressMessage?.Invoke($"Pushing {payload.Count} {(payload.Count == 1 ? "repository" : "repositories")}...");
         await PushReposAsync(workspace, contextId, payload, bearerByRepoId, onProgressMessage, onRepoError, onAppSideComplete, cancellationToken: cancellationToken);
         await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, contextId, payload, cancellationToken);
-    }
-
-    private async Task<bool> DiscoverRunningWorkflowsForLevelAsync(
-        IReadOnlyList<PushRepoPayload> reposAtLevel,
-        IReadOnlyList<WorkspaceRepositoryLink> links,
-        Dictionary<string, GhaWorkflowLiveFeedState> ghaFeedByRunKey,
-        ISet<int> noWorkflowRepoIds,
-        CancellationToken cancellationToken)
-    {
-        if (_gitHubActionsService == null)
-            return false;
-
-        var linksByRepoId = links.ToDictionary(l => l.RepositoryId);
-        foreach (var repo in reposAtLevel)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            if (noWorkflowRepoIds.Contains(repo.RepoId))
-                continue;
-
-            if (!linksByRepoId.TryGetValue(repo.RepoId, out var link)
-                || link.Repository?.Connector == null
-                || string.IsNullOrWhiteSpace(link.BranchName)
-                || string.IsNullOrWhiteSpace(link.Repository.OrgName)
-                || string.IsNullOrWhiteSpace(link.Repository.RepositoryName))
-            {
-                continue;
-            }
-
-            var entry = new GitHubRepositoryEntry
-            {
-                RepositoryId = link.Repository.RepositoryId,
-                ConnectorName = link.Repository.Connector.ConnectorName,
-                OrgName = link.Repository.OrgName,
-                RepositoryName = link.Repository.RepositoryName,
-                CloneUrl = link.Repository.CloneUrl,
-                Visibility = link.Repository.Visibility,
-                Archived = link.Repository.Archived
-            };
-
-            IReadOnlyList<ActionStatusInfo>? statuses;
-            try
-            {
-                statuses = await _gitHubActionsService.GetWorkflowStatusesForBranchAsync(entry, link.BranchName!, cancellationToken: cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Push wait: failed to discover running workflows for repo {RepoId}", repo.RepoId);
-                continue;
-            }
-
-            if (statuses == null || statuses.Count == 0)
-            {
-                noWorkflowRepoIds.Add(repo.RepoId);
-                _logger.LogDebug("Push wait: repo {RepoName} has no active GitHub Actions workflows; skipping live feed.", entry.RepositoryName);
-                continue;
-            }
-
-            foreach (var status in statuses)
-            {
-                if (!string.Equals(status.Status, "running", StringComparison.OrdinalIgnoreCase)
-                    || !status.RunId.HasValue
-                    || status.RunId.Value <= 0)
-                {
-                    continue;
-                }
-
-                var runKey = $"{entry.ConnectorName}|{entry.OrgName}|{entry.RepositoryName}|{status.RunId.Value}";
-                if (ghaFeedByRunKey.ContainsKey(runKey))
-                    continue;
-
-                ghaFeedByRunKey[runKey] = new GhaWorkflowLiveFeedState
-                {
-                    ConnectorName = entry.ConnectorName,
-                    Owner = entry.OrgName ?? string.Empty,
-                    RepositoryName = entry.RepositoryName,
-                    RunId = status.RunId.Value,
-                    WorkflowDisplayName = status.WorkflowName
-                };
-
-                _overlayCommandTerminalService?.Append($"gha:{entry.RepositoryName}", WorkerCommandStreamKind.Stdout, $"Run #{status.RunId.Value} - subscribing to job updates...");
-            }
-        }
-
-        return true;
-    }
-
-    private async Task PumpGhaLiveFeedIntoOverlayAsync(
-        IEnumerable<GhaWorkflowLiveFeedState> feeds,
-        CancellationToken cancellationToken)
-    {
-        if (_ghaWorkflowLiveFeedService == null || _overlayCommandTerminalService == null)
-            return;
-
-        foreach (var feed in feeds)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var update = await _ghaWorkflowLiveFeedService.PollOnceAsync(feed, cancellationToken);
-            if (update.NewLines.Count == 0)
-                continue;
-
-            var label = $"gha:{feed.RepositoryName}";
-            foreach (var line in update.NewLines)
-                _overlayCommandTerminalService.Append(label, WorkerCommandStreamKind.Stdout, line);
-        }
     }
 
     private async Task<bool> RestoreUpdatedReposAtLevelAsync(
@@ -844,7 +760,10 @@ public sealed class WorkspacePushService(
         var finished = 0;
         var total = repos.Count;
         using var semaphore = new SemaphoreSlim(_maxConcurrent);
+        // The health check reads through the scoped AppDbContext, which must not be used by two pushes at once.
+        using var healthCheckLock = new SemaphoreSlim(1, 1);
         var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var capabilities = await ResolveRepositoryOperationCapabilitiesAsync(workspace.WorkspaceId, cancellationToken);
         var rejectedRepos = new System.Collections.Concurrent.ConcurrentBag<(int RepoId, string RepoName)>();
         var failures = new System.Collections.Concurrent.ConcurrentBag<(int RepoId, string Error)>();
         var pushTasks = repos.Select(async repo =>
@@ -855,7 +774,17 @@ public sealed class WorkspacePushService(
                 try
                 {
                     if (_connectorHealthService != null)
-                        await _connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepoId, cancellationToken);
+                    {
+                        await healthCheckLock.WaitAsync(cancellationToken);
+                        try
+                        {
+                            await _connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepoId, cancellationToken);
+                        }
+                        finally
+                        {
+                            healthCheckLock.Release();
+                        }
+                    }
 
                     var args = new
                     {
@@ -865,7 +794,8 @@ public sealed class WorkspacePushService(
                         bearerToken = bearerByRepoId.GetValueOrDefault(repo.RepoId),
                         workspaceId = workspace.WorkspaceId,
                         workspaceRoot,
-                        refreshVersionAfterPush
+                        refreshVersionAfterPush,
+                        capabilities
                     };
                     var response = await _workerBridge.SendCommandAsync("PushRepository", args, cancellationToken);
                     var success = response.Success && response.Data != null && WorkerResponseJson.DeserializeWorkerResponse<PushRepositoryResponse>(response.Data) is { Success: true };
@@ -908,6 +838,9 @@ public sealed class WorkspacePushService(
             await FetchAfterRejectionAsync(workspace.WorkspaceId, contextId, repoId, repoName, workspace.Name, workspaceRoot, cancellationToken);
         return failures.ToList();
     }
+
+    private async Task<RepositoryOperationCapabilities> ResolveRepositoryOperationCapabilitiesAsync(int workspaceId, CancellationToken cancellationToken)
+        => (await _capabilitiesResolver.GetAsync(workspaceId, cancellationToken)).ToRepositoryOperationCapabilities();
 
     private async Task FetchAfterRejectionAsync(
         int workspaceId,

@@ -138,6 +138,15 @@ public sealed partial class WorkspaceRepositories
         return levelErrors.TryGetValue(key, out var msg) ? msg : null;
     }
 
+    /// <summary>
+    /// Level errors (sync, push, update failures reported against a level or level 0) have no level header to
+    /// render under in a flat grid, so they are shown as one page-level callout instead.
+    /// </summary>
+    private string? UngroupedLevelErrorMessage =>
+        _presentation.GroupByDependencyLevel || levelErrors.Count == 0
+            ? null
+            : string.Join("\n", levelErrors.OrderBy(kv => kv.Key).Select(kv => kv.Value));
+
     private RepoSyncStatus GetRepoSyncStatus(int repositoryId) =>
         repoSyncStatus.TryGetValue(repositoryId, out var status) ? status : RepoSyncStatus.NeedsSync;
 }

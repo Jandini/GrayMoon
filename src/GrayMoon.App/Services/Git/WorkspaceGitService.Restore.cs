@@ -18,11 +18,13 @@ public sealed partial class WorkspaceGitService
     /// <summary>
     /// Fires <c>dotnet restore --force --no-cache &lt;project.csproj&gt;</c> for each specified project file.
     /// Best-effort: errors are logged and swallowed so the caller's workflow is never interrupted.
+    /// A no-op for a workspace whose profile does not restore packages.
     /// </summary>
     public async Task RestoreDependenciesAsync(int workspaceId, WorkspaceFeatureContextId contextId, IEnumerable<(string RepoName, IReadOnlyList<string> ProjectPaths)> repos, CancellationToken cancellationToken)
     {
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null) return;
+        if (!await UsesPackageRestoreAsync(workspaceId, cancellationToken)) return;
         var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
         var tasks = repos
             .Where(r => r.ProjectPaths.Count > 0)
@@ -47,7 +49,8 @@ public sealed partial class WorkspaceGitService
     /// <summary>
     /// Fires <c>dotnet restore --force --no-cache</c> for all tracked project files across all workspace
     /// repositories, skipping repos pinned to a tag. Best-effort: individual restore errors are logged and swallowed.
-    /// Returns the total number of project files targeted for restore.
+    /// Returns the total number of project files targeted for restore, which is 0 for a workspace whose
+    /// profile does not restore packages.
     /// </summary>
     public async Task<int> RestoreAllWorkspacePackagesAsync(
         int workspaceId,
@@ -58,11 +61,11 @@ public sealed partial class WorkspaceGitService
         if (!_workerBridge.IsWorkerConnected)
             throw new WorkerNotConnectedException();
 
-        setProgress("Restoring packages...");
-
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
-        if (workspace == null)
+        if (workspace == null || !await UsesPackageRestoreAsync(workspaceId, cancellationToken))
             return 0;
+
+        setProgress("Restoring packages...");
 
         var tagPinnedIds = workspace.Repositories
             .Where(l => !string.IsNullOrWhiteSpace(l.CheckedOutTag))
@@ -99,11 +102,11 @@ public sealed partial class WorkspaceGitService
         if (syncedRepoIds.Count == 0)
             return 0;
 
-        setProgress("Restoring packages...");
-
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
-        if (workspace == null)
+        if (workspace == null || !await UsesPackageRestoreAsync(workspaceId, cancellationToken))
             return 0;
+
+        setProgress("Restoring packages...");
 
         var tagPinnedIds = workspace.Repositories
             .Where(l => !string.IsNullOrWhiteSpace(l.CheckedOutTag))
@@ -127,4 +130,7 @@ public sealed partial class WorkspaceGitService
         await RestoreDependenciesAsync(workspaceId, contextId, repoGroups, cancellationToken);
         return totalCount;
     }
+
+    private async Task<bool> UsesPackageRestoreAsync(int workspaceId, CancellationToken cancellationToken)
+        => (await _capabilitiesResolver.GetAsync(workspaceId, cancellationToken)).UsesPackageRestore;
 }

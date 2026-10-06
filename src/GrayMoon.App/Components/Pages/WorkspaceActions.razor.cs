@@ -1,5 +1,7 @@
 using GrayMoon.App.Models;
+using GrayMoon.App.Services.Ci;
 using GrayMoon.App.Services.Features;
+using GrayMoon.App.Services.Workspaces;
 using GrayMoon.Application.Features;
 using GrayMoon.App.Repositories;
 using Microsoft.AspNetCore.Components;
@@ -19,10 +21,16 @@ public sealed partial class WorkspaceActions : IDisposable
     [SupplyParameterFromQuery(Name = "context")]
     public int? ContextQuery { get; set; }
 
+    private WorkspacePageAccessOutcome? _pageAccess;
     private WorkspaceFeatureContextId? _selectedContextId;
     private bool _isFeatureContext;
+    private IWorkspaceCiProvider _ciProvider = NoCiProvider.Instance;
 
-    [Inject] private WorkspaceActionService ActionService { get; set; } = null!;
+    /// <summary>Null for the special Workspace, the selected context for a Feature - the shape <see cref="IWorkspaceCiProvider"/> takes.</summary>
+    private WorkspaceFeatureContextId? FeatureContextIdForCi => _isFeatureContext ? _selectedContextId : null;
+
+    [Inject] private IWorkspacePageAccessResolver PageAccess { get; set; } = null!;
+    [Inject] private IWorkspaceCiProviderResolver CiProviderResolver { get; set; } = null!;
     [Inject] private GitHubActionsService GitHubActionsService { get; set; } = null!;
     [Inject] private WorkspaceRepository WorkspaceRepository { get; set; } = null!;
     [Inject] private IOptions<WorkspaceOptions> WorkspaceOptions { get; set; } = null!;
@@ -39,11 +47,14 @@ public sealed partial class WorkspaceActions : IDisposable
     protected override async Task OnInitializedAsync()
     {
         ApplyIncomingSearchQuery();
-        ActivityStateService.BecameActive += OnActivityBecameActive;
-        var info = await ContextNavigation.ResolveForPageAsync(WorkspaceId, ContextQuery);
-        _selectedContextId = info.ContextId;
-        _isFeatureContext = !info.IsSpecialWorkspace;
-        await LoadWorkspaceAsync();
+        _pageAccess = await PageAccess.LoadIfAvailableAsync(WorkspaceId, WorkspacePage.Actions, async () =>
+        {
+            ActivityStateService.BecameActive += OnActivityBecameActive;
+            var info = await ContextNavigation.ResolveForPageAsync(WorkspaceId, ContextQuery);
+            _selectedContextId = info.ContextId;
+            _isFeatureContext = !info.IsSpecialWorkspace;
+            await LoadWorkspaceAsync();
+        });
     }
 
     protected override void OnParametersSet() => ApplyIncomingSearchQuery();

@@ -1,7 +1,9 @@
+using GrayMoon.Abstractions.Workspaces;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services;
 using GrayMoon.App.Services.GitChanges;
+using GrayMoon.App.Services.Workspaces;
 using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Repositories;
@@ -48,7 +50,19 @@ public sealed class WorkspaceRepository(
             .FirstOrDefaultAsync(workspace => workspace.WorkspaceId == workspaceId);
     }
 
-    public async Task<Workspace> AddAsync(string name, IReadOnlyCollection<int> repositoryIds)
+    /// <summary>
+    /// Creates a Workspace with an explicit profile. The optional profile parameters default to the .NET triple
+    /// because the create modal still defaults to the .NET triple. Callers that pass all three axes
+    /// (the modal after Unit H) persist exactly those values. The parameter defaults are deliberately not the
+    /// <see cref="Workspace"/> model default (Basic / None / None), which exists so a fresh database created
+    /// by EnsureCreated() starts clean.
+    /// </summary>
+    public async Task<Workspace> AddAsync(
+        string name,
+        IReadOnlyCollection<int> repositoryIds,
+        WorkspaceType type = WorkspaceType.DotNetDependency,
+        WorkspaceVersioningMode versioningMode = WorkspaceVersioningMode.GitVersion,
+        WorkspaceCiProvider ciProvider = WorkspaceCiProvider.GitHubActions)
     {
         var normalized = NormalizeName(name);
 
@@ -61,11 +75,17 @@ public sealed class WorkspaceRepository(
             throw new InvalidOperationException("Workspace name already exists.");
         }
 
-        var workspace = new Workspace { Name = normalized };
+        var workspace = new Workspace
+        {
+            Name = normalized,
+            Type = type,
+            VersioningMode = versioningMode,
+            CiProvider = ciProvider
+        };
         workspace.RootPath = await _workspaceService.GetRootPathAsync();
         db.Workspaces.Add(workspace);
         await db.SaveChangesAsync();
-        _logger.LogInformation("Persistence: saved Workspace. Action=Add, WorkspaceId={WorkspaceId}, Name={Name}", workspace.WorkspaceId, workspace.Name);
+        _logger.LogInformation("Persistence: saved Workspace. Action=Add, WorkspaceId={WorkspaceId}, Name={Name}, Type={Type}, VersioningMode={VersioningMode}, CiProvider={CiProvider}", workspace.WorkspaceId, workspace.Name, workspace.Type, workspace.VersioningMode, workspace.CiProvider);
 
         await _workspaceService.CreateDirectoryAsync(workspace.Name, workspace.RootPath);
 
@@ -73,7 +93,14 @@ public sealed class WorkspaceRepository(
         return workspace;
     }
 
-    public async Task UpdateAsync(int workspaceId, string name, IReadOnlyCollection<int> repositoryIds, string? rootPath)
+    public async Task UpdateAsync(
+        int workspaceId,
+        string name,
+        IReadOnlyCollection<int> repositoryIds,
+        string? rootPath,
+        WorkspaceType? type = null,
+        WorkspaceVersioningMode? versioningMode = null,
+        WorkspaceCiProvider? ciProvider = null)
     {
         var normalized = NormalizeName(name);
         var normalizedRootPath = string.IsNullOrWhiteSpace(rootPath) ? null : rootPath.Trim();
@@ -118,6 +145,13 @@ public sealed class WorkspaceRepository(
 
         workspace.Name = normalized;
         workspace.RootPath = normalizedRootPath;
+        if (type is { } profileType
+            && versioningMode is { } profileVersioning
+            && ciProvider is { } profileCi)
+        {
+            await WorkspaceProfileTransition.ApplyAsync(db, workspace, profileType, profileVersioning, profileCi);
+        }
+
         await db.SaveChangesAsync();
         _logger.LogInformation("Persistence: saved Workspace. Action=Update, WorkspaceId={WorkspaceId}, Name={Name}", workspaceId, workspace.Name);
 

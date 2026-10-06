@@ -103,6 +103,7 @@ public sealed class ReturnToDefaultPersistenceTests
     public async Task Successful_sync_persists_the_projects_found_on_the_default_branch()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
+        await ctx.UseDotNetDependencyProfileAsync();
         ctx.WorkerBridge.Respond("ReturnToDefaultBranch", SuccessfulResponse());
 
         await using var scope = ctx.CreateScope();

@@ -10,7 +10,11 @@ namespace GrayMoon.Worker.Commands;
 /// Handles post-merge hooks: re-runs GitVersion and gets commit counts.
 /// No git fetch - the merge already brought remote changes in; existing remote tracking refs are current enough.
 /// </summary>
-public sealed class MergeHookSyncCommand(IRepositoryStateProbe stateProbe, IHubConnectionProvider hubProvider, ILogger<MergeHookSyncCommand> logger)
+public sealed class MergeHookSyncCommand(
+    IRepositoryStateProbe stateProbe,
+    IWorkspaceCapabilityProvider capabilityProvider,
+    IHubConnectionProvider hubProvider,
+    ILogger<MergeHookSyncCommand> logger)
 {
     public async Task ExecuteAsync(INotifyJob payload, CancellationToken cancellationToken = default)
     {
@@ -20,13 +24,17 @@ public sealed class MergeHookSyncCommand(IRepositoryStateProbe stateProbe, IHubC
             return;
         }
 
+        // There is no app request to carry capabilities on this path, so they are resolved here.
+        var capabilities = await capabilityProvider.GetAsync(payload.WorkspaceId, cancellationToken);
+
         // One probe for version, branch/tag, commit counts, upstream and projects, so a merge reports the
         // same state groups a checkout does - including the comparison against the default branch, which a
         // pull moves just as much as the comparison against the upstream.
         var (state, _) = await stateProbe.CaptureAsync(payload.RepositoryPath, new RepositoryStateProbeOptions
         {
             IncludeGitVersion = true,
-            IncludeProjects = true
+            IncludeProjects = true,
+            Capabilities = capabilities
         }, cancellationToken);
 
         var version = state.GitVersion ?? "-";

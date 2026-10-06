@@ -5,14 +5,15 @@ using Microsoft.Extensions.Options;
 namespace GrayMoon.App.Services.Security;
 
 /// <summary>
-/// Only the real Worker may connect to <c>/hub/worker</c> or fetch a token from <c>/repos/{id}/connector</c> (F2).
+/// Only the real Worker may connect to <c>/hub/worker</c>, fetch a token from <c>/repos/{id}/connector</c>
+/// or read <c>/workspaces/{id}/capabilities</c> (F2).
 ///
 /// - A <b>wrong</b> secret is always rejected (401).
 /// - A <b>missing</b> secret is accepted with a warning until some Worker has proved it has the secret
 ///   (<see cref="WorkerSecretService.Seen"/>) or <c>Security:RequireWorkerSecret</c> is on; then it is 401.
 ///   That keeps an already-installed Worker working through the first upgrade, while a Worker that has
 ///   once been paired can never be impersonated by a program that simply omits the header.
-/// - <c>/repos/{id}/connector</c> and <c>/api/worker/pair</c> reject any request that carries an
+/// - The two Worker API paths and <c>/api/worker/pair</c> reject any request that carries an
 ///   <c>Origin</c> header (403): the Worker and the install script never send one, a browser page always does.
 /// </summary>
 public sealed class WorkerSecretMiddleware(
@@ -31,7 +32,7 @@ public sealed class WorkerSecretMiddleware(
             return;
         }
 
-        if ((kind is ProtectedPath.Connector or ProtectedPath.Pair) && context.Request.Headers.ContainsKey("Origin"))
+        if ((kind is ProtectedPath.Connector or ProtectedPath.WorkspaceCapabilities or ProtectedPath.Pair) && context.Request.Headers.ContainsKey("Origin"))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             return;
@@ -77,6 +78,7 @@ public sealed class WorkerSecretMiddleware(
         None,
         WorkerHub,
         Connector,
+        WorkspaceCapabilities,
         Pair
     }
 
@@ -91,6 +93,11 @@ public sealed class WorkerSecretMiddleware(
         if (path.StartsWith("/repos/", StringComparison.OrdinalIgnoreCase) &&
             path.EndsWith("/connector", StringComparison.OrdinalIgnoreCase))
             return ProtectedPath.Connector;
+
+        // Deliberately not /api/workspaces/...: that prefix is the browser-facing group and stays open.
+        if (path.StartsWith("/workspaces/", StringComparison.OrdinalIgnoreCase) &&
+            path.EndsWith("/capabilities", StringComparison.OrdinalIgnoreCase))
+            return ProtectedPath.WorkspaceCapabilities;
 
         return ProtectedPath.None;
     }
