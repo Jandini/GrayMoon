@@ -1,4 +1,5 @@
 using GrayMoon.Worker.Models;
+using GrayMoon.Worker.Services;
 using GrayMoon.Common.Git;
 
 namespace GrayMoon.Worker.Abstractions;
@@ -21,7 +22,7 @@ public interface IGitService
     /// </summary>
     Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, bool nonNormalize, string? commitSha, CancellationToken ct);
     /// <summary>Gets the current branch name (e.g. "main") with a single git call. Use instead of GetVersionAsync when only branch name is needed.</summary>
-    Task<string?> GetCurrentBranchNameAsync(string repoPath, CancellationToken ct);
+    Task<string?> GetCurrentBranchNameAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write);
     /// <summary>Returns the full SHA of HEAD via <c>git rev-parse HEAD</c>, or null when the repo is missing/unborn or the command fails.</summary>
     Task<string?> GetHeadCommitAsync(string repoPath, CancellationToken ct);
     /// <summary>
@@ -49,9 +50,9 @@ public interface IGitService
     /// </summary>
     Task<(int? Outgoing, int? Incoming, bool HasUpstream)> GetCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct, bool skipUpstreamCheck = false);
     /// <summary>Same work as <see cref="GetCommitCountsAsync"/> but also reports whether the counts and the upstream flag could be determined at all, so callers can leave persisted values alone instead of overwriting them with nulls after a failed git command.</summary>
-    Task<CommitCountsProbeResult> ProbeCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct, bool skipUpstreamCheck = false);
+    Task<CommitCountsProbeResult> ProbeCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct, bool skipUpstreamCheck = false, GitLockIntent intent = GitLockIntent.Write);
     /// <summary>Returns (behind, ahead, defaultBranchName) for the current branch vs the default branch. DefaultBranchName is without "origin/" prefix. When <paramref name="defaultBranchOriginRef"/> is provided, uses it instead of resolving.</summary>
-    Task<(int? DefaultBehind, int? DefaultAhead, string? DefaultBranchName)> GetCommitCountsVsDefaultAsync(string repoPath, string? defaultBranchOriginRef, CancellationToken ct);
+    Task<(int? DefaultBehind, int? DefaultAhead, string? DefaultBranchName)> GetCommitCountsVsDefaultAsync(string repoPath, string? defaultBranchOriginRef, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write);
     /// <summary>Pulls from origin. Returns (success, mergeConflict, errorMessage). When <paramref name="skipHooks"/> is true, hooks are disabled for the pull (orchestrated flows that already recompute and persist commit counts themselves).</summary>
     Task<(bool Success, bool MergeConflict, string? ErrorMessage)> PullAsync(string repoPath, string branchName, string? bearerToken, CancellationToken ct, bool skipHooks = false);
     /// <summary>Pushes to origin. When setTracking is true, uses -u so the branch is upstreamed even when there are no commits to push. Returns (success, errorMessage).</summary>
@@ -66,9 +67,9 @@ public interface IGitService
     /// </summary>
     Task<(bool Success, bool HasConflicts, IReadOnlyList<string> ConflictFiles, string? ErrorMessage)> MergeFromRemoteAsync(string repoPath, string remoteBranch, CancellationToken ct);
     /// <summary>Gets all local branch names (without 'origin/' prefix).</summary>
-    Task<IReadOnlyList<string>> GetLocalBranchesAsync(string repoPath, CancellationToken ct);
+    Task<IReadOnlyList<string>> GetLocalBranchesAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write);
     /// <summary>Gets all remote branch names from local refs (refs/remotes/origin). Use after fetch to avoid ls-remote network call.</summary>
-    Task<IReadOnlyList<string>> GetRemoteBranchesFromRefsAsync(string repoPath, CancellationToken ct);
+    Task<IReadOnlyList<string>> GetRemoteBranchesFromRefsAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write);
     /// <summary>Gets all remote branch names (without 'origin/' prefix). Uses ls-remote; for post-fetch use <see cref="GetRemoteBranchesFromRefsAsync"/>.</summary>
     Task<IReadOnlyList<string>> GetRemoteBranchesAsync(string repoPath, string? bearerToken, CancellationToken ct);
     /// <summary>Checks out the specified branch. Returns (success, errorMessage). When <paramref name="skipHooks"/> is true, hooks are disabled for the checkout (orchestrated flows such as return-to-default).</summary>
@@ -80,15 +81,15 @@ public interface IGitService
     /// <summary>Gets the default branch name (e.g., "main" or "master") without "origin/" prefix.</summary>
     Task<string?> GetDefaultBranchNameAsync(string repoPath, CancellationToken ct);
     /// <summary>Gets all tag names in the repository (newest first when supported, then alphabetical).</summary>
-    Task<IReadOnlyList<string>> GetTagsAsync(string repoPath, CancellationToken ct);
+    Task<IReadOnlyList<string>> GetTagsAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write);
     /// <summary>Fetches only tags from origin (git fetch origin --tags). Does not touch branches. Returns (success, errorMessage).</summary>
     Task<(bool Success, string? ErrorMessage)> FetchTagsAsync(string repoPath, string? bearerToken, CancellationToken ct);
     /// <summary>Checks out the specified tag (detached HEAD). Returns (success, errorMessage).</summary>
     Task<(bool Success, string? ErrorMessage)> CheckoutTagAsync(string repoPath, string tagName, CancellationToken ct);
     /// <summary>Returns the tag name HEAD currently points to when the repo is in a detached HEAD state AND that commit is the exact tip of a tag; otherwise null. Uses git symbolic-ref + describe --tags --exact-match.</summary>
-    Task<string?> GetCheckedOutTagAsync(string repoPath, CancellationToken ct);
+    Task<string?> GetCheckedOutTagAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write);
     /// <summary>Gets the default branch origin ref (e.g., "origin/main") for passing to GetCommitCountsAsync/GetCommitCountsVsDefaultAsync to avoid resolving twice.</summary>
-    Task<string?> GetDefaultBranchOriginRefAsync(string repoPath, CancellationToken ct);
+    Task<string?> GetDefaultBranchOriginRefAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write);
     /// <summary>
     /// Builds <c>origin/&lt;branch&gt;</c> for an ahead/behind comparison base. Returns null when
     /// <paramref name="branchName"/> is null/whitespace. Accepts a name already prefixed with <c>origin/</c>.

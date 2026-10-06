@@ -1,4 +1,4 @@
-using GrayMoon.Worker.Abstractions;
+﻿using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Jobs.Requests;
 using GrayMoon.Worker.Jobs.Response;
 using GrayMoon.Worker.Models;
@@ -11,12 +11,25 @@ namespace GrayMoon.Worker.Commands;
 /// version enrichment, then optional .NET project enrichment. The two optional stages are activated by the
 /// request's capabilities; when one is skipped its result is absent from the response rather than empty, so
 /// the app can tell "nobody looked" from "there is nothing there" and leaves that group of columns alone.
+/// After the fetch, the version provider (which holds the repository write lock), one lane of read-intent ref
+/// reads, and the project scan run side by side; the branch-dependent steps run once the first two finish.
 /// </summary>
 public sealed class SyncRepositoryCommand(
     IGitService git,
     ICsProjFileService csProjFileService,
     IRepositoryVersionProviderFactory versionProviderFactory) : ICommandHandler<SyncRepositoryRequest, SyncRepositoryResponse>
 {
+    /// <summary>Ref reads that do not depend on GitVersion's output or on the branch name.</summary>
+    private sealed record SyncRefs(
+        string? CurrentBranch,
+        string? CurrentTag,
+        IReadOnlyList<string> Tags,
+        IReadOnlyList<string>? LocalBranches,
+        IReadOnlyList<string>? RemoteBranches,
+        string? DefaultRef,
+        int? DefaultBehind,
+        int? DefaultAhead);
+
     public async Task<SyncRepositoryResponse> ExecuteAsync(SyncRepositoryRequest request, CancellationToken cancellationToken = default)
     {
         var workspaceName = request.WorkspaceName ?? throw new ArgumentException("workspaceName required");
@@ -52,8 +65,9 @@ public sealed class SyncRepositoryCommand(
         {
             await git.AddSafeDirectoryAsync(repoPath, cancellationToken);
 
-            // Stage 1, part one of the common git snapshot: the fetch has to complete before any version
-            // provider runs, because GitVersion is invoked with /nofetch.
+            // The fetch has to complete before the version provider and before any ref read: GitVersion is
+            // invoked with /nofetch, and the ref reads below must see the fetched refs. A failed fetch starts
+            // nothing else (no version, no reads, no project scan).
             var (fetchOk, fetchErr) = await git.FetchAsync(repoPath, includeTags: true, bearerToken, cancellationToken);
             fetchError = fetchErr;
             if (!fetchOk)
@@ -72,58 +86,57 @@ public sealed class SyncRepositoryCommand(
                 };
             }
 
-            // Stage 2: optional version enrichment. It is resolved here, ahead of the rest of the common
-            // snapshot, because the provider's own branch name wins over git's when it produced one and the
-            // commit counts below are taken against whichever name wins.
-            var versionResult = await versionProviderFactory
+            // Three things overlap from here. The version provider (GitVersion) holds the write lock for its
+            // process; the ref reads run as read intent so they do not wait for it, and they are one sequential
+            // lane to avoid adding many concurrent git processes per repository. Project discovery is a file
+            // system walk and has nothing to do with git. Stage 3 only discovers when the profile asks for it:
+            // otherwise projects stay null - an empty list would tell the app this repository genuinely has none,
+            // and it would prune every persisted project row.
+            var versionTask = versionProviderFactory
                 .Create(capabilities)
                 .GetVersionAsync(repoPath, RepositoryVersionOptions.Default, cancellationToken);
+            var refsTask = ReadRefsAsync(repoPath, request.DivergenceBaseBranch, cancellationToken);
+            var projectsTask = capabilities.ShouldDiscoverProjects
+                ? ScanProjectsAsync(repoPath, cancellationToken)
+                : Task.FromResult<IReadOnlyList<CsProjFileInfo>?>(null);
+
+            await Task.WhenAll(versionTask, refsTask);
+            var versionResult = await versionTask;
+            var refs = await refsTask;
+
+            // Stage 2: optional version enrichment.
             versionError = versionResult.Error;
             if (versionResult.Probed)
                 version = versionResult.VersionOrPlaceholder;
 
-            // Stage 1, part two: identity, refs, divergence and upstream. Always runs, for every profile.
             // The version provider may fail (an empty repository has no commits for it to read, a path over the
             // Windows limit breaks it) or be switched off entirely. Neither may cost the repository its
-            // identity: the branch is a plain git fact.
-            branch = await git.ResolveBranchAsync(versionResult.Result, repoPath, cancellationToken) ?? "-";
+            // identity: the branch is a plain git fact. The provider's own branch name wins when it produced
+            // one; otherwise the name read from git while the provider ran is used.
+            branch = GitVersionBranch.Choose(versionResult.Result, refs.CurrentBranch) ?? "-";
 
             // Detect tag/detached HEAD; if on a tag we don't have a real branch so wipe the version branch echo.
-            var currentTag = await git.GetCheckedOutTagAsync(repoPath, cancellationToken);
-            // Always fetch the full tag list - fetch already ran with includeTags:true so local refs are current.
-            var allTags = await git.GetTagsAsync(repoPath, cancellationToken);
-            if (currentTag != null)
-            {
+            if (refs.CurrentTag != null)
                 branch = "-";
-            }
 
             // Tag checkouts need current hooks too: hooks are shared with linked Feature worktrees, and a
             // stale static-path hook attributes every Feature worktree event to the special Workspace.
             // Only a valid checkout is required: a workspace that does not version its repositories resolves
             // no version, and gating on one would leave it with no managed hooks at all.
-            if (branch != "-" || currentTag != null)
-                await git.WriteSyncHooksAsync(repoPath, workspaceId, repositoryId, cancellationToken);
+            var hooksTask = branch != "-" || refs.CurrentTag != null
+                ? git.WriteSyncHooksAsync(repoPath, workspaceId, repositoryId, cancellationToken)
+                : Task.CompletedTask;
 
-            // Resolve default branch once; run commit counts and divergence in parallel when we have a branch.
-            // Divergence may be vs Feature parent (request / persisted) rather than the repository default.
-            var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, cancellationToken);
-            await git.SetDivergenceBaseBranchAsync(repoPath, request.DivergenceBaseBranch, cancellationToken);
-            var divergenceRef = git.ToOriginBranchRef(request.DivergenceBaseBranch) ?? defaultRef;
-            int? defaultBehind = null;
-            int? defaultAhead = null;
-            string? defaultBranch = defaultRef != null
-                ? (defaultRef.StartsWith("origin/", StringComparison.Ordinal)
-                    ? defaultRef["origin/".Length..]
-                    : defaultRef)
+            // Counts are taken against whichever branch name won. The divergence base file was already written
+            // in the read lane, which the no-upstream path of the probe reads back.
+            var countsTask = branch != "-"
+                ? git.ProbeCommitCountsAsync(repoPath, branch, refs.DefaultRef, cancellationToken, intent: GitLockIntent.Read)
                 : null;
 
-            if (branch != "-")
+            await hooksTask;
+            if (countsTask != null)
             {
-                var countsTask = git.ProbeCommitCountsAsync(repoPath, branch, defaultRef, cancellationToken);
-                var vsDefaultTask = git.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, cancellationToken);
-                await Task.WhenAll(countsTask, vsDefaultTask);
                 var counts = await countsTask;
-                (defaultBehind, defaultAhead, _) = await vsDefaultTask;
                 outgoingCommits = counts.Outgoing;
                 incomingCommits = counts.Incoming;
                 // Sync is the flow users reach for when a row looks wrong, so it has to report the upstream
@@ -131,49 +144,33 @@ public sealed class SyncRepositoryCommand(
                 hasUpstream = counts.HasUpstream;
                 upstreamProbed = counts.UpstreamProbed;
             }
-            else if (divergenceRef != null)
-            {
-                (defaultBehind, defaultAhead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, cancellationToken);
-            }
 
-            // Branch lists from local refs (no extra network after fetch)
-            IReadOnlyList<string>? localBranches = null;
-            IReadOnlyList<string>? remoteBranches = null;
-            try
-            {
-                var localBranchesTask = git.GetLocalBranchesAsync(repoPath, cancellationToken);
-                var remoteBranchesTask = git.GetRemoteBranchesFromRefsAsync(repoPath, cancellationToken);
-                localBranches = await localBranchesTask;
-                remoteBranches = await remoteBranchesTask;
-            }
-            catch
-            {
-                // If branch fetching fails, continue without branches (non-critical)
-            }
+            // Stage 3: optional project enrichment (null when not discovered).
+            projects = await projectsTask;
 
-            // Stage 3: optional project enrichment. Left null when the profile does not discover .NET
-            // projects - an empty list would tell the app this repository genuinely has none, and it would
-            // prune every persisted project row.
-            if (capabilities.ShouldDiscoverProjects)
-                projects = await csProjFileService.FindAsync(repoPath, cancellationToken);
+            string? defaultBranch = refs.DefaultRef != null
+                ? (refs.DefaultRef.StartsWith("origin/", StringComparison.Ordinal)
+                    ? refs.DefaultRef["origin/".Length..]
+                    : refs.DefaultRef)
+                : null;
 
             return new SyncRepositoryResponse
             {
                 Success = true,
                 Version = version,
                 Branch = branch,
-                Tag = currentTag,
-                Tags = allTags,
+                Tag = refs.CurrentTag,
+                Tags = refs.Tags,
                 Projects = projects,
                 OutgoingCommits = outgoingCommits,
                 IncomingCommits = incomingCommits,
-                LocalBranches = localBranches,
-                RemoteBranches = remoteBranches,
+                LocalBranches = refs.LocalBranches,
+                RemoteBranches = refs.RemoteBranches,
                 DefaultBranch = defaultBranch,
                 GitVersionError = versionError,
                 GitFetchError = fetchError,
-                DefaultBranchBehind = defaultBehind,
-                DefaultBranchAhead = defaultAhead,
+                DefaultBranchBehind = refs.DefaultBehind,
+                DefaultBranchAhead = refs.DefaultAhead,
                 HasUpstream = hasUpstream,
                 UpstreamProbed = upstreamProbed
             };
@@ -191,4 +188,49 @@ public sealed class SyncRepositoryCommand(
             GitFetchError = fetchError
         };
     }
+
+    /// <summary>
+    /// Ref reads that need neither GitVersion's output nor the branch name, run as read intent so they can
+    /// overlap GitVersion, which holds the repository write lock. Must start only after fetch has finished.
+    /// </summary>
+    private async Task<SyncRefs> ReadRefsAsync(string repoPath, string? divergenceBaseBranch, CancellationToken ct)
+    {
+        const GitLockIntent read = GitLockIntent.Read;
+
+        // Only a fallback: the branch from the version provider wins when it produced one.
+        var currentBranch = await git.GetCurrentBranchNameAsync(repoPath, ct, read);
+        var currentTag = await git.GetCheckedOutTagAsync(repoPath, ct, read);
+        // Always fetch the full tag list - fetch already ran with includeTags:true so local refs are current.
+        var tags = await git.GetTagsAsync(repoPath, ct, read);
+
+        // Branch lists from local refs (no extra network after fetch)
+        IReadOnlyList<string>? localBranches = null;
+        IReadOnlyList<string>? remoteBranches = null;
+        try
+        {
+            localBranches = await git.GetLocalBranchesAsync(repoPath, ct, read);
+            remoteBranches = await git.GetRemoteBranchesFromRefsAsync(repoPath, ct, read);
+        }
+        catch
+        {
+            // If branch fetching fails, continue without branches (non-critical)
+        }
+
+        // Resolve default branch once. Divergence may be vs Feature parent (request / persisted) rather than
+        // the repository default.
+        var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, ct, read);
+        await git.SetDivergenceBaseBranchAsync(repoPath, divergenceBaseBranch, ct);
+        var divergenceRef = git.ToOriginBranchRef(divergenceBaseBranch) ?? defaultRef;
+
+        int? defaultBehind = null;
+        int? defaultAhead = null;
+        if (divergenceRef != null)
+            (defaultBehind, defaultAhead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, ct, read);
+
+        return new SyncRefs(currentBranch, currentTag, tags, localBranches, remoteBranches, defaultRef, defaultBehind, defaultAhead);
+    }
+
+    /// <summary>Runs the project scan off the calling thread so its directory walk does not block the sync.</summary>
+    private Task<IReadOnlyList<CsProjFileInfo>?> ScanProjectsAsync(string repoPath, CancellationToken ct)
+        => Task.Run<IReadOnlyList<CsProjFileInfo>?>(async () => await csProjFileService.FindAsync(repoPath, ct), ct);
 }

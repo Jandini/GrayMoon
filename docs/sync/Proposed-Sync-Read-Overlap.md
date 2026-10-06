@@ -1,6 +1,6 @@
 # Proposed: overlap read-only work inside one repository sync
 
-**Status:** proposal with an implementation plan. No code change is described as done.  
+**Status:** implemented in code (steps 2 to 4 of the plan). Steps 0, 1 and 5 are manual measurements on a real workspace and have not been run yet.  
 **Date:** 2026-10-06 (revised the same day after a code review)
 
 Workspace sync already runs repositories side by side, up to `Workspace:MaxParallelOperations` (16). Each repository is one `SyncRepository` command (`src/GrayMoon.Worker/Commands/SyncRepositoryCommand.cs`). Inside that command every step is awaited one after another, and the per-repository write lock in `GitProcessRunner` keeps even the two pairs that are started together from overlapping.

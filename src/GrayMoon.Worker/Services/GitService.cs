@@ -180,12 +180,32 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         return ("dotnet-gitversion", commonArgs);
     }
 
-    public async Task<string?> GetCurrentBranchNameAsync(string repoPath, CancellationToken ct)
+    /// <summary>
+    /// Runs a git command with the given lock intent. Read intent skips the per-repository write lock and
+    /// puts <c>--no-optional-locks</c> in front of the subcommand, as <see cref="GitLockIntent"/> requires.
+    /// </summary>
+    private Task<(int ExitCode, string? Stdout, string? Stderr)> RunGitWithIntentAsync(
+        string arguments,
+        string repoPath,
+        CancellationToken ct,
+        GitLockIntent intent,
+        bool? streamStderrAsStdout = null,
+        bool? mirrorFailureOutputAsStderr = null)
+        => runner.RunAsync(
+            "git",
+            intent == GitLockIntent.Read ? "--no-optional-locks " + arguments : arguments,
+            repoPath,
+            ct,
+            streamStderrAsStdout,
+            mirrorFailureOutputAsStderr,
+            intent);
+
+    public async Task<string?> GetCurrentBranchNameAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
             return null;
 
-        var (exitCode, stdout, _) = await runner.RunAsync("git", "branch --show-current", repoPath, ct);
+        var (exitCode, stdout, _) = await RunGitWithIntentAsync("branch --show-current", repoPath, ct, intent);
         if (exitCode != 0)
             return null;
 
@@ -411,7 +431,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         return (probe.Outgoing, probe.Incoming, probe.HasUpstream);
     }
 
-    public async Task<CommitCountsProbeResult> ProbeCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct, bool skipUpstreamCheck = false)
+    public async Task<CommitCountsProbeResult> ProbeCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct, bool skipUpstreamCheck = false, GitLockIntent intent = GitLockIntent.Write)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
             return CommitCountsProbeResult.Unknown;
@@ -420,36 +440,36 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
 
         // Whether the branch has a configured upstream is only knowable when we actually ask git for it.
         var upstreamProbed = !skipUpstreamCheck;
-        var upstreamRef = skipUpstreamCheck ? null : await GetUpstreamRefAsync(repoPath, branchName, ct);
+        var upstreamRef = skipUpstreamCheck ? null : await GetUpstreamRefAsync(repoPath, branchName, ct, intent);
         if (string.IsNullOrWhiteSpace(upstreamRef))
         {
-            var compareRef = await ResolveNoUpstreamCompareRefAsync(repoPath, defaultBranchOriginRef, ct);
-            return await CountAheadOfCompareRefAsync(repoPath, branchName, compareRef, upstreamProbed, sw, "no upstream", ct);
+            var compareRef = await ResolveNoUpstreamCompareRefAsync(repoPath, defaultBranchOriginRef, ct, intent);
+            return await CountAheadOfCompareRefAsync(repoPath, branchName, compareRef, upstreamProbed, sw, "no upstream", ct, intent);
         }
 
         var originBranch = upstreamRef!;
 
-        if (!await RefExistsAsync(repoPath, originBranch, ct))
+        if (!await RefExistsAsync(repoPath, originBranch, ct, intent))
         {
-            var compareRef = await ResolveNoUpstreamCompareRefAsync(repoPath, defaultBranchOriginRef, ct);
+            var compareRef = await ResolveNoUpstreamCompareRefAsync(repoPath, defaultBranchOriginRef, ct, intent);
             if (compareRef == null)
             {
                 logger.LogDebug("Configured upstream for {Branch}, but remote {OriginBranch} not found and no compare ref for {RepoPath}, skipping commit counts", branchName, originBranch, repoPath);
                 return new CommitCountsProbeResult(null, null, false, CountsProbed: false, UpstreamProbed: upstreamProbed);
             }
 
-            return await CountAheadOfCompareRefAsync(repoPath, branchName, compareRef, upstreamProbed, sw, "missing remote upstream", ct);
+            return await CountAheadOfCompareRefAsync(repoPath, branchName, compareRef, upstreamProbed, sw, "missing remote upstream", ct, intent);
         }
 
         // Single atomic call: left=incoming (in originBranch not HEAD), right=outgoing (in HEAD not originBranch).
         // originBranch was just confirmed to exist, but HEAD can still be unborn (no commits yet) right
         // after a checkout - an expected, already-handled miss here (falls back to unknown counts below),
         // not a real command failure, so it must not be mirrored to the overlay as a red stderr line.
-        var (exitLR, stdoutLR, stderrLR) = await runner.RunAsync(
-            "git",
+        var (exitLR, stdoutLR, stderrLR) = await RunGitWithIntentAsync(
             $"rev-list --left-right --count {originBranch}...HEAD",
             repoPath,
             ct,
+            intent,
             streamStderrAsStdout: true,
             mirrorFailureOutputAsStderr: false);
         if (exitLR != 0)
@@ -466,12 +486,12 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         return new CommitCountsProbeResult(outVal, inVal, true, CountsProbed: true, UpstreamProbed: upstreamProbed);
     }
 
-    public async Task<(int? DefaultBehind, int? DefaultAhead, string? DefaultBranchName)> GetCommitCountsVsDefaultAsync(string repoPath, string? defaultBranchOriginRef, CancellationToken ct)
+    public async Task<(int? DefaultBehind, int? DefaultAhead, string? DefaultBranchName)> GetCommitCountsVsDefaultAsync(string repoPath, string? defaultBranchOriginRef, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
             return (null, null, null);
 
-        var defaultBranch = defaultBranchOriginRef ?? await GetDefaultBranchAsync(repoPath, ct);
+        var defaultBranch = defaultBranchOriginRef ?? await GetDefaultBranchAsync(repoPath, ct, intent);
         if (defaultBranch == null)
         {
             logger.LogDebug("GetCommitCountsVsDefault: no default branch for {RepoPath}", repoPath);
@@ -484,11 +504,11 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         // defaultBranch may be stale (resolved earlier, or not yet fetched) and simply not exist locally -
         // that is an expected, already-handled miss here, not a real command failure, so it must not be
         // mirrored to the overlay as a red stderr line (see RefExistsAsync for the same policy).
-        var (exitCode, stdout, stderr) = await runner.RunAsync(
-            "git",
+        var (exitCode, stdout, stderr) = await RunGitWithIntentAsync(
             $"rev-list --left-right --count {defaultBranch}...HEAD",
             repoPath,
             ct,
+            intent,
             streamStderrAsStdout: true,
             mirrorFailureOutputAsStderr: false);
         if (exitCode != 0)
@@ -647,12 +667,12 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
             .ToList();
     }
 
-    public async Task<IReadOnlyList<string>> GetLocalBranchesAsync(string repoPath, CancellationToken ct)
+    public async Task<IReadOnlyList<string>> GetLocalBranchesAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
             return Array.Empty<string>();
 
-        var (exitCode, stdout, stderr) = await runner.RunAsync("git", "for-each-ref refs/heads --format=%(refname:short)", repoPath, ct);
+        var (exitCode, stdout, stderr) = await RunGitWithIntentAsync("for-each-ref refs/heads --format=%(refname:short)", repoPath, ct, intent);
         if (exitCode != 0)
         {
             logger.LogWarning("Git for-each-ref refs/heads failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
@@ -666,12 +686,12 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
             .ToList();
     }
 
-    public async Task<IReadOnlyList<string>> GetRemoteBranchesFromRefsAsync(string repoPath, CancellationToken ct)
+    public async Task<IReadOnlyList<string>> GetRemoteBranchesFromRefsAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
             return Array.Empty<string>();
 
-        var (exitCode, stdout, stderr) = await runner.RunAsync("git", "for-each-ref refs/remotes/origin --format=%(refname:short)", repoPath, ct);
+        var (exitCode, stdout, stderr) = await RunGitWithIntentAsync("for-each-ref refs/remotes/origin --format=%(refname:short)", repoPath, ct, intent);
         if (exitCode != 0)
         {
             logger.LogDebug("Git for-each-ref refs/remotes/origin failed for {RepoPath}. ExitCode={ExitCode}", repoPath, exitCode);
@@ -962,12 +982,12 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         return defaultBranch;
     }
 
-    public async Task<IReadOnlyList<string>> GetTagsAsync(string repoPath, CancellationToken ct)
+    public async Task<IReadOnlyList<string>> GetTagsAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
             return Array.Empty<string>();
 
-        var (exitCode, stdout, stderr) = await runner.RunAsync("git", "tag --sort=-creatordate", repoPath, ct);
+        var (exitCode, stdout, stderr) = await RunGitWithIntentAsync("tag --sort=-creatordate", repoPath, ct, intent);
         if (exitCode != 0)
         {
             logger.LogDebug("Git tag list failed for {RepoPath}. ExitCode={ExitCode}, Stderr={Stderr}", repoPath, exitCode, stderr);
@@ -1026,16 +1046,16 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         return (true, null);
     }
 
-    public async Task<string?> GetCheckedOutTagAsync(string repoPath, CancellationToken ct)
+    public async Task<string?> GetCheckedOutTagAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
             return null;
 
-        var (symExit, _, _) = await runner.RunAsync("git", "symbolic-ref -q HEAD", repoPath, ct);
+        var (symExit, _, _) = await RunGitWithIntentAsync("symbolic-ref -q HEAD", repoPath, ct, intent);
         if (symExit == 0)
             return null;
 
-        var (descExit, stdout, _) = await runner.RunAsync("git", "describe --tags --exact-match", repoPath, ct);
+        var (descExit, stdout, _) = await RunGitWithIntentAsync("describe --tags --exact-match", repoPath, ct, intent);
         if (descExit != 0)
             return null;
 
@@ -1043,8 +1063,8 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         return string.IsNullOrWhiteSpace(tag) ? null : tag;
     }
 
-    public Task<string?> GetDefaultBranchOriginRefAsync(string repoPath, CancellationToken ct)
-        => GetDefaultBranchAsync(repoPath, ct);
+    public Task<string?> GetDefaultBranchOriginRefAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write)
+        => GetDefaultBranchAsync(repoPath, ct, intent);
 
     public string? ToOriginBranchRef(string? branchName)
     {
@@ -1114,13 +1134,13 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         return Path.Combine(fullGitDir, "graymoon-divergence-base");
     }
 
-    private async Task<string?> GetDefaultBranchAsync(string repoPath, CancellationToken ct)
+    private async Task<string?> GetDefaultBranchAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write)
     {
-        var (exitHead, stdoutHead, _) = await runner.RunAsync(
-            "git",
+        var (exitHead, stdoutHead, _) = await RunGitWithIntentAsync(
             "symbolic-ref -q refs/remotes/origin/HEAD",
             repoPath,
             ct,
+            intent,
             streamStderrAsStdout: true,
             mirrorFailureOutputAsStderr: false);
         if (exitHead == 0 && !string.IsNullOrWhiteSpace(stdoutHead))
@@ -1132,28 +1152,28 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
                 if (!string.IsNullOrEmpty(branch) && branch != "HEAD")
                 {
                     var originRef = $"origin/{branch}";
-                    if (await RefExistsAsync(repoPath, originRef, ct))
+                    if (await RefExistsAsync(repoPath, originRef, ct, intent))
                         return originRef;
                 }
             }
         }
 
-        if (await RefExistsAsync(repoPath, "origin/main", ct))
+        if (await RefExistsAsync(repoPath, "origin/main", ct, intent))
             return "origin/main";
 
-        if (await RefExistsAsync(repoPath, "origin/master", ct))
+        if (await RefExistsAsync(repoPath, "origin/master", ct, intent))
             return "origin/master";
 
         return null;
     }
 
-    private async Task<string?> GetUpstreamRefAsync(string repoPath, string branchName, CancellationToken ct)
+    private async Task<string?> GetUpstreamRefAsync(string repoPath, string branchName, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write)
     {
-        var (exitCode, stdout, _) = await runner.RunAsync(
-            "git",
+        var (exitCode, stdout, _) = await RunGitWithIntentAsync(
             $"for-each-ref --format=%(upstream:short) refs/heads/{branchName}",
             repoPath,
-            ct);
+            ct,
+            intent);
 
         if (exitCode != 0)
             return null;
@@ -1168,16 +1188,16 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
     /// remirroring on failure is also off: these checks are expected to miss (try local, then remote;
     /// try origin/main, then origin/master).
     /// </summary>
-    private async Task<bool> RefExistsAsync(string repoPath, string revision, CancellationToken ct)
+    private async Task<bool> RefExistsAsync(string repoPath, string revision, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write)
     {
         if (string.IsNullOrWhiteSpace(revision))
             return false;
 
-        var (exit, _, _) = await runner.RunAsync(
-            "git",
+        var (exit, _, _) = await RunGitWithIntentAsync(
             $"rev-parse --verify --quiet {revision}",
             repoPath,
             ct,
+            intent,
             streamStderrAsStdout: true,
             mirrorFailureOutputAsStderr: false);
         return exit == 0;
@@ -1191,7 +1211,8 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
     private async Task<string?> ResolveNoUpstreamCompareRefAsync(
         string repoPath,
         string? defaultBranchOriginRef,
-        CancellationToken ct)
+        CancellationToken ct,
+        GitLockIntent intent = GitLockIntent.Write)
     {
         var divergenceBase = await GetDivergenceBaseBranchAsync(repoPath, ct);
         if (!string.IsNullOrWhiteSpace(divergenceBase))
@@ -1199,11 +1220,11 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
             var local = divergenceBase.Trim();
             if (local.StartsWith("origin/", StringComparison.OrdinalIgnoreCase))
                 local = local["origin/".Length..];
-            if (await RefExistsAsync(repoPath, local, ct))
+            if (await RefExistsAsync(repoPath, local, ct, intent))
                 return local;
         }
 
-        return defaultBranchOriginRef ?? await GetDefaultBranchAsync(repoPath, ct);
+        return defaultBranchOriginRef ?? await GetDefaultBranchAsync(repoPath, ct, intent);
     }
 
     private async Task<CommitCountsProbeResult> CountAheadOfCompareRefAsync(
@@ -1213,7 +1234,8 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         bool upstreamProbed,
         Stopwatch sw,
         string reason,
-        CancellationToken ct)
+        CancellationToken ct,
+        GitLockIntent intent = GitLockIntent.Write)
     {
         if (compareRef == null)
         {
@@ -1224,11 +1246,11 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         // compareRef may be stale (resolved earlier, or not yet fetched) and simply not exist locally -
         // that is an expected, already-handled miss here, not a real command failure, so it must not be
         // mirrored to the overlay as a red stderr line (see RefExistsAsync for the same policy).
-        var (exitDefault, stdoutDefault, stderrDefault) = await runner.RunAsync(
-            "git",
+        var (exitDefault, stdoutDefault, stderrDefault) = await RunGitWithIntentAsync(
             $"rev-list --count {compareRef}..HEAD",
             repoPath,
             ct,
+            intent,
             streamStderrAsStdout: true,
             mirrorFailureOutputAsStderr: false);
         if (exitDefault != 0)
