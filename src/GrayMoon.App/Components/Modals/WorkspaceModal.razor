@@ -78,6 +78,25 @@
                         </div>
                     </div>
 
+                    <div class="mb-3">
+                        <label class="form-label text-nowrap" for="workspaceRepositorySelect">Workspace repository (optional)</label>
+                        <select class="form-select workspace-repository-select"
+                                id="workspaceRepositorySelect"
+                                disabled="@IsWorkspaceRepositoryDisabled"
+                                @onchange="OnWorkspaceRepositoryChosenAsync">
+                            <option value="" selected="@(WorkspaceRepositoryId is null)">None</option>
+                            @foreach (var choice in WorkspaceRepositoryChoices)
+                            {
+                                <option value="@choice.RepositoryId" selected="@(choice.RepositoryId == WorkspaceRepositoryId)">@choice.DisplayName</option>
+                            }
+                        </select>
+                        <div class="form-text">The Workspace's own Git repository. Its working tree is the Workspace root and it is the root of every Feature.</div>
+                        @if (IsWorkspaceRepositoryDisabled && !string.IsNullOrWhiteSpace(WorkspaceRepositoryDisabledHint))
+                        {
+                            <div class="form-text">@WorkspaceRepositoryDisabledHint</div>
+                        }
+                    </div>
+
                     @if (DirectoryAlreadyExists)
                     {
                         <div class="gm-callout gm-callout--warning" role="alert">The workspace directory exists with @ExistingRepositoryCount @(ExistingRepositoryCount == 1 ? "repository" : "repositories").</div>
@@ -129,6 +148,31 @@
     [Parameter] public EventCallback<bool> UseGitHubActionsChanged { get; set; }
     [Parameter] public bool IsTypeDisabled { get; set; }
     [Parameter] public string? TypeDisabledHint { get; set; }
+    [Parameter] public int? WorkspaceRepositoryId { get; set; }
+    [Parameter] public EventCallback<int?> WorkspaceRepositoryIdChanged { get; set; }
+    [Parameter] public IReadOnlyList<WorkspaceRepositoryChoice> WorkspaceRepositoryChoices { get; set; } = Array.Empty<WorkspaceRepositoryChoice>();
+    [Parameter] public bool IsWorkspaceRepositoryDisabled { get; set; }
+    [Parameter] public string? WorkspaceRepositoryDisabledHint { get; set; }
+
+    /// <summary>One entry of the "Workspace repository" select.</summary>
+    public sealed record WorkspaceRepositoryChoice(int RepositoryId, string DisplayName);
+
+    /// <summary>
+    /// Imported repositories that can become the Workspace repository: every repository that is not already a
+    /// Source of this Workspace (the Workspace's current Workspace repository is therefore included so an edit
+    /// shows it selected), sorted by display name.
+    /// </summary>
+    public static IReadOnlyList<WorkspaceRepositoryChoice> BuildWorkspaceRepositoryChoices(
+        IEnumerable<(int RepositoryId, string RepositoryName, string? OrgName)> repositories,
+        IReadOnlySet<int> sourceRepositoryIds) =>
+        repositories
+            .Where(r => !sourceRepositoryIds.Contains(r.RepositoryId))
+            .Select(r => new WorkspaceRepositoryChoice(
+                r.RepositoryId,
+                string.IsNullOrWhiteSpace(r.OrgName) ? r.RepositoryName : $"{r.OrgName}/{r.RepositoryName}"))
+            .OrderBy(c => c.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(c => c.RepositoryId)
+            .ToList();
 
     private bool _wasVisible;
 
@@ -172,6 +216,16 @@
         await TypeChanged.InvokeAsync(type);
         await UseGitVersionChanged.InvokeAsync(defaults.Versioning == WorkspaceVersioningMode.GitVersion);
         await UseGitHubActionsChanged.InvokeAsync(defaults.Ci == WorkspaceCiProvider.GitHubActions);
+    }
+
+    private Task OnWorkspaceRepositoryChosenAsync(ChangeEventArgs e)
+    {
+        if (IsWorkspaceRepositoryDisabled)
+            return Task.CompletedTask;
+
+        var raw = e.Value?.ToString();
+        int? chosen = int.TryParse(raw, out var id) ? id : null;
+        return WorkspaceRepositoryIdChanged.InvokeAsync(chosen);
     }
 
     private Task OnGitVersionChanged(ChangeEventArgs e) =>

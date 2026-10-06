@@ -1,10 +1,123 @@
+using GrayMoon.Abstractions.Worker;
+using GrayMoon.App.Data;
 using GrayMoon.App.Models;
+using GrayMoon.App.Repositories;
+using GrayMoon.App.Services.Worker;
+using GrayMoon.App.Services.WorkspaceManifest;
+using Microsoft.AspNetCore.Components;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.JSInterop;
 
 namespace GrayMoon.App.Components.Pages;
 
 public sealed partial class WorkspaceRepositories
 {
+    [Inject] private IDbContextFactory<AppDbContext> DbContextFactory { get; set; } = default!;
+    [Inject] private IWorkerFeatureSupportService WorkerFeatureSupport { get; set; } = default!;
+
+    /// <summary>True when the Workspace has a Workspace-role link (D13); drives the Worker compatibility banner.</summary>
+    private bool _hasWorkspaceRepositoryLink;
+    private bool _workerSupportsWorkspaceRepository = true;
+    private bool _isResolvingManifestDrift;
+
+    private bool ShowManifestDriftBanner => !_isFeatureContext && workspace?.ManifestDriftDetectedAt != null;
+
+    private bool ShowWorkerCompatibilityBanner =>
+        !_isFeatureContext && _hasWorkspaceRepositoryLink && !_workerSupportsWorkspaceRepository;
+
+    /// <summary>
+    /// Banner data: whether a Workspace-role link exists and, if so, whether the connected Worker advertises
+    /// <see cref="WorkerFeatures.WorkspaceRepository"/> (D2). Never throws; a failed read leaves the banner hidden.
+    /// </summary>
+    private async Task RefreshWorkspaceRepositoryBannerStateAsync()
+    {
+        try
+        {
+            await using var db = await DbContextFactory.CreateDbContextAsync();
+            _hasWorkspaceRepositoryLink = await db.WorkspaceRepositories.AsNoTracking()
+                .AnyAsync(l => l.WorkspaceId == WorkspaceId && l.Role == WorkspaceRepositoryRole.Workspace);
+            _workerSupportsWorkspaceRepository = !_hasWorkspaceRepositoryLink
+                || await WorkerFeatureSupport.SupportsAsync(WorkerFeatures.WorkspaceRepository);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogDebug(ex, "Could not read Workspace repository banner state for workspace {WorkspaceId}", WorkspaceId);
+            _hasWorkspaceRepositoryLink = false;
+            _workerSupportsWorkspaceRepository = true;
+        }
+    }
+
+    private async Task ReloadWorkspaceHeaderRowAsync()
+    {
+        var refreshed = await ScopedExecutor.ExecuteAsync<WorkspaceRepository, Workspace?>(
+            repo => repo.GetHeaderAsync(WorkspaceId));
+        if (refreshed != null)
+        {
+            workspace = refreshed;
+        }
+    }
+
+    /// <summary>Drift banner "Write Workspace definition to disk": rewrites .gitignore and the manifest (D5, D12), then re-checks drift (D8).</summary>
+    private async Task WriteWorkspaceDefinitionToDiskAsync()
+    {
+        if (_isResolvingManifestDrift)
+            return;
+
+        _isResolvingManifestDrift = true;
+        StateHasChanged();
+        try
+        {
+            var error = await ManifestService.SyncDefinitionToDiskAsync(WorkspaceId);
+            if (error is not null)
+            {
+                ToastService.ShowError(error);
+                return;
+            }
+
+            await ManifestService.DetectDriftAsync(WorkspaceId);
+            await ReloadWorkspaceHeaderRowAsync();
+            ToastService.Show("Workspace definition written to disk.");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Writing the Workspace definition failed for workspace {WorkspaceId}", WorkspaceId);
+            ToastService.ShowError($"Could not write the Workspace definition: {ex.Message}");
+        }
+        finally
+        {
+            _isResolvingManifestDrift = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>Drift banner "Dismiss": clears <c>Workspaces.ManifestDriftDetectedAt</c> until the next detection.</summary>
+    private async Task DismissManifestDriftAsync()
+    {
+        if (_isResolvingManifestDrift)
+            return;
+
+        _isResolvingManifestDrift = true;
+        StateHasChanged();
+        try
+        {
+            await using var db = await DbContextFactory.CreateDbContextAsync();
+            await db.Workspaces
+                .Where(w => w.WorkspaceId == WorkspaceId)
+                .ExecuteUpdateAsync(s => s.SetProperty(w => w.ManifestDriftDetectedAt, (DateTime?)null));
+            await ReloadWorkspaceHeaderRowAsync();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Dismissing the Workspace definition banner failed for workspace {WorkspaceId}", WorkspaceId);
+            ToastService.ShowError($"Could not dismiss the banner: {ex.Message}");
+        }
+        finally
+        {
+            _isResolvingManifestDrift = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
     private async Task CopyVersionToClipboard(string version)
     {
         if (string.IsNullOrEmpty(version))

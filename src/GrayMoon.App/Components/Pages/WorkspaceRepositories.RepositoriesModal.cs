@@ -14,11 +14,20 @@ public sealed partial class WorkspaceRepositories
     private async Task ShowRepositoriesModalAsync()
     {
         var snapshots = await LinkListQueryService.GetAllSnapshotsAsync(WorkspaceId);
-        var ids = snapshots.Select(r => r.RepositoryId).ToHashSet();
+        // The Workspace repository is neither selectable nor removable in this modal (D13).
+        var ids = snapshots
+            .Where(r => r.Role != WorkspaceRepositoryRole.Workspace)
+            .Select(r => r.RepositoryId)
+            .ToHashSet();
+        var workspaceRepositoryIds = snapshots
+            .Where(r => r.Role == WorkspaceRepositoryRole.Workspace)
+            .Select(r => r.RepositoryId)
+            .ToHashSet();
         _repositoriesModal = new RepositoriesModalState
         {
             IsVisible = true,
             SelectedRepositoryIds = ids,
+            ExcludedRepositoryIds = workspaceRepositoryIds,
             ErrorMessage = null,
             RefreshGeneration = _repositoriesModal.RefreshGeneration + 1,
         };
@@ -142,6 +151,7 @@ public sealed partial class WorkspaceRepositories
     {
         public bool IsVisible { get; set; }
         public HashSet<int> SelectedRepositoryIds { get; set; } = new();
+        public HashSet<int> ExcludedRepositoryIds { get; set; } = new();
         public bool HasConnectors { get; set; }
         public bool IsSaving { get; set; }
         public string? ErrorMessage { get; set; }

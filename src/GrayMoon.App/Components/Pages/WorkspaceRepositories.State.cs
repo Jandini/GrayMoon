@@ -117,6 +117,7 @@ public sealed partial class WorkspaceRepositories
     internal enum VirtualSlotKind
     {
         LevelHeader,
+        WorkspaceHeader,
         Row,
     }
     internal sealed record VirtualSlot(
@@ -226,7 +227,9 @@ public sealed partial class WorkspaceRepositories
     /// <summary>
     /// Pure slot layout for the virtualized grid. With <paramref name="groupByDependencyLevel"/> every
     /// dependency level (including the null "No dependencies" group) gets a header slot before its rows.
-    /// Without it the grid is a flat list of rows: no header slots at all, never a synthetic level group.
+    /// Without it the grid is a flat list of rows: no level header slots at all, never a synthetic level group.
+    /// A Workspace-role row is never part of a level group: it is laid out first, under its own
+    /// <see cref="VirtualSlotKind.WorkspaceHeader"/> slot (both with and without level grouping).
     /// </summary>
     internal static List<VirtualSlot> ComputeSlots(
         IReadOnlyList<WorkspaceRepositoryLinkIndexEntry> index,
@@ -237,10 +240,15 @@ public sealed partial class WorkspaceRepositories
         {
             return slots;
         }
-        if (!groupByDependencyLevel)
+        var stripeIndex = 0;
+        var workspaceEntries = index.Where(e => e.Role == WorkspaceRepositoryRole.Workspace).ToList();
+        var sourceEntries = workspaceEntries.Count == 0
+            ? index
+            : index.Where(e => e.Role != WorkspaceRepositoryRole.Workspace).ToList();
+        if (workspaceEntries.Count > 0)
         {
-            var flatStripeIndex = 0;
-            foreach (var entry in index)
+            slots.Add(new VirtualSlot(VirtualSlotKind.WorkspaceHeader, null, 0, 0, workspaceEntries.Count, -1));
+            foreach (var entry in workspaceEntries)
             {
                 slots.Add(new VirtualSlot(
                     VirtualSlotKind.Row,
@@ -248,20 +256,32 @@ public sealed partial class WorkspaceRepositories
                     entry.WorkspaceRepositoryId,
                     entry.RepositoryId,
                     0,
-                    flatStripeIndex++));
+                    stripeIndex++));
+            }
+        }
+        if (!groupByDependencyLevel)
+        {
+            foreach (var entry in sourceEntries)
+            {
+                slots.Add(new VirtualSlot(
+                    VirtualSlotKind.Row,
+                    null,
+                    entry.WorkspaceRepositoryId,
+                    entry.RepositoryId,
+                    0,
+                    stripeIndex++));
             }
             return slots;
         }
         var levelCounts = new Dictionary<int, int>();
-        foreach (var entry in index)
+        foreach (var entry in sourceEntries)
         {
             var levelKey = entry.DependencyLevel ?? int.MinValue;
             levelCounts[levelKey] = levelCounts.GetValueOrDefault(levelKey) + 1;
         }
         var previousLevel = int.MinValue;
         var hasPrevious = false;
-        var stripeIndex = 0;
-        foreach (var entry in index)
+        foreach (var entry in sourceEntries)
         {
             var levelKey = entry.DependencyLevel ?? int.MinValue;
             if (!hasPrevious || levelKey != previousLevel)
@@ -286,10 +306,9 @@ public sealed partial class WorkspaceRepositories
         }
         return slots;
     }
-
     private static string StripeClass(int stripeIndex) => VirtualScrollUi.StripeClass(stripeIndex);
     private static double SlotHeight(VirtualSlot slot) =>
-        slot.Kind == VirtualSlotKind.LevelHeader ? VirtualHeaderHeightPx : VirtualRowHeightPx;
+        slot.Kind != VirtualSlotKind.Row ? VirtualHeaderHeightPx : VirtualRowHeightPx;
     private double TotalScrollHeightPx()
     {
         double total = 0;
@@ -333,7 +352,7 @@ public sealed partial class WorkspaceRepositories
         _ = InvokeAsync(StateHasChanged);
     }
     private IEnumerable<WorkspaceRepositoryLink> GetHydratedLinksAtLevel(int? levelKey) =>
-        _linkByRepoId.Values.Where(wr => wr.DependencyLevel == levelKey);
+        _linkByRepoId.Values.Where(wr => wr.Role != WorkspaceRepositoryRole.Workspace && wr.DependencyLevel == levelKey);
     private bool IsLevelActionsDisabled(int? levelKey)
     {
         var hydrated = GetHydratedLinksAtLevel(levelKey).ToList();
