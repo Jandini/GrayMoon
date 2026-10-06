@@ -55,7 +55,9 @@ public sealed partial class WorkspaceProjectRepository
             .ToListAsync(cancellationToken);
         if (links.Count == 0) return;
 
-        var repoIdsInWorkspace = links.Select(l => l.RepositoryId).ToHashSet();
+        // The Workspace-role repository has no projects (D6) and no dependency level, so it never takes part in the dependency graph.
+        var sourceLinks = links.Where(l => l.Role != WorkspaceRepositoryRole.Workspace).ToList();
+        var repoIdsInWorkspace = sourceLinks.Select(l => l.RepositoryId).ToHashSet();
 
         // The Feature's own checked-out version is what unmatched-dependency comparisons must use; the shared
         // link's GitVersion is only correct for the special Workspace context (see design §6.4).
