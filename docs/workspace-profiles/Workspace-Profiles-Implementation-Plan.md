@@ -535,9 +535,123 @@ declarations removed or member-hiding warnings will break the 0-warning bar.
 
 | | |
 |---|---|
-| Owner | unassigned |
-| Status | READY |
+| Owner | subagent |
+| Status | REVIEW |
 | Dependencies | Unit A (DONE), Unit C (DONE), Unit E (DONE) |
+
+**What changed.** Implemented in one pass; design section 8a describes the result. No new capability.
+
+- Push strategy chosen once at the application boundary. `WorkspacePushOperations` resolves capabilities
+  and asks the new `WorkspacePushStrategySelector` (`UsesDependencyAwarePush`) for `BasicGitPushStrategy` or
+  `DotNetDependencyPushStrategy`. The strategy flows through `WorkspacePushHandler` (plan) and
+  `PushOrchestrator` (run), which no longer branch on synchronized/parallel or touch the registry service.
+- Basic: plan from the new profile-agnostic `WorkspaceProjectRepository.GetPushPayloadWithoutDependenciesAsync`
+  (no levels, no required packages), push through a new `WorkspacePushService.RunPushReposParallelAsync`
+  overload that takes that payload. No dependency query, registry sync, package wait, level order or restore,
+  even when the caller asks for a synchronized push.
+- .NET: the previous `PushOrchestrator` branches moved verbatim into the strategy; registry sync gated on
+  `UsesNuGetPackages`, per-level restore on `UsesPackageRestore` (both true for .NET, so behaviour is
+  unchanged). The three CI lines are intact (`WorkspacePushService.cs:190-192`, `:232`, `:276`).
+- Update: `DependencyUpdateOrchestrator` checks `UsesDependencyAwareUpdate` once; without it a run is
+  version files only (update+commit as one group, refresh committed versions, finalize). `GetUpdatePlanAsync`
+  and `SyncDependenciesAsync` carry the same gate.
+- Restore: the three `WorkspaceGitService.Restore.cs` entry points are no-ops (return 0) unless
+  `UsesPackageRestore`.
+- Capabilities now sent on `PushRepository` (App never sent them before), `UndoPush`, `FetchCommits`,
+  `GetGitChangeStatus` and `ReturnToDefaultBranch`. `ReturnToDefaultBranchRequest` gained `workspaceId` and
+  warms the Worker cache in `CommandDispatcher`.
+- Worker: `ReturnToDefaultBranchCommand` passes the capabilities to the probe; `UndoPushCommand` and
+  `PushRepositoryCommand` build the post-operation version from `IRepositoryVersionProviderFactory`, scan
+  projects only when `DiscoverDotNetProjects`, and report skipped steps as not probed. The notification
+  builders are `internal` so they can be tested without a hub connection.
+
+**Files touched.**
+
+```text
+src/GrayMoon.App/Services/Orchestration/IWorkspacePushStrategy.cs        (new: interface, WorkspacePushRun, selector)
+src/GrayMoon.App/Services/Orchestration/BasicGitPushStrategy.cs          (new)
+src/GrayMoon.App/Services/Orchestration/DotNetDependencyPushStrategy.cs  (new)
+src/GrayMoon.App/Services/Orchestration/PushOrchestrator.cs
+src/GrayMoon.App/Services/Orchestration/WorkspacePushHandler.cs
+src/GrayMoon.App/Services/Orchestration/WorkspaceUndoPushHandler.cs
+src/GrayMoon.App/Services/Orchestration/DependencyUpdateOrchestrator.cs
+src/GrayMoon.App/Services/Application/WorkspacePushOperations.cs
+src/GrayMoon.App/Services/Workspaces/WorkspacePushService.cs
+src/GrayMoon.App/Services/Git/WorkspaceGitService.Fetch.cs
+src/GrayMoon.App/Services/Git/WorkspaceGitService.Projects.cs
+src/GrayMoon.App/Services/Git/WorkspaceGitService.Restore.cs
+src/GrayMoon.App/Services/Git/WorkspaceGitService.ReturnToDefault.cs
+src/GrayMoon.App/Services/GitChanges/GitChangesWorkerClient.cs          (outside list: GetGitChangeStatus is sent here)
+src/GrayMoon.App/Repositories/WorkspaceProjectRepository.Push.cs
+src/GrayMoon.App/Program.cs                                             (three strategy registrations)
+src/GrayMoon.Worker/Jobs/Requests/ReturnToDefaultBranchRequest.cs
+src/GrayMoon.Worker/Commands/ReturnToDefaultBranchCommand.cs
+src/GrayMoon.Worker/Commands/UndoPushCommand.cs
+src/GrayMoon.Worker/Commands/PushRepositoryCommand.cs                   (outside list: ungated GitVersion and csproj scan)
+src/GrayMoon.Worker/Services/CommandDispatcher.cs                       (cache-warming case only)
+src/GrayMoon.App.Tests/WorkspacePushStrategyTests.cs                    (new)
+src/GrayMoon.Worker.Tests/PushUndoReturnCapabilitiesTests.cs            (new)
+docs/workspace-profiles/Workspace-Profiles-Design.md                    (section 8a)
+```
+
+**Tests.** `WorkspacePushStrategyTests` (14, real DI + in-memory SQLite + fake worker bridge + recording
+NuGet `HttpMessageHandler`): selector matrix; Basic plan has no required packages and makes no registry
+call; Basic push with `synchronizedPush: true` and an unmatched package pushes both repos plainly (no
+registry request, no `DotnetRestore`, `refreshVersionAfterPush` false, capabilities false/false); .NET plan
+requires the producer package; .NET synchronized push pushes producer before consumer, waits on the
+registry and restores the synced consumer; .NET with no registry match still throws
+`SynchronizedPushNotPossibleException`; Basic update sends no `SyncRepositoryDependencies` or
+`RefreshRepositoryProjects` and has an empty plan, .NET still lists the stale consumer; Basic restore is a
+no-op, .NET still restores; undo-push, fetch, return-to-default and git-change-status carry capabilities
+(and none for a missing workspace). `PushUndoReturnCapabilitiesTests` (6, real git, counting doubles):
+Basic+None return-to-default launches no GitVersion and scans no projects, .NET without versioning still
+scans, unstated keeps full enrichment; Basic+None undo-push and push refreshes launch no GitVersion and
+scan nothing, .NET without versioning still scans.
+
+**Owner verification.** `dotnet build GrayMoon.slnx` 0 warnings, 0 errors. `GrayMoon.App.Tests` 918/918
+(+14), `GrayMoon.Worker.Tests` 318 passed + 1 skipped (+6; the skip is the pre-existing conditional GitVersion test), `GrayMoon.Common.Tests` 234/234. Feature-context
+isolation suite passes inside `GrayMoon.App.Tests`. All touched files CRLF, no non-ASCII dashes.
+
+**Risks / findings.**
+
+- `WorkspacePushService.cs:764` (fixed): `PushReposAsync` ran the connector health check for every
+  parallel push on the one scoped `AppDbContext` (`ConnectorHealthService.cs:45`), so a multi-repo parallel
+  push could hit "a second operation was started". The check is now serialized; behaviour is otherwise
+  unchanged.
+- `WorkspacePushService.cs:715`: `TryRestoreReposAtLevelAsync` only restores edges whose referenced
+  project is in the level being pushed, so the default (no `syncedRepoIds`) per-level restore after a
+  synchronized push almost never runs for a normal lower-to-higher graph. Left as found (.NET behaviour
+  must not change here).
+- `WorkspacePushService.RunPushReposInLevelOrderAsync` has no callers.
+- `CreateBranchCommand.cs:63` still calls `git.GetVersionAsync` directly, so creating a branch launches
+  GitVersion for Basic+None. Not in this unit's file list.
+- `WorkspaceFeatureOperations.cs:1169` sends `GetGitChangeStatus` for Feature worktrees without
+  capabilities. Harmless today (the command runs no enrichment, it only warms the cache), not owned here.
+- A workspace switched from .NET to Basic keeps stale project rows and levels. Basic push, update and
+  restore never read them (Basic plan ignores levels and packages; update and restore are gated), but the
+  pages still do until Unit F/H.
+
+**Deviations.** `GitChangesWorkerClient.cs` and `PushRepositoryCommand.cs` are outside the file list but
+are where `GetGitChangeStatus` is sent and where push launched GitVersion and the project scan. Public
+page-called signatures are unchanged; `WorkspacePushHandler.GetPushPlanAsync` and
+`RunPushWithDependenciesAsync` changed shape, but their only caller is `WorkspacePushOperations`.
+
+**Follow-ups.**
+
+- Unit F: the push modal and badges read dependency info directly from `WorkspaceDependencyService`
+  instead of the strategy: `WorkspaceRepositories.Push.cs:36` (`GetPushDependencyInfoForRepoSetAsync`),
+  `:109` (`GetPushDependencyInfoForRepoAsync`), `WorkspaceActionNotificationPanel.razor:876` and `:947`.
+  For Basic these can show stale required packages; switch to `IWorkspacePushOperations.GetPlanForLinksAsync`
+  or hide on `UsesDependencyAwarePush`. Restore buttons (`WorkspaceRepositories.Push.cs:305`, `:322`,
+  `:361`, `:388`) are now no-ops for Basic and should be hidden on `UsesPackageRestore`. The update job
+  title "Updating dependencies..." (`WorkspaceRepositories.Update.cs:93`, `:362`,
+  `WorkspaceActionNotificationPanel.razor:562`, `:626`) is wrong for Basic, where update only touches
+  version files.
+- Unit G: `WorkspacePackages.razor:230` still calls `SyncWorkspacePackageRegistriesAsync` directly; hide or
+  gate it on `UsesNuGetPackages`.
+- Unit H: a profile switch must clear persisted project/level state (above). The Worker's capability cache
+  keeps the old profile until the next command for that workspace re-warms it; every command in this unit
+  re-warms it, but the git hooks between a switch and that command still use the old one.
 
 **Inputs from Wave 1.**
 

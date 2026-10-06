@@ -1,6 +1,7 @@
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.Application.Features;
+using GrayMoon.Application.Workspaces;
 using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services.Orchestration;
@@ -8,6 +9,7 @@ namespace GrayMoon.App.Services.Orchestration;
 /// <summary>
 /// Runs the dependency-update workflow: refresh projects, build plan, then per level (or single-level):
 /// sync .csproj files, commit changes, refresh repo version. Commits are required before moving to the next level.
+/// A workspace without dependency-aware update gets only the version-file part of that workflow.
 /// Stateless; no UI types. Caller provides progress and error callbacks.
 /// </summary>
 public sealed class DependencyUpdateOrchestrator(
@@ -17,6 +19,7 @@ public sealed class DependencyUpdateOrchestrator(
     WorkspaceProjectRepository workspaceProjectRepository,
     IOptions<WorkspaceOptions> workspaceOptions,
     IServiceScopeFactory scopeFactory,
+    IWorkspaceCapabilitiesResolver capabilitiesResolver,
     ILogger<DependencyUpdateOrchestrator> logger)
 {
     private readonly int _maxConcurrent = Math.Max(1, workspaceOptions?.Value?.MaxParallelOperations ?? 8);
@@ -74,6 +77,14 @@ public sealed class DependencyUpdateOrchestrator(
         {
             hadError = true;
             sink.Level(level, msg);
+        }
+
+        var capabilities = await capabilitiesResolver.GetAsync(workspaceId, cancellationToken);
+        if (!capabilities.UsesDependencyAwareUpdate)
+        {
+            var versionFilesOk = await RunVersionFileUpdateAsync(
+                workspaceId, contextId, cancellationToken, setProgress, onAppSideComplete, OnRepoError, OnLevelError, commitMessage, runId);
+            return versionFilesOk && !hadError ? DependencyUpdateRunResult.Ok() : DependencyUpdateRunResult.Failed();
         }
 
         // Step 1: Refresh project data from .csproj files on disk.
@@ -277,6 +288,68 @@ public sealed class DependencyUpdateOrchestrator(
             runId, workspaceId, hadError, hadError ? 0 : allSyncedRepoIds.Count);
 
         return hadError ? DependencyUpdateRunResult.Failed() : DependencyUpdateRunResult.Ok(allSyncedRepoIds);
+    }
+
+    /// <summary>
+    /// Update for a workspace without dependency-aware update: no project refresh, no dependency levels and no
+    /// project-file rewrites. Out-of-date version files across every non-tag-pinned repository are updated and
+    /// committed as one group, then the committed repositories' versions are refreshed.
+    /// </summary>
+    private async Task<bool> RunVersionFileUpdateAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        CancellationToken cancellationToken,
+        Action<string> setProgress,
+        Action? onAppSideComplete,
+        Action<int, string> onRepoError,
+        Action<int, string> onLevelError,
+        string? commitMessage,
+        string? runId)
+    {
+        var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+        {
+            onLevelError(0, $"Workspace {workspaceId} not found.");
+            return false;
+        }
+
+        var repoIds = workspace.Repositories
+            .Where(link => link.Repository != null && string.IsNullOrWhiteSpace(link.CheckedOutTag))
+            .Select(link => link.RepositoryId)
+            .ToHashSet();
+        var outOfDateFileRepoIds = workspace.Repositories
+            .Where(l => (l.OutOfDateFileRepos ?? 0) > 0)
+            .Select(l => l.RepositoryId)
+            .ToHashSet();
+
+        logger.LogInformation(
+            "[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: version-file update only. Repos={RepoCount}, WithOutOfDateFiles={FileRepoCount}",
+            runId, workspaceId, repoIds.Count, repoIds.Count(outOfDateFileRepoIds.Contains));
+
+        var (vfOk, vfCommittedRepoIds) = await UpdateAndCommitVersionFilesAsync(
+            workspaceId,
+            contextId,
+            repoIds,
+            outOfDateFileRepoIds,
+            level: 0,
+            cancellationToken,
+            setProgress,
+            onAppSideComplete,
+            onRepoError,
+            onLevelError,
+            commitMessage,
+            runId);
+        if (!vfOk)
+            return false;
+
+        if (vfCommittedRepoIds.Count > 0
+            && !await RefreshRepositoryVersionsAsync(vfCommittedRepoIds, workspaceId, contextId, cancellationToken, setProgress, onAppSideComplete, onRepoError))
+            return false;
+
+        onAppSideComplete?.Invoke();
+        await workspaceGitService.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, contextId, cancellationToken);
+        await fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, contextId, cancellationToken);
+        return true;
     }
 
     private async Task<IReadOnlyList<(int Level, IReadOnlySet<int> RepoIds)>> GetRepositoryIdsByDependencyLevelAsync(

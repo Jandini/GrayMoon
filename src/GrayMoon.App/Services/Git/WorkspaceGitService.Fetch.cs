@@ -47,6 +47,7 @@ public sealed partial class WorkspaceGitService
         _logger.LogInformation("Quick Fetch triggered. Workspace={WorkspaceName}, RepoCount={Count}", workspace.Name, links.Count);
 
         var divergenceByRepoId = await GetDivergenceBaseBranchesByRepositoryIdAsync(contextId, cancellationToken);
+        var capabilities = await ResolveRepositoryOperationCapabilitiesAsync(workspaceId, cancellationToken);
 
         var completedCount = 0;
         var totalCount = links.Count;
@@ -67,7 +68,8 @@ public sealed partial class WorkspaceGitService
                     bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
                     workspaceId,
                     workspaceRoot,
-                    divergenceBaseBranch
+                    divergenceBaseBranch,
+                    capabilities
                 };
                 var response = await _workerBridge.SendCommandAsync("FetchCommits", args, cancellationToken);
                 var data = response.Data != null

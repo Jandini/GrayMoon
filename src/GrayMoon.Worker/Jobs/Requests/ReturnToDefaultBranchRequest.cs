@@ -4,6 +4,10 @@ namespace GrayMoon.Worker.Jobs.Requests;
 
 public sealed class ReturnToDefaultBranchRequest : WorkspaceCommandRequest
 {
+    /// <summary>Optional. Lets the worker remember the workspace's capabilities for its git hooks.</summary>
+    [JsonPropertyName("workspaceId")]
+    public int WorkspaceId { get; set; }
+
     [JsonPropertyName("workspaceName")]
     public string? WorkspaceName { get; set; }
 

@@ -115,15 +115,18 @@ public sealed partial class WorkspaceGitService
         var forceDeleteLocalBranch = allowForceDeleteLocalBranch || prInfo?.IsMerged == true || prInfo?.IsClosed == true;
 
         var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var capabilities = await ResolveRepositoryOperationCapabilitiesAsync(workspaceId, cancellationToken);
         var args = new
         {
+            workspaceId,
             workspaceName = workspaceFolderName,
             repositoryName = repo.RepositoryName,
             currentBranchName,
             bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
             workspaceRoot,
             forceDeleteLocalBranch,
-            deleteRemoteBranch
+            deleteRemoteBranch,
+            capabilities
         };
 
         var response = await _workerBridge.SendCommandAsync("ReturnToDefaultBranch", args, cancellationToken);

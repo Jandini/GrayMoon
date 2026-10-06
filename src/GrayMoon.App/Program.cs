@@ -177,6 +177,9 @@ try
     builder.Services.AddScoped<PushOrchestrator>();
     builder.Services.AddScoped<WorkspacePushService>();
     builder.Services.AddScoped<WorkspacePushHandler>();
+    builder.Services.AddScoped<BasicGitPushStrategy>();
+    builder.Services.AddScoped<DotNetDependencyPushStrategy>();
+    builder.Services.AddScoped<WorkspacePushStrategySelector>();
     builder.Services.AddScoped<WorkspaceUndoPushHandler>();
     builder.Services.AddScoped<WorkspaceDependencyService>();
     builder.Services.AddScoped<WorkspacePendingActionsService>();

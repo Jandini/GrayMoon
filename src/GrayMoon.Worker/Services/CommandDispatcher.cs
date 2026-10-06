@@ -137,6 +137,9 @@ public sealed class CommandDispatcher(
             case GetGitChangeStatusRequest r:
                 capabilityProvider.Remember(r.WorkspaceId, r.Capabilities);
                 break;
+            case ReturnToDefaultBranchRequest r:
+                capabilityProvider.Remember(r.WorkspaceId, r.Capabilities);
+                break;
             case CreateGitWorktreeRequest { WorkspaceId: { } worktreeWorkspaceId } r:
                 capabilityProvider.Remember(worktreeWorkspaceId, r.Capabilities);
                 break;
