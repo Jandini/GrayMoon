@@ -1,6 +1,5 @@
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
-using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Components.Pages;
 
@@ -21,9 +20,16 @@ public sealed partial class WorkspaceActions
                 return;
             }
 
-            var persistedActions = _isFeatureContext && _selectedContextId is WorkspaceFeatureContextId ctxForActions
-                ? await ActionService.GetPersistedActionsForWorkspaceContextAsync(WorkspaceId, ctxForActions.Value, cancellationToken: default)
-                : await ActionService.GetPersistedActionsForWorkspaceAsync(WorkspaceId);
+            // No rows means no background refresh, auto-poll or hub-driven refresh can reach the CI provider either.
+            _ciProvider = await CiProviderResolver.GetForWorkspaceAsync(WorkspaceId);
+            if (!_ciProvider.IsEnabled)
+            {
+                errorMessage = "CI is not enabled for this workspace.";
+                rows = [];
+                return;
+            }
+
+            var persistedActions = await _ciProvider.GetPersistedStatusesAsync(WorkspaceId, FeatureContextIdForCi);
 
             // For a Feature context, the checked-out branch lives on WorkspaceRepositoryContextState, not on
             // the special Workspace's link - overlay it per repository so Actions polls/displays the Feature's
