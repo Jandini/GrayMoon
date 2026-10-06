@@ -9,7 +9,15 @@
 @inject IToastService ToastService
 @rendermode @(new InteractiveServerRenderMode(prerender: true))
 
-@if (State == WorkerConnectionState.VersionMismatch && !IsUpdating)
+@if (LogonPasswordRequired)
+{
+    <a href="/worker" class="badge bg-danger text-decoration-none ms-2"
+       title="@TitleText"
+       style="cursor: pointer; display: inline-flex; align-items: center; vertical-align: middle; background-color: #dc3545 !important; color: #fff !important;">
+        @StateLabel
+    </a>
+}
+else if (State == WorkerConnectionState.VersionMismatch && !IsUpdating)
 {
     <a class="@BadgeClassFull"
        title="@TitleText"
@@ -33,6 +41,7 @@ else
     private WorkerConnectionState State => WorkerConnectionTracker.State;
     private string? WorkerSemVer => WorkerConnectionTracker.WorkerSemVer;
     private bool IsUpdating => WorkerConnectionTracker.IsSelfUpdateInProgress;
+    private bool LogonPasswordRequired => WorkerConnectionTracker.LogonPasswordRequired;
 
     protected override void OnInitialized()
     {
@@ -75,28 +84,19 @@ else
 
     private string BadgeClassFull => $"badge {BadgeClass} text-decoration-none ms-2";
 
-    private string StateLabel => IsUpdating
-        ? "installing"
-        : State switch
-        {
-            WorkerConnectionState.Online => WorkerQueueStateService.GetTotalPendingCount() > 0 ? "running" : "online",
-            WorkerConnectionState.Offline => "offline",
-            WorkerConnectionState.Connecting => "connecting",
-            WorkerConnectionState.VersionMismatch => "update",
-            _ => "offline"
-        };
+    private string StateLabel => WorkerStatusText.Label(
+        IsUpdating,
+        LogonPasswordRequired,
+        State,
+        WorkerQueueStateService.GetTotalPendingCount());
 
-    private string TitleText => IsUpdating
-        ? "Worker is installing an update."
-        : State switch
-        {
-            WorkerConnectionState.VersionMismatch => $"Worker version mismatch. Worker version: {WorkerSemVer ?? "unknown"}. Click to update.",
-            WorkerConnectionState.Online => (WorkerQueueStateService.GetTotalPendingCount() > 0 ? "Worker is running tasks" : "Worker connection status:  online")
-                + (WorkerSecret.UnsecuredWorkerConnected ? ". Reinstall the Worker to finish securing GrayMoon." : string.Empty),
-            WorkerConnectionState.Offline => "Worker connection status:  offline",
-            WorkerConnectionState.Connecting => "Worker connection status:  connecting",
-            _ => "Worker connection status:  unknown"
-        };
+    private string TitleText => WorkerStatusText.Title(
+        IsUpdating,
+        LogonPasswordRequired,
+        State,
+        WorkerSemVer,
+        WorkerQueueStateService.GetTotalPendingCount(),
+        WorkerSecret.UnsecuredWorkerConnected);
 
     public void Dispose() => WorkerQueueStateService.RemoveQueueStateChanged(OnQueueStateChanged);
 }

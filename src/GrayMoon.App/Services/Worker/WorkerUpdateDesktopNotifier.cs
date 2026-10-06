@@ -34,7 +34,8 @@ public sealed class WorkerUpdateDesktopNotifier(
         var notification = _policy.OnChange(
             state,
             workerConnectionTracker.IsSelfUpdateInProgress,
-            workerConnectionTracker.WorkerSemVer);
+            workerConnectionTracker.WorkerSemVer,
+            workerConnectionTracker.LogonPasswordRequired);
         if (notification is null)
             return;
 

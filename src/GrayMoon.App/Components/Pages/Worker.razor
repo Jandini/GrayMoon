@@ -64,6 +64,10 @@
                                 The Windows service requires the .NET 10 (x64) runtime on the host.
                                 <a href="@WorkerDotnet10RuntimeUrl" target="_blank" rel="noopener noreferrer">Download the .NET 10 runtime</a>
                             </p>
+                            @if (WorkerConnectionTracker.LogonPasswordRequired)
+                            {
+                                <p class="small text-danger mt-3 mb-0">The Windows password stored for the Worker service is no longer valid. Install again and enter your current Windows password.</p>
+                            }
                             @if (ShowUnsecuredWorkerNotice)
                             {
                                 <p class="small text-warning mt-3 mb-0">Reinstall the Worker to finish securing GrayMoon.</p>
@@ -218,6 +222,12 @@
                     _ = InvokeAsync(LoadHostInfoAsync);
                 _ = InvokeAsync(() =>
                 {
+                    if (WorkerConnectionTracker.LogonPasswordRequired)
+                    {
+                        _isUpdating = false;
+                        _waitingForReconnect = false;
+                        ActiveTab = "install";
+                    }
                     if (state is not WorkerConnectionState.Online and not WorkerConnectionState.VersionMismatch && ActiveTab == "host")
                         ActiveTab = "install";
                     StateHasChanged();

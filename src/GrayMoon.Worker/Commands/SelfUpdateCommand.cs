@@ -8,6 +8,13 @@ namespace GrayMoon.Worker.Commands;
 
 public sealed class SelfUpdateCommand(ILogger<SelfUpdateCommand> logger) : ICommandHandler<SelfUpdateRequest, SelfUpdateResponse>
 {
+    /// <summary>Set by the hidden self-update PowerShell so the install script does not wait for a password.</summary>
+    internal const string NonInteractiveVariable = "GRAYMOON_WORKER_NONINTERACTIVE";
+
+    internal static string BuildLaunchArguments(string installUrl) =>
+        "/c start \"\" /b powershell.exe -NoProfile -NonInteractive -Command \""
+        + "$env:" + NonInteractiveVariable + "='1'; irm '" + installUrl + "' | iex\"";
+
     public Task<SelfUpdateResponse> ExecuteAsync(SelfUpdateRequest request, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.InstallUrl))
@@ -19,7 +26,7 @@ public sealed class SelfUpdateCommand(ILogger<SelfUpdateCommand> logger) : IComm
         var psi = new ProcessStartInfo
         {
             FileName = "cmd.exe",
-            Arguments = $"/c start \"\" /b powershell.exe -NoProfile -NonInteractive -Command \"irm '{request.InstallUrl}' | iex\"",
+            Arguments = BuildLaunchArguments(request.InstallUrl),
             UseShellExecute = false,
             CreateNoWindow = true,
         };
