@@ -25,7 +25,10 @@ public sealed partial class WorkspaceGitService
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null) return;
         if (!await UsesPackageRestoreAsync(workspaceId, cancellationToken)) return;
-        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workerArgs = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workspaceRoot = workerArgs.WorkspaceRoot;
+        var workspaceFolderName = workerArgs.WorkspaceFolderName;
+        var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
         var tasks = repos
             .Where(r => r.ProjectPaths.Count > 0)
             .Select(async r =>
@@ -34,7 +37,7 @@ public sealed partial class WorkspaceGitService
                 {
                     await _workerBridge.SendCommandAsync(
                         "DotnetRestore",
-                        new { workspaceName = workspaceFolderName, repositoryName = r.RepoName, projectPaths = r.ProjectPaths, workspaceRoot },
+                        new { workspaceName = workspaceFolderName, repositoryName = r.RepoName, projectPaths = r.ProjectPaths, workspaceRoot, workspaceRepositoryName },
                         cancellationToken);
                 }
                 catch (OperationCanceledException) { throw; }

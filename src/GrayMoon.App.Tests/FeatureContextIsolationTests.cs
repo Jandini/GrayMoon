@@ -139,8 +139,8 @@ public sealed class FeatureContextIsolationTests
         workspace.ManagedFeatureStorageRoot = @"C:\Workspace\.graymoon\test-ws\features";
         await seedDb.SaveChangesAsync();
 
-        var (specialRoot, specialFolder) = await pathResolver.GetWorkerWorkspaceArgsAsync(special);
-        var (featureRoot, featureFolder) = await pathResolver.GetWorkerWorkspaceArgsAsync(feature);
+        var (specialRoot, specialFolder, _) = await pathResolver.GetWorkerArgsAsync(special);
+        var (featureRoot, featureFolder, _) = await pathResolver.GetWorkerArgsAsync(feature);
 
         Assert.Equal("test-ws", specialFolder);
         Assert.Equal("feat-path", featureFolder);

@@ -29,7 +29,10 @@ public sealed partial class WorkspaceGitService
         if (workspace == null)
             return Array.Empty<(int, int?, bool?)>();
 
-        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workerArgs = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workspaceRoot = workerArgs.WorkspaceRoot;
+        var workspaceFolderName = workerArgs.WorkspaceFolderName;
+        var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
         var maxParallel = _maxConcurrent;
 
         using var semaphore = new SemaphoreSlim(maxParallel, maxParallel);
@@ -45,7 +48,8 @@ public sealed partial class WorkspaceGitService
                     {
                         workspaceName = workspaceFolderName,
                         repositoryName = repoName,
-                        workspaceRoot
+                        workspaceRoot,
+                        workspaceRepositoryName
                     }, cancellationToken);
                     if (!response.Success || response.Data == null)
                         return (RepoId: repoId, DefaultAhead: (int?)null, HasUpstream: (bool?)null);
@@ -114,7 +118,10 @@ public sealed partial class WorkspaceGitService
         // A merged or closed pull request stays an independent reason the branch is safe to drop.
         var forceDeleteLocalBranch = allowForceDeleteLocalBranch || prInfo?.IsMerged == true || prInfo?.IsClosed == true;
 
-        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workerArgs = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workspaceRoot = workerArgs.WorkspaceRoot;
+        var workspaceFolderName = workerArgs.WorkspaceFolderName;
+        var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
         var capabilities = await ResolveRepositoryOperationCapabilitiesAsync(workspaceId, cancellationToken);
         var args = new
         {
@@ -124,6 +131,7 @@ public sealed partial class WorkspaceGitService
             currentBranchName,
             bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
             workspaceRoot,
+            workspaceRepositoryName,
             forceDeleteLocalBranch,
             deleteRemoteBranch,
             capabilities

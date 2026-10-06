@@ -556,7 +556,8 @@ public sealed class WorkspaceFeatureOperations(
     {
         try
         {
-            return await pathResolver.GetWorkerWorkspaceArgsAsync(featureContextId, cancellationToken);
+            var featureArgs = await pathResolver.GetWorkerArgsAsync(featureContextId, cancellationToken);
+            return (featureArgs.WorkspaceRoot, featureArgs.WorkspaceFolderName);
         }
         catch (Exception ex)
         {
@@ -734,8 +735,8 @@ public sealed class WorkspaceFeatureOperations(
         string? workspaceFolderName = null;
         try
         {
-            (workspaceRoot, workspaceFolderName) =
-                await pathResolver.GetWorkerWorkspaceArgsAsync(specialContextId, cancellationToken);
+            (workspaceRoot, workspaceFolderName, _) =
+                await pathResolver.GetWorkerArgsAsync(specialContextId, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -749,7 +750,7 @@ public sealed class WorkspaceFeatureOperations(
         try
         {
             featureRootPath = await pathResolver.GetContextRootAsync(featureContextId, cancellationToken);
-            (featureStorageRoot, _) = await pathResolver.GetWorkerWorkspaceArgsAsync(featureContextId, cancellationToken);
+            (featureStorageRoot, _, _) = await pathResolver.GetWorkerArgsAsync(featureContextId, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -1721,8 +1722,8 @@ public sealed class WorkspaceFeatureOperations(
         string? workspaceFolderName = null;
         try
         {
-            (workspaceRoot, workspaceFolderName) =
-                await pathResolver.GetWorkerWorkspaceArgsAsync(specialContextId, cancellationToken);
+            (workspaceRoot, workspaceFolderName, _) =
+                await pathResolver.GetWorkerArgsAsync(specialContextId, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -1734,7 +1735,7 @@ public sealed class WorkspaceFeatureOperations(
         try
         {
             featureRootPath = await pathResolver.GetContextRootAsync(featureContextId, cancellationToken);
-            (featureStorageRoot, _) = await pathResolver.GetWorkerWorkspaceArgsAsync(featureContextId, cancellationToken);
+            (featureStorageRoot, _, _) = await pathResolver.GetWorkerArgsAsync(featureContextId, cancellationToken);
         }
         catch (Exception ex)
         {

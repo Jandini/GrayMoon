@@ -106,9 +106,9 @@ public sealed partial class WorkspaceGitChanges
 
         ShowConfirm(message, () => scope == GitChangeOperationScope.Repository
             ? RunRepositoryScopedDiscardJobAsync(workspaceRepositoryId)
-            : RunMutationAsync(workspaceRepositoryId, rowKey, isDiscard: true, async (root, wsName, repoName, repositoryId) =>
+            : RunMutationAsync(workspaceRepositoryId, rowKey, isDiscard: true, async (root, wsName, repoName, repositoryId, workspaceRepositoryName) =>
             {
-                var result = await WorkerClient.DiscardAsync(root, wsName, repoName, scope, paths, CancellationToken.None);
+                var result = await WorkerClient.DiscardAsync(root, wsName, repoName, workspaceRepositoryName, scope, paths, CancellationToken.None);
                 await PersistMutationResultAsync(workspaceRepositoryId, repositoryId, result.Success, result.Snapshot, result.ErrorMessage);
             }), "Undo", details, UndoFooterNote, confirmIsDanger: true);
     }
@@ -207,7 +207,7 @@ public sealed partial class WorkspaceGitChanges
             }
 
             var result = await WorkerClient.DiscardAsync(
-                resolved.Value.Root, resolved.Value.WorkspaceName, resolved.Value.RepositoryName,
+                resolved.Value.Root, resolved.Value.WorkspaceName, resolved.Value.RepositoryName, resolved.Value.WorkspaceRepositoryName,
                 GitChangeOperationScope.Repository, [], ct);
 
             // reload:false - StartPageJob's own ReloadOnSuccess does the final LoadAsync() once this job
@@ -281,7 +281,7 @@ public sealed partial class WorkspaceGitChanges
                     }
 
                     var result = await WorkerClient.DiscardAsync(
-                        resolved.Value.Root, resolved.Value.WorkspaceName, resolved.Value.RepositoryName,
+                        resolved.Value.Root, resolved.Value.WorkspaceName, resolved.Value.RepositoryName, resolved.Value.WorkspaceRepositoryName,
                         GitChangeOperationScope.Repository, [], ct);
 
                     await PersistMutationResultAsync(repo.WorkspaceRepositoryId, resolved.Value.RepositoryId, result.Success, result.Snapshot, result.ErrorMessage, reload: false);
@@ -375,7 +375,7 @@ public sealed partial class WorkspaceGitChanges
                     }
 
                     var result = await WorkerClient.DiscardAsync(
-                        resolved.Value.Root, resolved.Value.WorkspaceName, resolved.Value.RepositoryName,
+                        resolved.Value.Root, resolved.Value.WorkspaceName, resolved.Value.RepositoryName, resolved.Value.WorkspaceRepositoryName,
                         GitChangeOperationScope.ExplicitPaths, paths, ct);
 
                     await PersistMutationResultAsync(workspaceRepositoryId, resolved.Value.RepositoryId, result.Success, result.Snapshot, result.ErrorMessage, reload: false);

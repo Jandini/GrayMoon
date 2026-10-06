@@ -199,10 +199,13 @@ public sealed class WorkspaceFileVersionService(
             patternsForResolve.Add(pattern);
         }
 
-        var (workspaceRoot, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
+        var workerArgs = await pathResolver.GetWorkerArgsAsync(contextId, cancellationToken);
+        var workspaceRoot = workerArgs.WorkspaceRoot;
+        var workspaceFolderName = workerArgs.WorkspaceFolderName;
+        var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
         var capabilities = await capabilitiesResolver.GetAsync(workspaceId, cancellationToken);
         var tokenValues = await ResolveTokenValuesAsync(
-            workspace, contextId, capabilities.UsesRepositoryVersioning, workspaceRoot, workspaceFolderName, patternsForResolve, cancellationToken);
+            workspace, contextId, capabilities.UsesRepositoryVersioning, workspaceRoot, workspaceFolderName, workspaceRepositoryName, patternsForResolve, cancellationToken);
 
         // Update each configured file
         var totalUpdated = 0;
@@ -237,7 +240,8 @@ public sealed class WorkspaceFileVersionService(
                     filePath = file.FilePath,
                     versionPattern = versionPatternToSend,
                     tokenValues,
-                    workspaceRoot
+                    workspaceRoot,
+                    workspaceRepositoryName
                 }, cancellationToken);
 
                 if (resp.Success && resp.Data != null)
@@ -325,6 +329,7 @@ public sealed class WorkspaceFileVersionService(
         bool usesRepositoryVersioning,
         string? workspaceRoot,
         string workspaceFolderName,
+        string? workspaceRepositoryName,
         IEnumerable<string?> patterns,
         CancellationToken cancellationToken)
     {
@@ -418,6 +423,7 @@ public sealed class WorkspaceFileVersionService(
                 {
                     workspaceName = workspaceFolderName,
                     workspaceRoot,
+                    workspaceRepositoryName,
                     repositoryNames = commitRepos.ToList()
                 }, cancellationToken);
 
@@ -579,13 +585,16 @@ public sealed class WorkspaceFileVersionService(
             }
         }
 
-        var (workspaceRoot, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
+        var workerArgs = await pathResolver.GetWorkerArgsAsync(contextId, cancellationToken);
+        var workspaceRoot = workerArgs.WorkspaceRoot;
+        var workspaceFolderName = workerArgs.WorkspaceFolderName;
+        var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
         var patterns = configs
             .Where(c => c.File?.Repository != null)
             .Select(c => c.VersionPattern)
             .ToList();
         var tokenValues = await ResolveTokenValuesAsync(
-            workspace, contextId, capabilities.UsesRepositoryVersioning, workspaceRoot, workspaceFolderName, patterns, cancellationToken);
+            workspace, contextId, capabilities.UsesRepositoryVersioning, workspaceRoot, workspaceFolderName, workspaceRepositoryName, patterns, cancellationToken);
 
         var items = new List<object>();
         foreach (var cfg in configs)
@@ -640,6 +649,7 @@ public sealed class WorkspaceFileVersionService(
             {
                 workspaceName = workspaceFolderName,
                 workspaceRoot,
+                workspaceRepositoryName,
                 files = items
             }, cancellationToken);
             logger.LogDebug("CheckAndPersist CheckFileVersions worker call completed for workspace {WorkspaceId} in {ElapsedMs}ms", workspaceId, workerSw.ElapsedMilliseconds);
@@ -816,7 +826,10 @@ public sealed class WorkspaceFileVersionService(
             }
         }
 
-        var (workspaceRoot, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
+        var workerArgs = await pathResolver.GetWorkerArgsAsync(contextId, cancellationToken);
+        var workspaceRoot = workerArgs.WorkspaceRoot;
+        var workspaceFolderName = workerArgs.WorkspaceFolderName;
+        var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
 
         var requestItems = csprojConfigs
             .Select(cfg => new
@@ -833,6 +846,7 @@ public sealed class WorkspaceFileVersionService(
             {
                 workspaceName = workspaceFolderName,
                 workspaceRoot,
+                workspaceRepositoryName,
                 files = requestItems
             }, cancellationToken);
 
@@ -1161,11 +1175,15 @@ public sealed class WorkspaceFileVersionService(
 
         try
         {
-            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
+            var workerArgs = await pathResolver.GetWorkerArgsAsync(contextId, cancellationToken);
+            var workspaceRoot = workerArgs.WorkspaceRoot;
+            var workspaceFolderName = workerArgs.WorkspaceFolderName;
+            var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
             var resp = await workerBridge.SendCommandAsync("CheckFileVersions", new
             {
                 workspaceName = workspaceFolderName,
                 workspaceRoot,
+                workspaceRepositoryName,
                 files = new[]
                 {
                     new

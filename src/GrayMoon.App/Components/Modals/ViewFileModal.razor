@@ -74,6 +74,7 @@
     [Parameter] public WorkspaceFileDto? File { get; set; }
     [Parameter] public string? WorkspaceName { get; set; }
     [Parameter] public string? WorkspaceRoot { get; set; }
+    [Parameter] public string? WorkspaceRepositoryName { get; set; }
     [Parameter] public bool IsConfigured { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
     [Parameter] public EventCallback<string?> OnConfigure { get; set; }
@@ -145,6 +146,7 @@
             {
                 workspaceName = WorkspaceName,
                 workspaceRoot = WorkspaceRoot,
+                workspaceRepositoryName = WorkspaceRepositoryName,
                 repositoryName = File!.RepositoryName,
                 filePath = File.FilePath
             });

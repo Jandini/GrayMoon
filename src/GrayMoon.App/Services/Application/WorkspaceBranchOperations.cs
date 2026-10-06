@@ -172,13 +172,17 @@ public sealed class WorkspaceBranchOperations(
 
         try
         {
-            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
+            var workerArgs = await pathResolver.GetWorkerArgsAsync(contextId, cancellationToken);
+            var workspaceRoot = workerArgs.WorkspaceRoot;
+            var workspaceFolderName = workerArgs.WorkspaceFolderName;
+            var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
             var args = new
             {
                 workspaceName = workspaceFolderName,
                 repositoryId = repo.RepositoryId,
                 repositoryName = repo.RepositoryName,
-                workspaceRoot
+                workspaceRoot,
+                workspaceRepositoryName
             };
             var response = await workerBridge.SendCommandAsync("RefreshBranches", args, cancellationToken);
 
@@ -251,7 +255,10 @@ public sealed class WorkspaceBranchOperations(
 
         try
         {
-            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
+            var workerArgs = await pathResolver.GetWorkerArgsAsync(contextId, cancellationToken);
+            var workspaceRoot = workerArgs.WorkspaceRoot;
+            var workspaceFolderName = workerArgs.WorkspaceFolderName;
+            var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
 
             if (isTag)
             {
@@ -261,7 +268,8 @@ public sealed class WorkspaceBranchOperations(
                     repositoryId = repo.RepositoryId,
                     repositoryName = repo.RepositoryName,
                     tagName = branchName,
-                    workspaceRoot
+                    workspaceRoot,
+                    workspaceRepositoryName
                 };
                 var tagResponse = await workerBridge.SendCommandAsync("CheckoutTag", tagArgs, cancellationToken);
                 var tagCheckout = WorkerResponseJson.DeserializeWorkerResponse<CheckoutTagResponse>(tagResponse.Data);
@@ -291,7 +299,8 @@ public sealed class WorkspaceBranchOperations(
                 repositoryId = repo.RepositoryId,
                 repositoryName = repo.RepositoryName,
                 branchName,
-                workspaceRoot
+                workspaceRoot,
+                workspaceRepositoryName
             };
             var response = await workerBridge.SendCommandAsync("CheckoutBranch", args, cancellationToken);
 
@@ -527,7 +536,10 @@ public sealed class WorkspaceBranchOperations(
                 baseBranchName = baseBranch;
             }
 
-            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
+            var workerArgs = await pathResolver.GetWorkerArgsAsync(contextId, cancellationToken);
+            var workspaceRoot = workerArgs.WorkspaceRoot;
+            var workspaceFolderName = workerArgs.WorkspaceFolderName;
+            var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
             var capabilities = (await capabilitiesResolver.GetAsync(workspaceId, cancellationToken)).ToRepositoryOperationCapabilities();
             var args = new
             {
@@ -536,6 +548,7 @@ public sealed class WorkspaceBranchOperations(
                 newBranchName,
                 baseBranchName,
                 workspaceRoot,
+                workspaceRepositoryName,
                 workspaceId,
                 capabilities
             };
@@ -595,13 +608,17 @@ public sealed class WorkspaceBranchOperations(
 
         try
         {
-            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
+            var workerArgs = await pathResolver.GetWorkerArgsAsync(contextId, cancellationToken);
+            var workspaceRoot = workerArgs.WorkspaceRoot;
+            var workspaceFolderName = workerArgs.WorkspaceFolderName;
+            var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
             var args = new
             {
                 workspaceName = workspaceFolderName,
                 repositoryName = repo.RepositoryName,
                 branchName,
                 workspaceRoot,
+                workspaceRepositoryName,
                 repositoryId
             };
             var response = await workerBridge.SendCommandAsync("SetUpstreamBranch", args, cancellationToken);
@@ -674,7 +691,10 @@ public sealed class WorkspaceBranchOperations(
 
         try
         {
-            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
+            var workerArgs = await pathResolver.GetWorkerArgsAsync(contextId, cancellationToken);
+            var workspaceRoot = workerArgs.WorkspaceRoot;
+            var workspaceFolderName = workerArgs.WorkspaceFolderName;
+            var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
             var args = new
             {
                 workspaceName = workspaceFolderName,
@@ -683,7 +703,8 @@ public sealed class WorkspaceBranchOperations(
                 isRemote,
                 force,
                 bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
-                workspaceRoot
+                workspaceRoot,
+                workspaceRepositoryName
             };
             var response = await workerBridge.SendCommandAsync("DeleteBranch", args, cancellationToken);
 
