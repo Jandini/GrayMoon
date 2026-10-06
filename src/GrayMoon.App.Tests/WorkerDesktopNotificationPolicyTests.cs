@@ -84,6 +84,30 @@ public sealed class WorkerDesktopNotificationPolicyTests
     }
 
     [Fact]
+    public void Logon_password_failure_replaces_installing_with_an_error()
+    {
+        var policy = new WorkerDesktopNotificationPolicy();
+        policy.OnChange(WorkerConnectionState.VersionMismatch, selfUpdateInProgress: false, "1.0.0");
+        policy.OnChange(WorkerConnectionState.VersionMismatch, selfUpdateInProgress: true, "1.0.0");
+        var installing = policy.OnChange(WorkerConnectionState.Offline, selfUpdateInProgress: true, "1.0.0");
+        Assert.Equal("GrayMoon Worker is installing", installing!.Title);
+
+        var failed = policy.OnChange(
+            WorkerConnectionState.Offline,
+            selfUpdateInProgress: false,
+            "1.0.0",
+            logonPasswordRequired: true);
+
+        Assert.NotNull(failed);
+        Assert.Equal("GrayMoon Worker install failed", failed.Title);
+        Assert.Equal(DesktopNotificationSeverity.Error, failed.Severity);
+        Assert.Equal("/worker", failed.NavigationPath);
+        Assert.Contains("password", failed.Message, StringComparison.OrdinalIgnoreCase);
+
+        Assert.Null(policy.OnChange(WorkerConnectionState.Offline, selfUpdateInProgress: false, "1.0.0", logonPasswordRequired: true));
+    }
+
+    [Fact]
     public void Successful_reconnect_then_later_offline_sends_error_not_installing()
     {
         var policy = new WorkerDesktopNotificationPolicy();
