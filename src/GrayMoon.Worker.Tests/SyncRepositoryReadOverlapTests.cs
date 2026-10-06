@@ -7,6 +7,7 @@ using GrayMoon.Worker.Commands;
 using GrayMoon.Worker.Jobs.Requests;
 using GrayMoon.Worker.Jobs.Response;
 using GrayMoon.Worker.Services;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -149,6 +150,75 @@ public sealed class SyncRepositoryReadOverlapTests : IDisposable
         Assert.True(response.Success, response.ErrorMessage);
         Assert.Equal("feature", response.Branch);
         Assert.Equal(1, response.OutgoingCommits);
+    }
+
+    [Fact]
+    public async Task Version_providers_branch_wins_over_the_branch_in_git()
+    {
+        await CloneCommittedRepositoryAsync();
+        var factory = new FixedVersionProviderFactory(new RepositoryVersionResult(
+            Probed: true,
+            new GitVersionResult { InformationalVersion = "1.2.3", BranchName = "from-gitversion" },
+            Error: null));
+
+        var response = await SyncAsync(RepositoryOperationCapabilities.For(calculateVersion: true, discoverProjects: false), versionProviders: factory);
+
+        Assert.True(response.Success, response.ErrorMessage);
+        Assert.Equal("from-gitversion", response.Branch);
+        Assert.Equal("1.2.3", response.Version);
+    }
+
+    [Fact]
+    public async Task Branch_comes_from_git_when_the_version_provider_gives_none()
+    {
+        await CloneCommittedRepositoryAsync();
+        var factory = new FixedVersionProviderFactory(new RepositoryVersionResult(Probed: true, Result: null, Error: "boom"));
+
+        var response = await SyncAsync(RepositoryOperationCapabilities.For(calculateVersion: true, discoverProjects: false), versionProviders: factory);
+
+        Assert.True(response.Success, response.ErrorMessage);
+        Assert.Equal("main", response.Branch);
+        Assert.Equal("boom", response.GitVersionError);
+        Assert.NotNull(response.LocalBranches);
+        Assert.Equal(0, response.OutgoingCommits);
+    }
+
+    [Fact]
+    public async Task Sync_logs_where_the_time_went()
+    {
+        await CloneCommittedRepositoryAsync();
+        var log = new CapturingLogger();
+
+        var response = await new SyncRepositoryCommand(_git, new CountingCsProjFileService(), CapabilityTestDoubles.RealFactory(_git), log)
+            .ExecuteAsync(NewRequest(RepositoryOperationCapabilities.For(calculateVersion: false, discoverProjects: false)));
+
+        Assert.True(response.Success, response.ErrorMessage);
+        var line = Assert.Single(log.Messages, m => m.Contains("SyncRepository timings", StringComparison.Ordinal));
+        foreach (var part in new[] { "fetch=", "version=", "lane=", "tail=", "total=", "Lane steps:", "branch=", "tags=", "defaultCounts=" })
+            Assert.Contains(part, line, StringComparison.Ordinal);
+    }
+
+    private sealed class FixedVersionProviderFactory(RepositoryVersionResult result) : IRepositoryVersionProviderFactory
+    {
+        public IRepositoryVersionProvider Create(RepositoryOperationCapabilities? capabilities) => new Provider(result);
+
+        private sealed class Provider(RepositoryVersionResult result) : IRepositoryVersionProvider
+        {
+            public Task<RepositoryVersionResult> GetVersionAsync(string repoPath, RepositoryVersionOptions options, CancellationToken ct = default)
+                => Task.FromResult(result);
+        }
+    }
+
+    private sealed class CapturingLogger : ILogger<SyncRepositoryCommand>
+    {
+        public List<string> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            => Messages.Add(formatter(state, exception));
     }
 
     private static async Task FinishesInTimeAsync(Task task)
