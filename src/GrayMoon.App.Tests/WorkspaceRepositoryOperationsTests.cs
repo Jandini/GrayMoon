@@ -190,6 +190,29 @@ public sealed class WorkspaceRepositoryOperationsTests
         var only = Assert.Single(links);
         Assert.Equal(WorkspaceRepositoryRole.Workspace, only.Role);
     }
+
+    [Fact]
+    public async Task Restore_sends_require_empty_root_and_cleans_up_workspace_row_on_failure()
+    {
+        await using var fixture = await OperationsFixture.CreateAsync();
+        var github = await fixture.Seed.AddConnectorAsync("github", ConnectorType.GitHub, "https://api.github.com");
+        var root = await fixture.Seed.AddRepositoryAsync(github, "ws-root", "https://github.com/acme/ws-root.git");
+        fixture.Bridge.Handler = (command, _) => command == "AttachWorkspaceRepository"
+            ? new WorkerCommandResponse(true, new { success = false, errorMessage = "The folder already exists and is not empty." }, null)
+            : new WorkerCommandResponse(true, new { success = true }, null);
+
+        var result = await fixture.Operations.RestoreFromRepositoryAsync(root.RepositoryId, "restored");
+
+        Assert.False(result.Success);
+        Assert.Equal("The folder already exists and is not empty.", result.Error);
+        var attach = Assert.Single(fixture.Bridge.Sent, s => s.Command == "AttachWorkspaceRepository");
+        Assert.True(ManifestTestFixture.ToJson(attach.Args).GetProperty("requireEmptyRoot").GetBoolean());
+
+        await using var db = new AppDbContext(fixture.Seed.Options);
+        Assert.Empty(await db.Workspaces.AsNoTracking().ToListAsync());
+        Assert.Empty(await db.WorkspaceRepositories.AsNoTracking().ToListAsync());
+        Assert.DoesNotContain(fixture.Bridge.Sent, s => s.Command == "RemoveWorkspace" || s.Command == "DeleteDirectory");
+    }
 }
 
 internal sealed class OperationsFixture : IAsyncDisposable

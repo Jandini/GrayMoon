@@ -147,6 +147,114 @@ public sealed class AttachWorkspaceRepositoryCommandTests : IDisposable
         Assert.Equal("local content that differs\n", File.ReadAllText(Path.Combine(RootPath, "README.md")));
     }
 
+    [Fact]
+    public async Task Reattach_after_collision_checks_out_default_when_head_is_unborn()
+    {
+        var remote = CreateRemote(withCommit: true);
+        Directory.CreateDirectory(RootPath);
+        var readme = Path.Combine(RootPath, "README.md");
+        File.WriteAllText(readme, "local content that differs\n");
+
+        var first = await _command.ExecuteAsync(NewRequest(remote));
+        Assert.False(first.Success);
+        Assert.NotEqual(0, RunGit(RootPath, "rev-parse", "--verify", "HEAD").ExitCode);
+
+        File.Delete(readme);
+        var second = await _command.ExecuteAsync(NewRequest(remote));
+
+        Assert.True(second.Success, second.ErrorMessage);
+        Assert.Equal("main", second.Branch);
+        Assert.False(second.IsUnborn);
+        Assert.Equal(0, RunGit(RootPath, "rev-parse", "--verify", "HEAD").ExitCode);
+        Assert.Equal("origin/main", RunGit(RootPath, "rev-parse", "--abbrev-ref", "main@{upstream}").Stdout.Trim());
+        Assert.Equal("from remote\n", File.ReadAllText(readme).Replace("\r\n", "\n"));
+    }
+
+    [Fact]
+    public async Task Reattach_with_empty_remote_stays_unborn()
+    {
+        var remote = CreateRemote(withCommit: false);
+        Directory.CreateDirectory(RootPath);
+        File.WriteAllText(Path.Combine(RootPath, "notes.txt"), "keep me\n");
+        var first = await _command.ExecuteAsync(NewRequest(remote));
+        Assert.True(first.Success, first.ErrorMessage);
+
+        var second = await _command.ExecuteAsync(NewRequest(remote));
+
+        Assert.True(second.Success, second.ErrorMessage);
+        Assert.Equal("main", second.Branch);
+        Assert.True(second.IsUnborn);
+        Assert.NotEqual(0, RunGit(RootPath, "rev-parse", "--verify", "HEAD").ExitCode);
+    }
+
+    [Fact]
+    public async Task Reattach_collision_again_returns_git_message()
+    {
+        var remote = CreateRemote(withCommit: true);
+        Directory.CreateDirectory(RootPath);
+        File.WriteAllText(Path.Combine(RootPath, "README.md"), "local content that differs\n");
+        Assert.False((await _command.ExecuteAsync(NewRequest(remote))).Success);
+
+        var second = await _command.ExecuteAsync(NewRequest(remote));
+
+        Assert.False(second.Success);
+        Assert.Contains("README.md", second.ErrorMessage);
+        Assert.True(Directory.Exists(Path.Combine(RootPath, ".git")));
+        Assert.Equal("local content that differs\n", File.ReadAllText(Path.Combine(RootPath, "README.md")));
+    }
+
+    [Fact]
+    public async Task Require_empty_root_fails_when_folder_has_files()
+    {
+        var remote = CreateRemote(withCommit: true);
+        Directory.CreateDirectory(RootPath);
+        File.WriteAllText(Path.Combine(RootPath, "notes.txt"), "keep me\n");
+        var request = NewRequest(remote);
+        request.RequireEmptyRoot = true;
+
+        var response = await _command.ExecuteAsync(request);
+
+        Assert.False(response.Success);
+        Assert.Equal("The folder already exists and is not empty.", response.ErrorMessage);
+        Assert.False(Directory.Exists(Path.Combine(RootPath, ".git")));
+        Assert.Single(Directory.GetFileSystemEntries(RootPath));
+        Assert.Equal("keep me\n", File.ReadAllText(Path.Combine(RootPath, "notes.txt")));
+    }
+
+    [Fact]
+    public async Task Require_empty_root_allows_missing_or_empty_folder()
+    {
+        var remote = CreateRemote(withCommit: true);
+        var request = NewRequest(remote);
+        request.RequireEmptyRoot = true;
+
+        var missing = await _command.ExecuteAsync(request);
+        Assert.True(missing.Success, missing.ErrorMessage);
+        Assert.True(File.Exists(Path.Combine(RootPath, "README.md")));
+
+        request.WorkspaceName = "ws-empty";
+        var emptyRoot = Path.Combine(_workspaceRoot, "ws-empty");
+        Directory.CreateDirectory(emptyRoot);
+        var empty = await _command.ExecuteAsync(request);
+        Assert.True(empty.Success, empty.ErrorMessage);
+        Assert.True(File.Exists(Path.Combine(emptyRoot, "README.md")));
+    }
+
+    [Fact]
+    public async Task Reattach_with_require_empty_root_false_is_unchanged()
+    {
+        var remote = CreateRemote(withCommit: true);
+        Assert.True((await _command.ExecuteAsync(NewRequest(remote))).Success);
+        var request = NewRequest(remote);
+        request.RequireEmptyRoot = false;
+
+        var second = await _command.ExecuteAsync(request);
+
+        Assert.True(second.Success, second.ErrorMessage);
+        Assert.Equal("main", second.Branch);
+        Assert.False(second.IsUnborn);
+    }
+
     private string RootPath => Path.Combine(_workspaceRoot, "ws");
 
     private AttachWorkspaceRepositoryRequest NewRequest(string cloneUrl) => new()

@@ -27,4 +27,8 @@ public sealed class AttachWorkspaceRepositoryRequest : WorkspaceCommandRequest
     /// <summary>Identifies the repository in the sync hooks the Worker installs.</summary>
     [JsonPropertyName("repositoryId")]
     public int RepositoryId { get; set; }
+
+    /// <summary>When true, fails without changing anything if the root folder exists and contains any entry.</summary>
+    [JsonPropertyName("requireEmptyRoot")]
+    public bool RequireEmptyRoot { get; set; }
 }

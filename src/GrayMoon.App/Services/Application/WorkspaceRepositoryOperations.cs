@@ -220,7 +220,7 @@ public sealed class WorkspaceRepositoryOperations(
         }
 
         var workspaceId = workspace.WorkspaceId;
-        var attach = await LinkAndAttachAsync(workspaceId, repositoryId, progress, cancellationToken);
+        var attach = await LinkAndAttachAsync(workspaceId, repositoryId, progress, cancellationToken, requireEmptyRoot: true);
         if (!attach.Success)
         {
             await DeleteWorkspaceAsync(workspaceId);
@@ -321,7 +321,8 @@ public sealed class WorkspaceRepositoryOperations(
         int workspaceId,
         int repositoryId,
         IProgress<OperationProgress>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool requireEmptyRoot = false)
     {
         int workspaceRepositoryId;
         string cloneUrl;
@@ -363,7 +364,7 @@ public sealed class WorkspaceRepositoryOperations(
         try
         {
             progress.Report("Attaching Workspace repository...");
-            error = await AttachAsync(workspaceId, repositoryId, cloneUrl, bearerToken, cancellationToken);
+            error = await AttachAsync(workspaceId, repositoryId, cloneUrl, bearerToken, requireEmptyRoot, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -388,21 +389,34 @@ public sealed class WorkspaceRepositoryOperations(
         int repositoryId,
         string cloneUrl,
         string? bearerToken,
+        bool requireEmptyRoot,
         CancellationToken cancellationToken)
     {
         var (_, args) = await GetSpecialContextArgsAsync(workspaceId, cancellationToken);
         var response = await workerBridge.SendCommandAsync(
             WorkerHubMethods.AttachWorkspaceRepository,
-            new
-            {
-                workspaceName = args.WorkspaceFolderName,
-                workspaceRoot = args.WorkspaceRoot,
-                workspaceRepositoryName = args.WorkspaceRepositoryName,
-                cloneUrl,
-                bearerToken,
-                workspaceId,
-                repositoryId,
-            },
+            requireEmptyRoot
+                ? new
+                {
+                    workspaceName = args.WorkspaceFolderName,
+                    workspaceRoot = args.WorkspaceRoot,
+                    workspaceRepositoryName = args.WorkspaceRepositoryName,
+                    cloneUrl,
+                    bearerToken,
+                    workspaceId,
+                    repositoryId,
+                    requireEmptyRoot = true,
+                }
+                : (object)new
+                {
+                    workspaceName = args.WorkspaceFolderName,
+                    workspaceRoot = args.WorkspaceRoot,
+                    workspaceRepositoryName = args.WorkspaceRepositoryName,
+                    cloneUrl,
+                    bearerToken,
+                    workspaceId,
+                    repositoryId,
+                },
             cancellationToken);
 
         if (!response.Success)
