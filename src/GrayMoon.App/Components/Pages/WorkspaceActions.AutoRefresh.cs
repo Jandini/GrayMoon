@@ -1,4 +1,4 @@
-using GrayMoon.Application.Features;
+using GrayMoon.App.Services.Ci;
 
 namespace GrayMoon.App.Components.Pages;
 
@@ -298,26 +298,20 @@ public sealed partial class WorkspaceActions
         {
             row.IsRefreshing = true;
 
-            // Uses its own DI scope (not the circuit-scoped ActionService field) because this method is
+            // Uses its own DI scope (not the circuit-scoped _ciProvider field) because this method is
             // invoked from fire-and-forget background refresh loops (StartBackgroundRefresh, AutoPollLoopAsync,
             // visibility-retry loops) that can still be mid-flight when the page is disposed (e.g. browser
-            // refresh tears down the circuit). Using the injected ActionService there would persist through an
+            // refresh tears down the circuit). Using the circuit's provider there would persist through an
             // AppDbContext already disposed with the old circuit.
             await using var scope = ServiceScopeFactory.CreateAsyncScope();
-            var actionService = scope.ServiceProvider.GetRequiredService<WorkspaceActionService>();
+            var ciProvider = scope.ServiceProvider.GetRequiredService<IWorkspaceCiProviderResolver>().Get(_ciProvider.Kind);
 
-            var list = _isFeatureContext && _selectedContextId is WorkspaceFeatureContextId ctxForFetch
-                ? await actionService.FetchAndPersistContextAsync(
-                    ctxForFetch.Value,
-                    row.Link.WorkspaceRepositoryId,
-                    row.Repo,
-                    row.Link.BranchName!,
-                    cancellationToken)
-                : await actionService.FetchAndPersistAsync(
-                    row.Link.WorkspaceRepositoryId,
-                    row.Repo,
-                    row.Link.BranchName!,
-                    cancellationToken);
+            var list = await ciProvider.RefreshStatusesAsync(
+                FeatureContextIdForCi,
+                row.Link.WorkspaceRepositoryId,
+                row.Repo,
+                row.Link.BranchName!,
+                cancellationToken);
 
             if (!cancellationToken.IsCancellationRequested && list != null)
             {
@@ -335,7 +329,7 @@ public sealed partial class WorkspaceActions
         catch (OperationCanceledException)
         {
             // Expected: either this call's own token was cancelled, or this call coalesced onto an
-            // in-flight fetch (WorkspaceActionService.FetchAndPersistAsync) that got cancelled by a
+            // in-flight fetch (IWorkspaceCiProvider.RefreshStatusesAsync) that got cancelled by a
             // newer refresh superseding it (e.g. clicking Refresh while a background poll is in flight).
             // Not a genuine failure, so no error badge should be shown.
         }

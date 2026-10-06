@@ -455,6 +455,52 @@ should simply contain the pages currently available.
 
 Detailed design: Phase 5.
 
+## 11a. CI provider boundary
+
+CI is reached through one small seam in `GrayMoon.App/Services/Ci/`. There is no plugin framework and
+no second provider; the seam exists so CI=None does no CI work and so a later provider is one more
+implementation instead of a branch at every call site.
+
+```text
+IWorkspaceCiProviderResolver        GetForWorkspaceAsync(workspaceId) | Get(WorkspaceCiProvider)
+  -> IWorkspaceCiProvider           Kind, IsEnabled, GetPersistedStatusesAsync, RefreshStatusesAsync,
+                                    CreatePushRunWatch(overlay)
+       NoCiProvider                 None: empty, null, no-op watch - touches nothing
+       GitHubActionsCiProvider      adapter over WorkspaceActionService / GitHubActionsService /
+                                    GhaWorkflowLiveFeedService, behaviour unchanged
+  -> IPushCiRunWatch                TickAsync(pushedRepos, links) during the synchronized-push package wait
+       NoOpPushCiRunWatch           None, or no overlay to stream into
+       GitHubActionsPushRunWatch    the discovery + live-feed loop formerly inline in WorkspacePushService
+```
+
+- The resolver is the **only** place that maps `WorkspaceCiProvider` to behaviour. It resolves by
+  `workspaceId` only (section 3); an unknown enum value selects `NoCiProvider`, the side that does no work.
+- `IsEnabled` always equals `WorkspaceCapabilities.UsesCiIntegration`. UI that only needs "is there CI"
+  (navigation, page access, links) reads the capability; code that does CI work goes through the provider.
+- Context follows the existing convention: a `WorkspaceFeatureContextId?` that is null for the special
+  Workspace (legacy link rows) and set for a Feature (context rows only, never a fallback).
+- Consumers today: the Actions page (`WorkspaceActions.Loading.cs`, `WorkspaceActions.AutoRefresh.cs`)
+  for persisted reads and refresh, and `WorkspacePushService` for push-time run watching. With CI=None the
+  Actions page builds no rows, so no background refresh, auto-poll or hub-driven refresh can start.
+
+### What stays GitHub-specific behind the boundary
+
+`GitHubActionsService`, `GhaWorkflowLiveFeedService`, `GitHubActionEntry`, `GhaLiveFeedJobsCache`, the
+`WorkspaceRepositoryAction(s)` / `WorkspaceRepositoryContextAction(s)` tables and the Actions page's
+rerun / run / cancel / logs actions. The page's mutations still call `GitHubActionsService` directly; they
+act on rows that exist only when CI is enabled, so they are unreachable for CI=None. A second provider would
+need its own page actions anyway, which is why they were not abstracted.
+
+### Source control is not CI
+
+`GitHubService` stays one partial class, and one `Connector` row, token and `IGitHubRateLimitTracker` still
+serve both. Nothing on the repository, pull-request or connector paths consults the CI provider - including
+the pull-request **check-run** summary in the merge dialog, which is a PR fact reported by GitHub regardless
+of which CI produced it. Only its link to the Actions page depends on CI.
+
+`link.Repository.Connector != null` on the Actions page is now only a repository-reachability filter; the
+"is CI enabled" decision is `IWorkspaceCiProvider.IsEnabled`.
+
 ## 12. Feature and worktree implications
 
 - Capabilities resolve by `WorkspaceId` only (section 3).

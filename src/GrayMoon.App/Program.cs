@@ -8,6 +8,7 @@ using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
+using GrayMoon.App.Services.Ci;
 using GrayMoon.App.Services.Worker;
 using GrayMoon.App.Services.Connectors;
 using GrayMoon.App.Services.Git;
@@ -163,6 +164,8 @@ try
     builder.Services.AddScoped<WorkspaceStateRecomputeScope>();
     builder.Services.AddScoped<WorkspaceActionRepository>();
     builder.Services.AddScoped<WorkspaceActionService>();
+    builder.Services.AddScoped<GitHubActionsCiProvider>();
+    builder.Services.AddScoped<IWorkspaceCiProviderResolver, WorkspaceCiProviderResolver>();
     builder.Services.AddScoped<PackageRegistrySyncService>();
     builder.Services.AddScoped<IWorkspaceFileSearchService, WorkspaceFileSearchService>();
     builder.Services.AddScoped<WorkspaceFileVersionService>();

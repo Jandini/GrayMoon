@@ -536,8 +536,8 @@ semantics; no deep workspace-type checks inside `PushOrchestrator`.
 
 | | |
 |---|---|
-| Owner | unassigned |
-| Status | READY - runs in parallel with Unit C, the two are file-disjoint |
+| Owner | subagent |
+| Status | REVIEW |
 | Dependencies | Unit A (DONE) |
 
 **Scope.** The `WorkspaceCiProvider` boundary, GitHub Actions refresh/query activation, CI-specific
@@ -553,6 +553,94 @@ functionality still works with CI=None; CI=GitHubActions preserves current behav
 would not require provider checks throughout the UI.
 
 **Non-goal.** Do not implement a second provider.
+
+**What changed.** A small seam in `Services/Ci/` (design section 11a): `IWorkspaceCiProviderResolver`
+selects an `IWorkspaceCiProvider` from the workspace's `CiProvider` - `NoCiProvider` (does nothing) or
+`GitHubActionsCiProvider` (thin adapter over the unchanged `WorkspaceActionService` / `GitHubActionsService` /
+`GhaWorkflowLiveFeedService`). Push-time run watching became an `IPushCiRunWatch` strategy: the discovery and
+live-feed loop moved verbatim out of `WorkspacePushService` into `GitHubActionsPushRunWatch`, and the push
+loop now makes one provider-agnostic `TickAsync` call. The Actions page reads persisted status and refreshes
+rows through the provider; for CI=None it builds no rows and shows "CI is not enabled for this workspace.",
+so no background refresh, auto-poll or hub-triggered refresh can start. No GitHub-specific type was renamed,
+`GitHubService` was not split, and no Actions service gained a capability check of its own.
+
+**Files touched.**
+
+```text
+src/GrayMoon.App/Services/Ci/IWorkspaceCiProvider.cs             (new)
+src/GrayMoon.App/Services/Ci/IPushCiRunWatch.cs                  (new)
+src/GrayMoon.App/Services/Ci/NoCiProvider.cs                     (new, includes NoOpPushCiRunWatch)
+src/GrayMoon.App/Services/Ci/GitHubActionsCiProvider.cs          (new)
+src/GrayMoon.App/Services/Ci/GitHubActionsPushRunWatch.cs        (new, code moved from WorkspacePushService)
+src/GrayMoon.App/Services/Ci/WorkspaceCiProviderResolver.cs      (new, interface + implementation)
+src/GrayMoon.App/Services/Workspaces/WorkspacePushService.cs     (GHA-polling region only)
+src/GrayMoon.App/Components/Pages/WorkspaceActions.razor.cs
+src/GrayMoon.App/Components/Pages/WorkspaceActions.Loading.cs
+src/GrayMoon.App/Components/Pages/WorkspaceActions.AutoRefresh.cs
+src/GrayMoon.App/Program.cs                                      (DI registration only)
+src/GrayMoon.App.Tests/WorkspaceCiProviderTests.cs               (new)
+```
+
+`GitHubActionsService.cs`, `GhaWorkflowLiveFeedService.cs`, `GitHubService.Workflows.cs` and
+`WorkspaceActionService.cs` needed no change.
+
+**Tests.** `WorkspaceCiProviderTests` (12, fake `HttpMessageHandler` recording every GitHub request, SQLite
+in-memory): resolver selection (None, GitHubActions, unknown value -> None); `IsEnabled` equals
+`UsesCiIntegration`; CI=None refresh makes zero HTTP requests and persists nothing (special Workspace and
+Feature); CI=None reports no persisted status even over an old Actions row; CI=GitHubActions refresh fetches
+and persists onto the link for the special Workspace and onto the context row only for a Feature; CI=None push
+run watch makes zero requests and writes no overlay lines; CI=GitHubActions push run watch discovers the
+running run and streams its jobs; no overlay -> no-op; a PR lookup still reaches GitHub for a CI=None workspace
+while no `/actions/` request is made.
+
+**Owner verification (subagent run).** `dotnet build GrayMoon.slnx` 0 warnings / 0 errors.
+`GrayMoon.App.Tests` 890/890 (878 + 12), `GrayMoon.Worker.Tests` 307 + 1 pre-existing skip,
+`GrayMoon.Common.Tests` 234/234. Touched files CRLF, no non-ASCII dashes.
+
+**Risks / findings.**
+
+- `WorkspacePushService.RunPushAsync` has no test harness in the repository (it needs a Worker bridge,
+  dependency service, NuGet and DbContext). The CI=None push guarantee is therefore tested at the seam: the
+  push loop's only CI path is `ciRunWatch.TickAsync` (`WorkspacePushService.cs:268`), created from the
+  resolved provider (`:182-184`, `:224`), and the watch is tested directly.
+- `WorkspacePushService` previously took `GitHubActionsService?` and `GhaWorkflowLiveFeedService?` as optional
+  constructor parameters; it now takes `IWorkspaceCiProviderResolver?` instead. A null resolver selects
+  `NoCiProvider` - the safe direction - where a null `GitHubActionsService` also used to disable watching.
+- Push-wait GHA log lines now log under the `GitHubActionsCiProvider` category instead of
+  `WorkspacePushService`. Messages are unchanged.
+- The Actions page's rerun / run / cancel / logs and `GhaWorkflowLiveTerminal` / `GhaLogsModal` still call
+  GitHub directly (`WorkspaceActions.WorkflowRun.cs:260,322,382`, `WorkspaceActions.BulkActions.cs:114,192,272`,
+  `GhaLogsModal.razor:263`, `GhaWorkflowLiveTerminal.razor:161`). They only act on rows, and rows exist only
+  when CI is enabled (`WorkspaceActions.Loading.cs:24-30`), so CI=None cannot reach them. Left GitHub-specific
+  on purpose: a second provider would need different actions.
+- `link.Repository.Connector != null` (`WorkspaceActions.Loading.cs:43,169`) is kept as a reachability filter.
+  It is no longer the CI decision.
+- `GitHubActionsService.GetLatestActionsAsync` / `GetLatestActionAsync` have no callers. Left untouched.
+- The workspace repository grid query (`IWorkspaceRepositoryLinkListQueryService` and DTOs), workspace sync,
+  hook sync and background services do **not** read or refresh Actions; the only consumers were the Actions
+  page and synchronized push. Nothing else needed gating.
+- The PR merge dialog's checks row is a pull-request check-run summary (`GitHubService.PullRequests.cs:291`),
+  not GitHub Actions, and correctly stays available with CI=None. Only its link to the Actions page is CI.
+
+**Deviations.** No new capability was added to `WorkspaceCapabilities`: `UsesCiIntegration` already answers
+"does this workspace have a CI page", and `IWorkspaceCiProvider.IsEnabled` is pinned equal to it by test. The
+Actions page shows an inline "CI is not enabled" message for CI=None as a data-loading fallback; the redirect /
+access policy is still Unit G's.
+
+**Follow-ups (seam consumers).**
+
+- **Unit G (navigation and page access).** Gate the Actions nav item `NavMenu.razor:83-88` and the route
+  `WorkspaceActions.razor:1` on `WorkspaceCapabilities.UsesCiIntegration` (the SSR nav menu should use the
+  capability resolver, not the provider, so it pulls in no GitHub services). Once G guards the route, the
+  inline fallback at `WorkspaceActions.Loading.cs:25-30` can stay as defence in depth or be removed.
+- **Unit F (grid / header).** Pass `ActionsUrl` to `MergePullRequestModal` only when
+  `_capabilities.UsesCiIntegration` (`WorkspaceRepositories.razor:425`); the modal already hides the checks
+  link for a null/empty URL (`MergePullRequestModal.razor:191`). Optionally hide the "Actions" item of the
+  "Open in GitHub" menu (`GitHubSectionsMenu.razor:50`) for CI=None - it opens github.com, not GrayMoon, so
+  this is a product call rather than a correctness one. The grid itself has no Actions badges or query to gate.
+- **Unit D (push).** Keep the three CI lines in `WorkspacePushService.cs` (`:182-184` resolve once per run,
+  `:224` one watch per level, `:268` one `TickAsync` per wait tick) when restructuring push. A Basic push path
+  that skips the package wait simply never ticks the watch; no CI check is needed there.
 
 ---
 

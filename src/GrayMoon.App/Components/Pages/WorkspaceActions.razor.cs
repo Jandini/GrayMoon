@@ -1,4 +1,5 @@
 using GrayMoon.App.Models;
+using GrayMoon.App.Services.Ci;
 using GrayMoon.App.Services.Features;
 using GrayMoon.Application.Features;
 using GrayMoon.App.Repositories;
@@ -21,8 +22,12 @@ public sealed partial class WorkspaceActions : IDisposable
 
     private WorkspaceFeatureContextId? _selectedContextId;
     private bool _isFeatureContext;
+    private IWorkspaceCiProvider _ciProvider = NoCiProvider.Instance;
 
-    [Inject] private WorkspaceActionService ActionService { get; set; } = null!;
+    /// <summary>Null for the special Workspace, the selected context for a Feature - the shape <see cref="IWorkspaceCiProvider"/> takes.</summary>
+    private WorkspaceFeatureContextId? FeatureContextIdForCi => _isFeatureContext ? _selectedContextId : null;
+
+    [Inject] private IWorkspaceCiProviderResolver CiProviderResolver { get; set; } = null!;
     [Inject] private GitHubActionsService GitHubActionsService { get; set; } = null!;
     [Inject] private WorkspaceRepository WorkspaceRepository { get; set; } = null!;
     [Inject] private IOptions<WorkspaceOptions> WorkspaceOptions { get; set; } = null!;
