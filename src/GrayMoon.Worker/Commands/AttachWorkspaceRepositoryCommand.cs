@@ -25,6 +25,13 @@ public sealed class AttachWorkspaceRepositoryCommand(IGitService git)
         var bearerToken = request.BearerToken;
 
         var path = git.GetWorkspacePath(workspaceRoot, workspaceName);
+
+        // D14 step 1: a restore must never touch an existing, populated folder.
+        if (request.RequireEmptyRoot && Directory.Exists(path) && Directory.EnumerateFileSystemEntries(path).Any())
+        {
+            return Fail("The folder already exists and is not empty.");
+        }
+
         git.CreateDirectory(path);
 
         if (WorkerRepositoryPaths.HasGitMetadata(path))
@@ -33,6 +40,23 @@ public sealed class AttachWorkspaceRepositoryCommand(IGitService git)
             if (string.IsNullOrWhiteSpace(origin) || !RepositoryUrlIdentity.RepositoryUrlsEqual(origin, cloneUrl))
             {
                 return Fail("Root already has a different Git repository");
+            }
+
+            // A first run that hit a checkout collision leaves .git with a matching origin and an unborn HEAD.
+            // Finish the default-branch checkout now so a retry does not report success on an unborn HEAD.
+            if (string.IsNullOrWhiteSpace(await git.GetHeadCommitAsync(path, cancellationToken)))
+            {
+                var (refetchOk, refetchError) = await git.FetchAsync(path, includeTags: true, bearerToken, cancellationToken);
+                if (!refetchOk)
+                    return Fail(refetchError ?? "Git fetch failed.");
+
+                var existingDefault = await FindFetchedDefaultBranchAsync(path, bearerToken, cancellationToken);
+                if (!string.IsNullOrWhiteSpace(existingDefault))
+                {
+                    var (reCheckoutOk, reCheckoutError) = await git.CheckoutTrackingAsync(path, existingDefault, cancellationToken);
+                    if (!reCheckoutOk)
+                        return Fail(reCheckoutError ?? "Git checkout failed.");
+                }
             }
 
             await FinishAsync(request, path, cancellationToken);
@@ -63,14 +87,7 @@ public sealed class AttachWorkspaceRepositoryCommand(IGitService git)
         if (!fetchOk)
             return Fail(fetchError ?? "Git fetch failed.");
 
-        // A remote that is empty can still name an unborn HEAD branch; only a branch the fetch actually brought
-        // down counts as "the default exists".
-        var defaultBranch = await git.GetRemoteDefaultBranchAsync(path, bearerToken, cancellationToken);
-        if (!string.IsNullOrWhiteSpace(defaultBranch)
-            && await git.RevParseAsync(path, $"refs/remotes/origin/{defaultBranch}", cancellationToken) is null)
-        {
-            defaultBranch = null;
-        }
+        var defaultBranch = await FindFetchedDefaultBranchAsync(path, bearerToken, cancellationToken);
 
         if (!string.IsNullOrWhiteSpace(defaultBranch))
         {
@@ -89,6 +106,20 @@ public sealed class AttachWorkspaceRepositoryCommand(IGitService git)
 
         await FinishAsync(request, path, cancellationToken);
         return await SuccessAsync(path, cancellationToken);
+    }
+
+    // A remote that is empty can still name an unborn HEAD branch; only a branch the fetch actually brought
+    // down counts as "the default exists".
+    private async Task<string?> FindFetchedDefaultBranchAsync(string path, string? bearerToken, CancellationToken cancellationToken)
+    {
+        var defaultBranch = await git.GetRemoteDefaultBranchAsync(path, bearerToken, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(defaultBranch)
+            && await git.RevParseAsync(path, $"refs/remotes/origin/{defaultBranch}", cancellationToken) is null)
+        {
+            return null;
+        }
+
+        return defaultBranch;
     }
 
     private async Task FinishAsync(AttachWorkspaceRepositoryRequest request, string path, CancellationToken cancellationToken)
