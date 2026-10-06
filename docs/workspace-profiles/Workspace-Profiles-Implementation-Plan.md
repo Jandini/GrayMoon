@@ -1165,4 +1165,4 @@ Architectural findings that changed the design. Newest first.
 | Generated-package write scoping across contexts | owner decision | Verified by Unit C: complete for reads, not writes (discoveries log, 2026-10-06). Pre-existing and profile-independent, so a follow-up rather than part of this change unless the owner decides otherwise. |
 | `GrayMoon.App/Services/Git/GitVersionCommandService.cs` appears unused | - | Confirmed callerless. Left untouched; removal is out of scope. |
 | `GitHubActionsService.GetLatestActionsAsync` / `GetLatestActionAsync` appear unused | - | Found by Unit E. Left untouched; removal is out of scope. |
-| Desktop README "Recent GrayMoon changes" entry | Unit H | Phase 1-2 has no user-visible change; the entry belongs with the UX work. |
+| Desktop README "Recent GrayMoon changes" entry | Unit H | Added under Recent GrayMoon changes: Basic vs .NET Dependency, independent GitVersion and Actions, Feature freeze, .NET-to-Basic cleanup, create-only directory check. |
