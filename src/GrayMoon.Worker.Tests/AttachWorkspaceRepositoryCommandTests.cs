@@ -1,0 +1,207 @@
+using System.Diagnostics;
+using GrayMoon.Common;
+using GrayMoon.Common.Git;
+using GrayMoon.Worker.Commands;
+using GrayMoon.Worker.Jobs.Requests;
+using GrayMoon.Worker.Services;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+
+namespace GrayMoon.Worker.Tests;
+
+/// <summary>Real git against throwaway directories; git identity is passed per command so no global config is read or changed.</summary>
+public sealed class AttachWorkspaceRepositoryCommandTests : IDisposable
+{
+    private readonly string _baseDir = Directory.CreateTempSubdirectory("graymoon-attach-test-").FullName;
+    private readonly string _workspaceRoot;
+    private readonly AttachWorkspaceRepositoryCommand _command;
+
+    public AttachWorkspaceRepositoryCommandTests()
+    {
+        _workspaceRoot = Path.Combine(_baseDir, "workspaces");
+        Directory.CreateDirectory(_workspaceRoot);
+
+        var commandLine = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
+        var runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
+        var git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner);
+        _command = new AttachWorkspaceRepositoryCommand(git);
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            var directory = new DirectoryInfo(_baseDir);
+            if (directory.Exists)
+            {
+                foreach (var file in directory.GetFiles("*", SearchOption.AllDirectories))
+                {
+                    file.Attributes = FileAttributes.Normal;
+                }
+
+                directory.Delete(true);
+            }
+        }
+        catch
+        {
+            // Best-effort cleanup; a leftover temp directory is not fatal for a test run.
+        }
+    }
+
+    [Fact]
+    public async Task Empty_root_is_cloned_in_place()
+    {
+        var remote = CreateRemote(withCommit: true);
+
+        var response = await _command.ExecuteAsync(NewRequest(remote));
+
+        Assert.True(response.Success, response.ErrorMessage);
+        Assert.Equal("main", response.Branch);
+        Assert.False(response.IsUnborn);
+        Assert.True(Directory.Exists(Path.Combine(RootPath, ".git")));
+        Assert.True(File.Exists(Path.Combine(RootPath, "README.md")));
+    }
+
+    [Fact]
+    public async Task Non_empty_root_without_git_is_initialized_and_checked_out()
+    {
+        var remote = CreateRemote(withCommit: true);
+        Directory.CreateDirectory(RootPath);
+        File.WriteAllText(Path.Combine(RootPath, "notes.txt"), "keep me\n");
+
+        var response = await _command.ExecuteAsync(NewRequest(remote));
+
+        Assert.True(response.Success, response.ErrorMessage);
+        Assert.Equal("main", response.Branch);
+        Assert.False(response.IsUnborn);
+        Assert.True(Directory.Exists(Path.Combine(RootPath, ".git")));
+        Assert.Equal("keep me\n", File.ReadAllText(Path.Combine(RootPath, "notes.txt")));
+        Assert.True(File.Exists(Path.Combine(RootPath, "README.md")));
+
+        var upstream = RunGit(RootPath, "rev-parse", "--abbrev-ref", "main@{upstream}");
+        Assert.Equal(0, upstream.ExitCode);
+        Assert.Equal("origin/main", upstream.Stdout.Trim());
+    }
+
+    [Fact]
+    public async Task Non_empty_root_with_empty_remote_leaves_unborn_main()
+    {
+        var remote = CreateRemote(withCommit: false);
+        Directory.CreateDirectory(RootPath);
+        File.WriteAllText(Path.Combine(RootPath, "notes.txt"), "keep me\n");
+
+        var response = await _command.ExecuteAsync(NewRequest(remote));
+
+        Assert.True(response.Success, response.ErrorMessage);
+        Assert.Equal("main", response.Branch);
+        Assert.True(response.IsUnborn);
+        Assert.True(Directory.Exists(Path.Combine(RootPath, ".git")));
+        Assert.Equal("keep me\n", File.ReadAllText(Path.Combine(RootPath, "notes.txt")));
+        Assert.NotEqual(0, RunGit(RootPath, "rev-parse", "--verify", "HEAD").ExitCode);
+    }
+
+    [Fact]
+    public async Task Root_with_same_origin_is_idempotent()
+    {
+        var remote = CreateRemote(withCommit: true);
+        var first = await _command.ExecuteAsync(NewRequest(remote));
+        Assert.True(first.Success, first.ErrorMessage);
+        var headBefore = RunGit(RootPath, "rev-parse", "HEAD").Stdout.Trim();
+
+        var second = await _command.ExecuteAsync(NewRequest(remote));
+
+        Assert.True(second.Success, second.ErrorMessage);
+        Assert.Equal("main", second.Branch);
+        Assert.False(second.IsUnborn);
+        Assert.Equal(headBefore, RunGit(RootPath, "rev-parse", "HEAD").Stdout.Trim());
+    }
+
+    [Fact]
+    public async Task Root_with_different_origin_fails()
+    {
+        var remote = CreateRemote(withCommit: true);
+        Directory.CreateDirectory(RootPath);
+        Assert.Equal(0, RunGit(RootPath, "init").ExitCode);
+        Assert.Equal(0, RunGit(RootPath, "remote", "add", "origin", "https://example.com/other/repo.git").ExitCode);
+
+        var response = await _command.ExecuteAsync(NewRequest(remote));
+
+        Assert.False(response.Success);
+        Assert.Equal("Root already has a different Git repository", response.ErrorMessage);
+        Assert.Equal("https://example.com/other/repo.git", RunGit(RootPath, "config", "--get", "remote.origin.url").Stdout.Trim());
+    }
+
+    [Fact]
+    public async Task Checkout_collision_returns_git_message_and_keeps_dot_git()
+    {
+        var remote = CreateRemote(withCommit: true);
+        Directory.CreateDirectory(RootPath);
+        File.WriteAllText(Path.Combine(RootPath, "README.md"), "local content that differs\n");
+
+        var response = await _command.ExecuteAsync(NewRequest(remote));
+
+        Assert.False(response.Success);
+        Assert.False(string.IsNullOrWhiteSpace(response.ErrorMessage));
+        Assert.Contains("README.md", response.ErrorMessage);
+        Assert.True(Directory.Exists(Path.Combine(RootPath, ".git")));
+        Assert.Equal("local content that differs\n", File.ReadAllText(Path.Combine(RootPath, "README.md")));
+    }
+
+    private string RootPath => Path.Combine(_workspaceRoot, "ws");
+
+    private AttachWorkspaceRepositoryRequest NewRequest(string cloneUrl) => new()
+    {
+        WorkspaceRoot = _workspaceRoot,
+        WorkspaceName = "ws",
+        CloneUrl = cloneUrl,
+        WorkspaceId = 1,
+        RepositoryId = 2,
+    };
+
+    /// <summary>Creates a bare repository (HEAD on main) and, optionally, pushes one commit with README.md to it.</summary>
+    private string CreateRemote(bool withCommit)
+    {
+        var bare = Path.Combine(_baseDir, "remote.git");
+        Directory.CreateDirectory(bare);
+        Assert.Equal(0, RunGit(bare, "init", "--bare", "--initial-branch=main").ExitCode);
+
+        if (withCommit)
+        {
+            var source = Path.Combine(_baseDir, "source");
+            Directory.CreateDirectory(source);
+            Assert.Equal(0, RunGit(source, "init", "--initial-branch=main").ExitCode);
+            File.WriteAllText(Path.Combine(source, "README.md"), "from remote\n");
+            Assert.Equal(0, RunGit(source, "add", "--all").ExitCode);
+            Assert.Equal(0, RunGit(source,
+                "-c", "user.name=GrayMoon Test", "-c", "user.email=graymoon-test@example.com", "-c", "commit.gpgsign=false",
+                "commit", "-m", "Initial commit").ExitCode);
+            Assert.Equal(0, RunGit(source, "push", bare, "main").ExitCode);
+        }
+
+        return bare;
+    }
+
+    private static (int ExitCode, string Stdout, string Stderr) RunGit(string workingDirectory, params string[] args)
+    {
+        var startInfo = new ProcessStartInfo("git")
+        {
+            WorkingDirectory = workingDirectory,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+
+        foreach (var arg in args)
+        {
+            startInfo.ArgumentList.Add(arg);
+        }
+
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start git process.");
+        var stdout = process.StandardOutput.ReadToEnd();
+        var stderr = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+
+        return (process.ExitCode, stdout, stderr);
+    }
+}

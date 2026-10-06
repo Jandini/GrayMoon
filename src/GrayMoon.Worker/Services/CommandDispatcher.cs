@@ -1,4 +1,4 @@
-using GrayMoon.Abstractions.Worker;
+﻿using GrayMoon.Abstractions.Worker;
 using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Jobs.Requests;
 using GrayMoon.Worker.Jobs.Response;
@@ -50,6 +50,8 @@ public sealed class CommandDispatcher(
     ICommandHandler<RemoveGitWorktreeRequest, RemoveGitWorktreeResponse> removeGitWorktreeCommand,
     ICommandHandler<GetGitVersionAtDefaultTipRequest, GetGitVersionAtDefaultTipResponse> getGitVersionAtDefaultTipCommand,
     ICommandHandler<InspectWorktreeRequest, InspectWorktreeResponse> inspectWorktreeCommand,
+    ICommandHandler<AttachWorkspaceRepositoryRequest, AttachWorkspaceRepositoryResponse> attachWorkspaceRepositoryCommand,
+    ICommandHandler<WriteRepositoryFileRequest, WriteRepositoryFileResponse> writeRepositoryFileCommand,
     IWorkspaceCapabilityProvider capabilityProvider) : ICommandDispatcher
     {
     private readonly IReadOnlyDictionary<string, Func<object, CancellationToken, Task<object?>>> _executors = new Dictionary<string, Func<object, CancellationToken, Task<object?>>>(StringComparer.Ordinal)
@@ -98,6 +100,8 @@ public sealed class CommandDispatcher(
         [WorkerHubMethods.CreateGitWorktree] = async (req, ct) => await createGitWorktreeCommand.ExecuteAsync((CreateGitWorktreeRequest)req, ct),
         [WorkerHubMethods.RemoveGitWorktree] = async (req, ct) => await removeGitWorktreeCommand.ExecuteAsync((RemoveGitWorktreeRequest)req, ct),
         [WorkerHubMethods.InspectWorktree] = async (req, ct) => await inspectWorktreeCommand.ExecuteAsync((InspectWorktreeRequest)req, ct),
+        [WorkerHubMethods.AttachWorkspaceRepository] = async (req, ct) => await attachWorkspaceRepositoryCommand.ExecuteAsync((AttachWorkspaceRepositoryRequest)req, ct),
+        [WorkerHubMethods.WriteRepositoryFile] = async (req, ct) => await writeRepositoryFileCommand.ExecuteAsync((WriteRepositoryFileRequest)req, ct),
     };
 
     public Task<object?> ExecuteAsync(string commandName, object request, CancellationToken cancellationToken = default)
