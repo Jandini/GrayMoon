@@ -1,3 +1,4 @@
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Jobs.Requests;
 using GrayMoon.Worker.Jobs.Response;
@@ -24,7 +25,8 @@ public sealed class GetHostInfoCommand(ICommandLineService commandLine) : IComma
             DotnetVersion = dotnetVersion,
             GitVersion = gitVersion,
             GitVersionToolVersion = gitVersionToolVersion,
-            UserProfilePath = userProfile
+            UserProfilePath = userProfile,
+            SupportedFeatures = [WorkerFeatures.WorkspaceRepository]
         };
     }
 

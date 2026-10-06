@@ -41,11 +41,15 @@ public sealed partial class WorkspaceRepositories
             ShowConfirm($"Do you want to sync {filtered.Count} repositories in this level?", () => SyncLevelAsync(filtered));
     }
 
-    private async Task FetchLevelAsync(int? levelKey)
+    private async Task FetchLevelAsync(int? levelKey) =>
+        await FetchForIdsAsync(await GetRepositoryIdsAtLevelAsync(levelKey));
+
+    /// <summary>Header-menu "Fetch Repositories" over an explicit repository id set.</summary>
+    private Task FetchForIdsAsync(IReadOnlyList<int> repositoryIds)
     {
-        if (workspace == null || IsJobRunning) return;
-        var repoIds = (await GetRepositoryIdsAtLevelAsync(levelKey)).ToList();
-        if (repoIds.Count == 0) return;
+        if (workspace == null || IsJobRunning) return Task.CompletedTask;
+        var repoIds = repositoryIds.ToList();
+        if (repoIds.Count == 0) return Task.CompletedTask;
         var label = $"Fetching {repoIds.Count} {(repoIds.Count == 1 ? "repository" : "repositories")}...";
         StartPageJob(label, async (job, ct) =>
         {
@@ -66,6 +70,7 @@ public sealed partial class WorkspaceRepositories
                 SafeInvoke(() => SetPageError("Fetch failed. Check the logs for details."));
             }
         });
+        return Task.CompletedTask;
     }
 
     private Task QuickFetchAsync()

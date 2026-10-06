@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using GrayMoon.Abstractions.Worker;
 using GrayMoon.Worker.Jobs;
 using GrayMoon.Worker.Jobs.Requests;
@@ -120,6 +120,10 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid RemoveGitWorktree args"),
             WorkerHubMethods.InspectWorktree => JsonSerializer.Deserialize<InspectWorktreeRequest>(json, options)
                 ?? throw new ArgumentException("Invalid InspectWorktree args"),
+            WorkerHubMethods.AttachWorkspaceRepository => JsonSerializer.Deserialize<AttachWorkspaceRepositoryRequest>(json, options)
+                ?? throw new ArgumentException("Invalid AttachWorkspaceRepository args"),
+            WorkerHubMethods.WriteRepositoryFile => JsonSerializer.Deserialize<WriteRepositoryFileRequest>(json, options)
+                ?? throw new ArgumentException("Invalid WriteRepositoryFile args"),
             _ => throw new NotSupportedException($"Unknown command: {command}")
         };
     }

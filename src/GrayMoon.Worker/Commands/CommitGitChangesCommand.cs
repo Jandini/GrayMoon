@@ -2,6 +2,7 @@ using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Jobs.Requests;
 using GrayMoon.Worker.Jobs.Response;
 using GrayMoon.Worker.Services.GitChanges;
+using GrayMoon.Worker.Services;
 
 namespace GrayMoon.Worker.Commands;
 
@@ -15,7 +16,7 @@ public sealed class CommitGitChangesCommand(IGitService git, IRepositoryGitChang
         var commitMessage = request.CommitMessage ?? throw new ArgumentException("commitMessage required");
 
         var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
-        var repoPath = Path.Combine(workspacePath, repositoryName);
+        var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
 
         if (!git.DirectoryExists(repoPath))
         {

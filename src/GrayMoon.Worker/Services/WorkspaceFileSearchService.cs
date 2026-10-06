@@ -19,6 +19,7 @@ public sealed class WorkspaceFileSearchService : IWorkspaceFileSearchService
         string workspacePath,
         string? repositoryName,
         string searchPattern,
+        string? workspaceRepositoryName = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(workspacePath) || !Directory.Exists(workspacePath))
@@ -28,9 +29,11 @@ public sealed class WorkspaceFileSearchService : IWorkspaceFileSearchService
         var results = new List<WorkspaceFileSearchResult>();
 
         IEnumerable<string> repoDirs;
+        string? scopedRepositoryName = null;
         if (!string.IsNullOrWhiteSpace(repositoryName))
         {
-            var single = Path.Combine(workspacePath, repositoryName.Trim());
+            scopedRepositoryName = repositoryName.Trim();
+            var single = WorkerRepositoryPaths.Resolve(workspacePath, scopedRepositoryName, workspaceRepositoryName);
             if (!Directory.Exists(single))
                 return Task.FromResult<IReadOnlyList<WorkspaceFileSearchResult>>([]);
             repoDirs = [single];
@@ -51,7 +54,11 @@ public sealed class WorkspaceFileSearchService : IWorkspaceFileSearchService
         foreach (var repoDir in repoDirs)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var repoName = Path.GetFileName(repoDir);
+            // The Workspace repository's folder is the workspace folder, so report the repository's own name.
+            var repoName = scopedRepositoryName is not null
+                && WorkerRepositoryPaths.IsWorkspaceRepository(scopedRepositoryName, workspaceRepositoryName)
+                    ? scopedRepositoryName
+                    : Path.GetFileName(repoDir);
             EnumerateMatchingFiles(repoDir, repoDir, repoName, pattern, results, cancellationToken);
         }
 
@@ -89,6 +96,8 @@ public sealed class WorkspaceFileSearchService : IWorkspaceFileSearchService
                 cancellationToken.ThrowIfCancellationRequested();
                 var dirName = Path.GetFileName(subDir);
                 if (IsSkippedDirectory(dirName))
+                    continue;
+                if (currentDir == repoRoot && WorkerRepositoryPaths.HasGitMetadata(subDir))
                     continue;
                 EnumerateMatchingFiles(repoRoot, subDir, repositoryName, pattern, results, cancellationToken);
             }

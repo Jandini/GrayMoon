@@ -19,7 +19,7 @@ public sealed class RepositoryStateProbe(
         var capabilities = options.Capabilities ?? RepositoryOperationCapabilities.LegacyFullEnrichment;
 
         // Start the csproj scan first; it is IO-bound and independent of every git call below.
-        var projectsTask = options.IncludeProjects && capabilities.ShouldDiscoverProjects
+        var projectsTask = options.IncludeProjects && capabilities.ShouldDiscoverProjects && !options.IsWorkspaceRepository
             ? csProjFileService.FindAsync(repoPath, ct)
             : null;
 

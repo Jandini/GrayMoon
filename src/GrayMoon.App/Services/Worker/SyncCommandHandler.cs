@@ -4,6 +4,7 @@ using GrayMoon.App.Data;
 using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
+using GrayMoon.App.Services.WorkspaceManifest;
 using GrayMoon.Application.Features;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -107,6 +108,10 @@ public sealed class SyncCommandHandler(
 
         if (!string.IsNullOrWhiteSpace(n.ErrorMessage))
             await hubContext.Clients.All.SendAsync("RepositoryError", n.WorkspaceId, n.RepositoryId, n.ErrorMessage);
+
+        // D8: a hook sync of the Workspace repository in the special context re-checks the Workspace definition.
+        if (contextInfo.IsSpecialWorkspace && wr.Role == WorkspaceRepositoryRole.Workspace)
+            WorkspaceManifestHooks.DetectDriftInBackground(scopeFactory, logger, n.WorkspaceId);
 
         logger.LogDebug(
             "SyncCommand persisted in {ElapsedMs}ms: workspace={WorkspaceId}, context={ContextId}, repo={RepositoryId}, version={Version}, branch={Branch}",

@@ -2,6 +2,7 @@ using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Jobs.Requests;
 using GrayMoon.Worker.Jobs.Response;
 using Microsoft.Extensions.Logging;
+using GrayMoon.Worker.Services;
 
 namespace GrayMoon.Worker.Commands;
 
@@ -14,7 +15,7 @@ public sealed class ReturnToDefaultBranchCommand(IGitService git, IRepositorySta
         var currentBranchName = request.CurrentBranchName ?? throw new ArgumentException("currentBranchName required");
 
         var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
-        var repoPath = Path.Combine(workspacePath, repositoryName);
+        var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
 
         if (!git.DirectoryExists(repoPath))
         {
@@ -99,6 +100,7 @@ public sealed class ReturnToDefaultBranchCommand(IGitService git, IRepositorySta
             IncludeGitVersion = true,
             IncludeBranchLists = true,
             IncludeProjects = true,
+            IsWorkspaceRepository = WorkerRepositoryPaths.IsWorkspaceRepository(repositoryName, request.WorkspaceRepositoryName),
             BranchNameOverride = defaultBranch,
             Capabilities = request.Capabilities
         }, cancellationToken);

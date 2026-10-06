@@ -31,6 +31,7 @@ public sealed class MarkdownImageEmbedder(IWorkerBridge workerBridge, IHttpClien
         string workspaceRoot,
         string workspaceName,
         string repositoryName,
+        string? workspaceRepositoryName,
         string markdownRelativePath,
         string? githubBearerToken = null,
         CancellationToken cancellationToken = default)
@@ -74,6 +75,7 @@ public sealed class MarkdownImageEmbedder(IWorkerBridge workerBridge, IHttpClien
                     workspaceRoot,
                     workspaceName,
                     repositoryName,
+                    workspaceRepositoryName,
                     ResolveRepoRelativePath(markdownDir, src),
                     cancellationToken);
             }
@@ -144,6 +146,7 @@ public sealed class MarkdownImageEmbedder(IWorkerBridge workerBridge, IHttpClien
         string workspaceRoot,
         string workspaceName,
         string repositoryName,
+        string? workspaceRepositoryName,
         string? repoRelativePath,
         CancellationToken cancellationToken)
     {
@@ -160,6 +163,7 @@ public sealed class MarkdownImageEmbedder(IWorkerBridge workerBridge, IHttpClien
                 {
                     workspaceName,
                     workspaceRoot,
+                    workspaceRepositoryName,
                     repositoryName,
                     filePath = repoRelativePath,
                     asBase64 = true,

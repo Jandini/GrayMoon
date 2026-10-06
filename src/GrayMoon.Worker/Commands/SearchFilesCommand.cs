@@ -19,6 +19,7 @@ public sealed class SearchFilesCommand(
             workspacePath,
             request.RepositoryName,
             request.SearchPattern ?? "*",
+            request.WorkspaceRepositoryName,
             cancellationToken);
 
         return new SearchFilesResponse

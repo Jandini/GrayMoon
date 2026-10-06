@@ -280,8 +280,8 @@ public sealed class WorkspacePushStrategyTests
 
         await using var scope = ctx.CreateScope();
         var client = scope.ServiceProvider.GetRequiredService<IGitChangesWorkerClient>();
-        await client.GetStatusAsync(@"C:\gm-test-root", "test-ws", "graymoon-api", ctx.WorkspaceId, ctx.RepositoryId, CancellationToken.None);
-        await client.GetStatusAsync(@"C:\gm-test-root", "test-ws", "graymoon-api", workspaceId: 999_999, ctx.RepositoryId, CancellationToken.None);
+        await client.GetStatusAsync(@"C:\gm-test-root", "test-ws", "graymoon-api", null, ctx.WorkspaceId, ctx.RepositoryId, CancellationToken.None);
+        await client.GetStatusAsync(@"C:\gm-test-root", "test-ws", "graymoon-api", null, workspaceId: 999_999, ctx.RepositoryId, CancellationToken.None);
 
         var calls = ctx.WorkerBridge.Calls.Where(c => c.Command == "GetGitChangeStatus").Select(c => Args(c.Args)).ToList();
         Assert.Equal(2, calls.Count);

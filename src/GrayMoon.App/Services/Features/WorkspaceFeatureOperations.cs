@@ -128,7 +128,9 @@ public sealed class WorkspaceFeatureOperations(
             .Cast<string>()
             .ToList();
 
-        var snapshot = await GetHeadSnapshotAsync(workspace, repoNames, name, cancellationToken);
+        var workspaceRepositoryName = links
+            .FirstOrDefault(l => l.Role == WorkspaceRepositoryRole.Workspace)?.Repository?.RepositoryName;
+        var snapshot = await GetHeadSnapshotAsync(workspace, repoNames, workspaceRepositoryName, name, cancellationToken);
         if (snapshot.Commits.Count != repoNames.Count)
             return FailCreate("HeadCommitsIncomplete", "Could not resolve HEAD for every Workspace repository.");
 
@@ -221,7 +223,10 @@ public sealed class WorkspaceFeatureOperations(
                     {
                         WorkspaceFeatureContextId = context.WorkspaceFeatureContextId,
                         WorkspaceRepositoryId = link.WorkspaceRepositoryId,
-                        WorktreePath = WorkerPath.Combine(featureRootPath, repoName),
+                        // The Workspace-role repository's worktree is the Feature root itself (D10).
+                        WorktreePath = link.Role == WorkspaceRepositoryRole.Workspace
+                            ? featureRootPath
+                            : WorkerPath.Combine(featureRootPath, repoName),
                         BaseCommitSha = sha,
                         ParentBranchName = pinnedTag == null ? parentBranch : null,
                         PinnedTag = pinnedTag,
@@ -255,7 +260,9 @@ public sealed class WorkspaceFeatureOperations(
             var createTotal = pendingRows.Count;
             var capabilities = (await capabilitiesResolver.GetAsync(workspaceId, cancellationToken)).ToRepositoryOperationCapabilities();
             using var gate = new SemaphoreSlim(MaxParallel);
-            var tasks = pendingRows.Select(async row =>
+            var rootRow = pendingRows.SingleOrDefault(r => links.First(l => l.WorkspaceRepositoryId == r.WorkspaceRepositoryId).Role == WorkspaceRepositoryRole.Workspace);
+            var sourceRows = pendingRows.Where(r => r != rootRow).ToList();
+            Func<WorkspaceFeatureRepository, Task> createRowAsync = async row =>
             {
                 await gate.WaitAsync(cancellationToken);
                 try
@@ -321,9 +328,14 @@ public sealed class WorkspaceFeatureOperations(
                         createTotal);
                     gate.Release();
                 }
-            });
+            };
 
-            await Task.WhenAll(tasks);
+            // D10: the Workspace-role root worktree is created alone and first; Source worktrees live
+            // inside it. A root failure leaves every Source row Pending and skips the fan-out.
+            if (rootRow != null)
+                await createRowAsync(rootRow);
+            if (anyFailure == 0)
+                await Task.WhenAll(sourceRows.Select(createRowAsync));
 
             await using (var finalizeDb = await dbContextFactory.CreateDbContextAsync(cancellationToken))
             {
@@ -432,7 +444,7 @@ public sealed class WorkspaceFeatureOperations(
         await Task.WhenAll(pullRequestRefreshTask, pathArgsTask);
 
         var pullRequestStatusUnknown = await pullRequestRefreshTask;
-        var (featureWorkspaceRoot, featureWorkspaceFolder) = await pathArgsTask;
+        var (featureWorkspaceRoot, featureWorkspaceFolder, featureWorkspaceRepositoryName) = await pathArgsTask;
 
         var prs = await db.WorkspaceRepositoryContextPullRequests
             .AsNoTracking()
@@ -462,6 +474,7 @@ public sealed class WorkspaceFeatureOperations(
                     var live = await ProbeFeatureWorktreeLiveStatusAsync(
                         featureWorkspaceRoot,
                         featureWorkspaceFolder,
+                        featureWorkspaceRepositoryName,
                         info.WorkspaceId,
                         row,
                         disk.Exists,
@@ -550,18 +563,19 @@ public sealed class WorkspaceFeatureOperations(
         }
     }
 
-    private async Task<(string? Root, string? Folder)> ResolveFeatureWorkspaceArgsForRemoveAnalysisAsync(
+    private async Task<(string? Root, string? Folder, string? WorkspaceRepositoryName)> ResolveFeatureWorkspaceArgsForRemoveAnalysisAsync(
         WorkspaceFeatureContextId featureContextId,
         CancellationToken cancellationToken)
     {
         try
         {
-            return await pathResolver.GetWorkerWorkspaceArgsAsync(featureContextId, cancellationToken);
+            var featureArgs = await pathResolver.GetWorkerArgsAsync(featureContextId, cancellationToken);
+            return (featureArgs.WorkspaceRoot, featureArgs.WorkspaceFolderName, featureArgs.WorkspaceRepositoryName);
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Could not resolve Feature workspace paths for remove analysis.");
-            return (null, null);
+            return (null, null, null);
         }
     }
 
@@ -732,10 +746,11 @@ public sealed class WorkspaceFeatureOperations(
         var removeTotal = rows.Count;
         string? workspaceRoot = null;
         string? workspaceFolderName = null;
+        string? workspaceRepositoryName = null;
         try
         {
-            (workspaceRoot, workspaceFolderName) =
-                await pathResolver.GetWorkerWorkspaceArgsAsync(specialContextId, cancellationToken);
+            (workspaceRoot, workspaceFolderName, workspaceRepositoryName) =
+                await pathResolver.GetWorkerArgsAsync(specialContextId, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -749,16 +764,25 @@ public sealed class WorkspaceFeatureOperations(
         try
         {
             featureRootPath = await pathResolver.GetContextRootAsync(featureContextId, cancellationToken);
-            (featureStorageRoot, _) = await pathResolver.GetWorkerWorkspaceArgsAsync(featureContextId, cancellationToken);
+            (featureStorageRoot, _, _) = await pathResolver.GetWorkerArgsAsync(featureContextId, cancellationToken);
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Could not resolve Feature storage paths for worktree residue cleanup.");
         }
 
+        // D10: the Workspace-role root worktree is removed last, alone, and only when every Source
+        // removal succeeded (git worktree remove on a root that still holds Source worktrees would
+        // fail or need --force).
+        var rootRow = rows.SingleOrDefault(r =>
+            linkByWrId.TryGetValue(r.WorkspaceRepositoryId, out var rootLink)
+            && rootLink.Role == WorkspaceRepositoryRole.Workspace);
+        var sourceRows = rows.Where(r => r != rootRow).ToList();
+        var rootKeptMessage = false;
+
         using (var gate = new SemaphoreSlim(MaxParallel))
         {
-            var removeTasks = rows.Select(async row =>
+            Func<WorkspaceFeatureRepository, Task> removeRowAsync = async row =>
             {
                 await gate.WaitAsync(cancellationToken);
                 try
@@ -766,6 +790,7 @@ public sealed class WorkspaceFeatureOperations(
                     var repoName = linkByWrId.TryGetValue(row.WorkspaceRepositoryId, out var reportLink)
                         ? reportLink.Repository?.RepositoryName ?? ""
                         : "";
+                    var isRootRow = ReferenceEquals(row, rootRow);
 
                     var mainPath = await pathResolver.GetRepositoryPathAsync(
                         specialContextId, row.WorkspaceRepositoryId, cancellationToken);
@@ -779,8 +804,9 @@ public sealed class WorkspaceFeatureOperations(
                             mainRepositoryPath = mainPath,
                             worktreePath = row.WorktreePath,
                             force,
-                            featureRootPath,
-                            featureStorageRoot,
+                            // The root removal deletes the directory itself; Worker residue cleanup must not run.
+                            featureRootPath = isRootRow ? null : featureRootPath,
+                            featureStorageRoot = isRootRow ? null : featureStorageRoot,
                             unlock = options.AllowUnlockWorktrees
                         },
                         cancellationToken);
@@ -851,6 +877,7 @@ public sealed class WorkspaceFeatureOperations(
                             {
                                 workspaceName = workspaceFolderName,
                                 repositoryName = repoName,
+                                workspaceRepositoryName,
                                 branchName,
                                 isRemote = false,
                                 force = options.AllowForceDeleteLocalBranches,
@@ -923,6 +950,7 @@ public sealed class WorkspaceFeatureOperations(
                                         {
                                             workspaceName = workspaceFolderName,
                                             repositoryName = repoName,
+                                            workspaceRepositoryName,
                                             branchName,
                                             isRemote = true,
                                             force = false,
@@ -986,8 +1014,16 @@ public sealed class WorkspaceFeatureOperations(
                         removeTotal);
                     gate.Release();
                 }
-            });
-            await Task.WhenAll(removeTasks);
+            };
+
+            await Task.WhenAll(sourceRows.Select(removeRowAsync));
+            if (rootRow != null)
+            {
+                if (errorsByWrId.IsEmpty)
+                    await removeRowAsync(rootRow);
+                else
+                    rootKeptMessage = true;
+            }
         }
 
         if (!errorsByWrId.IsEmpty)
@@ -1005,6 +1041,13 @@ public sealed class WorkspaceFeatureOperations(
             }
 
             var firstError = errorsByWrId.Values.First();
+            if (rootKeptMessage)
+            {
+                const string rootKept = "Workspace repository worktree kept until all repository worktrees are removed.";
+                firstError = $"{firstError} {rootKept}";
+                rootRow!.LastError = rootKept;
+            }
+
             feature.LifecycleState = WorkspaceFeatureLifecycleState.NeedsRepair;
             feature.LastError = firstError;
             feature.UpdatedAt = DateTime.UtcNow;
@@ -1144,6 +1187,7 @@ public sealed class WorkspaceFeatureOperations(
     private async Task<FeatureWorktreeLiveStatus> ProbeFeatureWorktreeLiveStatusAsync(
         string? featureWorkspaceRoot,
         string? featureWorkspaceFolder,
+        string? workspaceRepositoryName,
         int workspaceId,
         WorkspaceFeatureRepository row,
         bool worktreeExists,
@@ -1173,6 +1217,7 @@ public sealed class WorkspaceFeatureOperations(
                     workspaceRoot = featureWorkspaceRoot,
                     workspaceName = featureWorkspaceFolder,
                     repositoryName = repoName,
+                    workspaceRepositoryName,
                     workspaceId,
                     repositoryId = repositoryId.Value,
                     includeLineStats = false,
@@ -1540,7 +1585,7 @@ public sealed class WorkspaceFeatureOperations(
             var capabilities = (await capabilitiesResolver.GetAsync(info.WorkspaceId, cancellationToken)).ToRepositoryOperationCapabilities();
             using var gate = new SemaphoreSlim(MaxParallel);
             var done = 0;
-            var tasks = retryRows.Select(async row =>
+            Func<WorkspaceFeatureRepository, Task> retryRowAsync = async row =>
             {
                 await gate.WaitAsync(cancellationToken);
                 try
@@ -1607,8 +1652,20 @@ public sealed class WorkspaceFeatureOperations(
                     progress?.Report(new OperationProgress($"Repaired {n} of {retryRows.Count} repositories", n, retryRows.Count));
                     gate.Release();
                 }
-            });
-            await Task.WhenAll(tasks);
+            };
+
+            // D10: a Pending/NeedsRepair Workspace-role root row is always retried alone, before any
+            // Source row; if it still fails, the Source rows are left untouched and the Feature stays NeedsRepair.
+            var rootRetryRow = retryRows.SingleOrDefault(r =>
+                linkByWrId[r.WorkspaceRepositoryId].Role == WorkspaceRepositoryRole.Workspace);
+            var sourceRetryRows = retryRows.Where(r => r != rootRetryRow).ToList();
+            if (rootRetryRow != null)
+                await retryRowAsync(rootRetryRow);
+            if (rootRetryRow == null || !results.Any(r =>
+                    r.WrId == rootRetryRow.WorkspaceRepositoryId && r.Result.Outcome == FeatureRepositoryOperationOutcome.Failed))
+            {
+                await Task.WhenAll(sourceRetryRows.Select(retryRowAsync));
+            }
         }
 
         var ordered = results.OrderBy(r => r.WrId).Select(r => r.Result).ToList();
@@ -1719,10 +1776,11 @@ public sealed class WorkspaceFeatureOperations(
 
         string? workspaceRoot = null;
         string? workspaceFolderName = null;
+        string? workspaceRepositoryName = null;
         try
         {
-            (workspaceRoot, workspaceFolderName) =
-                await pathResolver.GetWorkerWorkspaceArgsAsync(specialContextId, cancellationToken);
+            (workspaceRoot, workspaceFolderName, workspaceRepositoryName) =
+                await pathResolver.GetWorkerArgsAsync(specialContextId, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -1734,7 +1792,7 @@ public sealed class WorkspaceFeatureOperations(
         try
         {
             featureRootPath = await pathResolver.GetContextRootAsync(featureContextId, cancellationToken);
-            (featureStorageRoot, _) = await pathResolver.GetWorkerWorkspaceArgsAsync(featureContextId, cancellationToken);
+            (featureStorageRoot, _, _) = await pathResolver.GetWorkerArgsAsync(featureContextId, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -1743,11 +1801,31 @@ public sealed class WorkspaceFeatureOperations(
 
         var results = new List<FeatureRepairRepositoryResult>();
         var done = 0;
-        foreach (var row in rows)
+        // D10: the Workspace-role root worktree is the Feature root and holds the Source worktrees, so
+        // it is rolled back last and only when every Source row rolled back without a failure.
+        var rootRow = rows.SingleOrDefault(r =>
+            linkByWrId.TryGetValue(r.WorkspaceRepositoryId, out var rootLink)
+            && rootLink.Role == WorkspaceRepositoryRole.Workspace);
+        var orderedRows = rows.Where(r => r != rootRow).ToList();
+        if (rootRow != null)
+            orderedRows.Add(rootRow);
+        const string rootKeptMessage = "Workspace repository worktree kept until all repository worktrees are removed.";
+        var rootKept = false;
+        foreach (var row in orderedRows)
         {
             var repoName = linkByWrId.TryGetValue(row.WorkspaceRepositoryId, out var link)
                 ? link.Repository?.RepositoryName ?? ""
                 : "";
+            var isRootRow = ReferenceEquals(row, rootRow);
+            if (isRootRow && results.Any(r => r.Outcome == FeatureRepositoryOperationOutcome.Failed))
+            {
+                rootKept = true;
+                results.Add(new FeatureRepairRepositoryResult(repoName, FeatureRepositoryOperationOutcome.Skipped, rootKeptMessage));
+                done++;
+                progress?.Report(new OperationProgress($"Rolled back {done} of {rows.Count} repositories", done, rows.Count));
+                continue;
+            }
+
             var mainPath = await pathResolver.GetRepositoryPathAsync(specialContextId, row.WorkspaceRepositoryId, cancellationToken);
 
             var listResp = await workerBridge.SendCommandAsync(
@@ -1780,8 +1858,8 @@ public sealed class WorkspaceFeatureOperations(
                         mainRepositoryPath = mainPath,
                         worktreePath = row.WorktreePath,
                         force = false,
-                        featureRootPath,
-                        featureStorageRoot,
+                        featureRootPath = isRootRow ? null : featureRootPath,
+                        featureStorageRoot = isRootRow ? null : featureStorageRoot,
                         unlock = false
                     },
                     cancellationToken);
@@ -1817,6 +1895,7 @@ public sealed class WorkspaceFeatureOperations(
                         {
                             workspaceName = workspaceFolderName,
                             repositoryName = repoName,
+                            workspaceRepositoryName,
                             branchName,
                             isRemote = false,
                             force = false,
@@ -1849,7 +1928,10 @@ public sealed class WorkspaceFeatureOperations(
         if (results.Any(r => r.Outcome == FeatureRepositoryOperationOutcome.Failed))
         {
             var first = results.First(r => r.Outcome == FeatureRepositoryOperationOutcome.Failed);
-            return new RollbackFeatureResult(false, first.Message, results);
+            return new RollbackFeatureResult(
+                false,
+                rootKept ? $"{first.Message} {rootKeptMessage}" : first.Message,
+                results);
         }
 
         var special = specialContextId;
@@ -2145,6 +2227,7 @@ public sealed class WorkspaceFeatureOperations(
     private async Task<(Dictionary<string, string> Commits, Dictionary<string, string> Branches, Dictionary<string, string> Tags, Dictionary<string, List<string>> BranchCollisions)> GetHeadSnapshotAsync(
         Workspace workspace,
         IReadOnlyList<string> repositoryNames,
+        string? workspaceRepositoryName,
         string collisionBranchName,
         CancellationToken cancellationToken)
     {
@@ -2161,6 +2244,7 @@ public sealed class WorkspaceFeatureOperations(
                 workspaceName = workspace.Name,
                 workspaceRoot = root,
                 repositoryNames,
+                workspaceRepositoryName,
                 collisionBranchName
             },
             cancellationToken);

@@ -16,4 +16,7 @@ public sealed class GetHostInfoResponse
     /// <summary>Worker host user profile directory (e.g. C:\Users\name). Used to default Feature worktree storage.</summary>
     [JsonPropertyName("userProfilePath")]
     public string? UserProfilePath { get; set; }
+
+    [JsonPropertyName("supportedFeatures")]
+    public List<string>? SupportedFeatures { get; set; }
 }

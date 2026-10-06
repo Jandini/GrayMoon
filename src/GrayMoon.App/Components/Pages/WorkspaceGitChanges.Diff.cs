@@ -184,7 +184,10 @@ public sealed partial class WorkspaceGitChanges
                 return;
             }
 
-            var (root, folderName) = await PathResolver.GetWorkerWorkspaceArgsAsync(_selectedContextId.Value);
+            var workerArgs = await PathResolver.GetWorkerArgsAsync(_selectedContextId.Value);
+            var root = workerArgs.WorkspaceRoot;
+            var folderName = workerArgs.WorkspaceFolderName;
+            var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
             if (requestVersion != _diffRequestVersion)
             {
                 return;
@@ -204,7 +207,7 @@ public sealed partial class WorkspaceGitChanges
                 // LoadingOverlay terminal, even when LoadDiffAsync runs inside one (e.g. restoring a
                 // remembered selection right after a Refresh job's reload).
                 result = await WorkerClient.GetDiffAsync(
-                    root, folderName, link.Repository.RepositoryName, row.FilePath!, comparison, CancellationToken.None);
+                    root, folderName, link.Repository.RepositoryName, workspaceRepositoryName, row.FilePath!, comparison, CancellationToken.None);
             }
 
             if (requestVersion != _diffRequestVersion)

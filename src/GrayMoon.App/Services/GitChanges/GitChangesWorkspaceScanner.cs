@@ -66,7 +66,10 @@ public sealed class GitChangesWorkspaceScanner(
             .AsNoTracking()
             .ToListAsync(cancellationToken);
 
-        var (root, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
+        var workerArgs = await pathResolver.GetWorkerArgsAsync(contextId, cancellationToken);
+        var root = workerArgs.WorkspaceRoot;
+        var workspaceFolderName = workerArgs.WorkspaceFolderName;
+        var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
 
         var targets = new List<MonitorTarget>();
         foreach (var link in links)
@@ -87,6 +90,7 @@ public sealed class GitChangesWorkspaceScanner(
                 root,
                 workspaceFolderName,
                 link.Repository.RepositoryName,
+                workspaceRepositoryName,
                 link.WorkspaceId,
                 link.RepositoryId,
                 repositoryPath));
@@ -108,7 +112,7 @@ public sealed class GitChangesWorkspaceScanner(
             try
             {
                 var result = await workerClient.GetStatusAsync(
-                    target.Root, target.WorkspaceName, target.RepositoryName,
+                    target.Root, target.WorkspaceName, target.RepositoryName, target.WorkspaceRepositoryName,
                     target.WorkspaceId, target.RepositoryId, cancellationToken,
                     includeLineStats);
 
@@ -167,6 +171,7 @@ public sealed class GitChangesWorkspaceScanner(
         string Root,
         string WorkspaceName,
         string RepositoryName,
+        string? WorkspaceRepositoryName,
         int WorkspaceId,
         int RepositoryId,
         string RepositoryPath);

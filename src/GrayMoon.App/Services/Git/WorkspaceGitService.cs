@@ -36,7 +36,8 @@ public sealed partial class WorkspaceGitService(
     NuGetService? nuGetService = null,
     ConnectorRepository? connectorRepository = null,
     ConnectorHealthService? connectorHealthService = null,
-    WorkspaceFileVersionService? fileVersionService = null)
+    WorkspaceFileVersionService? fileVersionService = null,
+    IServiceScopeFactory? scopeFactory = null)
 {
     private readonly IWorkerBridge _workerBridge = workerBridge ?? throw new ArgumentNullException(nameof(workerBridge));
     private readonly WorkspaceService _workspaceService = workspaceService ?? throw new ArgumentNullException(nameof(workspaceService));

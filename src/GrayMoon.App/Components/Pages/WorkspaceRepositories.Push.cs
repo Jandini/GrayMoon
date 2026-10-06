@@ -359,11 +359,15 @@ public sealed partial class WorkspaceRepositories
         }
     }
 
-    private async Task RestorePackagesLevelAsync(int? levelKey)
+    private async Task RestorePackagesLevelAsync(int? levelKey) =>
+        await RestorePackagesForIdsAsync(await GetRepositoryIdsAtLevelAsync(levelKey));
+
+    /// <summary>Header-menu "Restore Packages" over an explicit repository id set.</summary>
+    private Task RestorePackagesForIdsAsync(IReadOnlyList<int> repositoryIds)
     {
-        if (workspace == null || IsJobRunning || !(_capabilities?.UsesPackageRestore ?? false)) return;
-        var repoIds = (await GetRepositoryIdsAtLevelAsync(levelKey)).ToHashSet();
-        if (repoIds.Count == 0) return;
+        if (workspace == null || IsJobRunning || !(_capabilities?.UsesPackageRestore ?? false)) return Task.CompletedTask;
+        var repoIds = repositoryIds.ToHashSet();
+        if (repoIds.Count == 0) return Task.CompletedTask;
 
         var label = $"Restoring packages in {repoIds.Count} {(repoIds.Count == 1 ? "repository" : "repositories")}...";
         StartPageJob(label, async (job, ct) =>
@@ -388,6 +392,7 @@ public sealed partial class WorkspaceRepositories
                 SafeInvoke(() => ToastService.ShowError($"Restore failed: {ex.Message}"));
             }
         });
+        return Task.CompletedTask;
     }
 
     private async Task RestoreSyncedPackagesCoreAsync(IReadOnlySet<int> syncedRepoIds, BackgroundJobHandle job, CancellationToken ct)

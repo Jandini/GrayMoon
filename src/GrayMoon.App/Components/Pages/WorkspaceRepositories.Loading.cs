@@ -44,6 +44,7 @@ public sealed partial class WorkspaceRepositories
 
         _capabilities = await CapabilitiesResolver.GetAsync(WorkspaceId);
         _presentation = WorkspaceGridPresentation.For(_capabilities);
+        await RefreshWorkspaceRepositoryBannerStateAsync();
     }
     private async Task LoadHeaderStateAsync(CancellationToken cancellationToken = default)
     {
@@ -423,6 +424,7 @@ public sealed partial class WorkspaceRepositories
                     return;
                 }
                 workspace = w;
+                await RefreshWorkspaceRepositoryBannerStateAsync();
                 // Rebuild index when levels/order may have changed. The visible slot range is recomputed below
                 // from the live scroll pixel position rather than reusing old slot indices, since a level
                 // split/merge shifts slot positions in the rebuilt list.

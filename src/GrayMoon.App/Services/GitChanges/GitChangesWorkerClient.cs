@@ -28,30 +28,30 @@ public sealed class GitChangesDiffResult
 public interface IGitChangesWorkerClient
 {
     Task<GitChangesStatusResult> GetStatusAsync(
-        string workspaceRoot, string workspaceName, string repositoryName,
+        string workspaceRoot, string workspaceName, string repositoryName, string? workspaceRepositoryName,
         int workspaceId, int repositoryId, CancellationToken cancellationToken,
         bool includeLineStats = false);
 
     Task<GitChangesDiffResult> GetDiffAsync(
-        string workspaceRoot, string workspaceName, string repositoryName,
+        string workspaceRoot, string workspaceName, string repositoryName, string? workspaceRepositoryName,
         string path, GitDiffComparison comparison, CancellationToken cancellationToken);
 
     Task<GitChangesMutationResult> StageAsync(
-        string workspaceRoot, string workspaceName, string repositoryName,
+        string workspaceRoot, string workspaceName, string repositoryName, string? workspaceRepositoryName,
         GitChangeOperationScope scope, IReadOnlyList<string> paths, CancellationToken cancellationToken);
 
     Task<GitChangesMutationResult> UnstageAsync(
-        string workspaceRoot, string workspaceName, string repositoryName,
+        string workspaceRoot, string workspaceName, string repositoryName, string? workspaceRepositoryName,
         GitChangeOperationScope scope, IReadOnlyList<string> paths, CancellationToken cancellationToken);
 
     /// <summary>Discards unstaged changes only: restores tracked working-tree edits from the index and
     /// deletes untracked files - never touches staged/index content.</summary>
     Task<GitChangesMutationResult> DiscardAsync(
-        string workspaceRoot, string workspaceName, string repositoryName,
+        string workspaceRoot, string workspaceName, string repositoryName, string? workspaceRepositoryName,
         GitChangeOperationScope scope, IReadOnlyList<string> paths, CancellationToken cancellationToken);
 
     Task<GitChangesCommitResult> CommitAsync(
-        string workspaceRoot, string workspaceName, string repositoryName,
+        string workspaceRoot, string workspaceName, string repositoryName, string? workspaceRepositoryName,
         string commitMessage, bool stageAllFirst, CancellationToken cancellationToken);
 }
 
@@ -60,62 +60,62 @@ public sealed class GitChangesWorkerClient(
     IWorkspaceCapabilitiesResolver capabilitiesResolver) : IGitChangesWorkerClient
 {
     public async Task<GitChangesStatusResult> GetStatusAsync(
-        string workspaceRoot, string workspaceName, string repositoryName,
+        string workspaceRoot, string workspaceName, string repositoryName, string? workspaceRepositoryName,
         int workspaceId, int repositoryId, CancellationToken cancellationToken,
         bool includeLineStats = false)
     {
         var capabilities = await ResolveCapabilitiesAsync(workspaceId, cancellationToken);
-        var args = new { workspaceRoot, workspaceName, repositoryName, workspaceId, repositoryId, includeLineStats, capabilities };
+        var args = new { workspaceRoot, workspaceRepositoryName, workspaceName, repositoryName, workspaceId, repositoryId, includeLineStats, capabilities };
         var response = await workerBridge.SendCommandAsync("GetGitChangeStatus", args, cancellationToken);
         return WorkerResponseJson.DeserializeWorkerResponse<GitChangesStatusResult>(response.Data)
             ?? new GitChangesStatusResult { Success = false, ErrorMessage = response.Error ?? "No response from worker." };
     }
 
     public async Task<GitChangesDiffResult> GetDiffAsync(
-        string workspaceRoot, string workspaceName, string repositoryName,
+        string workspaceRoot, string workspaceName, string repositoryName, string? workspaceRepositoryName,
         string path, GitDiffComparison comparison, CancellationToken cancellationToken)
     {
-        var args = new { workspaceRoot, workspaceName, repositoryName, path, comparison = (int)comparison };
+        var args = new { workspaceRoot, workspaceRepositoryName, workspaceName, repositoryName, path, comparison = (int)comparison };
         var response = await workerBridge.SendCommandAsync("GetGitFileDiff", args, cancellationToken);
         return WorkerResponseJson.DeserializeWorkerResponse<GitChangesDiffResult>(response.Data)
             ?? new GitChangesDiffResult { Success = false, ErrorMessage = response.Error ?? "No response from worker." };
     }
 
     public async Task<GitChangesMutationResult> StageAsync(
-        string workspaceRoot, string workspaceName, string repositoryName,
+        string workspaceRoot, string workspaceName, string repositoryName, string? workspaceRepositoryName,
         GitChangeOperationScope scope, IReadOnlyList<string> paths, CancellationToken cancellationToken)
     {
-        var args = new { workspaceRoot, workspaceName, repositoryName, scope = (int)scope, paths };
+        var args = new { workspaceRoot, workspaceRepositoryName, workspaceName, repositoryName, scope = (int)scope, paths };
         var response = await workerBridge.SendCommandAsync("StageGitChanges", args, cancellationToken);
         return WorkerResponseJson.DeserializeWorkerResponse<GitChangesMutationResult>(response.Data)
             ?? new GitChangesMutationResult { Success = false, ErrorMessage = response.Error ?? "No response from worker." };
     }
 
     public async Task<GitChangesMutationResult> UnstageAsync(
-        string workspaceRoot, string workspaceName, string repositoryName,
+        string workspaceRoot, string workspaceName, string repositoryName, string? workspaceRepositoryName,
         GitChangeOperationScope scope, IReadOnlyList<string> paths, CancellationToken cancellationToken)
     {
-        var args = new { workspaceRoot, workspaceName, repositoryName, scope = (int)scope, paths };
+        var args = new { workspaceRoot, workspaceRepositoryName, workspaceName, repositoryName, scope = (int)scope, paths };
         var response = await workerBridge.SendCommandAsync("UnstageGitChanges", args, cancellationToken);
         return WorkerResponseJson.DeserializeWorkerResponse<GitChangesMutationResult>(response.Data)
             ?? new GitChangesMutationResult { Success = false, ErrorMessage = response.Error ?? "No response from worker." };
     }
 
     public async Task<GitChangesMutationResult> DiscardAsync(
-        string workspaceRoot, string workspaceName, string repositoryName,
+        string workspaceRoot, string workspaceName, string repositoryName, string? workspaceRepositoryName,
         GitChangeOperationScope scope, IReadOnlyList<string> paths, CancellationToken cancellationToken)
     {
-        var args = new { workspaceRoot, workspaceName, repositoryName, scope = (int)scope, paths };
+        var args = new { workspaceRoot, workspaceRepositoryName, workspaceName, repositoryName, scope = (int)scope, paths };
         var response = await workerBridge.SendCommandAsync("DiscardGitChanges", args, cancellationToken);
         return WorkerResponseJson.DeserializeWorkerResponse<GitChangesMutationResult>(response.Data)
             ?? new GitChangesMutationResult { Success = false, ErrorMessage = response.Error ?? "No response from worker." };
     }
 
     public async Task<GitChangesCommitResult> CommitAsync(
-        string workspaceRoot, string workspaceName, string repositoryName,
+        string workspaceRoot, string workspaceName, string repositoryName, string? workspaceRepositoryName,
         string commitMessage, bool stageAllFirst, CancellationToken cancellationToken)
     {
-        var args = new { workspaceRoot, workspaceName, repositoryName, commitMessage, stageAllFirst };
+        var args = new { workspaceRoot, workspaceRepositoryName, workspaceName, repositoryName, commitMessage, stageAllFirst };
         var response = await workerBridge.SendCommandAsync("CommitGitChanges", args, cancellationToken);
         return WorkerResponseJson.DeserializeWorkerResponse<GitChangesCommitResult>(response.Data)
             ?? new GitChangesCommitResult { Success = false, ErrorMessage = response.Error ?? "No response from worker." };

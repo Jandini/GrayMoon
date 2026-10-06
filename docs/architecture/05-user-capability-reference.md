@@ -40,6 +40,39 @@ Repository
 Settings/default root
 ```
 
+### Workspace repository
+
+```text
+User can
+  choose a Workspace repository in the Workspace modal (enable, change or disable)
+  see it first on the Repositories page, in its own group with a Workspace badge
+  resolve a definition-drift banner with "Write Workspace definition to disk" or "Dismiss"
+
+Rules
+  at most one per Workspace; Role = Workspace on WorkspaceRepositoryLink
+  working tree is the Workspace root folder; Sources are nested folders ignored by a managed .gitignore section
+  enable and disable are refused while Features exist; disable never deletes files or .git
+  enable is refused unless the Worker reports supportedFeatures containing workspaceRepository
+  no dependency level, no projects
+  Feature create: root worktree first, then Sources; remove and rollback: Sources first, root last
+```
+
+Implementation areas:
+
+```text
+IWorkspaceRepositoryOperations / WorkspaceRepositoryOperations (enable, disable, restore)
+IWorkspaceManifestService / WorkspaceManifestService (.graymoon.json, managed .gitignore, drift)
+IWorkerFeatureSupportService (GetHostInfo supportedFeatures)
+Worker: AttachWorkspaceRepository, WriteRepositoryFile, WorkerRepositoryPaths.Resolve
+WorkspaceFeatureOperations (two-phase Feature create, Sources-first removal)
+```
+
+Enable attaches the repository to the Workspace root through the Worker (`AttachWorkspaceRepository`), then writes the managed `.gitignore` section and `.graymoon.json` through `WriteRepositoryFile`. Worker commands carry `WorkspaceRepositoryName` so `WorkerRepositoryPaths.Resolve` maps the Workspace repository to the Workspace root and every other repository to a nested folder.
+
+Restore (`RestoreFromRepositoryAsync`) clones the repository into an empty folder, creates the Workspace, applies the profile from `.graymoon.json`, links Source repositories by normalized URL and returns the connector and repository URLs it could not match.
+
+The Git Changes watcher ignores events under nested repository folders, and Workspace file search skips nested repositories, so the root's view does not include Source repositories.
+
 ---
 
 ## 2. Connectors

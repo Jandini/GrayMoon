@@ -1,19 +1,33 @@
 using GrayMoon.App.Models;
+using GrayMoon.App.Services.WorkspaceManifest;
+using GrayMoon.Application.WorkspaceManifest;
+using Microsoft.AspNetCore.Components;
 
 namespace GrayMoon.App.Components.Pages;
 
 public sealed partial class WorkspaceRepositories
 {
+    [Inject] private IWorkspaceManifestService ManifestService { get; set; } = default!;
+
     private RepositoriesModalState _repositoriesModal = new();
 
     private async Task ShowRepositoriesModalAsync()
     {
         var snapshots = await LinkListQueryService.GetAllSnapshotsAsync(WorkspaceId);
-        var ids = snapshots.Select(r => r.RepositoryId).ToHashSet();
+        // The Workspace repository is neither selectable nor removable in this modal (D13).
+        var ids = snapshots
+            .Where(r => r.Role != WorkspaceRepositoryRole.Workspace)
+            .Select(r => r.RepositoryId)
+            .ToHashSet();
+        var workspaceRepositoryIds = snapshots
+            .Where(r => r.Role == WorkspaceRepositoryRole.Workspace)
+            .Select(r => r.RepositoryId)
+            .ToHashSet();
         _repositoriesModal = new RepositoriesModalState
         {
             IsVisible = true,
             SelectedRepositoryIds = ids,
+            ExcludedRepositoryIds = workspaceRepositoryIds,
             ErrorMessage = null,
             RefreshGeneration = _repositoriesModal.RefreshGeneration + 1,
         };
@@ -62,6 +76,10 @@ public sealed partial class WorkspaceRepositories
                 workspace?.Name ?? string.Empty,
                 ids,
                 workspace?.RootPath);
+            // Membership changed: keep the managed .gitignore section and the Workspace definition in step (D12).
+            var definitionError = await ManifestService.SyncDefinitionToDiskAsync(WorkspaceId);
+            if (definitionError is not null)
+                ToastService.ShowError(definitionError);
             await PendingActionsService.RefreshAsync(
                 WorkspaceId,
                 WorkspacePageService.WorkspaceRepository,
@@ -133,6 +151,7 @@ public sealed partial class WorkspaceRepositories
     {
         public bool IsVisible { get; set; }
         public HashSet<int> SelectedRepositoryIds { get; set; } = new();
+        public HashSet<int> ExcludedRepositoryIds { get; set; } = new();
         public bool HasConnectors { get; set; }
         public bool IsSaving { get; set; }
         public string? ErrorMessage { get; set; }
