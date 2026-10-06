@@ -585,7 +585,24 @@ not a .NET feature - its own token syntax proves it (`{@Repo:branch}` and `{@Rep
 Capability badges belong in documentation and settings copy, not in the running left navigation, which
 should simply contain the pages currently available.
 
-Detailed design: Phase 5.
+### How it is enforced
+
+One pure policy, `WorkspacePageAccess`, answers `IsAvailable(page, capabilities)`. The left navigation
+and every gated page ask it; no page invents its own workspace-type check.
+
+`IWorkspacePageAccessResolver` applies that policy to a persisted workspace, by workspace id only
+(section 3). A Feature-context route (`?context=`) therefore gets exactly the parent Workspace's answer.
+It uses `GetManyAsync` rather than `GetAsync`, so a missing workspace is an outcome
+(`WorkspaceNotFound`), not an exception.
+
+The `NavMenu` never joins a live circuit. It rebuilds the item set from persisted state on every
+location change through this resolver, not through the CI provider, so the static-SSR nav pulls in no
+GitHub services. A failed lookup hides the gated items rather than showing them.
+
+Direct navigation to an unavailable page does not redirect. The page checks access before any data
+query (`LoadIfAvailableAsync`) and renders one standard state (`WorkspacePageGate`): an info callout
+and a "Back to Repositories" link that keeps the Feature context. The Actions page's inline
+"CI is not enabled for this workspace." fallback stays as defence in depth.
 
 ## 11a. CI provider boundary
 

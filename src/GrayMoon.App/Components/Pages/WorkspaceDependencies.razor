@@ -12,6 +12,7 @@
 @inject WorkspaceProjectRepository WorkspaceProjectRepository
 @inject NavigationManager NavigationManager
 @inject WorkspaceContextNavigationService ContextNavigation
+@inject IWorkspacePageAccessResolver PageAccess
 @inject IJSRuntime JSRuntime
 @inject ILogger<WorkspaceDependencies> Logger
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
@@ -19,124 +20,126 @@
 
 <PageTitle>Dependencies - GrayMoon</PageTitle>
 
-<div class="container-fluid page-container grid-page dependencies-page">
-    <div class="grid-page-header">
-        <div class="workspace-repos-header workspace-dependencies-header">
-            <div class="workspace-repos-title-row">
-                <h2 class="workspace-repos-title">Dependencies</h2>
-                <p class="text-muted mb-0 workspace-repos-subtitle workspace-dependencies__subtitle">
-                    <WorkspaceSubtitleName Name="@(workspace?.Name)" />
-                    @if (!isLoading && graph != null && graph.Nodes.Count > 0)
+<WorkspacePageGate Page="WorkspacePage.Dependencies" WorkspaceId="WorkspaceId" Outcome="_pageAccess" ContextQuery="ContextQuery">
+    <div class="container-fluid page-container grid-page dependencies-page">
+        <div class="grid-page-header">
+            <div class="workspace-repos-header workspace-dependencies-header">
+                <div class="workspace-repos-title-row">
+                    <h2 class="workspace-repos-title">Dependencies</h2>
+                    <p class="text-muted mb-0 workspace-repos-subtitle workspace-dependencies__subtitle">
+                        <WorkspaceSubtitleName Name="@(workspace?.Name)" />
+                        @if (!isLoading && graph != null && graph.Nodes.Count > 0)
+                        {
+                            var (nodeCount, edgeCount) = GetFilteredCounts();
+                            var searchNote = HasSearchFilter ? " - matching search" : "";
+                            <span>@($"{nodeCount} repositories | {edgeCount} dependencies{searchNote}")</span>
+                        }
+                        else if (!isLoading && workspace != null && graph != null && graph.Nodes.Count == 0)
+                        {
+                            <span>No dependency data</span>
+                        }
+                        else if (!isLoading && workspace != null)
+                        {
+                            <span>&nbsp;</span>
+                        }
+                        else if (isLoading)
+                        {
+                            <span>&nbsp;</span>
+                        }
+                    </p>
+                    <span class="workspace-repos-title-spacer"></span>
+                </div>
+                <div class="d-flex gap-2 align-items-center workspace-repos-header-actions deps-header-actions flex-wrap">
+                    <WorkspaceContextBar WorkspaceId="WorkspaceId"
+                                         WorkspaceName="@(workspace?.Name)"
+                                         SelectedContextId="_selectedContextId"
+                                         SelectedContextIdChanged="OnSelectedContextChangedAsync">
+                        <FilterSearchInput Value="@searchTerm"
+                                           ValueChanged="OnSearchValueChangedAsync"
+                                           InputId="workspace-dependencies-search"
+                                           InputAdditionalClass="workspace-grid-search"
+                                           Placeholder="Search repositories (shows each match and its dependency tree)..."
+                                           Disabled="@(isLoading || graph == null || graph.Nodes.Count == 0)"
+                                           OnKeyDown="OnSearchKeyDown"
+                                           OnClear="ClearSearchFilter" />
+                    </WorkspaceContextBar>
+                    @if (graph != null && graph.Nodes.Count > 0)
                     {
-                        var (nodeCount, edgeCount) = GetFilteredCounts();
-                        var searchNote = HasSearchFilter ? " - matching search" : "";
-                        <span>@($"{nodeCount} repositories | {edgeCount} dependencies{searchNote}")</span>
-                    }
-                    else if (!isLoading && workspace != null && graph != null && graph.Nodes.Count == 0)
-                    {
-                        <span>No dependency data</span>
-                    }
-                    else if (!isLoading && workspace != null)
-                    {
-                        <span>&nbsp;</span>
-                    }
-                    else if (isLoading)
-                    {
-                        <span>&nbsp;</span>
-                    }
-                </p>
-                <span class="workspace-repos-title-spacer"></span>
-            </div>
-            <div class="d-flex gap-2 align-items-center workspace-repos-header-actions deps-header-actions flex-wrap">
-                <WorkspaceContextBar WorkspaceId="WorkspaceId"
-                                     WorkspaceName="@(workspace?.Name)"
-                                     SelectedContextId="_selectedContextId"
-                                     SelectedContextIdChanged="OnSelectedContextChangedAsync">
-                    <FilterSearchInput Value="@searchTerm"
-                                       ValueChanged="OnSearchValueChangedAsync"
-                                       InputId="workspace-dependencies-search"
-                                       InputAdditionalClass="workspace-grid-search"
-                                       Placeholder="Search repositories (shows each match and its dependency tree)..."
-                                       Disabled="@(isLoading || graph == null || graph.Nodes.Count == 0)"
-                                       OnKeyDown="OnSearchKeyDown"
-                                       OnClear="ClearSearchFilter" />
-                </WorkspaceContextBar>
-                @if (graph != null && graph.Nodes.Count > 0)
-                {
-                    <div class="deps-filter-dropdown @(showFilterMenu ? "show" : "")">
-                        <button type="button"
-                                class="btn btn-outline-secondary dropdown-toggle deps-filter-toggle"
-                                aria-expanded="@showFilterMenu"
-                                title="@(HasSearchFilter ? "Clear search to apply this scope to the graph." : GetFilterLabel())"
-                                disabled="@HasSearchFilter"
-                                @onclick="ToggleFilterMenu">
-                            <span class="deps-filter-toggle-label">@GetFilterLabel()</span>
-                        </button>
-                        <div class="deps-filter-menu">
+                        <div class="deps-filter-dropdown @(showFilterMenu ? "show" : "")">
                             <button type="button"
-                                    class="dropdown-item deps-filter-option @(selectedFilterValue == "" ? "active" : "")"
-                                    @onclick='() => SelectFilter("")'>
-                                All repositories
+                                    class="btn btn-outline-secondary dropdown-toggle deps-filter-toggle"
+                                    aria-expanded="@showFilterMenu"
+                                    title="@(HasSearchFilter ? "Clear search to apply this scope to the graph." : GetFilterLabel())"
+                                    disabled="@HasSearchFilter"
+                                    @onclick="ToggleFilterMenu">
+                                <span class="deps-filter-toggle-label">@GetFilterLabel()</span>
                             </button>
-                            @foreach (var level in GetOrderedDependencyLevels())
-                            {
-                                var levelVal = $"level-{level}";
+                            <div class="deps-filter-menu">
                                 <button type="button"
-                                        class="dropdown-item deps-filter-option @(selectedFilterValue == levelVal ? "active" : "")"
-                                        @onclick="() => SelectFilter(levelVal)">
-                                    Level @level
+                                        class="dropdown-item deps-filter-option @(selectedFilterValue == "" ? "active" : "")"
+                                        @onclick='() => SelectFilter("")'>
+                                    All repositories
                                 </button>
-                            }
-                            @foreach (var n in graph.Nodes.OrderBy(n => n.RepositoryName, StringComparer.OrdinalIgnoreCase))
+                                @foreach (var level in GetOrderedDependencyLevels())
+                                {
+                                    var levelVal = $"level-{level}";
+                                    <button type="button"
+                                            class="dropdown-item deps-filter-option @(selectedFilterValue == levelVal ? "active" : "")"
+                                            @onclick="() => SelectFilter(levelVal)">
+                                        Level @level
+                                    </button>
+                                }
+                                @foreach (var n in graph.Nodes.OrderBy(n => n.RepositoryName, StringComparer.OrdinalIgnoreCase))
+                                {
+                                    var repoVal = n.RepositoryId.ToString();
+                                    <button type="button"
+                                            class="dropdown-item deps-filter-option @(selectedFilterValue == repoVal ? "active" : "")"
+                                            @onclick="() => SelectFilter(repoVal)">
+                                        @n.RepositoryName
+                                    </button>
+                                }
+                            </div>
+                            @if (showFilterMenu)
                             {
-                                var repoVal = n.RepositoryId.ToString();
-                                <button type="button"
-                                        class="dropdown-item deps-filter-option @(selectedFilterValue == repoVal ? "active" : "")"
-                                        @onclick="() => SelectFilter(repoVal)">
-                                    @n.RepositoryName
-                                </button>
+                                <div class="deps-filter-backdrop" @onclick="CloseFilterMenu"></div>
                             }
                         </div>
-                        @if (showFilterMenu)
-                        {
-                            <div class="deps-filter-backdrop" @onclick="CloseFilterMenu"></div>
-                        }
-                    </div>
+                    }
+                </div>
+            </div>
+            @if (errorMessage != null)
+            {
+                <div class="gm-callout gm-callout--error" role="alert">@errorMessage</div>
+            }
+        </div>
+        @if (errorMessage == null && graph != null)
+        {
+            <div class="grid-page-body">
+                <div id="cytoscape-dependency-graph" class="cytoscape-graph"></div>
+                @if (graph.Nodes.Count > 0 && !NoRepositoriesMatchSearch)
+                {
+                    <ul class="deps-graph-legend" aria-label="Repository type legend">
+                        <li><span class="deps-graph-legend__swatch deps-graph-legend__swatch--service" aria-hidden="true"></span>Service</li>
+                        <li><span class="deps-graph-legend__swatch deps-graph-legend__swatch--package" aria-hidden="true"></span>Package</li>
+                        <li><span class="deps-graph-legend__swatch deps-graph-legend__swatch--library" aria-hidden="true"></span>Library</li>
+                        <li><span class="deps-graph-legend__swatch deps-graph-legend__swatch--executable" aria-hidden="true"></span>Executable</li>
+                        <li><span class="deps-graph-legend__swatch deps-graph-legend__swatch--test" aria-hidden="true"></span>Test</li>
+                    </ul>
+                }
+                @if (graph.Nodes.Count == 0)
+                {
+                    <p class="dependencies-empty-message text-muted text-center mb-0">No dependencies to display. Sync repositories to discover projects and dependencies.</p>
+                }
+                else if (NoRepositoriesMatchSearch)
+                {
+                    <p class="dependencies-empty-message text-muted text-center mb-0">No repositories match your search.</p>
                 }
             </div>
-        </div>
-        @if (errorMessage != null)
-        {
-            <div class="gm-callout gm-callout--error" role="alert">@errorMessage</div>
         }
     </div>
-    @if (errorMessage == null && graph != null)
-    {
-        <div class="grid-page-body">
-            <div id="cytoscape-dependency-graph" class="cytoscape-graph"></div>
-            @if (graph.Nodes.Count > 0 && !NoRepositoriesMatchSearch)
-            {
-                <ul class="deps-graph-legend" aria-label="Repository type legend">
-                    <li><span class="deps-graph-legend__swatch deps-graph-legend__swatch--service" aria-hidden="true"></span>Service</li>
-                    <li><span class="deps-graph-legend__swatch deps-graph-legend__swatch--package" aria-hidden="true"></span>Package</li>
-                    <li><span class="deps-graph-legend__swatch deps-graph-legend__swatch--library" aria-hidden="true"></span>Library</li>
-                    <li><span class="deps-graph-legend__swatch deps-graph-legend__swatch--executable" aria-hidden="true"></span>Executable</li>
-                    <li><span class="deps-graph-legend__swatch deps-graph-legend__swatch--test" aria-hidden="true"></span>Test</li>
-                </ul>
-            }
-            @if (graph.Nodes.Count == 0)
-            {
-                <p class="dependencies-empty-message text-muted text-center mb-0">No dependencies to display. Sync repositories to discover projects and dependencies.</p>
-            }
-            else if (NoRepositoriesMatchSearch)
-            {
-                <p class="dependencies-empty-message text-muted text-center mb-0">No repositories match your search.</p>
-            }
-        </div>
-    }
-</div>
 
-<LoadingOverlay IsVisible="@isLoading" Message="Loading dependencies..." />
+    <LoadingOverlay IsVisible="@isLoading" Message="Loading dependencies..." />
+</WorkspacePageGate>
 
 @code {
     [Parameter] public int WorkspaceId { get; set; }
@@ -144,6 +147,7 @@
     [SupplyParameterFromQuery(Name = "context")]
     public int? ContextQuery { get; set; }
 
+    private WorkspacePageAccessOutcome? _pageAccess;
     private WorkspaceFeatureContextId? _selectedContextId;
     private WorkspaceModel? workspace;
     private RepositoryDependencyGraph? graph;
@@ -167,10 +171,13 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var info = await ContextNavigation.ResolveForPageAsync(WorkspaceId, ContextQuery);
-        _selectedContextId = info.ContextId;
-        await LoadAsync();
-        ApplyRepositoryFilterFromQuery();
+        _pageAccess = await PageAccess.LoadIfAvailableAsync(WorkspaceId, WorkspacePage.Dependencies, async () =>
+        {
+            var info = await ContextNavigation.ResolveForPageAsync(WorkspaceId, ContextQuery);
+            _selectedContextId = info.ContextId;
+            await LoadAsync();
+            ApplyRepositoryFilterFromQuery();
+        });
     }
 
     private async Task OnSelectedContextChangedAsync(WorkspaceFeatureContextId contextId)

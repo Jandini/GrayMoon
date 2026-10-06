@@ -906,9 +906,9 @@ level headers and no dependency Update/Restore UI; Basic+GitVersion adds version
 
 | | |
 |---|---|
-| Owner | unassigned |
-| Status | TODO |
-| Dependencies | Unit A, Unit E |
+| Owner | subagent (stalled; owner finished) |
+| Status | REVIEW |
+| Dependencies | Unit A (DONE), Unit E (DONE) |
 
 **Scope.** A reusable workspace-page capability/access policy, `NavMenu`, direct-route handling,
 Projects/Packages/Dependencies availability, Actions availability by CI provider.
@@ -917,15 +917,53 @@ Constraint: `NavMenu` renders under the static/SSR layout and never joins a live
 workspace context from `NavigationManager.Uri` on every location change. Do not introduce an interactive
 state dependency to hide items.
 
-**Inputs from Wave 1.** Gate the Actions nav item (`NavMenu.razor:83-88`) and route
-(`WorkspaceActions.razor:1`) on `UsesCiIntegration`, using `IWorkspaceCapabilitiesResolver` rather than the CI
-provider so the SSR nav pulls in no GitHub services. The Actions page's inline "CI is not enabled for this
-workspace." fallback (`WorkspaceActions.Loading.cs:25-30`) may stay as defence in depth. Projects, Packages
-and Dependencies gate on `DiscoversDotNetProjects` / `UsesDependencyGraph`: a Basic workspace now produces
-nothing current for them to show.
+**What changed.** One pure policy (`WorkspacePageAccess`) plus `IWorkspacePageAccessResolver` applied by
+workspace id only. `NavMenu` hides Projects/Packages/Dependencies unless the workspace is .NET, and
+Actions unless `UsesCiIntegration`, resolving through the page-access resolver so the SSR nav pulls in
+no GitHub services. Direct navigation to an unavailable page does not redirect: the page checks access
+before any data query (`LoadIfAvailableAsync`) and `WorkspacePageGate` renders one standard state (info
+callout + Back to Repositories, Feature context kept). The Actions page's inline CI fallback is
+unchanged as defence in depth. Files, Repositories and Changes stay always available and unedited.
 
-**Acceptance.** Basic hides Projects/Packages/Dependencies; .NET Dependency shows them; Actions depends
-only on the CI provider; direct navigation cannot bypass the rules; Files remains available for Basic.
+**Files touched.**
+
+```text
+src/GrayMoon.App/Services/Workspaces/WorkspacePageAccess.cs            (new)
+src/GrayMoon.App/Services/Workspaces/WorkspacePageAccessResolver.cs    (new)
+src/GrayMoon.App/Components/Shared/WorkspacePageGate.razor             (new)
+src/GrayMoon.App/Components/Layout/NavMenu.razor
+src/GrayMoon.App/Components/Pages/WorkspaceProjects.razor, .razor.cs
+src/GrayMoon.App/Components/Pages/WorkspacePackages.razor
+src/GrayMoon.App/Components/Pages/WorkspaceDependencies.razor
+src/GrayMoon.App/Components/Pages/WorkspaceActions.razor, .razor.cs    (guard only)
+src/GrayMoon.App/Program.cs                                            (DI line next to the capabilities resolver)
+src/GrayMoon.App.Tests/WorkspacePageAccessTests.cs                     (new)
+```
+
+**Tests.** `WorkspacePageAccessTests` (30): policy matrix across every Type x Versioning x CI combination;
+nav item sets for Basic, Basic+GitHubActions, DotNet+None, Legacy; missing workspace shows only always-
+available items; Basic direct routes never run the page loader; DotNet without CI loads the three .NET
+pages and not Actions; missing/zero/negative ids are an outcome, not an exception; loader exceptions
+propagate.
+
+**Owner verification.** `dotnet build GrayMoon.slnx` 0 warnings / 0 errors. `GrayMoon.App.Tests` 934/934 (904 + 30), `GrayMoon.Worker.Tests` 312 + 1 pre-existing skip, `GrayMoon.Common.Tests` 234/234.
+
+**Risks / findings.**
+
+- Unavailable-page behaviour is a standard on-page state, not a redirect. InteractiveServer pages
+  would flash if they redirected after prerender; the URL stays deterministic.
+- `WorkspaceActions.razor.cs` was edited for the guard even though Unit E owned the Loading partial.
+  Loading.cs is untouched.
+- A missing workspace still shows Repositories/Changes/Files in the nav (always-available). Those pages
+  already handle "not found" themselves.
+
+**Deviations.** Chose standard state over redirect, as allowed by the brief.
+
+**Follow-ups.**
+
+- Unit H: after a profile change the nav rebuilds on the next location change; no live subscription.
+- Unit I: visit Projects/Packages/Dependencies/Actions on a Basic workspace and confirm the standard
+  state, then the same pages on a .NET workspace with CI=None.
 
 ---
 

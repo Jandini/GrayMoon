@@ -15,131 +15,133 @@
 
 <PageTitle>Projects - GrayMoon</PageTitle>
 
-<div class="container-fluid page-container grid-page">
-    <div class="grid-page-header">
-        <div class="workspace-repos-header workspace-projects-header">
-            <div class="workspace-repos-title-row">
-                <h2 class="workspace-repos-title">Projects</h2>
-                <p class="text-muted mb-0 workspace-repos-subtitle workspace-projects__subtitle">
-                    <WorkspaceSubtitleName Name="@(workspace?.Name)" />
-                    @if (hasLoadedOnce && !isInitialLoading)
-                    {
-                        var projSuffix = HasSearchFilter ? " found" : "";
-                        var projCount = totalCount ?? 0;
-                        <span>@($"{projCount} {(projCount == 1 ? "project" : "projects")}{projSuffix}")</span>
-                    }
-                    else if (hasLoadedOnce && workspace != null && totalCount == 0 && !HasSearchFilter)
-                    {
-                        <span>0 projects</span>
-                    }
-                    else if (isInitialLoading)
-                    {
-                        <span>&nbsp;</span>
-                    }
-                </p>
-                <span class="workspace-repos-title-spacer"></span>
+<WorkspacePageGate Page="WorkspacePage.Projects" WorkspaceId="WorkspaceId" Outcome="_pageAccess" ContextQuery="ContextQuery">
+    <div class="container-fluid page-container grid-page">
+        <div class="grid-page-header">
+            <div class="workspace-repos-header workspace-projects-header">
+                <div class="workspace-repos-title-row">
+                    <h2 class="workspace-repos-title">Projects</h2>
+                    <p class="text-muted mb-0 workspace-repos-subtitle workspace-projects__subtitle">
+                        <WorkspaceSubtitleName Name="@(workspace?.Name)" />
+                        @if (hasLoadedOnce && !isInitialLoading)
+                        {
+                            var projSuffix = HasSearchFilter ? " found" : "";
+                            var projCount = totalCount ?? 0;
+                            <span>@($"{projCount} {(projCount == 1 ? "project" : "projects")}{projSuffix}")</span>
+                        }
+                        else if (hasLoadedOnce && workspace != null && totalCount == 0 && !HasSearchFilter)
+                        {
+                            <span>0 projects</span>
+                        }
+                        else if (isInitialLoading)
+                        {
+                            <span>&nbsp;</span>
+                        }
+                    </p>
+                    <span class="workspace-repos-title-spacer"></span>
+                </div>
+                <div class="d-flex gap-2 align-items-center workspace-repos-header-actions flex-wrap">
+                    <WorkspaceContextBar WorkspaceId="WorkspaceId"
+                                         WorkspaceName="@(workspace?.Name)"
+                                         SelectedContextId="_selectedContextId"
+                                         SelectedContextIdChanged="OnSelectedContextChangedAsync">
+                        <FilterSearchInput Value="@searchTerm"
+                                           ValueChanged="OnSearchTermChangedAsync"
+                                           InputId="workspace-projects-search"
+                                           InputAdditionalClass="workspace-grid-search"
+                                           Placeholder="Search project name or file..."
+                                           Disabled="@(isInitialLoading && !hasLoadedOnce)"
+                                           OnKeyDown="OnSearchKeyDown"
+                                           OnClear="ClearSearchFilter" />
+                    </WorkspaceContextBar>
+                </div>
             </div>
-            <div class="d-flex gap-2 align-items-center workspace-repos-header-actions flex-wrap">
-                <WorkspaceContextBar WorkspaceId="WorkspaceId"
-                                     WorkspaceName="@(workspace?.Name)"
-                                     SelectedContextId="_selectedContextId"
-                                     SelectedContextIdChanged="OnSelectedContextChangedAsync">
-                    <FilterSearchInput Value="@searchTerm"
-                                       ValueChanged="OnSearchTermChangedAsync"
-                                       InputId="workspace-projects-search"
-                                       InputAdditionalClass="workspace-grid-search"
-                                       Placeholder="Search project name or file..."
-                                       Disabled="@(isInitialLoading && !hasLoadedOnce)"
-                                       OnKeyDown="OnSearchKeyDown"
-                                       OnClear="ClearSearchFilter" />
-                </WorkspaceContextBar>
-            </div>
+            @if (errorMessage != null)
+            {
+                <div class="gm-callout gm-callout--error" role="alert">@errorMessage</div>
+            }
         </div>
-        @if (errorMessage != null)
+        @if (errorMessage == null)
         {
-            <div class="gm-callout gm-callout--error" role="alert">@errorMessage</div>
-        }
-    </div>
-    @if (errorMessage == null)
-    {
-        <div class="grid-page-body">
-            <div class="card page-card mb-4">
-                <div class="card-body p-0">
-                    <div class="table-responsive">
-                        <table class="table table-hover mb-0 projects-table resizable-columns virtual-scroll-table" data-workspace-id="@WorkspaceId">
-                            <thead class="table-dark">
-                                <tr>
-                                    <th class="col-name">Name</th>
-                                    <th class="col-type">Type</th>
-                                    <th class="col-framework">Framework</th>
-                                    <th class="col-file">File</th>
-                                </tr>
-                            </thead>
-                            <tbody @ref="_tbodyRef">
-                                @if (isInitialLoading && _virtual.Count == 0)
-                                {
+            <div class="grid-page-body">
+                <div class="card page-card mb-4">
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-hover mb-0 projects-table resizable-columns virtual-scroll-table" data-workspace-id="@WorkspaceId">
+                                <thead class="table-dark">
                                     <tr>
-                                        <td colspan="4" class="text-center text-muted py-4">
-                                            Loading projects...
-                                        </td>
+                                        <th class="col-name">Name</th>
+                                        <th class="col-type">Type</th>
+                                        <th class="col-framework">Framework</th>
+                                        <th class="col-file">File</th>
                                     </tr>
-                                }
-                                else if (hasLoadedOnce && totalCount == 0 && !HasSearchFilter)
-                                {
-                                    <tr>
-                                        <td colspan="4" class="text-center text-muted py-4">
-                                            No projects in this workspace. Sync repositories to discover .csproj projects.
-                                        </td>
-                                    </tr>
-                                }
-                                else if (NoProjectsMatchSearch)
-                                {
-                                    <tr>
-                                        <td colspan="4" class="text-center text-muted py-4">
-                                            No projects match your search.
-                                        </td>
-                                    </tr>
-                                }
-                                else
-                                {
-                                    @if (_virtual.TopSpacerPx > 0)
+                                </thead>
+                                <tbody @ref="_tbodyRef">
+                                    @if (isInitialLoading && _virtual.Count == 0)
                                     {
-                                        <tr class="virtual-scroll-spacer" aria-hidden="true">
-                                            <td colspan="4" style="height:@(_virtual.TopSpacerPx.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture))px;padding:0;border:0;line-height:0;"></td>
+                                        <tr>
+                                            <td colspan="4" class="text-center text-muted py-4">
+                                                Loading projects...
+                                            </td>
                                         </tr>
                                     }
-                                    @foreach (var (index, id, p) in _virtual.VisibleRows)
+                                    else if (hasLoadedOnce && totalCount == 0 && !HasSearchFilter)
                                     {
-                                        if (p is null)
-                                        {
-                                            <tr @key="@id" class="virtual-scroll-placeholder @StripeClass(index)">
-                                                <td colspan="4">&nbsp;</td>
-                                            </tr>
-                                        }
-                                        else
-                                        {
-                                            <tr @key="@id" class="@StripeClass(index)">
-                                                <td class="col-name"><strong>@p.ProjectName</strong></td>
-                                                <td class="col-type text-muted">@p.ProjectType</td>
-                                                <td class="col-framework"><span class="badge bg-secondary">@(p.TargetFramework ?? "-")</span></td>
-                                                <td class="col-file text-muted" title="@(p.IsGenerated ? null : p.ProjectFilePath)">@(p.IsGenerated ? null : GetFileName(p.ProjectFilePath))</td>
-                                            </tr>
-                                        }
-                                    }
-                                    @if (_virtual.BottomSpacerPx > 0)
-                                    {
-                                        <tr class="virtual-scroll-spacer" aria-hidden="true">
-                                            <td colspan="4" style="height:@(_virtual.BottomSpacerPx.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture))px;padding:0;border:0;line-height:0;"></td>
+                                        <tr>
+                                            <td colspan="4" class="text-center text-muted py-4">
+                                                No projects in this workspace. Sync repositories to discover .csproj projects.
+                                            </td>
                                         </tr>
                                     }
-                                }
-                            </tbody>
-                        </table>
+                                    else if (NoProjectsMatchSearch)
+                                    {
+                                        <tr>
+                                            <td colspan="4" class="text-center text-muted py-4">
+                                                No projects match your search.
+                                            </td>
+                                        </tr>
+                                    }
+                                    else
+                                    {
+                                        @if (_virtual.TopSpacerPx > 0)
+                                        {
+                                            <tr class="virtual-scroll-spacer" aria-hidden="true">
+                                                <td colspan="4" style="height:@(_virtual.TopSpacerPx.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture))px;padding:0;border:0;line-height:0;"></td>
+                                            </tr>
+                                        }
+                                        @foreach (var (index, id, p) in _virtual.VisibleRows)
+                                        {
+                                            if (p is null)
+                                            {
+                                                <tr @key="@id" class="virtual-scroll-placeholder @StripeClass(index)">
+                                                    <td colspan="4">&nbsp;</td>
+                                                </tr>
+                                            }
+                                            else
+                                            {
+                                                <tr @key="@id" class="@StripeClass(index)">
+                                                    <td class="col-name"><strong>@p.ProjectName</strong></td>
+                                                    <td class="col-type text-muted">@p.ProjectType</td>
+                                                    <td class="col-framework"><span class="badge bg-secondary">@(p.TargetFramework ?? "-")</span></td>
+                                                    <td class="col-file text-muted" title="@(p.IsGenerated ? null : p.ProjectFilePath)">@(p.IsGenerated ? null : GetFileName(p.ProjectFilePath))</td>
+                                                </tr>
+                                            }
+                                        }
+                                        @if (_virtual.BottomSpacerPx > 0)
+                                        {
+                                            <tr class="virtual-scroll-spacer" aria-hidden="true">
+                                                <td colspan="4" style="height:@(_virtual.BottomSpacerPx.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture))px;padding:0;border:0;line-height:0;"></td>
+                                            </tr>
+                                        }
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
-    }
-</div>
+        }
+    </div>
 
-<LoadingOverlay IsVisible="@(isInitialLoading && !hasLoadedOnce)" Message="Loading projects..." />
+    <LoadingOverlay IsVisible="@(isInitialLoading && !hasLoadedOnce)" Message="Loading projects..." />
+</WorkspacePageGate>
