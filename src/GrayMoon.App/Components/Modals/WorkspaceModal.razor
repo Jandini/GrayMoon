@@ -80,16 +80,41 @@
 
                     <div class="mb-3">
                         <label class="form-label text-nowrap" for="workspaceRepositorySelect">Workspace repository (optional)</label>
-                        <select class="form-select workspace-repository-select"
-                                id="workspaceRepositorySelect"
-                                disabled="@IsWorkspaceRepositoryDisabled"
-                                @onchange="OnWorkspaceRepositoryChosenAsync">
-                            <option value="" selected="@(WorkspaceRepositoryId is null)">None</option>
-                            @foreach (var choice in WorkspaceRepositoryChoices)
+                        <div class="workspace-repository-picker @(IsWorkspaceRepositoryDisabled ? "disabled" : "")">
+                            <input type="text"
+                                   class="form-control workspace-repository-select"
+                                   id="workspaceRepositorySelect"
+                                   autocomplete="off"
+                                   placeholder="@(_repositoryPickerOpen ? "Search repositories" : "None")"
+                                   value="@(_repositoryPickerOpen ? _repositoryFilter : SelectedRepositoryDisplayName)"
+                                   disabled="@IsWorkspaceRepositoryDisabled"
+                                   @onfocus="OpenRepositoryPicker"
+                                   @onclick="OpenRepositoryPicker"
+                                   @onblur="CloseRepositoryPicker"
+                                   @oninput="OnRepositoryFilterChanged"
+                                   @onkeydown="OnRepositoryPickerKeyDown"
+                                   @onkeydown:stopPropagation="_repositoryPickerOpen" />
+                            @if (_repositoryPickerOpen && !IsWorkspaceRepositoryDisabled)
                             {
-                                <option value="@choice.RepositoryId" selected="@(choice.RepositoryId == WorkspaceRepositoryId)">@choice.DisplayName</option>
+                                <div class="workspace-repository-list" role="listbox">
+                                    <button type="button" role="option"
+                                            class="workspace-repository-option text-nowrap @(WorkspaceRepositoryId is null ? "active" : "")"
+                                            @onmousedown="() => SelectRepositoryAsync(null)"
+                                            @onmousedown:preventDefault>None</button>
+                                    @foreach (var choice in FilteredRepositoryChoices)
+                                    {
+                                        <button type="button" role="option"
+                                                class="workspace-repository-option text-nowrap @(choice.RepositoryId == WorkspaceRepositoryId ? "active" : "")"
+                                                @onmousedown="() => SelectRepositoryAsync(choice.RepositoryId)"
+                                                @onmousedown:preventDefault>@choice.DisplayName</button>
+                                    }
+                                    @if (FilteredRepositoryChoices.Count == 0)
+                                    {
+                                        <div class="workspace-repository-empty text-nowrap">No matching repositories</div>
+                                    }
+                                </div>
                             }
-                        </select>
+                        </div>
                         <div class="form-text">The Workspace's own Git repository. Its working tree is the Workspace root and it is the root of every Feature.</div>
                         @if (IsWorkspaceRepositoryDisabled && !string.IsNullOrWhiteSpace(WorkspaceRepositoryDisabledHint))
                         {
@@ -218,16 +243,54 @@
         await UseGitHubActionsChanged.InvokeAsync(defaults.Ci == WorkspaceCiProvider.GitHubActions);
     }
 
-    private Task OnWorkspaceRepositoryChosenAsync(ChangeEventArgs e)
-    {
-        if (IsWorkspaceRepositoryDisabled)
-            return Task.CompletedTask;
+    private bool _repositoryPickerOpen;
+    private string _repositoryFilter = string.Empty;
 
-        var raw = e.Value?.ToString();
-        int? chosen = int.TryParse(raw, out var id) ? id : null;
-        return WorkspaceRepositoryIdChanged.InvokeAsync(chosen);
+    private IReadOnlyList<WorkspaceRepositoryChoice> FilteredRepositoryChoices =>
+        FilterWorkspaceRepositoryChoices(WorkspaceRepositoryChoices, _repositoryFilter);
+
+    private string SelectedRepositoryDisplayName =>
+        WorkspaceRepositoryChoices.FirstOrDefault(c => c.RepositoryId == WorkspaceRepositoryId)?.DisplayName ?? "None";
+
+    /// <summary>Case-insensitive "contains" filter on display name; an empty term returns all, order preserved.</summary>
+    public static IReadOnlyList<WorkspaceRepositoryChoice> FilterWorkspaceRepositoryChoices(
+        IEnumerable<WorkspaceRepositoryChoice> choices, string? term)
+    {
+        var trimmed = term?.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+            return choices.ToList();
+        return choices
+            .Where(c => c.DisplayName.Contains(trimmed, StringComparison.OrdinalIgnoreCase))
+            .ToList();
     }
 
+    private void OpenRepositoryPicker()
+    {
+        if (IsWorkspaceRepositoryDisabled || _repositoryPickerOpen)
+            return;
+        _repositoryFilter = string.Empty;
+        _repositoryPickerOpen = true;
+    }
+
+    private void CloseRepositoryPicker() => _repositoryPickerOpen = false;
+
+    private void OnRepositoryFilterChanged(ChangeEventArgs e) =>
+        _repositoryFilter = e.Value?.ToString() ?? string.Empty;
+
+    private void OnRepositoryPickerKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+            _repositoryPickerOpen = false;
+    }
+
+    private async Task SelectRepositoryAsync(int? id)
+    {
+        if (IsWorkspaceRepositoryDisabled)
+            return;
+
+        _repositoryPickerOpen = false;
+        await WorkspaceRepositoryIdChanged.InvokeAsync(id);
+    }
     private Task OnGitVersionChanged(ChangeEventArgs e) =>
         UseGitVersionChanged.InvokeAsync(e.Value is true or "true" or "on");
 
