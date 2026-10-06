@@ -12,6 +12,7 @@ using GrayMoon.App.Services.Jobs;
 using GrayMoon.App.Services.Workspaces;
 using GrayMoon.Application;
 using GrayMoon.Application.Features;
+using GrayMoon.Application.Workspaces;
 using GrayMoon.Common.Features;
 using GrayMoon.Common.Git;
 using Microsoft.EntityFrameworkCore;
@@ -31,6 +32,7 @@ public sealed class WorkspaceFeatureOperations(
     WorkspaceService workspaceService,
     WorkspacePullRequestService workspacePullRequestService,
     IWorkspaceGitChangesMonitoringPause gitChangesMonitoringPause,
+    IWorkspaceCapabilitiesResolver capabilitiesResolver,
     IOptions<WorkspaceOptions> workspaceOptions,
     ILogger<WorkspaceFeatureOperations> logger) : IWorkspaceFeatureOperations
 {
@@ -251,6 +253,7 @@ public sealed class WorkspaceFeatureOperations(
             var anyFailure = 0;
             var createCompleted = 0;
             var createTotal = pendingRows.Count;
+            var capabilities = (await capabilitiesResolver.GetAsync(workspaceId, cancellationToken)).ToRepositoryOperationCapabilities();
             using var gate = new SemaphoreSlim(MaxParallel);
             var tasks = pendingRows.Select(async row =>
             {
@@ -271,7 +274,8 @@ public sealed class WorkspaceFeatureOperations(
                             baseCommitSha = row.BaseCommitSha,
                             divergenceBaseBranch = row.ParentBranchName,
                             workspaceId,
-                            repositoryId = link.RepositoryId
+                            repositoryId = link.RepositoryId,
+                            capabilities
                         },
                         cancellationToken);
 
@@ -1531,6 +1535,7 @@ public sealed class WorkspaceFeatureOperations(
 
         if (retryRows.Count > 0)
         {
+            var capabilities = (await capabilitiesResolver.GetAsync(info.WorkspaceId, cancellationToken)).ToRepositoryOperationCapabilities();
             using var gate = new SemaphoreSlim(MaxParallel);
             var done = 0;
             var tasks = retryRows.Select(async row =>
@@ -1553,7 +1558,8 @@ public sealed class WorkspaceFeatureOperations(
                             baseCommitSha = row.BaseCommitSha,
                             divergenceBaseBranch = row.ParentBranchName,
                             workspaceId = info.WorkspaceId,
-                            repositoryId = link.RepositoryId
+                            repositoryId = link.RepositoryId,
+                            capabilities
                         },
                         cancellationToken);
 

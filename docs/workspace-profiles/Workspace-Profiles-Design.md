@@ -308,7 +308,67 @@ Basic must not gain synthetic NuGet packages or dependency levels merely because
 configured, and must not be presented as "Level 0" or "No dependencies" - levels are simply not part of
 that profile.
 
-Detailed design: Phase 3, not yet written.
+### The capability boundary
+
+Dependency state is gated where it is **produced**, never inside `WorkspaceProjectRepository`. The
+repository stays profile-agnostic; its callers decide whether to call it.
+
+| Producer | Gate | Where |
+|---|---|---|
+| Dependency-stat recompute (levels, unmatched counts) | `UsesDependencyGraph` | `WorkspaceStateRecomputeScope.RecomputeDependencyStatsAsync` |
+| Project/dependency merge from a sync | `UsesDependencyGraph` | `WorkspaceGitService.PersistVersionsAsync` |
+| Standalone project refresh | `DiscoversDotNetProjects` | `WorkspaceGitService.RefreshWorkspaceProjectsAsync` / `RefreshSingleRepositoryProjectsAsync`, and the Worker's `RefreshRepositoryProjectsCommand` |
+| Generated packages from version files | `UsesGeneratedPackagesFromVersionFiles` | `WorkspaceFileVersionService.SyncGeneratedPackageDependenciesAsync` |
+| Recompute after a file-version check | `UsesDependencyGraph` | inside `WorkspaceFileVersionService` (it cannot use the scope, which depends on it) |
+
+`WorkspaceStateRecomputeScope.RecomputeAsync` always runs the file-version check and then calls
+`RecomputeDependencyStatsAsync`, which is a no-op unless the workspace uses the dependency graph. Both
+entry points into the scope - the App write paths and the hook sync in `SyncCommandHandler` - go through
+it, so the hook path is gated without a check of its own. Every former direct caller of the repository's
+recompute (version refresh, project refresh, dependency sync, the Files page) now routes through the
+scope.
+
+Gating the producer, not the readers, is what makes a Basic workspace carry **no** dependency state
+rather than a misleading one. The two readers that treat a missing `GitVersion` as an unmatched
+dependency (`DependencyStats.cs`, `DependencyLines.cs`) are untouched: for a Basic workspace they are
+simply never invoked, so `DependencyLevel` and `UnmatchedDeps` stay null.
+
+### Generic file versioning versus generated packages
+
+Version files are a generic feature and work in every profile. The file-version check, the
+"out of date" flags and updating files all run for Basic. What is .NET-specific is the **interpretation**
+of a configured `.csproj` version file as a synthetic NuGet package with consumer edges, and that only
+happens when `UsesGeneratedPackagesFromVersionFiles` (DotNetDependency) holds.
+
+Version-file tokens split by what they need:
+
+| Token | Needs |
+|---|---|
+| `{@Repo:branch}`, `{@Repo:commit}` | nothing - always resolved from git |
+| `{@Repo}` (default token, GitVersion) | `UsesRepositoryVersioning` |
+
+When repository versioning is off, `{@Repo}` is rejected at configuration time in the Files page version
+dialog with "requires repository versioning (GitVersion) to be enabled"; the page also refuses to save such a
+pattern if the dialog check is bypassed. A pattern that already contains it (configured before versioning was
+turned off) is skipped during checks and updates rather than reported as a GitVersion failure, and the
+repository-grid "version lines" for it are not applicable.
+
+### Worktrees
+
+`CreateGitWorktreeRequest` derives from `WorkspaceCommandRequest` and carries the workspace's
+capabilities. The command itself runs no enrichment; the capabilities warm the Worker's capability
+cache so the `post-checkout` hook that `git worktree add` fires skips GitVersion and the project scan
+for a Basic workspace.
+
+### Known gaps
+
+- Feature creation recomputes dependency stats directly (`WorkspaceFeatureOperations.cs`), so a Basic
+  Feature context can still get a `DependencyLevel`.
+- Return-to-default-branch asks the Worker for projects unconditionally, and
+  `WorkspaceRepositoryStateWriter` merges any probed project list. The writer is the right single choke
+  point for dropping projects for non-discovering workspaces.
+- Generated packages are workspace-global, but they are synced from one context's view: a Feature's
+  missing-file overlay and its resolved versions are applied workspace-wide.
 
 ## 9. Persistence and migration
 

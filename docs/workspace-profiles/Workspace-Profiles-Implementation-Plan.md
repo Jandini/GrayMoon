@@ -347,9 +347,128 @@ Feature-context isolation suite is inside `GrayMoon.App.Tests` and passes.
 
 | | |
 |---|---|
-| Owner | unassigned |
-| Status | READY |
+| Owner | subagent |
+| Status | REVIEW |
 | Dependencies | Unit A (DONE), Unit B (DONE) |
+
+**Step progress.** All seven items are implemented in one pass: worktree request rebased onto
+`WorkspaceCommandRequest`, recompute gated at the scope boundary, every direct recompute caller routed
+through the scope, generic file versioning separated from generated-package inference, the `{@Repo}`
+token rule enforced in the Files page, the two Worker seams closed, and the stale `Derive` comment fixed.
+No new derived capability was needed (design section 4 unchanged): the gates use the existing
+`UsesDependencyGraph`, `DiscoversDotNetProjects`, `UsesRepositoryVersioning` and
+`UsesGeneratedPackagesFromVersionFiles`.
+
+**What changed.**
+
+- `CreateGitWorktreeRequest` now derives from `WorkspaceCommandRequest`. `WorkspaceId` was **not**
+  lifted onto the base class, so no member-hiding cleanup was needed. `WorkspaceFeatureOperations`
+  resolves capabilities and sends them on every worktree request (Feature create and repair), and
+  `CommandDispatcher` warms the capability cache from it, so the `post-checkout` hook fired by
+  `git worktree add` honours the profile. `CreateGitWorktreeCommand` itself runs no enrichment and is
+  unchanged.
+- `WorkspaceStateRecomputeScope` gained `RecomputeDependencyStatsAsync`, a no-op unless
+  `UsesDependencyGraph`. `RecomputeAsync` always runs the file-version check, then calls it. Because
+  `SyncCommandHandler.cs:90` already goes through the scope, the hook entry point is gated with no change
+  to that file.
+- Direct recompute callers rerouted through the scope: version refresh (`WorkspaceGitService.Sync.cs`),
+  dependency sync (`WorkspaceGitService.Projects.cs`), the Files page. `PersistVersionsAsync` merges
+  project dependencies only when `UsesDependencyGraph`. `RefreshWorkspaceProjectsAsync` and
+  `RefreshSingleRepositoryProjectsAsync` return before contacting the Worker when the workspace does not
+  discover .NET projects.
+- `WorkspaceFileVersionService`: generated-package sync returns "no changes" unless
+  `UsesGeneratedPackagesFromVersionFiles`; its own two recompute calls are gated on
+  `UsesDependencyGraph` (it cannot use the scope, which depends on it); `{@Repo}` tokens are skipped in
+  checks and updates when versioning is off (logged at debug, never a GitVersion failure); the grid's
+  version-line readers return nothing when versioning is off. New public helpers
+  `GetTokensRequiringRepositoryVersioning` and `RepositoryVersioningRequiredMessage`.
+- Files page: `VersionConfigModal` shows "requires repository versioning (GitVersion) to be enabled" for a
+  `{@Repo}` token and disables Save; `WorkspaceFiles.razor` also refuses the save. No new UI primitive.
+- Worker: `RefreshRepositoryProjectsCommand` returns a null project list (not scanned, as opposed to
+  empty) when project discovery is off. `CommitSyncRepositoryCommand` already honoured capabilities
+  (probe and version provider both built from them; it never scans projects) - no change needed.
+- `SyncStatusWrite.Derive` doc comment now matches the implementation (branch or tag identity; version
+  deliberately ignored).
+
+**Files touched.**
+
+```text
+src/GrayMoon.Worker/Jobs/Requests/CreateGitWorktreeRequest.cs
+src/GrayMoon.Worker/Services/CommandDispatcher.cs                       (cache-warming case only)
+src/GrayMoon.Worker/Commands/RefreshRepositoryProjectsCommand.cs
+src/GrayMoon.App/Services/Features/WorkspaceFeatureOperations.cs       (capabilities on worktree requests only)
+src/GrayMoon.App/Services/Workspaces/WorkspaceStateRecomputeScope.cs
+src/GrayMoon.App/Services/Workspaces/WorkspaceFileVersionService.cs
+src/GrayMoon.App/Services/Workspaces/WorkspaceRepositoryStateWriter.cs  (doc comment only)
+src/GrayMoon.App/Services/Git/WorkspaceGitService.Sync.cs
+src/GrayMoon.App/Services/Git/WorkspaceGitService.Projects.cs
+src/GrayMoon.App/Components/Pages/WorkspaceFiles.razor
+src/GrayMoon.App/Components/Modals/VersionConfigModal.razor
+src/GrayMoon.App.Tests/WorkspaceDependencyGatingTests.cs                (new)
+src/GrayMoon.App.Tests/WorkspaceB4ContextLeakTests.cs                   (forced: constructor change)
+src/GrayMoon.Worker.Tests/WorktreeAndProjectRefreshCapabilitiesTests.cs (new)
+docs/workspace-profiles/Workspace-Profiles-Design.md                    (section 8)
+```
+
+**Tests.** `WorkspaceDependencyGatingTests` (13, real DI + in-memory SQLite + fake worker bridge):
+Basic hook sync builds no dependency state while DotNet still does; Basic recompute still runs the
+file-version check but builds no levels from a version file, DotNet still orders the consumer after its
+producer; Basic+None checks `{@Repo:branch}` and never resolves `{@Repo}`; Basic+GitVersion resolves
+`{@Repo}` with no `.csproj`; a `.csproj` version file becomes a generated package for DotNet only; version
+lines are not applicable without versioning; the token rule rejects `{@Repo}` only when versioning is off;
+Basic project refresh sends nothing to the Worker; Basic sync merges no dependencies even when the Worker
+reports a project; Feature create sends the profile on every worktree request.
+`WorktreeAndProjectRefreshCapabilitiesTests` (5): the worktree request deserializes capabilities; the
+dispatcher warms the cache the `post-checkout` hook reads (so Basic+None worktree creation runs no
+GitVersion or project scan through the hook, which Unit B's hook tests already cover from the cache);
+project refresh skips the scan for Basic, scans for DotNet and for a pre-profile App.
+
+**Owner verification.** `dotnet build GrayMoon.slnx` 0 warnings, 0 errors. `GrayMoon.App.Tests`
+891/891 (+13), `GrayMoon.Worker.Tests` 312 passed + 1 skipped (pre-existing conditional GitVersion test,
++5), `GrayMoon.Common.Tests` 234/234. The Feature-context isolation suite is inside `GrayMoon.App.Tests`
+and passes.
+
+**Risks / findings.**
+
+- **Generated-package context-scoping (deferred TODO) is complete for reads, not for writes.** Generated
+  rows are workspace-global in the special context and every context's project read includes them
+  (`WorkspaceProjectRepository.cs:105`), and consumer edges are built for real projects in every context
+  (`WorkspaceProjectRepository.GeneratedPackages.cs:133-135`). But the sync is driven from one context's
+  view and applied workspace-wide: `WorkspaceFileVersionService.cs:793-794` applies the *calling*
+  context's missing-file overlay, so a Feature whose version file is missing removes the generated row
+  for every context; and `GeneratedPackages.cs:141-148` writes the version resolved in that context onto
+  the matching consumer project in *every* context, which can change another context's unmatched count.
+  Left as found; fixing it means per-context edge versions.
+- `WorkspaceFeatureOperations.cs:2104` recomputes dependency stats directly on Feature create, so a Basic
+  Feature context still gets a `DependencyLevel`. Outside this unit's edit scope in that file; the fix is
+  to call `WorkspaceStateRecomputeScope.RecomputeDependencyStatsAsync` instead.
+- `ReturnToDefaultBranchCommand.cs:99-101` asks for GitVersion and projects with no capabilities, and
+  `WorkspaceRepositoryStateWriter.cs:204` merges any probed project list, so return-to-default still
+  persists projects for Basic (dependency stats no longer follow). The hook fallback (no
+  `AppApiBaseUrl`, cold cache) reaches the same merge. The writer is the right single choke point to
+  drop projects for non-discovering workspaces; `RepositoryStateSnapshot` is a sealed class with init
+  properties, so the App cannot cheaply strip them before the writer.
+- `TotalFileConfigRepos` (`WorkspaceFileVersionService.cs:964`) still counts `{@Repo}` references when
+  versioning is off; harmless today but the grid counter is not yet profile-aware.
+
+**Deviations.** `WorkspaceB4ContextLeakTests.cs` (shared test, not owned) gained one constructor argument,
+forced by the new `WorkspaceFileVersionService` dependency. `SyncCommandHandler.cs` and
+`WorkspaceProjectRepository*.cs` were not changed: the scope gate covers the hook path, and the
+repository stays profile-agnostic.
+
+**Follow-ups.**
+
+- Unit D: `DependencyUpdateOrchestrator.cs:81` calls `RefreshWorkspaceProjectsAsync`, which is now a
+  no-op for workspaces that do not discover .NET projects.
+- Unit F: Basic grid rows have null `DependencyLevel`/`UnmatchedDeps` and empty version lines when
+  versioning is off; render them as not applicable, not as zero.
+- Unit G: a Basic workspace produces no new projects, edges or generated packages, so the
+  Projects/Packages/dependency pages have nothing current to show and can be hidden on
+  `DiscoversDotNetProjects` / `UsesDependencyGraph`.
+- Unit H: switching a workspace to Basic leaves previously persisted dependency state in place; the
+  transition must clear it, since nothing recomputes it any more.
+- Unit I: the two gaps above (Feature create recompute, return-to-default project merge) and the
+  generated-package write scoping.
 
 **Scope.** Project discovery persistence/reconciliation, dependency graph activation, dependency-stat
 recompute gating, generated packages from version files, and the separation between generic file
