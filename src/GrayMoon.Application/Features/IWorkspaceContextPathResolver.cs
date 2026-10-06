@@ -14,6 +14,8 @@ public interface IWorkspaceContextPathResolver
     /// </summary>
     Task<(string WorkerWorkspaceRoot, string WorkerWorkspaceFolderName)> GetWorkerWorkspaceArgsAsync(
         WorkspaceFeatureContextId contextId,
-        CancellationToken cancellationToken = default);
-}
-
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Worker path arguments plus the Workspace-role repository name (null when none). Replaces GetWorkerWorkspaceArgsAsync; Unit C migrates every caller and then deletes the tuple method.</summary>
+    Task<WorkerWorkspaceArgs> GetWorkerArgsAsync(WorkspaceFeatureContextId contextId, CancellationToken cancellationToken = default);
+}
