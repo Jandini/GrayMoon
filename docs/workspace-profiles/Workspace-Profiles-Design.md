@@ -6,7 +6,8 @@ the code.
 
 Companion: `Workspace-Profiles-Implementation-Plan.md` (execution state).
 
-Status: Phase 1-2 in progress. Phases 3-6 not yet designed in detail.
+Status: Phases 1-3 and the CI provider boundary (section 11a) implemented. Push/update/restore strategies,
+grid, navigation, create/edit and transitions not yet implemented.
 
 ---
 
@@ -81,10 +82,21 @@ public sealed record WorkspaceCapabilities(
     public bool UsesGitVersion          => VersioningMode == WorkspaceVersioningMode.GitVersion;
     public bool DiscoversDotNetProjects => Type == WorkspaceType.DotNetDependency;
     public bool UsesDependencyGraph     => Type == WorkspaceType.DotNetDependency;
+    public bool UsesNuGetPackages       => Type == WorkspaceType.DotNetDependency;
+    public bool UsesDependencyAwareUpdate => Type == WorkspaceType.DotNetDependency;
+    public bool UsesDependencyAwarePush => Type == WorkspaceType.DotNetDependency;
+    public bool UsesPackageRestore      => Type == WorkspaceType.DotNetDependency;
+    public bool UsesGeneratedPackagesFromVersionFiles => Type == WorkspaceType.DotNetDependency;
     public bool UsesCiIntegration       => CiProvider != WorkspaceCiProvider.None;
     public bool UsesGitHubActions       => CiProvider == WorkspaceCiProvider.GitHubActions;
+
+    public RepositoryOperationCapabilities ToRepositoryOperationCapabilities();  // Worker wire subset
+    public static WorkspaceCapabilities Legacy { get; }                          // the pre-profile triple
 }
 ```
+
+The .NET-type capabilities all derive from `Type` today, but they are separate properties because they
+gate different producers (section 8) and a future workspace type may want only some of them.
 
 Capability booleans are **derived, never persisted**. If the implementation starts accumulating
 `if (workspace.Type == ...)` checks in unrelated files, that is the signal to refactor toward a
@@ -320,6 +332,8 @@ repository stays profile-agnostic; its callers decide whether to call it.
 | Standalone project refresh | `DiscoversDotNetProjects` | `WorkspaceGitService.RefreshWorkspaceProjectsAsync` / `RefreshSingleRepositoryProjectsAsync`, and the Worker's `RefreshRepositoryProjectsCommand` |
 | Generated packages from version files | `UsesGeneratedPackagesFromVersionFiles` | `WorkspaceFileVersionService.SyncGeneratedPackageDependenciesAsync` |
 | Recompute after a file-version check | `UsesDependencyGraph` | inside `WorkspaceFileVersionService` (it cannot use the scope, which depends on it) |
+| Recompute after seeding a new Feature | `UsesDependencyGraph` | `WorkspaceFeatureOperations`, through `RecomputeDependencyStatsAsync` |
+| Project rows from any Worker snapshot | `DiscoversDotNetProjects` | `WorkspaceRepositoryStateWriter`, the single writer of probed state |
 
 `WorkspaceStateRecomputeScope.RecomputeAsync` always runs the file-version check and then calls
 `RecomputeDependencyStatsAsync`, which is a no-op unless the workspace uses the dependency graph. Both
@@ -360,13 +374,13 @@ capabilities. The command itself runs no enrichment; the capabilities warm the W
 cache so the `post-checkout` hook that `git worktree add` fires skips GitVersion and the project scan
 for a Basic workspace.
 
+The writer gate exists because not every Worker path can be told not to scan: return-to-default-branch
+still asks for projects unconditionally, and the hook fallback (App unreachable, cold capability cache)
+deliberately does full enrichment (section 5). The writer is the one place every probed snapshot passes
+through, so a workspace that does not discover projects never persists one, whichever path produced it.
+
 ### Known gaps
 
-- Feature creation recomputes dependency stats directly (`WorkspaceFeatureOperations.cs`), so a Basic
-  Feature context can still get a `DependencyLevel`.
-- Return-to-default-branch asks the Worker for projects unconditionally, and
-  `WorkspaceRepositoryStateWriter` merges any probed project list. The writer is the right single choke
-  point for dropping projects for non-discovering workspaces.
 - Generated packages are workspace-global, but they are synced from one context's view: a Feature's
   missing-file overlay and its resolved versions are applied workspace-wide.
 

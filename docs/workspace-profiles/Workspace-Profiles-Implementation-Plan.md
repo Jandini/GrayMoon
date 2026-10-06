@@ -14,17 +14,25 @@ It must be possible to stop work here and resume later without reconstructing st
 | | |
 |---|---|
 | Project status | IN PROGRESS |
-| Current phase | Phases 1 and 2 complete; Phase 3 awaiting re-plan |
-| Phases planned in detail | 1, 2 |
-| Phases not yet designed | 3, 4, 5, 6 |
-| Last verified | Build clean / 0 warnings. App 878/878, Worker 307 + 1 pre-existing skip, Common 234/234. |
+| Current phase | Wave 1 (Units C, E) integrated; Wave 2 (Unit D) is next |
+| Phases planned in detail | 1, 2, 3; Unit E of 5 |
+| Phases not yet designed | 4, 5 (Units F, G, H), 6 |
+| Last verified | 2026-10-06, after Wave 1 integration. Build clean / 0 warnings. App 904/904, Worker 312 + 1 pre-existing skip, Common 234/234. |
 
 **What works today.** A Workspace carries three independent persisted axes, every pre-profile Workspace
 was migrated to the .NET triple, and the Worker honours the profile on every entry point it owns: a
 Basic + None workspace does a full, correct Git sync with zero GitVersion launches, zero
 `dotnet tool restore` and zero `.csproj` scans, receives managed Git hooks, and no longer reads as a
-version failure. Nothing is user-visible yet: there is still no way to create anything but a .NET
-Dependency Workspace, because the create/edit controls are Unit H.
+version failure. On the App side a Basic workspace now produces no projects, dependency edges, levels,
+unmatched counts or generated packages on any path, while version files still work and `{@Repo}` is
+refused when versioning is off. A workspace with CI=None makes no GitHub Actions request, including
+during synchronized push, while GitHub repositories and pull requests are unaffected. Nothing else is
+user-visible yet: there is still no way to create anything but a .NET Dependency Workspace, because the
+create/edit controls are Unit H.
+
+**Integration method.** Parallel units run in separate git worktrees on their own branches
+(`wp/unit-<id>`), so two agents never build the same tree. The owner merges them into
+`workspace-profiles` one at a time and reruns all three suites after each wave.
 
 ### Phase map
 
@@ -32,9 +40,9 @@ Dependency Workspace, because the create/edit controls are Unit H.
 |---|---|---|
 | 1 | Profile model, migration, capability resolver | DONE (Unit A) |
 | 2 | Worker sync decoupling, version provider, hook capability resolution | DONE (Unit B) |
-| 3 | App persistence / dependency recompute gating | TODO (Unit C) |
-| 4 | Push / update / restore strategies | TODO (Unit D) |
-| 5 | UX: create/edit, grid, navigation, CI provider boundary | TODO (Units E, F, G) |
+| 3 | App persistence / dependency recompute gating | DONE (Unit C) |
+| 4 | Push / update / restore strategies | READY (Unit D) |
+| 5 | UX: create/edit, grid, navigation, CI provider boundary | Unit E DONE; F, G TODO |
 | 6 | Profile transitions, stale derived state, final regression | TODO (Units H, I) |
 
 ### Phase 3-6 sequencing, re-planned from the integrated state
@@ -347,8 +355,8 @@ Feature-context isolation suite is inside `GrayMoon.App.Tests` and passes.
 
 | | |
 |---|---|
-| Owner | subagent |
-| Status | REVIEW |
+| Owner | subagent, owner integration |
+| Status | DONE |
 | Dependencies | Unit A (DONE), Unit B (DONE) |
 
 **Step progress.** All seven items are implemented in one pass: worktree request rebased onto
@@ -428,6 +436,23 @@ project refresh skips the scan for Basic, scans for DotNet and for a pre-profile
 +5), `GrayMoon.Common.Tests` 234/234. The Feature-context isolation suite is inside `GrayMoon.App.Tests`
 and passes.
 
+**Owner integration (closes the two acceptance gaps below).** The subagent left two paths on which Basic
+could still build dependency state, both outside its edit scope. Both are fixed on the integration branch:
+
+- `WorkspaceFeatureOperations` (Feature seed) now recomputes through
+  `WorkspaceStateRecomputeScope.RecomputeDependencyStatsAsync` instead of calling the repository directly.
+  No dedicated test: there is no Feature-seed test harness, and the gate itself is covered by
+  `WorkspaceDependencyGatingTests`. Unit I's manual Feature pass covers it end to end.
+- `WorkspaceRepositoryStateWriter` persists probed project rows only when `DiscoversDotNetProjects`. This
+  covers return-to-default and the hook fallback in one place. New test
+  `Basic_workspace_persists_no_projects_even_when_the_snapshot_carries_them`.
+- Consequence: five existing writer/hook/return-to-default tests seeded the harness workspace with the model
+  default (Basic) while asserting .NET project behaviour. They now opt in through a new
+  `SyncStateTestContext.UseDotNetDependencyProfileAsync()`. The harness default stays Basic because the
+  profile tests rely on it.
+
+Verified after the merge with Unit E: build 0 warnings, App 904/904, Worker 312 + 1 skip, Common 234/234.
+
 **Risks / findings.**
 
 - **Generated-package context-scoping (deferred TODO) is complete for reads, not for writes.** Generated
@@ -439,15 +464,13 @@ and passes.
   for every context; and `GeneratedPackages.cs:141-148` writes the version resolved in that context onto
   the matching consumer project in *every* context, which can change another context's unmatched count.
   Left as found; fixing it means per-context edge versions.
-- `WorkspaceFeatureOperations.cs:2104` recomputes dependency stats directly on Feature create, so a Basic
-  Feature context still gets a `DependencyLevel`. Outside this unit's edit scope in that file; the fix is
-  to call `WorkspaceStateRecomputeScope.RecomputeDependencyStatsAsync` instead.
-- `ReturnToDefaultBranchCommand.cs:99-101` asks for GitVersion and projects with no capabilities, and
-  `WorkspaceRepositoryStateWriter.cs:204` merges any probed project list, so return-to-default still
-  persists projects for Basic (dependency stats no longer follow). The hook fallback (no
-  `AppApiBaseUrl`, cold cache) reaches the same merge. The writer is the right single choke point to
-  drop projects for non-discovering workspaces; `RepositoryStateSnapshot` is a sealed class with init
-  properties, so the App cannot cheaply strip them before the writer.
+- **Fixed in owner integration.** `WorkspaceFeatureOperations.cs:2104` recomputed dependency stats
+  directly on Feature create, so a Basic Feature context still got a `DependencyLevel`.
+- **Fixed in owner integration.** `ReturnToDefaultBranchCommand.cs:99-101` asks for GitVersion and
+  projects with no capabilities, and the state writer merged any probed project list, so return-to-default
+  and the hook fallback (no `AppApiBaseUrl`, cold cache) still persisted projects for Basic. The writer is
+  now the gate. `ReturnToDefaultBranchCommand` still runs GitVersion for Basic+None: that is a
+  Worker-side wasted probe, not persisted state, and is left for Unit D, which owns that request family.
 - `TotalFileConfigRepos` (`WorkspaceFileVersionService.cs:964`) still counts `{@Repo}` references when
   versioning is off; harmless today but the grid counter is not yet profile-aware.
 
@@ -467,8 +490,8 @@ repository stays profile-agnostic.
   `DiscoversDotNetProjects` / `UsesDependencyGraph`.
 - Unit H: switching a workspace to Basic leaves previously persisted dependency state in place; the
   transition must clear it, since nothing recomputes it any more.
-- Unit I: the two gaps above (Feature create recompute, return-to-default project merge) and the
-  generated-package write scoping.
+- Unit I: verify the Feature-seed recompute gate manually with a Basic Feature, and the
+  generated-package write scoping (Deferred TODOs).
 
 **Scope.** Project discovery persistence/reconciliation, dependency graph activation, dependency-stat
 recompute gating, generated packages from version files, and the separation between generic file
@@ -514,8 +537,21 @@ declarations removed or member-hiding warnings will break the 0-warning bar.
 | | |
 |---|---|
 | Owner | unassigned |
-| Status | TODO - blocked on Unit C |
-| Dependencies | Unit A (DONE), Unit C |
+| Status | READY |
+| Dependencies | Unit A (DONE), Unit C (DONE), Unit E (DONE) |
+
+**Inputs from Wave 1.**
+
+- Capabilities to dispatch on already exist: `UsesDependencyAwarePush`, `UsesDependencyAwareUpdate`,
+  `UsesPackageRestore`, `UsesNuGetPackages`. Do not add new ones for push.
+- `DependencyUpdateOrchestrator.cs:81` calls `RefreshWorkspaceProjectsAsync`, which is now a no-op for
+  workspaces that do not discover .NET projects (Unit C).
+- Keep the three CI lines in `WorkspacePushService.cs` (`:182-184` resolve the provider once per run,
+  `:224` one run watch per level, `:268` one `TickAsync` per wait tick). A Basic path that skips the package
+  wait never ticks the watch and needs no CI check (Unit E).
+- `ReturnToDefaultBranchCommand.cs:99-101` still requests GitVersion and projects with no capabilities.
+  Persisted state is already safe (the state writer drops the projects), but Basic+None still launches
+  GitVersion there. Populate capabilities on that request alongside the three below.
 
 **Note from Phase 1-2.** `PushRepositoryRequest` already carries capabilities, but `UndoPushRequest`,
 `FetchCommitsRequest` and `GetGitChangeStatusRequest` have a workspace id with no capabilities populated
@@ -537,7 +573,7 @@ semantics; no deep workspace-type checks inside `PushOrchestrator`.
 | | |
 |---|---|
 | Owner | subagent |
-| Status | REVIEW |
+| Status | DONE |
 | Dependencies | Unit A (DONE) |
 
 **Scope.** The `WorkspaceCiProvider` boundary, GitHub Actions refresh/query activation, CI-specific
@@ -596,6 +632,9 @@ while no `/actions/` request is made.
 **Owner verification (subagent run).** `dotnet build GrayMoon.slnx` 0 warnings / 0 errors.
 `GrayMoon.App.Tests` 890/890 (878 + 12), `GrayMoon.Worker.Tests` 307 + 1 pre-existing skip,
 `GrayMoon.Common.Tests` 234/234. Touched files CRLF, no non-ASCII dashes.
+
+**Owner verification.** Diff reviewed; merged after Unit C with no conflicts and no integration changes.
+Verified after the merge: build 0 warnings, App 904/904, Worker 312 + 1 skip, Common 234/234.
 
 **Risks / findings.**
 
@@ -661,6 +700,17 @@ own `ColSpan` parameters. The header's `DeterminePrimaryAction` is a pure static
 tests - extend that pattern rather than adding a render-time branch, since there is no component test
 harness.
 
+**Inputs from Wave 1.**
+
+- Basic rows carry null `DependencyLevel` / `UnmatchedDeps` and empty version lines when versioning is
+  off. Render them as not applicable, never as zero (Unit C).
+- `TotalFileConfigRepos` (`WorkspaceFileVersionService.cs:964`) still counts `{@Repo}` references when
+  versioning is off. Make the counter profile-aware here if the grid shows it.
+- Pass `ActionsUrl` to `MergePullRequestModal` only when `UsesCiIntegration`
+  (`WorkspaceRepositories.razor:425`); the modal already hides the checks link for an empty URL. Whether to
+  hide the github.com "Actions" item in `GitHubSectionsMenu.razor:50` is a product decision for the owner.
+  The grid has no Actions badges or query to gate (Unit E).
+
 **Acceptance.** Basic+None is a clean Git-focused grid with no Version column, no dependency metric, no
 level headers and no dependency Update/Restore UI; Basic+GitVersion adds version presentation only;
 .NET Dependency is unchanged; no fake "Level 0" or "No dependencies" grouping for Basic.
@@ -682,6 +732,13 @@ Constraint: `NavMenu` renders under the static/SSR layout and never joins a live
 workspace context from `NavigationManager.Uri` on every location change. Do not introduce an interactive
 state dependency to hide items.
 
+**Inputs from Wave 1.** Gate the Actions nav item (`NavMenu.razor:83-88`) and route
+(`WorkspaceActions.razor:1`) on `UsesCiIntegration`, using `IWorkspaceCapabilitiesResolver` rather than the CI
+provider so the SSR nav pulls in no GitHub services. The Actions page's inline "CI is not enabled for this
+workspace." fallback (`WorkspaceActions.Loading.cs:25-30`) may stay as defence in depth. Projects, Packages
+and Dependencies gate on `DiscoversDotNetProjects` / `UsesDependencyGraph`: a Basic workspace now produces
+nothing current for them to show.
+
 **Acceptance.** Basic hides Projects/Packages/Dependencies; .NET Dependency shows them; Actions depends
 only on the CI provider; direct navigation cannot bypass the rules; Files remains available for Basic.
 
@@ -700,6 +757,11 @@ only on the CI provider; direct navigation cannot bypass the rules; Files remain
 Simplicity is a hard requirement: three controls in the existing modal, no settings page, no capability
 matrix, no new list badges, no new UI primitives. Type changes are blocked while Features exist, reusing
 the existing disabled-field mechanism and wording.
+
+**Input from Wave 1.** Switching a workspace to Basic leaves its previously persisted projects, edges,
+levels and generated packages in place, and nothing recomputes or clears them any more, because every
+producer is now gated. The .NET to Basic transition must clear them, or every reader must stop reading
+them. Switching versioning off leaves `{@Repo}` patterns in place; they are skipped, not failed.
 
 **Acceptance.** An existing workspace opens with .NET Dependency / GitVersion / GitHub Actions selected;
 Basic to .NET activates enrichment safely; .NET to Basic cannot leave dependency UI or behaviour active;
@@ -735,6 +797,14 @@ A design that works for the special Workspace context but breaks Feature worktre
 - The merged-PR projection can be erased by its own sync before the default-tip step reads it (first row
   of the discoveries log). Pre-existing, but verify it with a real Feature and a real merged PR.
 
+**Carried in from Wave 1.**
+
+- Create a Feature in a Basic workspace and confirm its context has no `DependencyLevel`. The Feature-seed
+  recompute gate has no automated test.
+- Synchronized push for a GitHub Actions workspace still streams run jobs into the push overlay. The run
+  watch moved out of `WorkspacePushService` and `RunPushAsync` has no test harness.
+- Push-wait GitHub Actions log lines now log under the `GitHubActionsCiProvider` category.
+
 ---
 
 ## Discoveries log
@@ -743,6 +813,13 @@ Architectural findings that changed the design. Newest first.
 
 | Date | Finding | Consequence |
 |---|---|---|
+| 2026-10-06 | The shared test harness `SyncStateTestContext` seeds its workspace with the model defaults (Basic / None / None), so once the state writer gated projects, five pre-profile tests asserting .NET project persistence failed. | Pre-profile tests that exercise .NET behaviour must opt in with `UseDotNetDependencyProfileAsync()`. The harness default stays Basic because the profile tests depend on it. Later units adding project assertions must do the same. |
+| 2026-10-06 | Not every Worker path can be told not to scan: `ReturnToDefaultBranchCommand.cs:99-101` requests GitVersion and projects with no capabilities, and the hook fallback does full enrichment by design. | `WorkspaceRepositoryStateWriter` became the persisted-state gate for project rows (`DiscoversDotNetProjects`). Producer-side gating alone was not enough. Design section 8. |
+| 2026-10-06 | Feature seeding (`WorkspaceFeatureOperations.cs:2104`) was a fourth direct caller of the repository's dependency recompute, outside every scope the notes named. | Routed through `WorkspaceStateRecomputeScope.RecomputeDependencyStatsAsync`. That method is now the only sanctioned entry point. |
+| 2026-10-06 | Generated-package context scoping is complete for reads but not writes: `WorkspaceFileVersionService.cs:793-794` applies the calling context's missing-file overlay workspace-wide, and `WorkspaceProjectRepository.GeneratedPackages.cs:141-148` writes one context's resolved version into every context. | Pre-existing and profile-independent. Deferred TODO; fixing it means per-context edge versions. |
+| 2026-10-06 | GitHub Actions was only ever read or refreshed by the Actions page and synchronized push. The grid query, workspace sync, hook sync and background services never touch it, and the merge dialog's checks row is the PR check-run API (`GitHubService.PullRequests.cs:291`), not Actions. | The CI boundary is two consumers wide. No grid gating is needed beyond the merge dialog's Actions link. Design section 11a. |
+| 2026-10-06 | The Actions page used `link.Repository.Connector != null` (`WorkspaceActions.Loading.cs:43,169`) as its "CI enabled" proxy. | It is now only a reachability filter; the CI decision is the resolved provider. |
+| 2026-10-06 | `WorkspaceCapabilities` already carried the full .NET capability set (`UsesNuGetPackages`, `UsesDependencyAwareUpdate`, `UsesDependencyAwarePush`, `UsesPackageRestore`, `UsesGeneratedPackagesFromVersionFiles`), but design section 4 listed only six properties. | Section 4 corrected. Unit D dispatches on the existing push/update/restore capabilities rather than adding new ones. |
 | 2026-10-05 | The merged-PR default-tip path can erase its own precondition. `PersistVersionsAsync` runs the state writer with `ReconcilePullRequest = true` **before** `ApplyDefaultTipVersionsForMergedFeatureReposAsync` reads `MergedAt`. `WorkspaceRepositoryStateWriter.ReconcilePullRequestAsync` (`:341-359`) upserts on both `Refreshed` and `CacheHit`, so a lookup that legitimately finds no pull request overwrites the merged-PR row with null (`WorkspacePullRequestService.cs:272-273`). Only the `Failed` outcome leaves the projection alone, which is why the step-6 Feature tests must rate-limit the connector to reach the path at all. | Pre-existing and orthogonal to profiles, but it compounds the recorded R3 mismatch and belongs in the Unit I regression pass. |
 | 2026-10-05 | `SyncStatusWrite.Derive`'s doc comment (`WorkspaceRepositoryStateWriter.cs:16`) still says "Error without a usable version", but the implementation (`:268-285`) deliberately ignores the version entirely and says so in its own comment. | Actively misleading to Units C-F, which will read that enum looking for version coupling. Fix the comment in Unit C or I. |
 | 2026-10-05 | Two more places read an absent `GitVersion` as a problem, both outside Unit B: `WorkspaceProjectRepository.DependencyStats.cs:68-74` and `DependencyLines.cs:308-313` count a null version as an unmatched dependency, which would produce a nonzero unmatched-dependency badge for a Basic workspace out of nothing. | Unit C's gate is "dependency state is not produced at all for Basic", not a display fix. Unit C's notes did not mention these two. |
@@ -776,6 +853,7 @@ Architectural findings that changed the design. Newest first.
 | Item | Owner | Notes |
 |---|---|---|
 | Fold shipped behaviour into `docs/architecture/` 01-06 | owner | After Phase 6. `docs/architecture/README.md` keeps current-state docs authoritative; this folder is the proposal record, mirroring `docs/worktree/`. |
-| Verify generated-package context-scoping completeness | Unit C | An older gaps document recorded it as unfinished. |
+| Generated-package write scoping across contexts | owner decision | Verified by Unit C: complete for reads, not writes (discoveries log, 2026-10-06). Pre-existing and profile-independent, so a follow-up rather than part of this change unless the owner decides otherwise. |
 | `GrayMoon.App/Services/Git/GitVersionCommandService.cs` appears unused | - | Confirmed callerless. Left untouched; removal is out of scope. |
+| `GitHubActionsService.GetLatestActionsAsync` / `GetLatestActionAsync` appear unused | - | Found by Unit E. Left untouched; removal is out of scope. |
 | Desktop README "Recent GrayMoon changes" entry | Unit H | Phase 1-2 has no user-visible change; the entry belongs with the UX work. |

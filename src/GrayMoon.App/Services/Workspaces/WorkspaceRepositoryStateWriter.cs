@@ -3,6 +3,7 @@ using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.Application.Features;
+using GrayMoon.Application.Workspaces;
 using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Services.Workspaces;
@@ -63,6 +64,7 @@ public sealed class WorkspaceRepositoryStateWriter(
     WorkspaceProjectRepository workspaceProjectRepository,
     WorkspacePullRequestService pullRequestService,
     IWorkspaceFeatureContextResolver contextResolver,
+    IWorkspaceCapabilitiesResolver capabilitiesResolver,
     ILogger<WorkspaceRepositoryStateWriter> logger)
 {
     /// <summary>
@@ -201,7 +203,10 @@ public sealed class WorkspaceRepositoryStateWriter(
                 cancellationToken);
         }
 
-        if (snapshot.ProjectsProbed)
+        // Some Worker paths return projects without being asked (return-to-default, the hook fallback
+        // when capabilities cannot be resolved); a workspace that does not discover projects keeps none.
+        if (snapshot.ProjectsProbed
+            && (await capabilitiesResolver.GetAsync(workspaceId, cancellationToken)).DiscoversDotNetProjects)
             await ApplyProjectsAsync(contextId, workspaceId, repositoryId, wr, state, isSpecialWorkspace, snapshot, cancellationToken);
 
         if (options.ReconcilePullRequest)

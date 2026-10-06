@@ -187,6 +187,7 @@ public sealed class SyncCommandHandlerTests
     public async Task Projects_in_the_notification_are_merged_into_workspace_projects()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
+        await ctx.UseDotNetDependencyProfileAsync();
         await using var scope = ctx.CreateScope();
         var handler = scope.ServiceProvider.GetRequiredService<SyncCommandHandler>();
 
@@ -215,6 +216,7 @@ public sealed class SyncCommandHandlerTests
     public async Task Projects_with_package_references_update_project_dependencies_before_recompute()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
+        await ctx.UseDotNetDependencyProfileAsync();
         await using var scope = ctx.CreateScope();
         var handler = scope.ServiceProvider.GetRequiredService<SyncCommandHandler>();
 

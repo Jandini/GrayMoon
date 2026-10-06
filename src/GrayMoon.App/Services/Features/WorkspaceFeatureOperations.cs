@@ -2100,9 +2100,8 @@ public sealed class WorkspaceFeatureOperations(
         try
         {
             await using var statsScope = scopeFactory.CreateAsyncScope();
-            var projectRepo = statsScope.ServiceProvider.GetRequiredService<WorkspaceProjectRepository>();
-            await projectRepo.RecomputeAndPersistRepositoryDependencyStatsAsync(
-                workspaceId, contextId.Value, cancellationToken);
+            var recomputeScope = statsScope.ServiceProvider.GetRequiredService<WorkspaceStateRecomputeScope>();
+            await recomputeScope.RecomputeDependencyStatsAsync(workspaceId, contextId, cancellationToken);
         }
         catch (Exception ex)
         {
