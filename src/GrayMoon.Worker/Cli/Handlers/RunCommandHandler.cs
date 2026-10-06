@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using GrayMoon.Worker.Abstractions;
 using GrayMoon.Common;
 using GrayMoon.Common.Git;
@@ -180,6 +180,8 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<ICommandHandler<RemoveGitWorktreeRequest, RemoveGitWorktreeResponse>, RemoveGitWorktreeCommand>();
         builder.Services.AddSingleton<ICommandHandler<InspectWorktreeRequest, InspectWorktreeResponse>, InspectWorktreeCommand>();
         builder.Services.AddSingleton<ICommandHandler<GetGitVersionAtDefaultTipRequest, GetGitVersionAtDefaultTipResponse>, GetGitVersionAtDefaultTipCommand>();
+        builder.Services.AddSingleton<ICommandHandler<AttachWorkspaceRepositoryRequest, AttachWorkspaceRepositoryResponse>, AttachWorkspaceRepositoryCommand>();
+        builder.Services.AddSingleton<ICommandHandler<WriteRepositoryFileRequest, WriteRepositoryFileResponse>, WriteRepositoryFileCommand>();
         builder.Services.AddSingleton<CheckoutHookSyncCommand>();
         builder.Services.AddSingleton<CommitHookSyncCommand>();
         builder.Services.AddSingleton<MergeHookSyncCommand>();
