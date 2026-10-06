@@ -32,6 +32,8 @@
                                     FilteredCount="@(totalCount ?? 0)"
                                     SearchTerm="@searchTerm"
                                     HasUnmatchedDependencies="@hasUnmatchedDependencies"
+                                    HasOutOfDateFiles="@hasOutOfDateFiles"
+                                    Presentation="@_presentation"
                                     HasCreatablePr="@hasCreatablePr"
                                     HasOpenPr="@hasOpenPr"
                                     AllFeaturePrsCompleted="@allFeaturePrsCompleted"
@@ -51,6 +53,7 @@
                                     OnShowSwitchBranch='() => ShowBranchModalAsync("switchbranch")'
                                     OnNewPullRequest="OpenPullRequestDialogForAllRepositoriesAsync"
                                     OnReturnToDefault="ReturnAllToDefaultAsync"
+                                    OnMergePullRequests="OpenMergePullRequestsDialogForAllAsync"
                                     OnUpdate="OnUpdateClickAsync"
                                     OnUpdateFiles="OnUpdateFilesClickAsync"
                                     OnUpdateAndPush="OnUpdateAndPushClickAsync"
@@ -94,6 +97,10 @@
         {
             <div class="page-error-callout repo-error-line" role="alert">@errorMessage</div>
         }
+        @if (UngroupedLevelErrorMessage != null)
+        {
+            <div class="page-error-callout repo-error-line" role="alert">@UngroupedLevelErrorMessage</div>
+        }
     </div>
     @if (workspace != null && hasLoadedOnce && !isInitialLoading)
     {
@@ -105,19 +112,25 @@
                         <thead class="table-dark">
                             <tr>
                                 <th class="col-repo">Repository</th>
-                                <th class="col-version">Version</th>
+                                @if (_presentation.ShowVersionColumn)
+                                {
+                                    <th class="col-version">Version</th>
+                                }
                                 <th class="col-branch">Branch</th>
                                 <th class="col-metrics text-center">
-                                    <div class="metrics-grid-header">
+                                    <div class="metrics-grid-header @_presentation.MetricsGridModifierClass">
                                         <span class="metrics-block metrics-divergence" title="@(_isFeatureContext ? "Commits behind | ahead parent branch" : "Commits behind | ahead default branch")" aria-label="@(_isFeatureContext ? "Commits behind | ahead parent branch" : "Commits behind | ahead default branch")">
                                             <i class="bi bi-arrow-left-right header-icon"></i>
                                         </span>
                                         <span class="metrics-block metrics-pr" title="Pull Request" aria-label="Pull Request">
                                             <PullRequestIcon AdditionalClass="header-icon" />
                                         </span>
-                                        <span class="metrics-block metrics-deps" title="Dependencies" aria-label="Dependencies">
-                                            <i class="bi bi-diagram-3 header-icon"></i>
-                                        </span>
+                                        @if (_presentation.ShowDependencyMetrics)
+                                        {
+                                            <span class="metrics-block metrics-deps" title="Dependencies" aria-label="Dependencies">
+                                                <i class="bi bi-diagram-3 header-icon"></i>
+                                            </span>
+                                        }
                                         <span class="metrics-block metrics-commits" title="Outgoing â†‘ Incoming â†“ commits" aria-label="Outgoing up / Incoming down commits">
                                             <i class="bi bi-arrow-down-up header-icon"></i>
                                         </span>
@@ -206,6 +219,7 @@
                                                                   IsUpdating="@IsJobRunning"
                                                                   ColSpan="@TableColSpan"
                                                                   WorkspaceUsesRepositoryVersioning="@UsesRepositoryVersioning"
+                                                                  Presentation="@_presentation"
                                                                   OnVersionClick="() => CopyVersionToClipboard(wr.GitVersion!)"
                                                                   OnVersionMouseLeave="() => OnVersionMouseLeave(wr.GitVersion!)"
                                                                   OffFeatureBranchName="@GetOffFeatureBranchName(wr)"
@@ -422,7 +436,7 @@
                        IsSyncingLocalState="@_mergePrModal.IsSyncingLocalState"
                        ErrorMessage="@_mergePrModal.ErrorMessage"
                        ChangesUrl="@BuildContextScopedUrl($"/workspaces/{WorkspaceId}/changes")"
-                       ActionsUrl="@BuildContextScopedUrl($"/workspaces/{WorkspaceId}/actions")"
+                       ActionsUrl="@(_presentation.ShowCiLinks ? BuildContextScopedUrl($"/workspaces/{WorkspaceId}/actions") : null)"
                        RepositoryName="@_mergePrModal.RepositoryName"
                        ShowReturnToDefault="@(!_isFeatureContext)"
                        OnMerge="HandleMergeButtonClickedAsync"

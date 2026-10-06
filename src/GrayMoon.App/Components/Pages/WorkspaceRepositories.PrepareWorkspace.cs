@@ -61,7 +61,7 @@ public sealed partial class WorkspaceRepositories
                         request.NewBranchName,
                         request.BaseBranch,
                         tagFilteredRepoIds,
-                        request.UpdateDependencies,
+                        request.UpdateDependencies && _presentation.ShowDependencyUpdateActions,
                         commitMessage: null,
                         progress: job.ToOperationProgress(),
                         setRepositoryError: (repoId, msg) => SafeInvoke(() => SetRepositoryError(repoId, msg)),

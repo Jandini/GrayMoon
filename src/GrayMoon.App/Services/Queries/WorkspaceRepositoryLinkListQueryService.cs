@@ -1,6 +1,7 @@
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.Application.Features;
+using GrayMoon.Application.Workspaces;
 using GrayMoon.Common.Search;
 using Microsoft.EntityFrameworkCore;
 
@@ -57,8 +58,13 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
         int workspaceId,
         WorkspaceFeatureContextId? contextId = null,
         bool isSpecialWorkspace = true,
+        WorkspaceCapabilities? capabilities = null,
         CancellationToken cancellationToken = default)
     {
+        // Without the dependency graph there are no levels or unmatched counts to aggregate (and any left
+        // over from an earlier profile must not drive the header), so those queries are not run at all.
+        var usesDependencyGraph = (capabilities ?? WorkspaceCapabilities.Legacy).UsesDependencyGraph;
+
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
         var linkQuery = db.WorkspaceRepositories.AsNoTracking()
             .Where(wr => wr.WorkspaceId == workspaceId);
@@ -67,9 +73,14 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
 
         if (isSpecialWorkspace || contextId is null)
         {
-            var hasUnmatchedDependenciesLegacy = await linkQuery.AnyAsync(
+            var hasUnmatchedDependenciesLegacy = usesDependencyGraph && await linkQuery.AnyAsync(
                 wr => (wr.CheckedOutTag == null || wr.CheckedOutTag == string.Empty)
                     && ((wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0),
+                cancellationToken);
+
+            var hasOutOfDateFilesLegacy = !usesDependencyGraph && await linkQuery.AnyAsync(
+                wr => (wr.CheckedOutTag == null || wr.CheckedOutTag == string.Empty)
+                    && (wr.OutOfDateFileRepos ?? 0) > 0,
                 cancellationToken);
 
             var isPushRecommendedLegacy = await linkQuery.AnyAsync(
@@ -90,15 +101,19 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
                 wr => wr.SyncStatus != RepoSyncStatus.InSync,
                 cancellationToken);
 
-            var lowestLevelsLegacy = await linkQuery
-                .Where(wr => (wr.CheckedOutTag == null || wr.CheckedOutTag == string.Empty)
-                    && ((wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0)
-                    && wr.DependencyLevel != null)
-                .Select(wr => wr.DependencyLevel!.Value)
-                .OrderBy(level => level)
-                .Take(1)
-                .ToListAsync(cancellationToken);
-            int? lowestLevelNeedingWorkLegacy = lowestLevelsLegacy.Count > 0 ? lowestLevelsLegacy[0] : null;
+            int? lowestLevelNeedingWorkLegacy = null;
+            if (usesDependencyGraph)
+            {
+                var lowestLevelsLegacy = await linkQuery
+                    .Where(wr => (wr.CheckedOutTag == null || wr.CheckedOutTag == string.Empty)
+                        && ((wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0)
+                        && wr.DependencyLevel != null)
+                    .Select(wr => wr.DependencyLevel!.Value)
+                    .OrderBy(level => level)
+                    .Take(1)
+                    .ToListAsync(cancellationToken);
+                lowestLevelNeedingWorkLegacy = lowestLevelsLegacy.Count > 0 ? lowestLevelsLegacy[0] : null;
+            }
 
             // Same eligibility as PRBadge.ShowsCreateBadge once PR state is persisted: ahead of default,
             // not on a tag, and no open/merged/closed pull request.
@@ -126,7 +141,8 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
                 isOutOfSyncLegacy,
                 lowestLevelNeedingWorkLegacy,
                 hasCreatablePrLegacy,
-                hasOpenPrLegacy);
+                hasOpenPrLegacy,
+                HasOutOfDateFiles: hasOutOfDateFilesLegacy);
         }
 
         var cid = contextId.Value.Value;
@@ -137,10 +153,16 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
             from state in states.DefaultIfEmpty()
             select new { wr, state };
 
-        var hasUnmatchedDependencies = await stateQuery.AnyAsync(
+        var hasUnmatchedDependencies = usesDependencyGraph && await stateQuery.AnyAsync(
             x => (x.state == null || string.IsNullOrEmpty(x.state.CheckedOutTag))
                 && x.state != null
                 && ((x.state.UnmatchedDeps ?? 0) > 0 || (x.state.OutOfDateFileRepos ?? 0) > 0),
+            cancellationToken);
+
+        var hasOutOfDateFiles = !usesDependencyGraph && await stateQuery.AnyAsync(
+            x => x.state != null
+                && string.IsNullOrEmpty(x.state.CheckedOutTag)
+                && (x.state.OutOfDateFileRepos ?? 0) > 0,
             cancellationToken);
 
         var isPushRecommended = await stateQuery.AnyAsync(
@@ -163,16 +185,20 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
             x => x.state == null || x.state.SyncStatus != RepoSyncStatus.InSync,
             cancellationToken);
 
-        var lowestLevels = await stateQuery
-            .Where(x => x.state != null
-                && string.IsNullOrEmpty(x.state.CheckedOutTag)
-                && ((x.state.UnmatchedDeps ?? 0) > 0 || (x.state.OutOfDateFileRepos ?? 0) > 0)
-                && x.state.DependencyLevel != null)
-            .Select(x => x.state!.DependencyLevel!.Value)
-            .OrderBy(level => level)
-            .Take(1)
-            .ToListAsync(cancellationToken);
-        int? lowestLevelNeedingWork = lowestLevels.Count > 0 ? lowestLevels[0] : null;
+        int? lowestLevelNeedingWork = null;
+        if (usesDependencyGraph)
+        {
+            var lowestLevels = await stateQuery
+                .Where(x => x.state != null
+                    && string.IsNullOrEmpty(x.state.CheckedOutTag)
+                    && ((x.state.UnmatchedDeps ?? 0) > 0 || (x.state.OutOfDateFileRepos ?? 0) > 0)
+                    && x.state.DependencyLevel != null)
+                .Select(x => x.state!.DependencyLevel!.Value)
+                .OrderBy(level => level)
+                .Take(1)
+                .ToListAsync(cancellationToken);
+            lowestLevelNeedingWork = lowestLevels.Count > 0 ? lowestLevels[0] : null;
+        }
 
         var prQuery =
             from x in stateQuery
@@ -222,7 +248,8 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
             lowestLevelNeedingWork,
             hasCreatablePr,
             hasOpenPr,
-            allFeaturePrsCompleted);
+            allFeaturePrsCompleted,
+            hasOutOfDateFiles);
     }
 
     public async Task<IReadOnlyList<WorkspaceRepositoryLinkIndexEntry>> GetIndexAsync(

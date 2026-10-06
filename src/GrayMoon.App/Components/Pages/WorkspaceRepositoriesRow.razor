@@ -63,26 +63,29 @@
                 </span>
             }
         </td>
-        <td class="col-version">
-            @if (versionCell == VersionCell.Resolved)
-            {
-                <div class="version-container @(IsVersionClicked ? "version-clicked" : "")"
-                     @onmouseleave="OnVersionMouseLeave">
-                    <span class="version-inner text-muted"
-                          @onclick="OnVersionClick"
-                          title="Click to copy version">@Link.GitVersion</span>
-                </div>
-            }
-            else if (versionCell == VersionCell.ProviderFailed)
-            {
-                <span class="version-inner version-inner--unresolved"
-                      title="GitVersion could not compute a version for this repository (for example, it has no commits yet). The repository itself synced normally.">unresolved</span>
-            }
-            else
-            {
-                <span class="text-muted">&nbsp;</span>
-            }
-        </td>
+        @if (Presentation.ShowVersionColumn)
+        {
+            <td class="col-version">
+                @if (versionCell == VersionCell.Resolved)
+                {
+                    <div class="version-container @(IsVersionClicked ? "version-clicked" : "")"
+                         @onmouseleave="OnVersionMouseLeave">
+                        <span class="version-inner text-muted"
+                              @onclick="OnVersionClick"
+                              title="Click to copy version">@Link.GitVersion</span>
+                    </div>
+                }
+                else if (versionCell == VersionCell.ProviderFailed)
+                {
+                    <span class="version-inner version-inner--unresolved"
+                          title="GitVersion could not compute a version for this repository (for example, it has no commits yet). The repository itself synced normally.">unresolved</span>
+                }
+                else
+                {
+                    <span class="text-muted">&nbsp;</span>
+                }
+            </td>
+        }
         <td class="col-branch">
             @if (Link.IsOnTag)
             {
@@ -114,7 +117,7 @@
             }
         </td>
         <td class="col-metrics col-divergence col-pr text-center">
-            <div class="metrics-grid">
+            <div class="metrics-grid @Presentation.MetricsGridModifierClass">
                 <span class="metrics-block metrics-divergence text-nowrap">
                     <DivergenceBadge DefaultBehind="@Link.DefaultBranchBehindCommits"
                                     DefaultAhead="@Link.DefaultBranchAheadCommits"
@@ -142,67 +145,104 @@
                             OnUpgradeClick="@(() => OnUpgradeClick.InvokeAsync(Link))"
                             OnMergeClick="@((int prNumber) => OnMergeClick.InvokeAsync(Link))" />
                 </span>
-                <span class="metrics-block metrics-deps">
-                    @if (totalWithFiles == 0)
-                    {
-                        <span class="dependency-badge-link @(depOkBadgeInactive ? "dependency-badge-link--disabled dependency-badge-link--readonly" : "")">
-                            <span class="badge build-dep-badge build-dep-badge-none dependency-badge-graph-link"
-                                  role="button"
-                                  tabindex="@(depOkBadgeInactive ? -1 : 0)"
-                                  style="cursor: @(depOkBadgeInactive ? "default" : "pointer");"
-                                  title="@(depOkBadgeInactive ? "Repository is on a tag; checkout a branch first." : "Manage custom dependencies")"
-                                  @onclick="HandleCustomDependenciesClick"
-                                  @onclick:preventDefault
-                                  @onkeydown="HandleCustomDependenciesKeydown">0</span>
-                        </span>
-                    }
-                    else if (unmatchedWithFiles == 0)
-                    {
-                        <span class="dependency-badge-tooltip-wrap dependency-badge-link @(depOkBadgeInactive ? "dependency-badge-link--disabled dependency-badge-link--readonly" : "") @(IsDependencyBadgeClicked ? "dependency-badge-tooltip-wrap--clicked" : "")"
-                              @onmouseenter="OnDependencyBadgeMouseEnter"
-                              @onmouseleave="OnDependencyBadgeMouseLeave">
-                            <span class="badge build-dep-badge build-dep-badge-ok dependency-badge-graph-link"
-                                  role="button"
-                                  tabindex="@(depOkBadgeInactive ? -1 : 0)"
-                                  style="cursor: @(depOkBadgeInactive ? "default" : "pointer");"
-                                  title="@(depOkBadgeInactive ? "Repository is on a tag; checkout a branch first." : "Manage dependencies")"
-                                  @onclick="HandleCustomDependenciesClick"
-                                  @onclick:preventDefault
-                                  @onkeydown="HandleCustomDependenciesKeydown">@totalWithFiles</span>
-                            @if (hasDependencyTooltipContent)
-                            {
-                                <div class="dependency-badge-tooltip">
-                                    @if (AllDependencyLines.Count > 0)
-                                    {
-                                        <div class="dependency-badge-tooltip-header">
-                                            <span class="dependency-badge-tooltip-title">Dependencies:</span>
-                                            <button type="button"
-                                                    class="dependency-badge-tooltip-copy"
-                                                    title="Copy list to clipboard"
-                                                    aria-label="Copy list to clipboard"
-                                                    @onclick="HandleCopyAllDependencies"
-                                                    @onclick:preventDefault
-                                                    @onclick:stopPropagation>
-                                                <i class="bi bi-clipboard" aria-hidden="true"></i>
-                                            </button>
-                                        </div>
-                                        @foreach (var line in AllDependencyLines)
+                @if (Presentation.ShowDependencyMetrics)
+                {
+                    <span class="metrics-block metrics-deps">
+                        @if (totalWithFiles == 0)
+                        {
+                            <span class="dependency-badge-link @(depOkBadgeInactive ? "dependency-badge-link--disabled dependency-badge-link--readonly" : "")">
+                                <span class="badge build-dep-badge build-dep-badge-none dependency-badge-graph-link"
+                                      role="button"
+                                      tabindex="@(depOkBadgeInactive ? -1 : 0)"
+                                      style="cursor: @(depOkBadgeInactive ? "default" : "pointer");"
+                                      title="@(depOkBadgeInactive ? "Repository is on a tag; checkout a branch first." : "Manage custom dependencies")"
+                                      @onclick="HandleCustomDependenciesClick"
+                                      @onclick:preventDefault
+                                      @onkeydown="HandleCustomDependenciesKeydown">0</span>
+                            </span>
+                        }
+                        else if (unmatchedWithFiles == 0)
+                        {
+                            <span class="dependency-badge-tooltip-wrap dependency-badge-link @(depOkBadgeInactive ? "dependency-badge-link--disabled dependency-badge-link--readonly" : "") @(IsDependencyBadgeClicked ? "dependency-badge-tooltip-wrap--clicked" : "")"
+                                  @onmouseenter="OnDependencyBadgeMouseEnter"
+                                  @onmouseleave="OnDependencyBadgeMouseLeave">
+                                <span class="badge build-dep-badge build-dep-badge-ok dependency-badge-graph-link"
+                                      role="button"
+                                      tabindex="@(depOkBadgeInactive ? -1 : 0)"
+                                      style="cursor: @(depOkBadgeInactive ? "default" : "pointer");"
+                                      title="@(depOkBadgeInactive ? "Repository is on a tag; checkout a branch first." : "Manage dependencies")"
+                                      @onclick="HandleCustomDependenciesClick"
+                                      @onclick:preventDefault
+                                      @onkeydown="HandleCustomDependenciesKeydown">@totalWithFiles</span>
+                                @if (hasDependencyTooltipContent)
+                                {
+                                    <div class="dependency-badge-tooltip">
+                                        @if (AllDependencyLines.Count > 0)
                                         {
-                                            <div class="dependency-badge-tooltip-line">
-                                                <code>@line.PackageId</code> <span class="dependency-badge-tooltip-versions">@line.Version</span>
+                                            <div class="dependency-badge-tooltip-header">
+                                                <span class="dependency-badge-tooltip-title">Dependencies:</span>
+                                                <button type="button"
+                                                        class="dependency-badge-tooltip-copy"
+                                                        title="Copy list to clipboard"
+                                                        aria-label="Copy list to clipboard"
+                                                        @onclick="HandleCopyAllDependencies"
+                                                        @onclick:preventDefault
+                                                        @onclick:stopPropagation>
+                                                    <i class="bi bi-clipboard" aria-hidden="true"></i>
+                                                </button>
                                             </div>
+                                            @foreach (var line in AllDependencyLines)
+                                            {
+                                                <div class="dependency-badge-tooltip-line">
+                                                    <code>@line.PackageId</code> <span class="dependency-badge-tooltip-versions">@line.Version</span>
+                                                </div>
+                                            }
                                         }
-                                    }
-                                    @if (AllFileVersionLines.Count > 0)
-                                    {
-                                        @foreach (var entry in AllFileVersionLines.GroupBy(l => l.FileName).Select((fg, i) => new { fg, i }))
+                                        @if (AllFileVersionLines.Count > 0)
                                         {
-                                            @if (entry.i == 0 && AllDependencyLines.Count == 0 && CustomDependencyLines.Count == 0)
+                                            @foreach (var entry in AllFileVersionLines.GroupBy(l => l.FileName).Select((fg, i) => new { fg, i }))
+                                            {
+                                                @if (entry.i == 0 && AllDependencyLines.Count == 0 && CustomDependencyLines.Count == 0)
+                                                {
+                                                    <div class="dependency-badge-tooltip-header">
+                                                        <span class="dependency-badge-tooltip-title">
+                                                            <span class="dependency-badge-tooltip-filename">@entry.fg.Key</span><span class="dependency-badge-tooltip-section-suffix"> (up to date):</span>
+                                                        </span>
+                                                        <button type="button"
+                                                                class="dependency-badge-tooltip-copy"
+                                                                title="Copy list to clipboard"
+                                                                aria-label="Copy list to clipboard"
+                                                                @onclick="HandleCopyAllDependencies"
+                                                                @onclick:preventDefault
+                                                                @onclick:stopPropagation>
+                                                            <i class="bi bi-clipboard" aria-hidden="true"></i>
+                                                        </button>
+                                                    </div>
+                                                }
+                                                else
+                                                {
+                                                    <div class="dependency-badge-tooltip-section-header">
+                                                        <span class="dependency-badge-tooltip-filename">@entry.fg.Key</span><span class="dependency-badge-tooltip-section-suffix"> (up to date):</span>
+                                                    </div>
+                                                }
+                                                @foreach (var line in entry.fg)
+                                                {
+                                                    <div class="dependency-badge-tooltip-line">
+                                                        <code>@line.TokenName</code> <span class="dependency-badge-tooltip-versions">@line.Version</span>
+                                                    </div>
+                                                }
+                                            }
+                                        }
+                                        @if (CustomDependencyLines.Count > 0)
+                                        {
+                                            @if (AllDependencyLines.Count > 0 || AllFileVersionLines.Count > 0)
+                                            {
+                                                <div class="dependency-badge-tooltip-section-header">Custom dependencies:</div>
+                                            }
+                                            else
                                             {
                                                 <div class="dependency-badge-tooltip-header">
-                                                    <span class="dependency-badge-tooltip-title">
-                                                        <span class="dependency-badge-tooltip-filename">@entry.fg.Key</span><span class="dependency-badge-tooltip-section-suffix"> (up to date):</span>
-                                                    </span>
+                                                    <span class="dependency-badge-tooltip-title">Custom dependencies:</span>
                                                     <button type="button"
                                                             class="dependency-badge-tooltip-copy"
                                                             title="Copy list to clipboard"
@@ -214,109 +254,47 @@
                                                     </button>
                                                 </div>
                                             }
-                                            else
-                                            {
-                                                <div class="dependency-badge-tooltip-section-header">
-                                                    <span class="dependency-badge-tooltip-filename">@entry.fg.Key</span><span class="dependency-badge-tooltip-section-suffix"> (up to date):</span>
-                                                </div>
-                                            }
-                                            @foreach (var line in entry.fg)
+                                            @foreach (var name in CustomDependencyLines)
                                             {
                                                 <div class="dependency-badge-tooltip-line">
-                                                    <code>@line.TokenName</code> <span class="dependency-badge-tooltip-versions">@line.Version</span>
+                                                    <code>@name</code>
                                                 </div>
                                             }
                                         }
-                                    }
-                                    @if (CustomDependencyLines.Count > 0)
-                                    {
-                                        @if (AllDependencyLines.Count > 0 || AllFileVersionLines.Count > 0)
-                                        {
-                                            <div class="dependency-badge-tooltip-section-header">Custom dependencies:</div>
-                                        }
-                                        else
-                                        {
-                                            <div class="dependency-badge-tooltip-header">
-                                                <span class="dependency-badge-tooltip-title">Custom dependencies:</span>
-                                                <button type="button"
-                                                        class="dependency-badge-tooltip-copy"
-                                                        title="Copy list to clipboard"
-                                                        aria-label="Copy list to clipboard"
-                                                        @onclick="HandleCopyAllDependencies"
-                                                        @onclick:preventDefault
-                                                        @onclick:stopPropagation>
-                                                    <i class="bi bi-clipboard" aria-hidden="true"></i>
-                                                </button>
-                                            </div>
-                                        }
-                                        @foreach (var name in CustomDependencyLines)
-                                        {
-                                            <div class="dependency-badge-tooltip-line">
-                                                <code>@name</code>
-                                            </div>
-                                        }
-                                    }
-                                    <div class="dependency-badge-tooltip-footer dependency-badge-tooltip-footer--end">
-                                        <button type="button"
-                                                class="btn btn-link btn-sm p-0 dependency-badge-tooltip-show-deps"
-                                                disabled="@depOkBadgeInactive"
-                                                @onclick="HandleShowDependenciesClick"
-                                                @onclick:preventDefault
-                                                @onclick:stopPropagation>Show dependencies</button>
-                                    </div>
-                                </div>
-                            }
-                        </span>
-                    }
-                    else
-                    {
-                        var depBadgeOnTag = Link.IsOnTag;
-                        @* Rows on tags still need hover and copy on the mismatch tooltip; dependency-badge-link--disabled uses pointer-events:none which blocks that when the whole level is tag-pinned (ActionsDisabled). *@
-                        var depMismatchBadgeInactive = IsUpdating || IsSyncing || (ActionsDisabled && !depBadgeOnTag);
-                        <span class="dependency-badge-tooltip-wrap dependency-badge-link @(depMismatchBadgeInactive ? "dependency-badge-link--disabled" : "") @(depBadgeOnTag ? "dependency-badge-link--readonly" : "") @(IsDependencyBadgeClicked ? "dependency-badge-tooltip-wrap--clicked" : "")"
-                              role="button"
-                              tabindex="0"
-                              style="cursor: @(depBadgeOnTag || (unmatchedDeps == 0 && !hasOutOfDateFiles) ? "default" : "pointer");"
-                              @onclick="HandleDependencyBadgeClick"
-                              @onclick:preventDefault
-                              @onkeydown="OnDependencyBadgeKeydown"
-                              @onmouseenter="OnDependencyBadgeMouseEnter"
-                              @onmouseleave="OnDependencyBadgeMouseLeave">
-                            <span class="badge build-dep-badge @(depBadgeOnTag ? "build-dep-badge-none" : "build-dep-badge-mismatch")">@unmatchedWithFiles of @totalWithFiles</span>
-                            @if (MismatchedDependencyLines.Count > 0 || MismatchedFileVersionLines.Count > 0 || CustomDependencyLines.Count > 0)
-                            {
-                                <div class="dependency-badge-tooltip">
-                                    @if (MismatchedDependencyLines.Count > 0)
-                                    {
-                                        <div class="dependency-badge-tooltip-header">
-                                            <span class="dependency-badge-tooltip-title">Dependencies requiring update:</span>
+                                        <div class="dependency-badge-tooltip-footer dependency-badge-tooltip-footer--end">
                                             <button type="button"
-                                                    class="dependency-badge-tooltip-copy"
-                                                    title="Copy list to clipboard"
-                                                    aria-label="Copy list to clipboard"
-                                                    @onclick="HandleCopyDependencies"
+                                                    class="btn btn-link btn-sm p-0 dependency-badge-tooltip-show-deps"
+                                                    disabled="@depOkBadgeInactive"
+                                                    @onclick="HandleShowDependenciesClick"
                                                     @onclick:preventDefault
-                                                    @onclick:stopPropagation>
-                                                <i class="bi bi-clipboard" aria-hidden="true"></i>
-                                            </button>
+                                                    @onclick:stopPropagation>Show dependencies</button>
                                         </div>
-                                        @foreach (var line in MismatchedDependencyLines)
-                                        {
-                                            <div class="dependency-badge-tooltip-line">
-                                                <code>@line.PackageId</code> <span class="dependency-badge-tooltip-versions">@line.CurrentVersion <span class="dependency-badge-tooltip-arrow">→</span> <span class="dependency-badge-tooltip-new-version">@line.NewVersion</span></span>
-                                            </div>
-                                        }
-                                    }
-                                    @if (MismatchedFileVersionLines.Count > 0)
-                                    {
+                                    </div>
+                                }
+                            </span>
+                        }
+                        else
+                        {
+                            var depBadgeOnTag = Link.IsOnTag;
+                            @* Rows on tags still need hover and copy on the mismatch tooltip; dependency-badge-link--disabled uses pointer-events:none which blocks that when the whole level is tag-pinned (ActionsDisabled). *@
+                            var depMismatchBadgeInactive = IsUpdating || IsSyncing || (ActionsDisabled && !depBadgeOnTag);
+                            <span class="dependency-badge-tooltip-wrap dependency-badge-link @(depMismatchBadgeInactive ? "dependency-badge-link--disabled" : "") @(depBadgeOnTag ? "dependency-badge-link--readonly" : "") @(IsDependencyBadgeClicked ? "dependency-badge-tooltip-wrap--clicked" : "")"
+                                  role="button"
+                                  tabindex="0"
+                                  style="cursor: @(depBadgeOnTag || (unmatchedDeps == 0 && !hasOutOfDateFiles) ? "default" : "pointer");"
+                                  @onclick="HandleDependencyBadgeClick"
+                                  @onclick:preventDefault
+                                  @onkeydown="OnDependencyBadgeKeydown"
+                                  @onmouseenter="OnDependencyBadgeMouseEnter"
+                                  @onmouseleave="OnDependencyBadgeMouseLeave">
+                                <span class="badge build-dep-badge @(depBadgeOnTag ? "build-dep-badge-none" : "build-dep-badge-mismatch")">@unmatchedWithFiles of @totalWithFiles</span>
+                                @if (MismatchedDependencyLines.Count > 0 || MismatchedFileVersionLines.Count > 0 || CustomDependencyLines.Count > 0)
+                                {
+                                    <div class="dependency-badge-tooltip">
                                         @if (MismatchedDependencyLines.Count > 0)
                                         {
-                                            <div class="dependency-badge-tooltip-section-header">File dependencies requiring update:</div>
-                                        }
-                                        else
-                                        {
                                             <div class="dependency-badge-tooltip-header">
-                                                <span class="dependency-badge-tooltip-title">File dependencies requiring update:</span>
+                                                <span class="dependency-badge-tooltip-title">Dependencies requiring update:</span>
                                                 <button type="button"
                                                         class="dependency-badge-tooltip-copy"
                                                         title="Copy list to clipboard"
@@ -327,81 +305,109 @@
                                                     <i class="bi bi-clipboard" aria-hidden="true"></i>
                                                 </button>
                                             </div>
-                                        }
-                                        @foreach (var fileGroup in MismatchedFileVersionLines.GroupBy(l => l.FileName))
-                                        {
-                                            @if (!string.IsNullOrEmpty(fileGroup.Key))
+                                            @foreach (var line in MismatchedDependencyLines)
                                             {
-                                                <div class="dependency-badge-tooltip-file-header">@fileGroup.Key</div>
-                                            }
-                                            @foreach (var line in fileGroup)
-                                            {
-                                                <div class="dependency-badge-tooltip-line dependency-badge-tooltip-line--indented">
-                                                    <code>@line.TokenName</code>
-                                                    <span class="dependency-badge-tooltip-versions">
-                                                        @line.CurrentValue <span class="dependency-badge-tooltip-arrow">→</span> <span class="dependency-badge-tooltip-new-version">@line.ExpectedValue</span>
-                                                    </span>
+                                                <div class="dependency-badge-tooltip-line">
+                                                    <code>@line.PackageId</code> <span class="dependency-badge-tooltip-versions">@line.CurrentVersion <span class="dependency-badge-tooltip-arrow">→</span> <span class="dependency-badge-tooltip-new-version">@line.NewVersion</span></span>
                                                 </div>
                                             }
                                         }
-                                    }
-                                    @if (CustomDependencyLines.Count > 0)
-                                    {
-                                        @if (MismatchedDependencyLines.Count > 0 || MismatchedFileVersionLines.Count > 0)
+                                        @if (MismatchedFileVersionLines.Count > 0)
                                         {
-                                            <div class="dependency-badge-tooltip-section-header">Custom dependencies:</div>
+                                            @if (MismatchedDependencyLines.Count > 0)
+                                            {
+                                                <div class="dependency-badge-tooltip-section-header">File dependencies requiring update:</div>
+                                            }
+                                            else
+                                            {
+                                                <div class="dependency-badge-tooltip-header">
+                                                    <span class="dependency-badge-tooltip-title">File dependencies requiring update:</span>
+                                                    <button type="button"
+                                                            class="dependency-badge-tooltip-copy"
+                                                            title="Copy list to clipboard"
+                                                            aria-label="Copy list to clipboard"
+                                                            @onclick="HandleCopyDependencies"
+                                                            @onclick:preventDefault
+                                                            @onclick:stopPropagation>
+                                                        <i class="bi bi-clipboard" aria-hidden="true"></i>
+                                                    </button>
+                                                </div>
+                                            }
+                                            @foreach (var fileGroup in MismatchedFileVersionLines.GroupBy(l => l.FileName))
+                                            {
+                                                @if (!string.IsNullOrEmpty(fileGroup.Key))
+                                                {
+                                                    <div class="dependency-badge-tooltip-file-header">@fileGroup.Key</div>
+                                                }
+                                                @foreach (var line in fileGroup)
+                                                {
+                                                    <div class="dependency-badge-tooltip-line dependency-badge-tooltip-line--indented">
+                                                        <code>@line.TokenName</code>
+                                                        <span class="dependency-badge-tooltip-versions">
+                                                            @line.CurrentValue <span class="dependency-badge-tooltip-arrow">→</span> <span class="dependency-badge-tooltip-new-version">@line.ExpectedValue</span>
+                                                        </span>
+                                                    </div>
+                                                }
+                                            }
                                         }
-                                        else
+                                        @if (CustomDependencyLines.Count > 0)
                                         {
-                                            <div class="dependency-badge-tooltip-header">
-                                                <span class="dependency-badge-tooltip-title">Custom dependencies:</span>
-                                                <button type="button"
-                                                        class="dependency-badge-tooltip-copy"
-                                                        title="Copy list to clipboard"
-                                                        aria-label="Copy list to clipboard"
-                                                        @onclick="HandleCopyDependencies"
-                                                        @onclick:preventDefault
-                                                        @onclick:stopPropagation>
-                                                    <i class="bi bi-clipboard" aria-hidden="true"></i>
-                                                </button>
-                                            </div>
+                                            @if (MismatchedDependencyLines.Count > 0 || MismatchedFileVersionLines.Count > 0)
+                                            {
+                                                <div class="dependency-badge-tooltip-section-header">Custom dependencies:</div>
+                                            }
+                                            else
+                                            {
+                                                <div class="dependency-badge-tooltip-header">
+                                                    <span class="dependency-badge-tooltip-title">Custom dependencies:</span>
+                                                    <button type="button"
+                                                            class="dependency-badge-tooltip-copy"
+                                                            title="Copy list to clipboard"
+                                                            aria-label="Copy list to clipboard"
+                                                            @onclick="HandleCopyDependencies"
+                                                            @onclick:preventDefault
+                                                            @onclick:stopPropagation>
+                                                        <i class="bi bi-clipboard" aria-hidden="true"></i>
+                                                    </button>
+                                                </div>
+                                            }
+                                            @foreach (var name in CustomDependencyLines)
+                                            {
+                                                <div class="dependency-badge-tooltip-line">
+                                                    <code>@name</code>
+                                                </div>
+                                            }
                                         }
-                                        @foreach (var name in CustomDependencyLines)
-                                        {
-                                            <div class="dependency-badge-tooltip-line">
-                                                <code>@name</code>
-                                            </div>
-                                        }
-                                    }
-                                    <div class="dependency-badge-tooltip-footer dependency-badge-tooltip-footer--split">
-                                        @if (depBadgeOnTag)
-                                        {
-                                            <span class="dependency-badge-tooltip-footer-hint">Repository is on a tag; checkout a branch first.</span>
-                                        }
-                                        else if (unmatchedDeps > 0 && hasOutOfDateFiles)
-                                        {
-                                            <span class="dependency-badge-tooltip-footer-hint">Click to update dependencies and file versions in this repository only.</span>
-                                        }
-                                        else if (unmatchedDeps > 0)
-                                        {
-                                            <span class="dependency-badge-tooltip-footer-hint">Click to update this repository only.</span>
-                                        }
-                                        else if (hasOutOfDateFiles)
-                                        {
-                                            <span class="dependency-badge-tooltip-footer-hint">Click to update file versions in this repository only.</span>
-                                        }
-                                        <button type="button"
-                                                class="btn btn-link btn-sm p-0 dependency-badge-tooltip-show-deps"
-                                                disabled="@depBadgeOnTag"
-                                                @onclick="HandleShowDependenciesClick"
-                                                @onclick:preventDefault
-                                                @onclick:stopPropagation>Show dependencies</button>
+                                        <div class="dependency-badge-tooltip-footer dependency-badge-tooltip-footer--split">
+                                            @if (depBadgeOnTag)
+                                            {
+                                                <span class="dependency-badge-tooltip-footer-hint">Repository is on a tag; checkout a branch first.</span>
+                                            }
+                                            else if (unmatchedDeps > 0 && hasOutOfDateFiles)
+                                            {
+                                                <span class="dependency-badge-tooltip-footer-hint">Click to update dependencies and file versions in this repository only.</span>
+                                            }
+                                            else if (unmatchedDeps > 0)
+                                            {
+                                                <span class="dependency-badge-tooltip-footer-hint">Click to update this repository only.</span>
+                                            }
+                                            else if (hasOutOfDateFiles)
+                                            {
+                                                <span class="dependency-badge-tooltip-footer-hint">Click to update file versions in this repository only.</span>
+                                            }
+                                            <button type="button"
+                                                    class="btn btn-link btn-sm p-0 dependency-badge-tooltip-show-deps"
+                                                    disabled="@depBadgeOnTag"
+                                                    @onclick="HandleShowDependenciesClick"
+                                                    @onclick:preventDefault
+                                                    @onclick:stopPropagation>Show dependencies</button>
+                                        </div>
                                     </div>
-                                </div>
-                            }
-                        </span>
-                    }
-                </span>
+                                }
+                            </span>
+                        }
+                    </span>
+                }
                 <span class="metrics-block metrics-commits">
                     <CommitsBadge RepositoryId="repo.RepositoryId"
                                   Outgoing="@Link.OutgoingCommits"
@@ -466,6 +472,11 @@
     /// not state it keeps the pre-profile presentation.
     /// </summary>
     [Parameter] public bool WorkspaceUsesRepositoryVersioning { get; set; } = true;
+    /// <summary>
+    /// Profile-derived presentation: whether this row renders the Version cell and the dependency metric.
+    /// Must match the page's table header, or the cells shift under the wrong columns.
+    /// </summary>
+    [Parameter] public WorkspaceGridPresentation Presentation { get; set; } = WorkspaceGridPresentation.Legacy;
 
     [Parameter] public EventCallback OnVersionClick { get; set; }
     [Parameter] public EventCallback OnVersionMouseLeave { get; set; }

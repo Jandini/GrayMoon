@@ -3,6 +3,7 @@ using GrayMoon.App.Models;
 using GrayMoon.App.Services.Queries;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 
 namespace GrayMoon.App.Tests;
 
@@ -114,6 +115,13 @@ public sealed class ListQueryTestContext : IAsyncDisposable
         var workspaceId = ctx.DbContext.Workspaces.Select(w => w.WorkspaceId).First();
         return (ctx, workspaceId);
     }
+
+    /// <summary>A link-list query over the same database whose contexts carry <paramref name="interceptors"/> (for example to record the SQL a call issues).</summary>
+    public WorkspaceRepositoryLinkListQueryService CreateWorkspaceRepoLinkQuery(params IInterceptor[] interceptors) =>
+        new(new TestDbContextFactory(new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(_connection)
+            .AddInterceptors(interceptors)
+            .Options));
 
     public async ValueTask DisposeAsync()
     {

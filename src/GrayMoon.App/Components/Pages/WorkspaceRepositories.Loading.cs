@@ -43,11 +43,12 @@ public sealed partial class WorkspaceRepositories
         }
 
         _capabilities = await CapabilitiesResolver.GetAsync(WorkspaceId);
+        _presentation = WorkspaceGridPresentation.For(_capabilities);
     }
     private async Task LoadHeaderStateAsync(CancellationToken cancellationToken = default)
     {
         _headerState = await LinkListQueryService.GetHeaderStateAsync(
-            WorkspaceId, _selectedContextId, !_isFeatureContext, cancellationToken);
+            WorkspaceId, _selectedContextId, !_isFeatureContext, _capabilities, cancellationToken);
     }
     private async Task ResetAndLoadFromTopAsync(bool restoreScroll = true)
     {
@@ -483,6 +484,10 @@ public sealed partial class WorkspaceRepositories
     }
     private async Task EnsureTooltipDataForRepoAsync(int repositoryId)
     {
+        if (!_presentation.ShowDependencyMetrics)
+        {
+            return;
+        }
         if (_tooltipLoadedRepoIds.Contains(repositoryId) || !_tooltipLoadInFlight.Add(repositoryId))
         {
             return;
