@@ -20,7 +20,9 @@ public sealed partial class WorkspaceGitChanges
         string folderName;
         try
         {
-            (root, folderName) = await PathResolver.GetWorkerWorkspaceArgsAsync(_selectedContextId.Value);
+            var workerArgs = await PathResolver.GetWorkerArgsAsync(_selectedContextId.Value);
+            root = workerArgs.WorkspaceRoot;
+            folderName = workerArgs.WorkspaceFolderName;
         }
         catch (Exception)
         {

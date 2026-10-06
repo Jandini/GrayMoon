@@ -13,11 +13,14 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using GrayMoon.Application.Features;
 using GrayMoon.Application.Workspaces;
+using GrayMoon.App.Services.WorkspaceManifest;
 
 namespace GrayMoon.App.Services.Git;
 
 public sealed partial class WorkspaceGitService
 {
+    private readonly IServiceScopeFactory? _scopeFactory = scopeFactory;
+
     public async Task<IReadOnlyDictionary<int, RepoGitVersionInfo>> SyncAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
@@ -36,7 +39,10 @@ public sealed partial class WorkspaceGitService
 
         var configuredRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
         await _workspaceService.CreateDirectoryAsync(workspace.Name, configuredRoot, cancellationToken);
-        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workerArgs = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workspaceRoot = workerArgs.WorkspaceRoot;
+        var workspaceFolderName = workerArgs.WorkspaceFolderName;
+        var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
 
         var repos = workspace.Repositories
             .Select(link => link.Repository)
@@ -83,6 +89,7 @@ public sealed partial class WorkspaceGitService
                     bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
                     workspaceId,
                     workspaceRoot,
+                    workspaceRepositoryName,
                     divergenceBaseBranch,
                     capabilities
                 };
@@ -127,10 +134,42 @@ public sealed partial class WorkspaceGitService
         if (_fileVersionService != null)
             await _fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, contextId, cancellationToken);
 
+        // D8: a Sync in the special Workspace context re-checks the Workspace definition when the synced set
+        // (the whole workspace, or a subset) includes the Workspace-role repository.
+        var syncedRepositoryIds = repos.Select(r => r.RepositoryId).ToHashSet();
+        await TriggerManifestDriftCheckAsync(
+            workspace.Repositories.Any(l => l.Role == WorkspaceRepositoryRole.Workspace && syncedRepositoryIds.Contains(l.RepositoryId)),
+            workspaceId,
+            contextId,
+            cancellationToken);
+
         _logger.LogDebug("Sync completed for workspace {WorkspaceName}", workspace.Name);
         return results.ToDictionary(r => r.RepositoryId, r => r.info);
     }
 
+    /// <summary>
+    /// Fire-and-forget Workspace definition drift check (D8). Runs only in the special Workspace context and only
+    /// when the sync included the Workspace-role repository; never throws.
+    /// </summary>
+    private async Task TriggerManifestDriftCheckAsync(
+        bool includesWorkspaceRepository,
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        CancellationToken cancellationToken)
+    {
+        if (_scopeFactory is null || !includesWorkspaceRepository)
+            return;
+
+        try
+        {
+            if ((await _contextResolver.GetRequiredAsync(contextId, workspaceId, cancellationToken)).IsSpecialWorkspace)
+                WorkspaceManifestHooks.DetectDriftInBackground(_scopeFactory, _logger, workspaceId);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Could not schedule Workspace definition drift detection. WorkspaceId={WorkspaceId}", workspaceId);
+        }
+    }
     /// <summary>Refreshes version for a single repo and persists. Returns (success, errorMessage) for caller to report and optionally stop workflow.</summary>
     public async Task<(bool Success, string? ErrorMessage)> SyncSingleRepositoryAsync(int repositoryId, int workspaceId, WorkspaceFeatureContextId contextId, CancellationToken cancellationToken = default)
     {
@@ -153,7 +192,10 @@ public sealed partial class WorkspaceGitService
         if (workspace == null)
             return (false, "Workspace not found.");
 
-        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workerArgs = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workspaceRoot = workerArgs.WorkspaceRoot;
+        var workspaceFolderName = workerArgs.WorkspaceFolderName;
+        var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
         var divergenceByRepoId = await GetDivergenceBaseBranchesByRepositoryIdAsync(contextId, cancellationToken);
         divergenceByRepoId.TryGetValue(repo.RepositoryId, out var divergenceBaseBranch);
         var capabilities = await ResolveRepositoryOperationCapabilitiesAsync(workspaceId, cancellationToken);
@@ -163,6 +205,7 @@ public sealed partial class WorkspaceGitService
             repositoryName = repo.RepositoryName,
             repositoryId = repo.RepositoryId,
             workspaceRoot,
+            workspaceRepositoryName,
             divergenceBaseBranch,
             capabilities
         }, cancellationToken);
@@ -189,6 +232,12 @@ public sealed partial class WorkspaceGitService
 
         await _recomputeScope.RecomputeDependencyStatsAsync(workspaceId, contextId, cancellationToken);
 
+        await TriggerManifestDriftCheckAsync(
+            workspace.Repositories.Any(l => l.Role == WorkspaceRepositoryRole.Workspace && l.RepositoryId == repo.RepositoryId),
+            workspaceId,
+            contextId,
+            cancellationToken);
+
         if (_hubContext != null)
             await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
         return (true, null);
@@ -209,7 +258,10 @@ public sealed partial class WorkspaceGitService
         if (workspaceRepos.Count == 0)
             return result;
 
-        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workerArgs = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workspaceRoot = workerArgs.WorkspaceRoot;
+        var workspaceFolderName = workerArgs.WorkspaceFolderName;
+        var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
         var capabilities = await ResolveRepositoryOperationCapabilitiesAsync(workspaceId, cancellationToken);
         foreach (var wr in workspaceRepos)
         {
@@ -217,7 +269,7 @@ public sealed partial class WorkspaceGitService
             var repo = wr.Repository;
             if (repo == null) continue;
 
-            var response = await _workerBridge.SendCommandAsync("GetRepositoryVersion", new { workspaceName = workspaceFolderName, repositoryName = repo.RepositoryName, workspaceRoot, capabilities }, cancellationToken);
+            var response = await _workerBridge.SendCommandAsync("GetRepositoryVersion", new { workspaceName = workspaceFolderName, repositoryName = repo.RepositoryName, workspaceRoot, workspaceRepositoryName, capabilities }, cancellationToken);
             RepoSyncStatus status;
             if (!response.Success || response.Data == null)
                 status = RepoSyncStatus.Error;
@@ -367,7 +419,10 @@ public sealed partial class WorkspaceGitService
         if (links.Count == 0)
             return;
 
-        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspaceId, contextId, cancellationToken);
+        var workerArgs = await ResolveWorkerPathArgsAsync(workspaceId, contextId, cancellationToken);
+        var workspaceRoot = workerArgs.WorkspaceRoot;
+        var workspaceFolderName = workerArgs.WorkspaceFolderName;
+        var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
         foreach (var link in links)
         {
             var repoName = link.Repository?.RepositoryName;
@@ -376,7 +431,7 @@ public sealed partial class WorkspaceGitService
 
             var response = await _workerBridge.SendCommandAsync(
                 "GetGitVersionAtDefaultTip",
-                new { workspaceName = workspaceFolderName, repositoryName = repoName, workspaceRoot },
+                new { workspaceName = workspaceFolderName, repositoryName = repoName, workspaceRoot, workspaceRepositoryName },
                 cancellationToken);
             if (!response.Success || response.Data == null)
             {

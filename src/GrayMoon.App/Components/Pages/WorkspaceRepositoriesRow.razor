@@ -14,6 +14,7 @@
     var branchUrl = !string.IsNullOrEmpty(repoUrl) && !string.IsNullOrEmpty(Link.BranchName) && !string.IsNullOrEmpty(defaultBranch)
         ? $"{repoUrl}/compare/{defaultBranch}...{Uri.EscapeDataString(Link.BranchName)}"
         : null;
+    var isWorkspaceRepository = Link.Role == WorkspaceRepositoryRole.Workspace;
     var depCount = Link.Dependencies ?? 0;
     var unmatchedDeps = Link.UnmatchedDeps ?? 0;
     var fileMismatchRepos = Link.OutOfDateFileRepos ?? 0;
@@ -40,6 +41,10 @@
                     <a href="@repoUrl" target="_blank" rel="noopener noreferrer" class="repo-link">
                         <strong>@repo.RepositoryName</strong>
                     </a>
+                    @if (isWorkspaceRepository)
+                    {
+                        <span class="badge workspace-role-badge text-nowrap">Workspace</span>
+                    }
                     @if (repo.Archived)
                     {
                         <span class="badge repo-archived-badge">archived</span>
@@ -56,6 +61,10 @@
             {
                 <span class="repo-name-cell">
                     <strong>@repo.RepositoryName</strong>
+                    @if (isWorkspaceRepository)
+                    {
+                        <span class="badge workspace-role-badge text-nowrap">Workspace</span>
+                    }
                     @if (repo.Archived)
                     {
                         <span class="badge repo-archived-badge">archived</span>
@@ -145,7 +154,12 @@
                             OnUpgradeClick="@(() => OnUpgradeClick.InvokeAsync(Link))"
                             OnMergeClick="@((int prNumber) => OnMergeClick.InvokeAsync(Link))" />
                 </span>
-                @if (Presentation.ShowDependencyMetrics)
+                @if (Presentation.ShowDependencyMetrics && isWorkspaceRepository)
+                {
+                    @* The Workspace repository has no projects or dependencies (D6): keep the grid slot, render nothing. *@
+                    <span class="metrics-block metrics-deps"></span>
+                }
+                else if (Presentation.ShowDependencyMetrics)
                 {
                     <span class="metrics-block metrics-deps">
                         @if (totalWithFiles == 0)

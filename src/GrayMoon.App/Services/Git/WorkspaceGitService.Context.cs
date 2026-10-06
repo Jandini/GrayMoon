@@ -9,11 +9,11 @@ public sealed partial class WorkspaceGitService
     /// Resolves worker <c>workspaceRoot</c> + folder name for the given Feature/Workspace context.
     /// Callers must pass an explicit context id - never infer from ambient UI state.
     /// </summary>
-    private Task<(string WorkspaceRoot, string WorkspaceFolderName)> ResolveWorkerPathArgsAsync(
+    private Task<WorkerWorkspaceArgs> ResolveWorkerPathArgsAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken)
-        => _pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
+        => _pathResolver.GetWorkerArgsAsync(contextId, cancellationToken);
 
     /// <summary>
     /// Per-repository Feature parent branch for divergence / PR base.

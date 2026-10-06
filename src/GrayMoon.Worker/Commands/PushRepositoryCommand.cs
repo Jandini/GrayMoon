@@ -41,7 +41,7 @@ public sealed class PushRepositoryCommand(
         var bearerToken = request.BearerToken;
 
         var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
-        var repoPath = Path.Combine(workspacePath, repositoryName);
+        var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
 
         if (!git.DirectoryExists(repoPath))
         {
@@ -147,7 +147,9 @@ public sealed class PushRepositoryCommand(
             .GetVersionAsync(repoPath, new RepositoryVersionOptions { NonNormalize = true }, CancellationToken.None);
         var versionBranch = versionResult.Result?.BranchName ?? versionResult.Result?.EscapedBranchName ?? branch;
         List<RepositorySyncProjectNotification>? syncProjects = null;
-        var projectsProbed = capabilities.ShouldDiscoverProjects;
+        var discoverProjects = request.EffectiveCapabilities.ShouldDiscoverProjects
+            && !WorkerRepositoryPaths.IsWorkspaceRepository(request.RepositoryName ?? string.Empty, request.WorkspaceRepositoryName);
+        var projectsProbed = discoverProjects;
         if (projectsProbed)
         {
             var projects = await csProjFileService.FindAsync(repoPath, CancellationToken.None);

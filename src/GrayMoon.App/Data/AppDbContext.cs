@@ -159,6 +159,8 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
 
             entity.Property(workspace => workspace.ManagedFeatureStorageRoot)
                 .HasMaxLength(1000);
+
+            entity.Property(workspace => workspace.ManifestDriftDetectedAt);
         });
 
         modelBuilder.Entity<WorkspaceRepositoryLink>(entity =>
@@ -178,6 +180,15 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
                 wr.Dependencies,
                 wr.WorkspaceRepositoryId,
             });
+
+            entity.Property(wr => wr.Role)
+                .HasConversion<int>()
+                .HasDefaultValue(WorkspaceRepositoryRole.Source);
+
+            entity.HasIndex(wr => wr.WorkspaceId)
+                .IsUnique()
+                .HasFilter("\"Role\" = 1")
+                .HasDatabaseName("IX_WorkspaceRepositories_WorkspaceId_WorkspaceRole");
 
             entity.Property(wr => wr.GitVersion)
                 .HasMaxLength(100);

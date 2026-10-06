@@ -7,8 +7,8 @@
 <tr class="dependency-level-header">
     <td colspan="@ColSpan" class="dependency-level-header-cell">
         <div class="dependency-level-header-start">
-            <span class="dependency-level-title @(LevelKey == null ? "dependency-level-no-projects" : "")">@(LevelKey == null ? "No dependencies" : $"Level {LevelKey}")</span>
-            @if (LevelKey.HasValue)
+            <span class="dependency-level-title @(IsLevelHeader && LevelKey == null ? "dependency-level-no-projects" : "") @(IsLevelHeader ? "" : "text-nowrap")">@Title</span>
+            @if (IsLevelHeader && LevelKey.HasValue)
             {
                 <a href="@WorkspaceUrlHelper.GetDependencyGraphUrl(WorkspaceId, level: LevelKey!.Value)" class="dependency-level-graph-link" title="View dependency graph" aria-label="Dependency graph">
                     <i class="bi bi-diagram-3" aria-hidden="true"></i>
@@ -22,7 +22,7 @@
                   aria-label="Level actions">
                 <span class="dependency-level-count-num">@DisplayRepositoryCount</span> @(DisplayRepositoryCount == 1 ? "repository" : "repositories")<i class="bi bi-chevron-down dependency-level-count-caret @(HasActionablePr ? "dependency-level-count-caret--pr-pending" : "")" aria-hidden="true"></i>
                 <div class="gm-menu-panel level-actions-menu">
-                    <div class="gm-menu-title">@(LevelKey == null ? "No dependencies" : $"Level {LevelKey}")</div>
+                    <div class="gm-menu-title">@Title</div>
                     <div class="gm-menu-items @(ActionsDisabled ? "gm-menu-items--disabled" : "")">
                         @if (!IsFeatureContext)
                         {
@@ -88,6 +88,10 @@
 @code {
     [Parameter] public int WorkspaceId { get; set; }
     [Parameter] public int? LevelKey { get; set; }
+    /// <summary>Title shown in the header and the menu. Null means the dependency-level title ("Level N" / "No dependencies").</summary>
+    [Parameter] public string? TitleText { get; set; }
+    /// <summary>False for the Workspace and Repositories headers of a flat grid: no dependency-graph link and no "No dependencies" styling.</summary>
+    [Parameter] public bool IsLevelHeader { get; set; } = true;
     [Parameter] public string? LevelError { get; set; }
     [Parameter] public int ColSpan { get; set; } = 8;
     [Parameter] public IEnumerable<WorkspaceRepositoryLink>? Group { get; set; }
@@ -113,6 +117,8 @@
     [Parameter] public bool HasMergedPr { get; set; }
     /// <summary>True when at least one repository in this level has incoming or outgoing commits - "Sync Commits" is highlighted. No-upstream does not count.</summary>
     [Parameter] public bool HasSyncCommits { get; set; }
+
+    private string Title => TitleText ?? (LevelKey == null ? "No dependencies" : $"Level {LevelKey}");
 
     private bool HasActionablePr => HasCreatablePr || HasMergedPr || HasSyncCommits;
 

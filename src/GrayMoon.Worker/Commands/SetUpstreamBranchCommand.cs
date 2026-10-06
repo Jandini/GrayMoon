@@ -1,6 +1,7 @@
 using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Jobs.Requests;
 using GrayMoon.Worker.Jobs.Response;
+using GrayMoon.Worker.Services;
 
 namespace GrayMoon.Worker.Commands;
 
@@ -13,7 +14,7 @@ public sealed class SetUpstreamBranchCommand(IGitService git, IWorkerTokenProvid
         var branchName = request.BranchName ?? throw new ArgumentException("branchName required");
 
         var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
-        var repoPath = Path.Combine(workspacePath, repositoryName);
+        var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
 
         if (!git.DirectoryExists(repoPath))
         {

@@ -2,6 +2,7 @@ using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Jobs.Requests;
 using GrayMoon.Worker.Jobs.Response;
 using GrayMoon.Common.FileVersions;
+using GrayMoon.Worker.Services;
 namespace GrayMoon.Worker.Commands;
 /// <summary>
 /// For a configured .csproj version file, resolves which PackageReference (Include name) each version-pattern
@@ -28,7 +29,7 @@ public sealed class ResolveGeneratedPackageReferencesCommand(IGitService git, IC
             var pattern = item.Pattern;
             if (string.IsNullOrWhiteSpace(repositoryName) || string.IsNullOrWhiteSpace(filePath) || string.IsNullOrWhiteSpace(pattern))
                 continue;
-            var repoPath = Path.Combine(workspacePath, repositoryName);
+            var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
             var fullFilePath = Path.Combine(repoPath, filePath.Replace('/', Path.DirectorySeparatorChar));
             var fileResult = new ResolveGeneratedPackageReferencesFileResult
             {

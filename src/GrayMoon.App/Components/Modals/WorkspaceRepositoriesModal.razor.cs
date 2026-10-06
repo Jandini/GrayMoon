@@ -46,6 +46,15 @@ public sealed partial class WorkspaceRepositoriesModal : IAsyncDisposable
     [Parameter] public int RefreshGeneration { get; set; }
     [Parameter] public int? WorkspaceId { get; set; }
 
+    /// <summary>
+    /// Repositories that are never listed or selectable here (the Workspace's Workspace repository: it is neither
+    /// selectable nor removable in the membership modal, so saving can never drop it).
+    /// </summary>
+    [Parameter] public IReadOnlySet<int>? ExcludedRepositoryIds { get; set; }
+
+    internal static IReadOnlyList<int> ExcludeRepositories(IReadOnlyList<int> ids, IReadOnlySet<int>? excluded) =>
+        excluded is not { Count: > 0 } ? ids : ids.Where(id => !excluded.Contains(id)).ToList();
+
     protected override void OnParametersSet()
     {
         if (IsVisible && !_wasVisible)
@@ -146,7 +155,7 @@ public sealed partial class WorkspaceRepositoriesModal : IAsyncDisposable
     private async Task ToggleAllFiltered(bool isSelected)
     {
         var filter = BuildFilter();
-        var ids = await RepositoryListQueryService.GetMatchingIdsAsync(filter);
+        var ids = ExcludeRepositories(await RepositoryListQueryService.GetMatchingIdsAsync(filter), ExcludedRepositoryIds);
         if (isSelected)
         {
             foreach (var id in ids)
@@ -183,8 +192,9 @@ public sealed partial class WorkspaceRepositoriesModal : IAsyncDisposable
         try
         {
             var filter = BuildFilter();
-            totalCount = await RepositoryListQueryService.CountAsync(filter, token);
-            var matchingIds = await RepositoryListQueryService.GetMatchingIdsAsync(filter, token);
+            var matchingIds = ExcludeRepositories(
+                await RepositoryListQueryService.GetMatchingIdsAsync(filter, token), ExcludedRepositoryIds);
+            totalCount = matchingIds.Count;
             if (generation != _queryLoader.Generation || _disposed)
             {
                 return;

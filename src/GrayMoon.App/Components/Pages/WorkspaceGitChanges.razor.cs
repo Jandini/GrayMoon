@@ -597,7 +597,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     private Task StageAsync(int workspaceRepositoryId, GitChangeOperationScope scope, IReadOnlyList<string> paths, string rowKey) =>
         scope == GitChangeOperationScope.Repository
             ? RunRepositoryScopedMutationJobAsync(workspaceRepositoryId, isStage: true)
-            : RunMutationAsync(workspaceRepositoryId, rowKey, isDiscard: false, async (_, _, _, repositoryId) =>
+            : RunMutationAsync(workspaceRepositoryId, rowKey, isDiscard: false, async (_, _, _, repositoryId, _) =>
             {
                 var result = await GitChangesOperations.StageAsync(WorkspaceId, RequireSelectedContextId(), repositoryId, scope, paths, CancellationToken.None);
                 await PersistMutationResultAsync(workspaceRepositoryId, repositoryId, result.Success, result.Snapshot, result.ErrorMessage);
@@ -606,7 +606,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     private Task UnstageAsync(int workspaceRepositoryId, GitChangeOperationScope scope, IReadOnlyList<string> paths, string rowKey) =>
         scope == GitChangeOperationScope.Repository
             ? RunRepositoryScopedMutationJobAsync(workspaceRepositoryId, isStage: false)
-            : RunMutationAsync(workspaceRepositoryId, rowKey, isDiscard: false, async (_, _, _, repositoryId) =>
+            : RunMutationAsync(workspaceRepositoryId, rowKey, isDiscard: false, async (_, _, _, repositoryId, _) =>
             {
                 var result = await GitChangesOperations.UnstageAsync(WorkspaceId, RequireSelectedContextId(), repositoryId, scope, paths, CancellationToken.None);
                 await PersistMutationResultAsync(workspaceRepositoryId, repositoryId, result.Success, result.Snapshot, result.ErrorMessage);
@@ -652,7 +652,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         return Task.CompletedTask;
     }
 
-    private async Task RunMutationAsync(int workspaceRepositoryId, string rowKey, bool isDiscard, Func<string, string, string, int, Task> action)
+    private async Task RunMutationAsync(int workspaceRepositoryId, string rowKey, bool isDiscard, Func<string, string, string, int, string?, Task> action)
     {
         if (!WorkerBridge.IsWorkerConnected)
         {
@@ -678,7 +678,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
                 return;
             }
 
-            await action(resolved.Value.Root, resolved.Value.WorkspaceName, resolved.Value.RepositoryName, resolved.Value.RepositoryId);
+            await action(resolved.Value.Root, resolved.Value.WorkspaceName, resolved.Value.RepositoryName, resolved.Value.RepositoryId, resolved.Value.WorkspaceRepositoryName);
         }
         catch (Exception ex)
         {
@@ -741,7 +741,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             await LoadAsync();
     }
 
-    private async Task<(string Root, string WorkspaceName, string RepositoryName, int RepositoryId)?> ResolveRepositoryAsync(int workspaceRepositoryId)
+    private async Task<(string Root, string WorkspaceName, string RepositoryName, int RepositoryId, string? WorkspaceRepositoryName)?> ResolveRepositoryAsync(int workspaceRepositoryId)
     {
         await using var db = await DbContextFactory.CreateDbContextAsync();
         var link = await db.WorkspaceRepositories
@@ -754,8 +754,11 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             return null;
         }
 
-        var (root, folderName) = await PathResolver.GetWorkerWorkspaceArgsAsync(_selectedContextId.Value);
-        return string.IsNullOrWhiteSpace(root) ? null : (root, folderName, link.Repository.RepositoryName, link.RepositoryId);
+        var workerArgs = await PathResolver.GetWorkerArgsAsync(_selectedContextId.Value);
+        var root = workerArgs.WorkspaceRoot;
+        var folderName = workerArgs.WorkspaceFolderName;
+        var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
+        return string.IsNullOrWhiteSpace(root) ? null : (root, folderName, link.Repository.RepositoryName, link.RepositoryId, workspaceRepositoryName);
     }
 
     public async ValueTask DisposeAsync()

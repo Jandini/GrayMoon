@@ -3,6 +3,7 @@ using GrayMoon.Worker.Jobs.Requests;
 using GrayMoon.Worker.Jobs.Response;
 using GrayMoon.Common.FileVersions;
 using Microsoft.Extensions.Logging;
+using GrayMoon.Worker.Services;
 namespace GrayMoon.Worker.Commands;
 public sealed class CheckFileVersionsCommand(IGitService git, ILogger<CheckFileVersionsCommand> logger) : ICommandHandler<CheckFileVersionsRequest, CheckFileVersionsResponse>
 {
@@ -23,7 +24,7 @@ public sealed class CheckFileVersionsCommand(IGitService git, ILogger<CheckFileV
             var expectedValues = item.ExpectedValues ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             if (string.IsNullOrWhiteSpace(repositoryName) || string.IsNullOrWhiteSpace(filePath) || string.IsNullOrWhiteSpace(pattern))
                 continue;
-            var repoPath = Path.Combine(workspacePath, repositoryName);
+            var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
             var fullFilePath = Path.Combine(repoPath, filePath.Replace('/', Path.DirectorySeparatorChar));
             var fileName = Path.GetFileName(fullFilePath);
             var patternEntries = FileVersionTokenParser.ParsePatternLines(pattern);

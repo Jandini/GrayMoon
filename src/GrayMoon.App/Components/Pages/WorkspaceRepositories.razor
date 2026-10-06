@@ -93,6 +93,22 @@
         {
             <div class="page-warning-callout" role="status">This Feature needs attention. Use Repair to continue.</div>
         }
+        @if (ShowManifestDriftBanner)
+        {
+            <div class="alert alert-warning d-flex flex-wrap align-items-center gap-2 mb-2" role="alert">
+                <span class="me-auto">Workspace definition on disk differs from this Workspace.</span>
+                <button type="button" class="btn btn-sm btn-outline-dark text-nowrap flex-shrink-0"
+                        disabled="@_isResolvingManifestDrift"
+                        @onclick="WriteWorkspaceDefinitionToDiskAsync">Write Workspace definition to disk</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary text-nowrap flex-shrink-0"
+                        disabled="@_isResolvingManifestDrift"
+                        @onclick="DismissManifestDriftAsync">Dismiss</button>
+            </div>
+        }
+        @if (ShowWorkerCompatibilityBanner)
+        {
+            <div class="alert alert-danger mb-2" role="alert">The connected Worker does not support Workspace repositories. Update the Worker.</div>
+        }
         @if (errorMessage != null)
         {
             <div class="page-error-callout repo-error-line" role="alert">@errorMessage</div>
@@ -168,7 +184,61 @@
                                 }
                                 @foreach (var slot in VisibleSlots)
                                 {
-                                    if (slot.Kind == VirtualSlotKind.LevelHeader)
+                                    if (slot.Kind == VirtualSlotKind.WorkspaceHeader)
+                                    {
+                                        var wsGroup = GetHydratedWorkspaceRoleLinks();
+                                        <WorkspaceRepositoriesLevelHeader @key="@("ws-repo-header")"
+                                                                           WorkspaceId="@WorkspaceId"
+                                                                           TitleText="@WorkspaceHeaderTitle"
+                                                                           IsLevelHeader="false"
+                                                                           ColSpan="@TableColSpan"
+                                                                           Group="@wsGroup"
+                                                                           RepositoryCount="@slot.LevelRepoCount"
+                                                                           ActionsDisabled="@AreAllOnTag(wsGroup)"
+                                                                           IsFeatureContext="@_isFeatureContext"
+                                                                           OnReturnToDefault="async () => await ReturnToDefaultForIdsAsync(_workspaceRoleRepositoryIds)"
+                                                                           OnSyncCommits="() => SyncCommitsForIds(_workspaceRoleRepositoryIds)"
+                                                                           OnOpenPr="async () => await OpenPullRequestDialogForIdsAsync(_workspaceRoleRepositoryIds)"
+                                                                           OnOpenMergePrs="async () => await OpenMergePullRequestsDialogForIdsAsync(_workspaceRoleRepositoryIds, WorkspaceHeaderTitle)"
+                                                                           OnSyncLevel="() => SyncRepositoriesForIds(_workspaceRoleRepositoryIds)"
+                                                                           OnFetchLevel="async () => await FetchForIdsAsync(_workspaceRoleRepositoryIds)"
+                                                                           OnRestorePackagesLevel="async () => await RestorePackagesForIdsAsync(_workspaceRoleRepositoryIds)"
+                                                                           OpenPrUrls="@GetOpenPrUrlsForGroup(wsGroup)"
+                                                                           OpenPrPullMap="@GetOpenPrPullMapForGroup(wsGroup)"
+                                                                           HasCreatablePr="@GroupHasCreatablePr(wsGroup)"
+                                                                           HasMergeablePr="@GroupHasMergeablePr(wsGroup)"
+                                                                           HasMergedPr="@GroupHasMergedPr(wsGroup)"
+                                                                           HasSyncCommits="@GroupHasSyncCommits(wsGroup)"
+                                                                           />
+                                    }
+                                    else if (slot.Kind == VirtualSlotKind.SourcesHeader)
+                                    {
+                                        var srcGroup = GetHydratedSourceLinks();
+                                        <WorkspaceRepositoriesLevelHeader @key="@("src-repos-header")"
+                                                                           WorkspaceId="@WorkspaceId"
+                                                                           TitleText="@RepositoriesHeaderTitle"
+                                                                           IsLevelHeader="false"
+                                                                           ColSpan="@TableColSpan"
+                                                                           Group="@srcGroup"
+                                                                           RepositoryCount="@slot.LevelRepoCount"
+                                                                           ActionsDisabled="@AreAllOnTag(srcGroup)"
+                                                                           IsFeatureContext="@_isFeatureContext"
+                                                                           OnReturnToDefault="async () => await ReturnToDefaultForIdsAsync(_sourceRepositoryIds)"
+                                                                           OnSyncCommits="() => SyncCommitsForIds(_sourceRepositoryIds)"
+                                                                           OnOpenPr="async () => await OpenPullRequestDialogForIdsAsync(_sourceRepositoryIds)"
+                                                                           OnOpenMergePrs="async () => await OpenMergePullRequestsDialogForIdsAsync(_sourceRepositoryIds, RepositoriesHeaderTitle)"
+                                                                           OnSyncLevel="() => SyncRepositoriesForIds(_sourceRepositoryIds)"
+                                                                           OnFetchLevel="async () => await FetchForIdsAsync(_sourceRepositoryIds)"
+                                                                           OnRestorePackagesLevel="async () => await RestorePackagesForIdsAsync(_sourceRepositoryIds)"
+                                                                           OpenPrUrls="@GetOpenPrUrlsForGroup(srcGroup)"
+                                                                           OpenPrPullMap="@GetOpenPrPullMapForGroup(srcGroup)"
+                                                                           HasCreatablePr="@GroupHasCreatablePr(srcGroup)"
+                                                                           HasMergeablePr="@GroupHasMergeablePr(srcGroup)"
+                                                                           HasMergedPr="@GroupHasMergedPr(srcGroup)"
+                                                                           HasSyncCommits="@GroupHasSyncCommits(srcGroup)"
+                                                                           />
+                                    }
+                                    else if (slot.Kind == VirtualSlotKind.LevelHeader)
                                     {
                                         var levelGroup = GetHydratedLinksAtLevel(slot.LevelKey);
                                         <WorkspaceRepositoriesLevelHeader @key="@($"lvl-{slot.LevelKey?.ToString() ?? "none"}")"
@@ -265,6 +335,7 @@
 <WorkspaceRepositoriesModal IsVisible="@_repositoriesModal.IsVisible"
                             Title="@RepositoriesModalTitle"
                             SelectedRepositoryIds="@_repositoriesModal.SelectedRepositoryIds"
+                            ExcludedRepositoryIds="@_repositoriesModal.ExcludedRepositoryIds"
                             HasConnectors="@_repositoriesModal.HasConnectors"
                             IsSaving="@_repositoriesModal.IsSaving"
                             IsFetching="@_repositoriesModal.IsFetching"

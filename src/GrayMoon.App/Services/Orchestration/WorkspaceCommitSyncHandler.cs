@@ -62,7 +62,10 @@ public sealed class WorkspaceCommitSyncHandler(
         try
         {
             await connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepositoryId, cancellationToken);
-            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
+            var workerArgs = await pathResolver.GetWorkerArgsAsync(contextId, cancellationToken);
+            var workspaceRoot = workerArgs.WorkspaceRoot;
+            var workspaceFolderName = workerArgs.WorkspaceFolderName;
+            var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
             var divergenceBaseBranch = await (
                 from r in dbContext.WorkspaceFeatureRepositories.AsNoTracking()
                 join l in dbContext.WorkspaceRepositories.AsNoTracking()
@@ -78,6 +81,7 @@ public sealed class WorkspaceCommitSyncHandler(
                 bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
                 workspaceId,
                 workspaceRoot,
+                workspaceRepositoryName,
                 divergenceBaseBranch
             };
 
@@ -142,7 +146,10 @@ public sealed class WorkspaceCommitSyncHandler(
             return;
         }
 
-        var (workspaceRoot, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, cancellationToken);
+        var workerArgs = await pathResolver.GetWorkerArgsAsync(contextId, cancellationToken);
+        var workspaceRoot = workerArgs.WorkspaceRoot;
+        var workspaceFolderName = workerArgs.WorkspaceFolderName;
+        var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
         var total = repositoryIds.Count;
         var completedCount = 0;
 
@@ -183,6 +190,7 @@ public sealed class WorkspaceCommitSyncHandler(
                     bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
                     workspaceId,
                     workspaceRoot,
+                    workspaceRepositoryName,
                     divergenceBaseBranch
                 };
 

@@ -1,4 +1,5 @@
 using GrayMoon.App.Data;
+using GrayMoon.App.Models;
 using GrayMoon.App.Services.Workspaces;
 using GrayMoon.Application.Features;
 using Microsoft.EntityFrameworkCore;
@@ -63,6 +64,24 @@ public sealed class WorkspaceContextPathResolver(
         var repoName = link.Repository?.RepositoryName
             ?? throw new InvalidOperationException($"Repository name missing for WorkspaceRepository {workspaceRepositoryId}.");
 
+        if (link.Role == WorkspaceRepositoryRole.Workspace)
+        {
+            // Workspace-role repository: the working tree is the context root itself.
+            if (info.IsSpecialWorkspace)
+                return await GetContextRootAsync(contextId, cancellationToken);
+
+            var rootRepo = await db.WorkspaceFeatureRepositories
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    r => r.WorkspaceFeatureContextId == contextId.Value && r.WorkspaceRepositoryId == workspaceRepositoryId,
+                    cancellationToken);
+
+            if (rootRepo is not null && !string.IsNullOrWhiteSpace(rootRepo.WorktreePath))
+                return WorkerPath.Normalize(rootRepo.WorktreePath);
+
+            return await GetContextRootAsync(contextId, cancellationToken);
+        }
+
         if (!info.IsSpecialWorkspace)
         {
             var featureRepo = await db.WorkspaceFeatureRepositories
@@ -84,7 +103,7 @@ public sealed class WorkspaceContextPathResolver(
         return WorkerPath.Combine(contextRoot, repoName);
     }
 
-    public async Task<(string WorkerWorkspaceRoot, string WorkerWorkspaceFolderName)> GetWorkerWorkspaceArgsAsync(
+    public async Task<WorkerWorkspaceArgs> GetWorkerArgsAsync(
         WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken = default)
     {
@@ -99,7 +118,16 @@ public sealed class WorkspaceContextPathResolver(
         if (string.IsNullOrWhiteSpace(parent))
             throw new InvalidOperationException($"Cannot derive worker parent root from context root '{contextRoot}'.");
 
-        return (parent, folderName);
+        var info = await contextResolver.GetRequiredAsync(contextId, cancellationToken: cancellationToken);
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var workspaceRepositoryName = await db.WorkspaceRepositories
+            .AsNoTracking()
+            .Include(l => l.Repository)
+            .Where(l => l.WorkspaceId == info.WorkspaceId && l.Role == WorkspaceRepositoryRole.Workspace)
+            .Select(l => l.Repository!.RepositoryName)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return new WorkerWorkspaceArgs(parent, folderName, workspaceRepositoryName);
     }
 
     private async Task<string> ResolveSpecialWorkspaceFolderAsync(

@@ -206,6 +206,17 @@
     cursor: pointer;
 }
 
+/* Neutral gray "Workspace" role badge. Bootstrap 5.1 (wwwroot/bootstrap) has no .text-bg-* utilities, so
+   text-bg-secondary rendered nothing and the .badge text fell back to the dark app.css badge color
+   (var(--bg-primary)) on a transparent background. Same dark gray + white text as the PR column gray badges. */
+::deep .repositories-table .workspace-role-badge {
+    background-color: #495057;
+    color: #fff;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.4em 0.5em;
+}
+
 ::deep .repositories-table .repo-archived-badge {
     background-color: #6f42c1;
     color: #fff;

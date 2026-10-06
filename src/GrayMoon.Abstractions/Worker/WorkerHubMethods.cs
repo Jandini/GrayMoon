@@ -52,4 +52,10 @@ public static class WorkerHubMethods
 
     /// <summary>App → Worker: report everything removal needs to know about one worktree, checked live (read-only).</summary>
     public const string InspectWorktree = "InspectWorktree";
+
+    /// <summary>App → Worker: attach a remote repository to the Workspace root as its working tree (clone into an empty root, or init + fetch + checkout in a non-empty one).</summary>
+    public const string AttachWorkspaceRepository = "AttachWorkspaceRepository";
+
+    /// <summary>App → Worker: write one text file inside a repository working tree (atomic, UTF-8 without BOM, optionally only when the content changed).</summary>
+    public const string WriteRepositoryFile = "WriteRepositoryFile";
 }

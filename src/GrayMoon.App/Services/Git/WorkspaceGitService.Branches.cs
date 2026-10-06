@@ -28,13 +28,17 @@ public sealed partial class WorkspaceGitService
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null) return false;
 
-        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workerArgs = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workspaceRoot = workerArgs.WorkspaceRoot;
+        var workspaceFolderName = workerArgs.WorkspaceFolderName;
+        var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
         var response = await _workerBridge.SendCommandAsync("RefreshBranches", new
         {
             workspaceName = workspaceFolderName,
             repositoryId = repo.RepositoryId,
             repositoryName = repo.RepositoryName,
-            workspaceRoot
+            workspaceRoot,
+            workspaceRepositoryName
         }, cancellationToken);
 
         if (!response.Success) return false;
@@ -124,7 +128,10 @@ public sealed partial class WorkspaceGitService
         var completedCount = 0;
         var totalCount = links.Count;
         using var semaphore = new SemaphoreSlim(_maxConcurrent);
-        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workerArgs = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workspaceRoot = workerArgs.WorkspaceRoot;
+        var workspaceFolderName = workerArgs.WorkspaceFolderName;
+        var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
         var capabilities = (await _capabilitiesResolver.GetAsync(workspaceId, cancellationToken)).ToRepositoryOperationCapabilities();
 
         // Prefetch all default branches before the parallel section to avoid concurrent DbContext reads
@@ -167,6 +174,7 @@ public sealed partial class WorkspaceGitService
                     newBranchName,
                     baseBranchName,
                     workspaceRoot,
+                    workspaceRepositoryName,
                     repositoryId = wr.RepositoryId,
                     workspaceId,
                     skipHooks = syncState,

@@ -61,7 +61,10 @@ public sealed partial class WorkspaceGitService
         var completedCount = 0;
         var totalCount = repos.Count;
         using var semaphore = new SemaphoreSlim(_maxConcurrent);
-        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workerArgs = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workspaceRoot = workerArgs.WorkspaceRoot;
+        var workspaceFolderName = workerArgs.WorkspaceFolderName;
+        var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
         var capabilities = await ResolveRepositoryOperationCapabilitiesAsync(workspaceId, cancellationToken);
 
         var syncResults = await Task.WhenAll(repos.Select(async repo =>
@@ -69,7 +72,7 @@ public sealed partial class WorkspaceGitService
             await semaphore.WaitAsync(cancellationToken);
             try
             {
-                var args = new { workspaceName = workspaceFolderName, repositoryName = repo.RepositoryName, workspaceRoot, maxParallelOperations = _maxConcurrent, capabilities };
+                var args = new { workspaceName = workspaceFolderName, repositoryName = repo.RepositoryName, workspaceRoot, workspaceRepositoryName, maxParallelOperations = _maxConcurrent, capabilities };
                 var response = await _workerBridge.SendCommandAsync("RefreshRepositoryProjects", args, cancellationToken);
                 if (!response.Success)
                 {
@@ -140,9 +143,12 @@ public sealed partial class WorkspaceGitService
         if (!string.IsNullOrWhiteSpace(linkForWorkspace?.CheckedOutTag))
             return false;
 
-        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workerArgs = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workspaceRoot = workerArgs.WorkspaceRoot;
+        var workspaceFolderName = workerArgs.WorkspaceFolderName;
+        var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
         var capabilities = await ResolveRepositoryOperationCapabilitiesAsync(workspaceId, cancellationToken);
-        var args = new { workspaceName = workspaceFolderName, repositoryName = repo.RepositoryName, workspaceRoot, maxParallelOperations = _maxConcurrent, capabilities };
+        var args = new { workspaceName = workspaceFolderName, repositoryName = repo.RepositoryName, workspaceRoot, workspaceRepositoryName, maxParallelOperations = _maxConcurrent, capabilities };
         var response = await _workerBridge.SendCommandAsync("RefreshRepositoryProjects", args, cancellationToken);
         if (!response.Success)
         {
@@ -267,7 +273,10 @@ public sealed partial class WorkspaceGitService
         var totalCount = toSync.Count;
         var failedRepoIds = new ConcurrentDictionary<int, bool>();
         var syncedRepoIds = new ConcurrentDictionary<int, bool>();
-        var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workerArgs = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var workspaceRoot = workerArgs.WorkspaceRoot;
+        var workspaceFolderName = workerArgs.WorkspaceFolderName;
+        var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
 
         var repoTasks = toSync.Select(async repo =>
         {
@@ -286,7 +295,8 @@ public sealed partial class WorkspaceGitService
                 workspaceName = workspaceFolderName,
                 repositoryName = repo.RepoName,
                 projectUpdates,
-                workspaceRoot
+                workspaceRoot,
+                workspaceRepositoryName
             };
 
             var response = await _workerBridge.SendCommandAsync("SyncRepositoryDependencies", args, cancellationToken);

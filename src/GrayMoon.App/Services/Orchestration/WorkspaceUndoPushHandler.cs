@@ -34,7 +34,10 @@ public sealed class WorkspaceUndoPushHandler(
         if (workspace == null)
             return Array.Empty<(int, bool, string?)>();
 
-        var (workspaceRoot, workspaceFolderName) = await pathResolver.GetWorkerWorkspaceArgsAsync(contextId, ct);
+        var workerArgs = await pathResolver.GetWorkerArgsAsync(contextId, ct);
+        var workspaceRoot = workerArgs.WorkspaceRoot;
+        var workspaceFolderName = workerArgs.WorkspaceFolderName;
+        var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
         var capabilities = (await capabilitiesResolver.GetAsync(workspaceId, ct)).ToRepositoryOperationCapabilities();
 
         var total = targets.Count;
@@ -57,6 +60,7 @@ public sealed class WorkspaceUndoPushHandler(
                     branchName = wr.BranchName,
                     keepChanges,
                     workspaceRoot,
+                    workspaceRepositoryName,
                     bearerToken = ConnectorHelpers.UnprotectToken(wr.Repository?.Connector?.UserToken),
                     capabilities,
                 };

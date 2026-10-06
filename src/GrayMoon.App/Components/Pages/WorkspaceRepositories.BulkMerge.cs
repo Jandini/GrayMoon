@@ -34,6 +34,10 @@ public sealed partial class WorkspaceRepositories
             "No open pull requests in this level.");
     }
 
+    /// <summary>Header-menu "Merge PRs..." over an explicit repository id set (Workspace / Repositories headers of a flat grid).</summary>
+    private Task OpenMergePullRequestsDialogForIdsAsync(IReadOnlyList<int> repositoryIds, string scopeLabel) =>
+        OpenMergePullRequestsDialogAsync(repositoryIds.ToHashSet(), null, scopeLabel, "No open pull requests.");
+
     /// <summary>Header-menu entry for a flat grid (no level headers): the same dialog over every repository.</summary>
     private async Task OpenMergePullRequestsDialogForAllAsync()
     {

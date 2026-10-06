@@ -48,7 +48,7 @@ public sealed class SyncRepositoryCommand(
         var capabilities = request.EffectiveCapabilities;
 
         var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
-        var repoPath = Path.Combine(workspacePath, repositoryName);
+        var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
 
         git.CreateDirectory(workspacePath);
 
@@ -114,7 +114,11 @@ public sealed class SyncRepositoryCommand(
                 .Create(capabilities)
                 .GetVersionAsync(repoPath, RepositoryVersionOptions.Default, cancellationToken));
             var refsTask = ReadRefsAsync(repoPath, request.DivergenceBaseBranch, readBranchInLane, cancellationToken);
-            var projectsTask = capabilities.ShouldDiscoverProjects
+            // The Workspace repository's working tree is the Workspace root, which contains the nested source
+            // repositories, so scanning it would attribute their projects to it.
+            var discoverProjects = capabilities.ShouldDiscoverProjects
+                && !WorkerRepositoryPaths.IsWorkspaceRepository(repositoryName, request.WorkspaceRepositoryName);
+            var projectsTask = discoverProjects
                 ? TimedAsync(() => ScanProjectsAsync(repoPath, cancellationToken))
                 : Task.FromResult<(IReadOnlyList<CsProjFileInfo>? Value, long Ms)>((null, 0));
 
@@ -196,7 +200,6 @@ public sealed class SyncRepositoryCommand(
                 "branchFallback={BranchFallbackMs}ms, tail={TailMs}ms (hooks={HooksMs}ms, counts={CountsMs}ms), total={TotalMs}ms. Lane steps: {LaneSteps}",
                 repoPath, fetchMs, overlapMs, versionMs, refs.ElapsedMs, projectsMs,
                 branchFallbackMs, tailMs, hooksMs, countsMs, ElapsedMs(totalStart), refs.StepTimings);
-
             return new SyncRepositoryResponse
             {
                 Success = true,

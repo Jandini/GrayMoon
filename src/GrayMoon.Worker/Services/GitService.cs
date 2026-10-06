@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -1422,6 +1422,102 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         }
 
         logger.LogInformation("Git reset {Mode} {Target} completed in {ElapsedMs}ms for {RepoPath}", mode, target, sw.ElapsedMilliseconds, repoPath);
+        return (true, null);
+    }
+
+    public async Task<bool> CloneIntoAsync(string targetDir, string cloneUrl, string? bearerToken, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(targetDir))
+            throw new ArgumentException("Target directory is required.", nameof(targetDir));
+        if (string.IsNullOrWhiteSpace(cloneUrl))
+            throw new ArgumentException("Clone URL is required.", nameof(cloneUrl));
+
+        if (!Directory.Exists(targetDir))
+            Directory.CreateDirectory(targetDir);
+
+        var args = BuildCloneArguments(cloneUrl, bearerToken) + " .";
+        var sw = Stopwatch.StartNew();
+        var (exitCode, stdout, stderr) = await runner.ClonePipeline.ExecuteAsync(
+            async (cancellationToken) => await runner.RunAsync("git", args, targetDir, cancellationToken),
+            ct);
+        sw.Stop();
+        if (exitCode != 0)
+        {
+            logger.LogError("Git clone into {Dir} failed after retries in {ElapsedMs}ms. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", targetDir, sw.ElapsedMilliseconds, exitCode, stdout, stderr);
+            return false;
+        }
+        logger.LogInformation("Git clone completed in {ElapsedMs}ms: {Url} -> {Dir}", sw.ElapsedMilliseconds, cloneUrl, targetDir);
+        return true;
+    }
+
+    public async Task<(bool Success, string? Error)> InitAsync(string repoPath, CancellationToken ct)
+    {
+        var (exitCode, stdout, stderr) = await runner.RunAsync("git", "init", repoPath, ct);
+        if (exitCode != 0)
+        {
+            logger.LogError("Git init failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
+            return (false, BuildProcessError(stderr, stdout, $"Git init failed (exit code {exitCode})"));
+        }
+        return (true, null);
+    }
+
+    public async Task<(bool Success, string? Error)> AddRemoteAsync(string repoPath, string name, string url, CancellationToken ct)
+    {
+        var (exitCode, stdout, stderr) = await runner.RunAsync("git", $"remote add \"{name}\" \"{url}\"", repoPath, ct);
+        if (exitCode != 0)
+        {
+            logger.LogError("Git remote add failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
+            return (false, BuildProcessError(stderr, stdout, $"Git remote add failed (exit code {exitCode})"));
+        }
+        return (true, null);
+    }
+
+    public async Task<string?> GetRemoteDefaultBranchAsync(string repoPath, string? bearerToken, CancellationToken ct)
+    {
+        const string headRefPrefix = "ref: refs/heads/";
+        var args = string.IsNullOrWhiteSpace(bearerToken)
+            ? "ls-remote --symref origin HEAD"
+            : $"{BuildAuthHeaderArgs(bearerToken)} ls-remote --symref origin HEAD";
+
+        var (exitCode, stdout, stderr) = await runner.LsRemotePipeline.ExecuteAsync(
+            async cancellationToken => await runner.RunAsync("git", args, repoPath, cancellationToken),
+            ct);
+        if (exitCode != 0)
+        {
+            logger.LogWarning("Git ls-remote --symref failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
+            return null;
+        }
+
+        foreach (var line in (stdout ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (!line.StartsWith(headRefPrefix, StringComparison.Ordinal))
+                continue;
+            var name = line[headRefPrefix.Length..].Split('\t', ' ')[0];
+            if (name.Length > 0)
+                return name;
+        }
+        return null;
+    }
+
+    public async Task<(bool Success, string? Error)> CheckoutTrackingAsync(string repoPath, string branch, CancellationToken ct)
+    {
+        var (exitCode, stdout, stderr) = await runner.RunAsync("git", $"checkout -b \"{branch}\" --track \"origin/{branch}\"", repoPath, ct);
+        if (exitCode != 0)
+        {
+            logger.LogError("Git checkout --track failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
+            return (false, BuildProcessError(stderr, stdout, $"Git checkout failed (exit code {exitCode})"));
+        }
+        return (true, null);
+    }
+
+    public async Task<(bool Success, string? Error)> SetUnbornHeadAsync(string repoPath, string branch, CancellationToken ct)
+    {
+        var (exitCode, stdout, stderr) = await runner.RunAsync("git", $"symbolic-ref HEAD \"refs/heads/{branch}\"", repoPath, ct);
+        if (exitCode != 0)
+        {
+            logger.LogError("Git symbolic-ref failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
+            return (false, BuildProcessError(stderr, stdout, $"Git symbolic-ref failed (exit code {exitCode})"));
+        }
         return (true, null);
     }
 

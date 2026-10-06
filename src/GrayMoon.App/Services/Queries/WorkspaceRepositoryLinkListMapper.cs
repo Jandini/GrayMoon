@@ -33,6 +33,7 @@ internal static class WorkspaceRepositoryLinkListMapper
             FeatureBaseCommitSha = dto.FeatureBaseCommitSha,
             ParentBranchName = dto.ParentBranchName,
             FeaturePinnedTag = dto.FeaturePinnedTag,
+            Role = dto.Role,
             Repository = new Repository
             {
                 RepositoryId = dto.RepositoryId,

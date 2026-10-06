@@ -248,6 +248,7 @@ public sealed partial class WorkspaceGitChanges
                         repo.Root,
                         repo.WorkspaceName,
                         repo.RepositoryName,
+                        repo.WorkspaceRepositoryName,
                         mdPath,
                         githubToken);
                 }
