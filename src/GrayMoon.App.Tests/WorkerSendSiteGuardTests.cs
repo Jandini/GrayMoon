@@ -13,11 +13,7 @@ public sealed class WorkerSendSiteGuardTests
     /// Repo-relative paths (forward slashes) whose offending blocks are knowingly left for the unit that owns the file.
     /// Expected to stay empty except for files owned by a later unit.
     /// </summary>
-    private static readonly string[] AllowedFiles =
-    [
-        // Unit F owns WorkspaceFeatureOperations.cs; its send sites get workspaceRepositoryName there.
-        "src/GrayMoon.App/Services/Features/WorkspaceFeatureOperations.cs",
-    ];
+    private static readonly string[] AllowedFiles = [];
 
     private static readonly Regex AnonymousObject = new(@"new\s*\{[^}]*\}", RegexOptions.Singleline | RegexOptions.Compiled);
     private static readonly Regex RepositoryNameWord = new(@"\brepositoryNames?\b", RegexOptions.Compiled);
