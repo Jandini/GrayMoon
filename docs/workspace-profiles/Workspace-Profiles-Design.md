@@ -6,9 +6,9 @@ the code.
 
 Companion: `Workspace-Profiles-Implementation-Plan.md` (execution state).
 
-Status: Phases 1-3 and the CI provider boundary (section 11a) implemented. Host readiness requirements
-(section 11b) implemented on this branch. Push/update/restore strategies, grid, navigation, create/edit
-and transitions not yet implemented on this branch.
+Status: Phases 1-4, the CI provider boundary (section 11a), host readiness (section 11b), the
+Repositories grid (section 10a) and page access (section 11) are implemented. Create/edit and profile
+transitions (section 10) are not.
 
 ---
 
@@ -489,41 +489,6 @@ instead of solving it.
 
 Remaining transition behaviour (Basic to .NET activating discovery, .NET to Basic retiring derived state,
 versioning toggles invalidating stale version display) is Phase 6.
-
-## 10a. Repositories grid and header
-
-There is one Repositories page. A Basic workspace uses the same page, queries and virtualization, and
-just renders less of it. The page builds one `WorkspaceGridPresentation` from `WorkspaceCapabilities` when the
-workspace loads. The markup reads that record and never checks the profile itself.
-
-| Presentation flag | From | Effect when false |
-|---|---|---|
-| `ShowVersionColumn` | `UsesRepositoryVersioning` | Version `<th>` and `<td>` are not rendered; colspan drops to 3 |
-| `ShowDependencyMetrics` | `UsesDependencyGraph` | no dependency badge, tooltip, counts or custom-dependency entry; the metrics grid lays out 4 blocks |
-| `GroupByDependencyLevel` | `UsesDependencyGraph` | flat list of rows: no level headers, no "Level N" or "No dependencies" group |
-| `ShowDependencyUpdateActions` | `UsesDependencyAwareUpdate` | no Update / Push Updated / Level Only / Update &amp; Push controls (absent, not disabled) |
-| `ShowPackageRestore` | `UsesPackageRestore` | no Restore item in the Sync menu |
-| `ShowCiLinks` | `UsesCiIntegration` | the merge dialog gets no Actions link |
-
-- `ColumnCount` (3 plus Version) replaces the former `TableColSpan` const. Every full-width row uses it:
-  level headers, error rows, spacers and placeholders.
-- `ComputeSlots(index, groupByDependencyLevel)` is the pure slot layout. A flat layout ignores any
-  `DependencyLevel` left over from an earlier profile.
-- Header decisions are pure static methods next to `DeterminePrimaryAction`: `DetermineUpdateControl`
-  returns None / Update / PushUpdated, and `DetermineShowsFileVersionUpdate` decides the file-version button.
-- Version files still work in Basic (section 8), so a workspace without dependency-aware update gets a
-  standalone **Update Files** button. It only appears while a version file is out of date, and it calls the same
-  file-version operation the .NET Update menu's "Update Files" uses. It is never part of a dependency update.
-- The level-header menu was the only way to reach bulk **Merge PRs...**. A flat grid has no level headers, so
-  the header's Branch/Feature menu offers it across all repositories. Level errors also have no header to sit
-  under in a flat grid, so they appear in the page error callout.
-- The query is capability-aware at its boundary. `GetHeaderStateAsync(..., capabilities)` issues no
-  dependency aggregate without the dependency graph: `HasUnmatchedDependencies` is false,
-  `LowestLevelNeedingWork` is null, and `HasOutOfDateFiles` is computed instead. Row and index DTOs keep
-  their optional dependency fields. Those fields are plain link columns (no project join), and the
-  presentation ignores them. The per-row dependency tooltip loader, which does run project queries, never
-  runs without `ShowDependencyMetrics`.
-- `TotalFileConfigRepos` is not shown by the grid, so its `{@Repo}` counting is left as is.
 
 ## 10a. Repositories grid and header
 
