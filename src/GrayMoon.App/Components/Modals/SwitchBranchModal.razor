@@ -314,6 +314,10 @@
                                                                 <div class="text-muted mt-1" style="font-size: 0.8rem;">Force delete will run <code>git worktree remove --force</code> using the known path.</div>
                                                             }
                                                         </div>
+                                                        @if (CanOfferAlsoDeleteLocalBranch())
+                                                        {
+                                                            @AlsoDeleteLocalBranchCheckbox()
+                                                        }
                                                         <div class="d-flex gap-2 flex-shrink-0 align-self-end">
                                                             @if (CanForceDeleteUninspectedWorktree(_worktreeCleanupPlan))
                                                             {
@@ -334,6 +338,7 @@
                                                             <span class="text-danger">@_worktreeCleanupPlan.Summary has uncommitted changes.</span>
                                                             <div class="text-muted mt-1" style="font-size: 0.8rem;">Removing it will discard those changes.</div>
                                                         </div>
+                                                        @AlsoDeleteLocalBranchCheckbox()
                                                         <div class="d-flex gap-2 flex-shrink-0 align-self-end">
                                                             <button type="button" class="btn btn-danger btn-sm" @onclick="() => { _awaitingForceWorktreeCleanupConfirmation = true; }" disabled="@(isCleaningUpWorktree || isRefreshing)" @onclick:stopPropagation="true">Remove Anyway</button>
                                                             <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="DismissExternalWorktreeCleanup" disabled="@(isCleaningUpWorktree || isRefreshing)" @onclick:stopPropagation="true">Cancel</button>
@@ -341,18 +346,17 @@
                                                     }
                                                     else
                                                     {
-                                                        <div class="d-flex align-items-center justify-content-between">
-                                                            <span class="text-danger small">Remove external worktree at @_worktreeCleanupPlan.WorktreePath?</span>
-                                                            <div class="d-flex gap-2 flex-shrink-0">
-                                                                <button type="button" class="btn btn-danger btn-sm" @onclick="ProceedWithExternalWorktreeCleanupAsync" disabled="@(isCleaningUpWorktree || isRefreshing)" @onclick:stopPropagation="true">
-                                                                    @if (isCleaningUpWorktree)
-                                                                    {
-                                                                        <span class="spinner-border spinner-border-sm me-1"></span>
-                                                                    }
-                                                                    Remove
-                                                                </button>
-                                                                <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="DismissExternalWorktreeCleanup" disabled="@(isCleaningUpWorktree || isRefreshing)" @onclick:stopPropagation="true">Cancel</button>
-                                                            </div>
+                                                        <span class="text-danger small">Remove external worktree at @_worktreeCleanupPlan.WorktreePath?</span>
+                                                        @AlsoDeleteLocalBranchCheckbox()
+                                                        <div class="d-flex gap-2 flex-shrink-0 align-self-end">
+                                                            <button type="button" class="btn btn-danger btn-sm" @onclick="ProceedWithExternalWorktreeCleanupAsync" disabled="@(isCleaningUpWorktree || isRefreshing)" @onclick:stopPropagation="true">
+                                                                @if (isCleaningUpWorktree)
+                                                                {
+                                                                    <span class="spinner-border spinner-border-sm me-1"></span>
+                                                                }
+                                                                Remove
+                                                            </button>
+                                                            <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="DismissExternalWorktreeCleanup" disabled="@(isCleaningUpWorktree || isRefreshing)" @onclick:stopPropagation="true">Cancel</button>
                                                         </div>
                                                     }
                                                 </div>
@@ -699,6 +703,7 @@
     private GrayMoon.Application.Features.ExternalWorktreeCleanupPlan? _worktreeCleanupPlan;
     private bool isCleaningUpWorktree;
     private bool _awaitingForceWorktreeCleanupConfirmation;
+    private bool _alsoDeleteLocalBranch;
     private ElementReference worktreeCleanupConfirmElementRef;
     private bool _scrollToWorktreeCleanupConfirm;
 
@@ -736,7 +741,7 @@
             else
             {
                 currentBranchLocal = CurrentBranch;
-                // Reload lists after a page job (Fetch) finishes so the overlay path can persist then re-read.
+                // Reload lists after a page job (Fetch or remove-external-worktree) finishes so the overlay path can persist then re-read.
                 if (busyJustEnded)
                     await ReloadListsAfterPageJobAsync();
             }
@@ -764,6 +769,7 @@
                 ApplyBranchLists(outcome.Body);
                 selectedBranch = !string.IsNullOrWhiteSpace(currentTag) && activeTab == "tags" ? currentTag : currentBranchLocal;
                 showReturnToDefaultButton = remoteBranches.Count > 0 && ShouldShowReturnToDefaultButton();
+                await LoadOccupancyAsync();
             }
         }
         catch (Exception ex)
@@ -897,7 +903,7 @@
         }
     }
 
-    /// <summary>Reload branch lists from persistence without running fetch. Used after delete so UI reflects updated persistence.</summary>
+    /// <summary>Reload branch lists from persistence and live worktree occupancy without running fetch. Used after delete or external worktree remove so the dialog reflects git and persistence.</summary>
     private async Task ReloadBranchesFromPersistenceAsync()
     {
         try
@@ -908,6 +914,7 @@
                 ApplyBranchLists(outcome.Body);
                 selectedBranch = !string.IsNullOrWhiteSpace(currentTag) && activeTab == "tags" ? currentTag : currentBranchLocal;
                 showReturnToDefaultButton = remoteBranches.Count > 0 && ShouldShowReturnToDefaultButton();
+                await LoadOccupancyAsync();
                 await OnBranchChanged.InvokeAsync();
             }
         }
@@ -1281,6 +1288,7 @@
         worktreeCleanupBranch = branch;
         _worktreeCleanupPlan = null;
         _awaitingForceWorktreeCleanupConfirmation = false;
+        _alsoDeleteLocalBranch = false;
         errorMessage = null;
         _scrollToWorktreeCleanupConfirm = true;
         StateHasChanged();
@@ -1319,8 +1327,29 @@
         worktreeCleanupBranch = null;
         _worktreeCleanupPlan = null;
         _awaitingForceWorktreeCleanupConfirmation = false;
+        _alsoDeleteLocalBranch = false;
         StateHasChanged();
     }
+
+    private bool CanOfferAlsoDeleteLocalBranch()
+        => _worktreeCleanupPlan != null
+           && (_worktreeCleanupPlan.Success || CanForceDeleteUninspectedWorktree(_worktreeCleanupPlan));
+
+    private RenderFragment AlsoDeleteLocalBranchCheckbox() => __builder =>
+    {
+        <div class="form-check">
+            <input id="also-delete-local-branch"
+                   type="checkbox"
+                   class="form-check-input"
+                   checked="@_alsoDeleteLocalBranch"
+                   disabled="@(isCleaningUpWorktree || isRefreshing)"
+                   @onchange="e => _alsoDeleteLocalBranch = e.Value is true"
+                   @onclick:stopPropagation="true" />
+            <label class="form-check-label small" for="also-delete-local-branch">
+                Also delete local branch '@worktreeCleanupBranch'?
+            </label>
+        </div>
+    };
 
     private static bool CanForceDeleteUninspectedWorktree(GrayMoon.Application.Features.ExternalWorktreeCleanupPlan plan)
         => !plan.Success
@@ -1369,8 +1398,12 @@
 
             if (result.Success)
             {
+                var cleanedBranch = worktreeCleanupBranch;
+                var alsoDeleteBranch = _alsoDeleteLocalBranch;
                 DismissExternalWorktreeCleanup();
                 await ReloadBranchesFromPersistenceAsync();
+                if (alsoDeleteBranch)
+                    await DeleteLocalBranchAfterWorktreeRemovedAsync(cleanedBranch);
             }
             else
             {
@@ -1387,6 +1420,21 @@
             isCleaningUpWorktree = false;
             StateHasChanged();
         }
+    }
+
+    private async Task DeleteLocalBranchAfterWorktreeRemovedAsync(string? branch)
+    {
+        if (string.IsNullOrWhiteSpace(branch))
+            return;
+        if (!localBranches.Any(b => string.Equals(b, branch, StringComparison.OrdinalIgnoreCase)))
+            return;
+        if (TryGetOccupancy(branch, out var occ) && occ.RequiresExternalCleanup)
+            return;
+
+        branchToDelete = branch;
+        deleteIsRemote = false;
+        _awaitingForceDeleteConfirmation = false;
+        await DeleteBranchAsync(force: false);
     }
 
     /// <summary>Git exit when branch -d fails on unmerged branch; stable phrase from git's error output.</summary>
@@ -1578,6 +1626,7 @@
                     selectedBranch = currentBranchLocal;
 
                 showReturnToDefaultButton = ShouldShowReturnToDefaultButton();
+                await LoadOccupancyAsync();
 
                 // Refresh workspace data
                 await OnBranchChanged.InvokeAsync();
