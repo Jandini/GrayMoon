@@ -111,6 +111,16 @@ UnmatchedDeps
 RepositoryType
 ```
 
+### Workspace repository
+
+A Workspace can name one of its imported GitHub repositories as its **Workspace repository**. It is optional and set in the Workspace modal ("Workspace repository (optional)"). A Workspace has at most one.
+
+- The Workspace repository's working tree is the Workspace root folder itself. Source repositories stay in nested folders inside it and are ignored through a GrayMoon-managed section of the root `.gitignore`.
+- It carries the Workspace definition, `.graymoon.json`, which lists the Source repositories (by normalized URL), their connectors and the Workspace profile. GrayMoon rewrites it when membership or the profile changes. After a Sync it compares the file with the database; on a difference the Repositories page shows a banner with **Write Workspace definition to disk** and **Dismiss**.
+- The Repositories page lists it first, under a "Workspace repository" group, with a Workspace badge. It has no dependency level and no projects.
+- Enabling, disabling or changing it is refused while the Workspace has Features, and enabling is refused unless the connected Worker reports the `workspaceRepository` feature. Disabling removes the link only; files and `.git` stay on disk.
+- A Feature is created in two phases: the Workspace repository root worktree first (its path is the Feature root), then the Source worktrees inside it. Removal and rollback take the Sources first and the root last.
+
 ### Project
 
 A Workspace Project is a discovered `.csproj` or a generated/virtual package project.
