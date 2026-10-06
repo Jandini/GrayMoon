@@ -71,6 +71,9 @@
                                        OnKeyDown="OnSearchKeyDown"
                                        OnClear="ClearSearchFilter" />
                 </div>
+                <button class="btn btn-outline-primary text-nowrap flex-shrink-0" @onclick="ShowRestoreModal">
+                    Restore from repository
+                </button>
                 <button class="btn btn-primary flex-shrink-0" @onclick="ShowCreateModalAsync">
                     Add Workspace
                 </button>
@@ -209,6 +212,10 @@
                SaveDisabled="@EditorSaveDisabled"
                OnSave="@SaveWorkspaceAsync"
                OnCancel="@CloseEditorModal" />
+
+<RestoreWorkspaceModal IsVisible="@showRestoreModal"
+                        OnCancel="@CloseRestoreModal"
+                        OnRestored="@OnWorkspaceRestoredAsync" />
 
 <WorkspaceImportModal IsVisible="@showImportModal"
                       MatchingCount="@importMatchingCount"
@@ -469,6 +476,18 @@
         }
 
         showEditorModal = true;
+    }
+
+    private bool showRestoreModal;
+
+    private void ShowRestoreModal() => showRestoreModal = true;
+
+    private void CloseRestoreModal() => showRestoreModal = false;
+
+    private async Task OnWorkspaceRestoredAsync()
+    {
+        await LoadWorkspacesAsync();
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task ShowEditModalAsync(int workspaceId)
