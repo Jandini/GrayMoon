@@ -186,13 +186,57 @@
                                 {
                                     if (slot.Kind == VirtualSlotKind.WorkspaceHeader)
                                     {
-                                        <tr @key="@("ws-repo-header")" class="dependency-level-header">
-                                            <td colspan="@TableColSpan" class="dependency-level-header-cell">
-                                                <div class="dependency-level-header-start">
-                                                    <span class="dependency-level-title text-nowrap">Workspace repository</span>
-                                                </div>
-                                            </td>
-                                        </tr>
+                                        var wsGroup = GetHydratedWorkspaceRoleLinks();
+                                        <WorkspaceRepositoriesLevelHeader @key="@("ws-repo-header")"
+                                                                           WorkspaceId="@WorkspaceId"
+                                                                           TitleText="@WorkspaceHeaderTitle"
+                                                                           IsLevelHeader="false"
+                                                                           ColSpan="@TableColSpan"
+                                                                           Group="@wsGroup"
+                                                                           RepositoryCount="@slot.LevelRepoCount"
+                                                                           ActionsDisabled="@AreAllOnTag(wsGroup)"
+                                                                           IsFeatureContext="@_isFeatureContext"
+                                                                           OnReturnToDefault="async () => await ReturnToDefaultForIdsAsync(_workspaceRoleRepositoryIds)"
+                                                                           OnSyncCommits="() => SyncCommitsForIds(_workspaceRoleRepositoryIds)"
+                                                                           OnOpenPr="async () => await OpenPullRequestDialogForIdsAsync(_workspaceRoleRepositoryIds)"
+                                                                           OnOpenMergePrs="async () => await OpenMergePullRequestsDialogForIdsAsync(_workspaceRoleRepositoryIds, WorkspaceHeaderTitle)"
+                                                                           OnSyncLevel="() => SyncRepositoriesForIds(_workspaceRoleRepositoryIds)"
+                                                                           OnFetchLevel="async () => await FetchForIdsAsync(_workspaceRoleRepositoryIds)"
+                                                                           OnRestorePackagesLevel="async () => await RestorePackagesForIdsAsync(_workspaceRoleRepositoryIds)"
+                                                                           OpenPrUrls="@GetOpenPrUrlsForGroup(wsGroup)"
+                                                                           OpenPrPullMap="@GetOpenPrPullMapForGroup(wsGroup)"
+                                                                           HasCreatablePr="@GroupHasCreatablePr(wsGroup)"
+                                                                           HasMergeablePr="@GroupHasMergeablePr(wsGroup)"
+                                                                           HasMergedPr="@GroupHasMergedPr(wsGroup)"
+                                                                           HasSyncCommits="@GroupHasSyncCommits(wsGroup)"
+                                                                           />
+                                    }
+                                    else if (slot.Kind == VirtualSlotKind.SourcesHeader)
+                                    {
+                                        var srcGroup = GetHydratedSourceLinks();
+                                        <WorkspaceRepositoriesLevelHeader @key="@("src-repos-header")"
+                                                                           WorkspaceId="@WorkspaceId"
+                                                                           TitleText="@RepositoriesHeaderTitle"
+                                                                           IsLevelHeader="false"
+                                                                           ColSpan="@TableColSpan"
+                                                                           Group="@srcGroup"
+                                                                           RepositoryCount="@slot.LevelRepoCount"
+                                                                           ActionsDisabled="@AreAllOnTag(srcGroup)"
+                                                                           IsFeatureContext="@_isFeatureContext"
+                                                                           OnReturnToDefault="async () => await ReturnToDefaultForIdsAsync(_sourceRepositoryIds)"
+                                                                           OnSyncCommits="() => SyncCommitsForIds(_sourceRepositoryIds)"
+                                                                           OnOpenPr="async () => await OpenPullRequestDialogForIdsAsync(_sourceRepositoryIds)"
+                                                                           OnOpenMergePrs="async () => await OpenMergePullRequestsDialogForIdsAsync(_sourceRepositoryIds, RepositoriesHeaderTitle)"
+                                                                           OnSyncLevel="() => SyncRepositoriesForIds(_sourceRepositoryIds)"
+                                                                           OnFetchLevel="async () => await FetchForIdsAsync(_sourceRepositoryIds)"
+                                                                           OnRestorePackagesLevel="async () => await RestorePackagesForIdsAsync(_sourceRepositoryIds)"
+                                                                           OpenPrUrls="@GetOpenPrUrlsForGroup(srcGroup)"
+                                                                           OpenPrPullMap="@GetOpenPrPullMapForGroup(srcGroup)"
+                                                                           HasCreatablePr="@GroupHasCreatablePr(srcGroup)"
+                                                                           HasMergeablePr="@GroupHasMergeablePr(srcGroup)"
+                                                                           HasMergedPr="@GroupHasMergedPr(srcGroup)"
+                                                                           HasSyncCommits="@GroupHasSyncCommits(srcGroup)"
+                                                                           />
                                     }
                                     else if (slot.Kind == VirtualSlotKind.LevelHeader)
                                     {

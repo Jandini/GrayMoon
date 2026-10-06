@@ -8,6 +8,8 @@ using Microsoft.JSInterop;
 namespace GrayMoon.App.Components.Pages;
 public sealed partial class WorkspaceRepositories
 {
+    private const string WorkspaceHeaderTitle = "Workspace";
+    private const string RepositoriesHeaderTitle = "Repositories";
     private const double VirtualRowHeightPx = 48;
     private const double VirtualHeaderHeightPx = 40;
     private const int VirtualOverscanSlots = 24;
@@ -118,6 +120,8 @@ public sealed partial class WorkspaceRepositories
     {
         LevelHeader,
         WorkspaceHeader,
+        /// <summary>"Repositories" header over the Source rows of a flat grid that has a Workspace-role row.</summary>
+        SourcesHeader,
         Row,
     }
     internal sealed record VirtualSlot(
@@ -218,11 +222,25 @@ public sealed partial class WorkspaceRepositories
         _allFileVersionLinesByRepo = new Dictionary<int, IReadOnlyList<FileVersionDisplayLine>>();
         _customDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<string>>();
     }
+    /// <summary>Workspace-role repository ids of the current (search-filtered, context-scoped) grid index; the Workspace header menu acts on these.</summary>
+    private IReadOnlyList<int> _workspaceRoleRepositoryIds = [];
+    /// <summary>Source repository ids of the current grid index; the flat grid's "Repositories" header menu acts on these.</summary>
+    private IReadOnlyList<int> _sourceRepositoryIds = [];
     private void BuildSlots(IReadOnlyList<WorkspaceRepositoryLinkIndexEntry> index)
     {
+        _workspaceRoleRepositoryIds = GetRepositoryIdsByRole(index, workspaceRole: true);
+        _sourceRepositoryIds = GetRepositoryIdsByRole(index, workspaceRole: false);
         _slots.Clear();
         _slots.AddRange(ComputeSlots(index, _presentation.GroupByDependencyLevel));
     }
+
+    /// <summary>Repository ids of the index entries that are (workspaceRole true) or are not (false) Workspace-role, in index order. Source of the Workspace and Repositories header bulk actions.</summary>
+    internal static IReadOnlyList<int> GetRepositoryIdsByRole(
+        IReadOnlyList<WorkspaceRepositoryLinkIndexEntry> index,
+        bool workspaceRole) =>
+        index.Where(e => (e.Role == WorkspaceRepositoryRole.Workspace) == workspaceRole)
+            .Select(e => e.RepositoryId)
+            .ToList();
 
     /// <summary>
     /// Pure slot layout for the virtualized grid. With <paramref name="groupByDependencyLevel"/> every
@@ -230,6 +248,9 @@ public sealed partial class WorkspaceRepositories
     /// Without it the grid is a flat list of rows: no level header slots at all, never a synthetic level group.
     /// A Workspace-role row is never part of a level group: it is laid out first, under its own
     /// <see cref="VirtualSlotKind.WorkspaceHeader"/> slot (both with and without level grouping).
+    /// A flat grid that has a Workspace-role row and at least one Source row also gets a
+    /// <see cref="VirtualSlotKind.SourcesHeader"/> slot ("Repositories") before the Source rows; a flat grid
+    /// without a Workspace-role row, and a level-grouped grid, never do.
     /// </summary>
     internal static List<VirtualSlot> ComputeSlots(
         IReadOnlyList<WorkspaceRepositoryLinkIndexEntry> index,
@@ -261,6 +282,10 @@ public sealed partial class WorkspaceRepositories
         }
         if (!groupByDependencyLevel)
         {
+            if (workspaceEntries.Count > 0 && sourceEntries.Count > 0)
+            {
+                slots.Add(new VirtualSlot(VirtualSlotKind.SourcesHeader, null, 0, 0, sourceEntries.Count, -1));
+            }
             foreach (var entry in sourceEntries)
             {
                 slots.Add(new VirtualSlot(
@@ -307,7 +332,7 @@ public sealed partial class WorkspaceRepositories
         return slots;
     }
     private static string StripeClass(int stripeIndex) => VirtualScrollUi.StripeClass(stripeIndex);
-    private static double SlotHeight(VirtualSlot slot) =>
+    internal static double SlotHeight(VirtualSlot slot) =>
         slot.Kind != VirtualSlotKind.Row ? VirtualHeaderHeightPx : VirtualRowHeightPx;
     private double TotalScrollHeightPx()
     {
@@ -353,9 +378,14 @@ public sealed partial class WorkspaceRepositories
     }
     private IEnumerable<WorkspaceRepositoryLink> GetHydratedLinksAtLevel(int? levelKey) =>
         _linkByRepoId.Values.Where(wr => wr.Role != WorkspaceRepositoryRole.Workspace && wr.DependencyLevel == levelKey);
-    private bool IsLevelActionsDisabled(int? levelKey)
+    private IEnumerable<WorkspaceRepositoryLink> GetHydratedWorkspaceRoleLinks() =>
+        _linkByRepoId.Values.Where(wr => wr.Role == WorkspaceRepositoryRole.Workspace);
+    private IEnumerable<WorkspaceRepositoryLink> GetHydratedSourceLinks() =>
+        _linkByRepoId.Values.Where(wr => wr.Role != WorkspaceRepositoryRole.Workspace);
+    private bool IsLevelActionsDisabled(int? levelKey) => AreAllOnTag(GetHydratedLinksAtLevel(levelKey));
+    private static bool AreAllOnTag(IEnumerable<WorkspaceRepositoryLink> group)
     {
-        var hydrated = GetHydratedLinksAtLevel(levelKey).ToList();
+        var hydrated = group.ToList();
         if (hydrated.Count == 0)
         {
             return false;
