@@ -106,23 +106,17 @@ public interface IGitService
     /// <summary>Resets the current branch to origin/<paramref name="branchName"/>. When <paramref name="keepChanges"/> is true uses --mixed (changes remain in working tree); otherwise --hard. If the remote branch does not exist, pushes it upstream first using <paramref name="bearerToken"/>. Returns (success, errorMessage).</summary>
     Task<(bool Success, string? ErrorMessage)> ResetToRemoteAsync(string repoPath, string branchName, bool keepChanges, string? bearerToken, CancellationToken ct);
     /// <summary>Runs <c>git clone &lt;url&gt; .</c> inside <paramref name="targetDir"/> (an empty directory), so the repository root is that directory. Returns success.</summary>
-    Task<bool> CloneIntoAsync(string targetDir, string cloneUrl, string? bearerToken, CancellationToken ct)
-        => throw new NotSupportedException();
+    Task<bool> CloneIntoAsync(string targetDir, string cloneUrl, string? bearerToken, CancellationToken ct);
     /// <summary>Runs <c>git init</c> in <paramref name="repoPath"/>.</summary>
-    Task<(bool Success, string? Error)> InitAsync(string repoPath, CancellationToken ct)
-        => throw new NotSupportedException();
+    Task<(bool Success, string? Error)> InitAsync(string repoPath, CancellationToken ct);
     /// <summary>Runs <c>git remote add &lt;name&gt; &lt;url&gt;</c>.</summary>
-    Task<(bool Success, string? Error)> AddRemoteAsync(string repoPath, string name, string url, CancellationToken ct)
-        => throw new NotSupportedException();
+    Task<(bool Success, string? Error)> AddRemoteAsync(string repoPath, string name, string url, CancellationToken ct);
     /// <summary>Returns the remote HEAD branch name (from <c>git ls-remote --symref origin HEAD</c>), or null when the remote is empty or unreachable.</summary>
-    Task<string?> GetRemoteDefaultBranchAsync(string repoPath, string? bearerToken, CancellationToken ct)
-        => throw new NotSupportedException();
+    Task<string?> GetRemoteDefaultBranchAsync(string repoPath, string? bearerToken, CancellationToken ct);
     /// <summary>Runs <c>git checkout -b &lt;branch&gt; --track origin/&lt;branch&gt;</c>; the error is git's own message verbatim.</summary>
-    Task<(bool Success, string? Error)> CheckoutTrackingAsync(string repoPath, string branch, CancellationToken ct)
-        => throw new NotSupportedException();
+    Task<(bool Success, string? Error)> CheckoutTrackingAsync(string repoPath, string branch, CancellationToken ct);
     /// <summary>Points HEAD at an unborn branch with <c>git symbolic-ref HEAD refs/heads/&lt;branch&gt;</c>.</summary>
-    Task<(bool Success, string? Error)> SetUnbornHeadAsync(string repoPath, string branch, CancellationToken ct)
-        => throw new NotSupportedException();
+    Task<(bool Success, string? Error)> SetUnbornHeadAsync(string repoPath, string branch, CancellationToken ct);
     void CreateDirectory(string path);
     bool DirectoryExists(string path);
     string[] GetDirectories(string path);
