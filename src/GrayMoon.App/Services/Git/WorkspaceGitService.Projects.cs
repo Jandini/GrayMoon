@@ -201,6 +201,9 @@ public sealed partial class WorkspaceGitService
     /// <summary>Gets the list of repos that need dependency updates, with levels, scoped to <paramref name="contextId"/>. Used to detect single vs multi-level and to drive update-with-commit flow. When <paramref name="repositoryIds"/> is set, only those repos are considered.</summary>
     public async Task<(IReadOnlyList<SyncDependenciesRepoPayload> Payload, bool IsMultiLevel)> GetUpdatePlanAsync(int workspaceId, WorkspaceFeatureContextId contextId, IReadOnlySet<int>? repositoryIds = null, CancellationToken cancellationToken = default)
     {
+        if (!await UsesDependencyAwareUpdateAsync(workspaceId, cancellationToken))
+            return (Array.Empty<SyncDependenciesRepoPayload>(), false);
+
         var payloads = await _workspaceProjectRepository.GetSyncDependenciesPayloadAsync(workspaceId, contextId.Value, cancellationToken);
         var tagPinnedIds = (await _dbContext.WorkspaceRepositories
             .AsNoTracking()
@@ -236,6 +239,9 @@ public sealed partial class WorkspaceGitService
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)
             throw new InvalidOperationException($"Workspace {workspaceId} not found.");
+
+        if (!await UsesDependencyAwareUpdateAsync(workspaceId, cancellationToken))
+            return new HashSet<int>();
 
         var payloads = await _workspaceProjectRepository.GetSyncDependenciesPayloadAsync(workspaceId, contextId.Value, cancellationToken);
         var tagPinnedIds = (await _dbContext.WorkspaceRepositories
@@ -332,6 +338,21 @@ public sealed partial class WorkspaceGitService
             return true;
 
         _logger.LogDebug("Project refresh skipped: workspace {WorkspaceId} does not discover .NET projects", workspaceId);
+        return false;
+    }
+
+    /// <summary>
+    /// Rewriting package references to match the versions of the repositories that produce them exists only
+    /// for a workspace that uses dependency-aware update. Gated here so a Basic workspace never asks the worker
+    /// to touch a project file.
+    /// </summary>
+    private async Task<bool> UsesDependencyAwareUpdateAsync(int workspaceId, CancellationToken cancellationToken)
+    {
+        var capabilities = await _capabilitiesResolver.GetAsync(workspaceId, cancellationToken);
+        if (capabilities.UsesDependencyAwareUpdate)
+            return true;
+
+        _logger.LogDebug("Dependency update skipped: workspace {WorkspaceId} does not use dependency-aware update", workspaceId);
         return false;
     }
 }

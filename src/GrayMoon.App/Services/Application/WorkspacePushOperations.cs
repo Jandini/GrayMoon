@@ -1,13 +1,20 @@
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
+using GrayMoon.App.Services.Orchestration;
 using GrayMoon.Application.Features;
+using GrayMoon.Application.Workspaces;
 
 namespace GrayMoon.App.Services.Application;
 
+/// <summary>
+/// Application boundary for push. Resolves the workspace's capabilities once per call and selects the push
+/// strategy from them; everything below receives the chosen strategy instead of checking the workspace type.
+/// </summary>
 public sealed class WorkspacePushOperations(
     WorkspacePushHandler pushHandler,
     WorkspaceRepository workspaceRepository,
-    WorkspaceDependencyService dependencyService) : IWorkspacePushOperations
+    IWorkspaceCapabilitiesResolver capabilitiesResolver,
+    WorkspacePushStrategySelector strategySelector) : IWorkspacePushOperations
 {
     public async Task<WorkspacePushPlan> GetPlanAsync(
         int workspaceId,
@@ -41,21 +48,16 @@ public sealed class WorkspacePushOperations(
         int? maxLevel = null,
         CancellationToken cancellationToken = default)
     {
-        var (_, pushRepoIds, hasUnpushed) = await pushHandler.GetPushPlanAsync(workspaceId, contextId, links, cancellationToken, maxLevel);
+        var (_, strategy) = await SelectStrategyAsync(workspaceId, cancellationToken);
+        var (_, pushRepoIds, hasUnpushed) = await pushHandler.GetPushPlanAsync(strategy, workspaceId, contextId, links, cancellationToken, maxLevel);
         if (!hasUnpushed || pushRepoIds.Count == 0)
             return new WorkspacePushPlan(new HashSet<int>(), new HashSet<string>(StringComparer.OrdinalIgnoreCase), false);
 
-        var depInfo = await dependencyService.GetPushDependencyInfoForRepoSetAsync(workspaceId, contextId.Value, pushRepoIds, cancellationToken);
-        var required = depInfo?.PayloadForRepo?.RequiredPackages
-            .Select(r => r.PackageId?.Trim())
-            .Where(id => !string.IsNullOrEmpty(id))
-            .Cast<string>()
-            .ToHashSet(StringComparer.OrdinalIgnoreCase)
-            ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var required = await strategy.GetRequiredPackageIdsAsync(workspaceId, contextId, pushRepoIds, cancellationToken);
         return new WorkspacePushPlan(pushRepoIds, required, true);
     }
 
-    public Task<OperationResult> PushAsync(
+    public async Task<OperationResult> PushAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         IReadOnlySet<int> repositoryIds,
@@ -66,17 +68,20 @@ public sealed class WorkspacePushOperations(
         CancellationToken cancellationToken = default,
         string? runId = null,
         bool restorePackages = true)
-        => pushHandler.RunPushWithDependenciesAsync(
+    {
+        var (capabilities, strategy) = await SelectStrategyAsync(workspaceId, cancellationToken);
+        var run = new WorkspacePushRun(
             workspaceId,
             contextId,
+            capabilities,
             repositoryIds,
             synchronizedPush,
             requiredPackageIds,
-            progress,
-            syncedRepoIds: syncedRepoIds,
-            cancellationToken: cancellationToken,
-            runId: runId,
-            restorePackages: restorePackages);
+            syncedRepoIds,
+            restorePackages,
+            runId);
+        return await pushHandler.RunPushWithDependenciesAsync(strategy, run, progress, cancellationToken: cancellationToken);
+    }
 
     public async Task<OperationResult> PushPendingAsync(
         int workspaceId,
@@ -113,4 +118,12 @@ public sealed class WorkspacePushOperations(
             branchName,
             progress,
             cancellationToken);
+
+    private async Task<(WorkspaceCapabilities Capabilities, IWorkspacePushStrategy Strategy)> SelectStrategyAsync(
+        int workspaceId,
+        CancellationToken cancellationToken)
+    {
+        var capabilities = await capabilitiesResolver.GetAsync(workspaceId, cancellationToken);
+        return (capabilities, strategySelector.Select(capabilities));
+    }
 }

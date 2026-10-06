@@ -1,3 +1,5 @@
+using GrayMoon.Abstractions.Workspaces;
+using GrayMoon.Application.Workspaces;
 using GrayMoon.Common.Git;
 
 namespace GrayMoon.App.Services.GitChanges;
@@ -53,14 +55,17 @@ public interface IGitChangesWorkerClient
         string commitMessage, bool stageAllFirst, CancellationToken cancellationToken);
 }
 
-public sealed class GitChangesWorkerClient(IWorkerBridge workerBridge) : IGitChangesWorkerClient
+public sealed class GitChangesWorkerClient(
+    IWorkerBridge workerBridge,
+    IWorkspaceCapabilitiesResolver capabilitiesResolver) : IGitChangesWorkerClient
 {
     public async Task<GitChangesStatusResult> GetStatusAsync(
         string workspaceRoot, string workspaceName, string repositoryName,
         int workspaceId, int repositoryId, CancellationToken cancellationToken,
         bool includeLineStats = false)
     {
-        var args = new { workspaceRoot, workspaceName, repositoryName, workspaceId, repositoryId, includeLineStats };
+        var capabilities = await ResolveCapabilitiesAsync(workspaceId, cancellationToken);
+        var args = new { workspaceRoot, workspaceName, repositoryName, workspaceId, repositoryId, includeLineStats, capabilities };
         var response = await workerBridge.SendCommandAsync("GetGitChangeStatus", args, cancellationToken);
         return WorkerResponseJson.DeserializeWorkerResponse<GitChangesStatusResult>(response.Data)
             ?? new GitChangesStatusResult { Success = false, ErrorMessage = response.Error ?? "No response from worker." };
@@ -114,5 +119,18 @@ public sealed class GitChangesWorkerClient(IWorkerBridge workerBridge) : IGitCha
         var response = await workerBridge.SendCommandAsync("CommitGitChanges", args, cancellationToken);
         return WorkerResponseJson.DeserializeWorkerResponse<GitChangesCommitResult>(response.Data)
             ?? new GitChangesCommitResult { Success = false, ErrorMessage = response.Error ?? "No response from worker." };
+    }
+
+    /// <summary>Null when the workspace is gone, which the worker reads as "not stated".</summary>
+    private async Task<RepositoryOperationCapabilities?> ResolveCapabilitiesAsync(int workspaceId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return (await capabilitiesResolver.GetAsync(workspaceId, cancellationToken)).ToRepositoryOperationCapabilities();
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
     }
 }

@@ -384,6 +384,54 @@ through, so a workspace that does not discover projects never persists one, whic
 - Generated packages are workspace-global, but they are synced from one context's view: a Feature's
   missing-file overlay and its resolved versions are applied workspace-wide.
 
+## 8a. Push, update and restore strategies
+
+Push, update and restore choose their behaviour once, at the application boundary, from the workspace's
+capabilities. Nothing below that boundary asks what kind of workspace it is working on.
+
+### Push
+
+`WorkspacePushOperations` resolves the capabilities once per call and asks
+`WorkspacePushStrategySelector` for an `IWorkspacePushStrategy`. The chosen strategy is passed down through
+`WorkspacePushHandler` and `PushOrchestrator`; the orchestrator only runs it and folds failures into one
+result.
+
+| Strategy | Selected when | Plan | Push |
+|---|---|---|---|
+| `BasicGitPushStrategy` | not `UsesDependencyAwarePush` | every non-tag-pinned repository, no levels, no required packages | all selected repositories in parallel |
+| `DotNetDependencyPushStrategy` | `UsesDependencyAwarePush` | the context's dependency graph, levels and required packages | unchanged: synchronized (registry sync, level order, package wait, restore) or parallel |
+
+The Basic strategy reads no project or dependency rows, queries no registry, waits for no package, orders
+nothing by level and restores nothing, even when the caller asks for a synchronized push. The .NET strategy
+is the previous code path; it syncs registries only when `UsesNuGetPackages` and restores between levels
+only when `UsesPackageRestore`, both true for that profile. The CI run watch stays inside the .NET package
+wait, so a Basic push never ticks it.
+
+### Update
+
+`DependencyUpdateOrchestrator` checks `UsesDependencyAwareUpdate` once at the top of a run. Without it the
+run is version files only: out-of-date version files across every non-tag-pinned repository are updated and
+committed as one group, the committed repositories' versions are refreshed, and the run finalizes as before.
+No project refresh, no dependency levels, no `.csproj` rewrite. `WorkspaceGitService.GetUpdatePlanAsync`
+and `SyncDependenciesAsync` carry the same gate, so the single-repository update and any direct caller
+never send `SyncRepositoryDependencies` for such a workspace. Version-file updates themselves stay
+available for every profile.
+
+### Restore
+
+`WorkspaceGitService.RestoreDependenciesAsync`, `RestoreAllWorkspacePackagesAsync` and
+`RestoreSyncedWorkspacePackagesAsync` are no-ops (they return 0) unless `UsesPackageRestore`. None of them
+needs the .NET SDK for a Basic workspace.
+
+### Worker refresh after push, undo and return-to-default
+
+`PushRepository`, `UndoPush`, `FetchCommits`, `GetGitChangeStatus` and `ReturnToDefaultBranch` all carry
+the workspace's capabilities, and each warms the Worker's capability cache. The post-operation refresh in
+`PushRepositoryCommand` and `UndoPushCommand` asks the version provider built from the request's
+capabilities and scans projects only when `DiscoverDotNetProjects` holds; return-to-default passes the
+capabilities to the state probe. A skipped step reports itself as not probed, so the App keeps whatever it
+already has. For Basic with no versioning none of these launch GitVersion.
+
 ## 9. Persistence and migration
 
 Schema is owned by EF Core but applied through `EnsureCreated()` for new databases and guarded,

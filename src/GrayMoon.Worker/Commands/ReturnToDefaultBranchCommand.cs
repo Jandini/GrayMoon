@@ -99,7 +99,8 @@ public sealed class ReturnToDefaultBranchCommand(IGitService git, IRepositorySta
             IncludeGitVersion = true,
             IncludeBranchLists = true,
             IncludeProjects = true,
-            BranchNameOverride = defaultBranch
+            BranchNameOverride = defaultBranch,
+            Capabilities = request.Capabilities
         }, cancellationToken);
 
         return new ReturnToDefaultBranchResponse
