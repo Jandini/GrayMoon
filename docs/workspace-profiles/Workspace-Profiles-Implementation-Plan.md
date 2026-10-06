@@ -1119,8 +1119,7 @@ A design that works for the special Workspace context but breaks Feature worktre
 
 Architectural findings that changed the design. Newest first.
 
-| Date | Finding | Consequence |
-|---|---|---|
+| 2026-10-06 | On Linux, <c>Process.Start("dotnet-gitversion")</c> throws <c>Win32Exception</c> when the tool is not on PATH. The Worker treated that as a crashed hook instead of a failed version probe. | `CommandLineService` now returns exit -1 with the start error, matching the documented "failed to start" result. GitVersion-gated tests still skip on CI that has no tool. |
 | 2026-10-06 | A parallel push ran `ConnectorHealthService` from several repositories at once on the same DbContext (`WorkspacePushService` / `ConnectorHealthService`). | Serialized in Unit D. Pre-existing concurrency bug, not profile-specific. |
 | 2026-10-06 | The Repositories page and the action panel still read push-dependency info from `WorkspaceDependencyService`, not the push strategy. Restore and update job titles are similarly page-side. | Harmless until Unit H can create a Basic workspace. Then hide or switch those reads. |
 | 2026-10-06 | `CreateBranchCommand` still launches GitVersion with no capabilities; Feature operations send `GetGitChangeStatus` without them. Unit D gated the other request family. | Remaining Worker probes for Unit H or I. |

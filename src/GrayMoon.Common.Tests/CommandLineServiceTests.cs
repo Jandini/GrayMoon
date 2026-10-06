@@ -23,6 +23,28 @@ public sealed class CommandLineServiceTests
     }
 
     [Fact]
+    public async Task RunAsync_MissingExecutable_ReturnsFailedStartInsteadOfThrowing()
+    {
+        var service = CreateService();
+
+        var result = await service.RunAsync("graymoon-no-such-executable", "/version");
+
+        Assert.Equal(-1, result.ExitCode);
+        Assert.False(string.IsNullOrWhiteSpace(result.Stderr));
+    }
+
+    [Fact]
+    public async Task RunAsync_ArgumentListOverload_MissingExecutable_ReturnsFailedStartInsteadOfThrowing()
+    {
+        var service = CreateService();
+
+        var result = await service.RunAsync("graymoon-no-such-executable", (IReadOnlyList<string>)["/version"]);
+
+        Assert.Equal(-1, result.ExitCode);
+        Assert.False(string.IsNullOrWhiteSpace(result.Stderr));
+    }
+
+    [Fact]
     public void ApplyNonInteractiveGitEnvironment_SetsGitTerminalPromptZero_ForGitExecutable()
     {
         var startInfo = new ProcessStartInfo { FileName = "git" };
