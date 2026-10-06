@@ -19,9 +19,9 @@ It must be possible to stop work here and resume later without reconstructing st
 | | |
 |---|---|
 | Project status | READY |
-| Current phase | Wave 0 complete (Unit O DONE). Wave 1 (A, W1, B) is READY to start |
+| Current phase | Wave 1 complete (O, A, W1, B DONE). Wave 2 (C, W2) is READY to start |
 | Units planned in detail | O, A, W1, B, C, W2, D, E, F, G, I |
-| Last verified | 2026-10-06, after Unit O on `c0bfb2a` + O: `dotnet build GrayMoon.slnx` 0 warnings; App 1007/1007, Worker 320/320 + 1 pre-existing skip, Common 236/236. The baseline moved from `f7f94ce` (App 999, Worker 318) to `c0bfb2a` because `origin/main` (Worker Windows-service password change) was merged into this branch; the owner accepted the new numbers. Original plan baseline `f7f94ce`: `dotnet build GrayMoon.slnx` 0 warnings; App 999/999, Worker 318 + 1 pre-existing skip, Common 236/236. Every file path named in the units was checked to exist. |
+| Last verified | 2026-10-06, after Wave 1 on `workspace-as-git-repository`: `dotnet build GrayMoon.slnx` 0 warnings; App 1028/1028, Worker 329/329 + 1 pre-existing skip, Common 255/255. Baseline moved from `f7f94ce` (App 999, Worker 318) to `c0bfb2a` because `origin/main` (Worker Windows-service password change) was merged into this branch; the owner accepted it. |
 
 **What works today.** Nothing of this feature. A Workspace is a folder containing one subfolder per repository; the Worker derives every repository path as `<root>\<WorkspaceName>\<RepositoryName>`; Features create one worktree per repository under `<FeatureStorageRoot>\<Feature>\<RepositoryName>`.
 
@@ -322,7 +322,7 @@ Commit message: Add the contracts for the Workspace repository feature
 | | |
 |---|---|
 | Owner | subagent |
-| Status | REVIEW |
+| Status | DONE |
 | Dependencies | O |
 | Decisions | none beyond v3 section 7. Owner decision (user approved): call MigrateWorkspaceRepositoryRoleAsync from RunLegacyBaselineAsync before MigrateWorkspaceFeatureContextSchemaAsync, because that legacy step loads WorkspaceRepositoryLink through EF and needs the Role column to exist on pre-0.1.0 databases. |
 
@@ -461,7 +461,7 @@ Commit message: Add Role to WorkspaceRepositoryLink with strict migration step 5
 | | |
 |---|---|
 | Owner | subagent |
-| Status | REVIEW |
+| Status | DONE |
 | Dependencies | O |
 | Decisions | D1, D2, D6 |
 
@@ -569,7 +569,7 @@ Commit message: feat(worker): resolve Workspace repository path, gate project di
 | | |
 |---|---|
 | Owner | subagent |
-| Status | REVIEW |
+| Status | DONE |
 | Dependencies | O |
 | Decisions | D11, D12, D15 |
 
@@ -1077,7 +1077,12 @@ src/GrayMoon.App.Tests/RestoreWorkspaceFlowTests.cs                    (new, ser
 Record coupling or surprises here with unit, file and one sentence. Do not fix them unless your unit owns the file.
 
 ```text
-(empty)
+W1  SearchFilesCommand and IWorkspaceFileSearchService still Path.Combine(workspacePath, repositoryName) internally; a file search scoped to the Workspace repository name finds no folder. Triage: needed by Unit E (file search for the Workspace row); owner to assign an owner for those two files before Unit E starts.
+W1  Hook sync commands have no request.WorkspaceRepositoryName and rely on the default false, so a hook sync for the Workspace repository still discovers projects. Acceptable for v1; the App hides projects for Role == Workspace (Unit E).
+W1  WorkspaceFileSearchService also skips submodule folders at the repository root (they contain .git). Intended side effect of the nested-repo exclusion.
+B   ManagedGitIgnoreSection treats a start marker without an end marker as no section and appends a new one; it never deletes user lines.
+B   WriteIndented makes manifest arrays multi-line and the default JSON encoder escapes characters such as & and + in URLs as \uXXXX. Output is stable but less readable than the D15 example.
+A   Only the Feature-context legacy migration step loads WorkspaceRepositoryLink through EF before strict step 5; the early role call covers it.
 ```
 
 ## Decisions made during execution
@@ -1085,7 +1090,9 @@ Record coupling or surprises here with unit, file and one sentence. Do not fix t
 Only the owner writes here. Each entry: date, what, why, which document was updated.
 
 ```text
-(empty)
+2026-10-06  Baseline moved to c0bfb2a (origin/main merged: Worker Windows-service password change). App 1007, Worker 320 + 1 skip, Common 236. Accepted by the owner. Plan header updated.
+2026-10-06  Unit A may also edit Migrations.cs RunLegacyBaselineAsync: it calls the idempotent MigrateWorkspaceRepositoryRoleAsync before MigrateWorkspaceFeatureContextSchemaAsync. Why: the legacy Feature-context backfill loads WorkspaceRepositoryLink through EF and failed on databases without the Role column (UpgradeFrom010Tests). Chosen by the owner.
+2026-10-06  Unit W1 may also edit IRepositoryStateProbe.cs, RepositoryStateProbe.cs and the Worker.Tests probe stubs. Why: the D6 discovery gate in the probe needed them. Chosen by the owner. Implemented as RepositoryStateProbeOptions.IsWorkspaceRepository (default false), set only by ReturnToDefaultBranchCommand.
 ```
 
 ## Follow-ups (not v1)
@@ -1095,3 +1102,4 @@ Only the owner writes here. Each entry: date, what, why, which document was upda
 - Apply a drifted manifest to the database with per-item review (D8, v3 sections 27 and 42).
 - Model-driven watcher exclusion list sent from the App (D7).
 - Hook sync for the Workspace repository still discovers projects if the hook path has no request field (W1 step 4 note); harmless while the App hides projects for the Workspace row.
+- SearchFilesCommand / IWorkspaceFileSearchService do not know the Workspace repository name (see Discoveries); decide an owning unit before Unit E.
