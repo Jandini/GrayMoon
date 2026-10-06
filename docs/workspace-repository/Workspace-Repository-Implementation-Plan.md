@@ -501,7 +501,7 @@ src/GrayMoon.Worker.Tests/WorkspaceRepositoryDiscoveryGateTests.cs    (new)
 | | |
 |---|---|
 | Owner | subagent |
-| Status | TODO |
+| Status | REVIEW |
 | Dependencies | O |
 | Decisions | D11, D12, D15 |
 
@@ -569,7 +569,25 @@ src/GrayMoon.App.Tests/ManagedGitIgnoreSectionTests.cs                          
 **Handoff log.**
 
 ```text
-(empty)
+Date: 2026-10-06
+Status after this handoff: REVIEW
+Files changed (full paths):
+  C:\Users\matth\.graymoon\GrayMoon\features\workspace-as-git-repository\B\src\GrayMoon.Common\Git\RepositoryUrlIdentity.cs (new)
+  C:\Users\matth\.graymoon\GrayMoon\features\workspace-as-git-repository\B\src\GrayMoon.Common.Tests\RepositoryUrlIdentityTests.cs (new)
+  C:\Users\matth\.graymoon\GrayMoon\features\workspace-as-git-repository\B\src\GrayMoon.App\Services\WorkspaceManifest\WorkspaceManifestSerializer.cs (new)
+  C:\Users\matth\.graymoon\GrayMoon\features\workspace-as-git-repository\B\src\GrayMoon.App\Services\WorkspaceManifest\ManagedGitIgnoreSection.cs (new)
+  C:\Users\matth\.graymoon\GrayMoon\features\workspace-as-git-repository\B\src\GrayMoon.App\Services\WorkspaceManifest\WorkspaceManifestProfileNames.cs (new)
+  C:\Users\matth\.graymoon\GrayMoon\features\workspace-as-git-repository\B\src\GrayMoon.App.Tests\WorkspaceManifestSerializerTests.cs (new)
+  C:\Users\matth\.graymoon\GrayMoon\features\workspace-as-git-repository\B\src\GrayMoon.App.Tests\ManagedGitIgnoreSectionTests.cs (new)
+  C:\Users\matth\.graymoon\GrayMoon\features\workspace-as-git-repository\B\docs\workspace-repository\Workspace-Repository-Implementation-Plan.md (Unit B section only)
+Search counts before/after (for replace-all steps): n/a
+Build: dotnet build GrayMoon.slnx -> warnings: 0, errors: 0
+Tests: App 1021/1021, Common 255/255   (Worker not run, not required by this unit)
+New tests added (names): RepositoryUrlIdentityTests (Equivalent_repository_urls_normalize_to_the_same_value, Repository_url_compare_ignores_path_case, Different_owner_is_not_equal, Connector_urls_are_normalized, Garbage_returns_trimmed_input_and_equal_garbage_is_equal, Empty_input_returns_empty); WorkspaceManifestSerializerTests (Round_trip_is_byte_identical, Serialize_sorts_connectors_and_repositories, Serialize_uses_lf_and_trailing_newline, Serialize_never_contains_id_fields, Parse_rejects_schema_version_2, Parse_defaults_missing_schema_version_to_1, Parse_ignores_unknown_properties, Parse_fails_on_missing_workspace_name); ManagedGitIgnoreSectionTests (Appends_section_to_empty_file, Appends_section_after_blank_line_to_non_empty_file, Replaces_existing_section_and_preserves_outside_lines, Sorts_names_case_insensitively, Output_uses_lf, Idempotent_second_apply_is_identical)
+Deviations from the steps (and why): none of substance. WorkspaceManifestSerializer declares using-aliases for the manifest records inside the namespace, because the namespace GrayMoon.App.Services.WorkspaceManifest otherwise shadows the record type WorkspaceManifest. TryParse also returns an error for empty content and invalid JSON. Profile-name TryParse is case-insensitive. Normalized non-default http(s) ports are kept in NormalizeRepositoryUrl; ssh port is dropped.
+Discoveries (coupling, surprises, things that look wrong but were left alone): ManagedGitIgnoreSection treats a start marker without an end marker as "no section" and appends a new one (does not delete user lines). Serializer output of arrays is multi-line (WriteIndented), unlike the inline objects in the D15 example. Default JSON encoder escapes characters such as '&' and '+' as \uXXXX in URLs; stable but less readable.
+Follow-ups for the owner: none.
+Commit message: Add repository URL identity, manifest serializer and managed gitignore section
 ```
 
 ---
