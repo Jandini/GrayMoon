@@ -56,6 +56,48 @@ public sealed class WorkerConnectionTrackerTests
     }
 
     [Fact]
+    public void ReportLogonPasswordFailure_ends_installing_and_clears_after_the_worker_returns()
+    {
+        var tracker = new WorkerConnectionTracker("2.0.0");
+        tracker.OnWorkerConnected("old");
+        tracker.ReportWorkerSemVer("old", "1.0.0");
+        tracker.BeginSelfUpdate();
+        tracker.OnWorkerDisconnected("old");
+        Assert.True(tracker.IsSelfUpdateInProgress);
+
+        var raised = new List<WorkerConnectionState>();
+        tracker.OnStateChanged(raised.Add);
+        raised.Clear();
+
+        tracker.ReportLogonPasswordFailure();
+
+        Assert.True(tracker.LogonPasswordRequired);
+        Assert.False(tracker.IsSelfUpdateInProgress);
+        Assert.Equal(WorkerConnectionState.Offline, Assert.Single(raised));
+
+        tracker.ReportLogonPasswordFailure();
+        Assert.True(tracker.LogonPasswordRequired);
+
+        tracker.OnWorkerConnected("new");
+        tracker.ReportWorkerSemVer("new", "2.0.0");
+        Assert.False(tracker.LogonPasswordRequired);
+        Assert.Equal(WorkerConnectionState.Online, tracker.State);
+    }
+
+    [Fact]
+    public void ReportLogonPasswordFailure_ignores_a_worker_that_is_not_updating()
+    {
+        var tracker = new WorkerConnectionTracker("2.0.0");
+        tracker.OnWorkerConnected("w");
+        tracker.ReportWorkerSemVer("w", "2.0.0");
+
+        tracker.ReportLogonPasswordFailure();
+
+        Assert.False(tracker.LogonPasswordRequired);
+        Assert.Equal(WorkerConnectionState.Online, tracker.State);
+    }
+
+    [Fact]
     public void BeginSelfUpdate_from_a_state_handler_does_not_deadlock()
     {
         var tracker = new WorkerConnectionTracker("1.0.0");

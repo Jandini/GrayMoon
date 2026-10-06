@@ -12,15 +12,31 @@ internal sealed class WorkerDesktopNotificationPolicy
     private bool _hasBeenConnected;
     private bool _selfUpdateInProgress;
     private bool _installingNotified;
+    private bool _logonPasswordNotified;
 
-    public DesktopNotification? OnChange(WorkerConnectionState state, bool selfUpdateInProgress, string? workerSemVer)
+    public DesktopNotification? OnChange(
+        WorkerConnectionState state,
+        bool selfUpdateInProgress,
+        string? workerSemVer,
+        bool logonPasswordRequired = false)
     {
         if (selfUpdateInProgress && !_selfUpdateInProgress)
             _installingNotified = false;
         _selfUpdateInProgress = selfUpdateInProgress;
 
         if (state is WorkerConnectionState.Online or WorkerConnectionState.VersionMismatch)
+        {
             _hasBeenConnected = true;
+            _logonPasswordNotified = false;
+        }
+
+        if (logonPasswordRequired && !selfUpdateInProgress && state == WorkerConnectionState.Offline)
+        {
+            if (_logonPasswordNotified)
+                return null;
+            _logonPasswordNotified = true;
+            return LogonPasswordRequired();
+        }
 
         if (state == WorkerConnectionState.VersionMismatch && !selfUpdateInProgress)
             return UpdateRequired(workerSemVer);
@@ -57,6 +73,15 @@ internal sealed class WorkerDesktopNotificationPolicy
             "GrayMoon Worker is installing",
             "The GrayMoon Worker is updating and will reconnect when the install finishes.",
             DesktopNotificationSeverity.Info,
+            "/worker",
+            DateTimeOffset.UtcNow);
+
+    internal static DesktopNotification LogonPasswordRequired() =>
+        new(
+            Guid.NewGuid().ToString(),
+            "GrayMoon Worker install failed",
+            "The Windows password for the Worker service is no longer valid. Open the Worker page and install it again.",
+            DesktopNotificationSeverity.Error,
             "/worker",
             DateTimeOffset.UtcNow);
 

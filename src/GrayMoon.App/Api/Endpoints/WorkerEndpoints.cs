@@ -15,7 +15,32 @@ public static class WorkerEndpoints
         routes.MapGet("/api/worker/install", InstallWorker);
         routes.MapGet("/api/worker/uninstall", UninstallWorker);
         routes.MapPost("/api/worker/pair", PairWorker);
+        routes.MapPost("/api/worker/install-failure", ReportInstallFailure);
         return routes;
+    }
+
+    public const string LogonPasswordFailureReason = "logon-password";
+
+    public sealed record WorkerInstallFailureRequest(string? Reason);
+
+    /// <summary>
+    /// Unattended install script callback. A browser always sends <c>Origin</c> and is rejected.
+    /// The report is applied only while a self-update is in progress, so it cannot flip the badge on its own.
+    /// </summary>
+    internal static IResult ReportInstallFailure(
+        HttpRequest request,
+        WorkerInstallFailureRequest? body,
+        WorkerConnectionTracker tracker)
+    {
+        if (request.Headers.ContainsKey("Origin"))
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        if (!string.Equals(body?.Reason, LogonPasswordFailureReason, StringComparison.Ordinal))
+            return Results.BadRequest();
+
+        tracker.ReportLogonPasswordFailure();
+        // 200 with a body: Windows PowerShell 5.1's Invoke-RestMethod treats 204 as a failure.
+        return Results.Ok(new { reported = true });
     }
 
     /// <summary>Exchanges the one-time pairing code shown on the Worker page for the Worker secret (F2).

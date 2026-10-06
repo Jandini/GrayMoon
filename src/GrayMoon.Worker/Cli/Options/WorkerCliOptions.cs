@@ -23,6 +23,12 @@ internal static class WorkerCliOptions
     };
 
     // Install-only: not added to the run command.
+    public static readonly Option<bool> NonInteractive = new("--non-interactive")
+    {
+        Description = "Do not prompt. When the service logon password is stale, exit so GrayMoon can ask for it in an attended install.",
+    };
+
+    // Install-only: not added to the run command.
     public static readonly Option<string?> Account = new("--account")
     {
         Description = "Windows account to run the service as (default: current user)",

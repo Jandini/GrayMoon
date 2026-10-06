@@ -35,6 +35,44 @@ function Complete-WorkerInstall {
     exit $Code
 }
 
+# The worker that launches a background upgrade is the one already installed. It only starts a
+# hidden "powershell -NonInteractive" and cannot pass a new flag. Mark that host unattended so
+# this script does not wait on a password prompt nobody can see.
+function Enable-UnattendedWorkerInstall {
+    if ($env:GRAYMOON_WORKER_NONINTERACTIVE -eq '1') {
+        return
+    }
+
+    $commandLine = $null
+    try {
+        $commandLine = (Get-CimInstance -ClassName Win32_Process -Filter "ProcessId=$PID" -ErrorAction Stop).CommandLine
+    }
+    catch {
+        $commandLine = $null
+    }
+
+    $hidden = ($commandLine -match '(?i)(^|\s)-NonInteractive(\s|$)') -or -not [Environment]::UserInteractive
+    if ($hidden) {
+        $env:GRAYMOON_WORKER_NONINTERACTIVE = '1'
+    }
+}
+
+# Exit code 2 is the worker's logon-password failure (InstallCommandHandler.LogonPasswordRequiredExitCode).
+# An unattended upgrade cannot ask for the new Windows password, so tell GrayMoon to leave "installing"
+# and show the error badge. The user then runs an attended install, which prompts again.
+function Report-WorkerInstallFailure {
+    if ($env:GRAYMOON_WORKER_NONINTERACTIVE -ne '1') {
+        return
+    }
+
+    try {
+        Invoke-RestMethod -Method Post -Uri "$baseUrl/api/worker/install-failure" -ContentType 'application/json' -Body '{"reason":"logon-password"}' | Out-Null
+    }
+    catch {
+        Write-Host 'WARNING: GrayMoon could not be told that the Worker password must be entered again.' -ForegroundColor Yellow
+    }
+}
+
 if ($env:GRAYMOON_DESKTOP_INSTALL -eq '1') {
     trap {
         Write-Host ''
@@ -144,11 +182,22 @@ if (-not (Test-Path -LiteralPath $workerExe)) {
 }
 
 # Delegate all service management (create/update, rights grant, start) to the worker.
+# Unattended self-update must not wait on a hidden password prompt.
+Enable-UnattendedWorkerInstall
 Write-Host 'Installing service...' -ForegroundColor Yellow
-& $workerExe install --hub-url $hubUrl
-if ($LASTEXITCODE -ne 0) {
+if ($env:GRAYMOON_WORKER_NONINTERACTIVE -eq '1') {
+    & $workerExe install --hub-url $hubUrl --non-interactive
+} else {
+    & $workerExe install --hub-url $hubUrl
+}
+$installExit = $LASTEXITCODE
+if ($installExit -ne 0) {
+    if ($installExit -eq 2) {
+        Write-Host 'The Windows password stored for the Worker service is no longer valid. Install again from GrayMoon and enter the current password.' -ForegroundColor Red
+        Report-WorkerInstallFailure
+    }
     Write-Host "Installation failed. Correct any errors above and run the script again." -ForegroundColor Red
-    Complete-WorkerInstall -Code 1
+    Complete-WorkerInstall -Code $installExit
     return
 }
 Write-Host ''

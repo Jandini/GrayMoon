@@ -19,6 +19,8 @@ public sealed class WorkerConnectionTracker
     private readonly string? _appSemVer;
     private WorkerConnectionState _state = WorkerConnectionState.Offline;
     private bool _selfUpdateInProgress;
+    private bool _logonPasswordRequired;
+    private bool _offlineAfterLogonFailure;
     private event Action<WorkerConnectionState>? _onStateChanged;
 
     public WorkerConnectionTracker()
@@ -51,6 +53,19 @@ public sealed class WorkerConnectionTracker
         {
             lock (_lock)
                 return _selfUpdateInProgress;
+        }
+    }
+
+    /// <summary>
+    /// True after an unattended upgrade could not start the service because the stored Windows
+    /// password is stale. Cleared once the worker connects again after that failure.
+    /// </summary>
+    public bool LogonPasswordRequired
+    {
+        get
+        {
+            lock (_lock)
+                return _logonPasswordRequired;
         }
     }
 
@@ -102,6 +117,24 @@ public sealed class WorkerConnectionTracker
         });
     }
 
+    /// <summary>
+    /// Records that the in-progress unattended upgrade failed because the service logon password
+    /// is no longer valid. Ends the update so the badge leaves "installing". Ignored unless an
+    /// update is actually in progress.
+    /// </summary>
+    public void ReportLogonPasswordFailure()
+    {
+        RaiseIfChanged(() =>
+        {
+            if (!_selfUpdateInProgress)
+                return false;
+            _logonPasswordRequired = true;
+            _selfUpdateInProgress = false;
+            _offlineAfterLogonFailure = _connectionIds.Count == 0;
+            return true;
+        });
+    }
+
     public void OnWorkerConnected(string connectionId)
     {
         RaiseIfChanged(() =>
@@ -141,6 +174,17 @@ public sealed class WorkerConnectionTracker
     /// <summary>Must run while holding the instance lock. Returns true if listeners should be notified.</summary>
     private bool ApplyConnectionState()
     {
+        if (_logonPasswordRequired)
+        {
+            if (_connectionIds.Count == 0)
+                _offlineAfterLogonFailure = true;
+            else if (_offlineAfterLogonFailure)
+            {
+                _logonPasswordRequired = false;
+                _offlineAfterLogonFailure = false;
+            }
+        }
+
         var next = ComputeState();
         var endedUpdate = false;
         if (_selfUpdateInProgress && next == WorkerConnectionState.Online)

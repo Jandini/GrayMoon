@@ -13,6 +13,13 @@ internal static class InstallCommandHandler
     public const string ServiceName = "GrayMoonWorker";
     /// <summary>Previous Windows/systemd service id; removed on install/uninstall so upgrades migrate cleanly.</summary>
     public const string LegacyServiceName = "GrayMoonAgent";
+    /// <summary>
+    /// Printed and returned when the service account password is no longer valid and nobody can type a new one.
+    /// install-worker.ps1 treats this exit code as the unattended logon-password failure.
+    /// </summary>
+    internal const int LogonPasswordRequiredExitCode = 2;
+    internal const string LogonPasswordRequiredMarker = "LOGON_PASSWORD_REQUIRED";
+    private const int PasswordAttempts = 3;
     private const string ServiceDisplayName = "GrayMoon Worker";
     private const string ServiceDescription = "Host-side worker for GrayMoon: executes git and repository I/O operations";
 
@@ -59,11 +66,12 @@ internal static class InstallCommandHandler
             serviceExists = false;
         }
 
+        var interactive = !parseResult.GetValue(WorkerCliOptions.NonInteractive);
         try
         {
             return serviceExists && existing != null
-                ? UpdateWindows(existing, binPath)
-                : FreshInstallWindows(binPath, parseResult);
+                ? UpdateWindows(existing, binPath, interactive)
+                : FreshInstallWindows(binPath, parseResult, interactive);
         }
         finally
         {
@@ -126,7 +134,7 @@ internal static class InstallCommandHandler
     }
 
     [SupportedOSPlatform("windows")]
-    private static int UpdateWindows(ServiceController controller, string binPath)
+    private static int UpdateWindows(ServiceController controller, string binPath, bool interactive)
     {
         if (controller.Status == ServiceControllerStatus.Running)
         {
@@ -155,11 +163,11 @@ internal static class InstallCommandHandler
             return 1;
         }
 
-        return StartWindows();
+        return StartWindows(interactive);
     }
 
     [SupportedOSPlatform("windows")]
-    private static int FreshInstallWindows(string binPath, ParseResult parseResult)
+    private static int FreshInstallWindows(string binPath, ParseResult parseResult, bool interactive)
     {
         var account = parseResult.GetValue(WorkerCliOptions.Account)
             ?? WindowsIdentity.GetCurrent().Name;
@@ -170,6 +178,9 @@ internal static class InstallCommandHandler
 
         if (!IsVirtualAccount(account))
         {
+            if (!interactive)
+                return LogonPasswordRequired(account);
+
             Console.Write($"Password for {account}: ");
             password = ReadPasswordMasked();
 
@@ -215,25 +226,128 @@ internal static class InstallCommandHandler
             }
         }
 
-        return StartWindows();
+        return StartWindows(interactive);
     }
 
     [SupportedOSPlatform("windows")]
-    private static int StartWindows()
+    private static int StartWindows(bool interactive)
     {
+        var started = TryStartService(out var logonFailure);
+        if (started)
+            return 0;
+        if (!logonFailure)
+            return 1;
+
+        return RecoverFromLogonFailure(interactive);
+    }
+
+    /// <summary>Returns true when the service is running. Sets <paramref name="logonFailure"/> when Windows rejected the stored logon.</summary>
+    [SupportedOSPlatform("windows")]
+    private static bool TryStartService(out bool logonFailure)
+    {
+        logonFailure = false;
         try
         {
             using var sc = new ServiceController(ServiceName);
+            if (sc.Status == ServiceControllerStatus.Running)
+            {
+                Console.WriteLine($"Service '{ServiceName}' installed and started successfully.");
+                return true;
+            }
+
             sc.Start();
             sc.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(30));
             Console.WriteLine($"Service '{ServiceName}' installed and started successfully.");
-            return 0;
+            return true;
+        }
+        catch (Exception ex) when (ServiceLogonFailure.IsMatch(ex))
+        {
+            logonFailure = true;
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Failed to start service: {ex.Message}");
+            return false;
+        }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static int RecoverFromLogonFailure(bool interactive)
+    {
+        string account;
+        try
+        {
+            account = WindowsServiceManager.QueryServiceStartName(ServiceName);
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"Failed to start service: {ex.Message}");
             return 1;
         }
+
+        if (IsVirtualAccount(account) || account.EndsWith('$'))
+        {
+            Console.Error.WriteLine("Failed to start service: the service did not start due to a logon failure.");
+            return 1;
+        }
+
+        if (!interactive)
+            return LogonPasswordRequired(account);
+
+        Console.Error.WriteLine($"The Windows password for {account} was not accepted.");
+        for (var attempt = 1; attempt <= PasswordAttempts; attempt++)
+        {
+            Console.Write($"Password for {account}: ");
+            var password = ReadPasswordMasked();
+            if (password.Length == 0)
+            {
+                Console.Error.WriteLine("Installation cancelled.");
+                return 1;
+            }
+
+            try
+            {
+                var (domain, username) = ParseAccountName(account);
+                if (!WindowsCredentialValidator.Validate(username, domain, password))
+                {
+                    Console.Error.WriteLine("Invalid credentials.");
+                    continue;
+                }
+
+                Console.WriteLine("Updating the service logon password...");
+                var ntAccount = new NTAccount(account);
+                var sid = (SecurityIdentifier)ntAccount.Translate(typeof(SecurityIdentifier));
+                WindowsLsaPolicy.GrantServiceLogonRight(sid);
+                WindowsServiceManager.UpdateServicePassword(ServiceName, account, password);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Failed to update the service password: {ex.Message}");
+                return 1;
+            }
+            finally
+            {
+                password = new string('\0', password.Length);
+            }
+
+            var started = TryStartService(out var stillLogonFailure);
+            if (started)
+                return 0;
+            if (!stillLogonFailure)
+                return 1;
+
+            Console.Error.WriteLine("That password was not accepted.");
+        }
+
+        return LogonPasswordRequired(account);
+    }
+
+    private static int LogonPasswordRequired(string account)
+    {
+        Console.Error.WriteLine(
+            $"{LogonPasswordRequiredMarker}: The Windows password for {account} is no longer valid. Install the Worker again from GrayMoon and enter the current password.");
+        return LogonPasswordRequiredExitCode;
     }
 
     [SupportedOSPlatform("windows")]
@@ -250,7 +364,8 @@ internal static class InstallCommandHandler
         if (accountName.Contains('\\'))
         {
             var parts = accountName.Split('\\', 2);
-            return (parts[0], parts[1]);
+            var domain = parts[0] is "." or "" ? Environment.MachineName : parts[0];
+            return (domain, parts[1]);
         }
         if (accountName.Contains('@'))
         {

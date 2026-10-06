@@ -23,6 +23,7 @@ internal static class WorkerCli
         var installCommand = new Command("install", "Install the worker as a Windows service or systemd unit.");
         WorkerCliOptions.AddTo(installCommand);
         installCommand.Options.Add(WorkerCliOptions.Account);
+        installCommand.Options.Add(WorkerCliOptions.NonInteractive);
         installCommand.SetAction(InstallAsync);
         root.Subcommands.Add(installCommand);
 
