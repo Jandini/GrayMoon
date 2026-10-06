@@ -13,6 +13,7 @@
 @inject IWorkerBridge WorkerBridge
 @inject IToastService ToastService
 @inject HostPrerequisiteInstallService HostPrerequisiteInstall
+@inject HostPrerequisiteRequirementsProvider HostRequirementsProvider
 @inject WorkerInstallService WorkerInstall
 @inject WorkerSecretService WorkerSecret
 @inject WorkerPairingService WorkerPairing
@@ -112,14 +113,14 @@
                                     <div class="host-info-grid small">
                                         <span class="text-muted">Worker</span>
                                         <span>@VersionBadge(WorkerConnectionTracker.WorkerSemVer)</span>
-                                        <span class="text-muted">.NET SDK</span>
+                                        <span class="text-muted">@PrerequisiteLabel(HostPrerequisiteIds.DotnetSdk)</span>
                                         <span>@PrerequisiteCell(hostInfo.DotnetVersion, HostPrerequisiteInstallCommands.DotnetSdk)</span>
-                                        <span class="text-muted">Git</span>
+                                        <span class="text-muted">@PrerequisiteLabel(HostPrerequisiteIds.Git)</span>
                                         <span>@PrerequisiteCell(hostInfo.GitVersion, HostPrerequisiteInstallCommands.Git)</span>
-                                        <span class="text-muted">GitVersion</span>
+                                        <span class="text-muted">@PrerequisiteLabel(HostPrerequisiteIds.GitVersion)</span>
                                         <span>@PrerequisiteCell(hostInfo.GitVersionToolVersion, HostPrerequisiteInstallCommands.GitVersion)</span>
                                     </div>
-                                    <p class="small text-muted mt-3 mb-0">@HostPrerequisitesNote(hostInfo)</p>
+                                    <p class="small text-muted mt-3 mb-0">@HostPrerequisiteState.Note(CurrentHostVersions, hostRequirements)</p>
                                 }
                             </div>
                         }
@@ -149,8 +150,8 @@
                 else if (ShowHostInstallAllFooter)
                 {
                     <div class="card-footer card-footer-worker d-flex justify-content-between align-items-center">
-                        <small class="text-muted">GrayMoon Desktop can install the missing prerequisites automatically.</small>
-                        <button type="button" class="btn btn-danger" disabled="@HostPrerequisiteInstall.IsInstalling" @onclick="InstallAllHostPrerequisitesAsync">
+                        <small class="text-muted">@(HostTabMissingPrerequisites ? "GrayMoon Desktop can install the missing prerequisites automatically." : "GrayMoon Desktop can install the optional tools automatically.")</small>
+                        <button type="button" class="btn text-nowrap @(HostTabMissingPrerequisites ? "btn-danger" : "btn-outline-secondary")" disabled="@HostPrerequisiteInstall.IsInstalling" @onclick="InstallAllHostPrerequisitesAsync">
                             @(HostPrerequisiteInstall.IsInstalling ? "Installing..." : "Install Now")
                         </button>
                     </div>
@@ -172,6 +173,7 @@
     private string uninstallCommand = string.Empty;
     private string ActiveTab = "install";
     private HostInfoDto? hostInfo;
+    private HostPrerequisiteRequirements hostRequirements = HostPrerequisiteRequirements.All;
     private string? hostInfoLoadError;
     private bool _isUpdating;
     private bool _waitingForReconnect;
@@ -261,6 +263,7 @@
         {
             var json = response.Data is JsonElement je ? je.GetRawText() : JsonSerializer.Serialize(response.Data);
             var dto = JsonSerializer.Deserialize<HostInfoDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            hostRequirements = await HostRequirementsProvider.GetAsync();
             hostInfo = dto ?? new HostInfoDto(null, null, null);
 
             // Confirms the reconnected worker is actually responsive (not just SignalR-connected)
@@ -325,19 +328,28 @@
         new(hostInfo?.DotnetVersion, hostInfo?.GitVersion, hostInfo?.GitVersionToolVersion);
 
     private bool HostTabMissingPrerequisites =>
+        hostInfo != null && HostPrerequisiteState.AnyRequiredMissing(CurrentHostVersions, hostRequirements);
+
+    private bool HostTabAnyMissing =>
         hostInfo != null && HostPrerequisiteState.AnyMissing(CurrentHostVersions);
 
-    private static string HostPrerequisitesNote(HostInfoDto hostInfo) =>
-        HostPrerequisiteState.Note(new HostPrerequisiteVersions(
-            hostInfo.DotnetVersion,
-            hostInfo.GitVersion,
-            hostInfo.GitVersionToolVersion));
+    private RenderFragment PrerequisiteLabel(string id) => builder =>
+    {
+        builder.AddContent(0, HostPrerequisiteState.DisplayName(id));
+        if (hostRequirements.IsRequired(id))
+            return;
+
+        builder.AddContent(1, " ");
+        builder.OpenElement(2, "small");
+        builder.AddContent(3, "(optional)");
+        builder.CloseElement();
+    };
 
     private bool ShowHostInstallAllFooter =>
         ActiveTab == "host"
         && _desktopHostDetected
         && _isDesktopHost
-        && HostTabMissingPrerequisites
+        && HostTabAnyMissing
         && hostInfoLoadError is null;
 
     private bool InstallTabIsRed => WorkerConnectionTracker.State == WorkerConnectionState.Offline || WorkerConnectionTracker.State == WorkerConnectionState.VersionMismatch;

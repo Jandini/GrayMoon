@@ -19,6 +19,7 @@ public sealed class HomeNavAttentionMonitor : IDisposable
     private readonly ConnectorRepository _connectorRepository;
     private readonly ConnectorHealthService _connectorHealthService;
     private readonly HostPrerequisiteInstallService _hostPrerequisiteInstall;
+    private readonly HostPrerequisiteRequirementsProvider _hostPrerequisiteRequirements;
     private readonly NavigationManager _navigationManager;
     private readonly ILogger<HomeNavAttentionMonitor> _logger;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
@@ -29,6 +30,7 @@ public sealed class HomeNavAttentionMonitor : IDisposable
     private bool _hasConnectors = true;
     private bool _anyUsedConnectorUnhealthy;
     private bool _hostPrerequisitesMissing;
+    private HostPrerequisiteVersions? _lastHostVersions;
 
     public HomeNavAttentionMonitor(
         WorkerConnectionTracker workerConnectionTracker,
@@ -36,6 +38,7 @@ public sealed class HomeNavAttentionMonitor : IDisposable
         ConnectorRepository connectorRepository,
         ConnectorHealthService connectorHealthService,
         HostPrerequisiteInstallService hostPrerequisiteInstall,
+        HostPrerequisiteRequirementsProvider hostPrerequisiteRequirements,
         NavigationManager navigationManager,
         ILogger<HomeNavAttentionMonitor> logger)
     {
@@ -44,6 +47,7 @@ public sealed class HomeNavAttentionMonitor : IDisposable
         _connectorRepository = connectorRepository;
         _connectorHealthService = connectorHealthService;
         _hostPrerequisiteInstall = hostPrerequisiteInstall;
+        _hostPrerequisiteRequirements = hostPrerequisiteRequirements;
         _navigationManager = navigationManager;
         _logger = logger;
     }
@@ -106,6 +110,7 @@ public sealed class HomeNavAttentionMonitor : IDisposable
         {
             Interlocked.Increment(ref _hostInfoGeneration);
             _hostPrerequisitesMissing = false;
+            _lastHostVersions = null;
             RaiseChanged();
             return;
         }
@@ -146,11 +151,29 @@ public sealed class HomeNavAttentionMonitor : IDisposable
     private async Task RefreshAfterNavigationAsync()
     {
         await RefreshConnectorsAsync();
-        if (_disposed || !_hostPrerequisitesMissing)
+        if (_disposed || _workerConnectionTracker.State != WorkerConnectionState.Online)
             return;
 
-        if (_workerConnectionTracker.State == WorkerConnectionState.Online)
+        if (_hostPrerequisitesMissing)
+        {
             await RefreshHostPrerequisitesAsync();
+            return;
+        }
+
+        // A workspace created or re-profiled since the last probe can turn an optional missing tool into a
+        // required one. Re-evaluating needs only the workspace list, not another GetHostInfo round-trip.
+        if (_lastHostVersions is { } versions && HostPrerequisiteState.AnyMissing(versions))
+            await ReevaluateHostRequirementsAsync(versions);
+    }
+
+    private async Task ReevaluateHostRequirementsAsync(HostPrerequisiteVersions versions)
+    {
+        var generation = Volatile.Read(ref _hostInfoGeneration);
+        var requirements = await _hostPrerequisiteRequirements.GetAsync();
+        if (generation != Volatile.Read(ref _hostInfoGeneration) || _disposed)
+            return;
+
+        ApplyHostPrerequisitesMissing(HostPrerequisiteState.AnyRequiredMissing(versions, requirements));
     }
 
     private async Task RefreshConnectorsAsync()
@@ -206,10 +229,23 @@ public sealed class HomeNavAttentionMonitor : IDisposable
     private async Task RefreshHostPrerequisitesAsync()
     {
         var generation = Interlocked.Increment(ref _hostInfoGeneration);
-        var missing = await QueryHostPrerequisitesMissingAsync();
+        var versions = await QueryHostVersionsAsync();
+        var missing = false;
+        if (versions is not null && HostPrerequisiteState.AnyMissing(versions))
+        {
+            var requirements = await _hostPrerequisiteRequirements.GetAsync();
+            missing = HostPrerequisiteState.AnyRequiredMissing(versions, requirements);
+        }
+
         if (generation != Volatile.Read(ref _hostInfoGeneration) || _disposed)
             return;
 
+        _lastHostVersions = versions;
+        ApplyHostPrerequisitesMissing(missing);
+    }
+
+    private void ApplyHostPrerequisitesMissing(bool missing)
+    {
         var nowMissing = _workerConnectionTracker.State == WorkerConnectionState.Online && missing;
         if (_hostPrerequisitesMissing == nowMissing)
             return;
@@ -218,16 +254,16 @@ public sealed class HomeNavAttentionMonitor : IDisposable
         RaiseChanged();
     }
 
-    private async Task<bool> QueryHostPrerequisitesMissingAsync()
+    private async Task<HostPrerequisiteVersions?> QueryHostVersionsAsync()
     {
         if (!_workerBridge.IsWorkerConnected)
-            return false;
+            return null;
 
         try
         {
             var response = await _workerBridge.SendCommandAsync("GetHostInfo", new { }, CancellationToken.None);
             if (!response.Success || response.Data is null)
-                return false;
+                return null;
 
             var json = response.Data is JsonElement element
                 ? element.GetRawText()
@@ -236,16 +272,16 @@ public sealed class HomeNavAttentionMonitor : IDisposable
                 json,
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             if (dto is null)
-                return false;
+                return null;
 
-            return HostPrerequisiteState.AnyMissing(new HostPrerequisiteVersions(
+            return new HostPrerequisiteVersions(
                 dto.DotnetVersion,
                 dto.GitVersion,
-                dto.GitVersionToolVersion));
+                dto.GitVersionToolVersion);
         }
         catch (Exception)
         {
-            return false;
+            return null;
         }
     }
 

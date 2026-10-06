@@ -971,22 +971,55 @@ propagate.
 
 | | |
 |---|---|
-| Owner | unassigned |
-| Status | IN PROGRESS |
+| Owner | owner (subagent stalled) |
+| Status | REVIEW |
 | Dependencies | Unit A (DONE) |
 
 Added by the owner after Wave 1: prompt section 15 (Worker/environment readiness UX) was not assigned to
 any unit.
 
-**Scope.** Make host-prerequisite *requirement evaluation* capability-aware without removing host-info
-probing. Git is always required; the .NET SDK and GitVersion are required only when some workspace
-needs them. A missing .NET SDK or GitVersion must not mark the host, the Worker page, the Home page or the
-nav attention indicator as broken when no workspace profile uses them. Code: `HostPrerequisiteState`,
-`HostPrerequisiteInstallService`, `HomeNavAttentionMonitor`, `Worker.razor`, `Home.razor`, and the readiness
-parts of `WorkspaceService`.
+**What changed.** Design section 11b. Requirement evaluation is the union of every workspace's
+capabilities (`HostPrerequisiteRequirements`). Git is always required. GitVersion follows
+`UsesGitVersion`. The .NET SDK follows GitVersion or package restore / dependency-aware update, because
+GitVersion itself runs through `dotnet`. No workspaces means Git only. Probe results are unchanged;
+attention (Host tab, Home, nav) uses `AnyRequiredMissing`. Optional missing tools stay on the Host tab
+as "(optional)" and remain installable, including from Install Now. After a workspace create or
+re-profile, the nav re-evaluates cached host versions against the new union without another
+`GetHostInfo`. `WorkspaceService` had no host-readiness path; nothing there changed.
 
-**Acceptance.** Basic + None needs only Git; Basic + GitVersion needs Git plus what the GitVersion path
-actually requires; .NET Dependency needs Git, the .NET SDK and GitVersion; probing is unchanged.
+**Files touched.**
+
+```text
+src/GrayMoon.App/Services/Worker/HostPrerequisiteRequirements.cs            (new)
+src/GrayMoon.App/Services/Worker/HostPrerequisiteRequirementsProvider.cs    (new)
+src/GrayMoon.App/Services/Worker/HostPrerequisiteState.cs
+src/GrayMoon.App/Services/Worker/HostPrerequisiteInstallService.cs
+src/GrayMoon.App/Services/Ui/HomeNavAttentionMonitor.cs
+src/GrayMoon.App/Components/Pages/Worker.razor
+src/GrayMoon.App/Components/Pages/Home.razor
+src/GrayMoon.App/Program.cs
+src/GrayMoon.App.Tests/HostPrerequisiteRequirementsTests.cs                 (new)
+docs/workspace-profiles/Workspace-Profiles-Design.md                       (section 11b)
+```
+
+**Tests.** Matrix: Basic+None, Basic+GitVersion, .NET+None, Legacy, union, empty list. Attention is
+false when only optional tools are missing, true once a .NET workspace exists, and true for missing
+Git with no workspaces. Install outcome is judged against the requested ids. Provider: empty DB is
+Git only, persisted profiles union, read failure falls back to All.
+
+**Owner verification.** `dotnet build GrayMoon.slnx` 0 warnings / 0 errors. `GrayMoon.App.Tests` 918/918 (904 + 14), `GrayMoon.Worker.Tests` 312 + 1 pre-existing skip, `GrayMoon.Common.Tests` 234/234.
+
+**Risks / findings.**
+
+- Basic+GitVersion requires the .NET SDK even though the workspace is not .NET Dependency. That matches
+  the current GitVersion execution path.
+- Install Now still offers optional tools. The host is not marked broken for them; the footer uses a
+  quieter button when only optional tools are missing.
+- `Program.cs` is also owned by G and D in this wave. The hunk is one scoped registration next to
+  `HostPrerequisiteInstallService`.
+
+**Deviations.** None against the prompt. `WorkspaceService` was listed in the original scope but has no
+readiness evaluation to change.
 
 ---
 

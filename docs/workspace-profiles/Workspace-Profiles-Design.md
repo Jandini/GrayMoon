@@ -6,8 +6,9 @@ the code.
 
 Companion: `Workspace-Profiles-Implementation-Plan.md` (execution state).
 
-Status: Phases 1-3 and the CI provider boundary (section 11a) implemented. Push/update/restore strategies,
-grid, navigation, create/edit and transitions not yet implemented.
+Status: Phases 1-3 and the CI provider boundary (section 11a) implemented. Host readiness requirements
+(section 11b) implemented on this branch. Push/update/restore strategies, grid, navigation, create/edit
+and transitions not yet implemented on this branch.
 
 ---
 
@@ -649,6 +650,31 @@ of which CI produced it. Only its link to the Actions page depends on CI.
 
 `link.Repository.Connector != null` on the Actions page is now only a repository-reachability filter; the
 "is CI enabled" decision is `IWorkspaceCiProvider.IsEnabled`.
+
+## 11b. Host readiness requirements
+
+Host-info probing is unchanged: the Worker still reports .NET SDK, Git and GitVersion. What changed is
+which missing tools count as *required*.
+
+```text
+HostPrerequisiteRequirements.For(capabilities)
+  Git              always
+  GitVersion       UsesGitVersion
+  .NET SDK         UsesGitVersion | UsesPackageRestore | UsesDependencyAwareUpdate
+HostPrerequisiteRequirements.For(all workspaces)
+  union; no workspaces => Git only
+```
+
+GitVersion is invoked as `dotnet gitversion` or `dotnet-gitversion`, so a Basic workspace that uses
+GitVersion also requires the .NET SDK.
+
+`AnyMissing` still describes the probe. Attention (Host tab highlight, Home, nav dot) uses
+`AnyRequiredMissing`. Missing optional tools stay visible, labelled "(optional)", and remain
+installable; they never mark the host as broken. Install-Now success is judged against the tools that
+install was asked to add, not against every probed tool.
+
+If the workspace list cannot be read, every tool is treated as required so a genuine gap is never
+hidden.
 
 ## 12. Feature and worktree implications
 
