@@ -686,6 +686,77 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
             .ToList();
     }
 
+    public async Task<RefSnapshot?> GetRefSnapshotAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
+            return null;
+
+        // One listing over the three namespaces. The fields (tab separated; a ref name cannot contain a tab):
+        //   %(HEAD)            "*" on the local branch HEAD is attached to, otherwise " " (also " " when detached)
+        //   %(refname)         full name, used only to tell the namespaces apart
+        //   %(refname:short)   what the single-purpose branch reads use, ambiguity quirks included
+        //   %(refname:strip=2) what "git tag" prints, and the branch name "git branch --show-current" prints
+        // --sort=-creatordate is "git tag --sort=-creatordate" applied to every ref; only the tags' relative order
+        // is used, and the branch lists are sorted below exactly as the single-purpose reads sort them.
+        var (exitCode, stdout, stderr) = await RunGitWithIntentAsync(
+            "for-each-ref --sort=-creatordate --format=%(HEAD)%09%(refname)%09%(refname:short)%09%(refname:strip=2) refs/heads refs/remotes/origin refs/tags",
+            repoPath,
+            ct,
+            intent);
+        if (exitCode != 0)
+        {
+            // Callers fall back to the single-purpose reads, which keep their own failure handling.
+            logger.LogDebug("Git for-each-ref (ref snapshot) failed for {RepoPath}. ExitCode={ExitCode}, Stderr={Stderr}", repoPath, exitCode, stderr);
+            return null;
+        }
+
+        const string originPrefix = "origin/";
+        var tags = new List<string>();
+        var local = new List<string>();
+        var remote = new List<string>();
+        string? checkedOutBranch = null;
+
+        foreach (var rawLine in (stdout ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = rawLine.TrimEnd('\r').Split('\t');
+            if (parts.Length != 4)
+                continue;
+
+            var isHead = parts[0] == "*";
+            var fullName = parts[1];
+            var shortName = parts[2].Trim();
+            var strippedName = parts[3].Trim();
+
+            if (fullName.StartsWith("refs/tags/", StringComparison.Ordinal))
+            {
+                if (!string.IsNullOrWhiteSpace(strippedName))
+                    tags.Add(strippedName);
+            }
+            else if (fullName.StartsWith("refs/heads/", StringComparison.Ordinal))
+            {
+                if (!string.IsNullOrWhiteSpace(shortName))
+                    local.Add(shortName);
+                if (isHead && !string.IsNullOrWhiteSpace(strippedName))
+                    checkedOutBranch = strippedName;
+            }
+            else if (fullName.StartsWith("refs/remotes/origin/", StringComparison.Ordinal))
+            {
+                if (!string.IsNullOrWhiteSpace(shortName) && shortName.StartsWith(originPrefix, StringComparison.Ordinal))
+                {
+                    var name = shortName.Substring(originPrefix.Length);
+                    if (!string.IsNullOrWhiteSpace(name) && name != "HEAD")
+                        remote.Add(name);
+                }
+            }
+        }
+
+        return new RefSnapshot(
+            tags,
+            local.OrderBy(b => b).ToList(),
+            remote.OrderBy(b => b).ToList(),
+            checkedOutBranch);
+    }
+
     public async Task<IReadOnlyList<string>> GetRemoteBranchesFromRefsAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))

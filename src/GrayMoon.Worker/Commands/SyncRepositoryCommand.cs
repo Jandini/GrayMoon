@@ -251,32 +251,67 @@ public sealed class SyncRepositoryCommand(
         }
 
         string? currentBranch = null;
-        if (readCurrentBranch)
-        {
-            currentBranch = await git.GetCurrentBranchNameAsync(repoPath, ct, read);
-            Lap("branch");
-        }
-
-        var currentTag = await git.GetCheckedOutTagAsync(repoPath, ct, read);
-        Lap("checkedOutTag");
-        // Always fetch the full tag list - fetch already ran with includeTags:true so local refs are current.
-        var tags = await git.GetTagsAsync(repoPath, ct, read);
-        Lap("tags");
-
-        // Branch lists from local refs (no extra network after fetch)
+        string? currentTag;
+        IReadOnlyList<string> tags;
         IReadOnlyList<string>? localBranches = null;
         IReadOnlyList<string>? remoteBranches = null;
-        try
-        {
-            localBranches = await git.GetLocalBranchesAsync(repoPath, ct, read);
-            remoteBranches = await git.GetRemoteBranchesFromRefsAsync(repoPath, ct, read);
-        }
-        catch
-        {
-            // If branch fetching fails, continue without branches (non-critical)
-        }
 
-        Lap("branchLists");
+        // Tags and both branch lists (fetch already ran with includeTags:true, so local refs are current and there
+        // is no extra network) come from one for-each-ref, and the same listing says whether HEAD is attached to
+        // a branch. Attached means no tag checkout, so the symbolic-ref and describe calls are not needed, and the
+        // branch name is already known.
+        var snapshot = await git.GetRefSnapshotAsync(repoPath, ct, read);
+        Lap("refs");
+        if (snapshot != null)
+        {
+            tags = snapshot.Tags;
+            localBranches = snapshot.LocalBranches;
+            remoteBranches = snapshot.RemoteBranches;
+
+            if (snapshot.CheckedOutBranch != null)
+            {
+                currentTag = null;
+                if (readCurrentBranch)
+                    currentBranch = snapshot.CheckedOutBranch;
+            }
+            else
+            {
+                // Detached HEAD, or an unborn branch the listing cannot see: ask git, as before.
+                currentTag = await git.GetCheckedOutTagAsync(repoPath, ct, read);
+                Lap("checkedOutTag");
+                if (readCurrentBranch)
+                {
+                    currentBranch = await git.GetCurrentBranchNameAsync(repoPath, ct, read);
+                    Lap("branch");
+                }
+            }
+        }
+        else
+        {
+            // The combined listing failed: fall back to the separate reads, which keep their own failure handling.
+            if (readCurrentBranch)
+            {
+                currentBranch = await git.GetCurrentBranchNameAsync(repoPath, ct, read);
+                Lap("branch");
+            }
+
+            currentTag = await git.GetCheckedOutTagAsync(repoPath, ct, read);
+            Lap("checkedOutTag");
+            tags = await git.GetTagsAsync(repoPath, ct, read);
+            Lap("tags");
+
+            try
+            {
+                localBranches = await git.GetLocalBranchesAsync(repoPath, ct, read);
+                remoteBranches = await git.GetRemoteBranchesFromRefsAsync(repoPath, ct, read);
+            }
+            catch
+            {
+                // If branch fetching fails, continue without branches (non-critical)
+            }
+
+            Lap("branchLists");
+        }
 
         // Resolve default branch once. Divergence may be vs Feature parent (request / persisted) rather than
         // the repository default.

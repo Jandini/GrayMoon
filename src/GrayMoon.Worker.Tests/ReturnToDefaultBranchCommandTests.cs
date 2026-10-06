@@ -88,6 +88,7 @@ public sealed class ReturnToDefaultBranchCommandTests
         public Task AbortMergeAsync(string repoPath, CancellationToken ct) => throw new NotImplementedException();
         public Task<(bool Success, bool HasConflicts, IReadOnlyList<string> ConflictFiles, string? ErrorMessage)> MergeFromRemoteAsync(string repoPath, string remoteBranch, CancellationToken ct) => throw new NotImplementedException();
         public Task<IReadOnlyList<string>> GetLocalBranchesAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write) => throw new NotImplementedException();
+        public Task<RefSnapshot?> GetRefSnapshotAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write) => throw new NotImplementedException();
         public Task<IReadOnlyList<string>> GetRemoteBranchesFromRefsAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write) => throw new NotImplementedException();
         public Task<IReadOnlyList<string>> GetRemoteBranchesAsync(string repoPath, string? bearerToken, CancellationToken ct) => throw new NotImplementedException();
         public Task<(bool Success, string? ErrorMessage)> CreateBranchAsync(string repoPath, string newBranchName, string baseBranchName, CancellationToken ct, bool skipHooks = false) => throw new NotImplementedException();

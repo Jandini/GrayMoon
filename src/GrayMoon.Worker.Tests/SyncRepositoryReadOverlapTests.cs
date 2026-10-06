@@ -194,8 +194,84 @@ public sealed class SyncRepositoryReadOverlapTests : IDisposable
 
         Assert.True(response.Success, response.ErrorMessage);
         var line = Assert.Single(log.Messages, m => m.Contains("SyncRepository timings", StringComparison.Ordinal));
-        foreach (var part in new[] { "fetch=", "version=", "lane=", "tail=", "total=", "Lane steps:", "branch=", "tags=", "defaultCounts=" })
+        foreach (var part in new[] { "fetch=", "version=", "lane=", "tail=", "total=", "Lane steps:", "refs=", "defaultCounts=" })
             Assert.Contains(part, line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Ref_snapshot_matches_the_single_purpose_reads_on_an_awkward_repository()
+    {
+        var repoPath = await CloneCommittedRepositoryAsync();
+        await RunGitAsync(repoPath, "tag light1");
+        await RunGitAsync(repoPath, "tag light2");
+        await RunGitAsync(repoPath, "tag rel/1.0");
+        await RunGitAsync(repoPath, "tag -a ann1 -m ann");
+        await RunGitAsync(repoPath, "tag dup");          // a tag and a branch with the same name
+        await RunGitAsync(repoPath, "branch dup");
+        await RunGitAsync(repoPath, "branch feature/x");
+        await RunGitAsync(repoPath, "branch other");
+        await CommitAsync(repoPath, "later.txt", "later");
+        await RunGitAsync(repoPath, "tag later");
+        await RunGitAsync(repoPath, "push origin main:remote-only feature/x other --tags");
+        await RunGitAsync(repoPath, "fetch --prune");
+
+        await AssertSnapshotMatchesAsync(repoPath);
+    }
+
+    [Fact]
+    public async Task Ref_snapshot_reports_the_attached_branch_and_none_when_detached()
+    {
+        var repoPath = await CloneCommittedRepositoryAsync();
+        await RunGitAsync(repoPath, "tag v1.0.0");
+        await RunGitAsync(repoPath, "branch other");
+        await RunGitAsync(repoPath, "checkout -q other");
+        Assert.Equal("other", (await _git.GetRefSnapshotAsync(repoPath, CancellationToken.None, GitLockIntent.Read))!.CheckedOutBranch);
+        Assert.Equal("other", await _git.GetCurrentBranchNameAsync(repoPath, CancellationToken.None));
+        Assert.Null(await _git.GetCheckedOutTagAsync(repoPath, CancellationToken.None));
+
+        // Detached at a commit that a branch also points to: HEAD is not attached to that branch.
+        await RunGitAsync(repoPath, "checkout -q --detach main");
+        Assert.Null((await _git.GetRefSnapshotAsync(repoPath, CancellationToken.None, GitLockIntent.Read))!.CheckedOutBranch);
+        Assert.Null(await _git.GetCurrentBranchNameAsync(repoPath, CancellationToken.None));
+
+        await RunGitAsync(repoPath, "checkout -q --detach v1.0.0");
+        Assert.Null((await _git.GetRefSnapshotAsync(repoPath, CancellationToken.None, GitLockIntent.Read))!.CheckedOutBranch);
+        await AssertSnapshotMatchesAsync(repoPath);
+    }
+
+    [Fact]
+    public async Task Repository_with_no_commits_still_reports_its_unborn_branch()
+    {
+        var origin = Path.Combine(_root, "origin.git");
+        Directory.CreateDirectory(origin);
+        await RunGitAsync(origin, "init --bare -b main");
+        var workspace = Path.Combine(_root, "ws");
+        Directory.CreateDirectory(workspace);
+        await RunGitAsync(workspace, $"clone \"{origin}\" repo");
+        var repoPath = Path.Combine(workspace, "repo");
+
+        // The ref listing sees no branch here, but git does: sync has to fall back to asking git.
+        var snapshot = await _git.GetRefSnapshotAsync(repoPath, CancellationToken.None, GitLockIntent.Read);
+        Assert.NotNull(snapshot);
+        Assert.Null(snapshot!.CheckedOutBranch);
+        Assert.Empty(snapshot.Tags);
+        Assert.Equal("main", await _git.GetCurrentBranchNameAsync(repoPath, CancellationToken.None));
+
+        var response = await SyncAsync(RepositoryOperationCapabilities.For(calculateVersion: false, discoverProjects: false));
+
+        Assert.True(response.Success, response.ErrorMessage);
+        Assert.Equal("main", response.Branch);
+        Assert.Null(response.Tag);
+    }
+
+    private async Task AssertSnapshotMatchesAsync(string repoPath)
+    {
+        var ct = CancellationToken.None;
+        var snapshot = await _git.GetRefSnapshotAsync(repoPath, ct, GitLockIntent.Read);
+        Assert.NotNull(snapshot);
+        Assert.Equal(await _git.GetTagsAsync(repoPath, ct), snapshot!.Tags);
+        Assert.Equal(await _git.GetLocalBranchesAsync(repoPath, ct), snapshot.LocalBranches);
+        Assert.Equal(await _git.GetRemoteBranchesFromRefsAsync(repoPath, ct), snapshot.RemoteBranches);
     }
 
     private sealed class FixedVersionProviderFactory(RepositoryVersionResult result) : IRepositoryVersionProviderFactory

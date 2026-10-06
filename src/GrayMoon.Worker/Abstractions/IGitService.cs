@@ -68,6 +68,13 @@ public interface IGitService
     Task<(bool Success, bool HasConflicts, IReadOnlyList<string> ConflictFiles, string? ErrorMessage)> MergeFromRemoteAsync(string repoPath, string remoteBranch, CancellationToken ct);
     /// <summary>Gets all local branch names (without 'origin/' prefix).</summary>
     Task<IReadOnlyList<string>> GetLocalBranchesAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write);
+    /// <summary>
+    /// Tags, local branches, origin branches and the checked-out branch from a single <c>git for-each-ref</c>, with the
+    /// same contents and order as <see cref="GetTagsAsync"/>, <see cref="GetLocalBranchesAsync"/> and
+    /// <see cref="GetRemoteBranchesFromRefsAsync"/>. Returns null when the repository is missing or the command failed, in which case use
+    /// the single-purpose reads.
+    /// </summary>
+    Task<RefSnapshot?> GetRefSnapshotAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write);
     /// <summary>Gets all remote branch names from local refs (refs/remotes/origin). Use after fetch to avoid ls-remote network call.</summary>
     Task<IReadOnlyList<string>> GetRemoteBranchesFromRefsAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write);
     /// <summary>Gets all remote branch names (without 'origin/' prefix). Uses ls-remote; for post-fetch use <see cref="GetRemoteBranchesFromRefsAsync"/>.</summary>
