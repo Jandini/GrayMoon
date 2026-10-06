@@ -1,0 +1,120 @@
+@if (IsVisible && !_busy)
+{
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
+         @onkeydown="HandleKeyDownAsync"
+         @ref="_modalElement">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title text-nowrap">Restore Workspace from repository</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseAsync"></button>
+                </div>
+                @if (_panel is not null)
+                {
+                    <div class="modal-body">
+                        <p class="mb-2">Workspace restored.</p>
+                        @if (_panel.Warning is not null)
+                        {
+                            <div class="gm-callout gm-callout--warning mb-3" role="alert">@_panel.Warning</div>
+                        }
+                        @if (_panel.UnresolvedConnectors.Count > 0)
+                        {
+                            <p class="mb-1 fw-semibold">Connectors not found</p>
+                            <ul class="mb-3">
+                                @foreach (var connector in _panel.UnresolvedConnectors)
+                                {
+                                    <li>@connector</li>
+                                }
+                            </ul>
+                        }
+                        @if (_panel.UnresolvedRepositories.Count > 0)
+                        {
+                            <p class="mb-1 fw-semibold">Repositories not imported</p>
+                            <ul class="mb-3">
+                                @foreach (var repository in _panel.UnresolvedRepositories)
+                                {
+                                    <li>@repository</li>
+                                }
+                            </ul>
+                        }
+                        @if (_panel.ShowImportGuidance)
+                        {
+                            <p class="text-muted mb-0">@RestoreResultPanel.ImportGuidance</p>
+                        }
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-primary text-nowrap flex-shrink-0" data-default-action @onclick="OpenWorkspace">Open Workspace</button>
+                    </div>
+                }
+                else
+                {
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label text-nowrap" for="restore-workspace-filter">Workspace repository</label>
+                            <input type="text"
+                                   id="restore-workspace-filter"
+                                   class="form-control mb-2"
+                                   autocomplete="off"
+                                   placeholder="Search repositories"
+                                   value="@_filter"
+                                   @oninput="OnFilterChanged" />
+                            <select class="form-select"
+                                    id="restore-workspace-repository"
+                                    aria-label="Workspace repository"
+                                    @onchange="OnRepositoryChangedAsync">
+                                <option value="" selected="@(_repositoryId is null)">Select a repository</option>
+                                @foreach (var choice in FilteredChoices)
+                                {
+                                    <option value="@choice.RepositoryId" selected="@(choice.RepositoryId == _repositoryId)">@choice.DisplayName</option>
+                                }
+                            </select>
+                            <div class="form-text">An imported GitHub repository that contains <code>.graymoon.json</code>. It is cloned as the Workspace root.</div>
+                            @if (_choices.Count == 0)
+                            {
+                                <div class="form-text">No imported GitHub repositories. Import them on the Connectors page first.</div>
+                            }
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label text-nowrap" for="restore-workspace-name">Workspace name</label>
+                            <input type="text"
+                                   id="restore-workspace-name"
+                                   class="form-control @(NameError is not null ? "is-invalid" : null)"
+                                   autocomplete="off"
+                                   value="@_name"
+                                   @oninput="OnNameChangedAsync" />
+                            @if (NameError is not null)
+                            {
+                                <div class="invalid-feedback d-block">@NameError</div>
+                            }
+                        </div>
+
+                        @if (FolderState.Error is not null)
+                        {
+                            <div class="gm-callout gm-callout--error mb-3" role="alert">@FolderState.Error</div>
+                        }
+                        else if (FolderState.Note is not null)
+                        {
+                            <div class="gm-callout gm-callout--warning mb-3" role="alert">@FolderState.Note</div>
+                        }
+
+                        @if (_error is not null)
+                        {
+                            <div class="gm-callout gm-callout--error" role="alert">@_error</div>
+                        }
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary text-nowrap flex-shrink-0" @onclick="CancelAsync">Cancel</button>
+                        <button type="button" class="btn btn-primary text-nowrap flex-shrink-0" data-default-action @onclick="StartRestore" disabled="@(!CanRestore)">
+                            @if (_checking)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2"></span>
+                            }
+                            Restore
+                        </button>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
