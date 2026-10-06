@@ -179,6 +179,15 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
                 wr.WorkspaceRepositoryId,
             });
 
+            entity.Property(wr => wr.Role)
+                .HasConversion<int>()
+                .HasDefaultValue(WorkspaceRepositoryRole.Source);
+
+            entity.HasIndex(wr => wr.WorkspaceId)
+                .IsUnique()
+                .HasFilter("\"Role\" = 1")
+                .HasDatabaseName("IX_WorkspaceRepositories_WorkspaceId_WorkspaceRole");
+
             entity.Property(wr => wr.GitVersion)
                 .HasMaxLength(100);
 

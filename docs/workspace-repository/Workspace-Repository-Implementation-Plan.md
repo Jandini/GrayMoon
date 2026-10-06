@@ -322,9 +322,9 @@ Commit message: Add the contracts for the Workspace repository feature
 | | |
 |---|---|
 | Owner | subagent |
-| Status | TODO |
+| Status | REVIEW |
 | Dependencies | O |
-| Decisions | none beyond v3 section 7 |
+| Decisions | none beyond v3 section 7. Owner decision (user approved): call MigrateWorkspaceRepositoryRoleAsync from RunLegacyBaselineAsync before MigrateWorkspaceFeatureContextSchemaAsync, because that legacy step loads WorkspaceRepositoryLink through EF and needs the Role column to exist on pre-0.1.0 databases. |
 
 **Files to read.** `src/GrayMoon.App/Models/WorkspaceRepositoryLink.cs`, `src/GrayMoon.App/Data/AppDbContext.cs` lines 160-220, `src/GrayMoon.App/Migrations.cs` lines 1-120 and 405-460, `src/GrayMoon.App.Tests/WorkspaceProfileMigrationTests.cs` (pattern to copy).
 
@@ -415,7 +415,43 @@ src/GrayMoon.App.Tests/WorkspaceRepositoryRoleGuardTests.cs       (new)
 **Handoff log.**
 
 ```text
-(empty)
+Date: 2026-10-06
+Status after this handoff: REVIEW
+Files changed (full paths):
+  C:\Users\matth\.graymoon\GrayMoon\features\workspace-as-git-repository\A\src\GrayMoon.App\Models\WorkspaceRepositoryLink.cs
+  C:\Users\matth\.graymoon\GrayMoon\features\workspace-as-git-repository\A\src\GrayMoon.App\Data\AppDbContext.cs
+  C:\Users\matth\.graymoon\GrayMoon\features\workspace-as-git-repository\A\src\GrayMoon.App\Migrations.cs
+  C:\Users\matth\.graymoon\GrayMoon\features\workspace-as-git-repository\A\src\GrayMoon.App\Repositories\WorkspaceRepository.cs
+  C:\Users\matth\.graymoon\GrayMoon\features\workspace-as-git-repository\A\src\GrayMoon.App.Tests\WorkspaceRepositoryRoleMigrationTests.cs (new)
+  C:\Users\matth\.graymoon\GrayMoon\features\workspace-as-git-repository\A\src\GrayMoon.App.Tests\WorkspaceRepositoryRoleGuardTests.cs (new)
+  C:\Users\matth\.graymoon\GrayMoon\features\workspace-as-git-repository\A\docs\workspace-repository\Workspace-Repository-Implementation-Plan.md (this log)
+Search counts before/after (for replace-all steps): n/a (no replace-all step in this unit)
+Build: dotnet build GrayMoon.slnx -> warnings: 0, errors: 0
+Tests: App 1014/1014 (0 skipped; baseline 1007 + 7 new)
+New tests added (names):
+  WorkspaceRepositoryRoleMigrationTests: Existing_links_get_Role_Source_after_migration, Migration_is_idempotent,
+    Second_Workspace_role_link_in_same_workspace_is_rejected_by_index, Workspace_role_links_in_different_workspaces_coexist,
+    Fresh_database_has_filtered_index
+  WorkspaceRepositoryRoleGuardTests: Replace_membership_never_removes_workspace_role_link,
+    Replace_membership_skips_repository_that_is_the_workspace_repository
+Deviations from the steps (and why): one extra owner-approved edit in Migrations.cs RunLegacyBaselineAsync: call MigrateWorkspaceRepositoryRoleAsync before MigrateWorkspaceFeatureContextSchemaAsync (fixes the regression below).
+Discoveries (coupling, surprises, things that look wrong but were left alone):
+  - FIXED (owner-approved early call). Only the Feature-context legacy step loads WorkspaceRepositoryLink through EF (Migrations.Features.cs lines 329, 444, 481, 519, all inside it); no other legacy baseline step does, so the single early call covers all. Original regression: UpgradeFrom010Tests.Golden_010_database_upgrades_to_current_schema now fails ("Sequence contains no elements"
+    at UpgradeFrom010Tests.cs line 104). Cause: the legacy baseline step MigrateWorkspaceFeatureContextSchemaAsync ->
+    BackfillSpecialWorkspaceContextsAsync (src/GrayMoon.App/Migrations.Features.cs line 329) loads
+    dbContext.WorkspaceRepositories through EF, which now selects the new Role column. A pre-0.1.0 database has no Role
+    column until strict step 5 runs, which is AFTER the legacy baseline, so the query throws; the legacy baseline catches
+    and logs it, and the special Workspace context rows are never backfilled. This would also affect real upgrades.
+    Not fixed: needs a change outside Unit A's owned edits. Suggested fix for the owner: call
+    MigrateWorkspaceRepositoryRoleAsync (it is idempotent) from RunLegacyBaselineAsync in Migrations.cs before
+    MigrateWorkspaceFeatureContextSchemaAsync, or make the backfill projection avoid the Role column. Other
+    legacy/strict steps that load WorkspaceRepositoryLink via EF before step 5 could be affected the same way.
+  - Guard implementation: UpdateAsync/AddAsync membership replacement now excludes Workspace-role repositories from
+    validSet and from the SetEquals no-op comparison, and excludes Workspace-role rows from toRemove.
+  - Process note: an early edit attempt wrote 2 files into the sibling worktree ...\workspace-as-git-repository\GrayMoon
+    (relative-path mistake); it was reverted with git checkout and that worktree is clean again.
+Follow-ups for the owner: none.
+Commit message: Add Role to WorkspaceRepositoryLink with strict migration step 5, filtered unique index and membership guards
 ```
 
 ---

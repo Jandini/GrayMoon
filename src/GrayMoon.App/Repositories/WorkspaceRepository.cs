@@ -505,7 +505,18 @@ public sealed class WorkspaceRepository(
                 workspaceId, invalidIds.Count, string.Join(", ", invalidIds));
         }
 
-        var existingRepoIds = current.Select(wr => wr.RepositoryId).ToHashSet();
+        // A Workspace-role link is never part of membership replacement: it is never removed here, and its
+        // repository is never added again as a Source.
+        var workspaceRoleRepoIds = current
+            .Where(wr => wr.Role == WorkspaceRepositoryRole.Workspace)
+            .Select(wr => wr.RepositoryId)
+            .ToHashSet();
+        validSet.ExceptWith(workspaceRoleRepoIds);
+
+        var existingRepoIds = current
+            .Where(wr => wr.Role != WorkspaceRepositoryRole.Workspace)
+            .Select(wr => wr.RepositoryId)
+            .ToHashSet();
 
         // An unchanged membership set is a no-op: a save that does not actually add or remove any
         // repository must never be blocked by the Features-exist guard below.
@@ -518,7 +529,9 @@ public sealed class WorkspaceRepository(
                 "Cannot change Workspace repository membership while Features exist. Remove Features first.");
         }
 
-        var toRemove = current.Where(wr => !validSet.Contains(wr.RepositoryId)).ToList();
+        var toRemove = current
+            .Where(wr => wr.Role != WorkspaceRepositoryRole.Workspace && !validSet.Contains(wr.RepositoryId))
+            .ToList();
         var toAdd = validSet.Except(existingRepoIds).ToList();
 
         _logger.LogDebug(
