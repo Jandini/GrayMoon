@@ -52,9 +52,11 @@ public sealed partial class WorkspaceProjectRepository
             .ToListAsync(cancellationToken);
         if (links.Count == 0) return new RepositoryDependencyGraph(new List<RepositoryDependencyNode>(), new List<RepositoryDependencyEdge>());
 
-        var repoIdsInWorkspace = links.Select(l => l.RepositoryId).ToHashSet();
+        // The Workspace-role repository has no projects (D6) and no dependency level, so it never takes part in the dependency graph.
+        var sourceLinks = links.Where(l => l.Role != WorkspaceRepositoryRole.Workspace).ToList();
+        var repoIdsInWorkspace = sourceLinks.Select(l => l.RepositoryId).ToHashSet();
         var nameToRepoId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        foreach (var wr in links)
+        foreach (var wr in sourceLinks)
         {
             if (wr.Repository != null && !string.IsNullOrEmpty(wr.Repository.RepositoryName))
             {
@@ -80,7 +82,7 @@ public sealed partial class WorkspaceProjectRepository
             byProject,
             cancellationToken);
 
-        var repoNodes = links
+        var repoNodes = sourceLinks
             .Where(wr => wr.Repository != null && !string.IsNullOrEmpty(wr.Repository.RepositoryName))
             .Select(wr => new RepositoryDependencyNode(wr.RepositoryId, wr.Repository!.RepositoryName!, wr.RepositoryType))
             .ToList();
@@ -100,9 +102,11 @@ public sealed partial class WorkspaceProjectRepository
             .ToListAsync(cancellationToken);
         if (links.Count == 0) return new RepositoryDependencyGraph(new List<RepositoryDependencyNode>(), new List<RepositoryDependencyEdge>());
 
-        var repoIdsInWorkspace = links.Select(l => l.RepositoryId).ToHashSet();
+        // The Workspace-role repository has no projects (D6) and no dependency level, so it never takes part in the dependency graph.
+        var sourceLinks = links.Where(l => l.Role != WorkspaceRepositoryRole.Workspace).ToList();
+        var repoIdsInWorkspace = sourceLinks.Select(l => l.RepositoryId).ToHashSet();
         var nameToRepoId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        foreach (var wr in links)
+        foreach (var wr in sourceLinks)
         {
             if (wr.Repository != null && !string.IsNullOrEmpty(wr.Repository.RepositoryName))
             {
@@ -129,7 +133,7 @@ public sealed partial class WorkspaceProjectRepository
             cancellationToken,
             contextId?.Value);
 
-        var repoNodes = links
+        var repoNodes = sourceLinks
             .Where(wr => wr.Repository != null && !string.IsNullOrEmpty(wr.Repository.RepositoryName))
             .Select(wr => new RepositoryDependencyNode(wr.RepositoryId, wr.Repository!.RepositoryName!, wr.RepositoryType))
             .ToList();
@@ -284,9 +288,11 @@ public sealed partial class WorkspaceProjectRepository
         if (links.Count == 0)
             return null;
 
-        var repoIdsInWorkspace = links.Select(l => l.RepositoryId).ToHashSet();
+        // The Workspace-role repository has no projects (D6) and no dependency level, so it never takes part in the dependency graph.
+        var sourceLinks = links.Where(l => l.Role != WorkspaceRepositoryRole.Workspace).ToList();
+        var repoIdsInWorkspace = sourceLinks.Select(l => l.RepositoryId).ToHashSet();
         var nameToRepoId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        foreach (var wr in links)
+        foreach (var wr in sourceLinks)
         {
             if (wr.Repository != null && !string.IsNullOrEmpty(wr.Repository.RepositoryName))
             {

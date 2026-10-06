@@ -42,4 +42,25 @@ public sealed class WorkspaceRepositoryPickerFilterTests
         var result = WorkspaceModal.FilterWorkspaceRepositoryChoices(Choices, "a");
         Assert.Equal([1, 2, 3], result.Select(c => c.RepositoryId));
     }
+
+    [Theory]
+    [InlineData(0, 1, 3, 1)]
+    [InlineData(3, 1, 3, 3)]
+    [InlineData(0, -1, 3, 0)]
+    [InlineData(2, -1, 3, 1)]
+    [InlineData(0, 1, 0, 0)]
+    [InlineData(1, 1, 0, 0)]
+    public void MoveHighlight_ClampsAtEnds(int current, int delta, int filteredCount, int expected)
+    {
+        Assert.Equal(expected, WorkspaceModal.MoveRepositoryHighlight(current, delta, filteredCount));
+    }
+
+    [Theory]
+    [InlineData(3, 1)]
+    [InlineData(1, 1)]
+    [InlineData(0, 0)]
+    public void ResetHighlight_PicksFirstFilteredEntryOrNone(int filteredCount, int expected)
+    {
+        Assert.Equal(expected, WorkspaceModal.ResetRepositoryHighlight(filteredCount));
+    }
 }
