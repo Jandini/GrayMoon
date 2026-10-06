@@ -51,5 +51,8 @@ public class Workspace
     [MaxLength(1000)]
     public string? ManagedFeatureStorageRoot { get; set; }
 
+    /// <summary>Set when the Workspace repository definition file (.graymoon.json) was last found to differ from this Workspace; null when in agreement or never checked. Reconciliation state, not Git state.</summary>
+    public DateTime? ManifestDriftDetectedAt { get; set; }
+
     public ICollection<WorkspaceRepositoryLink> Repositories { get; set; } = new List<WorkspaceRepositoryLink>();
 }

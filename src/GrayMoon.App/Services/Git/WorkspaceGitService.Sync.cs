@@ -13,11 +13,14 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using GrayMoon.Application.Features;
 using GrayMoon.Application.Workspaces;
+using GrayMoon.App.Services.WorkspaceManifest;
 
 namespace GrayMoon.App.Services.Git;
 
 public sealed partial class WorkspaceGitService
 {
+    private readonly IServiceScopeFactory? _scopeFactory = scopeFactory;
+
     public async Task<IReadOnlyDictionary<int, RepoGitVersionInfo>> SyncAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
@@ -130,6 +133,14 @@ public sealed partial class WorkspaceGitService
 
         if (_fileVersionService != null)
             await _fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, contextId, cancellationToken);
+
+        // D8: a full Sync in the special Workspace context re-checks the Workspace definition when a Workspace repository exists.
+        if (_scopeFactory is not null
+            && workspace.Repositories.Any(l => l.Role == WorkspaceRepositoryRole.Workspace)
+            && (await _contextResolver.GetRequiredAsync(contextId, workspaceId, cancellationToken)).IsSpecialWorkspace)
+        {
+            WorkspaceManifestHooks.DetectDriftInBackground(_scopeFactory, _logger, workspaceId);
+        }
 
         _logger.LogDebug("Sync completed for workspace {WorkspaceName}", workspace.Name);
         return results.ToDictionary(r => r.RepositoryId, r => r.info);
