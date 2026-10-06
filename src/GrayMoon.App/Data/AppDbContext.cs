@@ -159,6 +159,8 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
 
             entity.Property(workspace => workspace.ManagedFeatureStorageRoot)
                 .HasMaxLength(1000);
+
+            entity.Property(workspace => workspace.ManifestDriftDetectedAt);
         });
 
         modelBuilder.Entity<WorkspaceRepositoryLink>(entity =>

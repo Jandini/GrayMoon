@@ -37,6 +37,7 @@ public static partial class Migrations
         (3, "E1 case-insensitive Feature name index", dbContext => MigrateFeatureNameIndexCollationAsync(dbContext)),
         (4, "Workspace profile columns", dbContext => MigrateWorkspaceProfileColumnsAsync(dbContext)),
         (5, "Workspace repository role", dbContext => MigrateWorkspaceRepositoryRoleAsync(dbContext)),
+        (6, "Workspace manifest drift column", dbContext => MigrateWorkspaceManifestDriftColumnAsync(dbContext)),
     };
 
     public static async Task RunAllAsync(AppDbContext dbContext, ILogger? logger = null)
@@ -471,6 +472,19 @@ public static partial class Migrations
             "CREATE UNIQUE INDEX IF NOT EXISTS IX_WorkspaceRepositories_WorkspaceId_WorkspaceRole " +
             "ON WorkspaceRepositories(WorkspaceId) WHERE Role = 1";
         await indexCmd.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>
+    /// Adds Workspaces.ManifestDriftDetectedAt (nullable TEXT, EF stores DateTime as TEXT in SQLite). Strict step 6:
+    /// no try/catch, a failure propagates to <see cref="RunStrictStepAsync"/>. Idempotent.
+    /// </summary>
+    public static async Task MigrateWorkspaceManifestDriftColumnAsync(AppDbContext dbContext, ILogger? logger = null)
+    {
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != ConnectionState.Open)
+            await conn.OpenAsync();
+
+        await AddNullableTextColumnIfMissingAsync(conn, "Workspaces", "ManifestDriftDetectedAt");
     }
 
     /// <summary>

@@ -1,9 +1,14 @@
 using GrayMoon.App.Models;
+using GrayMoon.App.Services.WorkspaceManifest;
+using GrayMoon.Application.WorkspaceManifest;
+using Microsoft.AspNetCore.Components;
 
 namespace GrayMoon.App.Components.Pages;
 
 public sealed partial class WorkspaceRepositories
 {
+    [Inject] private IWorkspaceManifestService ManifestService { get; set; } = default!;
+
     private RepositoriesModalState _repositoriesModal = new();
 
     private async Task ShowRepositoriesModalAsync()
@@ -62,6 +67,10 @@ public sealed partial class WorkspaceRepositories
                 workspace?.Name ?? string.Empty,
                 ids,
                 workspace?.RootPath);
+            // Membership changed: keep the managed .gitignore section and the Workspace definition in step (D12).
+            var definitionError = await ManifestService.SyncDefinitionToDiskAsync(WorkspaceId);
+            if (definitionError is not null)
+                ToastService.ShowError(definitionError);
             await PendingActionsService.RefreshAsync(
                 WorkspaceId,
                 WorkspacePageService.WorkspaceRepository,

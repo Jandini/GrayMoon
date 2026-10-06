@@ -26,6 +26,11 @@
 @using GrayMoon.Application
 @using GrayMoon.Application.Features
 @inject IWorkspaceFeatureOperations FeatureOperations
+@using GrayMoon.App.Services.Ui
+@using GrayMoon.App.Services.WorkspaceManifest
+@using GrayMoon.Application.WorkspaceManifest
+@inject IWorkspaceManifestService ManifestService
+@inject IToastService ToastService
 
 <PageTitle>Workspaces - GrayMoon</PageTitle>
 
@@ -594,6 +599,7 @@
                     editorType,
                     editorUseGitVersion ? WorkspaceVersioningMode.GitVersion : WorkspaceVersioningMode.None,
                     editorUseGitHubActions ? WorkspaceCiProvider.GitHubActions : WorkspaceCiProvider.None);
+                await SyncWorkspaceDefinitionAsync(editingWorkspaceId.Value);
                 await PendingActionsService.RefreshAsync(editingWorkspaceId.Value, WorkspaceRepository, WorkspaceProjectRepository);
             }
 
@@ -641,6 +647,7 @@
         {
             Logger.LogInformation("User added {Count} repositories to workspace {WorkspaceName}", selectedRepositoryIds.Count, repositoriesModalWorkspaceName);
             await WorkspaceRepository.UpdateAsync(editingWorkspaceId.Value, repositoriesModalWorkspaceName, selectedRepositoryIds, editingWorkspaceRootPath);
+            await SyncWorkspaceDefinitionAsync(editingWorkspaceId.Value);
             await PendingActionsService.RefreshAsync(editingWorkspaceId.Value, WorkspaceRepository, WorkspaceProjectRepository);
 
             CloseRepositoriesModal();
@@ -958,6 +965,7 @@
         try
         {
             await WorkspaceRepository.AddRepositoriesAsync(editingWorkspaceId.Value, importRepositoryIds);
+            await SyncWorkspaceDefinitionAsync(editingWorkspaceId.Value);
         }
         catch (Exception ex)
         {
@@ -969,6 +977,14 @@
             CloseEditorModal();
             await LoadWorkspacesAsync();
         }
+    }
+
+    // Source membership or the profile changed: keep the managed .gitignore section and the Workspace definition in step (D12).
+    private async Task SyncWorkspaceDefinitionAsync(int workspaceId)
+    {
+        var error = await ManifestService.SyncDefinitionToDiskAsync(workspaceId);
+        if (error is not null)
+            ToastService.ShowError(error);
     }
 
     private async Task CancelImportAsync()

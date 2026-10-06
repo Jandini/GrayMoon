@@ -74,4 +74,7 @@ public sealed class GetHostInfoWorkerResponse
 {
     [JsonPropertyName("userProfilePath")]
     public string? UserProfilePath { get; set; }
+
+    [JsonPropertyName("supportedFeatures")]
+    public List<string>? SupportedFeatures { get; set; }
 }
