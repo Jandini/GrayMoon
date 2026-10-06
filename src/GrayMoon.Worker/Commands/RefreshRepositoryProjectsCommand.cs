@@ -1,6 +1,7 @@
 using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Jobs.Requests;
 using GrayMoon.Worker.Jobs.Response;
+using GrayMoon.Worker.Services;
 
 namespace GrayMoon.Worker.Commands;
 
@@ -16,11 +17,13 @@ public sealed class RefreshRepositoryProjectsCommand(IGitService git, ICsProjFil
         var workspaceName = request.WorkspaceName ?? throw new ArgumentException("workspaceName required");
         var repositoryName = request.RepositoryName ?? throw new ArgumentException("repositoryName required");
 
-        if (!request.EffectiveCapabilities.ShouldDiscoverProjects)
+        var discoverProjects = request.EffectiveCapabilities.ShouldDiscoverProjects
+            && !WorkerRepositoryPaths.IsWorkspaceRepository(repositoryName, request.WorkspaceRepositoryName);
+        if (!discoverProjects)
             return new RefreshRepositoryProjectsResponse { Projects = null };
 
         var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
-        var repoPath = Path.Combine(workspacePath, repositoryName);
+        var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
 
         if (!git.DirectoryExists(repoPath))
             return new RefreshRepositoryProjectsResponse { Projects = [] };

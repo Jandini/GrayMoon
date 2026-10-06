@@ -16,7 +16,7 @@ public sealed class RefreshRepositoryVersionCommand(
         var repositoryName = request.RepositoryName ?? throw new ArgumentException("repositoryName required");
 
         var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
-        var repoPath = Path.Combine(workspacePath, repositoryName);
+        var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
 
         var version = "-";
         var branch = "-";

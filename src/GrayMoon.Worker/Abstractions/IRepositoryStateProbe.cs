@@ -72,4 +72,10 @@ public sealed class RepositoryStateProbeOptions
     /// means "not stated" and keeps the pre-profile behaviour of honouring the flags as given.
     /// </summary>
     public RepositoryOperationCapabilities? Capabilities { get; init; }
+
+    /// <summary>
+    /// True when the repository is the Workspace-root repository, which never discovers .NET projects
+    /// whatever <see cref="Capabilities"/> says. Hook sync commands have no request-level name and leave it false.
+    /// </summary>
+    public bool IsWorkspaceRepository { get; init; }
 }
