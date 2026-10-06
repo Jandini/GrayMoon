@@ -19,9 +19,9 @@ It must be possible to stop work here and resume later without reconstructing st
 | | |
 |---|---|
 | Project status | READY |
-| Current phase | Wave 1 complete (O, A, W1, B DONE). Wave 2 (C, W2) is READY to start |
+| Current phase | Wave 4 complete (E, F DONE). Wave 5 (G) is next. UI of E is untested by hand, see Unit E handoff. |
 | Units planned in detail | O, A, W1, B, C, W2, D, E, F, G, I |
-| Last verified | 2026-10-06, after Wave 1 on `workspace-as-git-repository`: `dotnet build GrayMoon.slnx` 0 warnings; App 1028/1028, Worker 329/329 + 1 pre-existing skip, Common 255/255. Baseline moved from `f7f94ce` (App 999, Worker 318) to `c0bfb2a` because `origin/main` (Worker Windows-service password change) was merged into this branch; the owner accepted it. |
+| Last verified | 2026-10-06, after Wave 4 + E2 on `workspace-as-git-repository`: `dotnet build GrayMoon.slnx` 0 warnings; App 1084/1084, Worker 353/353 + 1 pre-existing skip, Common 255/255. |
 
 **What works today.** Nothing of this feature. A Workspace is a folder containing one subfolder per repository; the Worker derives every repository path as `<root>\<WorkspaceName>\<RepositoryName>`; Features create one worktree per repository under `<FeatureStorageRoot>\<Feature>\<RepositoryName>`.
 
@@ -665,7 +665,7 @@ Commit message: Add repository URL identity, manifest serializer and managed git
 | | |
 |---|---|
 | Owner | subagent |
-| Status | TODO |
+| Status | DONE |
 | Dependencies | A, W1 (contract only; Worker binary not required to build) |
 | Decisions | D1, D9 |
 
@@ -725,7 +725,45 @@ src/GrayMoon.App.Tests/WorkerSendSiteGuardTests.cs                        (new)
 **Handoff log.**
 
 ```text
-(empty)
+Date: 2026-10-06
+Status after this handoff: DONE (merged; verified by the orchestrator)
+Files changed (full paths): all under src\
+  GrayMoon.App\Services\Features\WorkspaceContextPathResolver.cs
+  GrayMoon.Application\Features\IWorkspaceContextPathResolver.cs (tuple method deleted)
+  GrayMoon.App\Services\Application\WorkspaceBranchOperations.cs, WorkspaceFileOperations.cs, WorkspaceGitChangesOperations.cs
+  GrayMoon.App\Services\Features\WorkspaceFeatureOperations.cs (Unit F's file; deconstruction shape only)
+  GrayMoon.App\Services\Git\WorkspaceGitService.Branches.cs, .Commit.cs, .Context.cs, .Fetch.cs, .Projects.cs, .Restore.cs, .ReturnToDefault.cs, .Sync.cs
+  GrayMoon.App\Services\GitChanges\GitChangesWorkerClient.cs, GitChangesWorkspaceScanner.cs, MarkdownImageEmbedder.cs
+  GrayMoon.App\Services\Orchestration\WorkspaceBranchUpdateHandler.cs, WorkspaceCommitSyncHandler.cs, WorkspaceUndoPushHandler.cs
+  GrayMoon.App\Services\Workspaces\WorkspaceFileSearchService.cs, WorkspaceFileVersionService.cs, WorkspacePushService.cs
+  GrayMoon.App\Components\Modals\ViewFileModal.razor, Components\Pages\WorkspaceFiles.razor
+  GrayMoon.App\Components\Pages\WorkspaceGitChanges.CopyPath.cs, .Diff.cs, .Discard.cs, .Markdown.cs, .razor.cs
+  GrayMoon.App.Tests\FeatureContextIsolationTests.cs, WorkspacePushStrategyTests.cs (compile-required edits only)
+  GrayMoon.App.Tests\WorkspaceContextPathResolverRoleTests.cs, WorkspaceHookContextAttributorRoleTests.cs, WorkerSendSiteGuardTests.cs (new)
+Search counts before/after:
+  GetWorkerWorkspaceArgsAsync: 34 lines in 19 files -> 0 (plan said about 45)
+  workspaceRoot in src/GrayMoon.App: 135 -> 173; every send block with workspaceRoot + repositoryName now also carries workspaceRepositoryName except WorkspaceService.cs blocks (no repository name) and the allow-listed WorkspaceFeatureOperations.cs blocks
+Build: dotnet build GrayMoon.slnx -> warnings: 0, errors: 0
+Tests: App 1037/1037 (baseline 1028, +9)
+New tests added (names):
+  WorkspaceContextPathResolverRoleTests: Special_context_source_role_resolves_to_root_slash_name, Special_context_workspace_role_resolves_to_root, Feature_context_workspace_role_uses_persisted_worktree_path, Feature_context_workspace_role_without_worktree_path_resolves_to_feature_root, GetWorkerWorkspaceArgs_returns_workspace_repository_name_when_present_else_null
+  WorkspaceHookContextAttributorRoleTests: Hook_path_equal_to_workspace_root_attributes_to_special_context_for_workspace_role, Hook_path_equal_to_feature_root_attributes_to_feature_context_for_workspace_role, Hook_path_of_source_repo_still_attributes_to_source_link_not_workspace_link
+  WorkerSendSiteGuardTests: Every_send_site_with_workspace_root_and_repository_name_also_sends_workspace_repository_name
+Deviations from the steps (and why):
+  1. Guard allow-list is NOT empty: AllowedFiles = [WorkspaceFeatureOperations.cs] with a "Unit F removes this" comment. That file (Unit F's) has 5 qualifying blocks (DeleteBranch x3, GetGitChangeStatus, GetHeadCommits) that C may not change.
+  2. WorkspaceFeatureRepository.WorktreePath is non-null, so "no WorktreePath" is modelled as string.Empty in the test.
+  3. WorkerWorkspaceArgs has 3 members, so tuple deconstructions became (a, b, _) / (a, _, _).
+  4. Two test files outside "Files owned" were edited only to compile: FeatureContextIsolationTests.cs (3-element deconstructions) and WorkspacePushStrategyTests.cs (null argument for the new parameter).
+  5. The new string? workspaceRepositoryName parameter sits right after repositoryName in every IGitChangesWorkerClient method and in MarkdownImageEmbedder.EmbedAsync / TryLoadRepoFileAsync.
+  6. Compiler-forced signature changes: ResolveWorkerPathArgsAsync (WorkspaceGitService.Context.cs, WorkspacePushService.cs) returns WorkerWorkspaceArgs; WorkspacePushService restore/fetch helpers and WorkspaceFileVersionService.ResolveTokenValuesAsync take workspaceRepositoryName; WorkspaceGitChangesOperations.WithResolvedRepo callback has a 4th argument; GitChangesWorkspaceScanner MonitorTarget and page tuples gained a trailing element; ViewFileModal has a new WorkspaceRepositoryName parameter fed from WorkspaceFiles.razor.
+  7. WorkspaceGitChanges.CopyPath.cs only uses root and folder name, so it does not read the repository name.
+Discoveries:
+  - WorkspaceFeatureOperations.cs edits (deconstruction shape only): ~559 returns (featureArgs.WorkspaceRoot, featureArgs.WorkspaceFolderName) from GetWorkerArgsAsync; ~737 and ~1724 use (workspaceRoot, workspaceFolderName, _); ~752 and ~1737 use (featureStorageRoot, _, _).
+  - Pre-existing U+2013/U+2014 characters remain, identical in HEAD, in comments of FeatureContextIsolationTests.cs line 355, ViewFileModal.razor line 14, WorkspaceFeatureOperations.cs lines 1916 and 2204. Added lines contain none. Left alone (not mentioned by the steps).
+  - IWorkspaceContextPathResolver.cs had CR-CR-LF endings in its first half (left by Unit O); it is now clean CRLF.
+  - The plan's Select-String -Path src -Recurse form does not work; use Get-ChildItem -Recurse | Select-String.
+Follow-ups for the owner: Unit F must add workspaceRepositoryName to the 5 WorkspaceFeatureOperations.cs blocks and then empty AllowedFiles in WorkerSendSiteGuardTests.
+Commit message: Resolve Workspace-role repository paths in the App resolver and send workspaceRepositoryName from every Worker send site
 ```
 
 ---
@@ -735,7 +773,7 @@ src/GrayMoon.App.Tests/WorkerSendSiteGuardTests.cs                        (new)
 | | |
 |---|---|
 | Owner | subagent |
-| Status | TODO |
+| Status | DONE |
 | Dependencies | W1 |
 | Decisions | D4, D5, D7 |
 
@@ -792,7 +830,37 @@ src/GrayMoon.Worker.Tests/GitRepositoryWatcherNestedRepoTests.cs           (new)
 **Handoff log.**
 
 ```text
-(empty)
+Date: 2026-10-06
+Status after this handoff: DONE (merged; verified by the orchestrator)
+Files changed (full paths): all under src\
+  GrayMoon.Worker\Jobs\Requests\AttachWorkspaceRepositoryRequest.cs, WriteRepositoryFileRequest.cs (new)
+  GrayMoon.Worker\Jobs\Response\AttachWorkspaceRepositoryResponse.cs, WriteRepositoryFileResponse.cs (new)
+  GrayMoon.Worker\Commands\AttachWorkspaceRepositoryCommand.cs, WriteRepositoryFileCommand.cs (new)
+  GrayMoon.Worker\Abstractions\IGitService.cs, GrayMoon.Worker\Services\GitService.cs (six new members)
+  GrayMoon.Worker\Services\CommandDispatcher.cs, CommandJobFactory.cs, GrayMoon.Worker\Cli\Handlers\RunCommandHandler.cs
+  GrayMoon.Worker\Services\GitChanges\GitRepositoryWatcher.cs
+  GrayMoon.Worker.Tests\AttachWorkspaceRepositoryCommandTests.cs, WriteRepositoryFileCommandTests.cs, GitRepositoryWatcherNestedRepoTests.cs (new)
+Search counts before/after: n/a
+Build: dotnet build GrayMoon.slnx -> warnings: 0, errors: 0
+Tests: Worker 343/343 (+1 skipped); baseline 329 + 1 skipped, +14 new
+New tests added (names):
+  AttachWorkspaceRepositoryCommandTests: Empty_root_is_cloned_in_place, Non_empty_root_without_git_is_initialized_and_checked_out, Non_empty_root_with_empty_remote_leaves_unborn_main, Root_with_same_origin_is_idempotent, Root_with_different_origin_fails, Checkout_collision_returns_git_message_and_keeps_dot_git
+  WriteRepositoryFileCommandTests: Writes_utf8_without_bom, Skips_when_identical, Rejects_parent_traversal, Rejects_dot_git_path, Creates_missing_subdirectory
+  GitRepositoryWatcherNestedRepoTests: Event_under_nested_repo_is_ignored, Event_at_root_file_is_observed, Newly_created_nested_repo_is_excluded_after_refresh
+Deviations from the steps (and why):
+  1. The six new IGitService members are default interface methods that throw NotSupportedException; GitService implements all six. Two unowned test files (DeleteBranchCommandTests.cs, ReturnToDefaultBranchCommandTests.cs) have full IGitService fakes that plain members would break.
+  2. AttachWorkspaceRepositoryRequest has two extra int properties, workspaceId and repositoryId. D4 does not list them; hook installation (WriteSyncHooksAsync) needs both.
+  3. After GetRemoteDefaultBranchAsync the command checks refs/remotes/origin/<default> exists locally (RevParseAsync); git 2.31+ can report an unborn HEAD branch for an empty remote. An empty remote falls through to the unborn main path.
+  4. Watcher: TryCreateWorkTreeObservation stays static with an optional fifth parameter nestedRepoRoots; added internal RefreshNestedRepoRoots() and a NestedRepoRoots property for tests.
+  5. Watcher: the nested-root set also refreshes on a Created/Deleted/Renamed event for a .git entry directly inside an immediate child (otherwise a brand-new nested repo is never excluded).
+  6. Attach emits no explicit CommandOutput step lines; the git processes' own output streaming covers it (no existing command writes CommandOutput directly).
+Discoveries:
+  - GitRepositoryWatcher.cs was committed with CR-CR-LF endings on 204 lines. It is now proper CRLF, so a plain git diff shows the whole file; use git diff --ignore-space-at-eol (real change: 91 added, 3 removed).
+  - Retry after a checkout collision: .git stays with a matching origin, so a re-run takes the idempotent-success path and never re-checks out the default branch; HEAD stays unborn. D4 says the user resolves and retries, so Unit D's Enable flow (or a later Attach change) must handle it.
+  - Idempotent re-attach also installs hooks, runs safe.directory and reports the current branch; D4 step 2 only says success.
+  - AddSafeDirectoryAsync can modify global git config, only when the repository is not already safe; tests do not touch global config.
+Follow-ups for the owner: add the six IGitService stubs to the two test fakes and make the members non-default (one line each) when convenient. Unit D must send workspaceId and repositoryId in the Attach request.
+Commit message: Add AttachWorkspaceRepository and WriteRepositoryFile Worker commands and exclude nested repositories from the git watcher
 ```
 
 ---
@@ -802,7 +870,7 @@ src/GrayMoon.Worker.Tests/GitRepositoryWatcherNestedRepoTests.cs           (new)
 | | |
 |---|---|
 | Owner | subagent |
-| Status | TODO |
+| Status | DONE |
 | Dependencies | B, C, W2 |
 | Decisions | D2, D3, D4, D5, D8, D11, D12 |
 
@@ -869,6 +937,8 @@ src/GrayMoon.App.Tests/WorkspaceManifestDriftMigrationTests.cs              (new
    - `Restore_resolves_repositories_by_normalized_url_with_different_local_ids` (seed `Repository` rows whose ids differ from any hint; match purely by URL)
    - `Restore_reports_unresolved_connector_and_repository`
 
+9. Added 2026-10-06 (from W2 handoff): the AttachWorkspaceRepository request has two extra int properties beyond D4, `workspaceId` and `repositoryId` (needed to install hooks). `EnableWorkspaceRepositoryAsync` must send both.
+10. Added 2026-10-06 (from W2 handoff): after a checkout collision Attach leaves `.git` in place with a matching origin, so a retry returns idempotent success without checking out the default branch (HEAD stays unborn). `EnableWorkspaceRepositoryAsync` must handle this: on retry detect an unborn HEAD instead of claiming success. Ask the owner if the Attach response needs a field for it.
 **Acceptance.** Build clean. `GrayMoon.App.Tests` green.
 
 **Non-goals.** No Razor changes (E). No Feature ordering (F). No automatic import from GitHub.
@@ -876,7 +946,40 @@ src/GrayMoon.App.Tests/WorkspaceManifestDriftMigrationTests.cs              (new
 **Handoff log.**
 
 ```text
-(empty)
+Date: 2026-10-06
+Status after this handoff: DONE (merged; verified by the orchestrator). Owner note 10 and two policy points are OPEN, see Decisions pending.
+Files changed (full paths): all under src\
+  Owned: GrayMoon.App\Models\Workspace.cs (ManifestDriftDetectedAt), GrayMoon.App\Data\AppDbContext.cs (Workspace block), GrayMoon.App\Migrations.cs (strict step 6 + MigrateWorkspaceManifestDriftColumnAsync), GrayMoon.App\Models\Api\WorkspaceWorkerApiModels.cs (SupportedFeatures), GrayMoon.App\Program.cs (3 DI lines)
+  Permitted hook sites (steps 6/7): GrayMoon.App\Components\Pages\Workspaces.razor, GrayMoon.App\Components\Pages\WorkspaceRepositories.RepositoriesModal.cs, GrayMoon.App\Services\Worker\SyncCommandHandler.cs, GrayMoon.App\Services\Git\WorkspaceGitService.Sync.cs, GrayMoon.App\Services\Git\WorkspaceGitService.cs (one optional constructor parameter)
+  New: GrayMoon.App\Services\Worker\WorkerFeatureSupportService.cs, GrayMoon.App\Services\WorkspaceManifest\WorkspaceManifestService.cs, GrayMoon.App\Services\Application\WorkspaceRepositoryOperations.cs, GrayMoon.App.Tests\WorkspaceManifestServiceTests.cs, WorkspaceRepositoryOperationsTests.cs, WorkspaceManifestDriftMigrationTests.cs
+Search counts before/after: n/a
+Build: dotnet build GrayMoon.slnx -> warnings: 0, errors: 0
+Tests: App 1056/1056 (baseline 1037, +19); Worker 343 + 1 skipped and Common 255 re-run by the orchestrator after the merge, unchanged
+New tests added (names):
+  WorkspaceManifestServiceTests: Build_excludes_workspace_role_repository_and_nuget_connectors, Build_connector_url_derived_from_api_base_url, Write_manifest_sends_WriteRepositoryFile_to_workspace_repository_root, Write_manifest_is_noop_without_workspace_repository, Detect_drift_false_when_file_equals_database, Detect_drift_true_when_repository_added_in_file, Detect_drift_true_on_parse_error_with_reason, Detect_drift_refuses_feature_context, Detect_drift_ignores_url_formatting_differences
+  WorkspaceRepositoryOperationsTests: Enable_refused_when_worker_lacks_feature, Enable_refused_while_features_exist, Enable_refused_when_repository_is_already_source, Enable_rolls_back_link_when_attach_fails, Enable_writes_gitignore_then_manifest, Disable_refused_while_features_exist, Restore_resolves_repositories_by_normalized_url_with_different_local_ids, Restore_reports_unresolved_connector_and_repository
+  WorkspaceManifestDriftMigrationTests: Column_added_once_and_idempotent, Strict_step_6_is_registered_after_step_5 (extra)
+Deviations from the steps (and why):
+  1. WorkspaceGitService got an optional trailing constructor parameter IServiceScopeFactory? scopeFactory = null for the step 7 fire-and-forget scope (AGENTS.md rule 3). A null factory skips drift detection.
+  2. Step 6 "caller facade": the only callers of the membership methods are Razor pages, so those call sites were edited: Workspaces.razor (3 sites: UpdateAsync in the editor, UpdateAsync in the repositories modal, AddRepositoriesAsync in ConfirmImportAsync) and WorkspaceRepositories.RepositoriesModal.cs (1 site). Each calls the new extension WorkspaceManifestHooks.SyncDefinitionToDiskAsync (in WorkspaceManifestService.cs): writes .gitignore, then the manifest, never throws, returns an error string shown with ShowError. The profile-change hook is covered by the editor UpdateAsync site; WorkspaceProfileTransition itself is unedited.
+  3. OperationResult has no message field, so "No Workspace repository" is returned as new OperationResult(true, "No Workspace repository") (text in Error on a success result).
+  4. DetectDriftAsync takes only workspaceId; "refuse a Feature context" is implemented by asking IWorkspaceFeatureContextResolver for the special context and throwing InvalidOperationException when GetRequiredAsync reports it is not special.
+  5. With no Workspace-role link DetectDriftAsync clears ManifestDriftDetectedAt and returns no drift. A missing .graymoon.json counts as drift with a ParseError. A Worker or read failure throws and persists nothing.
+  6. Enable step (g): if the .gitignore or manifest write fails after the attach, the link and attached repository are kept and the result is Fail "The Workspace repository was attached, but ...". A retry of Enable then fails at check (c). The drift banner's "Write Workspace definition to disk" is the repair path.
+  7. Restore reports problems in RestoreWorkspaceResult: Success=true with Error="Restored without definition: <reason>" when the file is missing or unparsable; Success=true with Error="Workspace restored, but the Workspace definition could not be written: ..." when step 7 fails.
+  8. UnresolvedRepositoryUrls entries are "<repositoryUrl> (connector <connectorUrl>)" because the result type has no other place for the connector URL (Unit G must know this format).
+  9. Restore creates the Workspace through WorkspaceRepository.AddAsync (name normalization, duplicate check); if the attach fails the new Workspace row and its link are deleted.
+  10. Unknown profile strings in a manifest keep the Basic/None/None default for that axis.
+  11. Drift ignores workspace.name (a clone may use a different name) and compares repositories by normalized URL only.
+Discoveries:
+  - Owner note 10 NOT implemented: AttachWorkspaceRepositoryResponse has branch and isUnborn, but nothing says whether the remote has a default branch; isUnborn is also true for a legitimately empty remote. Needs a Worker change (a remoteHasDefaultBranch field, or the idempotent re-attach path checking out the default branch when HEAD is unborn and origin/<default> exists).
+  - Owner note 9 done: Enable sends workspaceName, workspaceRoot, workspaceRepositoryName, cloneUrl, bearerToken, workspaceId and repositoryId; response success and errorMessage are read.
+  - Restore D14 step 1 (folder must not exist or be empty) cannot be checked by the App without a new Worker command; Attach on a non-empty root without .git runs the convert flow, so Restore into a populated folder would silently convert it.
+  - D8 also lists single-repository sync of the Workspace repository and Checkout Branch/Tag as drift triggers; step 7 names only full Sync and hook sync, so SyncSingleRepositoryAsync and checkout are not hooked.
+  - The drift hook in SyncAsync runs only when the loaded Workspace has a Workspace-role link and the context is special; it runs even when repositoryIds filters the sync to a subset.
+  - The legacy baseline does not load the Workspace entity through EF, so no baseline reordering was needed for the new column.
+Follow-ups for the owner: see Decisions pending. Unit E can use ManifestDriftDetectedAt for the banner and WorkspaceManifestHooks.SyncDefinitionToDiskAsync for the "Write Workspace definition to disk" button. Unit G triggers the sync (D14 step 8) after RestoreFromRepositoryAsync.
+Commit message: Add Workspace manifest, managed .gitignore, drift detection and Workspace-repository enable, disable and restore operations
 ```
 
 ---
@@ -886,7 +989,7 @@ src/GrayMoon.App.Tests/WorkspaceManifestDriftMigrationTests.cs              (new
 | | |
 |---|---|
 | Owner | subagent |
-| Status | TODO |
+| Status | DONE |
 | Dependencies | A, C, D |
 | Decisions | D2, D6 (App part), D8 (banner), D13 |
 
@@ -933,7 +1036,12 @@ src/GrayMoon.App.Tests/WorkspaceRepositoryLinkListQueryServiceRoleTests.cs  (new
 **Handoff log.**
 
 ```text
-(empty)
+Date: 2026-10-06. Status: DONE (merged); UI NOT run by hand. Files (all merged): WorkspaceRepositoryLinkList{Models,Mapper,QueryService}.cs, WorkspaceModal.razor, WorkspaceRepositoriesModal.razor.cs, WorkspaceRepositories.{razor,Display.cs,Loading.cs}, plus four files outside the owned list that the steps required (owner-visible): WorkspaceRepositories.State.cs (ComputeSlots, level grouping), WorkspaceRepositories.RepositoriesModal.cs, WorkspaceRepositoriesRow.razor (badge, empty deps cell), Workspaces.razor (SaveWorkspaceAsync, Unit D hooks kept). File search per owner decision: IWorkspaceFileSearchService (SearchAsync gained optional workspaceRepositoryName), SearchFilesCommand, WorkspaceFileSearchService. Build 0 warnings. App 1068 at unit tip (+11), Worker 353 + 1 skipped (+4); combined tip App 1078.
+New tests: App WorkspaceRepositoryLinkListQueryServiceRoleTests (Workspace_role_row_is_first_in_every_sort, Workspace_role_row_is_not_in_any_level_group, Workspace_role_row_with_no_level_is_not_in_the_no_dependencies_group, Keyset_paging_keeps_workspace_row_first, Keyset_cursor_carries_the_role_of_the_last_row) and WorkspaceRepositoryGridLayoutTests (ComputeSlots x3, Repositories_modal_filtering_drops_excluded_ids_and_keeps_order, Workspace_repository_choices x2); Worker SearchFilesWorkspaceRepositoryTests (4).
+Deviations: Role added as optional trailing members (DTO, index entry, cursor RoleSortKey = 1). Keyset cursor key 0 resumes at the first Source row. The "Workspace repository" header shows whenever a Workspace-role row exists. Level 0 / No dependencies bulk actions exclude the Workspace row. The modal select is disabled while Features exist (rename wording). Disable runs before Enable; results shown as toast and modal error; link re-read from the DB after each call. WorkspaceRepositoriesModal has a new ExcludedRepositoryIds parameter. Drift banner: "Write Workspace definition to disk" runs SyncDefinitionToDiskAsync then DetectDriftAsync; Dismiss clears ManifestDriftDetectedAt. Both banners show in the special Workspace context only.
+Discoveries: App WorkspaceFileSearchService already sent workspaceRepositoryName (unchanged, no App search test). Projects, Packages and Deps pages were NOT checked for skipping repositories with no Projects (D6): manual check needed. Compatibility banner shows "does not support" also when the Worker is merely offline (follows plan literally). Pre-existing non-ASCII in WorkspaceRepositories.Loading.cs line 547 left alone.
+Follow-ups: decide whether the compatibility banner hides when the Worker is disconnected. D8 Review action (diff view) not built, DetectDriftAsync returns the data. Create flow: Enable runs before the existing-repositories import suggestion; if Enable fails the modal stays open and a second Save retries Enable but skips the import suggestion.
+Manual testing needed: Add/Edit Workspace modal (select, disabled with Features, enable/change/clear, old Worker refusal toast); grid first row, header, badge, no phantom Level 0 / No dependencies group, virtual scroll, Feature selector view; both banners; Repositories membership modals; Git Changes shows .graymoon.json and .gitignore as new files and commit works; Projects/Packages/Deps pages with a Workspace repository.
 ```
 
 ---
@@ -943,7 +1051,7 @@ src/GrayMoon.App.Tests/WorkspaceRepositoryLinkListQueryServiceRoleTests.cs  (new
 | | |
 |---|---|
 | Owner | subagent |
-| Status | TODO |
+| Status | DONE |
 | Dependencies | C, W1 |
 | Decisions | D9, D10 |
 
@@ -982,6 +1090,7 @@ src/GrayMoon.App.Tests/WorkspaceFeatureWorkspaceRepositoryTests.cs   (new)
    - `Retry_retries_root_before_sources`
    - `Workspace_without_workspace_repository_behaves_exactly_as_before` (same call set and order as today)
 
+Note added 2026-10-06 (from C handoff): `WorkspaceFeatureOperations.cs` has 5 Worker send blocks that Unit C could not change (DeleteBranch x3, GetGitChangeStatus ~line 1173, GetHeadCommits ~line 2162). Unit F adds `workspaceRepositoryName` to them (and the variable at the deconstruction sites ~737, ~752, ~1724, ~1737), then empties `AllowedFiles` in `WorkerSendSiteGuardTests`.
 **Acceptance.** Build clean. `GrayMoon.App.Tests` green (existing Feature tests must not change).
 
 **Non-goals.** No UI. No new worker commands.
@@ -989,7 +1098,9 @@ src/GrayMoon.App.Tests/WorkspaceFeatureWorkspaceRepositoryTests.cs   (new)
 **Handoff log.**
 
 ```text
-(empty)
+Date: 2026-10-06. Status: DONE (merged). Files: WorkspaceFeatureOperations.cs, WorkerSendSiteGuardTests.cs (AllowedFiles emptied), WorkspaceFeatureWorkspaceRepositoryTests.cs (new). Build 0 warnings. App 1067 (+10). New tests: Create_sends_root_worktree_before_any_source_worktree, Create_root_worktree_path_equals_feature_root, Create_root_failure_leaves_source_rows_pending_and_feature_needs_repair, Remove_sends_root_worktree_after_all_source_worktrees, Remove_skips_root_when_a_source_removal_failed, Retry_retries_root_before_sources, Workspace_without_workspace_repository_behaves_exactly_as_before, Rollback_removes_root_worktree_after_all_source_worktrees, Rollback_keeps_root_when_a_source_removal_failed, Rollback_without_workspace_repository_behaves_exactly_as_before.
+Deviations: GetHeadSnapshotAsync got a private workspaceRepositoryName parameter (it did not receive resolver args). Fan-out lambdas became local delegates (createRowAsync, retryRowAsync, removeRowAsync); root runs first/last alone. A root create failure leaves Feature LastError as the existing text; root error stays on the root row. Rollback (not in plan steps, added at the orchestrator's request per D10) now removes Source rows first and the root last, keeps the root when any source failed. Remove/Rollback root removal sends featureRootPath = null and featureStorageRoot = null.
+Discoveries: Rollback returns Fail without changing Feature state on failure (pre-existing). GetHeadCommits payload now carries workspaceRepositoryName (null when no Workspace role row); Worker ignores null. Pre-existing U+2013/U+2014 in two comments left alone.
 ```
 
 ---
@@ -1077,6 +1188,15 @@ src/GrayMoon.App.Tests/RestoreWorkspaceFlowTests.cs                    (new, ser
 Record coupling or surprises here with unit, file and one sentence. Do not fix them unless your unit owns the file.
 
 ```text
+D   Owner note 10 not implementable without a Worker change (Attach response cannot say whether the remote has a default branch). Open, see Decisions pending.
+D   Restore cannot check the D14 step 1 empty-folder rule without a Worker change. Open.
+D   Enable step (g) partial-failure policy chosen by the subagent (keep link, fail with message). Open for owner confirmation.
+D   D8 triggers not hooked: single-repository sync of the Workspace repository and Checkout Branch/Tag.
+D   Drift hook in SyncAsync runs even when repositoryIds filters the sync to a subset.
+C   WorkerSendSiteGuardTests allow-list is not empty: WorkspaceFeatureOperations.cs is allow-listed until Unit F (see Unit F note).
+W2  Six new IGitService members are default interface methods that throw NotSupportedException so the two unowned test fakes still compile; make them non-default later.
+W2  GitRepositoryWatcher.cs line endings normalized from CR-CR-LF to CRLF (whole-file diff; use --ignore-space-at-eol).
+W2  Attach retry after a checkout collision returns idempotent success with HEAD still unborn (see Unit D step 10).
 W1  SearchFilesCommand and IWorkspaceFileSearchService still Path.Combine(workspacePath, repositoryName) internally; a file search scoped to the Workspace repository name finds no folder. Triage: needed by Unit E (file search for the Workspace row); owner to assign an owner for those two files before Unit E starts.
 W1  Hook sync commands have no request.WorkspaceRepositoryName and rely on the default false, so a hook sync for the Workspace repository still discovers projects. Acceptable for v1; the App hides projects for Role == Workspace (Unit E).
 W1  WorkspaceFileSearchService also skips submodule folders at the repository root (they contain .git). Intended side effect of the nested-repo exclusion.
@@ -1085,11 +1205,25 @@ B   WriteIndented makes manifest arrays multi-line and the default JSON encoder 
 A   Only the Feature-context legacy migration step loads WorkspaceRepositoryLink through EF before strict step 5; the early role call covers it.
 ```
 
+## Decisions pending (owner)
+
+```text
+(all three resolved 2026-10-06, see Decisions made during execution; Unit D2 implements 1 and 2)
+```
+
 ## Decisions made during execution
+2026-10-06  Unit E2 (owner request, outside the original plan): the Workspace repository select in WorkspaceModal.razor was replaced by a searchable filtered picker (text input plus scrollable list, gray 8px auto scrollbar copied from BranchModal.razor.css). Files: WorkspaceModal.razor, WorkspaceModal.razor.css, WorkspaceRepositoryPickerFilterTests.cs (new, 6 tests incl. 3 theory cases). App 1084 (+6). Inline list (pushes content down, not a popup); no arrow-key navigation; Escape closes the list before the modal. Not run by hand.
 
 Only the owner writes here. Each entry: date, what, why, which document was updated.
 
 ```text
+2026-10-06  Owner decision (D note 10): the idempotent re-attach path of AttachWorkspaceRepositoryCommand checks out the remote default branch when HEAD is unborn and origin/<default> exists, so a retry after a checkout collision completes the attach or returns the git collision message again. Implemented in follow-up Unit D2. Documents unchanged (D4 step 2 gains this behaviour).
+2026-10-06  Owner decision (D14 step 1): AttachWorkspaceRepositoryRequest gains requireEmptyRoot (bool, default false); when true the Worker fails if the root exists and is non-empty. RestoreFromRepositoryAsync sends true, Enable does not. Implemented in follow-up Unit D2.
+2026-10-06  Owner decision (Enable step g): keep the link and fail with a message when the .gitignore or manifest write fails after the attach; the drift banner action repairs it. No change.
+2026-10-06  Follow-up Unit D2 (owner-approved scope): files owned are src/GrayMoon.Worker/Commands/AttachWorkspaceRepositoryCommand.cs, src/GrayMoon.Worker/Jobs/Requests/AttachWorkspaceRepositoryRequest.cs, src/GrayMoon.Worker/Jobs/Response/AttachWorkspaceRepositoryResponse.cs (only if needed), src/GrayMoon.Worker.Tests/AttachWorkspaceRepositoryCommandTests.cs, src/GrayMoon.App/Services/Application/WorkspaceRepositoryOperations.cs, src/GrayMoon.App.Tests/WorkspaceRepositoryOperationsTests.cs. Status: DONE 2026-10-06 (merged; verified by the orchestrator). Files changed: AttachWorkspaceRepositoryCommand.cs, AttachWorkspaceRepositoryRequest.cs, AttachWorkspaceRepositoryCommandTests.cs, WorkspaceRepositoryOperations.cs, WorkspaceRepositoryOperationsTests.cs. Build 0 warnings. Tests: Worker 349 + 1 skipped (+6), App 1057 (+1), Common 255. New tests: Reattach_after_collision_checks_out_default_when_head_is_unborn, Reattach_with_empty_remote_stays_unborn, Reattach_collision_again_returns_git_message, Require_empty_root_fails_when_folder_has_files, Require_empty_root_allows_missing_or_empty_folder, Reattach_with_require_empty_root_false_is_unchanged, Restore_sends_require_empty_root_and_cleans_up_workspace_row_on_failure. Note: the App sends two anonymous objects (with and without requireEmptyRoot) from AttachAsync; harmless, could be simplified later. The D2 subagent report never reached the orchestrator, so this entry comes from the orchestrator's own diff review and test run.
+2026-10-06  Owner decision (file search): Unit E also owns the file-search fix for the Workspace repository: src/GrayMoon.Worker/Commands/SearchFilesCommand.cs, the Worker file-search service interface/implementation it calls, the App IWorkspaceFileSearchService/WorkspaceFileSearchService, and their tests, so a search scoped to the Workspace repository name finds its folder (Worker uses WorkerRepositoryPaths.Resolve with request.WorkspaceRepositoryName). Unit F also owns src/GrayMoon.App.Tests/WorkerSendSiteGuardTests.cs for the single edit that empties AllowedFiles.
+2026-10-06  Unit worktrees for Wave 4 and later are created in C:\Users\matth\.graymoon\wr-units (outside the Feature folder) so the owner's Feature does not report needs-attention.
+2026-10-06  Wave 2 handoffs are written into this file by the orchestrator and left uncommitted so the owner can track them; Wave 2 subagents did not edit the plan.
 2026-10-06  Baseline moved to c0bfb2a (origin/main merged: Worker Windows-service password change). App 1007, Worker 320 + 1 skip, Common 236. Accepted by the owner. Plan header updated.
 2026-10-06  Unit A may also edit Migrations.cs RunLegacyBaselineAsync: it calls the idempotent MigrateWorkspaceRepositoryRoleAsync before MigrateWorkspaceFeatureContextSchemaAsync. Why: the legacy Feature-context backfill loads WorkspaceRepositoryLink through EF and failed on databases without the Role column (UpgradeFrom010Tests). Chosen by the owner.
 2026-10-06  Unit W1 may also edit IRepositoryStateProbe.cs, RepositoryStateProbe.cs and the Worker.Tests probe stubs. Why: the D6 discovery gate in the probe needed them. Chosen by the owner. Implemented as RepositoryStateProbeOptions.IsWorkspaceRepository (default false), set only by ReturnToDefaultBranchCommand.
