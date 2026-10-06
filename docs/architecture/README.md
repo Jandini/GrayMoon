@@ -41,6 +41,8 @@ Read these documents in order:
 
 The worktree Feature design and review notes under `docs/worktree/` are historical design records, not current-state references. Where they disagree with this folder or the code, the code wins.
 
+The Workspace repository design documents under `docs/workspace-repository/` (`GrayMoon-Workspace-As-Git-Repository-Design-v3.md` and `Workspace-Repository-Design-Supplement-v3.1.md`) are historical design records, not current-state references. Where they disagree with this folder or the code, the code wins.
+
 ## GrayMoon in one paragraph
 
 GrayMoon is a control plane for multi-repository .NET development. A Workspace groups related Git repositories, discovers their projects and package relationships, calculates dependency levels, coordinates branch and Git operations across them, updates package and configured-file versions, restores and pushes in dependency order, tracks pull requests and GitHub Actions, and provides a multi-repository Git Changes experience. GrayMoon.App owns orchestration and persisted state. GrayMoon.Worker (the Worker, executable `graymoon-worker`) runs on the developer machine and owns all local Git and filesystem work.
