@@ -470,7 +470,7 @@ Verified after the merge with Unit E: build 0 warnings, App 904/904, Worker 312 
   and the hook fallback (no `AppApiBaseUrl`, cold cache) still persisted projects for Basic. The writer is
   now the gate. `ReturnToDefaultBranchCommand` still runs GitVersion for Basic+None: that is a
   Worker-side wasted probe, not persisted state, and is left for Unit D, which owns that request family.
-- `TotalFileConfigRepos` (`WorkspaceFileVersionService.cs:964`) still counts `{@Repo}` references when
+- `TotalFileConfigRepos` (`Services/Workspaces/WorkspaceFileVersionService.cs:914-957`) still counts `{@Repo}` references when
   versioning is off; harmless today but the grid counter is not yet profile-aware.
 
 **Deviations.** `WorkspaceB4ContextLeakTests.cs` (shared test, not owned) gained one constructor argument,
@@ -686,9 +686,81 @@ access policy is still Unit G's.
 
 | | |
 |---|---|
-| Owner | unassigned |
-| Status | TODO |
+| Owner | subagent |
+| Status | REVIEW |
 | Dependencies | Unit A, Unit C, Unit E |
+
+**What changed.** Design section 10a. The page builds one `WorkspaceGridPresentation` from
+`WorkspaceCapabilities` per load. The markup reads only that record. `TableColSpan` became
+`ColumnCount` (3 plus Version). The Version `<th>`/`<td>` and the dependency metric block (header icon and
+row badge, tooltip and custom-dependency entry) render only when their flag is set. The metrics grid gets a
+4-block modifier. `ComputeSlots` is a pure flat-or-grouped slot layout. Header rules
+`DetermineUpdateControl` (None / Update / PushUpdated) and `DetermineShowsFileVersionUpdate` sit next to
+`DeterminePrimaryAction`. Restore is shown only with `ShowPackageRestore`. `ActionsUrl` is passed only with
+`UsesCiIntegration`. `GetHeaderStateAsync` takes optional `capabilities`: without the dependency graph it
+issues no dependency aggregate and returns the new `HasOutOfDateFiles` instead. Without the dependency graph,
+the page also: shows a standalone **Update Files** button (same file-version operation) while a file is out of
+date; puts bulk **Merge PRs...** (all repositories) in the Branch/Feature menu; shows level errors in the page
+callout; never runs the dependency tooltip loader; and does not pass "Update dependencies" from Prepare
+Workspace. .NET Dependency renders exactly as before.
+
+**Files touched.**
+
+```text
+src/GrayMoon.App/Components/Pages/WorkspaceGridPresentation.cs                (new)
+src/GrayMoon.App/Components/Pages/WorkspaceRepositories.razor, .razor.css
+src/GrayMoon.App/Components/Pages/WorkspaceRepositories.State.cs, .Loading.cs, .Display.cs, .BulkMerge.cs, .PrepareWorkspace.cs
+src/GrayMoon.App/Components/Pages/WorkspaceRepositoriesRow.razor
+src/GrayMoon.App/Components/Shared/WorkspaceRepositoriesHeader.razor
+src/GrayMoon.App/Services/Queries/IWorkspaceRepositoryLinkListQueryService.cs, WorkspaceRepositoryLinkListQueryService.cs, WorkspaceRepositoryLinkListModels.cs
+src/GrayMoon.App.Tests/WorkspaceGridPresentationTests.cs                     (new)
+src/GrayMoon.App.Tests/WorkspaceRepositoryLinkHeaderStateProfileTests.cs     (new)
+src/GrayMoon.App.Tests/ListQueryTestContext.cs                               (interceptor-capable query factory)
+docs/workspace-profiles/Workspace-Profiles-Design.md                         (new section 10a)
+```
+
+**Tests.** The presentation matrix covers Basic+None, Basic+GitVersion, .NET, null and the CI split.
+Colspan equals the rendered column count for every type x versioning x CI combination. Slot tests cover a flat
+list (rows only, stale levels ignored) and a grouped list (unchanged, including the "No dependencies" group).
+Header tests cover: no update control for Basic in any state, the .NET Update/PushUpdated rule unchanged,
+Basic file-version button only when out of date, and bulk merge in the menu only when flat. Header-state query
+tests use real SQLite and record the SQL issued. With Basic, no command references `UnmatchedDeps` or
+`DependencyLevel`, over stale values, for both the Workspace and a Feature context (which reads its own state).
+.NET equals the profile-less call. The existing `DeterminePrimaryAction`, version-cell and link-query tests
+still pass.
+
+**Verification.** `dotnet build GrayMoon.slnx` 0 warnings / 0 errors. App 933/933 (+29). Common 234/234.
+Worker: 312 passed + 1 skip. In the full run, `GitStatusRefreshCoordinatorTests.Coalesced_caller_receives_the_follow_up_scan_not_the_stale_in_flight_scan`
+failed once (timing under load). It passes when rerun alone (11/11), and no Worker code changed.
+Touched files are CRLF, and added lines have no non-ASCII dashes.
+
+**Risks / findings.**
+
+- `TotalFileConfigRepos` (`Services/Workspaces/WorkspaceFileVersionService.cs:914-957`) is not in any grid DTO, and the grid never
+  displays it. So it was not changed: the counter only matters where it is shown.
+- Row/index DTOs and `ApplySort` still read `DependencyLevel`/`RepositoryType`/`Dependencies`. For Basic these
+  are null (Unit C), so the order is effectively `WorkspaceRepositoryId`. Stale values from an earlier profile
+  can still affect sort order, but they cannot affect grouping or badges.
+- Before capabilities load, the header renders with `Legacy` presentation. It is disabled at that point
+  (no workspace name yet), so a Basic workspace could briefly show a disabled Update button.
+- Capabilities are resolved once per workspace load. A profile change made while the page is open shows after
+  navigation or reload.
+- `Modals/PrepareWorkspaceModal.razor:108-110` (not owned) still shows the "Update dependencies" checkbox for Basic.
+  The page ignores it (`WorkspaceRepositories.PrepareWorkspace.cs:64`).
+- The bulk-merge load-failure toast still says "for this level" (`WorkspaceRepositories.BulkMerge.cs:75`), also
+  when it is opened from the header menu.
+
+**Deviations.** `ListQueryTestContext.cs` (shared test harness) gained a factory method. Two changes outside
+the brief: header-menu bulk merge, and the Prepare Workspace page gate. Both prevent a Basic regression or
+dependency behaviour that the flat grid would otherwise cause.
+
+**Follow-ups.**
+
+- Owner (product): the github.com "Actions" item in `GitHubSectionsMenu.razor:50` was left as is.
+- Unit H or owner: hide "Update dependencies" in `PrepareWorkspaceModal` for workspaces without
+  dependency-aware update.
+- Unit D: page push paths (`WorkspaceRepositories.Push.cs:36,109`) still call
+  `WorkspaceDependencyService.GetPushDependencyInfoFor*`; the page relies on the service being gated.
 
 **Scope.** Capability-aware grid presentation, Version column visibility, dependency metric visibility,
 dependency-level grouping and level headers, header action availability, colspan and virtualization
@@ -703,7 +775,7 @@ harness.
 
 - Basic rows carry null `DependencyLevel` / `UnmatchedDeps` and empty version lines when versioning is
   off. Render them as not applicable, never as zero (Unit C).
-- `TotalFileConfigRepos` (`WorkspaceFileVersionService.cs:964`) still counts `{@Repo}` references when
+- `TotalFileConfigRepos` (`Services/Workspaces/WorkspaceFileVersionService.cs:914-957`) still counts `{@Repo}` references when
   versioning is off. Make the counter profile-aware here if the grid shows it.
 - Pass `ActionsUrl` to `MergePullRequestModal` only when `UsesCiIntegration`
   (`WorkspaceRepositories.razor:425`); the modal already hides the checks link for an empty URL. Whether to

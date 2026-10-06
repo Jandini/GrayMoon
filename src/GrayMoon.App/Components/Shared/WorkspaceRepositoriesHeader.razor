@@ -116,6 +116,17 @@
                             Create PR
                         </button>
                     </li>
+                    @if (Presentation.ShowBulkMergeInHeaderMenu)
+                    {
+                        <li>
+                            <button class="dropdown-item text-nowrap" type="button"
+                                    role="menuitem"
+                                    @onclick="HandleMergePullRequestsClick"
+                                    disabled="@BranchActionsDisabled">
+                                Merge PRs...
+                            </button>
+                        </li>
+                    }
                     @if (!IsFeatureContext)
                     {
                         <li><hr class="dropdown-divider branch-menu-divider" /></li>
@@ -146,7 +157,7 @@
                 </ul>
             }
         </div>
-        @if (HasUnmatchedDependencies && !HasIncomingCommits)
+        @if (UpdateControl == HeaderUpdateControl.PushUpdated)
         {
             <div class="btn-group position-relative">
                 <button class="btn btn-warning"
@@ -225,56 +236,70 @@
         }
         else
         {
-            <div class="btn-group position-relative">
-                <button class="btn @(HasUnmatchedDependencies ? "btn-danger" : "btn-outline-secondary")"
-                        @onclick="HandleUpdatePrimaryClick"
-                        @onclick:stopPropagation
-                        disabled="@UpdateDisabled">
-                    Update
-                </button>
+            @if (UpdateControl == HeaderUpdateControl.Update)
+            {
+                <div class="btn-group position-relative">
+                    <button class="btn @(HasUnmatchedDependencies ? "btn-danger" : "btn-outline-secondary")"
+                            @onclick="HandleUpdatePrimaryClick"
+                            @onclick:stopPropagation
+                            disabled="@UpdateDisabled">
+                        Update
+                    </button>
+                    <button type="button"
+                            class="btn btn-outline-secondary dropdown-toggle dropdown-toggle-split"
+                            aria-label="Toggle Update menu"
+                            aria-expanded="@(_updateMenuOpen ? "true" : "false")"
+                            @onclick="ToggleUpdateMenu"
+                            @onclick:stopPropagation
+                            disabled="@UpdateDisabled">
+                        <span class="visually-hidden">Toggle Dropdown</span>
+                    </button>
+                    @if (_updateMenuOpen)
+                    {
+                        <div class="branch-menu-backdrop" @onclick="CloseUpdateMenu"></div>
+                        <ul class="dropdown-menu show shadow branch-menu-list workspace-repository-actions-menu"
+                            role="menu">
+                            <li>
+                                <button class="dropdown-item" type="button"
+                                        role="menuitem"
+                                        @onclick="HandleUpdatePrimaryClick"
+                                        disabled="@UpdateDisabled">
+                                    Update
+                                </button>
+                            </li>
+                            <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                            <li>
+                                <button class="dropdown-item" type="button"
+                                        role="menuitem"
+                                        @onclick="HandleUpdateFilesClick"
+                                        disabled="@UpdateDisabled">
+                                    Update Files
+                                </button>
+                            </li>
+                            <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                            <li>
+                                <button class="dropdown-item" type="button"
+                                        role="menuitem"
+                                        @onclick="HandleUpdateAndPushClick"
+                                        disabled="@UpdateDisabled">
+                                    Update &amp; Push...
+                                </button>
+                            </li>
+                        </ul>
+                    }
+                </div>
+            }
+            @if (ShowFileVersionUpdateButton)
+            {
                 <button type="button"
-                        class="btn btn-outline-secondary dropdown-toggle dropdown-toggle-split"
-                        aria-label="Toggle Update menu"
-                        aria-expanded="@(_updateMenuOpen ? "true" : "false")"
-                        @onclick="ToggleUpdateMenu"
+                        class="btn btn-warning text-nowrap"
+                        title="Some configured version files are out of date. Rewrite them in place."
+                        @onclick="HandleUpdateFilesClick"
                         @onclick:stopPropagation
                         disabled="@UpdateDisabled">
-                    <span class="visually-hidden">Toggle Dropdown</span>
+                    Update Files
                 </button>
-                @if (_updateMenuOpen)
-                {
-                    <div class="branch-menu-backdrop" @onclick="CloseUpdateMenu"></div>
-                    <ul class="dropdown-menu show shadow branch-menu-list workspace-repository-actions-menu"
-                        role="menu">
-                        <li>
-                            <button class="dropdown-item" type="button"
-                                    role="menuitem"
-                                    @onclick="HandleUpdatePrimaryClick"
-                                    disabled="@UpdateDisabled">
-                                Update
-                            </button>
-                        </li>
-                        <li><hr class="dropdown-divider branch-menu-divider" /></li>
-                        <li>
-                            <button class="dropdown-item" type="button"
-                                    role="menuitem"
-                                    @onclick="HandleUpdateFilesClick"
-                                    disabled="@UpdateDisabled">
-                                Update Files
-                            </button>
-                        </li>
-                        <li><hr class="dropdown-divider branch-menu-divider" /></li>
-                        <li>
-                            <button class="dropdown-item" type="button"
-                                    role="menuitem"
-                                    @onclick="HandleUpdateAndPushClick"
-                                    disabled="@UpdateDisabled">
-                                Update &amp; Push...
-                            </button>
-                        </li>
-                    </ul>
-                }
-            </div>
+            }
             @if (HasIncomingCommits)
             {
                 <button class="btn btn-danger"
@@ -385,15 +410,18 @@
                                 Sync
                             </button>
                         </li>
-                        <li><hr class="dropdown-divider branch-menu-divider" /></li>
-                        <li>
-                            <button class="dropdown-item" type="button"
-                                    role="menuitem"
-                                    @onclick="HandleRestorePackagesClick"
-                                    disabled="@SyncDisabled">
-                                Restore
-                            </button>
-                        </li>
+                        @if (Presentation.ShowPackageRestore)
+                        {
+                            <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                            <li>
+                                <button class="dropdown-item" type="button"
+                                        role="menuitem"
+                                        @onclick="HandleRestorePackagesClick"
+                                        disabled="@SyncDisabled">
+                                    Restore
+                                </button>
+                            </li>
+                        }
                     </ul>
                 }
             </div>
@@ -420,6 +448,10 @@
     [Parameter] public int FilteredCount { get; set; }
     [Parameter] public string? SearchTerm { get; set; }
     [Parameter] public bool HasUnmatchedDependencies { get; set; }
+    /// <summary>True when a workspace without dependency-aware update has an out-of-date version file; shows the standalone "Update Files" action.</summary>
+    [Parameter] public bool HasOutOfDateFiles { get; set; }
+    /// <summary>Profile-derived presentation. Defaults to the pre-profile (.NET Dependency) header.</summary>
+    [Parameter] public GrayMoon.App.Components.Pages.WorkspaceGridPresentation Presentation { get; set; } = GrayMoon.App.Components.Pages.WorkspaceGridPresentation.Legacy;
     /// <summary>True when at least one repository would show the yellow "create" PR badge — primary Branch/Feature control becomes yellow "Create PR".</summary>
     [Parameter] public bool HasCreatablePr { get; set; }
     /// <summary>True when at least one repository has an open pull request. Combined with Feature context to decide whether the primary control shows Remove.</summary>
@@ -443,6 +475,8 @@
     [Parameter] public EventCallback OnShowSwitchBranch { get; set; }
     [Parameter] public EventCallback OnNewPullRequest { get; set; }
     [Parameter] public EventCallback OnReturnToDefault { get; set; }
+    /// <summary>Bulk merge across every repository; only offered when <see cref="GrayMoon.App.Components.Pages.WorkspaceGridPresentation.ShowBulkMergeInHeaderMenu"/>.</summary>
+    [Parameter] public EventCallback OnMergePullRequests { get; set; }
     [Parameter] public EventCallback OnUpdate { get; set; }
     [Parameter] public EventCallback OnUpdateFiles { get; set; }
     [Parameter] public EventCallback OnUpdateAndPush { get; set; }
@@ -522,6 +556,51 @@
         DeterminePrimaryAction(IsFeatureContext, HasCreatablePr, AllFeaturePrsCompleted);
 
     private bool ShowRemoveFeaturePrimary => PrimaryAction == HeaderPrimaryAction.Remove;
+
+    /// <summary>Which dependency-update control the header shows, if any.</summary>
+    internal enum HeaderUpdateControl
+    {
+        /// <summary>No dependency-update control at all (absent, not disabled): the workspace has no dependency-aware update.</summary>
+        None,
+
+        /// <summary>The "Update" split button (Update, Update Files, Update &amp; Push).</summary>
+        Update,
+
+        /// <summary>The yellow "Push Updated" split button, which replaces both Update and Push.</summary>
+        PushUpdated,
+    }
+
+    /// <summary>
+    /// Pure rule for <see cref="HeaderUpdateControl"/>. A dependency workspace keeps today's rule exactly:
+    /// "Push Updated" while dependencies are unmatched and nothing is incoming, otherwise "Update".
+    /// </summary>
+    internal static HeaderUpdateControl DetermineUpdateControl(
+        bool showDependencyUpdateActions,
+        bool hasUnmatchedDependencies,
+        bool hasIncomingCommits)
+    {
+        if (!showDependencyUpdateActions)
+        {
+            return HeaderUpdateControl.None;
+        }
+
+        return hasUnmatchedDependencies && !hasIncomingCommits
+            ? HeaderUpdateControl.PushUpdated
+            : HeaderUpdateControl.Update;
+    }
+
+    /// <summary>
+    /// Pure rule for the standalone "Update Files" button: only for a workspace that updates file versions
+    /// as its own action, and only while a version file is actually out of date.
+    /// </summary>
+    internal static bool DetermineShowsFileVersionUpdate(bool showFileVersionUpdateAction, bool hasOutOfDateFiles) =>
+        showFileVersionUpdateAction && hasOutOfDateFiles;
+
+    private HeaderUpdateControl UpdateControl =>
+        DetermineUpdateControl(Presentation.ShowDependencyUpdateActions, HasUnmatchedDependencies, HasIncomingCommits);
+
+    private bool ShowFileVersionUpdateButton =>
+        DetermineShowsFileVersionUpdate(Presentation.ShowFileVersionUpdateAction, HasOutOfDateFiles);
 
     private void ToggleBranchMenu()
     {
@@ -692,6 +771,12 @@
     {
         CloseBranchMenu();
         await OnReturnToDefault.InvokeAsync();
+    }
+
+    private async Task HandleMergePullRequestsClick()
+    {
+        CloseBranchMenu();
+        await OnMergePullRequests.InvokeAsync();
     }
 
     private async Task HandleRemoveFeatureClick()

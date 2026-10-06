@@ -5,7 +5,8 @@ using Microsoft.AspNetCore.Components;
 namespace GrayMoon.App.Components.Pages;
 
 /// <summary>
-/// Bulk-merge dialog opened per dependency level from the level-header "..." menu's "Merge PRs..." item.
+/// Bulk-merge dialog opened per dependency level from the level-header "..." menu's "Merge PRs..." item, or
+/// over every repository from the header menu when the grid is a flat list without level headers.
 /// Candidates are resolved authoritatively (GetRepositoryIdsAtLevelAsync + GetAllLinksForOperationAsync joined
 /// against the persisted PR table), never from the render-cache <c>prByRepositoryId</c> that
 /// GetHydratedLinksAtLevel/HasMergeablePr use - virtual scrolling means most rows are not hydrated.
@@ -26,9 +27,29 @@ public sealed partial class WorkspaceRepositories
     private async Task OpenMergePullRequestsDialogForLevelAsync(int? levelKey)
     {
         var ids = (await GetRepositoryIdsAtLevelAsync(levelKey)).ToHashSet();
+        await OpenMergePullRequestsDialogAsync(
+            ids,
+            levelKey,
+            levelKey.HasValue ? $"Level {levelKey}" : "No dependencies",
+            "No open pull requests in this level.");
+    }
+
+    /// <summary>Header-menu entry for a flat grid (no level headers): the same dialog over every repository.</summary>
+    private async Task OpenMergePullRequestsDialogForAllAsync()
+    {
+        var ids = (await GetAllLinksForOperationAsync()).Select(wr => wr.RepositoryId).ToHashSet();
+        await OpenMergePullRequestsDialogAsync(ids, null, "All repositories", "No open pull requests.");
+    }
+
+    private async Task OpenMergePullRequestsDialogAsync(
+        IReadOnlySet<int> ids,
+        int? levelKey,
+        string scopeLabel,
+        string nothingToMergeMessage)
+    {
         if (ids.Count == 0)
         {
-            ToastService.Show("No open pull requests in this level.");
+            ToastService.Show(nothingToMergeMessage);
             return;
         }
 
@@ -82,7 +103,7 @@ public sealed partial class WorkspaceRepositories
 
         if (rows.Count == 0)
         {
-            ToastService.Show("No open pull requests in this level.");
+            ToastService.Show(nothingToMergeMessage);
             return;
         }
 
@@ -92,7 +113,7 @@ public sealed partial class WorkspaceRepositories
         {
             IsVisible = true,
             LevelKey = levelKey,
-            LevelLabel = levelKey.HasValue ? $"Level {levelKey}" : "No dependencies",
+            LevelLabel = scopeLabel,
             Rows = rows
         };
         StateHasChanged();

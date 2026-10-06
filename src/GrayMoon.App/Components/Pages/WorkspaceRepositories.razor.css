@@ -989,6 +989,12 @@
     box-sizing: border-box;
 }
 
+/* Workspaces without the dependency graph render no dependency block: four blocks, header and rows alike. */
+::deep .repositories-table .metrics-grid.metrics-grid--no-deps,
+::deep .repositories-table .metrics-grid-header.metrics-grid--no-deps {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 ::deep .repositories-table .metrics-block {
     display: inline-flex;
     align-items: center;

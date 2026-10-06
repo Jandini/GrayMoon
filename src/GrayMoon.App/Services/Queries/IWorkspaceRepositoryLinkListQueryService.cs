@@ -1,4 +1,5 @@
 using GrayMoon.Application.Features;
+using GrayMoon.Application.Workspaces;
 
 namespace GrayMoon.App.Services.Queries;
 
@@ -19,10 +20,18 @@ public interface IWorkspaceRepositoryLinkListQueryService
         bool isSpecialWorkspace = true,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// <paramref name="capabilities"/> is the workspace's profile; null keeps the pre-profile behaviour. Without
+    /// <see cref="WorkspaceCapabilities.UsesDependencyGraph"/> no dependency aggregate is queried at all:
+    /// <see cref="WorkspaceRepositoryHeaderStateDto.HasUnmatchedDependencies"/> is false,
+    /// <see cref="WorkspaceRepositoryHeaderStateDto.LowestLevelNeedingWork"/> is null and
+    /// <see cref="WorkspaceRepositoryHeaderStateDto.HasOutOfDateFiles"/> is computed instead.
+    /// </summary>
     Task<WorkspaceRepositoryHeaderStateDto> GetHeaderStateAsync(
         int workspaceId,
         WorkspaceFeatureContextId? contextId = null,
         bool isSpecialWorkspace = true,
+        WorkspaceCapabilities? capabilities = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>

@@ -79,7 +79,13 @@ public sealed record WorkspaceRepositoryHeaderStateDto(
     /// and no repository has commits outside a pull request (not <see cref="HasCreatablePr"/>). Always false for
     /// the special Workspace, where "Remove" is never the header's primary action (E2).
     /// </summary>
-    bool AllFeaturePrsCompleted = false);
+    bool AllFeaturePrsCompleted = false,
+    /// <summary>
+    /// True when at least one repository not on a tag has an out-of-date version file. Only computed for a
+    /// workspace without the dependency graph, which offers file-version updating as its own action; a
+    /// dependency workspace folds out-of-date files into <see cref="HasUnmatchedDependencies"/> instead.
+    /// </summary>
+    bool HasOutOfDateFiles = false);
 
 /// <summary>Lightweight row for virtual-scroll index (no PR/join payload).</summary>
 public sealed record WorkspaceRepositoryLinkIndexEntry(
