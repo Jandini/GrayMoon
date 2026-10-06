@@ -17,9 +17,13 @@ public sealed partial class WorkspaceRepositories
         await OpenPullRequestDialogCoreAsync(links);
     }
 
-    private async Task OpenPullRequestDialogForLevelAsync(int? levelKey)
+    private async Task OpenPullRequestDialogForLevelAsync(int? levelKey) =>
+        await OpenPullRequestDialogForIdsAsync(await GetRepositoryIdsAtLevelAsync(levelKey));
+
+    /// <summary>Header-menu "Create PR" over an explicit repository id set (Workspace / Repositories headers of a flat grid).</summary>
+    private async Task OpenPullRequestDialogForIdsAsync(IReadOnlyList<int> repositoryIds)
     {
-        var ids = (await GetRepositoryIdsAtLevelAsync(levelKey)).ToHashSet();
+        var ids = repositoryIds.ToHashSet();
         var links = (await GetAllLinksForOperationAsync()).Where(wr => ids.Contains(wr.RepositoryId)).ToList();
         await OpenPullRequestDialogCoreAsync(links);
     }

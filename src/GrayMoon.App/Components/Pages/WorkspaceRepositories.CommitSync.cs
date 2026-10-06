@@ -59,23 +59,23 @@ public sealed partial class WorkspaceRepositories
         return false;
     }
 
-    private async Task SyncCommitsForLevelAsync(int? levelKey)
-    {
-        var ids = (await GetRepositoryIdsAtLevelAsync(levelKey)).ToList();
-        ShowConfirmSyncCommitsLevel(ids);
-    }
+    private async Task SyncCommitsForLevelAsync(int? levelKey) =>
+        SyncCommitsForIds(await GetRepositoryIdsAtLevelAsync(levelKey));
 
-    private async Task ReturnToDefaultForLevelAsync(int? levelKey)
-    {
-        var ids = (await GetRepositoryIdsAtLevelAsync(levelKey)).ToList();
-        await ShowConfirmReturnToDefaultLevel(ids);
-    }
+    private async Task ReturnToDefaultForLevelAsync(int? levelKey) =>
+        await ReturnToDefaultForIdsAsync(await GetRepositoryIdsAtLevelAsync(levelKey));
 
-    private async Task SyncLevelForLevelAsync(int? levelKey)
-    {
-        var ids = (await GetRepositoryIdsAtLevelAsync(levelKey)).ToList();
-        ShowConfirmSyncLevel(ids);
-    }
+    private async Task SyncLevelForLevelAsync(int? levelKey) =>
+        SyncRepositoriesForIds(await GetRepositoryIdsAtLevelAsync(levelKey));
+
+    /// <summary>Header-menu "Sync Commits" over an explicit repository id set (Workspace / Repositories headers of a flat grid).</summary>
+    private void SyncCommitsForIds(IReadOnlyList<int> repositoryIds) => ShowConfirmSyncCommitsLevel(repositoryIds.ToList());
+
+    /// <summary>Header-menu "Return to Default" over an explicit repository id set.</summary>
+    private Task ReturnToDefaultForIdsAsync(IReadOnlyList<int> repositoryIds) => ShowConfirmReturnToDefaultLevel(repositoryIds.ToList());
+
+    /// <summary>Header-menu "Sync Repositories" over an explicit repository id set.</summary>
+    private void SyncRepositoriesForIds(IReadOnlyList<int> repositoryIds) => ShowConfirmSyncLevel(repositoryIds.ToList());
 
     private void ShowConfirmSyncCommitsLevel(List<int> repositoryIds)
     {

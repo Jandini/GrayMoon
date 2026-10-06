@@ -273,12 +273,96 @@ public class WorkspaceRepositoryGridLayoutTests
             [
                 WorkspaceRepositories.VirtualSlotKind.WorkspaceHeader,
                 WorkspaceRepositories.VirtualSlotKind.Row,
+                WorkspaceRepositories.VirtualSlotKind.SourcesHeader,
                 WorkspaceRepositories.VirtualSlotKind.Row,
                 WorkspaceRepositories.VirtualSlotKind.Row,
             ],
             slots.Select(s => s.Kind));
         Assert.Equal([10, 11, 12], slots.Where(s => s.Kind == WorkspaceRepositories.VirtualSlotKind.Row).Select(s => s.WorkspaceRepositoryId));
         Assert.Equal([0, 1, 2], slots.Where(s => s.Kind == WorkspaceRepositories.VirtualSlotKind.Row).Select(s => s.StripeIndex));
+    }
+
+    [Fact]
+    public void ComputeSlots_flat_list_with_workspace_row_adds_repositories_header_over_sources()
+    {
+        var index = new[]
+        {
+            new WorkspaceRepositoryLinkIndexEntry(10, 100, null, WorkspaceRepositoryRole.Workspace),
+            new WorkspaceRepositoryLinkIndexEntry(11, 101, 2),
+            new WorkspaceRepositoryLinkIndexEntry(12, 102, 1),
+        };
+
+        var slots = WorkspaceRepositories.ComputeSlots(index, groupByDependencyLevel: false);
+
+        var workspaceHeader = Assert.Single(slots, s => s.Kind == WorkspaceRepositories.VirtualSlotKind.WorkspaceHeader);
+        var sourcesHeader = Assert.Single(slots, s => s.Kind == WorkspaceRepositories.VirtualSlotKind.SourcesHeader);
+        Assert.Equal(1, workspaceHeader.LevelRepoCount);
+        Assert.Equal(2, sourcesHeader.LevelRepoCount);
+        // The Repositories header sits between the Workspace row and the first Source row.
+        Assert.Equal(2, slots.IndexOf(sourcesHeader));
+        Assert.Equal(11, slots[3].WorkspaceRepositoryId);
+        Assert.Equal([0, 1, 2], slots.Where(s => s.Kind == WorkspaceRepositories.VirtualSlotKind.Row).Select(s => s.StripeIndex));
+        Assert.Equal(40, WorkspaceRepositories.SlotHeight(sourcesHeader));
+        Assert.Equal(slots.Count, slots.Select(s => (s.Kind, s.WorkspaceRepositoryId)).Distinct().Count());
+    }
+
+    [Fact]
+    public void ComputeSlots_flat_list_without_workspace_row_has_no_headers()
+    {
+        var index = new[]
+        {
+            new WorkspaceRepositoryLinkIndexEntry(11, 101, 2),
+            new WorkspaceRepositoryLinkIndexEntry(12, 102, null),
+        };
+
+        var slots = WorkspaceRepositories.ComputeSlots(index, groupByDependencyLevel: false);
+
+        Assert.All(slots, s => Assert.Equal(WorkspaceRepositories.VirtualSlotKind.Row, s.Kind));
+        Assert.Equal(2, slots.Count);
+    }
+
+    [Fact]
+    public void ComputeSlots_level_grouped_list_has_no_repositories_header()
+    {
+        var index = new[]
+        {
+            new WorkspaceRepositoryLinkIndexEntry(10, 100, null, WorkspaceRepositoryRole.Workspace),
+            new WorkspaceRepositoryLinkIndexEntry(11, 101, 2),
+            new WorkspaceRepositoryLinkIndexEntry(12, 102, 1),
+        };
+
+        var slots = WorkspaceRepositories.ComputeSlots(index, groupByDependencyLevel: true);
+
+        Assert.DoesNotContain(slots, s => s.Kind == WorkspaceRepositories.VirtualSlotKind.SourcesHeader);
+        Assert.Single(slots, s => s.Kind == WorkspaceRepositories.VirtualSlotKind.WorkspaceHeader);
+        Assert.Equal(2, slots.Count(s => s.Kind == WorkspaceRepositories.VirtualSlotKind.LevelHeader));
+    }
+
+    [Fact]
+    public void ComputeSlots_flat_list_with_only_a_workspace_row_has_no_repositories_header()
+    {
+        var index = new[] { new WorkspaceRepositoryLinkIndexEntry(10, 100, null, WorkspaceRepositoryRole.Workspace) };
+
+        var slots = WorkspaceRepositories.ComputeSlots(index, groupByDependencyLevel: false);
+
+        Assert.Equal(
+            [WorkspaceRepositories.VirtualSlotKind.WorkspaceHeader, WorkspaceRepositories.VirtualSlotKind.Row],
+            slots.Select(s => s.Kind));
+    }
+
+    [Fact]
+    public void GetRepositoryIdsByRole_splits_workspace_role_from_sources_in_index_order()
+    {
+        var index = new[]
+        {
+            new WorkspaceRepositoryLinkIndexEntry(10, 100, null, WorkspaceRepositoryRole.Workspace),
+            new WorkspaceRepositoryLinkIndexEntry(11, 101, 2),
+            new WorkspaceRepositoryLinkIndexEntry(12, 102, null),
+        };
+
+        Assert.Equal([100], WorkspaceRepositories.GetRepositoryIdsByRole(index, workspaceRole: true));
+        Assert.Equal([101, 102], WorkspaceRepositories.GetRepositoryIdsByRole(index, workspaceRole: false));
+        Assert.Empty(WorkspaceRepositories.GetRepositoryIdsByRole([], workspaceRole: true));
     }
 
     [Fact]
