@@ -36,6 +36,7 @@ public static partial class Migrations
         (2, "B2 orphan cleanup and WorkspaceProjects foreign key", dbContext => MigrateFeatureContextOrphanCleanupAndWorkspaceProjectsForeignKeyAsync(dbContext)),
         (3, "E1 case-insensitive Feature name index", dbContext => MigrateFeatureNameIndexCollationAsync(dbContext)),
         (4, "Workspace profile columns", dbContext => MigrateWorkspaceProfileColumnsAsync(dbContext)),
+        (5, "Workspace repository role", dbContext => MigrateWorkspaceRepositoryRoleAsync(dbContext)),
     };
 
     public static async Task RunAllAsync(AppDbContext dbContext, ILogger? logger = null)
@@ -72,6 +73,8 @@ public static partial class Migrations
         await MigrateDropGitHubApiUsageHourlyAsync(dbContext, logger);
         await MigrateWorkspacesExcludeAiWorkflowsAsync(dbContext, logger);
         await MigrateWorkspaceGitRepositoryStatusLineStatsAsync(dbContext, logger);
+        // Role must exist before any legacy step loads WorkspaceRepositoryLink through EF (strict step 5 repeats it idempotently).
+        await MigrateWorkspaceRepositoryRoleAsync(dbContext, logger);
         await MigrateWorkspaceFeatureContextSchemaAsync(dbContext, logger);
     }
 
@@ -439,6 +442,35 @@ public static partial class Migrations
         logger.LogInformation(
             "Backfilled {RowCount} pre-profile Workspace row(s) to DotNetDependency / GitVersion / GitHubActions.",
             backfilled);
+    }
+
+    /// <summary>
+    /// Adds WorkspaceRepositories.Role (0 = Source, 1 = Workspace) and the filtered unique index that allows at
+    /// most one Workspace-role link per Workspace. Strict step 5: no try/catch, a failure propagates to
+    /// <see cref="RunStrictStepAsync"/>.
+    /// </summary>
+    public static async Task MigrateWorkspaceRepositoryRoleAsync(AppDbContext dbContext, ILogger? logger = null)
+    {
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != ConnectionState.Open)
+            await conn.OpenAsync();
+
+        await using (var checkCmd = conn.CreateCommand())
+        {
+            checkCmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceRepositories') WHERE name = 'Role'";
+            if (Convert.ToInt32(await checkCmd.ExecuteScalarAsync()) == 0)
+            {
+                await using var alterCmd = conn.CreateCommand();
+                alterCmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN Role INTEGER NOT NULL DEFAULT 0";
+                await alterCmd.ExecuteNonQueryAsync();
+            }
+        }
+
+        await using var indexCmd = conn.CreateCommand();
+        indexCmd.CommandText =
+            "CREATE UNIQUE INDEX IF NOT EXISTS IX_WorkspaceRepositories_WorkspaceId_WorkspaceRole " +
+            "ON WorkspaceRepositories(WorkspaceId) WHERE Role = 1";
+        await indexCmd.ExecuteNonQueryAsync();
     }
 
     /// <summary>

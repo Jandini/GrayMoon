@@ -21,6 +21,9 @@ public class WorkspaceRepositoryLink
     [ForeignKey(nameof(RepositoryId))]
     public Repository? Repository { get; set; }
 
+    /// <summary>Source (default) or Workspace. At most one Workspace-role link per Workspace (filtered unique index).</summary>
+    public WorkspaceRepositoryRole Role { get; set; } = WorkspaceRepositoryRole.Source;
+
     [MaxLength(100)]
     public string? GitVersion { get; set; }
 
@@ -144,6 +147,7 @@ public class WorkspaceRepositoryLink
         Workspace = Workspace,
         RepositoryId = RepositoryId,
         Repository = Repository,
+        Role = Role,
         GitVersion = GitVersion,
         BranchName = branchName,
         CheckedOutTag = CheckedOutTag,
