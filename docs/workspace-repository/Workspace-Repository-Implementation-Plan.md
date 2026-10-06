@@ -19,9 +19,9 @@ It must be possible to stop work here and resume later without reconstructing st
 | | |
 |---|---|
 | Project status | READY |
-| Current phase | Wave 4 complete (E, F DONE). Wave 5 (G) is next. UI of E is untested by hand, see Unit E handoff. |
+| Current phase | All code units merged (O, A, W1, B, C, W2, D, D2, E, E2, F, G, H1, H2, H3) plus Unit I docs. Remaining: owner manual matrix in Unit I step 2 and follow-up triage. |
 | Units planned in detail | O, A, W1, B, C, W2, D, E, F, G, I |
-| Last verified | 2026-10-06, after Wave 4 + E2 on `workspace-as-git-repository`: `dotnet build GrayMoon.slnx` 0 warnings; App 1084/1084, Worker 353/353 + 1 pre-existing skip, Common 255/255. |
+| Last verified | 2026-10-07, integration tip aebfa0a: `dotnet build GrayMoon.slnx` 0 warnings; App 1114/1114, Worker 353/353 + 1 pre-existing skip, Common 255/255. |
 
 **What works today.** Nothing of this feature. A Workspace is a folder containing one subfolder per repository; the Worker derives every repository path as `<root>\<WorkspaceName>\<RepositoryName>`; Features create one worktree per repository under `<FeatureStorageRoot>\<Feature>\<RepositoryName>`.
 
@@ -1110,7 +1110,7 @@ Discoveries: Rollback returns Fail without changing Feature state on failure (pr
 | | |
 |---|---|
 | Owner | subagent |
-| Status | TODO |
+| Status | DONE |
 | Dependencies | D, E |
 | Decisions | D14 |
 
@@ -1140,7 +1140,10 @@ src/GrayMoon.App.Tests/RestoreWorkspaceFlowTests.cs                    (new, ser
 **Handoff log.**
 
 ```text
-(empty)
+Date: 2026-10-06. Status: DONE (merged). Files: RestoreWorkspaceModal.razor and .razor.cs (new), Workspaces.razor (button + modal host + 4 small members), RestoreWorkspaceFlowTests.cs (new). Desktop README bullet applied by the orchestrator (uncommitted, GrayMoon.Desktop). Build 0 warnings; App 1096 (+12). Tests: Restore_creates_workspace_links_and_profile_from_manifest, Restore_without_manifest_creates_bare_workspace, Restore_lists_unresolved_repositories_and_still_succeeds, Sync_is_not_requested_when_restore_fails, A_failing_sync_keeps_the_restored_workspace_and_is_reported, Default_name_is_the_repository_name (5 cases), Name_must_be_present_a_valid_folder_name_and_unique_ignoring_case, Folder_must_be_absent_or_empty.
+Deviations: (1) the dialog blocks Restore only when the folder exists and holds repositories (the App can only ask the Worker whether the folder exists and how many repositories it holds); an existing folder with no repositories gets a warning, and the Worker's requireEmptyRoot is the real guard (a folder with only non-repository files passes the dialog and fails in the Worker with its message). (2) Sync runs inside the restore job (key /workspaces) via IWorkspaceSyncOperations.SyncAsync on the special-Workspace context, without WorkspaceOperationLock (brand-new Workspace); a Sync failure or cancel does not undo the restore and shows as a warning. (3) If there is anything to show (unresolved lists or a warning) the modal stays open with an "Open Workspace" button; otherwise it navigates to workspaces/{id} (the plan says the Repositories page; the Workspace page route is workspaces/{id}).
+Discoveries: BackgroundJobOverlay matches jobs on the lowercase URL path. RestoreWorkspaceResult.Error also carries warnings when Success is true.
+Manual testing needed: button and dialog (list of imported GitHub repositories, filter, name defaulting, duplicate name error, non-empty folder block); restore end to end on a second database (overlay shows restore then sync); manifest with unimported repositories (panel text and Open Workspace); repository without .graymoon.json ("Restored without definition"); abort during overlay; restore into an existing empty folder and into one with non-repository files.
 ```
 
 ---
@@ -1150,7 +1153,7 @@ src/GrayMoon.App.Tests/RestoreWorkspaceFlowTests.cs                    (new, ser
 | | |
 |---|---|
 | Owner | owner + subagent |
-| Status | TODO |
+| Status | IN PROGRESS (docs and automated checks DONE; manual matrix waits for the owner) |
 | Dependencies | E, F, G |
 
 **Steps.**
@@ -1178,7 +1181,7 @@ src/GrayMoon.App.Tests/RestoreWorkspaceFlowTests.cs                    (new, ser
 **Handoff log.**
 
 ```text
-(empty)
+Date: 2026-10-06. Docs DONE (merged 927e6f3): docs/architecture/01, 03, 05 each gained a Workspace repository subsection and docs/architecture/README.md marks GrayMoon-Workspace-As-Git-Repository-Design-v3.md and the Supplement as historical design records (the Design v3 file name is the real one, not Workspace-Repository-Design-v3.md). Unverified and left out of the docs: the Restore button label (written before G merged; 05 only mentions RestoreFromRepositoryAsync). Step 1 automated: build 0 warnings; Common 255, Worker 353 + 1 skip, App 1096. Step 2 manual matrix: OWNER, not run. Step 4 follow-up triage: owner.
 ```
 
 ---
@@ -1212,6 +1215,11 @@ A   Only the Feature-context legacy migration step loads WorkspaceRepositoryLink
 ```
 
 ## Decisions made during execution
+2026-10-07  Owner decisions: Restore dialog folder check stays as is (the Worker requireEmptyRoot is the real guard); the Worker compatibility banner stays as is (it also shows while the Worker is offline). Owner asked to include the smaller follow-ups; done as H1, H2, H3.
+2026-10-07  Unit H1 DONE (merged): Dependencies graph and levels exclude the Workspace-role repository (WorkspaceProjectRepository.DependencyGraph.cs both repo graph overloads and LoadWorkspaceRepoDependencyGraphAsync; DependencyStats.cs persists DependencyLevel null, Dependencies 0 for it); arrow-key navigation (Up/Down clamp, Enter selects, highlight resets on filter change) in WorkspaceModal picker. Projects and Packages pages need no change (they read project rows). Push plan queries still include the Workspace repository and sort it last (left alone). Scroll-into-view of the highlighted row is NOT done (needs a small JS helper). Tests: Graph_excludes_workspace_role_repository, Graph_without_workspace_role_repository_is_unchanged, Graph_excludes_workspace_role_repository_in_feature_context, Recompute_gives_workspace_role_repository_no_dependency_level, MoveHighlight_ClampsAtEnds (6), ResetHighlight_PicksFirstFilteredEntryOrNone (3). App 1109 at unit tip.
+2026-10-07  Unit H2 DONE (merged): drift detection now runs after a sync only when the synced set includes the Workspace-role repository (full sync, the row's Sync action, and SyncSingleRepositoryAsync), and after a successful branch or tag checkout of the Workspace-role repository in the special Workspace context (WorkspaceBranchOperations gained an IServiceScopeFactory constructor parameter). AttachAsync always sends requireEmptyRoot. Files: WorkspaceGitService.Sync.cs, WorkspaceBranchOperations.cs, WorkspaceRepositoryOperations.cs, WorkspaceRepositoryOperationsTests.cs, WorkspaceManifestDriftTriggerTests.cs (5 tests). App 1101 at unit tip. Not tested: subset sync that excludes the Workspace repository, the SyncSingleRepositoryAsync hook, Feature-context checkout.
+2026-10-07  Unit H3 DONE (merged): the six W2 IGitService members are normal interface members; stubs added to the two RecordingGitService fakes (DeleteBranchCommandTests, ReturnToDefaultBranchCommandTests). No counts changed.
+2026-10-07  Orchestrator note: the H1 agent left two 3-byte BOM-only files at src/GrayMoon.App/WorkspaceProjectRepository.DependencyGraph.cs and .DependencyStats.cs in the integration tree (untracked, mis-pathed); verified content was only a BOM and deleted them. Integration tree is otherwise clean.
 2026-10-06  Unit E2 (owner request, outside the original plan): the Workspace repository select in WorkspaceModal.razor was replaced by a searchable filtered picker (text input plus scrollable list, gray 8px auto scrollbar copied from BranchModal.razor.css). Files: WorkspaceModal.razor, WorkspaceModal.razor.css, WorkspaceRepositoryPickerFilterTests.cs (new, 6 tests incl. 3 theory cases). App 1084 (+6). Inline list (pushes content down, not a popup); no arrow-key navigation; Escape closes the list before the modal. Not run by hand.
 
 Only the owner writes here. Each entry: date, what, why, which document was updated.
@@ -1230,6 +1238,17 @@ Only the owner writes here. Each entry: date, what, why, which document was upda
 ```
 
 ## Follow-ups (not v1)
+Added 2026-10-06 from Wave 4 and 5 handoffs:
+- (OWNER DECIDED 2026-10-07: keep as is) Decide whether the Worker compatibility banner hides while the Worker is disconnected (it currently shows "does not support" then).
+- D8 Review action (diff of added/removed repositories, profile and connector differences) is not built; DetectDriftAsync already returns the data.
+- Create flow: Enable runs before the existing-repositories import suggestion; if Enable fails, a second Save retries Enable but skips the import suggestion.
+- (DONE 2026-10-07, H1/H2/H3) Projects, Packages and Deps pages were not checked for skipping repositories with no Projects (D6).
+- (OWNER DECIDED 2026-10-07: keep as is) Restore dialog folder check is weaker than absent-or-empty (see Unit G deviation 1).
+- (DONE 2026-10-07, H1/H2/H3) Workspace picker has no arrow-key navigation.
+- (DONE 2026-10-07, H1/H2/H3) Make the six W2 IGitService members non-default and add stubs to the two test fakes.
+- (DONE 2026-10-07, H1/H2/H3) Single-repository sync of the Workspace repository and Checkout Branch/Tag do not trigger drift detection (D8).
+- (DONE 2026-10-07, H1/H2/H3) AttachAsync sends two anonymous objects (with and without requireEmptyRoot); could be simplified.
+
 
 - Local connector type for an offline Workspace repository (D3).
 - Automatic per-URL import from GitHub during restore (D14).
