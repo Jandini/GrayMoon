@@ -9,7 +9,9 @@ using GrayMoon.App.Services.Features;
 using GrayMoon.App.Services.GitChanges;
 using GrayMoon.App.Services.Jobs;
 using GrayMoon.App.Services.Queries;
+using GrayMoon.App.Services.Workspaces;
 using GrayMoon.Application.Features;
+using GrayMoon.Application.Workspaces;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -87,6 +89,7 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddScoped<WorkspaceRepositoryCustomDependencyRepository>();
 
         services.AddScoped<WorkspaceService>();
+        services.AddScoped<IWorkspaceCapabilitiesResolver, WorkspaceCapabilitiesResolver>();
         services.AddScoped<IWorkspaceFeatureContextResolver, WorkspaceFeatureContextResolver>();
         services.AddScoped<IWorkspaceContextPathResolver, WorkspaceContextPathResolver>();
         services.AddScoped<IWorkspaceSelectedFeatureContextService, WorkspaceSelectedFeatureContextService>();

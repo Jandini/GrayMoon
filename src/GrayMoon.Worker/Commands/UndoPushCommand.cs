@@ -80,6 +80,22 @@ public sealed class UndoPushCommand(IGitService git, IHubConnectionProvider hubP
                 HasUpstream = hasUpstream,
                 DefaultBranchBehind = defaultBehind,
                 DefaultBranchAhead = defaultAhead,
+                // This pass never scans the working tree, so the project marker stays false and the
+                // persisted project rows survive the reset.
+                State = new RepositoryStateSnapshot
+                {
+                    BranchName = versionBranch,
+                    GitVersion = versionResult?.InformationalVersion,
+                    OutgoingCommits = outgoing,
+                    IncomingCommits = incoming,
+                    DefaultBranchBehind = defaultBehind,
+                    DefaultBranchAhead = defaultAhead,
+                    HasUpstream = hasUpstream,
+                    IdentityProbed = true,
+                    GitVersionProbed = true,
+                    CommitCountsProbed = outgoing.HasValue || incoming.HasValue,
+                    UpstreamProbed = true,
+                }
             };
             await connection.InvokeAsync(WorkerHubMethods.SyncCommand, notification, CancellationToken.None);
             logger.LogInformation("Post-reset SyncCommand sent: workspace={WorkspaceId}, repo={RepoId}, outgoing={Outgoing}",

@@ -25,6 +25,7 @@
         || MismatchedFileVersionLines.Count > 0
         || CustomDependencyLines.Count > 0;
     var depOkBadgeInactive = ActionsDisabled || Link.IsOnTag;
+    var versionCell = DetermineVersionCell(Link.GitVersion, Link.IsVersionUnresolved, WorkspaceUsesRepositoryVersioning);
     var singleRepoPrPullMap = (!string.IsNullOrEmpty(repoUrl) && PrInfo != null
         && string.Equals(PrInfo.State, "open", StringComparison.OrdinalIgnoreCase)
         && !string.IsNullOrEmpty(PrInfo.HtmlUrl))
@@ -63,7 +64,7 @@
             }
         </td>
         <td class="col-version">
-            @if (!string.IsNullOrEmpty(Link.GitVersion))
+            @if (versionCell == VersionCell.Resolved)
             {
                 <div class="version-container @(IsVersionClicked ? "version-clicked" : "")"
                      @onmouseleave="OnVersionMouseLeave">
@@ -72,7 +73,7 @@
                           title="Click to copy version">@Link.GitVersion</span>
                 </div>
             }
-            else if (Link.IsVersionUnresolved)
+            else if (versionCell == VersionCell.ProviderFailed)
             {
                 <span class="version-inner version-inner--unresolved"
                       title="GitVersion could not compute a version for this repository (for example, it has no commits yet). The repository itself synced normally.">unresolved</span>
@@ -460,6 +461,11 @@
     [Parameter] public bool IsUpdating { get; set; }
     [Parameter] public bool ActionsDisabled { get; set; }
     [Parameter] public int ColSpan { get; set; } = 4;
+    /// <summary>
+    /// Whether the parent Workspace versions its repositories at all. Defaults to true so a caller that does
+    /// not state it keeps the pre-profile presentation.
+    /// </summary>
+    [Parameter] public bool WorkspaceUsesRepositoryVersioning { get; set; } = true;
 
     [Parameter] public EventCallback OnVersionClick { get; set; }
     [Parameter] public EventCallback OnVersionMouseLeave { get; set; }
@@ -482,6 +488,43 @@
     [Parameter] public EventCallback<WorkspaceRepositoryLink> OnMergeClick { get; set; }
     /// <summary>Fired when the user clicks the Copy button on the dependency-mismatch tooltip. Payload is the formatted text to copy to the clipboard.</summary>
     [Parameter] public EventCallback<string> OnCopyDependencies { get; set; }
+
+    /// <summary>What the Version cell shows. Three-valued: a workspace that does not version its repositories
+    /// has no version to be missing, so an absent one is not a failure.</summary>
+    internal enum VersionCell
+    {
+        /// <summary>No version, and none expected.</summary>
+        NotApplicable,
+
+        /// <summary>The version provider ran and could not produce a version.</summary>
+        ProviderFailed,
+
+        /// <summary>A version was produced.</summary>
+        Resolved,
+    }
+
+    /// <summary>
+    /// Pure rule for the Version cell. <paramref name="isVersionUnresolved"/> is
+    /// <see cref="WorkspaceRepositoryLink.IsVersionUnresolved"/>, whose meaning is unchanged: the
+    /// not-applicable state is layered on top of it here rather than redefining it.
+    /// </summary>
+    internal static VersionCell DetermineVersionCell(
+        string? gitVersion,
+        bool isVersionUnresolved,
+        bool workspaceUsesRepositoryVersioning)
+    {
+        if (!string.IsNullOrEmpty(gitVersion))
+        {
+            return VersionCell.Resolved;
+        }
+
+        if (!workspaceUsesRepositoryVersioning)
+        {
+            return VersionCell.NotApplicable;
+        }
+
+        return isVersionUnresolved ? VersionCell.ProviderFailed : VersionCell.NotApplicable;
+    }
 
     private string RepositoryTypeTitle => Link?.RepositoryType switch
     {

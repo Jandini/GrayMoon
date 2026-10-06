@@ -115,8 +115,15 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<GitRemoteIntegrateService>();
         builder.Services.AddSingleton<IWorkerSecretProvider, WorkerSecretProvider>();
         builder.Services.AddSingleton<IWorkerTokenProvider, WorkerTokenProvider>();
+        builder.Services.AddSingleton<IWorkspaceCapabilityProvider, WorkspaceCapabilityProvider>();
         builder.Services.AddSingleton<ICsProjFileParser, CsProjFileParser>();
         builder.Services.AddSingleton<ICsProjFileService, CsProjFileService>();
+        builder.Services.AddSingleton<GitVersionRepositoryVersionProvider>();
+        builder.Services.AddSingleton<NoRepositoryVersionProvider>();
+        builder.Services.AddSingleton<IRepositoryVersionProviderFactory, RepositoryVersionProviderFactory>();
+        // The direct registration is the GitVersion-backed provider, for the one call site that is not
+        // capability-gated (the Feature default-tip version).
+        builder.Services.AddSingleton<IRepositoryVersionProvider>(sp => sp.GetRequiredService<GitVersionRepositoryVersionProvider>());
         builder.Services.AddSingleton<IRepositoryStateProbe, RepositoryStateProbe>();
         builder.Services.AddSingleton<IWorkspaceFileSearchService, WorkspaceFileSearchService>();
         builder.Services.AddSingleton<CommandJobFactory>();

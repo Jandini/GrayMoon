@@ -39,7 +39,10 @@ public sealed partial class WorkspaceRepositories
         if (workspace == null)
         {
             SetPageError("Workspace not found.");
+            return;
         }
+
+        _capabilities = await CapabilitiesResolver.GetAsync(WorkspaceId);
     }
     private async Task LoadHeaderStateAsync(CancellationToken cancellationToken = default)
     {

@@ -28,8 +28,11 @@ public sealed class SyncRepositoryGitVersionFailureTests : IDisposable
         var commandLine = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
         var runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
         _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner);
-        _command = new SyncRepositoryCommand(_git, new NoProjects());
-        _probe = new RepositoryStateProbe(_git, new NoProjects());
+        var versionProviderFactory = new RepositoryVersionProviderFactory(
+            new GitVersionRepositoryVersionProvider(_git),
+            new NoRepositoryVersionProvider());
+        _command = new SyncRepositoryCommand(_git, new NoProjects(), versionProviderFactory);
+        _probe = new RepositoryStateProbe(_git, new NoProjects(), versionProviderFactory);
     }
 
     public void Dispose()

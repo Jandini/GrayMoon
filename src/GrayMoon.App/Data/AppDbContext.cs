@@ -1,3 +1,4 @@
+using GrayMoon.Abstractions.Workspaces;
 using GrayMoon.App.Models;
 using Microsoft.EntityFrameworkCore;
 
@@ -140,6 +141,21 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
 
             entity.Property(workspace => workspace.ExcludeAiWorkflows)
                 .HasDefaultValue(true);
+
+            entity.Property(workspace => workspace.Type)
+                .IsRequired()
+                .HasConversion<int>()
+                .HasDefaultValue(WorkspaceType.Basic);
+
+            entity.Property(workspace => workspace.VersioningMode)
+                .IsRequired()
+                .HasConversion<int>()
+                .HasDefaultValue(WorkspaceVersioningMode.None);
+
+            entity.Property(workspace => workspace.CiProvider)
+                .IsRequired()
+                .HasConversion<int>()
+                .HasDefaultValue(WorkspaceCiProvider.None);
 
             entity.Property(workspace => workspace.ManagedFeatureStorageRoot)
                 .HasMaxLength(1000);

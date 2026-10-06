@@ -1,0 +1,574 @@
+# Workspace Profiles - Implementation Plan
+
+Living execution document. `Workspace-Profiles-Design.md` defines the architecture; this file tracks
+state. Both are read before starting a unit.
+
+It must be possible to stop work here and resume later without reconstructing state from chat history.
+
+**Statuses:** `TODO` `READY` `IN PROGRESS` `BLOCKED` `REVIEW` `DONE`
+
+---
+
+## Overall status
+
+| | |
+|---|---|
+| Project status | IN PROGRESS |
+| Current phase | Phases 1 and 2 complete; Phase 3 awaiting re-plan |
+| Phases planned in detail | 1, 2 |
+| Phases not yet designed | 3, 4, 5, 6 |
+| Last verified | Build clean / 0 warnings. App 878/878, Worker 307 + 1 pre-existing skip, Common 234/234. |
+
+**What works today.** A Workspace carries three independent persisted axes, every pre-profile Workspace
+was migrated to the .NET triple, and the Worker honours the profile on every entry point it owns: a
+Basic + None workspace does a full, correct Git sync with zero GitVersion launches, zero
+`dotnet tool restore` and zero `.csproj` scans, receives managed Git hooks, and no longer reads as a
+version failure. Nothing is user-visible yet: there is still no way to create anything but a .NET
+Dependency Workspace, because the create/edit controls are Unit H.
+
+### Phase map
+
+| Phase | Content | Status |
+|---|---|---|
+| 1 | Profile model, migration, capability resolver | DONE (Unit A) |
+| 2 | Worker sync decoupling, version provider, hook capability resolution | DONE (Unit B) |
+| 3 | App persistence / dependency recompute gating | TODO (Unit C) |
+| 4 | Push / update / restore strategies | TODO (Unit D) |
+| 5 | UX: create/edit, grid, navigation, CI provider boundary | TODO (Units E, F, G) |
+| 6 | Profile transitions, stale derived state, final regression | TODO (Units H, I) |
+
+### Phase 3-6 sequencing, re-planned from the integrated state
+
+Phases 1 and 2 are complete, so the remaining units were re-sequenced against what actually shipped.
+
+| Wave | Units | Why together |
+|---|---|---|
+| 1 | **C** (.NET enrichment and recompute) and **E** (CI provider boundary), in parallel | Both depend only on finished work and are file-disjoint: C lives in the project/dependency/recompute layer, E in the GitHub/Actions layer. E is the larger unknown, so starting it early de-risks Phase 5. |
+| 2 | **D** (push/update/restore) | Needs C's dependency gating to exist before push can branch on it. |
+| 3 | **F** (grid/header UX) and **G** (navigation and page access), in parallel | Both are presentation over C's and E's capabilities. They touch different files, but both read the same resolver, so they land after both suppliers. |
+| 4 | **H** (create/edit and transitions) | The first user-visible change, and deliberately last: until it ships, no user can create anything but a .NET Dependency Workspace, so every earlier wave is safe to land incrementally. |
+| 5 | **I** (regression and assurance) | Verification over the whole feature, including the owner's manual Feature pass. |
+
+Two things changed in the plan as a result of Phase 1-2:
+
+- **Unit C gained a hard pre-work item.** `CreateGitWorktreeRequest` does not derive from
+  `WorkspaceCommandRequest`, so worktree creation cannot be capability-gated at all until it is rebased
+  onto the base class. This blocks part of both C and D and must be done first.
+- **Unit C gained a second recompute entry point**, `SyncCommandHandler.cs:90`, which the original notes
+  missed. Gating only the one entry point the notes named would have left Basic workspaces computing
+  dependency state on every hook sync.
+
+Unit H's scope **shrank**: because the version state is fully derived rather than persisted, the
+"versioning toggles handle stale version state" requirement no longer needs a data migration or a
+cleanup pass. Turning versioning off simply stops the enrichment and the UI stops reading the column.
+
+### Rules for agents
+
+1. Read both documents before starting a unit.
+2. The owner defines shared contracts before dependent units start. Do not invent a competing
+   capability abstraction.
+3. Do not edit a file another unit owns. If two units need one file, the owner assigns it and exposes a
+   seam.
+4. Read the latest integrated state before beginning a dependent unit.
+5. Every unit must compile and pass its focused tests before handoff.
+6. No opportunistic cleanup outside the unit's scope.
+7. Document discovered coupling that violates the intended architecture instead of patching around it
+   locally. The owner decides whether it belongs in this change or becomes a follow-up.
+8. Update this file before handoff: what changed, tests run, result, architectural discoveries,
+   deviations, follow-ups. Any architectural change also updates the design document.
+9. A unit is not `DONE` until its acceptance criteria and focused tests pass.
+
+### Avoid parallel edits to these hot files
+
+```text
+WorkspaceRepositories.razor and partials
+WorkspaceRepositoriesHeader.razor
+WorkspaceGitService*
+WorkspaceRepository
+WorkspaceProjectRepository*
+NavMenu.razor
+Program.cs / DI bootstrap
+AppDbContext.cs / Migrations.cs
+```
+
+---
+
+## Unit O - Owner: contracts and documents
+
+| | |
+|---|---|
+| Owner | owner |
+| Status | DONE |
+| Dependencies | none |
+
+**Scope.** Both living documents, and the shared contracts every other unit depends on.
+
+**Files owned.**
+
+```text
+docs/workspace-profiles/Workspace-Profiles-Design.md
+docs/workspace-profiles/Workspace-Profiles-Implementation-Plan.md
+src/GrayMoon.Abstractions/Workspaces/WorkspaceType.cs
+src/GrayMoon.Abstractions/Workspaces/WorkspaceVersioningMode.cs
+src/GrayMoon.Abstractions/Workspaces/WorkspaceCiProvider.cs
+src/GrayMoon.Abstractions/Workspaces/RepositoryOperationCapabilities.cs
+src/GrayMoon.Application/Workspaces/WorkspaceCapabilities.cs
+src/GrayMoon.Application/Workspaces/IWorkspaceCapabilitiesResolver.cs
+```
+
+**Acceptance.** Contracts compile; the three enums and the capability record exist with no behaviour
+attached; resolver interface takes a `workspaceId` and nothing context-shaped.
+
+**Notes.** Enums live in `GrayMoon.Abstractions` because both App and Worker need them.
+`RepositoryOperationCapabilities` is the Worker-facing wire subset and carries only what the Worker
+acts on. `WorkspaceCapabilities` and its resolver live in `GrayMoon.Application` because they are an
+App-side policy contract consumed by pages, orchestrators and endpoints.
+
+---
+
+## Unit A - Workspace profile model and capability policy
+
+| | |
+|---|---|
+| Owner | subagent |
+| Status | DONE |
+| Dependencies | Unit O |
+
+**Scope.** Persist the three axes, migrate existing rows, implement the resolver. No behaviour change
+anywhere else.
+
+**Files owned.**
+
+```text
+src/GrayMoon.App/Models/Workspace.cs
+src/GrayMoon.App/Data/AppDbContext.cs          (Workspace entity block only)
+src/GrayMoon.App/Migrations.cs
+src/GrayMoon.App/Services/Workspaces/WorkspaceCapabilitiesResolver.cs
+src/GrayMoon.App/Repositories/WorkspaceRepository.cs
+src/GrayMoon.App/Program.cs                    (DI registration only)
+src/GrayMoon.App.Tests/WorkspaceCapabilitiesResolverTests.cs
+src/GrayMoon.App.Tests/WorkspaceProfileMigrationTests.cs
+```
+
+**Implementation goal.**
+
+- Three enum properties on `Workspace`, persisted with `HasConversion<int>()`, model defaults
+  `Basic` / `None` / `None`.
+- `MigrateWorkspaceProfileColumnsAsync` in `Migrations.cs`, called from `RunAllAsync`: guard each column
+  with `pragma_table_info('Workspaces')`, add when absent, and backfill
+  `Type=1, VersioningMode=1, CiProvider=1` **only on the branch that just created the columns**.
+- `WorkspaceCapabilitiesResolver` implementing `IWorkspaceCapabilitiesResolver`, sealed, resolving by
+  `workspaceId` only.
+- An overload or helper so `WorkspaceRepository.AddAsync` can create a workspace with an explicit
+  profile, defaulting to today's behaviour for existing callers.
+
+**Tests.**
+
+- existing row migrates to `DotNetDependency` + `GitVersion` + `GitHubActions`
+- migration is idempotent across repeated runs
+- migration does not overwrite a profile the user changed after the columns existed
+- fresh database produces model defaults
+- resolver matrix: Basic+None, Basic+GitVersion, DotNetDependency+GitVersion
+- resolver returns the same capabilities for a Feature context's workspace as for the workspace itself
+
+**Acceptance.** All of the above pass; no other behaviour changes; all three test projects still pass.
+
+**Explicit non-goals.** No sync changes, no UI, no transition lifecycle, no dependency gating.
+
+**Risks / findings.**
+
+- The migration landed as **strict step 4** in `Migrations.StrictSteps`, not as a legacy tolerant step.
+  Strict steps run in their own transaction and must let exceptions propagate, so
+  `MigrateWorkspaceProfileColumnsAsync` deliberately has **no** `try`/`catch` - do not "fix" that by
+  copying the tolerant pattern used by the pre-baseline methods.
+- Raw ADO commands (`pragma_table_info`, `ALTER TABLE`, the backfill `UPDATE`) enlist in the strict
+  step's ambient transaction unchanged. `Runs_inside_the_strict_step_transaction` pins this.
+- The backfill is guarded by "at least one column was just created". A user who deliberately sets a
+  Workspace to Basic is therefore never stomped by a later migration run.
+- `Connector.ConnectorType` needs `.HasSentinel((ConnectorType)0)` because its default value is
+  non-zero. The three profile enums all default to `0` on the model, so they need no sentinel - if a
+  future axis gains a non-zero default, it will.
+- Migration tests cannot build the pre-migration table shape with `EnsureCreated()`, which always
+  creates the new columns. They use `ALTER TABLE Workspaces DROP COLUMN` to simulate the old shape.
+- `WorkspaceRepository.AddAsync` defaults the three new parameters to the **.NET triple**, not the model
+  defaults, so the existing create modal keeps producing today's behaviour until Unit H adds the
+  controls. Two different sets of defaults coexist on purpose; see the design doc's defaults table.
+
+**Owner verification.** `dotnet build GrayMoon.slnx` clean (0 warnings). `GrayMoon.App.Tests` 848/848,
+`GrayMoon.Worker.Tests` 279 passed + 1 skipped (pre-existing conditional GitVersion test),
+`GrayMoon.Common.Tests` 234/234. All eight touched files are CRLF with no non-ASCII dashes.
+
+**Follow-ups.**
+
+- Unit H passes all three profile values explicitly from the create modal and can then decide whether
+  `AddAsync`'s defaults should fall back to the model defaults.
+- Unit F/G consume `GetManyAsync` for list surfaces; it silently omits ids that no longer exist, so
+  those callers must handle a missing key rather than indexing blindly.
+
+---
+
+## Unit B - Worker Git sync and repository versioning
+
+| | |
+|---|---|
+| Owner | subagent |
+| Status | DONE |
+| Dependencies | Unit O, Unit A |
+
+**Step progress.** All six steps are integrated and verified, in three passes: steps 1-3 (explicit probed
+flags, sync restructure, `IRepositoryVersionProvider` plus capabilities on `WorkspaceCommandRequest`),
+steps 4-5 (`IWorkspaceCapabilityProvider` with its three resolution tiers, all four hooks routed through
+`RepositoryStateProbe`, hook-install version gate removed), step 6 (Feature default-tip path gated
+App-side, three-valued version state).
+
+The capability provider resolves in three tiers: a cache warmed from every inbound App command
+(`CommandDispatcher.ExecuteAsync`), then `GET /workspaces/{id}/capabilities` behind the worker secret,
+then `LegacyFullEnrichment` when the App is unreachable. A fallback result is never cached, and a hook
+sync never fails because capabilities could not be resolved. Hook scripts are unchanged and remain
+context-agnostic.
+
+**Scope.** Pure Git sync as the baseline, with optional version and project enrichment, across every
+Worker entry point including the four hooks.
+
+**Files owned.**
+
+```text
+src/GrayMoon.Abstractions/Notifications/RepositorySyncNotification.cs
+src/GrayMoon.Worker/Commands/SyncRepositoryCommand.cs
+src/GrayMoon.Worker/Commands/RefreshRepositoryVersionCommand.cs
+src/GrayMoon.Worker/Commands/GetRepositoryVersionCommand.cs
+src/GrayMoon.Worker/Commands/GetGitVersionAtDefaultTipCommand.cs
+src/GrayMoon.Worker/Commands/CommitHookSyncCommand.cs
+src/GrayMoon.Worker/Commands/CheckoutHookSyncCommand.cs
+src/GrayMoon.Worker/Commands/MergeHookSyncCommand.cs
+src/GrayMoon.Worker/Commands/PushHookSyncCommand.cs
+src/GrayMoon.Worker/Commands/CommitSyncRepositoryCommand.cs
+src/GrayMoon.Worker/Commands/PushRepositoryCommand.cs
+src/GrayMoon.Worker/Services/RepositoryStateProbe.cs
+src/GrayMoon.Worker/Services/RepositoryVersionProvider.cs        (new)
+src/GrayMoon.Worker/Services/WorkspaceCapabilityProvider.cs      (new)
+src/GrayMoon.Worker/Services/GitService.cs                       (hook-writing region only)
+src/GrayMoon.Worker/Jobs/Requests/*
+src/GrayMoon.Worker/Cli/Handlers/RunCommandHandler.cs            (DI registration only)
+src/GrayMoon.App/Api/Endpoints/WorkspaceEndpoints.cs             (one new endpoint)
+src/GrayMoon.App/Services/Git/WorkspaceGitService.Sync.cs
+src/GrayMoon.App/Services/Git/WorkspaceGitService.Projects.cs
+src/GrayMoon.App/Services/Worker/SyncCommandHandler.cs
+src/GrayMoon.Worker.Tests/*                                      (new test files)
+```
+
+**Implementation goal, in order.**
+
+1. **Explicit probed flags.** Add `GitVersionProbed` / `ProjectsProbed` to `RepositorySyncNotification`
+   and read them in `SyncCommandHandler` instead of inferring. Convert `CommitHookSyncCommand` and
+   `PushHookSyncCommand` to send an explicit `State` snapshot (the checkout and merge hooks already do).
+   Keep inference as a fallback for pre-`State` Workers. **Nothing may skip a group before this lands.**
+2. **Sync restructure.** Common Git snapshot, then optional version enrichment, then optional project
+   enrichment, each guarded by the request's capabilities and reporting its probed flag as `false` when
+   skipped.
+3. **Version provider.** `IRepositoryVersionProvider` with a GitVersion implementation and a no-op
+   implementation, selected from capabilities. Route every GitVersion call site through it. Thread
+   capabilities into `RepositoryStateProbeOptions`.
+4. **Capability provider.** `IWorkspaceCapabilityProvider` in the Worker: command-warmed per-workspace
+   cache, cold-miss fetch from `GET /workspaces/{id}/capabilities` behind the worker secret, legacy
+   full-enrichment fallback when neither is available, plus an invalidation path. Hook commands resolve
+   through it. Hook scripts stay unchanged and context-agnostic.
+5. **Hook install gate.** Remove the `version != "-"` condition so Basic+None still gets hooks. Preserve
+   `CreateGitWorktreeCommand`'s rewrite-before-`worktree add` ordering.
+6. **Feature path and version semantics.** Gate
+   `ApplyDefaultTipVersionsForMergedFeatureReposAsync` / `GetGitVersionAtDefaultTipCommand` on
+   `UsesRepositoryVersioning`. Add the explicit not-applicable version state without redefining
+   `IsVersionUnresolved`.
+
+**Tests.** Following the existing Worker convention - real temp git repositories
+(`TempGitRepositoryFixture`), `[FactIfGitVersion]` where GitVersion is required, hand-written fakes like
+`NoProjects`. This repository has no process mocking and no bUnit.
+
+- Basic+None: full Git sync, zero GitVersion process launches, zero `dotnet tool restore`, zero
+  `.csproj` scan
+- Basic+GitVersion: version resolved, still no `.csproj` scan
+- DotNetDependency+GitVersion: behaviourally identical to today
+- each of the four hook paths honours capabilities, including the cold-cache REST path and the
+  App-unreachable fallback
+- a Basic Feature context runs no GitVersion through the merged-PR default-tip path
+- a skipped group never clears persisted state (asserted through `WorkspaceRepositoryStateWriter`)
+- a genuinely project-free .NET repository stays distinguishable from a skipped scan
+- hooks are installed for a repository with no resolvable version
+
+**Acceptance.** All of the above pass; all three test projects pass; the Feature suite passes; the three
+awaiting-retest GitVersion/branch issues behave no worse than before.
+
+**Explicit non-goals.** No App-side dependency orchestration gating (Unit C). No UI. No push strategy
+work (Unit D).
+
+**Risks / findings.**
+
+- Step 1 needed no new fields on `RepositorySyncNotification`: `RepositoryStateSnapshot` already carried
+  both markers, so it reduced to making every current Worker send an explicit `State`.
+  `BuildSnapshotFromFlatNotification` is untouched and now only reachable from a pre-`State` Worker.
+- Step 5 turned out to be a **regression fix**, not a precaution. Once step 2 stopped resolving a version
+  for Basic+None, the `version != "-"` gate silently stopped installing any managed hooks. If the steps
+  are ever re-sequenced, 2 and 5 must stay adjacent.
+- The pre-push hook could not simply be pointed at `RepositoryStateProbe`: it fires before the push data
+  is transferred, so a straight probe would mark stale commit counts as probed and let the App persist
+  them over the real ones. `RepositoryStateProbeOptions` gained `IncludeCommitCounts` (default `true`,
+  so every existing caller is unchanged).
+- Converting the post-commit hook onto the probe changed where `HasUpstream` comes from: the git-configured
+  upstream rather than name-matching against the remote branch list. That is the direction the repo already
+  took deliberately (`RefreshRepositoryVersionCommand.cs:58`), and it means post-commit now makes no network
+  call and no longer needs a connector token - but it is a behaviour change, so it wants a line in Unit I.
+- The not-applicable version state is **fully derived**: no new column, no new enum on the link, no
+  denormalized state. `IsVersionUnresolved` and both of its pinning test files are untouched; the state is
+  layered on at the three points of consumption.
+- Three files outside Unit B's owned list had to change: `CommandDispatcher.cs` (the only seam every inbound
+  command passes through, needed for cache warming), `WorkerSecretMiddleware.cs` (unavoidable - the new
+  endpoint has to be classified there), and `SyncStateTestContext.cs` (shared test harness, forced by a
+  constructor change).
+
+**Owner verification.** Build clean / 0 warnings after each of the three passes. Final counts:
+`GrayMoon.App.Tests` 878/878, `GrayMoon.Worker.Tests` 307 passed + 1 skipped (pre-existing conditional
+GitVersion test), `GrayMoon.Common.Tests` 234/234. Phase 1-2 added 43 tests to App and 28 to Worker. The
+Feature-context isolation suite is inside `GrayMoon.App.Tests` and passes.
+
+**Follow-ups.**
+
+- `CreateGitWorktreeRequest` does not derive from `WorkspaceCommandRequest`, so it cannot be
+  capability-gated until it is rebased onto the base class. Blocks part of Units C/D.
+- `UndoPushRequest`, `FetchCommitsRequest` and `GetGitChangeStatusRequest` have a workspace id but the App
+  does not populate capabilities on them yet.
+- The four hooks now disagree about `GitVersionFailed`: the rewritten commit and push hooks set it
+  honestly, checkout and merge never set it. Harmless today, cleanup for Unit I.
+- `RefreshRepositoryProjectsCommand` and `CommitSyncRepositoryCommand` receive capabilities but do not act
+  on all of them yet; those are deliberate seams for Unit C.
+
+---
+
+## Unit C - .NET project/dependency enrichment and recompute
+
+| | |
+|---|---|
+| Owner | unassigned |
+| Status | READY |
+| Dependencies | Unit A (DONE), Unit B (DONE) |
+
+**Scope.** Project discovery persistence/reconciliation, dependency graph activation, dependency-stat
+recompute gating, generated packages from version files, and the separation between generic file
+versioning and .NET-specific dependency inference.
+
+Key seam: `WorkspaceStateRecomputeScope.RecomputeAsync` currently always does both the file-version
+check and the dependency-stat recompute. The file-version check is useful in both workspace types and
+must not be disabled for Basic; only dependency-stat recompute is gated, at the scope boundary rather
+than inside `WorkspaceProjectRepository`.
+
+**Added by Phase 1-2 (see the discoveries log for detail).**
+
+- `RecomputeAsync` has a **second** entry point the original notes missed:
+  `SyncCommandHandler.cs:90` invokes it unconditionally on every hook sync, including for a Basic
+  workspace. Both entry points must be gated.
+- Two readers count a null `GitVersion` as an unmatched dependency, which would give a Basic workspace a
+  nonzero unmatched-dependency badge out of nothing: `WorkspaceProjectRepository.DependencyStats.cs:68-74`
+  and `DependencyLines.cs:308-313`. The correct fix is the gate above (produce no dependency state at
+  all for Basic), not a display tweak.
+- `WorkspaceFileVersionService.cs:1046,1080` are the two lines that must implement design section 11's
+  rule that only the default `{@Repo}` GitVersion token requires versioning to be enabled.
+- `RefreshRepositoryProjectsCommand` and `CommitSyncRepositoryCommand` already receive capabilities from
+  the App but do not act on all of them. Those are deliberate seams left for this unit.
+- Fix the stale `SyncStatusWrite.Derive` doc comment at `WorkspaceRepositoryStateWriter.cs:16`: it claims
+  "Error without a usable version" but the implementation deliberately ignores the version.
+
+**Acceptance.** Basic never builds .NET dependency state; generic Files/version-file behaviour still
+works for Basic; .NET Dependency behaviour is unchanged.
+
+**Pre-work.** Verify whether generated-package context-scoping is complete; an older gaps document
+recorded it as unfinished.
+
+**Pre-work, new.** `CreateGitWorktreeRequest` does not derive from `WorkspaceCommandRequest`, so it has
+no `Capabilities` property and worktree creation cannot be gated at all until it is rebased onto the base
+class. Do that first, and note that `WorkspaceCommandRequest` has no `WorkspaceId` of its own - if this
+unit lifts one onto the base class, the three derived types that declare their own must have those
+declarations removed or member-hiding warnings will break the 0-warning bar.
+
+---
+
+## Unit D - Push / update / restore strategies
+
+| | |
+|---|---|
+| Owner | unassigned |
+| Status | TODO - blocked on Unit C |
+| Dependencies | Unit A (DONE), Unit C |
+
+**Note from Phase 1-2.** `PushRepositoryRequest` already carries capabilities, but `UndoPushRequest`,
+`FetchCommitsRequest` and `GetGitChangeStatusRequest` have a workspace id with no capabilities populated
+by the App. Populate them here rather than in Unit C.
+
+**Scope.** Basic Git push path, dependency-aware push path, package waits, dependency update
+orchestration, package restore, capability-based strategy dispatch.
+
+Key seam: `WorkspacePushOperations.GetPlanForLinksAsync` always requests dependency info after building
+the push plan.
+
+**Acceptance.** Basic push performs no package/dependency query or wait; .NET Dependency retains current
+semantics; no deep workspace-type checks inside `PushOrchestrator`.
+
+---
+
+## Unit E - CI provider boundary
+
+| | |
+|---|---|
+| Owner | unassigned |
+| Status | READY - runs in parallel with Unit C, the two are file-disjoint |
+| Dependencies | Unit A (DONE) |
+
+**Scope.** The `WorkspaceCiProvider` boundary, GitHub Actions refresh/query activation, CI-specific
+status sources, and the separation of source control from CI.
+
+Known coupling to work through: one `GitHubService` partial class spans repositories, pull requests and
+workflows; one `Connector` row, one token and one rate-limit tracker serve both; the Actions page gates
+on `link.Repository.Connector != null` as a proxy for "CI enabled"; `WorkspacePushService` polls Actions
+during synchronized push.
+
+**Acceptance.** CI=None performs no GitHub Actions refresh or query; GitHub repository and PR
+functionality still works with CI=None; CI=GitHubActions preserves current behaviour; another provider
+would not require provider checks throughout the UI.
+
+**Non-goal.** Do not implement a second provider.
+
+---
+
+## Unit F - Repositories page / grid / header UX
+
+| | |
+|---|---|
+| Owner | unassigned |
+| Status | TODO |
+| Dependencies | Unit A, Unit C, Unit E |
+
+**Scope.** Capability-aware grid presentation, Version column visibility, dependency metric visibility,
+dependency-level grouping and level headers, header action availability, colspan and virtualization
+correctness.
+
+Notes: `TableColSpan` is a const in `WorkspaceRepositories.State.cs`; level headers and rows take their
+own `ColSpan` parameters. The header's `DeterminePrimaryAction` is a pure static method with existing
+tests - extend that pattern rather than adding a render-time branch, since there is no component test
+harness.
+
+**Acceptance.** Basic+None is a clean Git-focused grid with no Version column, no dependency metric, no
+level headers and no dependency Update/Restore UI; Basic+GitVersion adds version presentation only;
+.NET Dependency is unchanged; no fake "Level 0" or "No dependencies" grouping for Basic.
+
+---
+
+## Unit G - Navigation and page access
+
+| | |
+|---|---|
+| Owner | unassigned |
+| Status | TODO |
+| Dependencies | Unit A, Unit E |
+
+**Scope.** A reusable workspace-page capability/access policy, `NavMenu`, direct-route handling,
+Projects/Packages/Dependencies availability, Actions availability by CI provider.
+
+Constraint: `NavMenu` renders under the static/SSR layout and never joins a live circuit; it rebuilds
+workspace context from `NavigationManager.Uri` on every location change. Do not introduce an interactive
+state dependency to hide items.
+
+**Acceptance.** Basic hides Projects/Packages/Dependencies; .NET Dependency shows them; Actions depends
+only on the CI provider; direct navigation cannot bypass the rules; Files remains available for Basic.
+
+---
+
+## Unit H - Workspace create/edit and profile transitions
+
+| | |
+|---|---|
+| Owner | unassigned |
+| Status | TODO |
+| Dependencies | Unit A |
+
+**Scope.** The three modal controls (design document section 10), and the transition lifecycle.
+
+Simplicity is a hard requirement: three controls in the existing modal, no settings page, no capability
+matrix, no new list badges, no new UI primitives. Type changes are blocked while Features exist, reusing
+the existing disabled-field mechanism and wording.
+
+**Acceptance.** An existing workspace opens with .NET Dependency / GitVersion / GitHub Actions selected;
+Basic to .NET activates enrichment safely; .NET to Basic cannot leave dependency UI or behaviour active;
+versioning toggles handle stale version state; CI toggling does not disturb Git or PR state.
+
+---
+
+## Unit I - Regression and feature assurance
+
+| | |
+|---|---|
+| Owner | unassigned |
+| Status | TODO |
+| Dependencies | all |
+
+**Scope.** Verification, not redesign. The existing Feature-context suite is a mandatory gate, and the
+owner additionally performs a focused manual end-to-end pass of the main Feature workflow.
+
+Verify: Workspace context; Feature contexts; Feature create, repair, remove; branch switching; parent
+branch behaviour; PR create/merge; Git Changes; file versioning; push/pull; Actions when enabled;
+dependency update; synchronized push; Projects/Packages/Dependencies pages; context-state isolation.
+
+A design that works for the special Workspace context but breaks Feature worktrees is not acceptable.
+
+**Carried in from Phase 1-2.**
+
+- The four git hooks now disagree about `RepositorySyncNotification.GitVersionFailed`: the rewritten
+  commit and push hooks set it honestly, checkout and merge never set it. Harmless today because only
+  the pre-`State` fallback path reads it, but make them consistent.
+- The post-commit hook's `HasUpstream` changed source, from name-matching against the remote branch list
+  to the git-configured upstream. It is a behaviour improvement and removes a network call, but it is a
+  behaviour change on a hook path and deserves an explicit manual check.
+- The merged-PR projection can be erased by its own sync before the default-tip step reads it (first row
+  of the discoveries log). Pre-existing, but verify it with a real Feature and a real merged PR.
+
+---
+
+## Discoveries log
+
+Architectural findings that changed the design. Newest first.
+
+| Date | Finding | Consequence |
+|---|---|---|
+| 2026-10-05 | The merged-PR default-tip path can erase its own precondition. `PersistVersionsAsync` runs the state writer with `ReconcilePullRequest = true` **before** `ApplyDefaultTipVersionsForMergedFeatureReposAsync` reads `MergedAt`. `WorkspaceRepositoryStateWriter.ReconcilePullRequestAsync` (`:341-359`) upserts on both `Refreshed` and `CacheHit`, so a lookup that legitimately finds no pull request overwrites the merged-PR row with null (`WorkspacePullRequestService.cs:272-273`). Only the `Failed` outcome leaves the projection alone, which is why the step-6 Feature tests must rate-limit the connector to reach the path at all. | Pre-existing and orthogonal to profiles, but it compounds the recorded R3 mismatch and belongs in the Unit I regression pass. |
+| 2026-10-05 | `SyncStatusWrite.Derive`'s doc comment (`WorkspaceRepositoryStateWriter.cs:16`) still says "Error without a usable version", but the implementation (`:268-285`) deliberately ignores the version entirely and says so in its own comment. | Actively misleading to Units C-F, which will read that enum looking for version coupling. Fix the comment in Unit C or I. |
+| 2026-10-05 | Two more places read an absent `GitVersion` as a problem, both outside Unit B: `WorkspaceProjectRepository.DependencyStats.cs:68-74` and `DependencyLines.cs:308-313` count a null version as an unmatched dependency, which would produce a nonzero unmatched-dependency badge for a Basic workspace out of nothing. | Unit C's gate is "dependency state is not produced at all for Basic", not a display fix. Unit C's notes did not mention these two. |
+| 2026-10-05 | `WorkspaceFileVersionService.cs:1046,1080` are the two lines that must implement design section 11's rule that only the default `{@Repo}` GitVersion token requires versioning to be enabled. Otherwise a `{@Repo}` token in a Basic+None workspace compares against a version that will never exist. | Unit C's file-versioning boundary. |
+| 2026-10-05 | `WorkspaceCommandRequest` has **no** `WorkspaceId`; three derived types declare their own. Cache warming is therefore an explicit per-type list in `CommandDispatcher.ExecuteAsync` (`CommandDispatcher.cs:102`), not a base-class check. | If a later unit lifts `WorkspaceId` onto the base class, the three derived declarations must be removed or member-hiding warnings break the 0-warning bar. |
+| 2026-10-05 | Only `SyncRepositoryRequest`, `CommitSyncRepositoryRequest` and `PushRepositoryRequest` carry both a workspace id and capabilities. `UndoPushRequest`, `FetchCommitsRequest` and `GetGitChangeStatusRequest` have the id but the App does not populate capabilities. **`CreateGitWorktreeRequest` does not derive from `WorkspaceCommandRequest` at all**, so it has no `Capabilities` property. | Units C/D cannot capability-gate worktree creation without first rebasing that request onto the base class. |
+| 2026-10-05 | `GetRepositoryVersionResponse` cannot express "not probed" versus "probed and failed", although the Worker has the distinction in `RepositoryVersionResult.Probed`. `ParseGetRepositoryVersionToStatus` (`ResponseParsing.cs:256-264`) therefore returns `VersionMismatch` for every row of a Basic+None workspace. | Step 6 must add that signal to the response DTO; it is the remaining half of the not-applicable version state. |
+| 2026-10-05 | `GetGitVersionAtDefaultTipCommand` is registered against the **direct** GitVersion-backed `IRepositoryVersionProvider` singleton (`RunCommandHandler.cs:125`), deliberately the one un-gated call site. | Step 6 gates it App-side in `ApplyDefaultTipVersionsForMergedFeatureReposAsync`, which is cheaper than threading capabilities onto the request and keeps that registration honest. |
+| 2026-10-05 | `WriteSyncHooksCoreAsync` (`GitService.cs:1373-1419`) has no version assumptions at all. | Step 5 was genuinely a one-condition fix; nothing else downstream of hook writing cared about the version. |
+| 2026-10-05 | `WorkspaceStateRecomputeScope.RecomputeAsync` is invoked unconditionally from `SyncCommandHandler.cs:90` on **every** hook sync, including for a Basic workspace. | A second entry point into dependency recompute that Unit C's notes do not mention. |
+| 2026-10-05 | The checkout and merge hooks never set `RepositorySyncNotification.GitVersionFailed`; the rewritten commit and push hooks now do. Harmless today, since `SyncCommandHandler` only reads it on the pre-`State` fallback path (`SyncCommandHandler.cs:184`). | The four hooks are inconsistent with each other. Cleanup candidate for Unit I. |
+| 2026-10-05 | The post-commit hook used to derive `HasUpstream` by name-matching against the remote branch list, which needed a connector token and a network call. Converting it onto `RepositoryStateProbe` switched it to the git-configured upstream - the direction the repo already took deliberately elsewhere (`RefreshRepositoryVersionCommand.cs:58` comment). | Post-commit now makes no network call and no longer takes `IWorkerTokenProvider`. A behaviour improvement, but a behaviour change: worth a line in the Unit I regression pass. |
+| 2026-10-05 | The hook-install gate is now a **live** defect, not a hypothetical one. `SyncRepositoryCommand.cs:102` still reads `version != "-" && (branch != "-" \|\| currentTag != null)`. Before capability gating the version always resolved, so the gate never fired; a Basic+None workspace now receives **no managed git hooks at all**. | Unit B step 5 is no longer independent of step 2 and must land immediately after it. |
+| 2026-10-05 | Only the **notification** path inferred probe markers. The command-response path (`WorkspaceGitService.ResponseParsing.cs:75-99,125-147`) already built honest snapshots, including a `HasProjectsBlock(data)` helper at line 230 that exists precisely to tell an empty project list from an absent one. | Design section 6 overstates the defect's reach. Unit B steps 2-3 needed zero App-side probed-flag work. |
+| 2026-10-05 | Four Worker call sites relied on the flat-notification inference, not two: `PushRepositoryCommand.SendPostOperationSyncAsync` and `UndoPushCommand.SendPostResetSyncAsync` as well as the commit and push hooks. | All four now send an explicit `State`. Design section 6's "two live callers" is wrong. |
+| 2026-10-05 | `RepositoryStateSnapshot` already carries `GitVersionProbed` and `ProjectsProbed`, so no top-level probed fields were needed on `RepositorySyncNotification`. | Step 1 reduced to "make every current Worker send `State`". `RepositorySyncNotification` is unmodified. |
+| 2026-10-05 | Three more consumers assume "a version means health", beyond `IsVersionUnresolved`: the workspace-level `isInSync` rollup in `WorkspaceGitService.SyncAsync` (now gated on `ShouldCalculateVersion`), and `ParseGetRepositoryVersionToStatus` (`ResponseParsing.cs:256-264`), which returns `VersionMismatch` for every repository in a Basic+None workspace. | The second is **not** yet fixed and belongs to Unit B step 6's not-applicable state. |
+| 2026-10-05 | The Worker's only `dotnet tool restore` lives inside `GitService.GetVersionAsync` (`GitService.cs:128`) and is reached only after GitVersion already failed. | Gating the version provider removes it for free; there is no second mechanism to gate. Design section 6 lists it as an independent requirement, which is misleading. |
+| 2026-10-05 | `CheckoutHookSyncCommand` and `MergeHookSyncCommand` funnel through `RepositoryStateProbe`, but `CommitHookSyncCommand` and `PushHookSyncCommand` call `GetVersionAsync` and `FindAsync` directly and hand-build their snapshots, so they have no single seam for capabilities. | Unit B step 4 should begin by converting those two onto the probe, which also deletes the hand-built snapshots step 1 added. |
+| 2026-10-05 | Three GitVersion / project-scan paths remain un-gated and are missing from the design's entry-point table: `ReturnToDefaultBranchCommand.cs:97` (captures with both includes on, passes no capabilities), `CreateBranchCommand.cs:63` (direct `GetVersionAsync`, not routed through the provider), and `RefreshBranchesCommand.cs:48` (uses the probe but requests neither, so harmless). | Must be swept before Phase 2 can be called complete. |
+| 2026-10-05 | `SyncRepositoryResponse` has no `state` field, so the App reconstructs the snapshot. `CommitCountsProbed = probed && !onTag` (`ResponseParsing.cs:95`) is therefore true even when the count commands failed and returned nulls, which clears persisted counts. | Pre-existing, not a regression. Candidate for Unit C. |
+| 2026-10-05 | Hook scripts are deliberately context-agnostic (`GitService.cs` comment): they send the repo path so the App attributes the context, so no decision state belongs in the script. | Capabilities are pulled by the Worker from the App API, following `WorkerTokenProvider`, instead of being baked into the hook payload. Design section 5. |
+| 2026-10-05 | `SyncCommandHandler` infers probe markers; `ProjectsProbed = n.Projects is { Count: > 0 }` cannot distinguish a project-free repository from an unscanned one. `CommitHookSyncCommand` and `PushHookSyncCommand` are the live callers relying on it. | Explicit probed flags became step 1 of Unit B, a precondition for any skipping. Design section 6. |
+| 2026-10-05 | `ApplyDefaultTipVersionsForMergedFeatureReposAsync` runs `GetGitVersionAtDefaultTip` after every Feature-context sync and returns early for the special Workspace, so it is invisible when tracing Workspace sync. | Gated on `UsesRepositoryVersioning`, with its own acceptance test. Design section 7. |
+| 2026-10-05 | Hook installation is gated on `version != "-"`, so a workspace that resolves no version would never receive hooks. | Gate removed in Unit B step 5. Design section 12. |
+| 2026-10-05 | Repository membership changes and name/root edits are already refused while Features exist. | Workspace-type changes adopt the same rule, removing most of the Feature transition problem. Design section 10. |
+| 2026-10-05 | `WorkspaceFeature.BaseKind` / `BaseWorkspaceFeatureId` exist but are unused - a reserved Feature hierarchy. | Profile inheritance must not collide with it. Design section 15. |
+
+## Deferred TODOs
+
+| Item | Owner | Notes |
+|---|---|---|
+| Fold shipped behaviour into `docs/architecture/` 01-06 | owner | After Phase 6. `docs/architecture/README.md` keeps current-state docs authoritative; this folder is the proposal record, mirroring `docs/worktree/`. |
+| Verify generated-package context-scoping completeness | Unit C | An older gaps document recorded it as unfinished. |
+| `GrayMoon.App/Services/Git/GitVersionCommandService.cs` appears unused | - | Confirmed callerless. Left untouched; removal is out of scope. |
+| Desktop README "Recent GrayMoon changes" entry | Unit H | Phase 1-2 has no user-visible change; the entry belongs with the UX work. |

@@ -21,6 +21,7 @@ using GrayMoon.App.Services.Ui;
 using GrayMoon.App.Services.Features;
 using GrayMoon.App.Services.Workspaces;
 using GrayMoon.Application.Features;
+using GrayMoon.Application.Workspaces;
 using GrayMoon.Common;
 using GrayMoon.Common.Git;
 using Microsoft.AspNetCore.DataProtection;
@@ -131,6 +132,7 @@ try
     builder.Services.AddScoped<IWorkerBridge, WorkerBridge>();
     builder.Services.AddScoped<WorkspaceService>();
     builder.Services.AddScoped<IWorkspaceFeatureContextResolver, WorkspaceFeatureContextResolver>();
+    builder.Services.AddScoped<IWorkspaceCapabilitiesResolver, WorkspaceCapabilitiesResolver>();
     builder.Services.AddScoped<IWorkspaceContextPathResolver, WorkspaceContextPathResolver>();
     builder.Services.AddScoped<IWorkspaceSelectedFeatureContextService, WorkspaceSelectedFeatureContextService>();
     builder.Services.AddScoped<IWorkspaceHookContextAttributor, WorkspaceHookContextAttributor>();

@@ -205,6 +205,41 @@ public sealed class WorkspaceRepositoryStateWriterTests
         Assert.Null(after.RepositoryType);
     }
 
+    [Fact]
+    public async Task A_skipped_enrichment_group_leaves_the_persisted_version_and_projects_alone()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+
+        await ApplyAsync(ctx, new RepositoryStateSnapshot
+        {
+            Projects =
+            [
+                new RepositorySyncProjectNotification { Name = "Api", ProjectType = (int)ProjectType.Service, ProjectPath = "src/Api/Api.csproj" }
+            ],
+            ProjectsProbed = true,
+        });
+        Assert.Single(await ctx.ReadProjectsAsync());
+
+        // What a hook sync for a workspace that neither versions nor discovers projects reports: identity,
+        // and both enrichment groups explicitly not probed. A skipped group is not an empty answer, so it
+        // must not clear the version or prune a single project row.
+        await ApplyAsync(ctx, new RepositoryStateSnapshot
+        {
+            BranchName = "main",
+            GitVersion = null,
+            Projects = null,
+            IdentityProbed = true,
+            GitVersionProbed = false,
+            ProjectsProbed = false,
+        });
+
+        var after = await ctx.ReadLinkAsync();
+        Assert.Equal("main", after.BranchName);
+        Assert.Equal("1.0.0", after.GitVersion);
+        Assert.Equal(ProjectType.Service, after.RepositoryType);
+        Assert.Single(await ctx.ReadProjectsAsync());
+    }
+
     private static readonly RepositoryStateWriteOptions Derive = new() { SyncStatus = SyncStatusWrite.Derive };
 
     [Fact]

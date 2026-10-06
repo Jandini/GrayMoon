@@ -52,6 +52,14 @@ public sealed class WorkerGetRepositoryVersionResponse
 
     [JsonPropertyName("branch")]
     public string? Branch { get; set; }
+
+    /// <summary>
+    /// Whether the worker actually ran a version provider. False means the workspace does not version its
+    /// repositories, so an empty <see cref="Version"/> is not a mismatch. Null from a worker that predates
+    /// workspace profiles, which always ran one.
+    /// </summary>
+    [JsonPropertyName("versionProbed")]
+    public bool? VersionProbed { get; set; }
 }
 
 /// <summary>Worker response with commit counts and hasUpstream (from GetCommitCounts).</summary>

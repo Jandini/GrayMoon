@@ -5,7 +5,9 @@ using GrayMoon.Worker.Services;
 
 namespace GrayMoon.Worker.Commands;
 
-public sealed class GetRepositoryVersionCommand(IGitService git) : ICommandHandler<GetRepositoryVersionRequest, GetRepositoryVersionResponse>
+public sealed class GetRepositoryVersionCommand(
+    IGitService git,
+    IRepositoryVersionProviderFactory versionProviderFactory) : ICommandHandler<GetRepositoryVersionRequest, GetRepositoryVersionResponse>
 {
     public async Task<GetRepositoryVersionResponse> ExecuteAsync(GetRepositoryVersionRequest request, CancellationToken cancellationToken = default)
     {
@@ -18,14 +20,25 @@ public sealed class GetRepositoryVersionCommand(IGitService git) : ICommandHandl
 
         string? version = null;
         string? branch = null;
+        bool? versionProbed = null;
         if (exists)
         {
-            var (vr, _) = await git.GetVersionAsync(repoPath, cancellationToken);
-            version = vr?.InformationalVersion;
-            // A GitVersion failure leaves the version unresolved; it must not cost the repository its branch.
-            branch = await git.ResolveBranchAsync(vr, repoPath, cancellationToken);
+            var versionResult = await versionProviderFactory
+                .Create(request.EffectiveCapabilities)
+                .GetVersionAsync(repoPath, RepositoryVersionOptions.Default, cancellationToken);
+            version = versionResult.InformationalVersion;
+            versionProbed = versionResult.Probed;
+            // A version provider that failed, or that is switched off, leaves the version unresolved; it must
+            // not cost the repository its branch.
+            branch = await git.ResolveBranchAsync(versionResult.Result, repoPath, cancellationToken);
         }
 
-        return new GetRepositoryVersionResponse { Exists = exists, Version = version, Branch = branch };
+        return new GetRepositoryVersionResponse
+        {
+            Exists = exists,
+            Version = version,
+            Branch = branch,
+            VersionProbed = versionProbed,
+        };
     }
 }

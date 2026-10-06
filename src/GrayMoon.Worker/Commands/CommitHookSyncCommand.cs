@@ -2,17 +2,21 @@ using System.Diagnostics;
 using GrayMoon.Abstractions.Worker;
 using GrayMoon.Abstractions.Notifications;
 using GrayMoon.Worker.Abstractions;
-using GrayMoon.Worker.Services;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
 
 namespace GrayMoon.Worker.Commands;
 
 /// <summary>
-/// Handles post-commit and post-update hooks: re-runs GitVersion, gets commit counts, and re-scans .csproj references.
+/// Handles post-commit and post-update hooks: re-reads repository state, including the version and the
+/// .csproj references when the workspace's profile asks for them.
 /// No git fetch - uses the existing remote tracking refs from the last checkout/sync.
 /// </summary>
-public sealed class CommitHookSyncCommand(IGitService git, ICsProjFileService csProjFileService, IWorkerTokenProvider tokenProvider, IHubConnectionProvider hubProvider, ILogger<CommitHookSyncCommand> logger)
+public sealed class CommitHookSyncCommand(
+    IRepositoryStateProbe stateProbe,
+    IWorkspaceCapabilityProvider capabilityProvider,
+    IHubConnectionProvider hubProvider,
+    ILogger<CommitHookSyncCommand> logger)
 {
     public async Task ExecuteAsync(INotifyJob payload, CancellationToken cancellationToken = default)
     {
@@ -22,50 +26,20 @@ public sealed class CommitHookSyncCommand(IGitService git, ICsProjFileService cs
             return;
         }
 
-        var (versionResult, _) = await git.GetVersionAsync(payload.RepositoryPath, cancellationToken);
-        var version = versionResult?.InformationalVersion ?? "-";
-        // A GitVersion failure leaves the version unresolved; it must not cost the repository its branch.
-        var branch = await git.ResolveBranchAsync(versionResult, payload.RepositoryPath, cancellationToken) ?? "-";
-        var findProjectsTask = csProjFileService.FindAsync(payload.RepositoryPath, cancellationToken);
+        // There is no app request to carry capabilities on this path, so they are resolved here.
+        var capabilities = await capabilityProvider.GetAsync(payload.WorkspaceId, cancellationToken);
 
-        var currentTag = await git.GetCheckedOutTagAsync(payload.RepositoryPath, cancellationToken);
-        if (currentTag != null)
-            branch = "-";
-
-        int? outgoing = null;
-        int? incoming = null;
-        int? defaultBehind = null;
-        int? defaultAhead = null;
-        if (branch != "-")
+        // One probe for version, branch/tag, commit counts, upstream and projects, so a commit reports the
+        // same state groups a checkout does and the two can never drift apart.
+        var (state, _) = await stateProbe.CaptureAsync(payload.RepositoryPath, new RepositoryStateProbeOptions
         {
-            var defaultRef = await git.GetDefaultBranchOriginRefAsync(payload.RepositoryPath, cancellationToken);
-            var divergenceRef = git.ToOriginBranchRef(await git.GetDivergenceBaseBranchAsync(payload.RepositoryPath, cancellationToken))
-                ?? defaultRef;
-            var (o, i, _) = await git.GetCommitCountsAsync(payload.RepositoryPath, branch, defaultRef, cancellationToken);
-            outgoing = o;
-            incoming = i;
-            var (db, da, _) = await git.GetCommitCountsVsDefaultAsync(payload.RepositoryPath, divergenceRef, cancellationToken);
-            defaultBehind = db;
-            defaultAhead = da;
-        }
+            IncludeGitVersion = true,
+            IncludeProjects = true,
+            Capabilities = capabilities
+        }, cancellationToken);
 
-        bool? hasUpstream = null;
-        if (branch != "-")
-        {
-            string? token = await tokenProvider.GetTokenForRepositoryAsync(payload.RepositoryId, cancellationToken);
-            if (token == null)
-            {
-                logger.LogDebug("CommitHookSync: no token available for repo {RepositoryId}; skipping remote branch query.", payload.RepositoryId);
-            }
-            else
-            {
-                var remoteBranches = await git.GetRemoteBranchesAsync(payload.RepositoryPath, token, cancellationToken);
-                hasUpstream = remoteBranches.Any(r => string.Equals(r, branch, StringComparison.OrdinalIgnoreCase));
-            }
-        }
-
-        var projects = await findProjectsTask;
-        var syncProjects = RepositorySyncProjectMapper.ToNotifications(projects);
+        var version = state.GitVersion ?? "-";
+        var branch = state.BranchName ?? "-";
 
         var connection = hubProvider.Connection;
         if (connection?.State == HubConnectionState.Connected)
@@ -76,16 +50,17 @@ public sealed class CommitHookSyncCommand(IGitService git, ICsProjFileService cs
                 RepositoryId = payload.RepositoryId,
                 RepositoryPath = payload.RepositoryPath,
                 Version = version,
-                GitVersionFailed = versionResult == null,
+                GitVersionFailed = state.GitVersionProbed && state.GitVersion == null,
                 Branch = branch,
-                Tag = currentTag,
-                OutgoingCommits = outgoing,
-                IncomingCommits = incoming,
-                HasUpstream = hasUpstream,
-                DefaultBranchBehind = defaultBehind,
-                DefaultBranchAhead = defaultAhead,
-                Projects = syncProjects,
-                ErrorMessage = null
+                Tag = state.CheckedOutTag,
+                OutgoingCommits = state.OutgoingCommits,
+                IncomingCommits = state.IncomingCommits,
+                HasUpstream = state.HasUpstream,
+                DefaultBranchBehind = state.DefaultBranchBehind,
+                DefaultBranchAhead = state.DefaultBranchAhead,
+                Projects = state.Projects,
+                ErrorMessage = null,
+                State = state
             };
             var syncSw = Stopwatch.StartNew();
             logger.LogDebug(
@@ -93,8 +68,8 @@ public sealed class CommitHookSyncCommand(IGitService git, ICsProjFileService cs
                 payload.WorkspaceId, payload.RepositoryId);
             await connection.InvokeAsync(WorkerHubMethods.SyncCommand, notification, cancellationToken);
             logger.LogInformation(
-                "CommitHookSync SyncCommand returned in {ElapsedMs}ms: workspace={WorkspaceId}, repo={RepoId}, version={Version}, branch={Branch}, ↑{Outgoing} ↓{Incoming}, hasUpstream={HasUpstream}",
-                syncSw.ElapsedMilliseconds, payload.WorkspaceId, payload.RepositoryId, version, branch, outgoing, incoming, hasUpstream);
+                "CommitHookSync SyncCommand returned in {ElapsedMs}ms: workspace={WorkspaceId}, repo={RepoId}, version={Version}, branch={Branch}, \u2191{Outgoing} \u2193{Incoming}, hasUpstream={HasUpstream}",
+                syncSw.ElapsedMilliseconds, payload.WorkspaceId, payload.RepositoryId, version, branch, state.OutgoingCommits, state.IncomingCommits, state.HasUpstream);
         }
         else
         {

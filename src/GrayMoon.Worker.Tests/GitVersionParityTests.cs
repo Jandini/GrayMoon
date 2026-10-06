@@ -27,7 +27,7 @@ public sealed class GitVersionParityTests : IDisposable
         var commandLine = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
         var runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
         _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner);
-        _command = new GetGitVersionAtDefaultTipCommand(_git);
+        _command = new GetGitVersionAtDefaultTipCommand(_git, new GitVersionRepositoryVersionProvider(_git));
     }
 
     public void Dispose()

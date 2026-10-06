@@ -1,5 +1,7 @@
+using GrayMoon.Abstractions.Workspaces;
 using GrayMoon.App.Models.Api;
 using GrayMoon.Application.Features;
+using GrayMoon.Application.Workspaces;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
@@ -18,7 +20,33 @@ public static class WorkspaceEndpoints
         group.MapGet("/files/search", SearchWorkspaceFiles)
             .WithName("SearchWorkspaceFiles");
 
+        // For the Worker, on the one path that has no app request to read capabilities from: a git hook.
+        // No /api prefix, matching GET /repos/{repoId}/connector, and gated by the same worker secret.
+        routes.MapGet("/workspaces/{workspaceId:int}/capabilities", GetWorkspaceCapabilities);
+
         return routes;
+    }
+
+    internal static async Task<Results<Ok<RepositoryOperationCapabilities>, BadRequest<ProblemDetails>, NotFound>> GetWorkspaceCapabilities(
+        int workspaceId,
+        IWorkspaceCapabilitiesResolver resolver,
+        CancellationToken cancellationToken)
+    {
+        if (workspaceId <= 0)
+            return TypedResults.BadRequest(new ProblemDetails { Title = "workspaceId must be greater than 0." });
+
+        WorkspaceCapabilities capabilities;
+        try
+        {
+            capabilities = await resolver.GetAsync(workspaceId, cancellationToken);
+        }
+        catch (InvalidOperationException)
+        {
+            return TypedResults.NotFound();
+        }
+
+        // Only the Worker-facing subset: what the Worker acts on, not the whole derived capability record.
+        return TypedResults.Ok(capabilities.ToRepositoryOperationCapabilities());
     }
 
     private static async Task<Results<Ok<List<WorkspaceFileDto>>, NotFound>> GetWorkspaceFiles(

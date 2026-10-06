@@ -182,6 +182,7 @@ public class WorkerSecretTests
 
     [Theory]
     [InlineData("/repos/7/connector")]
+    [InlineData("/workspaces/7/capabilities")]
     [InlineData("/hub/worker")]
     [InlineData("/hub/agent")]   // legacy path kept for already-installed Workers
     public async Task Right_secret_passes_and_marks_seen(string path)
@@ -200,6 +201,7 @@ public class WorkerSecretTests
 
     [Theory]
     [InlineData("/repos/7/connector")]
+    [InlineData("/workspaces/7/capabilities")]
     [InlineData("/hub/worker")]
     [InlineData("/hub/agent")]   // legacy path kept for already-installed Workers
     [InlineData("/hub/worker/negotiate")]
@@ -216,6 +218,7 @@ public class WorkerSecretTests
 
     [Theory]
     [InlineData("/repos/7/connector")]
+    [InlineData("/workspaces/7/capabilities")]
     [InlineData("/hub/worker")]
     [InlineData("/hub/agent")]   // legacy path kept for already-installed Workers
     public async Task Missing_secret_is_accepted_while_not_required_and_never_seen(string path)
@@ -231,6 +234,7 @@ public class WorkerSecretTests
 
     [Theory]
     [InlineData("/repos/7/connector")]
+    [InlineData("/workspaces/7/capabilities")]
     [InlineData("/hub/worker")]
     [InlineData("/hub/agent")]   // legacy path kept for already-installed Workers
     public async Task Missing_secret_is_401_when_required(string path)
@@ -246,6 +250,7 @@ public class WorkerSecretTests
 
     [Theory]
     [InlineData("/repos/7/connector")]
+    [InlineData("/workspaces/7/capabilities")]
     [InlineData("/hub/worker")]
     [InlineData("/hub/agent")]   // legacy path kept for already-installed Workers
     public async Task Missing_secret_is_401_once_a_worker_has_presented_the_secret(string path)
@@ -301,6 +306,19 @@ public class WorkerSecretTests
         var pipeline = new Pipeline(service, new SecurityOptions());
 
         var context = await pipeline.SendAsync("/repos/7/connector", secret: service.Secret, origin: "http://localhost:8384");
+
+        Assert.False(pipeline.NextCalled);
+        Assert.Equal(StatusCodes.Status403Forbidden, context.Response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Capabilities_request_with_any_origin_is_403_even_with_the_right_secret()
+    {
+        using var folder = new TempSecretFolder();
+        var service = CreateService(folder);
+        var pipeline = new Pipeline(service, new SecurityOptions());
+
+        var context = await pipeline.SendAsync("/workspaces/7/capabilities", secret: service.Secret, origin: "http://localhost:8384");
 
         Assert.False(pipeline.NextCalled);
         Assert.Equal(StatusCodes.Status403Forbidden, context.Response.StatusCode);

@@ -8,6 +8,7 @@ using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
 using GrayMoon.Application.Features;
+using GrayMoon.Application.Workspaces;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
@@ -28,6 +29,7 @@ public sealed partial class WorkspaceGitService(
     Microsoft.Extensions.Options.IOptions<WorkspaceOptions> workspaceOptions,
     IWorkspaceFeatureContextResolver contextResolver,
     IWorkspaceContextPathResolver pathResolver,
+    IWorkspaceCapabilitiesResolver capabilitiesResolver,
     ILogger<WorkspaceGitService> logger,
     IHubContext<WorkspaceSyncHub>? hubContext = null,
     PackageRegistrySyncService? packageRegistrySyncService = null,
@@ -49,6 +51,7 @@ public sealed partial class WorkspaceGitService(
     private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
     private readonly IWorkspaceFeatureContextResolver _contextResolver = contextResolver ?? throw new ArgumentNullException(nameof(contextResolver));
     private readonly IWorkspaceContextPathResolver _pathResolver = pathResolver ?? throw new ArgumentNullException(nameof(pathResolver));
+    private readonly IWorkspaceCapabilitiesResolver _capabilitiesResolver = capabilitiesResolver ?? throw new ArgumentNullException(nameof(capabilitiesResolver));
     private readonly ILogger<WorkspaceGitService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly int _maxConcurrent = Math.Max(1, workspaceOptions?.Value?.MaxParallelOperations ?? 16);
     private readonly IHubContext<WorkspaceSyncHub>? _hubContext = hubContext;

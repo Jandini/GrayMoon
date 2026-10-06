@@ -131,6 +131,7 @@ public sealed class PushRepositoryCommand(
             var version = versionResult?.InformationalVersion ?? "-";
             var versionBranch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? branch;
             var projects = await csProjFileService.FindAsync(repoPath, CancellationToken.None);
+            var syncProjects = RepositorySyncProjectMapper.ToNotifications(projects);
 
             var notification = new RepositorySyncNotification
             {
@@ -146,7 +147,25 @@ public sealed class PushRepositoryCommand(
                 HasUpstream = hasUpstream,
                 DefaultBranchBehind = defaultBehind,
                 DefaultBranchAhead = defaultAhead,
-                Projects = RepositorySyncProjectMapper.ToNotifications(projects),
+                Projects = syncProjects,
+                // A version-only pass deliberately skips the counts, so those markers stay false and the
+                // persisted numbers survive.
+                State = new RepositoryStateSnapshot
+                {
+                    BranchName = versionBranch,
+                    GitVersion = versionResult?.InformationalVersion,
+                    OutgoingCommits = outgoing,
+                    IncomingCommits = incoming,
+                    DefaultBranchBehind = defaultBehind,
+                    DefaultBranchAhead = defaultAhead,
+                    HasUpstream = hasUpstream,
+                    Projects = syncProjects,
+                    IdentityProbed = true,
+                    GitVersionProbed = true,
+                    CommitCountsProbed = outgoing.HasValue || incoming.HasValue,
+                    UpstreamProbed = hasUpstream.HasValue,
+                    ProjectsProbed = true,
+                }
             };
             await connection.InvokeAsync(WorkerHubMethods.SyncCommand, notification, CancellationToken.None);
             logger.LogInformation("Post-push SyncCommand sent: workspace={WorkspaceId}, repo={RepoId}, outgoing={Outgoing}, versionOnly={VersionOnly}",

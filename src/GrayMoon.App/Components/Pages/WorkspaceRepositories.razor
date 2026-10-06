@@ -205,6 +205,7 @@
                                                                   IsSyncing="@IsJobRunning"
                                                                   IsUpdating="@IsJobRunning"
                                                                   ColSpan="@TableColSpan"
+                                                                  WorkspaceUsesRepositoryVersioning="@UsesRepositoryVersioning"
                                                                   OnVersionClick="() => CopyVersionToClipboard(wr.GitVersion!)"
                                                                   OnVersionMouseLeave="() => OnVersionMouseLeave(wr.GitVersion!)"
                                                                   OffFeatureBranchName="@GetOffFeatureBranchName(wr)"

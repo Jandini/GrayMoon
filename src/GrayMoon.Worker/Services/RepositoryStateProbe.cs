@@ -1,30 +1,42 @@
 using GrayMoon.Abstractions.Notifications;
+using GrayMoon.Abstractions.Workspaces;
 using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Models;
 
 namespace GrayMoon.Worker.Services;
 
 /// <inheritdoc cref="IRepositoryStateProbe" />
-public sealed class RepositoryStateProbe(IGitService git, ICsProjFileService csProjFileService) : IRepositoryStateProbe
+public sealed class RepositoryStateProbe(
+    IGitService git,
+    ICsProjFileService csProjFileService,
+    IRepositoryVersionProviderFactory versionProviderFactory) : IRepositoryStateProbe
 {
     public async Task<RepositoryStateCapture> CaptureAsync(string repoPath, RepositoryStateProbeOptions options, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !git.DirectoryExists(repoPath))
             return new RepositoryStateCapture(new RepositoryStateSnapshot { ErrorMessage = options.ErrorMessage }, null);
 
+        var capabilities = options.Capabilities ?? RepositoryOperationCapabilities.LegacyFullEnrichment;
+
         // Start the csproj scan first; it is IO-bound and independent of every git call below.
-        var projectsTask = options.IncludeProjects ? csProjFileService.FindAsync(repoPath, ct) : null;
+        var projectsTask = options.IncludeProjects && capabilities.ShouldDiscoverProjects
+            ? csProjFileService.FindAsync(repoPath, ct)
+            : null;
 
         var defaultRef = options.DefaultBranchOriginRef ?? await git.GetDefaultBranchOriginRefAsync(repoPath, ct);
         var defaultBranchName = await git.GetDefaultBranchNameAsync(repoPath, ct);
 
         string? branch;
         string? gitVersion = null;
+        var versionProbed = false;
         if (options.IncludeGitVersion)
         {
-            var (versionResult, _) = await git.GetVersionAsync(repoPath, options.GitVersionNonNormalize, ct);
-            gitVersion = versionResult?.InformationalVersion;
-            branch = versionResult?.BranchName ?? versionResult?.EscapedBranchName;
+            var versionResult = await versionProviderFactory
+                .Create(capabilities)
+                .GetVersionAsync(repoPath, new RepositoryVersionOptions { NonNormalize = options.GitVersionNonNormalize }, ct);
+            versionProbed = versionResult.Probed;
+            gitVersion = versionResult.InformationalVersion;
+            branch = versionResult.Result?.BranchName ?? versionResult.Result?.EscapedBranchName;
         }
         else
         {
@@ -46,7 +58,7 @@ public sealed class RepositoryStateProbe(IGitService git, ICsProjFileService csP
         int? defaultBehind = null;
         int? defaultAhead = null;
         var vsDefaultProbed = false;
-        if (hasBranch)
+        if (hasBranch && options.IncludeCommitCounts)
         {
             counts = await git.ProbeCommitCountsAsync(repoPath, branch!, defaultRef, ct);
             // Feature ahead/behind: explicit override, else worktree-persisted Feature parent, else default.
@@ -101,13 +113,14 @@ public sealed class RepositoryStateProbe(IGitService git, ICsProjFileService csP
             Projects = projects,
             ErrorMessage = options.ErrorMessage,
             IdentityProbed = true,
-            // A GitVersion run that failed is a probe result too: it clears the stored version, which the grid then
-            // shows as unresolved, instead of leaving a stale number from before the failure.
-            GitVersionProbed = options.IncludeGitVersion,
+            // A version run that failed is a probe result too: it clears the stored version, which the grid then
+            // shows as unresolved, instead of leaving a stale number from before the failure. A run that never
+            // happened - the workspace does not version its repositories - is not, and leaves the column alone.
+            GitVersionProbed = versionProbed,
             // On a tag there is nothing to count, and the app clears those columns from the tag state
             // itself, so reporting the group as probed keeps the two paths consistent.
-            CommitCountsProbed = !hasBranch || (counts.CountsProbed && vsDefaultProbed),
-            UpstreamProbed = !hasBranch || counts.UpstreamProbed,
+            CommitCountsProbed = options.IncludeCommitCounts && (!hasBranch || (counts.CountsProbed && vsDefaultProbed)),
+            UpstreamProbed = options.IncludeCommitCounts && (!hasBranch || counts.UpstreamProbed),
             BranchesProbed = branchesProbed,
             ProjectsProbed = projects != null,
         };

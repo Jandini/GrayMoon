@@ -2,6 +2,7 @@ using GrayMoon.App.Components.Shared;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services;
 using GrayMoon.App.Services.Queries;
+using GrayMoon.Application.Workspaces;
 using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
 namespace GrayMoon.App.Components.Pages;
@@ -23,6 +24,12 @@ public sealed partial class WorkspaceRepositories
     private readonly List<VirtualSlot> _slots = new();
     private readonly HashSet<int> _tooltipLoadInFlight = new();
     private Workspace? workspace;
+    /// <summary>
+    /// Profile-derived capabilities of the workspace being viewed. Resolved by workspace id: Features inherit
+    /// the parent Workspace's profile. Null until the first load, which the pre-profile defaults cover.
+    /// </summary>
+    private WorkspaceCapabilities? _capabilities;
+    private bool UsesRepositoryVersioning => _capabilities?.UsesRepositoryVersioning ?? true;
     private WorkspaceRepositoryHeaderStateDto? _headerState;
     private IReadOnlyDictionary<int, PullRequestInfo?> prByRepositoryId = new Dictionary<int, PullRequestInfo?>();
     private string? errorMessage;

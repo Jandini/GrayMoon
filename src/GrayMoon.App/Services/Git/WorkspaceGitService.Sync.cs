@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using GrayMoon.Abstractions.Worker;
 using GrayMoon.Abstractions.Exceptions;
 using GrayMoon.Abstractions.Notifications;
+using GrayMoon.Abstractions.Workspaces;
 using GrayMoon.App.Data;
 using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
@@ -11,6 +12,7 @@ using GrayMoon.App.Services.Worker;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using GrayMoon.Application.Features;
+using GrayMoon.Application.Workspaces;
 
 namespace GrayMoon.App.Services.Git;
 
@@ -59,6 +61,9 @@ public sealed partial class WorkspaceGitService
 
         var divergenceByRepoId = await GetDivergenceBaseBranchesByRepositoryIdAsync(contextId, cancellationToken);
 
+        // Features inherit the parent Workspace's profile, so this resolves by workspace id only.
+        var capabilities = await ResolveRepositoryOperationCapabilitiesAsync(workspaceId, cancellationToken);
+
         var completedCount = 0;
         var totalCount = repos.Count;
         using var semaphore = new SemaphoreSlim(_maxConcurrent);
@@ -78,7 +83,8 @@ public sealed partial class WorkspaceGitService
                     bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
                     workspaceId,
                     workspaceRoot,
-                    divergenceBaseBranch
+                    divergenceBaseBranch,
+                    capabilities
                 };
                 var response = await _workerBridge.SendCommandAsync("SyncRepository", args, cancellationToken);
                 var info = ParseSyncRepositoryResponse(response);
@@ -111,7 +117,10 @@ public sealed partial class WorkspaceGitService
         }
         else
         {
-            isInSync = results.All(r => r.info.Version != "-" && r.info.Branch != "-");
+            // A workspace that does not version its repositories has no version to be missing, so holding it
+            // to "every row resolved a version" would leave it permanently out of sync.
+            isInSync = results.All(r =>
+                (!capabilities.ShouldCalculateVersion || r.info.Version != "-") && r.info.Branch != "-");
         }
         await _workspaceRepository.UpdateSyncMetadataAsync(workspaceId, DateTime.UtcNow, isInSync);
 
@@ -147,13 +156,15 @@ public sealed partial class WorkspaceGitService
         var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
         var divergenceByRepoId = await GetDivergenceBaseBranchesByRepositoryIdAsync(contextId, cancellationToken);
         divergenceByRepoId.TryGetValue(repo.RepositoryId, out var divergenceBaseBranch);
+        var capabilities = await ResolveRepositoryOperationCapabilitiesAsync(workspaceId, cancellationToken);
         var response = await _workerBridge.SendCommandAsync("RefreshRepositoryVersion", new
         {
             workspaceName = workspaceFolderName,
             repositoryName = repo.RepositoryName,
             repositoryId = repo.RepositoryId,
             workspaceRoot,
-            divergenceBaseBranch
+            divergenceBaseBranch,
+            capabilities
         }, cancellationToken);
         if (!response.Success)
         {
@@ -199,13 +210,14 @@ public sealed partial class WorkspaceGitService
             return result;
 
         var (workspaceRoot, workspaceFolderName) = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var capabilities = await ResolveRepositoryOperationCapabilitiesAsync(workspaceId, cancellationToken);
         foreach (var wr in workspaceRepos)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var repo = wr.Repository;
             if (repo == null) continue;
 
-            var response = await _workerBridge.SendCommandAsync("GetRepositoryVersion", new { workspaceName = workspaceFolderName, repositoryName = repo.RepositoryName, workspaceRoot }, cancellationToken);
+            var response = await _workerBridge.SendCommandAsync("GetRepositoryVersion", new { workspaceName = workspaceFolderName, repositoryName = repo.RepositoryName, workspaceRoot, capabilities }, cancellationToken);
             RepoSyncStatus status;
             if (!response.Success || response.Data == null)
                 status = RepoSyncStatus.Error;
@@ -231,6 +243,18 @@ public sealed partial class WorkspaceGitService
         WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken = default)
         => _recomputeScope.CompleteAsync(workspaceId, contextId, cancellationToken);
+
+    /// <summary>
+    /// The worker-facing subset of the workspace's capabilities, to ride along on the request. Keyed on the
+    /// workspace alone: a profile belongs to the parent Workspace and worktree-backed Features inherit it.
+    /// </summary>
+    private async Task<RepositoryOperationCapabilities> ResolveRepositoryOperationCapabilitiesAsync(
+        int workspaceId,
+        CancellationToken cancellationToken)
+    {
+        var capabilities = await _capabilitiesResolver.GetAsync(workspaceId, cancellationToken);
+        return capabilities.ToRepositoryOperationCapabilities();
+    }
 
     private async Task PersistVersionsAsync(
         int workspaceId,
@@ -314,6 +338,12 @@ public sealed partial class WorkspaceGitService
     {
         var info = await _contextResolver.GetRequiredAsync(contextId, workspaceId, cancellationToken);
         if (info.IsSpecialWorkspace)
+            return;
+
+        // GetGitVersionAtDefaultTip launches GitVersion unconditionally in the worker, so the gate has to be
+        // here. Features inherit the parent Workspace's profile, which is why this resolves by workspace id.
+        var capabilities = await _capabilitiesResolver.GetAsync(workspaceId, cancellationToken);
+        if (!capabilities.UsesRepositoryVersioning)
             return;
 
         var mergedRepoWrlIds = await _dbContext.WorkspaceRepositoryContextPullRequests

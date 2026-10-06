@@ -1,7 +1,7 @@
 using GrayMoon.Abstractions.Worker;
 using GrayMoon.Abstractions.Notifications;
+using GrayMoon.Abstractions.Workspaces;
 using GrayMoon.Worker.Abstractions;
-using GrayMoon.Worker.Services;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
 
@@ -13,7 +13,12 @@ namespace GrayMoon.Worker.Commands;
 /// actual post-push counts so DB persistence is updated regardless of whether the push
 /// originated from GrayMoon or an external IDE.
 /// </summary>
-public sealed class PushHookSyncCommand(IGitService git, ICsProjFileService csProjFileService, IHubConnectionProvider hubProvider, ILogger<PushHookSyncCommand> logger)
+public sealed class PushHookSyncCommand(
+    IGitService git,
+    IRepositoryStateProbe stateProbe,
+    IWorkspaceCapabilityProvider capabilityProvider,
+    IHubConnectionProvider hubProvider,
+    ILogger<PushHookSyncCommand> logger)
 {
     public async Task ExecuteAsync(INotifyJob payload, CancellationToken cancellationToken = default)
     {
@@ -23,18 +28,25 @@ public sealed class PushHookSyncCommand(IGitService git, ICsProjFileService csPr
             return;
         }
 
-        var (versionResult, _) = await git.GetVersionAsync(payload.RepositoryPath, cancellationToken);
-        var version = versionResult?.InformationalVersion ?? "-";
-        // A GitVersion failure leaves the version unresolved; it must not cost the repository its branch.
-        var branch = await git.ResolveBranchAsync(versionResult, payload.RepositoryPath, cancellationToken) ?? "-";
+        // There is no app request to carry capabilities on this path, so they are resolved here.
+        var capabilities = await capabilityProvider.GetAsync(payload.WorkspaceId, cancellationToken);
 
-        var currentTag = await git.GetCheckedOutTagAsync(payload.RepositoryPath, cancellationToken);
-        if (currentTag != null)
-            branch = "-";
+        // Identity and version only. Commit counts are intentionally not probed here - this hook fires
+        // BEFORE the push data is transferred, so any counts read now are stale - and the project scan
+        // belongs to the deferred pass, which runs once rather than on every attempt.
+        var (state, _) = await stateProbe.CaptureAsync(payload.RepositoryPath, new RepositoryStateProbeOptions
+        {
+            IncludeGitVersion = true,
+            IncludeCommitCounts = false,
+            Capabilities = capabilities
+        }, cancellationToken);
+
+        var version = state.GitVersion ?? "-";
+        var branch = state.BranchName ?? "-";
 
         // The ref name as git knows it, which is what the deferred pass counts against and compares HEAD to.
-        // GitVersion's branch name can be escaped (slashes replaced), so it is not usable as a ref.
-        var pushedBranch = currentTag == null
+        // The version provider's branch name can be escaped (slashes replaced), so it is not usable as a ref.
+        var pushedBranch = state.CheckedOutTag == null
             ? await git.GetCurrentBranchNameAsync(payload.RepositoryPath, cancellationToken)
             : null;
 
@@ -42,19 +54,18 @@ public sealed class PushHookSyncCommand(IGitService git, ICsProjFileService csPr
         if (connection?.State == HubConnectionState.Connected)
         {
             // Send an immediate notification with Version+Branch so the UI updates right away.
-            // Commit counts are intentionally omitted here - this hook fires BEFORE the push
-            // data is transferred, so any counts read now are stale.
-            // SyncCommandHandler's HasValue guards ensure null fields do not overwrite DB values.
+            // SyncCommandHandler's probe markers ensure the groups this pass skipped are not overwritten.
             var notification = new RepositorySyncNotification
             {
                 WorkspaceId = payload.WorkspaceId,
                 RepositoryId = payload.RepositoryId,
                 RepositoryPath = payload.RepositoryPath,
                 Version = version,
-                GitVersionFailed = versionResult == null,
+                GitVersionFailed = state.GitVersionProbed && state.GitVersion == null,
                 Branch = branch,
-                Tag = currentTag,
-                ErrorMessage = null
+                Tag = state.CheckedOutTag,
+                ErrorMessage = null,
+                State = state
             };
             await connection.InvokeAsync(WorkerHubMethods.SyncCommand, notification, cancellationToken);
             logger.LogInformation("PushHookSync initial sent: workspace={WorkspaceId}, repo={RepoId}, version={Version}, branch={Branch}",
@@ -69,14 +80,14 @@ public sealed class PushHookSyncCommand(IGitService git, ICsProjFileService csPr
         // Uses CancellationToken.None so it outlives the job's own token. A detached HEAD has no branch to
         // count against, so there is nothing to defer.
         if (!string.IsNullOrWhiteSpace(pushedBranch))
-            _ = SendDeferredPostPushCountsAsync(payload, pushedBranch!);
+            _ = SendDeferredPostPushCountsAsync(payload, pushedBranch!, capabilities);
     }
 
     /// <summary>
     /// Polls commit counts every 2 seconds (up to 30 seconds) waiting for outgoing commits to
     /// reach 0 after the push completes, then sends a SyncCommand so the app updates persistence.
     /// </summary>
-    private async Task SendDeferredPostPushCountsAsync(INotifyJob payload, string branch)
+    private async Task SendDeferredPostPushCountsAsync(INotifyJob payload, string branch, RepositoryOperationCapabilities capabilities)
     {
         const int maxChecks = 15;
         var repoPath = payload.RepositoryPath!;
@@ -97,8 +108,10 @@ public sealed class PushHookSyncCommand(IGitService git, ICsProjFileService csPr
                 if (!await StillOnPushedBranchAsync(repoPath, branch, payload.RepositoryId))
                     return;
 
+                // The wait itself stays a bare count: polling must not relaunch the version provider or the
+                // project scan on every attempt.
                 var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, CancellationToken.None);
-                var (outgoing, incoming, hasUpstream) = await git.GetCommitCountsAsync(repoPath, branch, defaultRef, CancellationToken.None);
+                var (outgoing, _, _) = await git.GetCommitCountsAsync(repoPath, branch, defaultRef, CancellationToken.None);
 
                 // Keep polling while push is still in progress (outgoing > 0) unless this is the last attempt
                 if (outgoing > 0 && attempt < maxChecks - 1)
@@ -107,21 +120,17 @@ public sealed class PushHookSyncCommand(IGitService git, ICsProjFileService csPr
                     continue;
                 }
 
-                // Push done (outgoing == 0 or null) or max attempts reached - send final notification
-                var divergenceRef = git.ToOriginBranchRef(await git.GetDivergenceBaseBranchAsync(repoPath, CancellationToken.None))
-                    ?? defaultRef;
-                var (defaultBehind, defaultAhead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, CancellationToken.None);
-                var (versionResult, _) = await git.GetVersionAsync(repoPath, CancellationToken.None);
-                var finalVersion = versionResult?.InformationalVersion ?? "-";
-                var finalBranch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? branch;
+                // Push done (outgoing == 0 or null) or max attempts reached - capture the full state once.
+                var (state, _) = await stateProbe.CaptureAsync(repoPath, new RepositoryStateProbeOptions
+                {
+                    IncludeGitVersion = true,
+                    IncludeProjects = true,
+                    DefaultBranchOriginRef = defaultRef,
+                    BranchNameOverride = branch,
+                    Capabilities = capabilities
+                }, CancellationToken.None);
 
-                var finalTag = await git.GetCheckedOutTagAsync(repoPath, CancellationToken.None);
-                if (finalTag != null)
-                    finalBranch = "-";
-
-                var projects = await csProjFileService.FindAsync(repoPath, CancellationToken.None);
-
-                // GitVersion alone can take seconds, so re-check rather than trusting the check above.
+                // The version provider alone can take seconds, so re-check rather than trusting the check above.
                 if (!await StillOnPushedBranchAsync(repoPath, branch, payload.RepositoryId))
                     return;
 
@@ -130,20 +139,21 @@ public sealed class PushHookSyncCommand(IGitService git, ICsProjFileService csPr
                     WorkspaceId = payload.WorkspaceId,
                     RepositoryId = payload.RepositoryId,
                     RepositoryPath = payload.RepositoryPath,
-                    Version = finalVersion,
-                    GitVersionFailed = versionResult == null,
-                    Branch = finalBranch,
-                    Tag = finalTag,
-                    OutgoingCommits = outgoing,
-                    IncomingCommits = incoming,
-                    HasUpstream = hasUpstream,
-                    DefaultBranchBehind = defaultBehind,
-                    DefaultBranchAhead = defaultAhead,
-                    Projects = RepositorySyncProjectMapper.ToNotifications(projects),
+                    Version = state.GitVersion ?? "-",
+                    GitVersionFailed = state.GitVersionProbed && state.GitVersion == null,
+                    Branch = state.BranchName ?? "-",
+                    Tag = state.CheckedOutTag,
+                    OutgoingCommits = state.OutgoingCommits,
+                    IncomingCommits = state.IncomingCommits,
+                    HasUpstream = state.HasUpstream,
+                    DefaultBranchBehind = state.DefaultBranchBehind,
+                    DefaultBranchAhead = state.DefaultBranchAhead,
+                    Projects = state.Projects,
+                    State = state
                 };
                 await connection.InvokeAsync(WorkerHubMethods.SyncCommand, finalNotification, CancellationToken.None);
                 logger.LogInformation("PushHookSync deferred SyncCommand sent: workspace={WorkspaceId}, repo={RepoId}, outgoing={Outgoing}, attempt={Attempt}",
-                    payload.WorkspaceId, payload.RepositoryId, outgoing, attempt + 1);
+                    payload.WorkspaceId, payload.RepositoryId, state.OutgoingCommits, attempt + 1);
                 return;
             }
             catch (Exception ex)
@@ -173,4 +183,3 @@ public sealed class PushHookSyncCommand(IGitService git, ICsProjFileService csPr
         return false;
     }
 }
-
