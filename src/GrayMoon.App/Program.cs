@@ -134,6 +134,7 @@ try
     builder.Services.AddScoped<WorkspaceService>();
     builder.Services.AddScoped<IWorkspaceFeatureContextResolver, WorkspaceFeatureContextResolver>();
     builder.Services.AddScoped<IWorkspaceCapabilitiesResolver, WorkspaceCapabilitiesResolver>();
+    builder.Services.AddScoped<IWorkspacePageAccessResolver, WorkspacePageAccessResolver>();
     builder.Services.AddScoped<IWorkspaceContextPathResolver, WorkspaceContextPathResolver>();
     builder.Services.AddScoped<IWorkspaceSelectedFeatureContextService, WorkspaceSelectedFeatureContextService>();
     builder.Services.AddScoped<IWorkspaceHookContextAttributor, WorkspaceHookContextAttributor>();

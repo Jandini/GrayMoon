@@ -8,364 +8,406 @@
 
 <PageTitle>Actions - GrayMoon</PageTitle>
 
-<div class="container-fluid page-container grid-page">
-    <div class="grid-page-header">
-        <div class="workspace-repos-header workspace-actions-header">
-            <div class="workspace-repos-title-row">
-                <h2 class="workspace-repos-title">Actions</h2>
-                <p class="text-muted mb-0 workspace-repos-subtitle workspace-actions__subtitle">
-                    <WorkspaceSubtitleName Name="@(workspace?.Name)" />
-                    @if (!isLoading && rows.Count > 0)
+<WorkspacePageGate Page="WorkspacePage.Actions" WorkspaceId="WorkspaceId" Outcome="_pageAccess" ContextQuery="ContextQuery">
+    <div class="container-fluid page-container grid-page">
+        <div class="grid-page-header">
+            <div class="workspace-repos-header workspace-actions-header">
+                <div class="workspace-repos-title-row">
+                    <h2 class="workspace-repos-title">Actions</h2>
+                    <p class="text-muted mb-0 workspace-repos-subtitle workspace-actions__subtitle">
+                        <WorkspaceSubtitleName Name="@(workspace?.Name)" />
+                        @if (!isLoading && rows.Count > 0)
+                        {
+                            var wfSuffix = HasSearchFilter ? " found" : "";
+                            var wfCount = HasSearchFilter ? FilteredWorkflowLineCount : VisibleWorkflowLineCount;
+                            <span>@($"{wfCount} {(wfCount == 1 ? "workflow" : "workflows")}{wfSuffix}")</span>
+                        }
+                        else if (!isLoading && workspace != null)
+                        {
+                            <span>0 workflows</span>
+                        }
+                        else if (isLoading)
+                        {
+                            <span>&nbsp;</span>
+                        }
+                    </p>
+                    @if (!isLoading && rows.Count > 0 && (ErrorCount > 0 || FailedCount > 0 || AbortedCount > 0 || RunningCount > 0 || SuccessCount > 0 || NoneCount > 0))
                     {
-                        var wfSuffix = HasSearchFilter ? " found" : "";
-                        var wfCount = HasSearchFilter ? FilteredWorkflowLineCount : VisibleWorkflowLineCount;
-                        <span>@($"{wfCount} {(wfCount == 1 ? "workflow" : "workflows")}{wfSuffix}")</span>
+                        <span class="workspace-actions__filter-sep text-muted" aria-hidden="true">|</span>
+                        <span class="workspace-actions__filters d-inline-flex align-items-center flex-wrap" role="toolbar" aria-label="Filter workflows by status">
+                            @if (ErrorCount > 0)
+                            {
+                                <button type="button"
+                                        class="gha-status-chip @(_showErrors ? "gha-status-chip--on" : "gha-status-chip--off")"
+                                        aria-pressed="@_showErrors"
+                                        aria-label="Filter repository load errors"
+                                        @onclick="ToggleShowErrors">
+                                    <span class="gha-status-chip__label action-badge action-badge-failed">errors</span>
+                                    <span class="gha-status-chip__count action-badge action-badge-failed">@ErrorCount</span>
+                                </button>
+                            }
+                            @if (FailedCount > 0)
+                            {
+                                <button type="button"
+                                        class="gha-status-chip @(_showFailed ? "gha-status-chip--on" : "gha-status-chip--off")"
+                                        aria-pressed="@_showFailed"
+                                        aria-label="Filter failed workflows"
+                                        @onclick="ToggleShowFailed">
+                                    <span class="gha-status-chip__label action-badge action-badge-failed">failed</span>
+                                    <span class="gha-status-chip__count action-badge action-badge-failed">@FailedCount</span>
+                                </button>
+                            }
+                            @if (AbortedCount > 0)
+                            {
+                                <button type="button"
+                                        class="gha-status-chip @(_showAborted ? "gha-status-chip--on" : "gha-status-chip--off")"
+                                        aria-pressed="@_showAborted"
+                                        aria-label="Filter aborted workflows"
+                                        @onclick="ToggleShowAborted">
+                                    <span class="gha-status-chip__label action-badge action-badge-aborted">aborted</span>
+                                    <span class="gha-status-chip__count action-badge action-badge-aborted">@AbortedCount</span>
+                                </button>
+                            }
+                            @if (RunningCount > 0)
+                            {
+                                <button type="button"
+                                        class="gha-status-chip @(_showRunning ? "gha-status-chip--on" : "gha-status-chip--off")"
+                                        aria-pressed="@_showRunning"
+                                        aria-label="Filter running workflows"
+                                        @onclick="ToggleShowRunning">
+                                    <span class="gha-status-chip__label action-badge action-badge-running">running</span>
+                                    <span class="gha-status-chip__count action-badge action-badge-running">@RunningCount</span>
+                                </button>
+                            }
+                            @if (SuccessCount > 0)
+                            {
+                                <button type="button"
+                                        class="gha-status-chip @(_showSuccess ? "gha-status-chip--on" : "gha-status-chip--off")"
+                                        aria-pressed="@_showSuccess"
+                                        aria-label="Filter successful workflows"
+                                        @onclick="ToggleShowSuccess">
+                                    <span class="gha-status-chip__label action-badge action-badge-success">success</span>
+                                    <span class="gha-status-chip__count action-badge action-badge-success">@SuccessCount</span>
+                                </button>
+                            }
+                            @if (NoneCount > 0)
+                            {
+                                <button type="button"
+                                        class="gha-status-chip @(_showNone ? "gha-status-chip--on" : "gha-status-chip--off")"
+                                        aria-pressed="@_showNone"
+                                        aria-label="Filter workflows with no status"
+                                        @onclick="ToggleShowNone">
+                                    <span class="gha-status-chip__label action-badge action-badge-none">none</span>
+                                    <span class="gha-status-chip__count action-badge action-badge-none">@NoneCount</span>
+                                </button>
+                            }
+                        </span>
                     }
-                    else if (!isLoading && workspace != null)
+                    @if (!isLoading && AiWorkflowCount > 0)
                     {
-                        <span>0 workflows</span>
-                    }
-                    else if (isLoading)
-                    {
-                        <span>&nbsp;</span>
-                    }
-                </p>
-                @if (!isLoading && rows.Count > 0 && (ErrorCount > 0 || FailedCount > 0 || AbortedCount > 0 || RunningCount > 0 || SuccessCount > 0 || NoneCount > 0))
-                {
-                    <span class="workspace-actions__filter-sep text-muted" aria-hidden="true">|</span>
-                    <span class="workspace-actions__filters d-inline-flex align-items-center flex-wrap" role="toolbar" aria-label="Filter workflows by status">
-                        @if (ErrorCount > 0)
-                        {
-                            <button type="button"
-                                    class="gha-status-chip @(_showErrors ? "gha-status-chip--on" : "gha-status-chip--off")"
-                                    aria-pressed="@_showErrors"
-                                    aria-label="Filter repository load errors"
-                                    @onclick="ToggleShowErrors">
-                                <span class="gha-status-chip__label action-badge action-badge-failed">errors</span>
-                                <span class="gha-status-chip__count action-badge action-badge-failed">@ErrorCount</span>
-                            </button>
-                        }
-                        @if (FailedCount > 0)
-                        {
-                            <button type="button"
-                                    class="gha-status-chip @(_showFailed ? "gha-status-chip--on" : "gha-status-chip--off")"
-                                    aria-pressed="@_showFailed"
-                                    aria-label="Filter failed workflows"
-                                    @onclick="ToggleShowFailed">
-                                <span class="gha-status-chip__label action-badge action-badge-failed">failed</span>
-                                <span class="gha-status-chip__count action-badge action-badge-failed">@FailedCount</span>
-                            </button>
-                        }
-                        @if (AbortedCount > 0)
-                        {
-                            <button type="button"
-                                    class="gha-status-chip @(_showAborted ? "gha-status-chip--on" : "gha-status-chip--off")"
-                                    aria-pressed="@_showAborted"
-                                    aria-label="Filter aborted workflows"
-                                    @onclick="ToggleShowAborted">
-                                <span class="gha-status-chip__label action-badge action-badge-aborted">aborted</span>
-                                <span class="gha-status-chip__count action-badge action-badge-aborted">@AbortedCount</span>
-                            </button>
-                        }
-                        @if (RunningCount > 0)
-                        {
-                            <button type="button"
-                                    class="gha-status-chip @(_showRunning ? "gha-status-chip--on" : "gha-status-chip--off")"
-                                    aria-pressed="@_showRunning"
-                                    aria-label="Filter running workflows"
-                                    @onclick="ToggleShowRunning">
-                                <span class="gha-status-chip__label action-badge action-badge-running">running</span>
-                                <span class="gha-status-chip__count action-badge action-badge-running">@RunningCount</span>
-                            </button>
-                        }
-                        @if (SuccessCount > 0)
-                        {
-                            <button type="button"
-                                    class="gha-status-chip @(_showSuccess ? "gha-status-chip--on" : "gha-status-chip--off")"
-                                    aria-pressed="@_showSuccess"
-                                    aria-label="Filter successful workflows"
-                                    @onclick="ToggleShowSuccess">
-                                <span class="gha-status-chip__label action-badge action-badge-success">success</span>
-                                <span class="gha-status-chip__count action-badge action-badge-success">@SuccessCount</span>
-                            </button>
-                        }
-                        @if (NoneCount > 0)
-                        {
-                            <button type="button"
-                                    class="gha-status-chip @(_showNone ? "gha-status-chip--on" : "gha-status-chip--off")"
-                                    aria-pressed="@_showNone"
-                                    aria-label="Filter workflows with no status"
-                                    @onclick="ToggleShowNone">
-                                <span class="gha-status-chip__label action-badge action-badge-none">none</span>
-                                <span class="gha-status-chip__count action-badge action-badge-none">@NoneCount</span>
-                            </button>
-                        }
-                    </span>
-                }
-                @if (!isLoading && AiWorkflowCount > 0)
-                {
-                    <button type="button"
-                            class="gha-status-chip workspace-actions__ai-toggle @(IncludeAiWorkflows ? "gha-status-chip--on" : "gha-status-chip--off")"
-                            aria-pressed="@IncludeAiWorkflows"
-                            aria-label="Include AI-driven workflows"
-                            title="@(IncludeAiWorkflows ? "AI workflows are included - click to hide" : "AI workflows are hidden - click to include")"
-                            disabled="@(isLoading || _isTogglingAiFilter)"
-                            @onclick="ToggleExcludeAiWorkflowsAsync">
-                        <span class="gha-status-chip__label action-badge action-badge-ai">ai</span>
-                        <span class="gha-status-chip__count action-badge action-badge-ai">@AiWorkflowCount</span>
-                    </button>
-                }
-                <span class="workspace-repos-title-spacer"></span>
-                @if (isRefreshing)
-                {
-                    <div class="git-changes-header__scan-indicator">
-                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                        <span>@RefreshStatusText</span>
                         <button type="button"
-                                class="btn btn-link btn-sm git-changes-header__scan-abort"
-                                title="Abort refresh"
-                                aria-label="Abort refresh"
-                                @onclick="AbortRefresh">
-                            <i class="bi bi-x-circle" aria-hidden="true"></i>
+                                class="gha-status-chip workspace-actions__ai-toggle @(IncludeAiWorkflows ? "gha-status-chip--on" : "gha-status-chip--off")"
+                                aria-pressed="@IncludeAiWorkflows"
+                                aria-label="Include AI-driven workflows"
+                                title="@(IncludeAiWorkflows ? "AI workflows are included - click to hide" : "AI workflows are hidden - click to include")"
+                                disabled="@(isLoading || _isTogglingAiFilter)"
+                                @onclick="ToggleExcludeAiWorkflowsAsync">
+                            <span class="gha-status-chip__label action-badge action-badge-ai">ai</span>
+                            <span class="gha-status-chip__count action-badge action-badge-ai">@AiWorkflowCount</span>
                         </button>
-                    </div>
-                }
-            </div>
-            <div class="d-flex gap-2 align-items-center workspace-repos-header-actions flex-wrap">
-                <WorkspaceContextBar WorkspaceId="WorkspaceId"
-                                     WorkspaceName="@(workspace?.Name)"
-                                     SelectedContextId="_selectedContextId"
-                                     SelectedContextIdChanged="OnSelectedContextChangedAsync">
-                    <FilterSearchInput @bind-Value="searchTerm"
-                                       InputId="workspace-actions-search"
-                                       InputAdditionalClass="workspace-grid-search"
-                                       Placeholder="Search repository or workflow..."
-                                       Disabled="@(isLoading || rows.Count == 0)"
-                                       OnKeyDown="OnSearchKeyDown"
-                                       OnClear="ClearSearchFilter" />
-                </WorkspaceContextBar>
-                @if (HasFailedRows)
-                {
-                    <div class="btn-group position-relative">
-                        <button class="btn btn-danger"
-                                @onclick="RerunAllFailedAsync"
-                                @onclick:stopPropagation
-                                disabled="@(isRerunningAll || isRefreshing || isLoading)">
-                            Re-run
-                        </button>
-                        <button type="button"
-                                class="btn btn-outline-secondary dropdown-toggle dropdown-toggle-split"
-                                aria-label="Toggle Re-run menu"
-                                aria-expanded="@(_rerunMenuOpen ? "true" : "false")"
-                                @onclick="ToggleRerunMenu"
-                                @onclick:stopPropagation
-                                disabled="@(isRerunningAll || isRefreshing || isLoading)">
-                            <span class="visually-hidden">Toggle Dropdown</span>
-                        </button>
-                        @if (_rerunMenuOpen)
-                        {
-                            <div class="branch-menu-backdrop" @onclick="CloseRerunMenu"></div>
-                            <ul class="dropdown-menu show shadow branch-menu-list workspace-repository-actions-menu"
-                                role="menu">
-                                <li>
-                                    <button class="dropdown-item" type="button"
-                                            role="menuitem"
-                                            @onclick="HandleRerunAllClick"
-                                            disabled="@(isRerunningAll || isRefreshing || isLoading)">
-                                        Re-run
-                                    </button>
-                                </li>
-                                <li><hr class="dropdown-divider branch-menu-divider" /></li>
-                                <li>
-                                    <button class="dropdown-item" type="button"
-                                            role="menuitem"
-                                            @onclick="HandleRerunFailedJobsOnlyClick"
-                                            disabled="@(isRerunningAll || isRefreshing || isLoading)">
-                                        Re-run Failed Jobs Only
-                                    </button>
-                                </li>
-                                @if (HasFailedRowsSupportingRunAgain)
-                                {
+                    }
+                    <span class="workspace-repos-title-spacer"></span>
+                    @if (isRefreshing)
+                    {
+                        <div class="git-changes-header__scan-indicator">
+                            <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                            <span>@RefreshStatusText</span>
+                            <button type="button"
+                                    class="btn btn-link btn-sm git-changes-header__scan-abort"
+                                    title="Abort refresh"
+                                    aria-label="Abort refresh"
+                                    @onclick="AbortRefresh">
+                                <i class="bi bi-x-circle" aria-hidden="true"></i>
+                            </button>
+                        </div>
+                    }
+                </div>
+                <div class="d-flex gap-2 align-items-center workspace-repos-header-actions flex-wrap">
+                    <WorkspaceContextBar WorkspaceId="WorkspaceId"
+                                         WorkspaceName="@(workspace?.Name)"
+                                         SelectedContextId="_selectedContextId"
+                                         SelectedContextIdChanged="OnSelectedContextChangedAsync">
+                        <FilterSearchInput @bind-Value="searchTerm"
+                                           InputId="workspace-actions-search"
+                                           InputAdditionalClass="workspace-grid-search"
+                                           Placeholder="Search repository or workflow..."
+                                           Disabled="@(isLoading || rows.Count == 0)"
+                                           OnKeyDown="OnSearchKeyDown"
+                                           OnClear="ClearSearchFilter" />
+                    </WorkspaceContextBar>
+                    @if (HasFailedRows)
+                    {
+                        <div class="btn-group position-relative">
+                            <button class="btn btn-danger"
+                                    @onclick="RerunAllFailedAsync"
+                                    @onclick:stopPropagation
+                                    disabled="@(isRerunningAll || isRefreshing || isLoading)">
+                                Re-run
+                            </button>
+                            <button type="button"
+                                    class="btn btn-outline-secondary dropdown-toggle dropdown-toggle-split"
+                                    aria-label="Toggle Re-run menu"
+                                    aria-expanded="@(_rerunMenuOpen ? "true" : "false")"
+                                    @onclick="ToggleRerunMenu"
+                                    @onclick:stopPropagation
+                                    disabled="@(isRerunningAll || isRefreshing || isLoading)">
+                                <span class="visually-hidden">Toggle Dropdown</span>
+                            </button>
+                            @if (_rerunMenuOpen)
+                            {
+                                <div class="branch-menu-backdrop" @onclick="CloseRerunMenu"></div>
+                                <ul class="dropdown-menu show shadow branch-menu-list workspace-repository-actions-menu"
+                                    role="menu">
+                                    <li>
+                                        <button class="dropdown-item" type="button"
+                                                role="menuitem"
+                                                @onclick="HandleRerunAllClick"
+                                                disabled="@(isRerunningAll || isRefreshing || isLoading)">
+                                            Re-run
+                                        </button>
+                                    </li>
                                     <li><hr class="dropdown-divider branch-menu-divider" /></li>
                                     <li>
                                         <button class="dropdown-item" type="button"
                                                 role="menuitem"
-                                                @onclick="HandleRunAgainAllClick"
+                                                @onclick="HandleRerunFailedJobsOnlyClick"
                                                 disabled="@(isRerunningAll || isRefreshing || isLoading)">
-                                            Run again
+                                            Re-run Failed Jobs Only
                                         </button>
                                     </li>
-                                }
-                            </ul>
-                        }
-                    </div>
-                }
-                <button class="btn btn-outline-secondary"
-                        @onclick="RefreshAllAsync"
-                        disabled="@(isRefreshing || isLoading || workspace == null)">
-                    Refresh
-                </button>
-            </div>
-        </div>
-        @if (errorMessage != null)
-        {
-            <div class="gm-callout gm-callout--error" role="alert">@errorMessage</div>
-        }
-    </div>
-
-    @if (errorMessage == null)
-    {
-        <div class="grid-page-body">
-            <div class="card page-card mb-4">
-                <div class="card-body p-0">
-                    <div class="table-responsive">
-                        <table class="table table-hover mb-0 actions-table resizable-columns" data-workspace-id="@WorkspaceId">
-                            <thead class="table-dark">
-                                <tr>
-                                    <th class="col-repo">Repository</th>
-                                    <th class="col-branch">Branch</th>
-                                    <th class="col-workflow">Workflow</th>
-                                    <th class="col-last-run">Last Run</th>
-                                    <th class="col-action-status">Status</th>
-                                    <th class="col-actions">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody @onscroll="CloseRerunLineMenu">
-                                @if (isLoading)
-                                {
-                                    <tr>
-                                        <td colspan="6" class="text-center text-muted py-4">
-                                            Loading workspace...
-                                        </td>
-                                    </tr>
-                                }
-                                else if (rows.Count == 0)
-                                {
-                                    <tr>
-                                        <td colspan="6" class="text-center text-muted py-4">
-                                            No repositories in this workspace. Add repositories to see actions.
-                                        </td>
-                                    </tr>
-                                }
-                                else if (NoVisibleWorkflowRows)
-                                {
-                                    <tr>
-                                        <td colspan="6" class="text-center text-muted py-4">
-                                            @(HasSearchFilter ? "No workflows match your search." : "No workflows match the current filters.")
-                                        </td>
-                                    </tr>
-                                }
-                                else
-                                {
-                                    var groupIndex = 0;
-                                    @foreach (var row in rows.OrderBy(GetStatusSortOrder).ThenBy(r => r.Repo.RepositoryName, System.StringComparer.OrdinalIgnoreCase))
+                                    @if (HasFailedRowsSupportingRunAgain)
                                     {
-                                        var displayLines = LinesForTable(row).ToList();
-                                        if (displayLines.Count == 0)
-                                        {
-                                            continue;
-                                        }
+                                        <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                                        <li>
+                                            <button class="dropdown-item" type="button"
+                                                    role="menuitem"
+                                                    @onclick="HandleRunAgainAllClick"
+                                                    disabled="@(isRerunningAll || isRefreshing || isLoading)">
+                                                Run again
+                                            </button>
+                                        </li>
+                                    }
+                                </ul>
+                            }
+                        </div>
+                    }
+                    <button class="btn btn-outline-secondary"
+                            @onclick="RefreshAllAsync"
+                            disabled="@(isRefreshing || isLoading || workspace == null)">
+                        Refresh
+                    </button>
+                </div>
+            </div>
+            @if (errorMessage != null)
+            {
+                <div class="gm-callout gm-callout--error" role="alert">@errorMessage</div>
+            }
+        </div>
 
-                                        var stripeClass = GroupStripeClass(groupIndex);
-                                        @for (var li = 0; li < displayLines.Count; li++)
+        @if (errorMessage == null)
+        {
+            <div class="grid-page-body">
+                <div class="card page-card mb-4">
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-hover mb-0 actions-table resizable-columns" data-workspace-id="@WorkspaceId">
+                                <thead class="table-dark">
+                                    <tr>
+                                        <th class="col-repo">Repository</th>
+                                        <th class="col-branch">Branch</th>
+                                        <th class="col-workflow">Workflow</th>
+                                        <th class="col-last-run">Last Run</th>
+                                        <th class="col-action-status">Status</th>
+                                        <th class="col-actions">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody @onscroll="CloseRerunLineMenu">
+                                    @if (isLoading)
+                                    {
+                                        <tr>
+                                            <td colspan="6" class="text-center text-muted py-4">
+                                                Loading workspace...
+                                            </td>
+                                        </tr>
+                                    }
+                                    else if (rows.Count == 0)
+                                    {
+                                        <tr>
+                                            <td colspan="6" class="text-center text-muted py-4">
+                                                No repositories in this workspace. Add repositories to see actions.
+                                            </td>
+                                        </tr>
+                                    }
+                                    else if (NoVisibleWorkflowRows)
+                                    {
+                                        <tr>
+                                            <td colspan="6" class="text-center text-muted py-4">
+                                                @(HasSearchFilter ? "No workflows match your search." : "No workflows match the current filters.")
+                                            </td>
+                                        </tr>
+                                    }
+                                    else
+                                    {
+                                        var groupIndex = 0;
+                                        @foreach (var row in rows.OrderBy(GetStatusSortOrder).ThenBy(r => r.Repo.RepositoryName, System.StringComparer.OrdinalIgnoreCase))
                                         {
-                                            var line = displayLines[li];
-                                            var firstLine = li == 0;
-                                            var isLastWorkflowLineInRepo = li == displayLines.Count - 1;
-                                            var showGhaTerminal = string.IsNullOrWhiteSpace(row.ErrorMessage)
-                                                && IsLineRunningForBranch(row, line)
-                                                && (line.Action?.RunId ?? 0) > 0;
-                                            var showRepoBranchInRow = firstLine
-                                                || IsLineRunningForBranch(row, line)
-                                                || line.RunInProgress
-                                                || line.AbortInProgress;
-                                            var repoEndOnDataRow = isLastWorkflowLineInRepo && !showGhaTerminal;
-                                            var repoEndOnGhaRow = isLastWorkflowLineInRepo && showGhaTerminal;
-                                            var isRunningWorkflowRow = IsLineRunningForBranch(row, line);
-                                            var trClass = $"{stripeClass} actions-data-row"
-                                                + (repoEndOnDataRow ? " actions-row-repo-end" : "")
-                                                + (isRunningWorkflowRow ? " actions-row-running" : "")
-                                                + (showGhaTerminal ? " actions-row-running-above-terminal" : "");
-                                            <tr class="@trClass">
-                                                <td class="col-repo">
-                                                    @if (showRepoBranchInRow)
-                                                    {
-                                                        var repoUrl = GrayMoon.App.Services.GitHub.RepositoryUrlHelper.GetRepositoryUrl(row.Repo.CloneUrl);
-                                                        @if (!string.IsNullOrWhiteSpace(repoUrl))
+                                            var displayLines = LinesForTable(row).ToList();
+                                            if (displayLines.Count == 0)
+                                            {
+                                                continue;
+                                            }
+
+                                            var stripeClass = GroupStripeClass(groupIndex);
+                                            @for (var li = 0; li < displayLines.Count; li++)
+                                            {
+                                                var line = displayLines[li];
+                                                var firstLine = li == 0;
+                                                var isLastWorkflowLineInRepo = li == displayLines.Count - 1;
+                                                var showGhaTerminal = string.IsNullOrWhiteSpace(row.ErrorMessage)
+                                                    && IsLineRunningForBranch(row, line)
+                                                    && (line.Action?.RunId ?? 0) > 0;
+                                                var showRepoBranchInRow = firstLine
+                                                    || IsLineRunningForBranch(row, line)
+                                                    || line.RunInProgress
+                                                    || line.AbortInProgress;
+                                                var repoEndOnDataRow = isLastWorkflowLineInRepo && !showGhaTerminal;
+                                                var repoEndOnGhaRow = isLastWorkflowLineInRepo && showGhaTerminal;
+                                                var isRunningWorkflowRow = IsLineRunningForBranch(row, line);
+                                                var trClass = $"{stripeClass} actions-data-row"
+                                                    + (repoEndOnDataRow ? " actions-row-repo-end" : "")
+                                                    + (isRunningWorkflowRow ? " actions-row-running" : "")
+                                                    + (showGhaTerminal ? " actions-row-running-above-terminal" : "");
+                                                <tr class="@trClass">
+                                                    <td class="col-repo">
+                                                        @if (showRepoBranchInRow)
                                                         {
-                                                            <a href="@repoUrl" target="_blank" rel="noopener noreferrer" class="repo-link">
+                                                            var repoUrl = GrayMoon.App.Services.GitHub.RepositoryUrlHelper.GetRepositoryUrl(row.Repo.CloneUrl);
+                                                            @if (!string.IsNullOrWhiteSpace(repoUrl))
+                                                            {
+                                                                <a href="@repoUrl" target="_blank" rel="noopener noreferrer" class="repo-link">
+                                                                    <strong>@row.Repo.RepositoryName</strong>
+                                                                </a>
+                                                            }
+                                                            else
+                                                            {
                                                                 <strong>@row.Repo.RepositoryName</strong>
-                                                            </a>
+                                                            }
                                                         }
-                                                        else
+                                                    </td>
+                                                    <td class="col-branch">
+                                                        @if (showRepoBranchInRow)
                                                         {
-                                                            <strong>@row.Repo.RepositoryName</strong>
+                                                            @if (!string.IsNullOrWhiteSpace(row.Link.BranchName))
+                                                            {
+                                                                <span class="text-muted">@row.Link.BranchName</span>
+                                                            }
+                                                            else
+                                                            {
+                                                                <span class="text-muted">-</span>
+                                                            }
                                                         }
-                                                    }
-                                                </td>
-                                                <td class="col-branch">
-                                                    @if (showRepoBranchInRow)
-                                                    {
-                                                        @if (!string.IsNullOrWhiteSpace(row.Link.BranchName))
+                                                    </td>
+                                                    <td class="col-workflow">
+                                                        @if (!string.IsNullOrWhiteSpace(line.Action?.WorkflowName))
                                                         {
-                                                            <span class="text-muted">@row.Link.BranchName</span>
+                                                            var workflowUrl = GetWorkflowPageUrl(row, line);
+                                                            @if (!string.IsNullOrWhiteSpace(workflowUrl))
+                                                            {
+                                                                <a href="@workflowUrl" target="_blank" rel="noopener noreferrer"
+                                                                   class="actions-workflow-link" title="Open workflow on GitHub">@line.Action!.WorkflowName</a>
+                                                            }
+                                                            else
+                                                            {
+                                                                <span class="text-muted">@line.Action!.WorkflowName</span>
+                                                            }
                                                         }
                                                         else
                                                         {
                                                             <span class="text-muted">-</span>
                                                         }
-                                                    }
-                                                </td>
-                                                <td class="col-workflow">
-                                                    @if (!string.IsNullOrWhiteSpace(line.Action?.WorkflowName))
-                                                    {
-                                                        var workflowUrl = GetWorkflowPageUrl(row, line);
-                                                        @if (!string.IsNullOrWhiteSpace(workflowUrl))
+                                                    </td>
+                                                    <td class="col-last-run text-muted">
+                                                        @if (line.Action?.UpdatedAt != null)
                                                         {
-                                                            <a href="@workflowUrl" target="_blank" rel="noopener noreferrer"
-                                                               class="actions-workflow-link" title="Open workflow on GitHub">@line.Action!.WorkflowName</a>
+                                                            var lastRunTooltip = line.Action.UpdatedAt.Value.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss");
+                                                            <span title="@lastRunTooltip">@FormatLastRun(line.Action.UpdatedAt)</span>
                                                         }
                                                         else
                                                         {
-                                                            <span class="text-muted">@line.Action!.WorkflowName</span>
+                                                            <span class="text-muted">never</span>
                                                         }
-                                                    }
-                                                    else
-                                                    {
-                                                        <span class="text-muted">-</span>
-                                                    }
-                                                </td>
-                                                <td class="col-last-run text-muted">
-                                                    @if (line.Action?.UpdatedAt != null)
-                                                    {
-                                                        var lastRunTooltip = line.Action.UpdatedAt.Value.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss");
-                                                        <span title="@lastRunTooltip">@FormatLastRun(line.Action.UpdatedAt)</span>
-                                                    }
-                                                    else
-                                                    {
-                                                        <span class="text-muted">never</span>
-                                                    }
-                                                </td>
-                                                <td class="col-action-status text-center">
-                                                    @if (firstLine)
-                                                    {
-                                                        <ActionBadge Status="@(line.Action?.Status)"
-                                                                     HtmlUrl="@line.Action?.HtmlUrl"
-                                                                     ErrorMessage="@row.ErrorMessage" />
-                                                    }
-                                                    else if (string.IsNullOrWhiteSpace(row.ErrorMessage))
-                                                    {
-                                                        <ActionBadge Status="@(line.Action?.Status)"
-                                                                     HtmlUrl="@line.Action?.HtmlUrl" />
-                                                    }
-                                                </td>
-                                                <td class="col-actions ps-3">
-                                                    @if (string.IsNullOrWhiteSpace(row.ErrorMessage))
-                                                    {
-                                                        <div class="d-flex gap-2 align-items-center">
-                                                            @if (CanRunAgain(row, line))
-                                                            {
-                                                                <div class="btn-group position-relative">
+                                                    </td>
+                                                    <td class="col-action-status text-center">
+                                                        @if (firstLine)
+                                                        {
+                                                            <ActionBadge Status="@(line.Action?.Status)"
+                                                                         HtmlUrl="@line.Action?.HtmlUrl"
+                                                                         ErrorMessage="@row.ErrorMessage" />
+                                                        }
+                                                        else if (string.IsNullOrWhiteSpace(row.ErrorMessage))
+                                                        {
+                                                            <ActionBadge Status="@(line.Action?.Status)"
+                                                                         HtmlUrl="@line.Action?.HtmlUrl" />
+                                                        }
+                                                    </td>
+                                                    <td class="col-actions ps-3">
+                                                        @if (string.IsNullOrWhiteSpace(row.ErrorMessage))
+                                                        {
+                                                            <div class="d-flex gap-2 align-items-center">
+                                                                @if (CanRunAgain(row, line))
+                                                                {
+                                                                    <div class="btn-group position-relative">
+                                                                        <button class="btn btn-outline-primary action-run-btn"
+                                                                                @onclick="() => RerunWorkflowAsync(row, line)"
+                                                                                disabled="@line.RunInProgress"
+                                                                                title="Re-run failed workflow: @line.Action?.WorkflowName">
+                                                                            @if (line.RunInProgress)
+                                                                            {
+                                                                                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                                                                            }
+                                                                            else
+                                                                            {
+                                                                                @:Re-run
+                                                                            }
+                                                                        </button>
+                                                                        <button type="button"
+                                                                                class="btn btn-outline-primary dropdown-toggle dropdown-toggle-split action-run-btn-split-toggle"
+                                                                                aria-label="Toggle Re-run menu"
+                                                                                aria-expanded="@(IsRerunLineMenuOpen(line) ? "true" : "false")"
+                                                                                @onclick="(MouseEventArgs args) => ToggleRerunLineMenu(line, args)"
+                                                                                @onclick:stopPropagation
+                                                                                disabled="@line.RunInProgress">
+                                                                            <span class="visually-hidden">Toggle Dropdown</span>
+                                                                        </button>
+                                                                        @if (IsRerunLineMenuOpen(line))
+                                                                        {
+                                                                            <div class="branch-menu-backdrop" @onclick="CloseRerunLineMenu"></div>
+                                                                            <ul class="dropdown-menu show shadow action-run-menu-fixed" role="menu"
+                                                                                style="@($"top:{_rerunLineMenuTop.ToString(System.Globalization.CultureInfo.InvariantCulture)}px; left:{_rerunLineMenuLeft.ToString(System.Globalization.CultureInfo.InvariantCulture)}px;")">
+                                                                                <li>
+                                                                                    <button class="dropdown-item" type="button" role="menuitem"
+                                                                                            @onclick="() => HandleRunAgainClick(row, line)"
+                                                                                            disabled="@line.RunInProgress"
+                                                                                            title="@($"Run a new workflow on branch {row.Link.BranchName}")">
+                                                                                        Run again
+                                                                                    </button>
+                                                                                </li>
+                                                                            </ul>
+                                                                        }
+                                                                    </div>
+                                                                }
+                                                                else if (CanRerun(row, line))
+                                                                {
                                                                     <button class="btn btn-outline-primary action-run-btn"
                                                                             @onclick="() => RerunWorkflowAsync(row, line)"
                                                                             disabled="@line.RunInProgress"
@@ -379,126 +421,86 @@
                                                                             @:Re-run
                                                                         }
                                                                     </button>
-                                                                    <button type="button"
-                                                                            class="btn btn-outline-primary dropdown-toggle dropdown-toggle-split action-run-btn-split-toggle"
-                                                                            aria-label="Toggle Re-run menu"
-                                                                            aria-expanded="@(IsRerunLineMenuOpen(line) ? "true" : "false")"
-                                                                            @onclick="(MouseEventArgs args) => ToggleRerunLineMenu(line, args)"
-                                                                            @onclick:stopPropagation
-                                                                            disabled="@line.RunInProgress">
-                                                                        <span class="visually-hidden">Toggle Dropdown</span>
+                                                                }
+                                                                else if (CanAbort(row, line))
+                                                                {
+                                                                    <button class="btn btn-outline-primary action-run-btn"
+                                                                            @onclick="() => AbortWorkflowAsync(row, line)"
+                                                                            disabled="@line.AbortInProgress"
+                                                                            title="Cancel this workflow run on GitHub">
+                                                                        @if (line.AbortInProgress)
+                                                                        {
+                                                                            <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                                                                        }
+                                                                        else
+                                                                        {
+                                                                            @:Abort
+                                                                        }
                                                                     </button>
-                                                                    @if (IsRerunLineMenuOpen(line))
-                                                                    {
-                                                                        <div class="branch-menu-backdrop" @onclick="CloseRerunLineMenu"></div>
-                                                                        <ul class="dropdown-menu show shadow action-run-menu-fixed" role="menu"
-                                                                            style="@($"top:{_rerunLineMenuTop.ToString(System.Globalization.CultureInfo.InvariantCulture)}px; left:{_rerunLineMenuLeft.ToString(System.Globalization.CultureInfo.InvariantCulture)}px;")">
-                                                                            <li>
-                                                                                <button class="dropdown-item" type="button" role="menuitem"
-                                                                                        @onclick="() => HandleRunAgainClick(row, line)"
-                                                                                        disabled="@line.RunInProgress"
-                                                                                        title="@($"Run a new workflow on branch {row.Link.BranchName}")">
-                                                                                    Run again
-                                                                                </button>
-                                                                            </li>
-                                                                        </ul>
-                                                                    }
-                                                                </div>
-                                                            }
-                                                            else if (CanRerun(row, line))
-                                                            {
-                                                                <button class="btn btn-outline-primary action-run-btn"
-                                                                        @onclick="() => RerunWorkflowAsync(row, line)"
-                                                                        disabled="@line.RunInProgress"
-                                                                        title="Re-run failed workflow: @line.Action?.WorkflowName">
-                                                                    @if (line.RunInProgress)
-                                                                    {
-                                                                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                                                                    }
-                                                                    else
-                                                                    {
-                                                                        @:Re-run
-                                                                    }
-                                                                </button>
-                                                            }
-                                                            else if (CanAbort(row, line))
-                                                            {
-                                                                <button class="btn btn-outline-primary action-run-btn"
-                                                                        @onclick="() => AbortWorkflowAsync(row, line)"
-                                                                        disabled="@line.AbortInProgress"
-                                                                        title="Cancel this workflow run on GitHub">
-                                                                    @if (line.AbortInProgress)
-                                                                    {
-                                                                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                                                                    }
-                                                                    else
-                                                                    {
-                                                                        @:Abort
-                                                                    }
-                                                                </button>
-                                                            }
-                                                            else if (CanRun(row, line))
-                                                            {
-                                                                <button class="btn btn-outline-primary action-run-btn"
-                                                                        @onclick="() => RunWorkflowAsync(row, line)"
-                                                                        disabled="@IsRunWorkflowBusy(row, line)"
-                                                                        title="@($"Run workflow: {line.Action?.WorkflowName}")">
-                                                                    @if (line.RunInProgress)
-                                                                    {
-                                                                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                                                                    }
-                                                                    else
-                                                                    {
-                                                                        @:Run
-                                                                    }
-                                                                </button>
-                                                            }
-                                                            @if (line.Action?.RunId != null && !IsLineRunningForBranch(row, line))
-                                                            {
-                                                                <button class="btn btn-outline-secondary action-run-btn"
-                                                                        @onclick="() => OpenLogsModal(row, line)"
-                                                                        title="View logs for @line.Action!.WorkflowName">
-                                                                    Logs
-                                                                </button>
-                                                            }
-                                                        </div>
-                                                    }
-                                                </td>
-                                            </tr>
-                                            @if (showGhaTerminal)
-                                            {
-                                                <tr class="@($"{stripeClass} actions-gha-feed-row actions-data-row actions-row-running actions-row-running-terminal{(repoEndOnGhaRow ? " actions-row-repo-end" : "")}")">
-                                                    <td colspan="6" class="p-0 border-0">
-                                                        <GhaWorkflowLiveTerminal @key="@($"{row.Repo.RepositoryId}-{(line.Action?.WorkflowId ?? 0)}-{(line.Action?.RunId ?? 0)}")"
-                                                                                 ConnectorName="@row.Repo.ConnectorName"
-                                                                                 Owner="@(row.Repo.OrgName ?? "")"
-                                                                                 RepositoryName="@row.Repo.RepositoryName"
-                                                                                 RunId="@(line.Action!.RunId!.Value)"
-                                                                                 WorkflowDisplayName="@line.Action.WorkflowName" />
+                                                                }
+                                                                else if (CanRun(row, line))
+                                                                {
+                                                                    <button class="btn btn-outline-primary action-run-btn"
+                                                                            @onclick="() => RunWorkflowAsync(row, line)"
+                                                                            disabled="@IsRunWorkflowBusy(row, line)"
+                                                                            title="@($"Run workflow: {line.Action?.WorkflowName}")">
+                                                                        @if (line.RunInProgress)
+                                                                        {
+                                                                            <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                                                                        }
+                                                                        else
+                                                                        {
+                                                                            @:Run
+                                                                        }
+                                                                    </button>
+                                                                }
+                                                                @if (line.Action?.RunId != null && !IsLineRunningForBranch(row, line))
+                                                                {
+                                                                    <button class="btn btn-outline-secondary action-run-btn"
+                                                                            @onclick="() => OpenLogsModal(row, line)"
+                                                                            title="View logs for @line.Action!.WorkflowName">
+                                                                        Logs
+                                                                    </button>
+                                                                }
+                                                            </div>
+                                                        }
                                                     </td>
                                                 </tr>
+                                                @if (showGhaTerminal)
+                                                {
+                                                    <tr class="@($"{stripeClass} actions-gha-feed-row actions-data-row actions-row-running actions-row-running-terminal{(repoEndOnGhaRow ? " actions-row-repo-end" : "")}")">
+                                                        <td colspan="6" class="p-0 border-0">
+                                                            <GhaWorkflowLiveTerminal @key="@($"{row.Repo.RepositoryId}-{(line.Action?.WorkflowId ?? 0)}-{(line.Action?.RunId ?? 0)}")"
+                                                                                     ConnectorName="@row.Repo.ConnectorName"
+                                                                                     Owner="@(row.Repo.OrgName ?? "")"
+                                                                                     RepositoryName="@row.Repo.RepositoryName"
+                                                                                     RunId="@(line.Action!.RunId!.Value)"
+                                                                                     WorkflowDisplayName="@line.Action.WorkflowName" />
+                                                        </td>
+                                                    </tr>
+                                                }
                                             }
-                                        }
 
-                                        groupIndex++;
+                                            groupIndex++;
+                                        }
                                     }
-                                }
-                            </tbody>
-                        </table>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
-    }
-</div>
+        }
+    </div>
 
-<LoadingOverlay IsVisible="@isRerunningAll" Message="@RerunAllOverlayMessage" />
+    <LoadingOverlay IsVisible="@isRerunningAll" Message="@RerunAllOverlayMessage" />
 
-<GhaLogsModal IsVisible="@_logsModalVisible"
-              ConnectorName="@(_logsConnectorName ?? "")"
-              Owner="@(_logsOwner ?? "")"
-              RepositoryName="@(_logsRepo ?? "")"
-              RunId="@_logsRunId"
-              WorkflowDisplayName="@_logsWorkflowName"
-              OnClose="CloseLogsModal"
-              OnRerunTriggered="OnLogsRerunTriggered" />
+    <GhaLogsModal IsVisible="@_logsModalVisible"
+                  ConnectorName="@(_logsConnectorName ?? "")"
+                  Owner="@(_logsOwner ?? "")"
+                  RepositoryName="@(_logsRepo ?? "")"
+                  RunId="@_logsRunId"
+                  WorkflowDisplayName="@_logsWorkflowName"
+                  OnClose="CloseLogsModal"
+                  OnRerunTriggered="OnLogsRerunTriggered" />
+</WorkspacePageGate>
