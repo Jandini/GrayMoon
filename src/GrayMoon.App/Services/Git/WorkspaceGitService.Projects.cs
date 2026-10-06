@@ -24,6 +24,9 @@ public sealed partial class WorkspaceGitService
         IReadOnlySet<int>? repositoryIds = null,
         CancellationToken cancellationToken = default)
     {
+        if (!await DiscoversDotNetProjectsAsync(workspaceId, cancellationToken))
+            return;
+
         if (!_workerBridge.IsWorkerConnected)
             throw new InvalidOperationException("Worker not connected. Start the GrayMoon Worker to refresh projects.");
 
@@ -119,6 +122,9 @@ public sealed partial class WorkspaceGitService
         Action<int, string>? onRepoError = null,
         CancellationToken cancellationToken = default)
     {
+        if (!await DiscoversDotNetProjectsAsync(workspaceId, cancellationToken))
+            return false;
+
         if (!_workerBridge.IsWorkerConnected)
             throw new InvalidOperationException("Worker not connected. Start the GrayMoon Worker to refresh projects.");
 
@@ -308,9 +314,24 @@ public sealed partial class WorkspaceGitService
         if (_fileVersionService != null)
             await _fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, contextId, cancellationToken);
 
-        await _workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, contextId.Value, cancellationToken);
+        await _recomputeScope.RecomputeDependencyStatsAsync(workspaceId, contextId, cancellationToken);
 
         _logger.LogDebug("Sync dependencies completed for workspace {WorkspaceName}. Synced {SyncedCount} repos (with changes), persisted {UpdateCount} versions", workspace.Name, syncedRepoIds.Count, updatesToPersist.Count);
         return syncedRepoIds.Keys.ToHashSet();
+    }
+
+    /// <summary>
+    /// Project discovery, reconciliation and the dependency edges built from it exist only for a workspace
+    /// that discovers .NET projects. Gated here, at the orchestration boundary, so a Basic workspace never
+    /// asks the worker for a scan and never reaches <see cref="WorkspaceProjectRepository"/>'s merge paths.
+    /// </summary>
+    private async Task<bool> DiscoversDotNetProjectsAsync(int workspaceId, CancellationToken cancellationToken)
+    {
+        var capabilities = await _capabilitiesResolver.GetAsync(workspaceId, cancellationToken);
+        if (capabilities.DiscoversDotNetProjects)
+            return true;
+
+        _logger.LogDebug("Project refresh skipped: workspace {WorkspaceId} does not discover .NET projects", workspaceId);
+        return false;
     }
 }

@@ -8,7 +8,13 @@ namespace GrayMoon.Worker.Jobs.Requests;
 /// <c>git worktree add --detach &lt;worktreePath&gt; &lt;baseCommitSha&gt;</c> when <see cref="Detach"/> is set.
 /// Offline-safe; never uses <c>--force</c>.
 /// </summary>
-public sealed class CreateGitWorktreeRequest
+/// <remarks>
+/// The command itself runs no version or project enrichment. It carries
+/// <see cref="WorkspaceCommandRequest.Capabilities"/> because <c>git worktree add</c> fires the shared
+/// <c>post-checkout</c> hook, and that hook resolves the workspace profile from the capability cache this
+/// request warms.
+/// </remarks>
+public sealed class CreateGitWorktreeRequest : WorkspaceCommandRequest
 {
     [JsonPropertyName("mainRepositoryPath")]
     public string? MainRepositoryPath { get; set; }

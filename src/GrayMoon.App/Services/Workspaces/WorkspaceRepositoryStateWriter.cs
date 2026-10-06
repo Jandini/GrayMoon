@@ -13,7 +13,11 @@ public enum SyncStatusWrite
     /// <summary>Leave the persisted status alone (branch-only operations such as delete-branch or update-from-default).</summary>
     Leave,
 
-    /// <summary>Derive it from the snapshot: Error without a usable version, NeedsSync without a known default branch, otherwise InSync.</summary>
+    /// <summary>
+    /// Derive it from the snapshot: Error without a branch or tag, NeedsSync without a known default branch (unless
+    /// the remote is empty or a hook keeps an earlier InSync), otherwise InSync. The version is deliberately not
+    /// considered, so a workspace without repository versioning syncs to InSync like any other.
+    /// </summary>
     Derive,
 
     /// <summary>Force InSync.</summary>

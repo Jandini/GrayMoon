@@ -3,6 +3,7 @@
 @using GrayMoon.App.Components.Shared
 @using GrayMoon.App.Components.Features
 @using GrayMoon.Application.Features
+@using GrayMoon.Application.Workspaces
 @using GrayMoon.App.Services.Features
 @using GrayMoon.App.Models
 @using GrayMoon.App.Models.Api
@@ -19,6 +20,7 @@
 @inject IServiceScopeFactory ServiceScopeFactory
 @inject WorkspaceService WorkspaceService
 @inject IWorkspaceContextPathResolver PathResolver
+@inject IWorkspaceCapabilitiesResolver CapabilitiesResolver
 @inject WorkspaceContextNavigationService ContextNavigation
 @inject IToastService ToastService
 @inject ILogger<WorkspaceFiles> Logger
@@ -171,6 +173,7 @@
                     File="@configuringFile"
                     WorkspaceRepos="@workspaceRepos"
                     CurrentPattern="@currentConfigPattern"
+                    UsesRepositoryVersioning="@usesRepositoryVersioning"
                     OnSaved="OnVersionPatternSaved"
                     OnCancel="CloseVersionConfigModal" />
 
@@ -195,6 +198,7 @@
     private List<WorkspaceFileDto> files = new();
     private List<WorkspaceRepoItem> workspaceRepos = new();
     private Dictionary<int, string> fileVersionConfigs = new();
+    private bool usesRepositoryVersioning = true;
     private string? errorMessage;
     private bool isLoading = true;
     private bool showFileModal;
@@ -278,6 +282,7 @@
                 errorMessage = "No Feature context selected.";
                 return;
             }
+            usesRepositoryVersioning = (await CapabilitiesResolver.GetAsync(WorkspaceId)).UsesRepositoryVersioning;
             var (workerRoot, folderName) = await PathResolver.GetWorkerWorkspaceArgsAsync(_selectedContextId.Value);
             workspaceRoot = workerRoot;
             contextFolderName = folderName;
@@ -373,6 +378,12 @@
             }
             else
             {
+                var notApplicable = WorkspaceFileVersionService.GetTokensRequiringRepositoryVersioning(pattern, usesRepositoryVersioning);
+                if (notApplicable.Count > 0)
+                {
+                    errorMessage = $"{notApplicable[0].TokenKey} {WorkspaceFileVersionService.RepositoryVersioningRequiredMessage}.";
+                    return;
+                }
                 var normalized = WorkspaceFileVersionService.NormalizePatternLeadingWhitespace(pattern);
                 await VersionConfigRepository.UpsertAsync(configuringFile.FileId, normalized);
                 fileVersionConfigs[configuringFile.FileId] = normalized;
@@ -391,9 +402,9 @@
     {
         await using var scope = ServiceScopeFactory.CreateAsyncScope();
         var fileVersionService = scope.ServiceProvider.GetRequiredService<WorkspaceFileVersionService>();
-        var projectRepo = scope.ServiceProvider.GetRequiredService<WorkspaceProjectRepository>();
+        var recomputeScope = scope.ServiceProvider.GetRequiredService<WorkspaceStateRecomputeScope>();
         await fileVersionService.CheckAndPersistFileVersionStatusAsync(WorkspaceId, _selectedContextId!.Value, forceFresh: true);
-        await projectRepo.RecomputeAndPersistRepositoryDependencyStatsAsync(WorkspaceId, _selectedContextId!.Value.Value);
+        await recomputeScope.RecomputeDependencyStatsAsync(WorkspaceId, _selectedContextId!.Value);
         await LoadAsync();
     }
 

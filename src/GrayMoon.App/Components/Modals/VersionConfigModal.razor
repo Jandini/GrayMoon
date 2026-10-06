@@ -37,9 +37,9 @@
                     <div class="mb-3 version-config-editor-wrap">
                         <label class="form-label d-flex align-items-baseline gap-2 flex-wrap">
                             Version Pattern
-                            @if (!string.IsNullOrWhiteSpace(patternText) && (validTokenCount > 0 || invalidTokens.Count > 0 || unsupportedSelectors.Count > 0 || selfReferencingTokens.Count > 0))
+                            @if (!string.IsNullOrWhiteSpace(patternText) && (validTokenCount > 0 || HasValidationProblems))
                             {
-                                @if (invalidTokens.Count > 0 || unsupportedSelectors.Count > 0 || selfReferencingTokens.Count > 0)
+                                @if (HasValidationProblems)
                                 {
                                     <span class="version-config-error-icon">
                                         &#x26A0;
@@ -68,10 +68,18 @@
                                                     <div>@s</div>
                                                 }
                                             }
+                                            @if (versioningRequiredTokens.Count > 0)
+                                            {
+                                                <div class="version-config-error-tooltip-title">Require repository versioning:</div>
+                                                @foreach (var t in versioningRequiredTokens)
+                                                {
+                                                    <div>@t</div>
+                                                }
+                                            }
                                         </div>
                                     </span>
                                 }
-                                <span class="version-config-token-count @(invalidTokens.Count > 0 || unsupportedSelectors.Count > 0 || selfReferencingTokens.Count > 0 ? "version-config-token-count-warning" : "")">@validTokenCount token@(validTokenCount != 1 ? "s" : "") resolved</span>
+                                <span class="version-config-token-count @(HasValidationProblems ? "version-config-token-count-warning" : "")">@validTokenCount token@(validTokenCount != 1 ? "s" : "") resolved</span>
                             }
                         </label>
                         <textarea class="form-control version-config-textarea font-monospace"
@@ -126,6 +134,15 @@
                             </div>
                         }
 
+                        @if (versioningRequiredTokens.Count > 0)
+                        {
+                            <div class="mt-2 small text-danger">
+                                <span class="font-monospace">@string.Join(", ", versioningRequiredTokens)</span>
+                                @WorkspaceFileVersionService.RepositoryVersioningRequiredMessage.
+                                Use <code>@("{@repo:branch}")</code> or <code>@("{@repo:commit}")</code> instead.
+                            </div>
+                        }
+
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -139,7 +156,7 @@
                     <button type="button"
                             class="btn btn-primary"
                             data-default-action
-                            disabled="@(selfReferencingTokens.Count > 0)"
+                            disabled="@(selfReferencingTokens.Count > 0 || versioningRequiredTokens.Count > 0)"
                             @onclick="SaveAsync">
                         Save
                     </button>
@@ -163,6 +180,7 @@
     [Parameter] public WorkspaceFileDto? File { get; set; }
     [Parameter] public List<WorkspaceRepoItem> WorkspaceRepos { get; set; } = new();
     [Parameter] public string? CurrentPattern { get; set; }
+    [Parameter] public bool UsesRepositoryVersioning { get; set; } = true;
     [Parameter] public EventCallback<string> OnSaved { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
 
@@ -171,7 +189,11 @@
     private List<string> invalidTokens = new();
     private List<string> unsupportedSelectors = new();
     private List<FileVersionToken> selfReferencingTokens = new();
+    private List<string> versioningRequiredTokens = new();
     private int validTokenCount;
+
+    private bool HasValidationProblems =>
+        invalidTokens.Count > 0 || unsupportedSelectors.Count > 0 || selfReferencingTokens.Count > 0 || versioningRequiredTokens.Count > 0;
     private bool _wasVisible;
     private ElementReference textareaRef;
     private ElementReference _suggestionsRef;
@@ -328,6 +350,10 @@
         invalidTokens = result.UnknownRepositories.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         unsupportedSelectors = result.UnsupportedSelectors.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         selfReferencingTokens = result.SelfReferencingTokens.ToList();
+        versioningRequiredTokens = WorkspaceFileVersionService.GetTokensRequiringRepositoryVersioning(patternText, UsesRepositoryVersioning)
+            .Select(t => t.TokenKey)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
         validTokenCount = result.ValidTokens.Count;
     }
 
@@ -337,6 +363,7 @@
         invalidTokens.Clear();
         unsupportedSelectors.Clear();
         selfReferencingTokens.Clear();
+        versioningRequiredTokens.Clear();
         validTokenCount = 0;
         showSuggestions = false;
         CancelValidateCts();
@@ -346,7 +373,7 @@
 
     private async Task SaveAsync()
     {
-        if (selfReferencingTokens.Count > 0)
+        if (selfReferencingTokens.Count > 0 || versioningRequiredTokens.Count > 0)
             return;
         await OnSaved.InvokeAsync(patternText.Trim());
     }

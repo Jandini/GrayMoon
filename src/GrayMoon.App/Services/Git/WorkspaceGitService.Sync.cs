@@ -187,7 +187,7 @@ public sealed partial class WorkspaceGitService
         if (_fileVersionService != null)
             await _fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, contextId, cancellationToken);
 
-        await _workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, contextId.Value, cancellationToken);
+        await _recomputeScope.RecomputeDependencyStatsAsync(workspaceId, contextId, cancellationToken);
 
         if (_hubContext != null)
             await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
@@ -279,9 +279,14 @@ public sealed partial class WorkspaceGitService
         }
 
         // The writer already merged each repository's projects; the dependency edges still have to be
-        // merged as one batch so the level computation sees the whole graph at once.
-        var syncResults = resultList.Select(r => (r.RepoId, r.info.ProjectsDetail)).ToList();
-        await _workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(workspaceId, syncResults, contextId.Value, persistDependencyLevel, cancellationToken);
+        // merged as one batch so the level computation sees the whole graph at once. A workspace without a
+        // dependency graph gets no edges and no levels, even if a worker reported projects anyway.
+        var capabilities = await _capabilitiesResolver.GetAsync(workspaceId, cancellationToken);
+        if (capabilities.UsesDependencyGraph)
+        {
+            var syncResults = resultList.Select(r => (r.RepoId, r.info.ProjectsDetail)).ToList();
+            await _workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(workspaceId, syncResults, contextId.Value, persistDependencyLevel, cancellationToken);
+        }
 
         // Partial sync (single repo or whole level): merge uses persistDependencyLevel false so Persist is not
         // called with a partial uniqueEdges graph. Recompute from full ProjectDependencies in DB so every
