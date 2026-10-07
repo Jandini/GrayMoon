@@ -115,6 +115,10 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<ILocalGitSnapshotReader, LibGit2SharpLocalGitSnapshotReader>();
         builder.Services.AddSingleton<IGitService, GitService>();
         builder.Services.AddSingleton<IGitWorktreeService, GitWorktreeService>();
+        if (OperatingSystem.IsWindows())
+            builder.Services.AddSingleton<IFileLockInspector, WindowsFileLockInspector>();
+        else
+            builder.Services.AddSingleton<IFileLockInspector, UnsupportedFileLockInspector>();
         builder.Services.AddSingleton<GitRemoteIntegrateService>();
         builder.Services.AddSingleton<IWorkerSecretProvider, WorkerSecretProvider>();
         builder.Services.AddSingleton<IWorkerTokenProvider, WorkerTokenProvider>();
@@ -184,6 +188,7 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<ICommandHandler<CreateGitWorktreeRequest, CreateGitWorktreeResponse>, CreateGitWorktreeCommand>();
         builder.Services.AddSingleton<ICommandHandler<RemoveGitWorktreeRequest, RemoveGitWorktreeResponse>, RemoveGitWorktreeCommand>();
         builder.Services.AddSingleton<ICommandHandler<InspectWorktreeRequest, InspectWorktreeResponse>, InspectWorktreeCommand>();
+        builder.Services.AddSingleton<ICommandHandler<InspectPathLocksRequest, InspectPathLocksResponse>, InspectPathLocksCommand>();
         builder.Services.AddSingleton<ICommandHandler<GetGitVersionAtDefaultTipRequest, GetGitVersionAtDefaultTipResponse>, GetGitVersionAtDefaultTipCommand>();
         builder.Services.AddSingleton<ICommandHandler<AttachWorkspaceRepositoryRequest, AttachWorkspaceRepositoryResponse>, AttachWorkspaceRepositoryCommand>();
         builder.Services.AddSingleton<ICommandHandler<WriteRepositoryFileRequest, WriteRepositoryFileResponse>, WriteRepositoryFileCommand>();

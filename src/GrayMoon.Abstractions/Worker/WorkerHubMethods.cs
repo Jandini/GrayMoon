@@ -53,6 +53,9 @@ public static class WorkerHubMethods
     /// <summary>App → Worker: report everything removal needs to know about one worktree, checked live (read-only).</summary>
     public const string InspectWorktree = "InspectWorktree";
 
+    /// <summary>App → Worker: list the local processes keeping each given path in use (read-only lock diagnostics).</summary>
+    public const string InspectPathLocks = "InspectPathLocks";
+
     /// <summary>App → Worker: attach a remote repository to the Workspace root as its working tree (clone into an empty root, or init + fetch + checkout in a non-empty one).</summary>
     public const string AttachWorkspaceRepository = "AttachWorkspaceRepository";
 
