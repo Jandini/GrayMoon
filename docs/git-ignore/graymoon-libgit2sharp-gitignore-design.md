@@ -1,913 +1,301 @@
 # GrayMoon LibGit2Sharp Git Ignore Design
 
-**Status:** Proposed  
-**Scope:** All GrayMoon Git-ignore decisions in the Worker  
-**Primary goal:** Replace subprocess-based `git check-ignore` usage with one correct, robust, fast LibGit2Sharp-backed ignore implementation and make it the single source of truth for ignore decisions.
+**Status:** Revised after code review and a LibGit2Sharp behavior spike (branch `gitignore-gitlib`)
+**Scope:** Every GrayMoon-owned Git-ignore decision in the Worker
+**Primary goal:** Replace subprocess-based `git check-ignore` usage with one correct, fast, LibGit2Sharp-backed implementation that is the single source of truth for ignore decisions. No workarounds and no fallbacks.
 
 ---
 
 ## 1. Motivation
 
-Real enterprise VDI measurements show that `git check-ignore` is disproportionately expensive.
+Enterprise VDI measurements show `git check-ignore` is disproportionately expensive. In the measured 39-repository workspace:
 
-In the measured 39-repository workspace:
+- `git check-ignore` ran once per repository during project discovery (39 calls on a clean sync);
+- aggregate time was about 180 seconds, about 4.6 seconds per repository;
+- the clean workspace sync took 82.1 seconds wall clock.
 
-- `git check-ignore` ran once per repository during project discovery;
-- the clean new sync performed 39 `check-ignore` calls;
-- aggregate `check-ignore` time was about 180 seconds;
-- average cost was about 4.6 seconds per repository;
-- the clean workspace sync still took 82.1 seconds wall clock.
+Each call starts `git.exe`, re-reads Git configuration and ignore files, and is exposed to EDR/antivirus process inspection.
 
-This is especially expensive because every invocation starts `git.exe`, causes Git configuration and ignore files to be read, and can trigger enterprise EDR/antivirus/process inspection.
-
-The new design removes `git check-ignore` from GrayMoon's normal ignore-decision paths.
+The design removes `git check-ignore` from every GrayMoon-owned decision path and, in the same change, fixes correctness defects in the current implementation (section 3).
 
 ---
 
-## 2. Code audit
+## 2. Code audit (verified against the branch)
 
-The current `main` branch has three direct production consumers of GrayMoon ignore logic.
+### 2.1 Direct consumers of ignore logic
 
-### 2.1 Project discovery
+| # | Location | Current behavior |
+|---|---|---|
+| 1 | `Services/CsProjFileService.cs` `GetProjectPathsAsync` | Asks `check-ignore` about top-level directory **names** only, then `SearchOption.AllDirectories` below survivors. |
+| 2 | `Services/GitService.cs` `StageAndCommitAsync` (line ~889) | `git add`, and on the "ignored by one of your .gitignore files" error runs `check-ignore`, drops ignored paths, retries. |
+| 3 | `Services/GitChanges/GitCliRepositoryGitChangesService.cs` `StageAsync` (line ~314) | Same `AddWithIgnoredFallbackAsync` behavior. |
+| 4 | `Services/WorkspaceFileSearchService.cs` | **Not in the previous design.** Hard-codes `.git`, `bin`, `obj` skipping at any depth. This is a hand-written approximation of ignore rules and must not survive "all ignore decisions use one implementation". |
+| - | `Services/GitIgnoredPathFilter.cs` | Owns the `check-ignore` process, NUL parsing, and the add-retry orchestration. To be deleted. |
 
-File:
+All `*.csproj` discovery goes through `ICsProjFileService.FindAsync`/`GetProjectPathsAsync`. Callers, all of which inherit the new behavior: `SyncRepositoryCommand` (via `ScanProjectsAsync`), `RepositoryStateProbe.CaptureAsync`, `RefreshRepositoryProjectsCommand`, `PushRepositoryCommand` post-operation notification (after the network push), `SyncRepositoryDependenciesCommand`.
 
-```text
-src/GrayMoon.Worker/Services/CsProjFileService.cs
-```
+### 2.2 Deliberately out of scope
 
-Current flow:
+- `GitRepositoryWatcher` does not filter ignored paths (it only drops `.git` and nested repositories), so build output churn triggers status refreshes. That is a separate watcher-noise problem: events arrive on FS callback threads at high rate and need a long-lived rule cache with invalidation. It must not be solved by opening a `Repository` per event. Track separately.
+- `git add --all` (whole-repository stage) and `git status` already honor ignore rules natively inside the mutation/read that needs them. They are not "GrayMoon ignore decisions" and stay on the Git CLI.
+- `ManagedGitIgnoreSection` (App side) writes the managed `.gitignore` block; it makes no ignore decisions.
 
-```text
-enumerate repo-root *.csproj
-        |
-enumerate top-level directories
-        |
-GitIgnoredPathFilter.KeepNonIgnoredAsync(...)
-        |
-git check-ignore -z --stdin
-        |
-recursively enumerate *.csproj under surviving top-level directories
-```
+### 2.3 Existing helper to reuse, not duplicate
 
-This is used directly or indirectly by:
+`GrayMoon.Common.Git.GitRepositoryPathValidator.Validate(repoRoot, path)` already rejects absolute paths and `.`/`..` traversal, normalizes separators to `/`, and confirms the path stays inside the repository. The Git Changes path already uses it (`ValidateAndNormalizePaths`). The previous design proposed a new normalization helper; that would be a second implementation. Use the existing validator.
 
-- `SyncRepositoryCommand`;
-- `RefreshRepositoryProjectsCommand`;
-- `PushRepositoryCommand.BuildPostOperationNotificationAsync`;
-- other flows that refresh project/package metadata through `ICsProjFileService`.
-
-Therefore improving project discovery also removes the ignore subprocess from post-push project refresh and other project-discovery operations.
-
-### 2.2 `GitService.StageAndCommitAsync`
-
-File:
-
-```text
-src/GrayMoon.Worker/Services/GitService.cs
-```
-
-Current selective-stage flow:
-
-```text
-git add requested paths
-        |
-if Git reports "ignored by one of your .gitignore files"
-        |
-GitIgnoredPathFilter.AddWithIgnoredFallbackAsync(...)
-        |
-git check-ignore -z --stdin
-        |
-remove ignored paths
-        |
-retry git add
-```
-
-### 2.3 Git Changes selective staging
-
-File:
-
-```text
-src/GrayMoon.Worker/Services/GitChanges/GitCliRepositoryGitChangesService.cs
-```
-
-`StageAsync` uses the same `GitIgnoredPathFilter.AddWithIgnoredFallbackAsync(...)` behavior for path-scoped staging.
-
-### 2.4 Existing helper
-
-File:
-
-```text
-src/GrayMoon.Worker/Services/GitIgnoredPathFilter.cs
-```
-
-It currently owns:
-
-- parsing the `git add` ignored-path error;
-- launching `git check-ignore`;
-- parsing NUL-delimited Git output;
-- filtering ignored paths;
-- retry orchestration.
-
-This class should no longer own ignore evaluation after this work.
+`StageAndCommitAsync` currently does **not** use it (only `Replace('\\','/')` and `Trim`), so it accepts `../x` and absolute paths from the caller. This change closes that gap.
 
 ---
 
-## 3. Important indirect flows
+## 3. Defects in the current behavior
 
-Some operations do not directly call `check-ignore` but still pay for it through project discovery.
-
-### Push
-
-`PushRepositoryCommand` performs its network push and then builds a post-operation sync notification.
-
-When project discovery is enabled:
-
-```csharp
-var projects = await csProjFileService.FindAsync(repoPath, CancellationToken.None);
-```
-
-Therefore the current push flow can trigger `git check-ignore` after the push.
-
-The new shared ignore implementation removes this cost automatically.
-
-### Sync
-
-`SyncRepositoryCommand` starts project discovery concurrently with GitVersion and ref reads.
-
-Replacing project-discovery `check-ignore` removes one Git process per repository and reduces filesystem/process contention during the sync critical section.
-
-### Explicit project refresh
-
-`RefreshRepositoryProjectsCommand` calls the same `CsProjFileService` and therefore benefits directly.
-
-### Update / merge operations
-
-`UpdateBranchFromDefaultCommand` does not directly perform an ignore decision.
-
-It may cause later hooks/sync/project refresh behavior that reaches project discovery. That downstream path must use the new shared implementation.
-
-No fake ignore dependency should be introduced into operations that do not need ignore semantics.
+1. **Top-level-only ignore check.** `src/Generated/` ignored by rule is still scanned because only `src` is checked. Nested ignored `.csproj` files are returned.
+2. **Fail-open in `KeepNonIgnoredAsync`.** When `check-ignore` fails (exit other than 0/1) it returns the original, unfiltered list. An ignore failure silently becomes "nothing is ignored".
+3. **Swallowed discovery failure.** `GetProjectPathsAsync` ends in `catch { return []; }` and `EnumerateCsprojInDirectory` returns `[]` on any exception. A transient IO problem produces an empty project list that sync then reports as "this repository has zero projects".
+4. **Nested repositories are not excluded.** Git never tracks the contents of a nested repository or submodule, but discovery will walk into one unless a rule happens to ignore it.
+5. **Pathspec/classification mismatch.** `git add --pathspec-from-file` interprets entries as pathspecs (glob magic: `[`, `*`, `?`). Any classifier that treats the same string as a literal path can disagree with what `git add` stages.
+6. **Unvalidated paths in `StageAndCommitAsync`** (section 2.3).
+7. **Tests assert the old mechanism.** `GitServiceStageAndCommitTests` asserts that `check-ignore` *was* invoked (lines ~146, ~177); `GitIgnoredPathFilterTests` tests the retry helper.
 
 ---
 
-## 4. Current correctness problem
+## 4. No workarounds, no fallbacks (explicit rules)
 
-The existing project-discovery implementation checks only top-level directories.
-
-Example:
-
-```text
-Repo/
-  src/
-    Product/
-      Product.csproj
-    Generated/
-      Generated.csproj
-```
-
-With:
-
-```gitignore
-src/Generated/
-```
-
-GrayMoon asks Git whether:
-
-```text
-src
-```
-
-is ignored.
-
-It is not.
-
-GrayMoon then recursively scans all descendants of `src`, which can discover:
-
-```text
-src/Generated/Generated.csproj
-```
-
-even though Git considers it ignored.
-
-The intended rule is:
-
-> GrayMoon project discovery must include only `.csproj` files that Git considers non-ignored.
-
-The new implementation must apply ignore semantics at every directory boundary and to candidate files.
+- No `git check-ignore` in production code. It is allowed only as the oracle in parity tests.
+- No fail-open: if ignore state cannot be determined, the operation fails with a clear error. It never proceeds as if nothing is ignored.
+- No swallow-to-empty: discovery that cannot complete returns a failure, never a partial or empty list presented as a result.
+- No CLI fallback when LibGit2Sharp cannot open a repository (ownership/`safe.directory`, corrupt repo, missing native library). The error is surfaced.
+- No hard-coded directory names (`bin`, `obj`, `node_modules`) standing in for ignore rules.
+- No GrayMoon-written pattern matching. Rule evaluation belongs to libgit2 only.
+- No add-then-retry: staging classifies first and runs `git add` once.
 
 ---
 
-## 5. Design decision
+## 5. Verified LibGit2Sharp behavior (spike results)
 
-Introduce one shared abstraction:
+Spike: LibGit2Sharp 0.32.0 (restores and runs on `net10.0`, Windows x64) compared against `git check-ignore` from Git for Windows 2.53.0, on a repository with root and nested `.gitignore`, `.git/info/exclude`, anchored, `**`, wildcard, negation, spaces/Unicode, a linked worktree and a tracked-but-ignored file.
 
-```csharp
-IGitIgnoreService
+| Behavior | Result |
+|---|---|
+| Root/nested `.gitignore`, `.git/info/exclude`, `/anchored/`, `**/gen/`, `*.Generated.csproj`, `generated/*` + `!generated/keep/` | Identical to `git check-ignore` for files **and** directories. |
+| Case (`core.ignorecase=true` on Windows) | Identical (`OBJ`, `Obj/h.csproj`, `SRC/Local` all match). libgit2 reads the repo's own setting. |
+| Linked worktree (`.git` is a file) | `info/exclude` and `.gitignore` rules identical to CLI. |
+| Directory vs file | libgit2 stats the work tree to decide "directory", so `obj` is ignored by `obj/` when the directory exists. `nonexistent/obj` is not ignored, same as Git. |
+| **Tracked file matching a rule** | **Diverges.** libgit2 `IsPathIgnored` = `true`; `git check-ignore` = `false` (Git never reports tracked paths). `repo.Index[path]` correctly reports it tracked, including for a file deleted from disk. |
+| **Invalid inputs** | `IsPathIgnored` does **not** validate: `../x` -> `true`, `.` -> `true`, `.git` -> `true`, `obj\h.csproj` (backslash) -> `false` (wrong), absolute path -> `false` (wrong), `""` -> `ArgumentException`. Callers must pass only validated `/`-separated repository-relative paths. |
+| `RetrieveStatus` with `PathSpec` as a classifier | Reports ignored directories as one entry and **omits** a path inside an ignored directory. Unsuitable as the classifier; use `IsPathIgnored` + index. |
+| Cost | `Repository` open about 1.9 ms. `IsPathIgnored` about 0.2-0.35 ms per deep path (20,000 checks 4.4 s; 6,000 directory checks 2.1 s, versus 0.9 s to merely enumerate them). Pruning matters; check directories and candidate files only, never every file. |
+
+Conclusions that drive the design: libgit2 rule evaluation is trustworthy for untracked paths; tracked state must come from the index; input validation is mandatory and must precede every call.
+
+---
+
+## 6. The single exclusion predicate
+
+Git's own definition: a path is *excluded* when it is untracked **and** matches an ignore rule. Tracked paths are never excluded.
+
+```text
+IsExcluded(path, kind):
+    kind = File:       !tracked(path) && IsPathIgnored(path)
+    kind = Directory:  !containsTrackedEntries(path) && IsPathIgnored(path + "/")
 ```
 
-Recommended contract:
+Every consumer uses this one predicate:
+
+- discovery prunes a directory iff it is excluded, and accepts a candidate file iff it is not excluded;
+- staging drops a path iff it is excluded.
+
+Tracked paths therefore stay stageable (including deleted tracked files) and tracked `.csproj` files under an ignore-matching directory are still discovered (a deliberate improvement over the current top-level check, and consistent with Git's definition).
+
+---
+
+## 7. Service contract
+
+Ignore evaluation needs one open `Repository` for a logical operation, and `Repository` is not thread-safe. The contract is therefore a short-lived session, not a bag of path-in/path-out methods (this replaces the previous `FindNonIgnoredFiles` on the service: walking the file system is project discovery's job, not the ignore service's).
 
 ```csharp
 public interface IGitIgnoreService
 {
-    bool IsIgnored(string repositoryPath, string path);
-
-    IReadOnlyList<string> KeepNonIgnored(
-        string repositoryPath,
-        IReadOnlyList<string> paths);
-
-    IReadOnlyList<string> FindNonIgnoredFiles(
-        string repositoryPath,
-        string searchPattern,
-        CancellationToken cancellationToken = default);
+    // Opens the repository once. Throws GitIgnoreException (typed, actionable) when it cannot be opened.
+    IGitIgnoreSession Open(string repositoryPath);
 }
+
+public interface IGitIgnoreSession : IDisposable
+{
+    // path: validated, repository-relative, '/'-separated. Anything else throws ArgumentException.
+    bool IsExcluded(string relativePath, GitPathKind kind);
+
+    // Filters requested paths with the same predicate; files vs directories are decided from the work tree.
+    GitStageSelection SelectStageable(IReadOnlyList<string> relativePaths);
+}
+
+public enum GitPathKind { File, Directory }
+
+public sealed record GitStageSelection(
+    IReadOnlyList<string> Stageable,
+    IReadOnlyList<string> ExcludedUntracked);
 ```
 
-If asynchronous API shape is preferred for consistency, the public interface may expose `Task`, but ignore evaluation itself is local and synchronous in LibGit2Sharp.
+Implementation: `LibGit2SharpGitIgnoreService` (sealed, primary constructor, registered as a singleton in `RunCommandHandler`; the singleton holds no `Repository`).
 
-The essential design requirement is not the exact signatures. It is:
+Session internals:
 
-> Every GrayMoon ignore decision goes through the same service.
+- Opens `new Repository(repositoryPath)` once; libgit2 resolves linked worktrees and `.git` files itself. GrayMoon never derives Git directory paths for ignore evaluation.
+- Builds the tracked-file set and the set of directories that contain tracked entries lazily on the first query (one pass over `repo.Index`), using ordinal-ignore-case comparison when `core.ignorecase` is true and ordinal otherwise.
+- Rejects invalid input with `ArgumentException` rather than passing it to libgit2 (section 5).
+- No cross-session caching; `.gitignore`, `info/exclude`, global excludes and index state change at any time.
 
-Implementation:
-
-```text
-LibGit2SharpGitIgnoreService
-```
+The session never normalizes. Callers validate with `GitRepositoryPathValidator` first (section 2.3), so there is exactly one normalization implementation.
 
 ---
 
-## 6. LibGit2Sharp behavior
+## 8. Project discovery
 
-LibGit2Sharp exposes:
-
-```csharp
-repository.Ignore.IsPathIgnored(relativePath)
-```
-
-The API accepts repository-relative paths and delegates ignore evaluation to libgit2.
-
-The upstream LibGit2Sharp test suite includes tests for:
-
-- direct ignored-path checks;
-- nested `.gitignore`;
-- normal repository ignore rules;
-- slash-separated relative paths.
-
-GrayMoon must validate the exact semantics it relies upon with its own parity tests before removing the CLI implementation.
-
----
-
-## 7. Repository lifetime
-
-A key performance rule:
-
-> Open a LibGit2Sharp `Repository` once for a logical ignore operation, not once per path.
-
-Bad:
+Algorithm (sequential walk on one thread, one session; `.csproj` parsing stays parallel afterwards as today):
 
 ```text
-path A -> open repo -> check -> dispose
-path B -> open repo -> check -> dispose
-path C -> open repo -> check -> dispose
-```
-
-Correct:
-
-```text
-open repo
-  check A
-  check B
-  check C
-dispose repo
-```
-
-For tree discovery:
-
-```text
-open repo
-  walk complete project tree
-dispose repo
-```
-
-For selective staging:
-
-```text
-open repo
-  classify all requested paths
-dispose repo
-```
-
----
-
-## 8. Path normalization
-
-All ignore decisions must use one normalization helper.
-
-Recommended semantics:
-
-```csharp
-string ToGitRelativePath(string repositoryRoot, string path)
+open session
+visit(root):
+    for each *.csproj file in dir:  include iff !IsExcluded(file, File)
+    for each subdirectory d (ordinal order):
+        skip d if d is ".git"
+        skip d if d has its own .git (nested repository or submodule: never part of this repository)
+        skip d if IsExcluded(d, Directory)
+        visit(d)
 ```
 
 Rules:
 
-1. accept either absolute paths under the repository or repository-relative paths;
-2. reject paths that escape the repository root;
-3. normalize separators to `/`;
-4. remove harmless leading `./`;
-5. never pass an empty repository-root path into `IsPathIgnored`;
-6. preserve path content otherwise;
-7. do not invent GrayMoon-specific wildcard logic.
-
-Example:
-
-```text
-C:\Work\Repo\src\App\App.csproj
-```
-
-becomes:
-
-```text
-src/App/App.csproj
-```
+- **Pruning is exact, not "conservative vs aggressive".** Git cannot re-include anything below an excluded directory, so pruning an excluded directory is precisely Git's semantics. Negation such as `generated/*` + `!generated/keep/` works because `generated` itself is not excluded (only its children are), so the walk reaches `generated/keep` and prunes its ignored siblings. The spike confirmed parity for exactly this case. The previous design's "Option A/B" is removed.
+- Candidate files are checked individually.
+- Results are sorted ordinally so persistence sees a stable order.
+- Cancellation is checked per directory.
+- **Failure policy (no fallback):** an unopenable repository or an unreadable directory fails the scan with an exception that names the repository and path. It never returns a partial or empty list. Callers decide how a failed probe is reported (section 12); none may treat it as "zero projects".
+- `CsProjFileService` stops depending on `GitProcessRunner`; it depends on `IGitIgnoreService`.
+- A missing repository directory keeps its existing meaning at the call sites (they already guard `Directory.Exists`).
 
 ---
 
-## 9. Project discovery design
-
-Replace the existing top-level `check-ignore` plus `SearchOption.AllDirectories` algorithm.
-
-New algorithm:
+## 9. Selective staging
 
 ```text
-open Repository once
-        |
-walk repository tree
-        |
-for each directory
+validate paths (GitRepositoryPathValidator, both call sites)
     |
-    +-- skip .git metadata
+open session; SelectStageable(paths)        one Repository open
     |
-    +-- evaluate ignore state
+Stageable empty  -> success, nothing staged (log count of excluded)
     |
-    +-- prune when safe
-        |
-for each *.csproj candidate
+git --literal-pathspecs add --pathspec-from-file=- ...     exactly one invocation, no retry
     |
-    +-- evaluate candidate path
-    |
-    +-- include only when non-ignored
+(StageAndCommit only) git diff --cached --quiet -> git commit
 ```
 
-Candidate files must always be checked individually.
+- Both `StageAndCommitAsync` and Git Changes `StageAsync` call the same session method. There is no second filter.
+- `--literal-pathspecs` makes `git add` interpret each entry exactly as the classifier did, removing the glob-magic mismatch (defect 5). Verified at implementation time against the batched fallback path used on Git older than 2.25.
+- Tracked and deleted-tracked paths are stageable; untracked non-ignored paths are stageable (a nonexistent untracked path still reaches `git add`, which reports it as Git does); only excluded untracked paths are dropped.
+- Never `git add -f`.
+- If `.gitignore` changes between classification and `git add` and Git rejects a path, that error is returned to the caller. There is no retry loop. The window is milliseconds and an explicit error is the correct outcome.
+- Classification takes no `GitProcessRunner` lock: it is a read; libgit2 reads the index atomically, and `git` itself writes the index via `index.lock` + rename.
 
-### Why explicit traversal is better
-
-The current code recursively enumerates an entire surviving top-level subtree.
-
-The new approach can avoid walking ignored output trees entirely.
-
-That reduces:
-
-- directory enumeration;
-- file metadata reads;
-- EDR/antivirus inspection;
-- useless `.csproj` parsing work;
-- total VDI filesystem pressure.
+Whole-repository staging (`git add --all`) is unchanged (section 2.2).
 
 ---
 
-## 10. Negation and safe pruning
+## 10. Workspace file search
 
-Git ignore negation makes directory pruning subtle.
+`WorkspaceFileSearchService` currently skips `bin`/`obj`/`.git` by name. Under the single-source rule it must use the session predicate per repository instead, which changes observable behavior in two ways:
 
-Example:
+- ignored files that are not build output (for example `.env`, `*.user`) no longer appear in the file picker;
+- tracked files under a directory named `bin`/`obj` now appear.
 
-```gitignore
-generated/*
-!generated/important/
-```
-
-A naive implementation that prunes `generated` too early could miss a re-included descendant.
-
-Therefore directory pruning must be verified against Git/libgit2 semantics.
-
-Implementation rule:
-
-> Do not assume that `IsPathIgnored(directory)` alone is sufficient evidence that every descendant can be skipped unless parity tests prove this for the exact traversal representation.
-
-Two acceptable implementations:
-
-### Option A: Conservative first implementation
-
-- enumerate directories;
-- evaluate candidate `.csproj` files individually;
-- only prune directory patterns whose semantics are proven safe by parity tests.
-
-This favors correctness.
-
-### Option B: Libgit2-proven pruning
-
-If tests demonstrate that `IsPathIgnored(relativeDirectoryPath)` correctly represents whether traversal of that path can be omitted under Git's parent-ignore/negation semantics, prune ignored directories.
-
-This favors maximum performance.
-
-The implementation plan must start with parity tests before enabling aggressive pruning.
+Directories without Git metadata (the unscoped search enumerates every child of the workspace folder) have no Git ignore semantics; the search must be restricted to directories with Git metadata, consistent with `GetWorkspaceRepositoriesCommand`. **This is a product-visible change and is gated on confirmation** (plan Unit 8). If it is rejected, the hard-coded skip stays and is documented as an accepted non-Git rule; it must not be partially migrated.
 
 ---
 
-## 11. Selective staging design
+## 11. Native packaging, ownership and environment
 
-Current behavior first lets `git add` fail, then starts a second Git process to discover ignored paths, then retries.
-
-The new flow should pre-filter with LibGit2Sharp:
-
-```text
-requested paths
-        |
-IGitIgnoreService.KeepNonIgnored(...)
-        |
-   +----+----+
- ignored    allowed
-               |
-            git add
-```
-
-This removes the normal `git add failure -> check-ignore -> git add retry` sequence.
-
-### Required semantics
-
-For selective staging:
-
-- ignored untracked paths should be dropped;
-- non-ignored paths continue to `git add`;
-- tracked files must not be accidentally suppressed because an ignore rule now matches them;
-- deleted tracked files must remain stageable;
-- force-add behavior must not be introduced;
-- the service must preserve the current GrayMoon intent: skip truly ignored paths rather than use `git add -f`.
-
-This tracked-file point is critical.
-
-Git ignore rules primarily affect untracked files. A file already tracked by Git can match an ignore pattern and still require staging.
-
-Therefore `KeepNonIgnored` used for staging cannot be a simplistic:
-
-```csharp
-paths.Where(p => !repo.Ignore.IsPathIgnored(p))
-```
-
-The staging classifier must distinguish tracked/indexed paths from untracked ignored paths.
-
-Recommended result model:
-
-```csharp
-public sealed record GitIgnoreClassification(
-    string Path,
-    bool IsIgnored,
-    bool IsTracked,
-    bool ShouldStage);
-```
-
-For staging:
-
-```text
-tracked -> stage
-untracked + non-ignored -> stage
-untracked + ignored -> skip
-```
-
-LibGit2Sharp index/status information may be used for this classification if needed.
+- The Worker is a framework-dependent dotnet tool (`PackAsTool`) that also runs as a Windows Service or Linux systemd unit. `LibGit2Sharp.NativeBinaries` must be present under `runtimes/<rid>/native` in the packed tool and in `dotnet publish` output; verify `dotnet pack` + `dotnet tool install` on win-x64 and linux-x64, and that GitVersion.MsBuild/CI are unaffected.
+- Pin an exact version (`0.32.0` is the version spiked, with libgit2 shipped inside `NativeBinaries`); do not use a wildcard for a native dependency. Record the reason and the bundled libgit2 version in the docs.
+- libgit2 enforces repository ownership (`safe.directory`) like Git does. When the Worker runs as a service account that does not own a repository, `Open` fails. That is parity with the Git CLI, which fails the same way; it is surfaced as a `GitIgnoreException` with the repository path and the ownership message. No CLI fallback. Parity test required.
+- libgit2 reads system/global/XDG config for `core.excludesFile`; global-excludes parity is tested in an isolated `HOME`/`XDG_CONFIG_HOME`.
 
 ---
 
-## 12. Whole-repository staging
+## 12. Failure reporting by caller
 
-Current whole-repository staging uses:
+| Caller | Required behavior on `GitIgnoreException` / incomplete discovery |
+|---|---|
+| `SyncRepositoryCommand`, `RepositoryStateProbe` | Report the repository's project probe as failed (existing `projectsProbed` style semantics so persisted projects survive), never persist `[]`. |
+| `RefreshRepositoryProjectsCommand` | Return the command error; do not return `Projects = []`. |
+| `PushRepositoryCommand` post-operation | The push already succeeded; report projects as not probed and log. A discovery failure must not turn a successful push into a failed one. |
+| Staging (both) | Return a stage failure with the error text; stage nothing. |
 
-```text
-git add --all
-```
-
-Git already applies ignore semantics correctly.
-
-Do not add a pre-scan of every repository file merely to route it through `IGitIgnoreService`.
-
-The principle "all ignore implementations use the new approach" means:
-
-- GrayMoon code must not independently run `git check-ignore` or implement separate ignore parsing;
-- native Git operations that inherently honor ignores, such as `git add --all`, may continue to let Git do so.
-
-Do not replace a single efficient Git mutation with an expensive whole-tree GrayMoon pre-classification.
+Each is verified in the plan; the exact existing flag names are confirmed against the current code before editing.
 
 ---
 
-## 13. Stage-and-commit behavior
+## 13. Lifetime and concurrency
 
-`GitService.StageAndCommitAsync` currently delegates selective add retry behavior to `GitIgnoredPathFilter`.
-
-Change it to:
-
-```text
-normalize requested paths
-        |
-IGitIgnoreService classify/filter once
-        |
-if no stageable paths:
-    return successful "nothing staged" behavior as appropriate
-        |
-git add only stageable paths
-        |
-verify staged diff
-        |
-commit
-```
-
-The Git mutation remains Git CLI.
-
-Only ignore classification moves to LibGit2Sharp.
-
-This keeps the broader architecture conservative:
-
-```text
-local metadata/read classification -> LibGit2Sharp
-mutating operation                -> git.exe
-```
+- One `Repository` per logical operation (one discovery scan, one stage classification), disposed deterministically with `using`. Not shared across threads or operations; no pool; no singleton `Repository`.
+- Disposal is correctness-critical on Windows: an undisposed handle can block worktree removal (`RemoveGitWorktree`) and branch operations.
+- Different repositories may be scanned concurrently (sync workers); each owns its own session.
 
 ---
 
-## 14. Git Changes staging behavior
+## 14. Instrumentation
 
-`GitCliRepositoryGitChangesService.StageAsync` must use exactly the same classification path as `GitService.StageAndCommitAsync`.
+Debug-level structured timings, no per-path logging at Information.
 
-There must not be:
-
-- one ignore implementation for Git Changes;
-- another for Stage-and-Commit;
-- another for project discovery.
-
-All three depend on `IGitIgnoreService`.
+Discovery: `repo`, `elapsedMs`, `directoriesVisited`, `directoriesPruned`, `nestedReposSkipped`, `candidateFiles`, `excludedCandidates`, `returnedFiles`.
+Staging: `repo`, `elapsedMs`, `requested`, `trackedPaths`, `excludedUntracked`, `stageable`.
 
 ---
 
-## 15. `GitIgnoredPathFilter` disposition
+## 15. Parity strategy
 
-After migration, the existing helper should no longer be the normal ignore engine.
+`git check-ignore` is the oracle in tests only. The fixture builds a temporary repository, writes rules and files, asks both `git check-ignore` and the session, and asserts equal classification **under Git's definition** (tracked paths are not ignored). The test project must never launch `check-ignore` from production types; a process-recorder assertion proves the production paths launch none.
 
-Recommended end state:
+Required cases (the spike matrix is the starting point):
 
-- remove `KeepNonIgnoredAsync`;
-- remove direct `git check-ignore` invocation;
-- remove NUL-delimited `check-ignore` parsing;
-- remove `AddWithIgnoredFallbackAsync` once both staging paths use the new service;
-- remove `IgnoredByGitignoreMarker` parsing if no longer required.
-
-A temporary diagnostic fallback may be retained during rollout, but it must not silently become a permanent second implementation.
-
-If retained temporarily, it should:
-
-- be clearly marked compatibility/diagnostic only;
-- log when reached;
-- not run during successful normal flows;
-- have a TODO/removal gate tied to parity tests.
-
-Final target:
-
-```text
-zero normal GrayMoon git check-ignore processes
-```
+- root and nested `.gitignore`; `.git/info/exclude`; global excludes (isolated config)
+- directory-only patterns, anchored, `**`, wildcards, `*.Generated.csproj`
+- negation and nested negation (`generated/*`, `!generated/keep/`) including walk-level assertions that `generated/keep` is reached and `generated/other` pruned
+- tracked file matching a rule; deleted tracked file matching a rule; tracked file inside an ignored directory
+- untracked ignored / untracked non-ignored
+- spaces, Unicode, `core.ignorecase` true and false (platform-appropriate, no hard-coded cross-platform assumptions)
+- linked worktree opened from the worktree path
+- nested repository and submodule directories skipped
+- invalid input rejected: `../x`, absolute, backslash, empty, `.git`
+- ownership/`safe.directory` failure surfaces a typed error
 
 ---
 
-## 16. Error handling
+## 16. Performance acceptance
 
-The ignore service is local infrastructure and must fail predictably.
-
-### Invalid repository
-
-Return a controlled error/result rather than allowing arbitrary LibGit2Sharp exceptions to leak into UI code.
-
-### Path outside repository
-
-Reject it.
-
-Never classify:
-
-```text
-..\OtherRepo\file.csproj
-```
-
-against the current repository.
-
-### Repository unavailable during operation
-
-Operations must tolerate expected races such as repository removal or worktree cleanup.
-
-Behavior should match the caller:
-
-- discovery can fail safely and return no discovered files while logging;
-- staging should fail explicitly rather than silently stage an unknown subset.
-
-### Inaccessible directories
-
-Discovery should skip inaccessible subtrees, log at debug/warning as appropriate, and continue with other accessible paths.
-
-### Cancellation
-
-Long tree discovery must check cancellation while traversing.
+- Production `git check-ignore` process count is 0 for sync, explicit refresh, post-push refresh, Stage-and-Commit, and Git Changes stage (asserted by the process recorder in tests and by the VDI run).
+- One `Repository` open per discovery or classification operation.
+- Re-run the 39-repository / 16-worker VDI benchmark and compare wall time, `SyncRepository` p50/p90, per-repo project scan time, total Git subprocess count, `check-ignore` count (target 0), GitVersion duration.
 
 ---
 
-## 17. Worktrees
-
-The service must be tested with Git worktrees.
-
-Do not assume:
+## 17. Architectural boundary
 
 ```text
-repoPath/.git
+LibGit2Sharp : ignore decisions, tracked/untracked classification needed for them
+Git CLI      : add, commit, fetch, pull, push, merge, checkout, reset, clean, status
 ```
 
-is always a directory.
-
-In linked worktrees `.git` can be a file pointing to the common Git directory.
-
-LibGit2Sharp repository discovery/open behavior should be used rather than manually assuming Git directory structure.
-
-Tests must cover:
-
-- normal repository;
-- linked worktree;
-- workspace/feature worktree where applicable.
+This change does not convert mutations or network operations to LibGit2Sharp and does not combine with the broader sync/ref/status migration.
 
 ---
 
-## 18. Threading and concurrency
-
-Do not share one LibGit2Sharp `Repository` instance across unrelated concurrent repository operations.
-
-Recommended lifetime:
-
-```text
-one logical operation
-    ->
-one Repository instance
-    ->
-dispose
-```
-
-Different repositories may be evaluated concurrently.
-
-For the same repository, existing GrayMoon repository locking rules must be respected when an ignore classification is part of a mutation sequence.
-
-Selective stage/commit should keep classification sufficiently close to the Git mutation to minimize races.
-
-Where the caller already holds a repository write lock, classification should run inside that lock.
-
----
-
-## 19. Caching
-
-Do not introduce cross-operation ignore-result caching in the first implementation.
-
-Ignore state can change when:
-
-- `.gitignore` changes;
-- nested `.gitignore` changes;
-- `.git/info/exclude` changes;
-- user/global ignore configuration changes;
-- tracked/untracked state changes.
-
-The first implementation should prefer correctness and still gain most of the performance benefit from eliminating process launches.
-
-Possible future optimization:
-
-- cache only within a single logical discovery/staging operation;
-- later investigate invalidation-aware caching if profiling proves necessary.
-
----
-
-## 20. Logging and instrumentation
-
-Add structured timings around the new service.
-
-For project discovery:
-
-```text
-Git ignore/project discovery:
-repo
-elapsed
-directoriesVisited
-directoriesPruned
-candidateFiles
-ignoredCandidates
-projectsReturned
-```
-
-For selective staging:
-
-```text
-Git ignore classification:
-repo
-requestedPaths
-trackedPaths
-ignoredUntrackedPaths
-stageablePaths
-elapsed
-```
-
-Do not log excessive individual file paths at information level.
-
----
-
-## 21. Correctness parity strategy
-
-Before deleting `git check-ignore`, create integration tests comparing LibGit2Sharp results to real Git.
-
-Test fixture should:
-
-1. create temporary repository;
-2. write ignore rules;
-3. create files/directories;
-4. ask:
-   ```text
-   git check-ignore
-   ```
-5. ask:
-   ```csharp
-   IGitIgnoreService
-   ```
-6. assert equivalent classification.
-
-This CLI use is test-only.
-
-The production Worker must not launch `git check-ignore`.
-
----
-
-## 22. Required parity cases
-
-At minimum:
-
-### Basic
-
-```gitignore
-bin/
-obj/
-*.tmp
-```
-
-### Nested `.gitignore`
-
-```text
-src/.gitignore
-generated/
-```
-
-### Root anchored
-
-```gitignore
-/generated/
-```
-
-### Wildcards
-
-```gitignore
-**/generated/
-*.generated.csproj
-```
-
-### Negation
-
-```gitignore
-generated/*
-!generated/keep/
-```
-
-### Nested negation
-
-Test parent-directory ignore behavior carefully.
-
-### `.git/info/exclude`
-
-Must match Git behavior.
-
-### Global excludes
-
-If supported by the current libgit2/LibGit2Sharp environment, verify parity.
-
-### Spaces
-
-```text
-Folder With Spaces/App.csproj
-```
-
-### Unicode
-
-Include non-ASCII repository-relative paths.
-
-### Windows separators
-
-Input `\` must normalize correctly.
-
-### Case behavior
-
-Run platform-appropriate tests without hard-coding incorrect cross-platform assumptions.
-
-### Tracked file matching ignore pattern
-
-A tracked file that now matches `.gitignore` must still be stageable.
-
-### Deleted tracked file
-
-Must remain stageable.
-
-### Worktree
-
-Ignore behavior must work from linked worktree paths.
-
----
-
-## 23. Performance acceptance criteria
-
-Primary:
-
-```text
-production git check-ignore process count = 0
-```
-
-for:
-
-- workspace sync/project discovery;
-- explicit project refresh;
-- post-push project discovery;
-- selective Stage-and-Commit;
-- Git Changes selective Stage.
-
-Project discovery should perform one LibGit2Sharp repository open per repository discovery operation.
-
-Selective staging should perform one LibGit2Sharp repository open per classification operation.
-
-On the enterprise VDI, re-run the same 39-repository benchmark and compare:
-
-- workspace wall time;
-- per-repository project scan time;
-- total Git subprocess count;
-- `git check-ignore` count;
-- GitVersion duration;
-- process contention.
-
-Expected `git check-ignore` count:
-
-```text
-0
-```
-
----
-
-## 24. Architectural boundary
-
-This work does not convert Git mutations or network operations to LibGit2Sharp.
-
-Target boundary:
-
-```text
-LibGit2Sharp
-  |
-  +-- ignore classification
-  +-- project-discovery ignore decisions
-  +-- tracked/untracked classification where needed for ignore correctness
-
-Git CLI
-  |
-  +-- add
-  +-- commit
-  +-- fetch
-  +-- pull
-  +-- push
-  +-- merge
-  +-- checkout
-  +-- reset
-  +-- clean
-```
-
-The goal is a focused, low-risk performance improvement with one authoritative ignore implementation.
-
----
-
-## 25. Definition of done
-
-The design is complete when:
-
-- every GrayMoon-owned ignore decision uses `IGitIgnoreService`;
-- project discovery no longer launches `git check-ignore`;
-- selective staging no longer launches `git check-ignore`;
-- post-push project discovery inherits the new path;
-- `GitIgnoredPathFilter` is removed or reduced to no production ignore evaluation;
-- nested ignored `.csproj` files are correctly excluded;
-- tracked files remain stageable even when matching ignore patterns;
-- worktrees behave correctly;
-- parity tests pass against Git CLI;
-- production `git check-ignore` count is zero;
-- the enterprise VDI benchmark is rerun and documented.
+## 18. Definition of done
+
+- Every GrayMoon-owned ignore decision goes through `IGitIgnoreSession.IsExcluded`/`SelectStageable`; `WorkspaceFileSearchService` is migrated or its non-Git rule is explicitly documented per section 10.
+- No production `git check-ignore`; `GitIgnoredPathFilter` and its tests deleted.
+- Nested ignored `.csproj` files excluded; tracked files stay stageable and discoverable; nested repositories skipped.
+- No fail-open, swallow-to-empty, or retry path remains; failures surface per section 12.
+- `StageAndCommitAsync` validates paths; both staging paths use `--literal-pathspecs`.
+- Parity tests (section 15) pass; native packaging verified on win-x64 and linux-x64.
+- VDI benchmark rerun and documented.
