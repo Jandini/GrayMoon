@@ -631,6 +631,18 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
             // push a delete that refuses when origin/<name> is no longer at expectedSha.
             if (!string.IsNullOrWhiteSpace(expectedSha))
             {
+                // Ask the remote first. When the host already deleted the branch (e.g. GitHub's delete-on-merge)
+                // there is nothing to fetch or push: just drop the stale tracking ref and report success, instead
+                // of running a fetch and a push that are both guaranteed to fail noisily.
+                if (await IsRemoteBranchAbsentAsync(repoPath, name, bearerToken, ct))
+                {
+                    var trackingRef = $"refs/remotes/origin/{name}";
+                    if (await reader.RefExistsAsync(repoPath, trackingRef, ct))
+                        await runner.RunAsync("git", $"update-ref -d {trackingRef}", repoPath, ct);
+                    logger.LogInformation("Git remote branch already absent on origin for {RepoPath}. Branch={Branch}; pruned stale tracking ref.", repoPath, name);
+                    return (true, null);
+                }
+
                 // Always fetch this branch's remote tip (plus default when known) so the lease compares
                 // against current origin state, even when the local branch has no upstream configured.
                 var (fetchOk, fetchErr) = await FetchMinimalAsync(
@@ -728,6 +740,38 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
                 return (false, CombineOutput(stdoutForce, stderrForce));
             }
             logger.LogInformation("Git branch force deleted for {RepoPath}. Branch={Branch}", repoPath, localName);
+            return (true, null);
+        }
+
+        // Merged means reachable from HEAD or from origin/<default>. Plain `git branch -d` would also accept the
+        // branch's own (possibly stale) remote-tracking ref, which is how a branch not yet merged into the checked-out
+        // branch got deleted with a "not yet merged to HEAD" warning. Decide here, then delete.
+        var mergedIntoHead = await IsAncestorAsync(repoPath, $"refs/heads/{localName}", "HEAD", ct);
+        if (!mergedIntoHead)
+        {
+            var defaultOriginRef = await reader.GetDefaultBranchOriginRefAsync(repoPath, ct);
+            var mergedIntoDefault = false;
+            if (!string.IsNullOrWhiteSpace(defaultOriginRef))
+            {
+                var defaultRef = defaultOriginRef!.StartsWith("refs/", StringComparison.Ordinal)
+                    ? defaultOriginRef
+                    : $"refs/remotes/{defaultOriginRef}";
+                mergedIntoDefault = await IsAncestorAsync(repoPath, $"refs/heads/{localName}", defaultRef, ct);
+            }
+
+            if (!mergedIntoDefault)
+            {
+                logger.LogWarning("Branch {Branch} is not fully merged in {RepoPath}; not deleting.", localName, repoPath);
+                return (false, $"error: The branch '{localName}' is not fully merged.");
+            }
+
+            var (exitMerged, stdoutMerged, stderrMerged) = await runner.RunAsync("git", $"branch -D {localName}", repoPath, ct);
+            if (exitMerged != 0)
+            {
+                logger.LogWarning("Git branch delete failed for {RepoPath}. Branch={Branch}, ExitCode={ExitCode}", repoPath, localName, exitMerged);
+                return (false, CombineOutput(stdoutMerged, stderrMerged));
+            }
+            logger.LogInformation("Git branch deleted (merged into default branch) for {RepoPath}. Branch={Branch}", repoPath, localName);
             return (true, null);
         }
 
@@ -1421,6 +1465,24 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         var text = (stderr ?? string.Empty) + " " + (stdout ?? string.Empty);
         return text.Contains("unknown option", StringComparison.OrdinalIgnoreCase)
             || text.Contains("unrecognized argument", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<bool> IsAncestorAsync(string repoPath, string ancestor, string descendant, CancellationToken ct)
+    {
+        var (exit, _, _) = await runner.RunAsync("git", $"merge-base --is-ancestor {ancestor} {descendant}", repoPath, ct);
+        return exit == 0;
+    }
+
+    /// <summary>True only when ls-remote succeeded and origin has no such branch; any failure returns false so the normal delete path decides.</summary>
+    private async Task<bool> IsRemoteBranchAbsentAsync(string repoPath, string name, string? bearerToken, CancellationToken ct)
+    {
+        var args = string.IsNullOrWhiteSpace(bearerToken)
+            ? $"ls-remote --heads origin refs/heads/{name}"
+            : $"{BuildAuthHeaderArgs(bearerToken)} ls-remote --heads origin refs/heads/{name}";
+        var (exit, stdout, _) = await runner.LsRemotePipeline.ExecuteAsync(
+            async cancellationToken => await runner.RunAsync("git", args, repoPath, cancellationToken),
+            ct);
+        return exit == 0 && string.IsNullOrWhiteSpace(stdout);
     }
 
     private static bool IsRemoteBranchAlreadyDeleted(string output)
