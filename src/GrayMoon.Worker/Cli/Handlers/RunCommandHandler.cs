@@ -112,6 +112,7 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<ICommandLineService, CommandLineService>();
         builder.Services.AddSingleton<GitProcessRunner>();
         builder.Services.AddSingleton<IGitRepositoryReader, GitCliRepositoryReader>();
+        builder.Services.AddSingleton<ILocalGitSnapshotReader, LibGit2SharpLocalGitSnapshotReader>();
         builder.Services.AddSingleton<IGitService, GitService>();
         builder.Services.AddSingleton<IGitWorktreeService, GitWorktreeService>();
         builder.Services.AddSingleton<GitRemoteIntegrateService>();

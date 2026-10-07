@@ -90,7 +90,7 @@ public sealed class WorkspaceRepositoryDiscoveryGateTests : IDisposable
 
     private Task<GrayMoon.Worker.Jobs.Response.SyncRepositoryResponse> SyncAsync(
         CountingCsProjFileService scanner, string repositoryName, string? workspaceRepositoryName)
-        => new SyncRepositoryCommand(_git, _reader, scanner, CapabilityTestDoubles.RealFactory(_git)).ExecuteAsync(new SyncRepositoryRequest
+        => new SyncRepositoryCommand(_git, _reader, new LibGit2SharpLocalGitSnapshotReader(), scanner, CapabilityTestDoubles.RealFactory(_git)).ExecuteAsync(new SyncRepositoryRequest
         {
             WorkspaceRoot = _root,
             WorkspaceName = "ws",

@@ -13,20 +13,41 @@ namespace GrayMoon.Worker.Commands;
 /// version enrichment, then optional .NET project enrichment. The two optional stages are activated by the
 /// request's capabilities; when one is skipped its result is absent from the response rather than empty, so
 /// the app can tell "nobody looked" from "there is nothing there" and leaves that group of columns alone.
-/// After the fetch, the version provider (which holds the repository write lock), one lane of read-intent ref
-/// reads, and the project scan run side by side; the branch-dependent steps run once the first two finish.
+/// After the fetch, the version provider (which holds the repository write lock), the read lane, and the project
+/// scan run side by side; the branch-dependent steps run once the first two finish. The read lane is one
+/// in-process local snapshot (<see cref="ILocalGitSnapshotReader"/>: refs, HEAD, tags, default branch, upstream
+/// and ahead/behind, no git process); when that cannot read the repository it falls back, logged, to the
+/// read-intent git CLI reads. Fetch, origin/HEAD repair, hooks and the version provider stay on the git CLI.
 /// A Debug line per repository reports where the time went (fetch, version, read lane and its steps, project
 /// scan, hooks and counts).
 /// </summary>
 public sealed class SyncRepositoryCommand(
     IGitService git, IGitRepositoryReader reader,
+    ILocalGitSnapshotReader snapshotReader,
     ICsProjFileService csProjFileService,
     IRepositoryVersionProviderFactory versionProviderFactory,
     ILogger<SyncRepositoryCommand>? logger = null) : ICommandHandler<SyncRepositoryRequest, SyncRepositoryResponse>
 {
+    /// <summary>Where the read lane's answers came from.</summary>
+    private enum RefsSource
+    {
+        /// <summary>The in-process local snapshot.</summary>
+        Snapshot,
+
+        /// <summary>The git CLI reads (the snapshot failed, or the environment points git elsewhere).</summary>
+        GitCli,
+
+        /// <summary>Nothing: the folder is not a repository of its own.</summary>
+        None,
+    }
+
     /// <summary>Ref reads that do not depend on GitVersion's output or on the branch name.</summary>
+    /// <param name="CurrentBranchKnown">The current branch was read (so no separate read is needed after the version provider).</param>
+    /// <param name="CountsBranch">The branch <paramref name="CurrentBranchCounts"/> was taken for.</param>
+    /// <param name="CurrentBranchCounts">Upstream/outgoing counts for the checked-out branch, when the snapshot took them.</param>
     private sealed record SyncRefs(
         string? CurrentBranch,
+        bool CurrentBranchKnown,
         string? CurrentTag,
         IReadOnlyList<string> Tags,
         IReadOnlyList<string>? LocalBranches,
@@ -35,6 +56,9 @@ public sealed class SyncRepositoryCommand(
         int? DefaultBehind,
         int? DefaultAhead,
         bool OriginHeadUnresolved,
+        string? CountsBranch,
+        CommitCountsProbeResult? CurrentBranchCounts,
+        RefsSource Source,
         long ElapsedMs,
         string StepTimings);
 
@@ -100,15 +124,15 @@ public sealed class SyncRepositoryCommand(
             }
 
             // Three things overlap from here. The version provider (GitVersion) holds the write lock for its
-            // process; the ref reads run as read intent so they do not wait for it, and they are one sequential
-            // lane to avoid adding many concurrent git processes per repository. Project discovery is a file
-            // system walk and has nothing to do with git. Stage 3 only discovers when the profile asks for it:
-            // otherwise projects stay null - an empty list would tell the app this repository genuinely has none,
-            // and it would prune every persisted project row.
+            // process; the read lane takes no lock, so it does not wait for it: an in-process snapshot, or the
+            // read-intent git CLI reads as one sequential lane when the snapshot cannot be taken. Project
+            // discovery is a file system walk. Stage 3 only discovers when the profile asks for it: otherwise
+            // projects stay null - an empty list would tell the app this repository genuinely has none, and it
+            // would prune every persisted project row.
             //
-            // The current-branch read is only a fallback for when the version provider gives no branch. When a
-            // version provider is going to run, it is read after the overlap and only if it is needed; when none
-            // will run there is nothing to wait for, so it joins the lane.
+            // The current branch is only a fallback for when the version provider gives no branch. The snapshot
+            // always has it; on the CLI lane, when a version provider is going to run, it is read after the
+            // overlap and only if it is needed, and when none will run it joins the lane.
             var readBranchInLane = !capabilities.ShouldCalculateVersion;
             var overlapStart = Stopwatch.GetTimestamp();
             var versionTask = TimedAsync(() => versionProviderFactory
@@ -139,7 +163,7 @@ public sealed class SyncRepositoryCommand(
             // one; otherwise the name is read from git.
             var gitBranch = refs.CurrentBranch;
             var branchFallbackMs = 0L;
-            if (!readBranchInLane && string.IsNullOrWhiteSpace(GitVersionBranch.Choose(versionResult.Result, null)))
+            if (!refs.CurrentBranchKnown && string.IsNullOrWhiteSpace(GitVersionBranch.Choose(versionResult.Result, null)))
             {
                 var fallbackStart = Stopwatch.GetTimestamp();
                 gitBranch = await reader.GetCurrentBranchNameAsync(repoPath, cancellationToken);
@@ -171,11 +195,18 @@ public sealed class SyncRepositoryCommand(
                 ? TimedAsync(async () => { await git.WriteSyncHooksAsync(repoPath, workspaceId, repositoryId, cancellationToken); return 0; })
                 : null;
 
-            // Counts are taken against whichever branch name won. The divergence base file was already written
-            // in the read lane, which the no-upstream path of the probe reads back.
-            var countsTask = branch != "-"
-                ? TimedAsync(() => reader.ProbeCommitCountsAsync(repoPath, branch, refs.DefaultRef, cancellationToken))
-                : null;
+            // Counts are taken against whichever branch name won. When that is the checked-out branch the snapshot
+            // already took them (and took them again after a repair); any other name - a version provider can
+            // report a branch that is not checked out - is counted against HEAD by the CLI probe, which reads
+            // back the divergence base file the read lane wrote.
+            var countsFromSnapshot = branch != "-"
+                && refs.CurrentBranchCounts != null
+                && string.Equals(branch, refs.CountsBranch, StringComparison.Ordinal);
+            var countsTask = branch == "-"
+                ? null
+                : countsFromSnapshot
+                    ? Task.FromResult((refs.CurrentBranchCounts!, 0L))
+                    : TimedAsync(() => reader.ProbeCommitCountsAsync(repoPath, branch, refs.DefaultRef, cancellationToken));
 
             var hooksMs = hooksTask != null ? (await hooksTask).Ms : 0;
             var countsMs = 0L;
@@ -207,10 +238,10 @@ public sealed class SyncRepositoryCommand(
             // version and lane); "tail" is hooks plus counts after it. Compare version and lane to see which one
             // the overlap waited for.
             logger?.LogDebug(
-                "SyncRepository timings for {RepoPath}: fetch={FetchMs}ms, overlap={OverlapMs}ms (version={VersionMs}ms, lane={LaneMs}ms, projects={ProjectsMs}ms), " +
-                "branchFallback={BranchFallbackMs}ms, headRepair={HeadRepairMs}ms, tail={TailMs}ms (hooks={HooksMs}ms, counts={CountsMs}ms), total={TotalMs}ms. Lane steps: {LaneSteps}",
-                repoPath, fetchMs, overlapMs, versionMs, refs.ElapsedMs, projectsMs,
-                branchFallbackMs, headRepairMs, tailMs, hooksMs, countsMs, ElapsedMs(totalStart), refs.StepTimings);
+                "SyncRepository timings for {RepoPath}: fetch={FetchMs}ms, overlap={OverlapMs}ms (version={VersionMs}ms, lane={LaneMs}ms [{LaneSource}], projects={ProjectsMs}ms), " +
+                "branchFallback={BranchFallbackMs}ms, headRepair={HeadRepairMs}ms, tail={TailMs}ms (hooks={HooksMs}ms, counts={CountsMs}ms [{CountsSource}]), total={TotalMs}ms. Lane steps: {LaneSteps}",
+                repoPath, fetchMs, overlapMs, versionMs, refs.ElapsedMs, refs.Source, projectsMs,
+                branchFallbackMs, headRepairMs, tailMs, hooksMs, countsMs, countsTask == null ? "none" : countsFromSnapshot ? "snapshot" : "git", ElapsedMs(totalStart), refs.StepTimings);
             return new SyncRepositoryResponse
             {
                 Success = true,
@@ -247,15 +278,93 @@ public sealed class SyncRepositoryCommand(
     }
 
     /// <summary>
-    /// Ref reads that need neither GitVersion's output nor the branch name, run as read intent so they can
-    /// overlap GitVersion, which holds the repository write lock. Must start only after fetch has finished.
-    /// The current branch is read here only when <paramref name="readCurrentBranch"/> is set (no version
-    /// provider will run, so its answer is the only one there is).
+    /// Ref reads that need neither GitVersion's output nor the branch name, taken without the repository lock so
+    /// they overlap GitVersion, which holds it. Must start only after fetch has finished. Writes the divergence
+    /// base file first (worktree-private GrayMoon state that hooks and later commands read back), then takes the
+    /// in-process snapshot. When the snapshot cannot read the repository the git CLI reads answer instead - the
+    /// one sanctioned fallback, logged as a warning and reported in the timing line. A folder without its own
+    /// <c>.git</c> is not read at all: git would walk up and answer for an enclosing repository.
     /// </summary>
     private async Task<SyncRefs> ReadRefsAsync(string repoPath, string? divergenceBaseBranch, bool readCurrentBranch, CancellationToken ct)
     {
         var laneStart = Stopwatch.GetTimestamp();
         var steps = new List<string>(8);
+        var lap = Stopwatch.GetTimestamp();
+        void Lap(string name)
+        {
+            steps.Add($"{name}={ElapsedMs(lap)}ms");
+            lap = Stopwatch.GetTimestamp();
+        }
+
+        await git.SetDivergenceBaseBranchAsync(repoPath, divergenceBaseBranch, ct);
+        Lap("divergenceBase");
+
+        // libgit2 does not honour GIT_DIR; git does, so a Worker started with it keeps the CLI reads.
+        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("GIT_DIR")))
+        {
+            if (!Directory.Exists(Path.Combine(repoPath, ".git")) && !File.Exists(Path.Combine(repoPath, ".git")))
+            {
+                logger?.LogWarning("{RepoPath} has no .git of its own; refs left unread rather than taken from an enclosing repository", repoPath);
+                return new SyncRefs(
+                    null, true, null, [], null, null, null, null, null, false, null, null,
+                    RefsSource.None, ElapsedMs(laneStart), string.Join(", ", steps));
+            }
+
+            try
+            {
+                var snapshot = await ReadSnapshotAsync(repoPath, divergenceBaseBranch, ct);
+                Lap($"snapshot(graph={snapshot.GraphCalculations})");
+                return new SyncRefs(
+                    snapshot.CurrentBranch,
+                    true,
+                    snapshot.CheckedOutTag,
+                    snapshot.Refs.Tags,
+                    snapshot.Refs.LocalBranches,
+                    snapshot.Refs.RemoteBranches,
+                    snapshot.Refs.DefaultOriginRef,
+                    snapshot.DefaultBehind,
+                    snapshot.DefaultAhead,
+                    !snapshot.Refs.OriginHeadResolved,
+                    snapshot.CurrentBranch,
+                    snapshot.CurrentBranchCounts,
+                    RefsSource.Snapshot,
+                    ElapsedMs(laneStart),
+                    string.Join(", ", steps));
+            }
+            catch (LocalGitReadException ex)
+            {
+                Lap("snapshot(failed)");
+                logger?.LogWarning(ex, "Local snapshot failed for {RepoPath}; falling back to git CLI reads", repoPath);
+            }
+        }
+
+        return await ReadRefsWithGitCliAsync(repoPath, divergenceBaseBranch, readCurrentBranch, laneStart, steps, ct);
+    }
+
+    /// <summary>
+    /// Takes the in-process snapshot off the calling thread (it is synchronous) and logs one Debug record for it.
+    /// The repository is opened and disposed inside the call.
+    /// </summary>
+    private async Task<LocalGitSnapshot> ReadSnapshotAsync(string repoPath, string? divergenceBaseBranch, CancellationToken ct)
+    {
+        var start = Stopwatch.GetTimestamp();
+        var snapshot = await Task.Run(() => snapshotReader.Read(repoPath, new LocalGitSnapshotRequest(divergenceBaseBranch), ct), ct);
+        logger?.LogDebug(
+            "Local snapshot for {RepoPath}: elapsed={ElapsedMs}ms, branch={Branch}, detached={IsDetached}, unborn={IsUnborn}, localBranches={LocalBranchCount}, " +
+            "remoteBranches={RemoteBranchCount}, tags={TagCount}, hasUpstream={HasUpstream}, originHeadResolved={OriginHeadResolved}, graphCalculations={GraphCalculations}",
+            repoPath, ElapsedMs(start), snapshot.CurrentBranch, snapshot.CurrentBranch == null, snapshot.IsHeadUnborn, snapshot.Refs.LocalBranches.Count,
+            snapshot.Refs.RemoteBranches.Count, snapshot.Refs.Tags.Count, snapshot.CurrentBranchCounts?.HasUpstream, snapshot.Refs.OriginHeadResolved, snapshot.GraphCalculations);
+        return snapshot;
+    }
+
+    /// <summary>
+    /// The git CLI read lane, as read intent so it overlaps GitVersion: the fallback for when the snapshot cannot
+    /// read the repository. The current branch is read here only when <paramref name="readCurrentBranch"/> is set
+    /// (no version provider will run, so its answer is the only one there is).
+    /// </summary>
+    private async Task<SyncRefs> ReadRefsWithGitCliAsync(
+        string repoPath, string? divergenceBaseBranch, bool readCurrentBranch, long laneStart, List<string> steps, CancellationToken ct)
+    {
         var lap = Stopwatch.GetTimestamp();
         void Lap(string name)
         {
@@ -334,9 +443,7 @@ public sealed class SyncRepositoryCommand(
             ? snapshot.DefaultOriginRef
             : await reader.GetDefaultBranchOriginRefAsync(repoPath, ct);
         Lap("defaultBranch");
-        await git.SetDivergenceBaseBranchAsync(repoPath, divergenceBaseBranch, ct);
         var divergenceRef = OriginDefaultRef.ToOriginBranchRef(divergenceBaseBranch) ?? defaultRef;
-        Lap("divergenceBase");
 
         int? defaultBehind = null;
         int? defaultAhead = null;
@@ -346,8 +453,9 @@ public sealed class SyncRepositoryCommand(
 
         // Only a listing that succeeded can say origin/HEAD is missing or dangling; when it failed nothing is known.
         return new SyncRefs(
-            currentBranch, currentTag, tags, localBranches, remoteBranches, defaultRef, defaultBehind, defaultAhead,
+            currentBranch, readCurrentBranch, currentTag, tags, localBranches, remoteBranches, defaultRef, defaultBehind, defaultAhead,
             snapshot is { OriginHeadResolved: false },
+            null, null, RefsSource.GitCli,
             ElapsedMs(laneStart), string.Join(", ", steps));
     }
 
@@ -356,13 +464,39 @@ public sealed class SyncRepositoryCommand(
     /// dangles, and the default branch (and the counts against it) is lost or silently wrong until it is repointed.
     /// This asks the remote and repoints it, then takes the default branch again, and the counts against it when
     /// they were taken against the default (a Feature's divergence base is unaffected). It runs after GitVersion
-    /// has finished because it writes a ref and so needs the repository write lock the version provider holds.
+    /// has finished because it writes a ref and so needs the repository write lock the version provider holds;
+    /// the snapshot has finished and released the repository by then. The repair is a git CLI mutation; the
+    /// re-read after it is a fresh snapshot when the lane used one (the checked-out branch's no-upstream counts
+    /// may have been taken against the old default, so they are taken again too), else the git CLI reads.
     /// Any failure leaves the refs as they were.
     /// </summary>
     private async Task<SyncRefs> RepairOriginHeadAsync(SyncRefs refs, string repoPath, string? divergenceBaseBranch, string? bearerToken, CancellationToken ct)
     {
         if (!await git.RepairOriginHeadAsync(repoPath, bearerToken, ct))
             return refs;
+
+        if (refs.Source == RefsSource.Snapshot)
+        {
+            try
+            {
+                var snapshot = await ReadSnapshotAsync(repoPath, divergenceBaseBranch, ct);
+                return refs with
+                {
+                    DefaultRef = snapshot.Refs.DefaultOriginRef,
+                    DefaultBehind = snapshot.DefaultBehind,
+                    DefaultAhead = snapshot.DefaultAhead,
+                    OriginHeadUnresolved = !snapshot.Refs.OriginHeadResolved,
+                    CountsBranch = snapshot.CurrentBranch,
+                    CurrentBranchCounts = snapshot.CurrentBranchCounts,
+                };
+            }
+            catch (LocalGitReadException ex)
+            {
+                // The counts may be against the old default: leave them to the CLI probe.
+                logger?.LogWarning(ex, "Local snapshot after the origin/HEAD repair failed for {RepoPath}; falling back to git CLI reads", repoPath);
+                refs = refs with { CountsBranch = null, CurrentBranchCounts = null };
+            }
+        }
 
         var defaultRef = await reader.GetDefaultBranchOriginRefAsync(repoPath, ct);
         if (defaultRef == refs.DefaultRef)

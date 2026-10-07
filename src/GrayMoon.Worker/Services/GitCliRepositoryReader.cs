@@ -238,7 +238,9 @@ public sealed class GitCliRepositoryReader(GitProcessRunner runner, ILogger<GitC
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
             return Array.Empty<string>();
 
-        var (exitCode, stdout, stderr) = await RunGitReadAsync("for-each-ref refs/heads --format=%(refname:short)", repoPath, ct);
+        // strip=2 is the branch name itself; refname:short would turn a branch that shares its name with a tag into
+        // "heads/<name>", which checks out as a detached HEAD.
+        var (exitCode, stdout, stderr) = await RunGitReadAsync("for-each-ref refs/heads --format=%(refname:strip=2)", repoPath, ct);
         if (exitCode != 0)
         {
             logger.LogWarning("Git for-each-ref refs/heads failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
@@ -259,15 +261,17 @@ public sealed class GitCliRepositoryReader(GitProcessRunner runner, ILogger<GitC
 
         // One listing over the three namespaces. The fields (tab separated; a ref name cannot contain a tab):
         //   %(HEAD)            "*" on the local branch HEAD is attached to, otherwise " " (also " " when detached)
-        //   %(refname)         full name, used only to tell the namespaces apart
-        //   %(refname:short)   what the single-purpose branch reads use, ambiguity quirks included
-        //   %(refname:strip=2) what "git tag" prints, and the branch name "git branch --show-current" prints
+        //   %(refname)         full name; tells the namespaces apart and gives the origin branch names
+        //   %(refname:strip=2) what "git tag" prints, and the local branch name "git branch --show-current" prints
         //   %(symref)          where a symbolic ref points; only refs/remotes/origin/HEAD is one that matters here,
         //                      and it is what the default branch is read from
+        // Branch names are the full names below refs/heads/ and refs/remotes/origin/, never git's disambiguated
+        // %(refname:short) ("heads/dup" when a tag is also called dup, "remotes/origin/x" when a local branch is
+        // called origin/x), so they can be checked out and compared as they are.
         // --sort=-creatordate is "git tag --sort=-creatordate" applied to every ref; only the tags' relative order
         // is used, and the branch lists are sorted below exactly as the single-purpose reads sort them.
         var (exitCode, stdout, stderr) = await RunGitReadAsync(
-            "for-each-ref --sort=-creatordate --format=%(HEAD)%09%(refname)%09%(refname:short)%09%(refname:strip=2)%09%(symref) refs/heads refs/remotes/origin refs/tags",
+            "for-each-ref --sort=-creatordate --format=%(HEAD)%09%(refname)%09%(refname:strip=2)%09%(symref) refs/heads refs/remotes/origin refs/tags",
             repoPath,
             ct);
         if (exitCode != 0)
@@ -277,7 +281,6 @@ public sealed class GitCliRepositoryReader(GitProcessRunner runner, ILogger<GitC
             return null;
         }
 
-        const string originPrefix = "origin/";
         const string remoteRefPrefix = "refs/remotes/origin/";
         var tags = new List<string>();
         var local = new List<string>();
@@ -293,22 +296,12 @@ public sealed class GitCliRepositoryReader(GitProcessRunner runner, ILogger<GitC
         foreach (var rawLine in (stdout ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries))
         {
             var parts = rawLine.TrimEnd('\r').Split('\t');
-            if (parts.Length != 5)
+            if (parts.Length != 4)
                 continue;
 
             var isHead = parts[0] == "*";
             var fullName = parts[1];
-            var shortName = parts[2].Trim();
-            var strippedName = parts[3].Trim();
-
-            if (fullName.StartsWith(remoteRefPrefix, StringComparison.Ordinal))
-            {
-                var remoteName = fullName[remoteRefPrefix.Length..];
-                if (remoteName == "HEAD")
-                    originHeadSymref = parts[4];
-                else if (remoteName.Length > 0)
-                    remoteBranchNames.Add(remoteName);
-            }
+            var strippedName = parts[2].Trim();
 
             if (fullName.StartsWith("refs/tags/", StringComparison.Ordinal))
             {
@@ -317,18 +310,22 @@ public sealed class GitCliRepositoryReader(GitProcessRunner runner, ILogger<GitC
             }
             else if (fullName.StartsWith("refs/heads/", StringComparison.Ordinal))
             {
-                if (!string.IsNullOrWhiteSpace(shortName))
-                    local.Add(shortName);
+                if (!string.IsNullOrWhiteSpace(strippedName))
+                    local.Add(strippedName);
                 if (isHead && !string.IsNullOrWhiteSpace(strippedName))
                     checkedOutBranch = strippedName;
             }
-            else if (fullName.StartsWith("refs/remotes/origin/", StringComparison.Ordinal))
+            else if (fullName.StartsWith(remoteRefPrefix, StringComparison.Ordinal))
             {
-                if (!string.IsNullOrWhiteSpace(shortName) && shortName.StartsWith(originPrefix, StringComparison.Ordinal))
+                var remoteName = fullName[remoteRefPrefix.Length..];
+                if (remoteName == "HEAD")
                 {
-                    var name = shortName.Substring(originPrefix.Length);
-                    if (!string.IsNullOrWhiteSpace(name) && name != "HEAD")
-                        remote.Add(name);
+                    originHeadSymref = parts[3];
+                }
+                else if (!string.IsNullOrWhiteSpace(remoteName))
+                {
+                    remoteBranchNames.Add(remoteName);
+                    remote.Add(remoteName);
                 }
             }
         }
@@ -350,18 +347,17 @@ public sealed class GitCliRepositoryReader(GitProcessRunner runner, ILogger<GitC
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
             return Array.Empty<string>();
 
-        var (exitCode, stdout, stderr) = await RunGitReadAsync("for-each-ref refs/remotes/origin --format=%(refname:short)", repoPath, ct);
+        // strip=3 is the name below refs/remotes/origin/; refname:short would turn it into "remotes/origin/<name>"
+        // when a local branch is literally called origin/<name>, and the branch would drop out of the list.
+        var (exitCode, stdout, stderr) = await RunGitReadAsync("for-each-ref refs/remotes/origin --format=%(refname:strip=3)", repoPath, ct);
         if (exitCode != 0)
         {
             logger.LogDebug("Git for-each-ref refs/remotes/origin failed for {RepoPath}. ExitCode={ExitCode}", repoPath, exitCode);
             return Array.Empty<string>();
         }
 
-        const string originPrefix = "origin/";
         return (stdout ?? "")
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(b => !string.IsNullOrWhiteSpace(b) && b.StartsWith(originPrefix, StringComparison.Ordinal))
-            .Select(b => b.Substring(originPrefix.Length))
             .Where(b => !string.IsNullOrWhiteSpace(b) && b != "HEAD")
             .OrderBy(b => b)
             .ToList();

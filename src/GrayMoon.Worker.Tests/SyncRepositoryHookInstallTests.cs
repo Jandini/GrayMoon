@@ -80,7 +80,7 @@ public sealed class SyncRepositoryHookInstallTests : IDisposable
     }
 
     private Task<SyncRepositoryResponse> SyncAsync(RepositoryOperationCapabilities capabilities)
-        => new SyncRepositoryCommand(_git, _reader, new CountingCsProjFileService(), CapabilityTestDoubles.RealFactory(_git))
+        => new SyncRepositoryCommand(_git, _reader, new LibGit2SharpLocalGitSnapshotReader(), new CountingCsProjFileService(), CapabilityTestDoubles.RealFactory(_git))
             .ExecuteAsync(new SyncRepositoryRequest
             {
                 WorkspaceRoot = _root,
