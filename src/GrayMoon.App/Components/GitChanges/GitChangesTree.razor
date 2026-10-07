@@ -53,6 +53,11 @@
                             <span class="git-changes-tree__count-badge">@row.Count</span>
                         }
                     }
+                    else if (row.IsDirectoryEntry)
+                    {
+                        <span title="@DirectoryEntryTitle">@row.Label</span>
+                        <span class="git-changes-tree__directory-hint text-muted" title="@DirectoryEntryTitle">untracked folder</span>
+                    }
                     else
                     {
                         @row.Label
@@ -116,13 +121,20 @@
     /// fans out to the whole selection when this is greater than 1.</summary>
     [Parameter] public int MultiSelectionCount { get; set; }
 
+    /// <summary>Why a directory entry has no actions: Git reports it as one unit and never lists files inside it.</summary>
+    internal const string DirectoryEntryTitle =
+        "Untracked folder that Git does not list file by file (usually a nested Git repository). " +
+        "Add it to .gitignore to hide it from Changes.";
+
     private bool IsSelected(GitChangesTreeRow row) =>
         SelectedRow != null && SelectedRow.Kind == GitChangesTreeRowKind.File && SelectedRow.Key == row.Key;
 
     private Task OnLabelClick(GitChangesTreeRow row, MouseEventArgs e) =>
         row.Kind == GitChangesTreeRowKind.File
             ? OnSelectFile.InvokeAsync(new GitChangesFileSelectEventArgs(row, e.CtrlKey || e.MetaKey, e.ShiftKey))
-            : OnToggleExpand.InvokeAsync(row);
+            : row.IsDirectoryEntry
+                ? Task.CompletedTask
+                : OnToggleExpand.InvokeAsync(row);
 
     private static string IconFor(GitChangesTreeRow row) => row.Kind switch
     {
@@ -195,6 +207,11 @@
 
     private RenderFragment RenderActions(GitChangesTreeRow row) => builder =>
     {
+        // A directory entry is not a file and not a folder of listed files: staging it would embed the nested
+        // repository, and discarding it would delete a whole repository, so no action is offered.
+        if (row.IsDirectoryEntry)
+            return;
+
         switch (row.Kind)
         {
             case GitChangesTreeRowKind.File:

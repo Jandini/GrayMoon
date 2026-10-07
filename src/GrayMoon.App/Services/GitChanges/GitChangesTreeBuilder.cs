@@ -44,6 +44,14 @@ public sealed record GitChangesTreeRow
 
     public bool HasChildren { get; init; }
     public bool IsExpanded { get; init; } = true;
+
+    /// <summary>
+    /// True for a Folder row that stands for one Git change entry naming a whole directory (a path ending in "/"), which
+    /// is how <c>git status --untracked-files=all</c> reports an untracked folder it does not descend into - in practice a
+    /// nested Git repository that the repository does not ignore. Such a row is never a file: no diff, no file actions,
+    /// nothing to expand. <see cref="FilePath"/> holds the entry's path (with the trailing "/").
+    /// </summary>
+    public bool IsDirectoryEntry { get; init; }
 }
 
 /// <summary>
@@ -59,6 +67,13 @@ public static class GitChangesTreeBuilder
     /// section/repo prefix leaves the folder's own repo-relative path.</summary>
     public static string FolderRelativePathOf(GitChangesTreeRow row) =>
         string.Join('/', row.Key.Split('/').Skip(2));
+
+    /// <summary>
+    /// True when a change entry names a directory rather than a file. Git marks those with a trailing "/" (an untracked
+    /// folder it does not list file by file, such as a nested repository). Node kind is decided from this, never from
+    /// whether a node happens to have children.
+    /// </summary>
+    public static bool IsDirectoryPath(string path) => path.EndsWith('/');
 
     public static IReadOnlyList<GitChangesTreeRow> Build(
         WorkspaceGitChangesView view,
@@ -169,16 +184,51 @@ public static class GitChangesTreeBuilder
         var folders = items
             .Where(i => i.Remaining.Length > 1)
             .GroupBy(i => i.Remaining[0])
-            .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
+            .ToList();
+        var folderNames = folders.Select(g => g.Key).ToHashSet(StringComparer.Ordinal);
+
+        // A directory entry ("Child/") becomes a Directory-style Folder row. If the same folder already exists as a parent
+        // of other entries, that folder row wins and the directory entry adds nothing; it is never turned into a file.
+        var directoryEntries = items
+            .Where(i => i.Remaining.Length == 1 && IsDirectoryPath(i.Entry.Path) && !folderNames.Contains(i.Remaining[0]))
+            .GroupBy(i => i.Remaining[0])
+            .Select(g => g.First())
+            .ToList();
 
         var files = items
-            .Where(i => i.Remaining.Length <= 1)
+            .Where(i => i.Remaining.Length == 1 && !IsDirectoryPath(i.Entry.Path))
             .Select(i => i.Entry)
             .OrderBy(e => e.Path, StringComparer.OrdinalIgnoreCase);
 
-        foreach (var group in folders)
+        var folderNodes = folders
+            .Select(g => (Name: g.Key, Group: (IGrouping<string, (WorkspaceGitChangeEntryView Entry, string[] Remaining)>?)g, DirectoryEntry: (WorkspaceGitChangeEntryView?)null))
+            .Concat(directoryEntries.Select(d => (Name: d.Remaining[0], Group: (IGrouping<string, (WorkspaceGitChangeEntryView Entry, string[] Remaining)>?)null, DirectoryEntry: (WorkspaceGitChangeEntryView?)d.Entry)))
+            .OrderBy(n => n.Name, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (name, group, directoryEntry) in folderNodes)
         {
-            var folderKey = $"{parentKey}/{group.Key}";
+            if (directoryEntry is not null)
+            {
+                rows.Add(new GitChangesTreeRow
+                {
+                    Key = $"{parentKey}/{name}",
+                    Kind = GitChangesTreeRowKind.Folder,
+                    Depth = depth,
+                    Label = name,
+                    IsStagedSection = isStagedSection,
+                    WorkspaceRepositoryId = repo.WorkspaceRepositoryId,
+                    RepositoryName = repo.RepositoryName,
+                    FilePath = directoryEntry.Path,
+                    IndexChange = directoryEntry.IndexChange,
+                    WorktreeChange = directoryEntry.WorktreeChange,
+                    HasChildren = false,
+                    IsExpanded = false,
+                    IsDirectoryEntry = true,
+                });
+                continue;
+            }
+
+            var folderKey = $"{parentKey}/{name}";
             var expanded = !collapsedKeys.Contains(folderKey);
 
             rows.Add(new GitChangesTreeRow
@@ -186,7 +236,7 @@ public static class GitChangesTreeBuilder
                 Key = folderKey,
                 Kind = GitChangesTreeRowKind.Folder,
                 Depth = depth,
-                Label = group.Key,
+                Label = name,
                 IsStagedSection = isStagedSection,
                 WorkspaceRepositoryId = repo.WorkspaceRepositoryId,
                 RepositoryName = repo.RepositoryName,
@@ -199,7 +249,7 @@ public static class GitChangesTreeBuilder
                 continue;
             }
 
-            var nested = group.Select(i => (i.Entry, Remaining: i.Remaining.Skip(1).ToArray())).ToList();
+            var nested = group!.Select(i => (i.Entry, Remaining: i.Remaining.Skip(1).ToArray())).ToList();
             AppendLevel(rows, folderKey, depth + 1, isStagedSection, repo, nested, collapsedKeys);
         }
 

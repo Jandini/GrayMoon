@@ -143,7 +143,7 @@ Status: **implemented and committed** (2026-10-08)
 
 ## 3. BUG - Git Changes directory rendering
 
-Status: not started (root cause found)
+Status: **implemented and committed** (2026-10-08)
 
 ### Root cause
 
@@ -161,8 +161,25 @@ Reproduced:
 
 In the current workspace these folders are now listed in the root `.gitignore`, so they only appear when the ignore entry is missing.
 
-### Plan
+### What was done
 
-- Model: carry an explicit "is directory" flag for entries whose path ends with `/` (nested repository / directory entry).
-- Tree builder: render such entries as Folder-kind nodes (repository-directory style) and never with file actions; never let a file row replace a folder row of the same name.
-- Tests: tree-building cases from the feedback + integration test with a temporary workspace repo containing a tracked root file, nested tracked file, ignored child repo and a non-ignored child repo.
+- `GitChangesTreeBuilder` decides node kind from the entry itself: a path ending in `/` (`IsDirectoryPath`) becomes an explicit directory row (`GitChangesTreeRow.IsDirectoryEntry`, Folder kind, no children, `FilePath` = the entry path). It is never inferred from "has children".
+- If the same name already exists as a parent folder of other entries, the folder row wins; a directory entry never becomes a file row.
+- `GitChangesTree`: directory rows show a folder icon, an "untracked folder" hint with a tooltip (usually a nested Git repository; add it to `.gitignore` to hide it), no status letter, no diff on click and no Stage / Undo actions (staging would embed the nested repository, Undo would delete it). Copy path still copies `Name/`.
+- Ignored child repositories were already absent (Git does not report them); nothing reintroduces them.
+- No schema or Worker change: the trailing slash is preserved end to end, so the fix lives at the tree / model layer.
+
+### Tests added
+
+- `GitChangesDirectoryEntryTests`: nested file creates parent folders; `GrayMoon.Release/` and `GrayMoon.wiki/` render as directories, not files; a parent folder is not replaced by a same-named entry; tracked files beside repository directories (folders first, then files); nested directory entry; copy-path round trip; trailing-slash detection; integration test with a real temporary Workspace repository (tracked root file, tracked nested `.claude` file, ignored child repo, non-ignored child repo) run through real `git status` and `GitPorcelainV2Parser`.
+
+### Notes
+
+- Unchanged (out of scope): folder-level Stage on a parent folder passes the folder as a pathspec, so it would still stage a nested repository inside it as Git does on the command line.
+- Full run: Common 261, Worker 561 (+1 pre-existing skip), App 1175 - all passed; build 0 warnings.
+
+### Manual test checklist
+
+1. Remove `GrayMoon.Release/` from the Workspace `.gitignore`: Changes shows `GrayMoon.Release` as a folder with "untracked folder", no actions, nothing opens on click.
+2. Put the ignore line back: the entry disappears.
+3. Normal file changes in the Workspace and in regular repositories behave exactly as before.
