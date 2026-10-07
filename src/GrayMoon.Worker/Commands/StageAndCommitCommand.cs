@@ -5,7 +5,7 @@ using GrayMoon.Worker.Services;
 
 namespace GrayMoon.Worker.Commands;
 
-public sealed class StageAndCommitCommand(IGitService git) : ICommandHandler<StageAndCommitRequest, StageAndCommitResponse>
+public sealed class StageAndCommitCommand(IGitService git, IGitRepositoryReader reader) : ICommandHandler<StageAndCommitRequest, StageAndCommitResponse>
 {
     public async Task<StageAndCommitResponse> ExecuteAsync(StageAndCommitRequest request, CancellationToken cancellationToken = default)
     {
@@ -14,13 +14,13 @@ public sealed class StageAndCommitCommand(IGitService git) : ICommandHandler<Sta
         var commitMessage = request.CommitMessage ?? throw new ArgumentException("commitMessage required");
         var pathsToStage = request.PathsToStage ?? [];
 
-        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
+        var workspacePath = WorkerRepositoryPaths.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
 
-        if (!git.DirectoryExists(repoPath))
+        if (!Directory.Exists(repoPath))
             return new StageAndCommitResponse { Success = false, ErrorMessage = "Repository not found." };
 
-        var checkedOutTag = await git.GetCheckedOutTagAsync(repoPath, cancellationToken);
+        var checkedOutTag = await reader.GetCheckedOutTagAsync(repoPath, cancellationToken);
         if (checkedOutTag != null)
             return new StageAndCommitResponse { Success = true, Committed = false };
 

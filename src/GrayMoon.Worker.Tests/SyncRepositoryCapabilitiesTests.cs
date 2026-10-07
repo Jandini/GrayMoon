@@ -21,12 +21,14 @@ public sealed class SyncRepositoryCapabilitiesTests : IDisposable
 {
     private readonly string _root = Directory.CreateTempSubdirectory("graymoon-caps-").FullName;
     private readonly GitService _git;
+    private GitCliRepositoryReader _reader = null!;
 
     public SyncRepositoryCapabilitiesTests()
     {
         var commandLine = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
         var runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
-        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner);
+        _reader = new GitCliRepositoryReader(runner, NullLogger<GitCliRepositoryReader>.Instance);
+        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, _reader);
     }
 
     public void Dispose()
@@ -149,7 +151,7 @@ public sealed class SyncRepositoryCapabilitiesTests : IDisposable
     {
         var repoPath = await CloneCommittedRepositoryAsync();
         var (projectScanner, versionProviders) = NewDoubles();
-        var probe = new RepositoryStateProbe(_git, projectScanner, versionProviders);
+        var probe = new RepositoryStateProbe(_reader, projectScanner, versionProviders);
 
         var capture = await probe.CaptureAsync(repoPath, new RepositoryStateProbeOptions
         {
@@ -172,7 +174,7 @@ public sealed class SyncRepositoryCapabilitiesTests : IDisposable
     {
         var repoPath = await CloneCommittedRepositoryAsync();
         var (projectScanner, versionProviders) = NewDoubles();
-        var probe = new RepositoryStateProbe(_git, projectScanner, versionProviders);
+        var probe = new RepositoryStateProbe(_reader, projectScanner, versionProviders);
 
         var capture = await probe.CaptureAsync(repoPath, new RepositoryStateProbeOptions
         {
@@ -192,7 +194,7 @@ public sealed class SyncRepositoryCapabilitiesTests : IDisposable
         ICsProjFileService projectScanner,
         IRepositoryVersionProviderFactory versionProviders,
         RepositoryOperationCapabilities? capabilities)
-        => new SyncRepositoryCommand(_git, projectScanner, versionProviders).ExecuteAsync(new SyncRepositoryRequest
+        => new SyncRepositoryCommand(_git, _reader, projectScanner, versionProviders).ExecuteAsync(new SyncRepositoryRequest
         {
             WorkspaceRoot = _root,
             WorkspaceName = "ws",

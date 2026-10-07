@@ -15,15 +15,25 @@ internal static class GitVersionBranch
     /// Null for a detached HEAD, which callers already treat as "no branch".
     /// </summary>
     public static async Task<string?> ResolveBranchAsync(
-        this IGitService git,
+        this IGitRepositoryReader reader,
         GitVersionResult? versionResult,
         string repoPath,
         CancellationToken cancellationToken)
     {
-        var fromGitVersion = versionResult?.BranchName ?? versionResult?.EscapedBranchName;
+        var fromGitVersion = Choose(versionResult, null);
         if (!string.IsNullOrWhiteSpace(fromGitVersion))
             return fromGitVersion;
 
-        return await git.GetCurrentBranchNameAsync(repoPath, cancellationToken);
+        return Choose(null, await reader.GetCurrentBranchNameAsync(repoPath, cancellationToken));
+    }
+
+    /// <summary>
+    /// Picks the branch name: GitVersion's when it returned a non-blank one, otherwise <paramref name="gitBranch"/>
+    /// (read from git). An empty GitVersion <c>BranchName</c> falls through to git, not to <c>EscapedBranchName</c>.
+    /// </summary>
+    public static string? Choose(GitVersionResult? versionResult, string? gitBranch)
+    {
+        var fromGitVersion = versionResult?.BranchName ?? versionResult?.EscapedBranchName;
+        return !string.IsNullOrWhiteSpace(fromGitVersion) ? fromGitVersion : gitBranch;
     }
 }

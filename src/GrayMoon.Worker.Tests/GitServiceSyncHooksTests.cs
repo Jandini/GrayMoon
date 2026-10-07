@@ -18,13 +18,15 @@ public sealed class GitServiceSyncHooksTests : IDisposable
     private readonly TempGitRepositoryFixture _repo = new();
     private readonly CapturingLogger<GitService> _logger = new();
     private readonly GitService _git;
+    private GitCliRepositoryReader _reader = null!;
     private readonly List<string> _cleanup = [];
 
     public GitServiceSyncHooksTests()
     {
         var inner = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
         var runner = new GitProcessRunner(inner, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
-        _git = new GitService(Options.Create(new WorkerOptions()), _logger, runner);
+        _reader = new GitCliRepositoryReader(runner, NullLogger<GitCliRepositoryReader>.Instance);
+        _git = new GitService(Options.Create(new WorkerOptions()), _logger, runner, _reader);
     }
 
     public void Dispose()

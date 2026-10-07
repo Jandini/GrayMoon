@@ -5,7 +5,7 @@ using GrayMoon.Worker.Services;
 
 namespace GrayMoon.Worker.Commands;
 
-public sealed class GetGitVersionAtDefaultTipCommand(IGitService git, IRepositoryVersionProvider versionProvider)
+public sealed class GetGitVersionAtDefaultTipCommand(IGitRepositoryReader reader, IRepositoryVersionProvider versionProvider)
     : ICommandHandler<GetGitVersionAtDefaultTipRequest, GetGitVersionAtDefaultTipResponse>
 {
     public async Task<GetGitVersionAtDefaultTipResponse> ExecuteAsync(
@@ -17,9 +17,9 @@ public sealed class GetGitVersionAtDefaultTipCommand(IGitService git, IRepositor
         if (string.IsNullOrWhiteSpace(request.WorkspaceRoot))
             throw new ArgumentException("workspaceRoot required");
 
-        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
+        var workspacePath = WorkerRepositoryPaths.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
-        if (!git.DirectoryExists(repoPath))
+        if (!Directory.Exists(repoPath))
         {
             return new GetGitVersionAtDefaultTipResponse
             {
@@ -28,7 +28,7 @@ public sealed class GetGitVersionAtDefaultTipCommand(IGitService git, IRepositor
             };
         }
 
-        var defaultBranch = await git.GetDefaultBranchNameAsync(repoPath, cancellationToken);
+        var defaultBranch = await reader.GetDefaultBranchNameAsync(repoPath, cancellationToken);
         if (string.IsNullOrWhiteSpace(defaultBranch))
         {
             return new GetGitVersionAtDefaultTipResponse
@@ -38,7 +38,7 @@ public sealed class GetGitVersionAtDefaultTipCommand(IGitService git, IRepositor
             };
         }
 
-        var sha = await git.RevParseAsync(repoPath, $"origin/{defaultBranch}", cancellationToken);
+        var sha = await reader.RevParseAsync(repoPath, $"origin/{defaultBranch}", cancellationToken);
         if (string.IsNullOrWhiteSpace(sha))
         {
             return new GetGitVersionAtDefaultTipResponse

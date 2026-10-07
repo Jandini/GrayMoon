@@ -4,7 +4,7 @@ using GrayMoon.Worker.Jobs.Response;
 using GrayMoon.Common.FileVersions;
 using GrayMoon.Worker.Services;
 namespace GrayMoon.Worker.Commands;
-public sealed class UpdateFileVersionsCommand(IGitService git) : ICommandHandler<UpdateFileVersionsRequest, UpdateFileVersionsResponse>
+public sealed class UpdateFileVersionsCommand() : ICommandHandler<UpdateFileVersionsRequest, UpdateFileVersionsResponse>
 {
     public async Task<UpdateFileVersionsResponse> ExecuteAsync(UpdateFileVersionsRequest request, CancellationToken cancellationToken = default)
     {
@@ -15,7 +15,7 @@ public sealed class UpdateFileVersionsCommand(IGitService git) : ICommandHandler
         var tokenValues = request.TokenValues ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (string.IsNullOrWhiteSpace(versionPattern))
             return new UpdateFileVersionsResponse { UpdatedCount = 0 };
-        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
+        var workspacePath = WorkerRepositoryPaths.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
         var fullFilePath = Path.Combine(repoPath, filePath.Replace('/', Path.DirectorySeparatorChar));
         if (!File.Exists(fullFilePath))

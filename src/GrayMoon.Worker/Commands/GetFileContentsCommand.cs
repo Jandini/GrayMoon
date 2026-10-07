@@ -7,7 +7,7 @@ using GrayMoon.Worker.Services;
 
 namespace GrayMoon.Worker.Commands;
 
-public sealed class GetFileContentsCommand(IGitService git) : ICommandHandler<GetFileContentsRequest, GetFileContentsResponse>
+public sealed class GetFileContentsCommand() : ICommandHandler<GetFileContentsRequest, GetFileContentsResponse>
 {
     private const long MaxBase64Bytes = 2 * 1024 * 1024;
 
@@ -18,7 +18,7 @@ public sealed class GetFileContentsCommand(IGitService git) : ICommandHandler<Ge
         var filePath = request.FilePath ?? throw new ArgumentException("filePath required");
         var workspaceRoot = request.WorkspaceRoot ?? throw new ArgumentException("workspaceRoot required");
 
-        var workspacePath = git.GetWorkspacePath(workspaceRoot, workspaceName);
+        var workspacePath = WorkerRepositoryPaths.GetWorkspacePath(workspaceRoot, workspaceName);
         var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
 
         var validation = GitRepositoryPathValidator.Validate(repoPath, filePath);

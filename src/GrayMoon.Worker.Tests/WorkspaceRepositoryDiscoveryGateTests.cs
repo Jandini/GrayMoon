@@ -18,12 +18,14 @@ public sealed class WorkspaceRepositoryDiscoveryGateTests : IDisposable
 {
     private readonly string _root = Directory.CreateTempSubdirectory("graymoon-gate-").FullName;
     private readonly GitService _git;
+    private GitCliRepositoryReader _reader = null!;
 
     public WorkspaceRepositoryDiscoveryGateTests()
     {
         var commandLine = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
         var runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
-        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner);
+        _reader = new GitCliRepositoryReader(runner, NullLogger<GitCliRepositoryReader>.Instance);
+        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, _reader);
     }
 
     public void Dispose()
@@ -73,7 +75,7 @@ public sealed class WorkspaceRepositoryDiscoveryGateTests : IDisposable
         await CloneCommittedRepositoryAsync(cloneIntoWorkspaceRoot: false);
         var repoPath = Path.Combine(_root, "ws", "repo");
         var scanner = new CountingCsProjFileService();
-        var probe = new RepositoryStateProbe(_git, scanner, CapabilityTestDoubles.RealFactory(_git));
+        var probe = new RepositoryStateProbe(_reader, scanner, CapabilityTestDoubles.RealFactory(_git));
 
         var capture = await probe.CaptureAsync(repoPath, new RepositoryStateProbeOptions
         {
@@ -88,7 +90,7 @@ public sealed class WorkspaceRepositoryDiscoveryGateTests : IDisposable
 
     private Task<GrayMoon.Worker.Jobs.Response.SyncRepositoryResponse> SyncAsync(
         CountingCsProjFileService scanner, string repositoryName, string? workspaceRepositoryName)
-        => new SyncRepositoryCommand(_git, scanner, CapabilityTestDoubles.RealFactory(_git)).ExecuteAsync(new SyncRepositoryRequest
+        => new SyncRepositoryCommand(_git, _reader, scanner, CapabilityTestDoubles.RealFactory(_git)).ExecuteAsync(new SyncRepositoryRequest
         {
             WorkspaceRoot = _root,
             WorkspaceName = "ws",

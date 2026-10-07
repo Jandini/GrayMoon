@@ -1,11 +1,11 @@
-﻿using GrayMoon.Worker.Models;
+using GrayMoon.Worker.Models;
+using GrayMoon.Worker.Services;
 using GrayMoon.Common.Git;
 
 namespace GrayMoon.Worker.Abstractions;
 
 public interface IGitService
 {
-    string GetWorkspacePath(string root, string workspaceName);
     Task<bool> CloneAsync(string workingDir, string cloneUrl, string? bearerToken, CancellationToken ct);
     Task AddSafeDirectoryAsync(string repoPath, CancellationToken ct);
     Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, CancellationToken ct);
@@ -20,19 +20,6 @@ public interface IGitService
     /// specific commit (e.g. tip of <c>origin/main</c>) without checking it out.
     /// </summary>
     Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, bool nonNormalize, string? commitSha, CancellationToken ct);
-    /// <summary>Gets the current branch name (e.g. "main") with a single git call. Use instead of GetVersionAsync when only branch name is needed.</summary>
-    Task<string?> GetCurrentBranchNameAsync(string repoPath, CancellationToken ct);
-    /// <summary>Returns the full SHA of HEAD via <c>git rev-parse HEAD</c>, or null when the repo is missing/unborn or the command fails.</summary>
-    Task<string?> GetHeadCommitAsync(string repoPath, CancellationToken ct);
-    /// <summary>
-    /// Returns short names of local (<c>refs/heads/&lt;name&gt;</c>) and remote-tracking (<c>refs/remotes/*/&lt;name&gt;</c>)
-    /// refs that collide with <paramref name="branchName"/>, including refs nested under it (e.g. <c>name/sub</c>).
-    /// Empty when none exist or the repository cannot be read.
-    /// </summary>
-    Task<IReadOnlyList<string>> FindBranchCollisionsAsync(string repoPath, string branchName, CancellationToken ct);
-    /// <summary>Returns the full SHA for <paramref name="rev"/> via <c>git rev-parse</c> (e.g. <c>origin/main</c>), or null on failure.</summary>
-    Task<string?> RevParseAsync(string repoPath, string rev, CancellationToken ct);
-    Task<string?> GetRemoteOriginUrlAsync(string repoPath, CancellationToken ct);
     /// <summary>Fetches from origin; when <paramref name="includeTags"/> is true, fetches tags as well. Returns (success, errorMessage).</summary>
     Task<(bool Success, string? ErrorMessage)> FetchAsync(string repoPath, bool includeTags, string? bearerToken, CancellationToken ct);
     /// <summary>
@@ -40,18 +27,6 @@ public interface IGitService
     /// instead of fetching all remote branches and tags. Returns (success, errorMessage).
     /// </summary>
     Task<(bool Success, string? ErrorMessage)> FetchMinimalAsync(string repoPath, string branchName, string? defaultBranchOriginRef, string? bearerToken, CancellationToken ct, bool skipUpstreamCheck = false);
-    /// <summary>
-    /// Returns (outgoing count, incoming count, hasUpstream) for the current branch vs its upstream.
-    /// When the branch has no upstream (or the remote upstream ref is missing): if the worktree has a
-    /// Feature divergence base, outgoing is ahead of that local parent branch; otherwise outgoing is
-    /// ahead of <paramref name="defaultBranchOriginRef"/> / the default origin branch. Incoming is null
-    /// and hasUpstream is false in those cases.
-    /// </summary>
-    Task<(int? Outgoing, int? Incoming, bool HasUpstream)> GetCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct, bool skipUpstreamCheck = false);
-    /// <summary>Same work as <see cref="GetCommitCountsAsync"/> but also reports whether the counts and the upstream flag could be determined at all, so callers can leave persisted values alone instead of overwriting them with nulls after a failed git command.</summary>
-    Task<CommitCountsProbeResult> ProbeCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct, bool skipUpstreamCheck = false);
-    /// <summary>Returns (behind, ahead, defaultBranchName) for the current branch vs the default branch. DefaultBranchName is without "origin/" prefix. When <paramref name="defaultBranchOriginRef"/> is provided, uses it instead of resolving.</summary>
-    Task<(int? DefaultBehind, int? DefaultAhead, string? DefaultBranchName)> GetCommitCountsVsDefaultAsync(string repoPath, string? defaultBranchOriginRef, CancellationToken ct);
     /// <summary>Pulls from origin. Returns (success, mergeConflict, errorMessage). When <paramref name="skipHooks"/> is true, hooks are disabled for the pull (orchestrated flows that already recompute and persist commit counts themselves).</summary>
     Task<(bool Success, bool MergeConflict, string? ErrorMessage)> PullAsync(string repoPath, string branchName, string? bearerToken, CancellationToken ct, bool skipHooks = false);
     /// <summary>Pushes to origin. When setTracking is true, uses -u so the branch is upstreamed even when there are no commits to push. Returns (success, errorMessage).</summary>
@@ -65,10 +40,6 @@ public interface IGitService
     /// resolve; the caller must NOT abort - the user resolves in their IDE then commits.
     /// </summary>
     Task<(bool Success, bool HasConflicts, IReadOnlyList<string> ConflictFiles, string? ErrorMessage)> MergeFromRemoteAsync(string repoPath, string remoteBranch, CancellationToken ct);
-    /// <summary>Gets all local branch names (without 'origin/' prefix).</summary>
-    Task<IReadOnlyList<string>> GetLocalBranchesAsync(string repoPath, CancellationToken ct);
-    /// <summary>Gets all remote branch names from local refs (refs/remotes/origin). Use after fetch to avoid ls-remote network call.</summary>
-    Task<IReadOnlyList<string>> GetRemoteBranchesFromRefsAsync(string repoPath, CancellationToken ct);
     /// <summary>Gets all remote branch names (without 'origin/' prefix). Uses ls-remote; for post-fetch use <see cref="GetRemoteBranchesFromRefsAsync"/>.</summary>
     Task<IReadOnlyList<string>> GetRemoteBranchesAsync(string repoPath, string? bearerToken, CancellationToken ct);
     /// <summary>Checks out the specified branch. Returns (success, errorMessage). When <paramref name="skipHooks"/> is true, hooks are disabled for the checkout (orchestrated flows such as return-to-default).</summary>
@@ -77,30 +48,15 @@ public interface IGitService
     Task<(bool Success, string? ErrorMessage)> CreateBranchAsync(string repoPath, string newBranchName, string baseBranchName, CancellationToken ct, bool skipHooks = false);
     /// <summary>Deletes a local or remote branch. Returns (success, errorMessage). For remote, runs git push origin --delete. For local, when <paramref name="force"/> is true, uses git branch -D. When <paramref name="skipHooks"/> is true, hooks are disabled for the remote delete, so the pre-push hook does not queue a sync for a branch the caller is about to leave behind. When deleting a remote branch, pass <paramref name="bearerToken"/> so private remotes authenticate the same way as fetch/pull/push.</summary>
     Task<(bool Success, string? ErrorMessage)> DeleteBranchAsync(string repoPath, string branchName, bool isRemote, bool force, CancellationToken ct, bool skipHooks = false, string? bearerToken = null, string? expectedSha = null);
-    /// <summary>Gets the default branch name (e.g., "main" or "master") without "origin/" prefix.</summary>
-    Task<string?> GetDefaultBranchNameAsync(string repoPath, CancellationToken ct);
-    /// <summary>Gets all tag names in the repository (newest first when supported, then alphabetical).</summary>
-    Task<IReadOnlyList<string>> GetTagsAsync(string repoPath, CancellationToken ct);
     /// <summary>Fetches only tags from origin (git fetch origin --tags). Does not touch branches. Returns (success, errorMessage).</summary>
     Task<(bool Success, string? ErrorMessage)> FetchTagsAsync(string repoPath, string? bearerToken, CancellationToken ct);
     /// <summary>Checks out the specified tag (detached HEAD). Returns (success, errorMessage).</summary>
     Task<(bool Success, string? ErrorMessage)> CheckoutTagAsync(string repoPath, string tagName, CancellationToken ct);
-    /// <summary>Returns the tag name HEAD currently points to when the repo is in a detached HEAD state AND that commit is the exact tip of a tag; otherwise null. Uses git symbolic-ref + describe --tags --exact-match.</summary>
-    Task<string?> GetCheckedOutTagAsync(string repoPath, CancellationToken ct);
-    /// <summary>Gets the default branch origin ref (e.g., "origin/main") for passing to GetCommitCountsAsync/GetCommitCountsVsDefaultAsync to avoid resolving twice.</summary>
-    Task<string?> GetDefaultBranchOriginRefAsync(string repoPath, CancellationToken ct);
-    /// <summary>
-    /// Builds <c>origin/&lt;branch&gt;</c> for an ahead/behind comparison base. Returns null when
-    /// <paramref name="branchName"/> is null/whitespace. Accepts a name already prefixed with <c>origin/</c>.
-    /// </summary>
-    string? ToOriginBranchRef(string? branchName);
     /// <summary>
     /// Persists or clears the worktree-local divergence base branch (Feature PR parent). Stored under the
     /// worktree-specific git dir so linked Feature worktrees do not share Workspace state. Pass null/empty to clear.
     /// </summary>
     Task SetDivergenceBaseBranchAsync(string repoPath, string? divergenceBaseBranch, CancellationToken ct);
-    /// <summary>Reads the worktree-local divergence base branch name, or null when unset (hooks then use default).</summary>
-    Task<string?> GetDivergenceBaseBranchAsync(string repoPath, CancellationToken ct);
     /// <summary>Stages the given paths (relative to repo root) and creates a commit with the given message. Returns (success, committed, errorMessage). When <paramref name="skipHooks"/> is true, hooks are disabled for add and commit (orchestrated flows such as dependency update that persist state themselves).</summary>
     Task<(bool Success, bool Committed, string? ErrorMessage)> StageAndCommitAsync(string repoPath, IReadOnlyList<string> pathsToStage, string commitMessage, CancellationToken ct, bool skipHooks = false);
     /// <summary>Resets the current branch to origin/<paramref name="branchName"/>. When <paramref name="keepChanges"/> is true uses --mixed (changes remain in working tree); otherwise --hard. If the remote branch does not exist, pushes it upstream first using <paramref name="bearerToken"/>. Returns (success, errorMessage).</summary>
@@ -113,13 +69,14 @@ public interface IGitService
     Task<(bool Success, string? Error)> AddRemoteAsync(string repoPath, string name, string url, CancellationToken ct);
     /// <summary>Returns the remote HEAD branch name (from <c>git ls-remote --symref origin HEAD</c>), or null when the remote is empty or unreachable.</summary>
     Task<string?> GetRemoteDefaultBranchAsync(string repoPath, string? bearerToken, CancellationToken ct);
+    /// <summary>
+    /// Points <c>refs/remotes/origin/HEAD</c> at the remote's current default branch (asked with <c>ls-remote --symref</c>, set with <c>git remote set-head origin &lt;branch&gt;</c>). Meant for when it is missing or dangling, which a fetch never repairs. Returns true only when it was repointed. Never throws for a failed lookup or a refused <c>set-head</c>; after an attempt that did not repair it, the same repository is not asked again for a while, so a remote that cannot answer does not cost a round trip on every sync.
+    /// </summary>
+    Task<bool> RepairOriginHeadAsync(string repoPath, string? bearerToken, CancellationToken ct);
     /// <summary>Runs <c>git checkout -b &lt;branch&gt; --track origin/&lt;branch&gt;</c>; the error is git's own message verbatim.</summary>
     Task<(bool Success, string? Error)> CheckoutTrackingAsync(string repoPath, string branch, CancellationToken ct);
     /// <summary>Points HEAD at an unborn branch with <c>git symbolic-ref HEAD refs/heads/&lt;branch&gt;</c>.</summary>
     Task<(bool Success, string? Error)> SetUnbornHeadAsync(string repoPath, string branch, CancellationToken ct);
-    void CreateDirectory(string path);
-    bool DirectoryExists(string path);
-    string[] GetDirectories(string path);
     /// <summary>
     /// Installs the shared sync hooks (post-commit/post-checkout/post-merge/post-update/pre-push) once
     /// per common Git directory. Safe to call for a linked worktree (Feature) checkout - resolves the
@@ -128,64 +85,7 @@ public interface IGitService
     /// </summary>
     Task WriteSyncHooksAsync(string repoPath, int workspaceId, int repositoryId, CancellationToken ct);
 
-    /// <summary>Lists worktrees for the repository at <paramref name="mainRepositoryPath"/> via <c>git worktree list --porcelain</c>.</summary>
-    Task<(bool Success, IReadOnlyList<GitWorktreeInfo> Worktrees, string? ErrorCode, string? ErrorMessage)> ListWorktreesAsync(
-        string mainRepositoryPath,
-        CancellationToken ct);
 
-    /// <summary>
-    /// Creates a linked worktree with a new branch from <paramref name="baseCommitSha"/> (offline-safe), or a
-    /// detached worktree at that commit when <paramref name="branchName"/> is null.
-    /// Never passes <c>--force</c>. Idempotent when the expected path already has the expected branch
-    /// (or, when detached, is already detached at <paramref name="baseCommitSha"/>).
-    /// </summary>
-    Task<(bool Success, GitWorktreeInfo? Worktree, bool AlreadyExisted, string? ErrorCode, string? ErrorMessage)> CreateWorktreeAsync(
-        string mainRepositoryPath,
-        string worktreePath,
-        string? branchName,
-        string baseCommitSha,
-        CancellationToken ct);
 
-    /// <summary>
-    /// Removes a linked worktree. When <paramref name="force"/> is false uses a clean remove;
-    /// force is only for callers that have already authorized discard of dirty state.
-    /// After the Git-level remove (or when the path was already unregistered), if the worktree
-    /// folder still has files, deletes them with a custom walk (retries, reparse-point-safe) only
-    /// when every safety guard passes for <paramref name="featureRootPath"/> and
-    /// <paramref name="featureStorageRoot"/>; otherwise the leftover is only reported.
-    /// When <paramref name="featureRootPath"/> becomes empty afterward, it is removed too.
-    /// Without <paramref name="featureRootPath"/> and <paramref name="featureStorageRoot"/>, no
-    /// residue is deleted, matching today's behaviour for an old caller.
-    /// When <paramref name="unlock"/> is true, runs <c>git worktree unlock</c> before the remove, so a
-    /// locked worktree (<c>git worktree lock</c>) can be removed (D5). Defaults to false, matching
-    /// today's behaviour for an old caller.
-    /// </summary>
-    Task<(bool Success, bool AlreadyRemoved, string? ErrorCode, string? ErrorMessage, WorktreeResidueResult Residue)> RemoveWorktreeAsync(
-        string mainRepositoryPath,
-        string worktreePath,
-        bool force,
-        CancellationToken ct,
-        string? featureRootPath = null,
-        string? featureStorageRoot = null,
-        bool unlock = false);
 
-    /// <summary>
-    /// Reports everything removal needs to know about one worktree, checked live: registration,
-    /// existence, lock state, dirty state, and commit counts vs upstream and the default branch.
-    /// Returns facts only (no exception) even when the worktree folder does not exist. When
-    /// <paramref name="featureBranch"/> is set, the result also reports that branch's own facts
-    /// (<c>refs/heads/&lt;featureBranch&gt;</c>), computed from refs without checking anything out
-    /// (09 SB-2, plan unit I1); null leaves the Feature-branch fields null and nothing else changes.
-    /// "Ahead of default" is judged against this worktree's own persisted divergence base
-    /// (<see cref="GetDivergenceBaseBranchAsync"/>, the Feature's actual parent branch) when one was
-    /// recorded, falling back to <paramref name="defaultBranch"/> otherwise, so a nested Feature
-    /// (branched from another unmerged Feature branch) is never reported as ahead by commits that
-    /// already live safely on its parent branch.
-    /// </summary>
-    Task<WorktreeInspectionResult> InspectWorktreeAsync(
-        string mainRepositoryPath,
-        string worktreePath,
-        string? defaultBranch,
-        string? featureBranch,
-        CancellationToken ct);
 }

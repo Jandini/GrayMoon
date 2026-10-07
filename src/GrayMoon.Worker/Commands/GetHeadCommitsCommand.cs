@@ -11,7 +11,7 @@ namespace GrayMoon.Worker.Commands;
 /// When <see cref="GetHeadCommitsRequest.CollisionBranchName"/> is set, also reports existing local/remote-tracking refs with that name
 /// for repositories that are not on a tag.
 /// </summary>
-public sealed class GetHeadCommitsCommand(IGitService git, ILogger<GetHeadCommitsCommand> logger)
+public sealed class GetHeadCommitsCommand(IGitRepositoryReader reader, ILogger<GetHeadCommitsCommand> logger)
     : ICommandHandler<GetHeadCommitsRequest, GetHeadCommitsResponse>
 {
     private const int DefaultMaxConcurrent = 8;
@@ -36,7 +36,7 @@ public sealed class GetHeadCommitsCommand(IGitService git, ILogger<GetHeadCommit
         }
 
         var collisionBranch = string.IsNullOrWhiteSpace(request.CollisionBranchName) ? null : request.CollisionBranchName.Trim();
-        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
+        var workspacePath = WorkerRepositoryPaths.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var commits = new System.Collections.Concurrent.ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var branches = new System.Collections.Concurrent.ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var tags = new System.Collections.Concurrent.ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -48,7 +48,7 @@ public sealed class GetHeadCommitsCommand(IGitService git, ILogger<GetHeadCommit
             try
             {
                 var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repoName, request.WorkspaceRepositoryName);
-                var sha = await git.GetHeadCommitAsync(repoPath, cancellationToken);
+                var sha = await reader.GetHeadCommitAsync(repoPath, cancellationToken);
                 if (!string.IsNullOrWhiteSpace(sha))
                     commits[repoName] = sha;
                 else
@@ -56,17 +56,17 @@ public sealed class GetHeadCommitsCommand(IGitService git, ILogger<GetHeadCommit
                         "GetHeadCommits: could not resolve HEAD for repository {RepositoryName} under {WorkspacePath} (missing, unborn, or git failed).",
                         repoName, workspacePath);
 
-                var branch = await git.GetCurrentBranchNameAsync(repoPath, cancellationToken);
+                var branch = await reader.GetCurrentBranchNameAsync(repoPath, cancellationToken);
                 if (!string.IsNullOrWhiteSpace(branch))
                     branches[repoName] = branch;
 
-                var tag = await git.GetCheckedOutTagAsync(repoPath, cancellationToken);
+                var tag = await reader.GetCheckedOutTagAsync(repoPath, cancellationToken);
                 if (tag != null)
                     tags[repoName] = tag;
 
                 if (collisionBranch != null && tag == null)
                 {
-                    var refs = await git.FindBranchCollisionsAsync(repoPath, collisionBranch, cancellationToken);
+                    var refs = await reader.FindBranchCollisionsAsync(repoPath, collisionBranch, cancellationToken);
                     if (refs.Count > 0)
                         collisions[repoName] = refs.ToList();
                 }

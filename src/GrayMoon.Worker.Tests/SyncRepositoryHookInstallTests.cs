@@ -21,12 +21,14 @@ public sealed class SyncRepositoryHookInstallTests : IDisposable
 
     private readonly string _root = Directory.CreateTempSubdirectory("graymoon-hook-install-").FullName;
     private readonly GitService _git;
+    private GitCliRepositoryReader _reader = null!;
 
     public SyncRepositoryHookInstallTests()
     {
         var commandLine = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
         var runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
-        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner);
+        _reader = new GitCliRepositoryReader(runner, NullLogger<GitCliRepositoryReader>.Instance);
+        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, _reader);
     }
 
     public void Dispose()
@@ -78,7 +80,7 @@ public sealed class SyncRepositoryHookInstallTests : IDisposable
     }
 
     private Task<SyncRepositoryResponse> SyncAsync(RepositoryOperationCapabilities capabilities)
-        => new SyncRepositoryCommand(_git, new CountingCsProjFileService(), CapabilityTestDoubles.RealFactory(_git))
+        => new SyncRepositoryCommand(_git, _reader, new CountingCsProjFileService(), CapabilityTestDoubles.RealFactory(_git))
             .ExecuteAsync(new SyncRepositoryRequest
             {
                 WorkspaceRoot = _root,

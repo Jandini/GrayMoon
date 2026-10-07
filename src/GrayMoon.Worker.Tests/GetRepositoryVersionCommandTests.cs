@@ -20,6 +20,7 @@ public sealed class GetRepositoryVersionCommandTests : IDisposable
 {
     private readonly string _root = Directory.CreateTempSubdirectory("graymoon-getver-").FullName;
     private readonly GitService _git;
+    private GitCliRepositoryReader _reader = null!;
     private readonly CountingVersionProviderFactory _versionProviders;
     private readonly GetRepositoryVersionCommand _command;
 
@@ -27,9 +28,10 @@ public sealed class GetRepositoryVersionCommandTests : IDisposable
     {
         var commandLine = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
         var runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
-        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner);
+        _reader = new GitCliRepositoryReader(runner, NullLogger<GitCliRepositoryReader>.Instance);
+        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, _reader);
         _versionProviders = CapabilityTestDoubles.RealFactory(_git);
-        _command = new GetRepositoryVersionCommand(_git, _versionProviders);
+        _command = new GetRepositoryVersionCommand(_reader, _versionProviders);
     }
 
     public void Dispose()

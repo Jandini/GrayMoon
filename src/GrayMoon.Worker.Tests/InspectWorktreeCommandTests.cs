@@ -14,6 +14,8 @@ public sealed class InspectWorktreeCommandTests : IDisposable
 {
     private readonly string _root = Directory.CreateTempSubdirectory("graymoon-iw-").FullName;
     private readonly GitService _git;
+    private GitCliRepositoryReader _reader = null!;
+    private GitWorktreeService _worktrees = null!;
     private readonly CreateGitWorktreeCommand _create;
     private readonly InspectWorktreeCommand _inspect;
 
@@ -21,9 +23,11 @@ public sealed class InspectWorktreeCommandTests : IDisposable
     {
         var commandLine = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
         var runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
-        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner);
-        _create = new CreateGitWorktreeCommand(_git);
-        _inspect = new InspectWorktreeCommand(_git);
+        _reader = new GitCliRepositoryReader(runner, NullLogger<GitCliRepositoryReader>.Instance);
+        _worktrees = new GitWorktreeService(runner, _reader, NullLogger<GitWorktreeService>.Instance);
+        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, _reader);
+        _create = new CreateGitWorktreeCommand(_git, _worktrees);
+        _inspect = new InspectWorktreeCommand(_worktrees);
     }
 
     public void Dispose()
@@ -37,7 +41,7 @@ public sealed class InspectWorktreeCommandTests : IDisposable
         var mainPath = Path.Combine(_root, "main1");
         Directory.CreateDirectory(mainPath);
         await InitGitWithCommitAsync(mainPath);
-        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+        var head = await _reader.GetHeadCommitAsync(mainPath, CancellationToken.None);
 
         var worktreePath = Path.Combine(_root, "features", "clean", "main1");
         var created = await _create.ExecuteAsync(new CreateGitWorktreeRequest
@@ -76,7 +80,7 @@ public sealed class InspectWorktreeCommandTests : IDisposable
         var mainPath = Path.Combine(_root, "main2");
         Directory.CreateDirectory(mainPath);
         await InitGitWithCommitAsync(mainPath);
-        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+        var head = await _reader.GetHeadCommitAsync(mainPath, CancellationToken.None);
 
         var worktreePath = Path.Combine(_root, "features", "untracked", "main2");
         await _create.ExecuteAsync(new CreateGitWorktreeRequest
@@ -107,7 +111,7 @@ public sealed class InspectWorktreeCommandTests : IDisposable
         var mainPath = Path.Combine(_root, "main3");
         Directory.CreateDirectory(mainPath);
         await InitGitWithCommitAsync(mainPath);
-        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+        var head = await _reader.GetHeadCommitAsync(mainPath, CancellationToken.None);
 
         var worktreePath = Path.Combine(_root, "features", "staged", "main3");
         await _create.ExecuteAsync(new CreateGitWorktreeRequest
@@ -139,7 +143,7 @@ public sealed class InspectWorktreeCommandTests : IDisposable
         var mainPath = Path.Combine(_root, "main4");
         Directory.CreateDirectory(mainPath);
         await InitGitWithCommitAsync(mainPath);
-        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+        var head = await _reader.GetHeadCommitAsync(mainPath, CancellationToken.None);
 
         var worktreePath = Path.Combine(_root, "features", "unstaged", "main4");
         await _create.ExecuteAsync(new CreateGitWorktreeRequest
@@ -170,7 +174,7 @@ public sealed class InspectWorktreeCommandTests : IDisposable
         var mainPath = Path.Combine(_root, "main5");
         Directory.CreateDirectory(mainPath);
         await InitGitWithCommitAsync(mainPath);
-        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+        var head = await _reader.GetHeadCommitAsync(mainPath, CancellationToken.None);
 
         var worktreePath = Path.Combine(_root, "features", "gone", "main5");
         await _create.ExecuteAsync(new CreateGitWorktreeRequest
@@ -200,7 +204,7 @@ public sealed class InspectWorktreeCommandTests : IDisposable
         var mainPath = Path.Combine(_root, "main6");
         Directory.CreateDirectory(mainPath);
         await InitGitWithCommitAsync(mainPath);
-        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+        var head = await _reader.GetHeadCommitAsync(mainPath, CancellationToken.None);
 
         var worktreePath = Path.Combine(_root, "features", "locked", "main6");
         await _create.ExecuteAsync(new CreateGitWorktreeRequest
@@ -228,7 +232,7 @@ public sealed class InspectWorktreeCommandTests : IDisposable
         var mainPath = Path.Combine(_root, "main7");
         Directory.CreateDirectory(mainPath);
         await InitGitWithCommitAsync(mainPath);
-        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+        var head = await _reader.GetHeadCommitAsync(mainPath, CancellationToken.None);
         await RunGitAsync(mainPath, "update-ref refs/remotes/origin/main main");
 
         var worktreePath = Path.Combine(_root, "features", "ahead", "main7");
@@ -269,7 +273,7 @@ public sealed class InspectWorktreeCommandTests : IDisposable
         var mainPath = Path.Combine(_root, "main11");
         Directory.CreateDirectory(mainPath);
         await InitGitWithCommitAsync(mainPath);
-        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+        var head = await _reader.GetHeadCommitAsync(mainPath, CancellationToken.None);
         await RunGitAsync(mainPath, "update-ref refs/remotes/origin/main main");
 
         // Parent Feature branch: 2 commits ahead of main, never merged.
@@ -280,7 +284,7 @@ public sealed class InspectWorktreeCommandTests : IDisposable
         await File.WriteAllTextAsync(Path.Combine(mainPath, "p2.txt"), "2\n");
         await RunGitAsync(mainPath, "add p2.txt");
         await RunGitAsync(mainPath, "commit -m parent-commit-2");
-        var parentHead = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+        var parentHead = await _reader.GetHeadCommitAsync(mainPath, CancellationToken.None);
         await RunGitAsync(mainPath, "checkout main");
 
         // Child Feature worktree, branched from parent-feature, recording it as the divergence base.
@@ -321,7 +325,7 @@ public sealed class InspectWorktreeCommandTests : IDisposable
         var mainPath = Path.Combine(_root, "main8");
         Directory.CreateDirectory(mainPath);
         await InitGitWithCommitAsync(mainPath);
-        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+        var head = await _reader.GetHeadCommitAsync(mainPath, CancellationToken.None);
         await RunGitAsync(mainPath, "update-ref refs/remotes/origin/main main");
 
         var worktreePath = Path.Combine(_root, "features", "drift", "main8");
@@ -362,7 +366,7 @@ public sealed class InspectWorktreeCommandTests : IDisposable
         var mainPath = Path.Combine(_root, "main9");
         Directory.CreateDirectory(mainPath);
         await InitGitWithCommitAsync(mainPath);
-        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+        var head = await _reader.GetHeadCommitAsync(mainPath, CancellationToken.None);
 
         var worktreePath = Path.Combine(_root, "features", "gone-feat", "main9");
         await _create.ExecuteAsync(new CreateGitWorktreeRequest
@@ -394,7 +398,7 @@ public sealed class InspectWorktreeCommandTests : IDisposable
         var mainPath = Path.Combine(_root, "main10");
         Directory.CreateDirectory(mainPath);
         await InitGitWithCommitAsync(mainPath);
-        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+        var head = await _reader.GetHeadCommitAsync(mainPath, CancellationToken.None);
 
         var worktreePath = Path.Combine(_root, "features", "no-feature-branch", "main10");
         await _create.ExecuteAsync(new CreateGitWorktreeRequest

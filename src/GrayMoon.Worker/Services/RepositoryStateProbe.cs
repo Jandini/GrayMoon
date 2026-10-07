@@ -7,13 +7,13 @@ namespace GrayMoon.Worker.Services;
 
 /// <inheritdoc cref="IRepositoryStateProbe" />
 public sealed class RepositoryStateProbe(
-    IGitService git,
+    IGitRepositoryReader reader,
     ICsProjFileService csProjFileService,
     IRepositoryVersionProviderFactory versionProviderFactory) : IRepositoryStateProbe
 {
     public async Task<RepositoryStateCapture> CaptureAsync(string repoPath, RepositoryStateProbeOptions options, CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(repoPath) || !git.DirectoryExists(repoPath))
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
             return new RepositoryStateCapture(new RepositoryStateSnapshot { ErrorMessage = options.ErrorMessage }, null);
 
         var capabilities = options.Capabilities ?? RepositoryOperationCapabilities.LegacyFullEnrichment;
@@ -23,8 +23,8 @@ public sealed class RepositoryStateProbe(
             ? csProjFileService.FindAsync(repoPath, ct)
             : null;
 
-        var defaultRef = options.DefaultBranchOriginRef ?? await git.GetDefaultBranchOriginRefAsync(repoPath, ct);
-        var defaultBranchName = await git.GetDefaultBranchNameAsync(repoPath, ct);
+        var defaultRef = options.DefaultBranchOriginRef ?? await reader.GetDefaultBranchOriginRefAsync(repoPath, ct);
+        var defaultBranchName = await reader.GetDefaultBranchNameAsync(repoPath, ct);
 
         string? branch;
         string? gitVersion = null;
@@ -40,19 +40,19 @@ public sealed class RepositoryStateProbe(
         }
         else
         {
-            branch = options.BranchNameOverride ?? await git.GetCurrentBranchNameAsync(repoPath, ct);
+            branch = options.BranchNameOverride ?? await reader.GetCurrentBranchNameAsync(repoPath, ct);
         }
 
         // A tag checkout is a detached HEAD, so there is no branch to report or count against.
-        var currentTag = await git.GetCheckedOutTagAsync(repoPath, ct);
+        var currentTag = await reader.GetCheckedOutTagAsync(repoPath, ct);
         if (currentTag != null)
             branch = null;
         else if (string.IsNullOrWhiteSpace(branch) || branch == "-")
-            branch = options.BranchNameOverride ?? await git.GetCurrentBranchNameAsync(repoPath, ct);
+            branch = options.BranchNameOverride ?? await reader.GetCurrentBranchNameAsync(repoPath, ct);
 
         var hasBranch = currentTag == null && !string.IsNullOrWhiteSpace(branch) && branch != "-";
 
-        var headCommit = await git.GetHeadCommitAsync(repoPath, ct);
+        var headCommit = await reader.GetHeadCommitAsync(repoPath, ct);
 
         CommitCountsProbeResult counts = CommitCountsProbeResult.Unknown;
         int? defaultBehind = null;
@@ -60,12 +60,12 @@ public sealed class RepositoryStateProbe(
         var vsDefaultProbed = false;
         if (hasBranch && options.IncludeCommitCounts)
         {
-            counts = await git.ProbeCommitCountsAsync(repoPath, branch!, defaultRef, ct);
+            counts = await reader.ProbeCommitCountsAsync(repoPath, branch!, defaultRef, ct);
             // Feature ahead/behind: explicit override, else worktree-persisted Feature parent, else default.
-            var divergenceRef = git.ToOriginBranchRef(options.DivergenceBaseOriginRef)
-                ?? git.ToOriginBranchRef(await git.GetDivergenceBaseBranchAsync(repoPath, ct))
+            var divergenceRef = OriginDefaultRef.ToOriginBranchRef(options.DivergenceBaseOriginRef)
+                ?? OriginDefaultRef.ToOriginBranchRef(await reader.GetDivergenceBaseBranchAsync(repoPath, ct))
                 ?? defaultRef;
-            var (behind, ahead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, ct);
+            var (behind, ahead, _) = await reader.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, ct);
             defaultBehind = behind;
             defaultAhead = ahead;
             vsDefaultProbed = divergenceRef != null;
@@ -77,14 +77,14 @@ public sealed class RepositoryStateProbe(
         var branchesProbed = false;
         if (options.IncludeBranchLists)
         {
-            localBranches = [.. await git.GetLocalBranchesAsync(repoPath, ct)];
-            remoteBranches = [.. await git.GetRemoteBranchesFromRefsAsync(repoPath, ct)];
-            tags = [.. await git.GetTagsAsync(repoPath, ct)];
+            localBranches = [.. await reader.GetLocalBranchesAsync(repoPath, ct)];
+            remoteBranches = [.. await reader.GetRemoteBranchesFromRefsAsync(repoPath, ct)];
+            tags = [.. await reader.GetTagsAsync(repoPath, ct)];
             branchesProbed = true;
         }
         else if (options.IncludeRemoteBranchesOnly)
         {
-            remoteBranches = [.. await git.GetRemoteBranchesFromRefsAsync(repoPath, ct)];
+            remoteBranches = [.. await reader.GetRemoteBranchesFromRefsAsync(repoPath, ct)];
         }
 
         IReadOnlyList<CsProjFileInfo>? rawProjects = null;

@@ -12,7 +12,7 @@ namespace GrayMoon.Worker.Commands;
 /// checked out on the remote default branch (or left on an unborn <c>main</c> when the remote is empty). A root that
 /// already has a matching origin is left alone. Never writes <c>.graymoon.json</c> or <c>.gitignore</c> and never commits.
 /// </summary>
-public sealed class AttachWorkspaceRepositoryCommand(IGitService git)
+public sealed class AttachWorkspaceRepositoryCommand(IGitService git, IGitRepositoryReader reader)
     : ICommandHandler<AttachWorkspaceRepositoryRequest, AttachWorkspaceRepositoryResponse>
 {
     private const string FallbackUnbornBranch = "main";
@@ -24,7 +24,7 @@ public sealed class AttachWorkspaceRepositoryCommand(IGitService git)
         var workspaceRoot = request.WorkspaceRoot ?? throw new ArgumentException("workspaceRoot required");
         var bearerToken = request.BearerToken;
 
-        var path = git.GetWorkspacePath(workspaceRoot, workspaceName);
+        var path = WorkerRepositoryPaths.GetWorkspacePath(workspaceRoot, workspaceName);
 
         // D14 step 1: a restore must never touch an existing, populated folder.
         if (request.RequireEmptyRoot && Directory.Exists(path) && Directory.EnumerateFileSystemEntries(path).Any())
@@ -32,11 +32,11 @@ public sealed class AttachWorkspaceRepositoryCommand(IGitService git)
             return Fail("The folder already exists and is not empty.");
         }
 
-        git.CreateDirectory(path);
+        Directory.CreateDirectory(path);
 
         if (WorkerRepositoryPaths.HasGitMetadata(path))
         {
-            var origin = await git.GetRemoteOriginUrlAsync(path, cancellationToken);
+            var origin = await reader.GetRemoteOriginUrlAsync(path, cancellationToken);
             if (string.IsNullOrWhiteSpace(origin) || !RepositoryUrlIdentity.RepositoryUrlsEqual(origin, cloneUrl))
             {
                 return Fail("Root already has a different Git repository");
@@ -44,7 +44,7 @@ public sealed class AttachWorkspaceRepositoryCommand(IGitService git)
 
             // A first run that hit a checkout collision leaves .git with a matching origin and an unborn HEAD.
             // Finish the default-branch checkout now so a retry does not report success on an unborn HEAD.
-            if (string.IsNullOrWhiteSpace(await git.GetHeadCommitAsync(path, cancellationToken)))
+            if (string.IsNullOrWhiteSpace(await reader.GetHeadCommitAsync(path, cancellationToken)))
             {
                 var (refetchOk, refetchError) = await git.FetchAsync(path, includeTags: true, bearerToken, cancellationToken);
                 if (!refetchOk)
@@ -114,7 +114,7 @@ public sealed class AttachWorkspaceRepositoryCommand(IGitService git)
     {
         var defaultBranch = await git.GetRemoteDefaultBranchAsync(path, bearerToken, cancellationToken);
         if (!string.IsNullOrWhiteSpace(defaultBranch)
-            && await git.RevParseAsync(path, $"refs/remotes/origin/{defaultBranch}", cancellationToken) is null)
+            && await reader.RevParseAsync(path, $"refs/remotes/origin/{defaultBranch}", cancellationToken) is null)
         {
             return null;
         }
@@ -130,8 +130,8 @@ public sealed class AttachWorkspaceRepositoryCommand(IGitService git)
 
     private async Task<AttachWorkspaceRepositoryResponse> SuccessAsync(string path, CancellationToken cancellationToken)
     {
-        var branch = await git.GetCurrentBranchNameAsync(path, cancellationToken);
-        var head = await git.GetHeadCommitAsync(path, cancellationToken);
+        var branch = await reader.GetCurrentBranchNameAsync(path, cancellationToken);
+        var head = await reader.GetHeadCommitAsync(path, cancellationToken);
         return new AttachWorkspaceRepositoryResponse
         {
             Success = true,

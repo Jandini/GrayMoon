@@ -12,6 +12,8 @@ public sealed class GitWorktreeCommandTests : IDisposable
 {
     private readonly string _root = Directory.CreateTempSubdirectory("graymoon-wt-").FullName;
     private readonly GitService _git;
+    private GitCliRepositoryReader _reader = null!;
+    private GitWorktreeService _worktrees = null!;
     private readonly ListGitWorktreesCommand _list;
     private readonly CreateGitWorktreeCommand _create;
     private readonly RemoveGitWorktreeCommand _remove;
@@ -20,10 +22,12 @@ public sealed class GitWorktreeCommandTests : IDisposable
     {
         var commandLine = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
         var runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
-        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner);
-        _list = new ListGitWorktreesCommand(_git);
-        _create = new CreateGitWorktreeCommand(_git);
-        _remove = new RemoveGitWorktreeCommand(_git);
+        _reader = new GitCliRepositoryReader(runner, NullLogger<GitCliRepositoryReader>.Instance);
+        _worktrees = new GitWorktreeService(runner, _reader, NullLogger<GitWorktreeService>.Instance);
+        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, _reader);
+        _list = new ListGitWorktreesCommand(_worktrees);
+        _create = new CreateGitWorktreeCommand(_git, _worktrees);
+        _remove = new RemoveGitWorktreeCommand(_worktrees);
     }
 
     public void Dispose()
@@ -37,7 +41,7 @@ public sealed class GitWorktreeCommandTests : IDisposable
         var mainPath = Path.Combine(_root, "main");
         Directory.CreateDirectory(mainPath);
         await InitGitWithCommitAsync(mainPath);
-        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+        var head = await _reader.GetHeadCommitAsync(mainPath, CancellationToken.None);
         Assert.False(string.IsNullOrWhiteSpace(head));
 
         var listed = await _list.ExecuteAsync(new ListGitWorktreesRequest { MainRepositoryPath = mainPath });
@@ -106,7 +110,7 @@ public sealed class GitWorktreeCommandTests : IDisposable
         var mainPath = Path.Combine(_root, "main2");
         Directory.CreateDirectory(mainPath);
         await InitGitWithCommitAsync(mainPath);
-        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+        var head = await _reader.GetHeadCommitAsync(mainPath, CancellationToken.None);
 
         var firstPath = Path.Combine(_root, "features", "feat-a", "main2");
         var first = await _create.ExecuteAsync(new CreateGitWorktreeRequest
@@ -137,7 +141,7 @@ public sealed class GitWorktreeCommandTests : IDisposable
         await InitGitWithCommitAsync(mainPath);
         await RunGitAsync(mainPath, "tag 1.0.0");
         await RunGitAsync(mainPath, "checkout -q --detach 1.0.0");
-        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+        var head = await _reader.GetHeadCommitAsync(mainPath, CancellationToken.None);
 
         var worktreePath = Path.Combine(_root, "features", "feat-tag", "main6");
         var request = new CreateGitWorktreeRequest
@@ -151,8 +155,8 @@ public sealed class GitWorktreeCommandTests : IDisposable
         var created = await _create.ExecuteAsync(request);
         Assert.True(created.Success, created.ErrorMessage);
         Assert.Null(created.BranchName);
-        Assert.Equal("1.0.0", await _git.GetCheckedOutTagAsync(created.WorktreePath!, CancellationToken.None));
-        Assert.Empty(await _git.FindBranchCollisionsAsync(mainPath, "feat-tag", CancellationToken.None));
+        Assert.Equal("1.0.0", await _reader.GetCheckedOutTagAsync(created.WorktreePath!, CancellationToken.None));
+        Assert.Empty(await _reader.FindBranchCollisionsAsync(mainPath, "feat-tag", CancellationToken.None));
 
         var again = await _create.ExecuteAsync(request);
         Assert.True(again.Success, again.ErrorMessage);
@@ -166,17 +170,17 @@ public sealed class GitWorktreeCommandTests : IDisposable
         Directory.CreateDirectory(mainPath);
         await InitGitWithCommitAsync(mainPath);
 
-        Assert.Empty(await _git.FindBranchCollisionsAsync(mainPath, "feat-x", CancellationToken.None));
+        Assert.Empty(await _reader.FindBranchCollisionsAsync(mainPath, "feat-x", CancellationToken.None));
 
         await RunGitAsync(mainPath, "branch feat-x");
         await RunGitAsync(mainPath, "update-ref refs/remotes/origin/feat-x HEAD");
         await RunGitAsync(mainPath, "branch feat-y/sub");
         await RunGitAsync(mainPath, "branch feat-xy");
 
-        var collisions = await _git.FindBranchCollisionsAsync(mainPath, "feat-x", CancellationToken.None);
+        var collisions = await _reader.FindBranchCollisionsAsync(mainPath, "feat-x", CancellationToken.None);
         Assert.Equal(["feat-x", "origin/feat-x"], collisions.Order(StringComparer.Ordinal));
 
-        var nested = await _git.FindBranchCollisionsAsync(mainPath, "feat-y", CancellationToken.None);
+        var nested = await _reader.FindBranchCollisionsAsync(mainPath, "feat-y", CancellationToken.None);
         Assert.Equal(["feat-y/sub"], nested);
     }
 
@@ -186,7 +190,7 @@ public sealed class GitWorktreeCommandTests : IDisposable
         var mainPath = Path.Combine(_root, "main3");
         Directory.CreateDirectory(mainPath);
         await InitGitWithCommitAsync(mainPath);
-        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+        var head = await _reader.GetHeadCommitAsync(mainPath, CancellationToken.None);
 
         var worktreePath = Path.Combine(_root, "features", "dirty", "main3");
         var created = await _create.ExecuteAsync(new CreateGitWorktreeRequest
@@ -241,7 +245,7 @@ public sealed class GitWorktreeCommandTests : IDisposable
         var mainPath = Path.Combine(_root, "main7");
         Directory.CreateDirectory(mainPath);
         await InitGitWithCommitAsync(mainPath);
-        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+        var head = await _reader.GetHeadCommitAsync(mainPath, CancellationToken.None);
         await RunGitAsync(mainPath, "branch other");
 
         var worktreePath = Path.Combine(_root, "features", "ABC-7", "main7");
@@ -257,7 +261,7 @@ public sealed class GitWorktreeCommandTests : IDisposable
         await RunGitAsync(worktreePath, "checkout other");
         Assert.Equal("other", await CurrentBranchAsync(worktreePath));
 
-        var local = await _git.GetLocalBranchesAsync(worktreePath, CancellationToken.None);
+        var local = await _reader.GetLocalBranchesAsync(worktreePath, CancellationToken.None);
 
         Assert.Contains("ABC-7", local);
         Assert.Contains("main", local);

@@ -11,7 +11,7 @@ namespace GrayMoon.Worker.Commands;
 
 /// <summary>Fetches and pulls remote changes, then pushes when outgoing commits exist or upstream is not set.</summary>
 public sealed class PushRepositoryCommand(
-    IGitService git,
+    IGitService git, IGitRepositoryReader reader,
     ICsProjFileService csProjFileService,
     IRepositoryVersionProviderFactory versionProviderFactory,
     GitRemoteIntegrateService remoteIntegrate,
@@ -40,10 +40,10 @@ public sealed class PushRepositoryCommand(
         var repositoryName = request.RepositoryName ?? throw new ArgumentException("repositoryName required");
         var bearerToken = request.BearerToken;
 
-        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
+        var workspacePath = WorkerRepositoryPaths.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
 
-        if (!git.DirectoryExists(repoPath))
+        if (!Directory.Exists(repoPath))
         {
             return new PushRepositoryResponse
             {
@@ -128,7 +128,7 @@ public sealed class PushRepositoryCommand(
     internal async Task<RepositorySyncNotification> BuildPostOperationNotificationAsync(PushRepositoryRequest request, string repoPath, string branch, bool versionOnly)
     {
         var capabilities = request.EffectiveCapabilities;
-        var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, CancellationToken.None);
+        var defaultRef = await reader.GetDefaultBranchOriginRefAsync(repoPath, CancellationToken.None);
         int? outgoing = null;
         int? incoming = null;
         bool? hasUpstream = null;
@@ -136,10 +136,10 @@ public sealed class PushRepositoryCommand(
         int? defaultAhead = null;
         if (!versionOnly)
         {
-            var divergenceRef = git.ToOriginBranchRef(await git.GetDivergenceBaseBranchAsync(repoPath, CancellationToken.None))
+            var divergenceRef = OriginDefaultRef.ToOriginBranchRef(await reader.GetDivergenceBaseBranchAsync(repoPath, CancellationToken.None))
                 ?? defaultRef;
-            (outgoing, incoming, hasUpstream) = await git.GetCommitCountsAsync(repoPath, branch, defaultRef, CancellationToken.None);
-            (defaultBehind, defaultAhead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, CancellationToken.None);
+            (outgoing, incoming, hasUpstream) = await reader.GetCommitCountsAsync(repoPath, branch, defaultRef, CancellationToken.None);
+            (defaultBehind, defaultAhead, _) = await reader.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, CancellationToken.None);
         }
 
         var versionResult = await versionProviderFactory
