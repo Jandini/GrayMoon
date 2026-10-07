@@ -22,7 +22,7 @@ public sealed class WorkerInstallFailureTests
         Assert.Equal(StatusCodes.Status200OK, Assert.IsAssignableFrom<IStatusCodeHttpResult>(result).StatusCode);
         Assert.True(tracker.LogonPasswordRequired);
         Assert.False(tracker.IsSelfUpdateInProgress);
-        Assert.Equal("error", WorkerStatusText.Label(tracker.IsSelfUpdateInProgress, tracker.LogonPasswordRequired, tracker.State, pendingCount: 0));
+        Assert.Equal("error", WorkerStatusText.Label(tracker.IsSelfUpdateInProgress, tracker.LogonPasswordRequired, tracker.State));
     }
 
     [Fact]
@@ -38,7 +38,7 @@ public sealed class WorkerInstallFailureTests
             tracker);
 
         Assert.False(tracker.LogonPasswordRequired);
-        Assert.Equal("online", WorkerStatusText.Label(false, false, tracker.State, pendingCount: 0));
+        Assert.Equal("online", WorkerStatusText.Label(false, false, tracker.State));
     }
 
     [Fact]
@@ -68,10 +68,10 @@ public sealed class WorkerInstallFailureTests
     [Fact]
     public void Badge_stays_installing_until_the_password_failure_is_reported()
     {
-        Assert.Equal("installing", WorkerStatusText.Label(selfUpdateInProgress: true, logonPasswordRequired: false, WorkerConnectionState.Offline, 0));
+        Assert.Equal("installing", WorkerStatusText.Label(selfUpdateInProgress: true, logonPasswordRequired: false, WorkerConnectionState.Offline));
         Assert.Equal(
             "error",
-            WorkerStatusText.Label(selfUpdateInProgress: false, logonPasswordRequired: true, WorkerConnectionState.Offline, 0));
+            WorkerStatusText.Label(selfUpdateInProgress: false, logonPasswordRequired: true, WorkerConnectionState.Offline));
         Assert.Contains(
             "password",
             WorkerStatusText.Title(false, true, WorkerConnectionState.Offline, null, 0, false),

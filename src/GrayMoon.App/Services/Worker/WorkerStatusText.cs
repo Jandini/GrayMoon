@@ -3,7 +3,7 @@ namespace GrayMoon.App.Services.Worker;
 /// <summary>Label and tooltip for the top-right worker badge.</summary>
 internal static class WorkerStatusText
 {
-    public static string Label(bool selfUpdateInProgress, bool logonPasswordRequired, WorkerConnectionState state, int pendingCount)
+    public static string Label(bool selfUpdateInProgress, bool logonPasswordRequired, WorkerConnectionState state)
     {
         if (logonPasswordRequired)
             return "error";
@@ -12,7 +12,8 @@ internal static class WorkerStatusText
 
         return state switch
         {
-            WorkerConnectionState.Online => pendingCount > 0 ? "running" : "online",
+            // Queue activity keeps this label so the badge does not grow. The activity frame shows the work.
+            WorkerConnectionState.Online => "online",
             WorkerConnectionState.Offline => "offline",
             WorkerConnectionState.Connecting => "connecting",
             WorkerConnectionState.VersionMismatch => "update",
