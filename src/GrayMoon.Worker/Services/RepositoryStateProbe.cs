@@ -2,6 +2,7 @@ using GrayMoon.Abstractions.Notifications;
 using GrayMoon.Abstractions.Workspaces;
 using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Models;
+using Microsoft.Extensions.Logging;
 
 namespace GrayMoon.Worker.Services;
 
@@ -9,7 +10,8 @@ namespace GrayMoon.Worker.Services;
 public sealed class RepositoryStateProbe(
     IGitRepositoryReader reader,
     ICsProjFileService csProjFileService,
-    IRepositoryVersionProviderFactory versionProviderFactory) : IRepositoryStateProbe
+    IRepositoryVersionProviderFactory versionProviderFactory,
+    ILogger<RepositoryStateProbe>? logger = null) : IRepositoryStateProbe
 {
     public async Task<RepositoryStateCapture> CaptureAsync(string repoPath, RepositoryStateProbeOptions options, CancellationToken ct = default)
     {
@@ -20,7 +22,7 @@ public sealed class RepositoryStateProbe(
 
         // Start the csproj scan first; it is IO-bound and independent of every git call below.
         var projectsTask = options.IncludeProjects && capabilities.ShouldDiscoverProjects && !options.IsWorkspaceRepository
-            ? csProjFileService.FindAsync(repoPath, ct)
+            ? FindProjectsOrNullAsync(repoPath, ct)
             : null;
 
         var defaultRef = options.DefaultBranchOriginRef ?? await reader.GetDefaultBranchOriginRefAsync(repoPath, ct);
@@ -92,7 +94,7 @@ public sealed class RepositoryStateProbe(
         if (projectsTask != null)
         {
             rawProjects = await projectsTask;
-            projects = ToNotifications(rawProjects);
+            projects = rawProjects is null ? null : ToNotifications(rawProjects);
         }
 
         var snapshot = new RepositoryStateSnapshot
@@ -126,6 +128,20 @@ public sealed class RepositoryStateProbe(
         };
 
         return new RepositoryStateCapture(snapshot, rawProjects);
+    }
+
+    /// <summary>A failed discovery is "not probed" (null), never an empty list, so persisted projects survive.</summary>
+    private async Task<IReadOnlyList<CsProjFileInfo>?> FindProjectsOrNullAsync(string repoPath, CancellationToken ct)
+    {
+        try
+        {
+            return await csProjFileService.FindAsync(repoPath, ct);
+        }
+        catch (ProjectDiscoveryException ex)
+        {
+            logger?.LogWarning(ex, "Project discovery failed for {RepoPath}; projects left unprobed", repoPath);
+            return null;
+        }
     }
 
     /// <summary>Maps the worker's csproj model onto the wire shape shared with the app.</summary>

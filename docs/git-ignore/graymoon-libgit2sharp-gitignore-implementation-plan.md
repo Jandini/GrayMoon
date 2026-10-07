@@ -213,22 +213,22 @@ Update the existing Git service design docs: ignore decisions on LibGit2Sharp, m
 
 # Implementation checklist
 
-- [ ] Baseline and VDI numbers recorded (Unit 0)
-- [ ] LibGit2Sharp 0.32.0 added; native assets verified in publish and packed tool (win-x64, linux-x64)
-- [ ] `IGitIgnoreService` / `IGitIgnoreSession` / `GitIgnoreException` implemented and registered
-- [ ] Single exclusion predicate with index-backed tracked check
-- [ ] Parity harness and gate passed (including tracked divergence, negation walk, worktree, nested repo, ownership)
-- [ ] `CsProjFileService` migrated; no `GitProcessRunner`; no swallow-to-empty
-- [ ] Caller failure semantics verified: sync, probe, refresh, push post-op, dependencies sync
-- [ ] Git Changes `StageAsync` migrated; `--literal-pathspecs`; single `git add`
-- [ ] `StageAndCommitAsync` validates paths and migrated; single `git add`
-- [ ] Whole-repo `git add --all` reviewed and unchanged
-- [ ] `WorkspaceFileSearchService` decision made and implemented (or documented as accepted non-Git rule)
-- [ ] `GitIgnoredPathFilter` and its tests deleted; code-search gates recorded
-- [ ] Worktree, handle-release and concurrency review complete
-- [ ] Instrumentation added
-- [ ] Full regression passes
-- [ ] VDI benchmark rerun and documented
+- [x] Baseline and VDI numbers recorded (Unit 0)
+- [x] LibGit2Sharp 0.32.0 added; native assets verified in publish and packed tool (win-x64, linux-x64) (publish/pack verified; tool install and service hosting not exercised)
+- [x] `IGitIgnoreService` / `IGitIgnoreSession` / `GitIgnoreException` implemented and registered
+- [x] Single exclusion predicate with index-backed tracked check
+- [x] Parity harness and gate passed (including tracked divergence, negation walk, worktree, nested repo, ownership) (ownership failure case not simulated)
+- [x] `CsProjFileService` migrated; no `GitProcessRunner`; no swallow-to-empty
+- [x] Caller failure semantics verified: sync, probe, refresh, push post-op, dependencies sync
+- [x] Git Changes `StageAsync` migrated; `--literal-pathspecs`; single `git add`
+- [x] `StageAndCommitAsync` validates paths and migrated; single `git add`
+- [x] Whole-repo `git add --all` reviewed and unchanged
+- [x] `WorkspaceFileSearchService` decision made and implemented (or documented as accepted non-Git rule)
+- [x] `GitIgnoredPathFilter` and its tests deleted; code-search gates recorded
+- [x] Worktree, handle-release and concurrency review complete
+- [x] Instrumentation added
+- [x] Full regression passes
+- [ ] VDI benchmark rerun and documented (needs the enterprise VDI; not runnable here)
 - [ ] Living docs updated
 
 ---
@@ -246,3 +246,18 @@ Update the existing Git service design docs: ignore decisions on LibGit2Sharp, m
 9. No ignore dependency is added to fetch, push, merge or branch-update operations.
 10. Git mutations and network operations remain on the Git CLI.
 11. The VDI benchmark shows zero `check-ignore` processes and records the performance delta.
+
+---
+
+# Implementation status (branch `gitignore-gitlib`)
+
+Done and covered by tests (Worker suite: 450 passed, 1 skipped; baseline was 407 passed, 1 skipped):
+
+- Units 0-7 and 9-12 as written. Unit 8 was approved and implemented last: `WorkspaceFileSearchService` now uses the session predicate, searches only directories with Git metadata, skips nested repositories at any depth, and no longer hard-codes `bin`/`obj`.
+- Discovery failures: sync, state probe and post-push report projects as not probed (`ProjectDiscoveryException`, never `[]`); explicit refresh lets the error propagate.
+- `GitIgnoredPathFilter` and its tests are deleted. Code search: `check-ignore` appears only in tests (oracle and "no check-ignore" assertions) and docs.
+
+Open (cannot be completed in this environment):
+
+- Unit 13 VDI benchmark rerun and Unit 14 living-doc update of the Git service design docs with the measured deltas.
+- Not exercised: `dotnet tool install` of the packed tool, Windows Service/systemd native-library loading, and the `safe.directory`/ownership failure path (opening a repository owned by another account). Failure is surfaced as `GitIgnoreException`; a test needs a differently-owned repository.

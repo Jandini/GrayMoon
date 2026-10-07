@@ -17,7 +17,7 @@ public sealed class GitCliRepositoryGitChangesServiceTests : IDisposable
     {
         var commandLine = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
         var runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
-        _service = new GitCliRepositoryGitChangesService(runner, NullLogger<GitCliRepositoryGitChangesService>.Instance);
+        _service = new GitCliRepositoryGitChangesService(runner, new LibGit2SharpGitIgnoreService(), NullLogger<GitCliRepositoryGitChangesService>.Instance);
     }
 
     public void Dispose() => _repo.Dispose();
@@ -304,6 +304,64 @@ public sealed class GitCliRepositoryGitChangesServiceTests : IDisposable
         var change = Assert.Single(stageResult.Snapshot!.Changes, c => c.IsStaged);
         Assert.Equal("file.txt", change.Path);
         Assert.DoesNotContain(stageResult.Snapshot.Changes, c => c.Path.Contains(".work", StringComparison.OrdinalIgnoreCase) && c.IsStaged);
+    }
+
+    [Fact]
+    public async Task Stage_only_ignored_paths_is_a_successful_no_op()
+    {
+        _repo.CommitInitial();
+        _repo.WriteFile(".gitignore", ".work\n");
+        _repo.RunGit("add", ".gitignore");
+        _repo.RunGit("commit", "-m", "ignore .work");
+        _repo.WriteFile(".work/Ignored.csproj", "<Project />\n");
+
+        var stageResult = await _service.StageAsync(
+            _repo.RepositoryPath,
+            new GitStageOperationRequest(GitChangeOperationScope.ExplicitPaths, [".work/Ignored.csproj"]),
+            2,
+            CancellationToken.None);
+
+        Assert.True(stageResult.Success, stageResult.ErrorMessage);
+        Assert.DoesNotContain(stageResult.Snapshot!.Changes, c => c.IsStaged);
+    }
+
+    [Fact]
+    public async Task Stage_tracked_and_deleted_tracked_files_that_match_an_ignore_rule()
+    {
+        _repo.WriteFile("edited.tmp", "one\n");
+        _repo.WriteFile("gone.tmp", "one\n");
+        _repo.WriteFile(".gitignore", "*.tmp\n");
+        _repo.RunGit("add", "-f", ".gitignore", "edited.tmp", "gone.tmp");
+        _repo.RunGit("commit", "-m", "init");
+        _repo.WriteFile("edited.tmp", "two\n");
+        _repo.DeleteFile("gone.tmp");
+
+        var stageResult = await _service.StageAsync(
+            _repo.RepositoryPath,
+            new GitStageOperationRequest(GitChangeOperationScope.ExplicitPaths, ["edited.tmp", "gone.tmp"]),
+            2,
+            CancellationToken.None);
+
+        Assert.True(stageResult.Success, stageResult.ErrorMessage);
+        Assert.Equal(2, stageResult.Snapshot!.Changes.Count(c => c.IsStaged));
+    }
+
+    [Fact]
+    public async Task Stage_path_with_glob_characters_is_literal()
+    {
+        _repo.CommitInitial();
+        _repo.WriteFile("[x].cs", "a\n");
+        _repo.WriteFile("x.cs", "b\n");
+
+        var stageResult = await _service.StageAsync(
+            _repo.RepositoryPath,
+            new GitStageOperationRequest(GitChangeOperationScope.ExplicitPaths, ["[x].cs"]),
+            2,
+            CancellationToken.None);
+
+        Assert.True(stageResult.Success, stageResult.ErrorMessage);
+        var staged = Assert.Single(stageResult.Snapshot!.Changes, c => c.IsStaged);
+        Assert.Equal("[x].cs", staged.Path);
     }
 
     [Fact]

@@ -152,8 +152,17 @@ public sealed class PushRepositoryCommand(
         var projectsProbed = discoverProjects;
         if (projectsProbed)
         {
-            var projects = await csProjFileService.FindAsync(repoPath, CancellationToken.None);
-            syncProjects = RepositorySyncProjectMapper.ToNotifications(projects);
+            try
+            {
+                var projects = await csProjFileService.FindAsync(repoPath, CancellationToken.None);
+                syncProjects = RepositorySyncProjectMapper.ToNotifications(projects);
+            }
+            catch (ProjectDiscoveryException ex)
+            {
+                // The push already succeeded. Report projects as not probed so persisted rows survive.
+                logger.LogWarning(ex, "Post-push project discovery failed for repo {RepoId}; projects left unprobed", request.RepositoryId);
+                projectsProbed = false;
+            }
         }
 
         return new RepositorySyncNotification

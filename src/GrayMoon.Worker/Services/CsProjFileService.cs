@@ -1,10 +1,11 @@
+using System.Diagnostics;
 using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Models;
 using Microsoft.Extensions.Logging;
 
 namespace GrayMoon.Worker.Services;
 
-public sealed class CsProjFileService(ICsProjFileParser parser, GitProcessRunner runner, ILogger<CsProjFileService> logger) : ICsProjFileService
+public sealed class CsProjFileService(ICsProjFileParser parser, IGitIgnoreService ignore, ILogger<CsProjFileService> logger) : ICsProjFileService
 {
     private const int DefaultMaxParallel = 8;
 
@@ -37,9 +38,14 @@ public sealed class CsProjFileService(ICsProjFileParser parser, GitProcessRunner
                             PackageReferences = parsed.PackageReferences
                         };
                 }
-                catch
+                catch (OperationCanceledException)
                 {
-                    // Skip this file; do not affect others
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    // A file that does not parse is skipped; it does not affect others.
+                    logger.LogDebug(ex, "Skipping unparsable project {ProjectPath}", path);
                 }
                 return null;
             }
@@ -57,58 +63,79 @@ public sealed class CsProjFileService(ICsProjFileParser parser, GitProcessRunner
         return results;
     }
 
-    public async Task<IReadOnlyList<string>> GetProjectPathsAsync(string repoPath, CancellationToken cancellationToken = default, int? maxParallel = null)
+    public Task<IReadOnlyList<string>> GetProjectPathsAsync(string repoPath, CancellationToken cancellationToken = default, int? maxParallel = null)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
-            return [];
+            return Task.FromResult<IReadOnlyList<string>>([]);
 
-        var limit = Math.Max(1, maxParallel ?? DefaultMaxParallel);
+        // One synchronous walk on one Repository (not thread-safe). Parsing stays parallel in FindAsync.
+        var sw = Stopwatch.StartNew();
+        var stats = new WalkStats();
+        var results = new List<string>();
         try
         {
-            var rootPaths = EnumerateCsprojInDirectory(repoPath, topLevelOnly: true);
+            using var session = ignore.Open(repoPath);
+            Walk(session, repoPath, repoPath, relativeDir: "", results, stats, cancellationToken);
+        }
+        catch (GitIgnoreException ex)
+        {
+            throw new ProjectDiscoveryException(repoPath, ex.Message, ex);
+        }
 
-            var subdirs = Directory.GetDirectories(repoPath)
-                .Where(d => !string.Equals(Path.GetFileName(d), ".git", StringComparison.OrdinalIgnoreCase))
-                .ToList();
+        results.Sort(StringComparer.Ordinal);
+        logger.LogDebug(
+            "Git ignore/project discovery: repo={RepoPath} elapsedMs={ElapsedMs} directoriesVisited={Visited} directoriesPruned={Pruned} nestedReposSkipped={Nested} candidateFiles={Candidates} excludedCandidates={ExcludedCandidates} returnedFiles={Returned}",
+            repoPath, sw.ElapsedMilliseconds, stats.Visited, stats.Pruned, stats.NestedRepos, stats.Candidates, stats.ExcludedCandidates, results.Count);
+        return Task.FromResult<IReadOnlyList<string>>(results);
+    }
 
-            if (subdirs.Count == 0)
-                return rootPaths;
+    private sealed class WalkStats
+    {
+        public int Visited, Pruned, NestedRepos, Candidates, ExcludedCandidates;
+    }
 
-            var dirNames = subdirs.Select(d => Path.GetFileName(d)!).ToList();
-            var keptNames = await GitIgnoredPathFilter.KeepNonIgnoredAsync(runner, logger, repoPath, dirNames, cancellationToken);
-            if (keptNames.Count != dirNames.Count)
+    private static void Walk(
+        IGitIgnoreSession session, string repoRoot, string directory, string relativeDir,
+        List<string> results, WalkStats stats, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        stats.Visited++;
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(directory, "*.csproj"))
             {
-                var keptSet = keptNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
-                subdirs = subdirs.Where(d => keptSet.Contains(Path.GetFileName(d)!)).ToList();
+                stats.Candidates++;
+                var rel = relativeDir.Length == 0 ? Path.GetFileName(file) : relativeDir + "/" + Path.GetFileName(file);
+                if (session.IsExcluded(rel, GitPathKind.File))
+                    stats.ExcludedCandidates++;
+                else
+                    results.Add(file);
             }
 
-            if (subdirs.Count == 0)
-                return rootPaths;
-
-            using var semaphore = new SemaphoreSlim(limit);
-            var subdirPaths = await Task.WhenAll(subdirs.Select(async subdir =>
+            foreach (var sub in Directory.EnumerateDirectories(directory))
             {
-                await semaphore.WaitAsync(cancellationToken);
-                try
+                var name = Path.GetFileName(sub);
+                if (string.Equals(name, ".git", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (WorkerRepositoryPaths.HasGitMetadata(sub))
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    return EnumerateCsprojInDirectory(subdir, topLevelOnly: false);
+                    stats.NestedRepos++; // Git never tracks the contents of a nested repository or submodule.
+                    continue;
                 }
-                finally
-                {
-                    semaphore.Release();
-                }
-            }));
 
-            return rootPaths.Concat(subdirPaths.SelectMany(x => x)).ToList();
+                var rel = relativeDir.Length == 0 ? name : relativeDir + "/" + name;
+                if (session.IsExcluded(rel, GitPathKind.Directory))
+                {
+                    stats.Pruned++;
+                    continue;
+                }
+
+                Walk(session, repoRoot, sub, rel, results, stats, cancellationToken);
+            }
         }
-        catch (OperationCanceledException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            throw;
-        }
-        catch
-        {
-            return [];
+            throw new ProjectDiscoveryException(repoRoot, $"Cannot read directory '{directory}': {ex.Message}", ex);
         }
     }
 
@@ -139,16 +166,4 @@ public sealed class CsProjFileService(ICsProjFileParser parser, GitProcessRunner
         return updatedCount;
     }
 
-    private static List<string> EnumerateCsprojInDirectory(string path, bool topLevelOnly)
-    {
-        try
-        {
-            var option = topLevelOnly ? SearchOption.TopDirectoryOnly : SearchOption.AllDirectories;
-            return Directory.EnumerateFiles(path, "*.csproj", option).ToList();
-        }
-        catch
-        {
-            return [];
-        }
-    }
 }

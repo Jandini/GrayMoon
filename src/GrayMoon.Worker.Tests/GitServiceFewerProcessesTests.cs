@@ -3,6 +3,7 @@ using GrayMoon.Abstractions.Worker;
 using GrayMoon.Abstractions.Workspaces;
 using GrayMoon.Common;
 using GrayMoon.Common.Git;
+using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Commands;
 using GrayMoon.Worker.Jobs.Requests;
 using GrayMoon.Worker.Jobs.Response;
@@ -31,7 +32,7 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
         var commandLine = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
         var runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
         _reader = new GitCliRepositoryReader(runner, NullLogger<GitCliRepositoryReader>.Instance);
-        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, _reader);
+        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, _reader, new LibGit2SharpGitIgnoreService());
     }
 
     public void Dispose()
@@ -745,6 +746,20 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
         // fetch, ref listing, counts vs default, hooks, upstream counts
         Assert.True(commands.Count <= 5, "Expected at most 5 git processes, got " + commands.Count + ":\n" + string.Join("\n", commands));
         _ = repo;
+    }
+
+    [Fact]
+    public async Task A_sync_whose_project_discovery_fails_leaves_projects_unprobed()
+    {
+        var repo = await CloneAsync(await SeedOriginAsync("main"));
+        var scanner = new CountingCsProjFileService(failWith: new ProjectDiscoveryException(repo, "boom"));
+        var request = NewRequest(RepositoryOperationCapabilities.For(calculateVersion: false, discoverProjects: true));
+
+        var response = await new SyncRepositoryCommand(_git, _reader, scanner, CapabilityTestDoubles.RealFactory(_git)).ExecuteAsync(request);
+
+        Assert.True(response.Success, response.ErrorMessage);
+        Assert.Equal(1, scanner.FindCalls);
+        Assert.Null(response.Projects);
     }
 
     [Fact]

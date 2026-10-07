@@ -27,7 +27,7 @@ public sealed class HookSyncCapabilitiesTests : IDisposable
         var commandLine = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
         var runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
         _reader = new GitCliRepositoryReader(runner, NullLogger<GitCliRepositoryReader>.Instance);
-        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, _reader);
+        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, _reader, new LibGit2SharpGitIgnoreService());
     }
 
     public void Dispose()
@@ -115,6 +115,25 @@ public sealed class HookSyncCapabilitiesTests : IDisposable
         Assert.False(state.UpstreamProbed);
         Assert.False(state.GitVersionProbed);
         Assert.False(state.ProjectsProbed);
+    }
+
+    [Fact]
+    public async Task A_failed_project_discovery_is_not_probed_instead_of_reported_as_no_projects()
+    {
+        var repoPath = await CloneCommittedRepositoryAsync();
+        var scanner = new CountingCsProjFileService(failWith: new ProjectDiscoveryException(repoPath, "boom"));
+        var probe = new RepositoryStateProbe(_reader, scanner, CapabilityTestDoubles.RealFactory(_git));
+
+        var (state, raw) = await probe.CaptureAsync(repoPath, new RepositoryStateProbeOptions
+        {
+            IncludeProjects = true,
+            Capabilities = RepositoryOperationCapabilities.For(calculateVersion: false, discoverProjects: true)
+        });
+
+        Assert.Equal(1, scanner.FindCalls);
+        Assert.False(state.ProjectsProbed);
+        Assert.Null(state.Projects);
+        Assert.Null(raw);
     }
 
     private sealed record Harness(

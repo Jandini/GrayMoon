@@ -3,17 +3,10 @@ using GrayMoon.Worker.Models;
 
 namespace GrayMoon.Worker.Services;
 
-/// <summary>Recursive file search that skips .git, bin, and obj at any depth. Supports * and ? in pattern.</summary>
-public sealed class WorkspaceFileSearchService : IWorkspaceFileSearchService
+/// <summary>Recursive file search inside Git repositories that skips .git, nested repositories and everything Git excludes (see <see cref="IGitIgnoreSession.IsExcluded"/>). Supports * and ? in pattern.</summary>
+public sealed class WorkspaceFileSearchService(IGitIgnoreService ignore) : IWorkspaceFileSearchService
 {
     private static readonly StringComparison OrdinalIgnoreCase = StringComparison.OrdinalIgnoreCase;
-
-    private static bool IsSkippedDirectory(string dirName)
-    {
-        return string.Equals(dirName, ".git", OrdinalIgnoreCase)
-            || string.Equals(dirName, "bin", OrdinalIgnoreCase)
-            || string.Equals(dirName, "obj", OrdinalIgnoreCase);
-    }
 
     public Task<IReadOnlyList<WorkspaceFileSearchResult>> SearchAsync(
         string workspacePath,
@@ -43,7 +36,7 @@ public sealed class WorkspaceFileSearchService : IWorkspaceFileSearchService
             try
             {
                 repoDirs = Directory.GetDirectories(workspacePath)
-                    .Where(d => !string.Equals(Path.GetFileName(d), ".git", OrdinalIgnoreCase));
+                    .Where(d => !string.Equals(Path.GetFileName(d), ".git", OrdinalIgnoreCase) && WorkerRepositoryPaths.HasGitMetadata(d));
             }
             catch
             {
@@ -59,16 +52,26 @@ public sealed class WorkspaceFileSearchService : IWorkspaceFileSearchService
                 && WorkerRepositoryPaths.IsWorkspaceRepository(scopedRepositoryName, workspaceRepositoryName)
                     ? scopedRepositoryName
                     : Path.GetFileName(repoDir);
-            EnumerateMatchingFiles(repoDir, repoDir, repoName, pattern, results, cancellationToken);
+            try
+            {
+                using var session = ignore.Open(repoDir);
+                EnumerateMatchingFiles(session, repoDir, repoDir, relativeDir: "", repoName, pattern, results, cancellationToken);
+            }
+            catch (GitIgnoreException ex)
+            {
+                throw new InvalidOperationException($"File search failed for repository {repoName}: {ex.Message}", ex);
+            }
         }
 
         return Task.FromResult<IReadOnlyList<WorkspaceFileSearchResult>>(results);
     }
 
-    /// <summary>Recursively enumerates files under currentDir, skipping .git, bin, obj. Adds matches (relative to repoRoot) to results.</summary>
+    /// <summary>Recursively enumerates files under currentDir, skipping .git, nested repositories and Git-excluded paths. Adds matches (relative to repoRoot) to results.</summary>
     private static void EnumerateMatchingFiles(
+        IGitIgnoreSession session,
         string repoRoot,
         string currentDir,
+        string relativeDir,
         string repositoryName,
         string pattern,
         List<WorkspaceFileSearchResult> results,
@@ -82,11 +85,13 @@ public sealed class WorkspaceFileSearchService : IWorkspaceFileSearchService
                 var fileName = Path.GetFileName(file);
                 if (!MatchesPattern(fileName, pattern))
                     continue;
-                var relativePath = Path.GetRelativePath(repoRoot, file);
+                var relativePath = relativeDir.Length == 0 ? fileName : relativeDir + "/" + fileName;
+                if (session.IsExcluded(relativePath, GitPathKind.File))
+                    continue;
                 results.Add(new WorkspaceFileSearchResult
                 {
                     RepositoryName = repositoryName,
-                    FilePath = relativePath.Replace('\\', '/'),
+                    FilePath = relativePath,
                     FileName = fileName
                 });
             }
@@ -95,20 +100,19 @@ public sealed class WorkspaceFileSearchService : IWorkspaceFileSearchService
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var dirName = Path.GetFileName(subDir);
-                if (IsSkippedDirectory(dirName))
+                if (string.Equals(dirName, ".git", OrdinalIgnoreCase))
                     continue;
-                if (currentDir == repoRoot && WorkerRepositoryPaths.HasGitMetadata(subDir))
+                if (WorkerRepositoryPaths.HasGitMetadata(subDir))
+                    continue; // nested repository: never part of this repository
+                var relativeSub = relativeDir.Length == 0 ? dirName : relativeDir + "/" + dirName;
+                if (session.IsExcluded(relativeSub, GitPathKind.Directory))
                     continue;
-                EnumerateMatchingFiles(repoRoot, subDir, repositoryName, pattern, results, cancellationToken);
+                EnumerateMatchingFiles(session, repoRoot, subDir, relativeSub, repositoryName, pattern, results, cancellationToken);
             }
         }
-        catch (OperationCanceledException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            throw;
-        }
-        catch
-        {
-            // Skip directories we can't read
+            throw new InvalidOperationException($"Cannot read directory '{currentDir}': {ex.Message}", ex);
         }
     }
 

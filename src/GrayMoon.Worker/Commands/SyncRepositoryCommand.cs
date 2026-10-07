@@ -383,7 +383,19 @@ public sealed class SyncRepositoryCommand(
 
     /// <summary>Runs the project scan off the calling thread so its directory walk does not block the sync.</summary>
     private Task<IReadOnlyList<CsProjFileInfo>?> ScanProjectsAsync(string repoPath, CancellationToken ct)
-        => Task.Run<IReadOnlyList<CsProjFileInfo>?>(async () => await csProjFileService.FindAsync(repoPath, ct), ct);
+        => Task.Run<IReadOnlyList<CsProjFileInfo>?>(async () =>
+        {
+            try
+            {
+                return await csProjFileService.FindAsync(repoPath, ct);
+            }
+            catch (ProjectDiscoveryException ex)
+            {
+                // Not probed (null), never an empty list: an empty list would prune every persisted project row.
+                logger?.LogWarning(ex, "Project discovery failed for {RepoPath}; projects left unprobed", repoPath);
+                return null;
+            }
+        }, ct);
 
     /// <summary>Starts <paramref name="work"/> right away and reports how long it took alongside its result.</summary>
     private static async Task<(T Value, long Ms)> TimedAsync<T>(Func<Task<T>> work)

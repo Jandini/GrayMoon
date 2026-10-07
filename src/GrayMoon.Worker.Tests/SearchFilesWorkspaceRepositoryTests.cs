@@ -26,19 +26,19 @@ public sealed class SearchFilesWorkspaceRepositoryTests : IDisposable
         var commandLine = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
         var runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
         var reader = new GitCliRepositoryReader(runner, NullLogger<GitCliRepositoryReader>.Instance);
-        var git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, reader);
-        _command = new SearchFilesCommand(new WorkspaceFileSearchService());
+        var git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, reader, new LibGit2SharpGitIgnoreService());
+        _command = new SearchFilesCommand(new WorkspaceFileSearchService(new LibGit2SharpGitIgnoreService()));
 
         // Workspace repository: the workspace folder itself.
         var workspacePath = Path.Combine(_workspaceRoot, WorkspaceFolder);
-        Directory.CreateDirectory(Path.Combine(workspacePath, ".git"));
+        GitInit(workspacePath);
         File.WriteAllText(Path.Combine(workspacePath, "root.txt"), "root");
         Directory.CreateDirectory(Path.Combine(workspacePath, "plain-dir"));
         File.WriteAllText(Path.Combine(workspacePath, "plain-dir", "inner.txt"), "inner");
 
         // Source repository nested inside the Workspace repository's working tree.
         var sourcePath = Path.Combine(workspacePath, SourceRepositoryName);
-        Directory.CreateDirectory(Path.Combine(sourcePath, ".git"));
+        GitInit(sourcePath);
         File.WriteAllText(Path.Combine(sourcePath, "nested.txt"), "nested");
         Directory.CreateDirectory(Path.Combine(sourcePath, "docs"));
         File.WriteAllText(Path.Combine(sourcePath, "docs", "deep.txt"), "deep");
@@ -92,6 +92,19 @@ public sealed class SearchFilesWorkspaceRepositoryTests : IDisposable
         var response = await _command.ExecuteAsync(NewRequest(WorkspaceRepositoryName, workspaceRepositoryName: null));
 
         Assert.Empty(response.Files);
+    }
+
+    private static void GitInit(string path)
+    {
+        Directory.CreateDirectory(path);
+        var psi = new System.Diagnostics.ProcessStartInfo("git") { WorkingDirectory = path, UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        psi.ArgumentList.Add("init");
+        psi.ArgumentList.Add("-q");
+        using var process = System.Diagnostics.Process.Start(psi)!;
+        process.StandardOutput.ReadToEnd();
+        process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        Assert.Equal(0, process.ExitCode);
     }
 
     private SearchFilesRequest NewRequest(string repositoryName, string? workspaceRepositoryName) => new()

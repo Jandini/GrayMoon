@@ -143,6 +143,27 @@ public sealed class GitIgnoreParityTests : IDisposable
         }
     }
 
+    [Fact]
+    public void Disposed_session_releases_handles_so_a_worktree_can_be_removed_immediately()
+    {
+        _repo.CommitInitial();
+        var wt = Path.Combine(Path.GetTempPath(), "graymoon-wt-" + Guid.NewGuid().ToString("N")[..8]);
+        _extraDirs.Add(wt);
+        Assert.Equal(0, _repo.RunGit("worktree", "add", "-b", "wt2", wt).ExitCode);
+        File.WriteAllText(Path.Combine(wt, "a.txt"), "x");
+
+        using (var session = _service.Open(wt))
+        {
+            session.IsExcluded("a.txt", GitPathKind.File);
+            session.SelectStageable(["a.txt", "README.md"]);
+        }
+
+        var removed = _repo.RunGit("worktree", "remove", "--force", wt);
+        Assert.True(removed.ExitCode == 0, removed.Stderr);
+        Assert.False(Directory.Exists(wt));
+    }
+
+
     private sealed class WorktreeOracle(string path)
     {
         public bool Ignored(string p)

@@ -24,7 +24,7 @@ public sealed class AttachWorkspaceRepositoryCommandTests : IDisposable
         var commandLine = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
         var runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
         var reader = new GitCliRepositoryReader(runner, NullLogger<GitCliRepositoryReader>.Instance);
-        var git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, reader);
+        var git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, reader, new LibGit2SharpGitIgnoreService());
         _command = new AttachWorkspaceRepositoryCommand(git, reader);
     }
 

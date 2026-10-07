@@ -2,14 +2,14 @@ using GrayMoon.Worker.Models;
 
 namespace GrayMoon.Worker.Abstractions;
 
-/// <summary>Finds and parses .csproj files within a repository path (root and subdirectories, excluding .git and gitignored top-level directories), with parallel subdirectory search.</summary>
+/// <summary>Finds and parses .csproj files within a repository path (root and subdirectories) that Git does not exclude, with parallel parsing.</summary>
 public interface ICsProjFileService
 {
-    /// <summary>Finds all *.csproj in repo root and subdirectories (except .git and gitignored top-level directories), parses each in parallel (up to maxParallel at a time when specified), and returns parsed info for every successfully parsed file. Failed parses are skipped.</summary>
+    /// <summary>Finds all *.csproj in repo root and subdirectories that Git does not exclude (see IGitIgnoreSession.IsExcluded; nested repositories are skipped), parses each in parallel (up to maxParallel at a time when specified), and returns parsed info for every successfully parsed file. A file that fails to parse is skipped. Throws when discovery itself fails.</summary>
     /// <param name="maxParallel">When null, uses a default (e.g. 8).</param>
     Task<IReadOnlyList<CsProjFileInfo>> FindAsync(string repoPath, CancellationToken cancellationToken = default, int? maxParallel = null);
 
-    /// <summary>Returns full paths of all *.csproj in repo root and subdirectories (except .git and gitignored top-level directories), searching subdirs in parallel.</summary>
+    /// <summary>Returns full paths of all *.csproj in repo root and subdirectories that Git does not exclude, in ordinal order. Throws (never returns a partial list) when the repository cannot be opened or a directory cannot be read.</summary>
     /// <param name="maxParallel">When null, uses a default (e.g. 8).</param>
     Task<IReadOnlyList<string>> GetProjectPathsAsync(string repoPath, CancellationToken cancellationToken = default, int? maxParallel = null);
 
@@ -21,4 +21,11 @@ public interface ICsProjFileService
     /// <param name="projectUpdates">List of (project path relative to repo, package ID to new version).</param>
     /// <returns>Number of project files that were modified.</returns>
     Task<int> UpdatePackageVersionsAsync(string repoPath, IReadOnlyList<(string ProjectPath, IReadOnlyDictionary<string, string> PackageUpdates)> projectUpdates, CancellationToken cancellationToken = default);
+}
+
+/// <summary>Project discovery could not complete. Never means "no projects"; callers must treat the probe as failed.</summary>
+public sealed class ProjectDiscoveryException(string repositoryPath, string message, Exception? innerException = null)
+    : Exception($"{message} (repository: {repositoryPath})", innerException)
+{
+    public string RepositoryPath { get; } = repositoryPath;
 }

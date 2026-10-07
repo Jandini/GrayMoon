@@ -209,7 +209,7 @@ Whole-repository staging (`git add --all`) is unchanged (section 2.2).
 - ignored files that are not build output (for example `.env`, `*.user`) no longer appear in the file picker;
 - tracked files under a directory named `bin`/`obj` now appear.
 
-Directories without Git metadata (the unscoped search enumerates every child of the workspace folder) have no Git ignore semantics; the search must be restricted to directories with Git metadata, consistent with `GetWorkspaceRepositoriesCommand`. **This is a product-visible change and is gated on confirmation** (plan Unit 8). If it is rejected, the hard-coded skip stays and is documented as an accepted non-Git rule; it must not be partially migrated.
+Directories without Git metadata (the unscoped search enumerates every child of the workspace folder) have no Git ignore semantics; the search must be restricted to directories with Git metadata, consistent with `GetWorkspaceRepositoriesCommand`. **This is a product-visible change; it was approved and implemented last** (plan Unit 8). If it is rejected, the hard-coded skip stays and is documented as an accepted non-Git rule; it must not be partially migrated.
 
 ---
 

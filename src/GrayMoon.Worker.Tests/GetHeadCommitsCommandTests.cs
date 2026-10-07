@@ -17,7 +17,7 @@ public sealed class GetHeadCommitsCommandTests : IDisposable
         _recorder = new RecordingCommandLineService(inner);
         var runner = new GitProcessRunner(_recorder, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
         var reader = new GitCliRepositoryReader(runner, NullLogger<GitCliRepositoryReader>.Instance);
-        var git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, reader);
+        var git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, reader, new LibGit2SharpGitIgnoreService());
         _command = new GetHeadCommitsCommand(reader, NullLogger<GetHeadCommitsCommand>.Instance);
     }
     public void Dispose()
