@@ -56,11 +56,11 @@ public sealed class WorkerRepositoryPathsTests
     }
 
     [Fact]
-    public async Task GetHostInfo_response_contains_workspaceRepository_feature()
+    public async Task GetCapabilities_response_contains_workspaceRepository_feature()
     {
-        var command = new GetHostInfoCommand(new ThrowingCommandLineService());
+        var command = new GetCapabilitiesCommand();
 
-        var response = await command.ExecuteAsync(new GetHostInfoRequest());
+        var response = await command.ExecuteAsync(new GetCapabilitiesRequest());
 
         Assert.NotNull(response.SupportedFeatures);
         Assert.Contains(WorkerFeatures.WorkspaceRepository, response.SupportedFeatures!);

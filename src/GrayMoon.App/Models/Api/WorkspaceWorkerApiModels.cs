@@ -74,7 +74,11 @@ public sealed class GetHostInfoWorkerResponse
 {
     [JsonPropertyName("userProfilePath")]
     public string? UserProfilePath { get; set; }
+}
 
+/// <summary>Worker GetCapabilities response.</summary>
+public sealed class GetCapabilitiesWorkerResponse
+{
     [JsonPropertyName("supportedFeatures")]
     public List<string>? SupportedFeatures { get; set; }
 }

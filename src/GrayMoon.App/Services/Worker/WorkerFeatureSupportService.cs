@@ -2,7 +2,7 @@ using GrayMoon.App.Models.Api;
 
 namespace GrayMoon.App.Services.Worker;
 
-/// <summary>Tells whether the connected Worker advertises a feature in its <c>GetHostInfo</c> response (D2).</summary>
+/// <summary>Tells whether the connected Worker advertises a feature in its <c>GetCapabilities</c> response (D2).</summary>
 public interface IWorkerFeatureSupportService
 {
     /// <summary>
@@ -13,7 +13,7 @@ public interface IWorkerFeatureSupportService
 }
 
 /// <summary>
-/// Singleton. Asks the Worker for its host info through a short-lived scope (the bridge is scoped) and caches the
+/// Singleton. Asks the Worker for its capabilities (a cheap command, no child processes) through a short-lived scope (the bridge is scoped) and caches the
 /// advertised feature list for 60 seconds. A disconnected Worker or a failed call is never cached.
 /// </summary>
 public sealed class WorkerFeatureSupportService(
@@ -57,15 +57,15 @@ public sealed class WorkerFeatureSupportService(
             if (!workerBridge.IsWorkerConnected)
                 return null;
 
-            var response = await workerBridge.SendCommandAsync("GetHostInfo", new { }, cancellationToken);
+            var response = await workerBridge.SendCommandAsync("GetCapabilities", new { }, cancellationToken);
             if (!response.Success || response.Data is null)
                 return null;
 
-            var hostInfo = WorkerResponseJson.DeserializeWorkerResponse<GetHostInfoWorkerResponse>(response.Data);
-            if (hostInfo?.SupportedFeatures is null)
+            var capabilities = WorkerResponseJson.DeserializeWorkerResponse<GetCapabilitiesWorkerResponse>(response.Data);
+            if (capabilities?.SupportedFeatures is null)
                 return null;
 
-            var features = hostInfo.SupportedFeatures.ToList();
+            var features = capabilities.SupportedFeatures.ToList();
             lock (_gate)
             {
                 _cachedFeatures = features;
