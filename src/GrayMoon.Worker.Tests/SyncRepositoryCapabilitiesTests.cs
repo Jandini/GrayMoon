@@ -194,7 +194,7 @@ public sealed class SyncRepositoryCapabilitiesTests : IDisposable
         ICsProjFileService projectScanner,
         IRepositoryVersionProviderFactory versionProviders,
         RepositoryOperationCapabilities? capabilities)
-        => new SyncRepositoryCommand(_git, _reader, projectScanner, versionProviders).ExecuteAsync(new SyncRepositoryRequest
+        => new SyncRepositoryCommand(_git, _reader, new LibGit2SharpLocalGitSnapshotReader(), projectScanner, versionProviders).ExecuteAsync(new SyncRepositoryRequest
         {
             WorkspaceRoot = _root,
             WorkspaceName = "ws",

@@ -723,10 +723,10 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
     // ---------------------------------------------------------------- whole sync
 
     [Fact]
-    public async Task A_sync_of_a_repository_with_an_upstream_needs_at_most_five_git_processes()
+    public async Task A_sync_of_a_repository_with_an_upstream_needs_only_the_fetch_and_the_hooks_git_processes()
     {
         var repo = await CloneAsync(await SeedOriginAsync("main"));
-        var command = new SyncRepositoryCommand(_git, _reader, new CountingCsProjFileService(), CapabilityTestDoubles.RealFactory(_git));
+        var command = new SyncRepositoryCommand(_git, _reader, new LibGit2SharpLocalGitSnapshotReader(), new CountingCsProjFileService(), CapabilityTestDoubles.RealFactory(_git));
         var request = NewRequest(RepositoryOperationCapabilities.For(calculateVersion: false, discoverProjects: false));
         await command.ExecuteAsync(request); // first sync of a process also runs the one-off safe.directory check
 
@@ -743,9 +743,39 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
         Assert.True(response.HasUpstream);
         Assert.Equal("main", response.DefaultBranch);
         Assert.Equal(0, response.DefaultBranchAhead);
-        // fetch, ref listing, counts vs default, hooks, upstream counts
-        Assert.True(commands.Count <= 5, "Expected at most 5 git processes, got " + commands.Count + ":\n" + string.Join("\n", commands));
+        // fetch and the hooks location; refs, HEAD, default branch, upstream and every count come from the
+        // in-process snapshot.
+        Assert.True(commands.Count <= 2, "Expected at most 2 git processes, got " + commands.Count + ":\n" + string.Join("\n", commands));
+        AssertNoLocalReadProcesses(commands);
         _ = repo;
+    }
+
+    [Fact]
+    public async Task A_sync_of_a_branch_ahead_and_behind_its_upstream_reports_both_counts_without_a_read_process()
+    {
+        var origin = await SeedOriginAsync("main");
+        var repo = await CloneAsync(origin);
+        await PushFromSeedAsync(origin, "remote.txt", "remote");
+        await CommitAsync(repo, "local1.txt", "local1");
+        await CommitAsync(repo, "local2.txt", "local2");
+
+        var (response, commands) = await RecordAsync(() => SyncAsync());
+
+        Assert.True(response.Success, response.ErrorMessage);
+        Assert.Equal(2, response.OutgoingCommits);
+        Assert.Equal(1, response.IncomingCommits);
+        Assert.True(response.HasUpstream);
+        Assert.True(response.UpstreamProbed);
+        Assert.Equal(2, response.DefaultBranchAhead);
+        Assert.Equal(1, response.DefaultBranchBehind);
+        AssertNoLocalReadProcesses(commands);
+    }
+
+    /// <summary>None of the local reads the snapshot replaced may start a git process in a normal sync.</summary>
+    private static void AssertNoLocalReadProcesses(List<string> commands)
+    {
+        foreach (var read in new[] { "for-each-ref", "rev-list", "symbolic-ref", "describe", "branch --show-current", "tag --sort", "rev-parse --verify" })
+            Assert.DoesNotContain(commands, c => c.Contains(read, StringComparison.Ordinal));
     }
 
     [Fact]
@@ -755,7 +785,7 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
         var scanner = new CountingCsProjFileService(failWith: new ProjectDiscoveryException(repo, "boom"));
         var request = NewRequest(RepositoryOperationCapabilities.For(calculateVersion: false, discoverProjects: true));
 
-        var response = await new SyncRepositoryCommand(_git, _reader, scanner, CapabilityTestDoubles.RealFactory(_git)).ExecuteAsync(request);
+        var response = await new SyncRepositoryCommand(_git, _reader, new LibGit2SharpLocalGitSnapshotReader(), scanner, CapabilityTestDoubles.RealFactory(_git)).ExecuteAsync(request);
 
         Assert.True(response.Success, response.ErrorMessage);
         Assert.Equal(1, scanner.FindCalls);
@@ -774,7 +804,7 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
 
         var request = NewRequest(RepositoryOperationCapabilities.For(calculateVersion: false, discoverProjects: false));
         request.DivergenceBaseBranch = "parent";
-        var response = await new SyncRepositoryCommand(_git, _reader, new CountingCsProjFileService(), CapabilityTestDoubles.RealFactory(_git)).ExecuteAsync(request);
+        var response = await new SyncRepositoryCommand(_git, _reader, new LibGit2SharpLocalGitSnapshotReader(), new CountingCsProjFileService(), CapabilityTestDoubles.RealFactory(_git)).ExecuteAsync(request);
 
         Assert.True(response.Success, response.ErrorMessage);
         Assert.Equal("feature", response.Branch);
@@ -820,9 +850,10 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
         Assert.Equal("trunk", response.DefaultBranch);
         Assert.DoesNotContain(commands, c => c.Contains("ls-remote", StringComparison.Ordinal));
         Assert.DoesNotContain(commands, c => c.Contains("set-head", StringComparison.Ordinal));
-        // Fetch, listing, counts, hooks, and the tracking read. Local main still tracks the renamed (pruned)
-        // origin/main here, so the gone-upstream compare path adds one rev-list on top of the usual five.
-        Assert.True(commands.Count <= 6, string.Join(Environment.NewLine, commands));
+        // Fetch and hooks. Local main still tracks the renamed (pruned) origin/main here, so its counts take the
+        // gone-upstream compare path - in process, like every other local read.
+        Assert.True(commands.Count <= 2, string.Join(Environment.NewLine, commands));
+        AssertNoLocalReadProcesses(commands);
     }
 
     [Fact]
@@ -1002,7 +1033,7 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
         => RunSyncAsync(NewRequest(RepositoryOperationCapabilities.For(calculateVersion: false, discoverProjects: false)));
 
     private Task<SyncRepositoryResponse> RunSyncAsync(SyncRepositoryRequest request)
-        => new SyncRepositoryCommand(_git, _reader, new CountingCsProjFileService(), CapabilityTestDoubles.RealFactory(_git))
+        => new SyncRepositoryCommand(_git, _reader, new LibGit2SharpLocalGitSnapshotReader(), new CountingCsProjFileService(), CapabilityTestDoubles.RealFactory(_git))
             .ExecuteAsync(request);
 
     /// <summary>Runs <paramref name="action"/> and returns the text of every git command it started.</summary>

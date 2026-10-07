@@ -33,7 +33,7 @@ public sealed class SyncRepositoryGitVersionFailureTests : IDisposable
         var versionProviderFactory = new RepositoryVersionProviderFactory(
             new GitVersionRepositoryVersionProvider(_git),
             new NoRepositoryVersionProvider());
-        _command = new SyncRepositoryCommand(_git, _reader, new NoProjects(), versionProviderFactory);
+        _command = new SyncRepositoryCommand(_git, _reader, new LibGit2SharpLocalGitSnapshotReader(), new NoProjects(), versionProviderFactory);
         _probe = new RepositoryStateProbe(_reader, new NoProjects(), versionProviderFactory);
     }
 

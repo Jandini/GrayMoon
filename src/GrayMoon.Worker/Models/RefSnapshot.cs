@@ -6,8 +6,8 @@ namespace GrayMoon.Worker.Models;
 /// (<c>GetTagsAsync</c>, <c>GetLocalBranchesAsync</c>, <c>GetRemoteBranchesFromRefsAsync</c>).
 /// </summary>
 /// <param name="Tags">Tag names, newest first (git's <c>creatordate</c> order).</param>
-/// <param name="LocalBranches">Local branch names, sorted.</param>
-/// <param name="RemoteBranches">Branch names on <c>origin</c> without the prefix, sorted, without <c>HEAD</c>.</param>
+/// <param name="LocalBranches">Local branch names (the full name below <c>refs/heads/</c>, never git's disambiguated short form), sorted.</param>
+/// <param name="RemoteBranches">Branch names on <c>origin</c> (the full name below <c>refs/remotes/origin/</c>), sorted, without <c>HEAD</c>.</param>
 /// <param name="CheckedOutBranch">
 /// The branch HEAD is attached to, when that branch exists as a ref. Null for a detached HEAD and also for an
 /// unborn branch (a repository with no commits yet), which the ref listing cannot tell apart, so a null here

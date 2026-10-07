@@ -349,6 +349,26 @@ Git operations that contact a remote receive authentication dynamically.
 
 Failure categories such as protected branch, unauthorized, non-fast-forward, or unavailable remote should be handled as operation outcomes, not blindly retried forever.
 
+### Git CLI versus in-process LibGit2Sharp
+
+The Worker runs Git two ways:
+
+```text
+LibGit2Sharp (in process, read-only, one Repository per logical operation)
+  ignore evaluation                 IGitIgnoreService
+  sync's local repository snapshot  ILocalGitSnapshotReader (refs, HEAD, tags, default branch, upstream, ahead/behind)
+
+Git CLI
+  network and authentication        clone, fetch, pull, push, ls-remote
+  mutations                         checkout, branch, merge, commit, reset, tag, ...
+  worktree changes                  git worktree add/remove
+  repair operations                 origin/HEAD repair (remote set-head)
+  hooks, safe.directory, GitVersion
+  every other local read            IGitRepositoryReader (also sync's fallback when the snapshot cannot read a repository)
+```
+
+A LibGit2Sharp `Repository` is never cached, pooled or shared across threads, and is disposed before the operation returns. See `docs/git-lib/graymoon-libgit2sharp-local-read-design.md`.
+
 ---
 
 ## 17. SignalR browser broadcasts

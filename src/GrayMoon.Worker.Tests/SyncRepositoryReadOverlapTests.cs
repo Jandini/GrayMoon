@@ -120,7 +120,7 @@ public sealed class SyncRepositoryReadOverlapTests : IDisposable
 
         var request = NewRequest(RepositoryOperationCapabilities.For(calculateVersion: false, discoverProjects: false));
         request.DivergenceBaseBranch = "parent";
-        var response = await new SyncRepositoryCommand(_git, _reader, new CountingCsProjFileService(), CapabilityTestDoubles.RealFactory(_git))
+        var response = await new SyncRepositoryCommand(_git, _reader, new LibGit2SharpLocalGitSnapshotReader(), new CountingCsProjFileService(), CapabilityTestDoubles.RealFactory(_git))
             .ExecuteAsync(request);
 
         Assert.True(response.Success, response.ErrorMessage);
@@ -165,13 +165,14 @@ public sealed class SyncRepositoryReadOverlapTests : IDisposable
         await CloneCommittedRepositoryAsync();
         var log = new CapturingLogger();
 
-        var response = await new SyncRepositoryCommand(_git, _reader, new CountingCsProjFileService(), CapabilityTestDoubles.RealFactory(_git), log)
+        var response = await new SyncRepositoryCommand(_git, _reader, new LibGit2SharpLocalGitSnapshotReader(), new CountingCsProjFileService(), CapabilityTestDoubles.RealFactory(_git), log)
             .ExecuteAsync(NewRequest(RepositoryOperationCapabilities.For(calculateVersion: false, discoverProjects: false)));
 
         Assert.True(response.Success, response.ErrorMessage);
         var line = Assert.Single(log.Messages, m => m.Contains("SyncRepository timings", StringComparison.Ordinal));
-        foreach (var part in new[] { "fetch=", "version=", "lane=", "tail=", "total=", "Lane steps:", "refs=", "defaultCounts=" })
+        foreach (var part in new[] { "fetch=", "version=", "lane=", "[Snapshot]", "tail=", "counts=", "[snapshot]", "total=", "Lane steps:", "divergenceBase=", "snapshot(graph=" })
             Assert.Contains(part, line, StringComparison.Ordinal);
+        Assert.Single(log.Messages, m => m.Contains("Local snapshot for", StringComparison.Ordinal) && m.Contains("graphCalculations=", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -287,6 +288,7 @@ public sealed class SyncRepositoryReadOverlapTests : IDisposable
         => new SyncRepositoryCommand(
                 _git,
                 _reader,
+                new LibGit2SharpLocalGitSnapshotReader(),
                 projectScanner ?? new CountingCsProjFileService(),
                 versionProviders ?? CapabilityTestDoubles.RealFactory(_git))
             .ExecuteAsync(NewRequest(capabilities));

@@ -770,6 +770,8 @@ The refactor is complete when:
 
 # Expected follow-up after this refactor
 
+> **Superseded (2026-10):** this split is implemented. The LibGit2Sharp follow-up was built as a separate, sync-only `ILocalGitSnapshotReader` (one in-process snapshot per sync) rather than a whole-reader `LibGit2RepositoryReader`; `GitCliRepositoryReader` stays for every other caller and as sync's explicit fallback. See `docs/git-lib/graymoon-libgit2sharp-local-read-design.md`.
+
 Only after this split is merged and verified should the LibGit2Sharp work begin.
 
 The first LibGit2Sharp implementation should target:

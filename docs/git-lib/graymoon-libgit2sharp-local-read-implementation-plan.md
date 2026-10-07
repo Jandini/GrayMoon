@@ -1,361 +1,106 @@
 # GrayMoon LibGit2Sharp Local Read Implementation Plan
 
-**Companion design:** `graymoon-libgit2sharp-local-read-design.md`
+**Companion design:** `graymoon-libgit2sharp-local-read-design.md` (same folder)
+**Status:** Implemented on branch `sync-git-lib`, except the enterprise VDI benchmark (step 8).
 
-## 0. Mandatory pre-implementation code review
+## 0. Pre-implementation review (done)
 
-Before changing code, inspect the current `main` branch.
+Reviewed `main` at `e8ebf8e` (#394) before any code change: `SyncRepositoryCommand`, `IGitRepositoryReader` / `GitCliRepositoryReader`, `GitProcessRunner` locking, origin/HEAD repair, worktree handling (`GitDirectoryLocator`, linked worktrees), and `LibGit2SharpGitIgnoreService`. Findings that changed this plan:
 
-The implementing AI must first produce a short review covering:
-
-- current `SyncRepositoryCommand` flow;
-- `IGitRepositoryReader` and implementation;
-- all sync-time local Git CLI calls;
-- repository lock behavior;
-- origin HEAD repair flow;
-- divergence/upstream/count semantics;
-- current LibGit2Sharp ignore implementation and lifetime pattern;
-- relevant tests;
-- recent changes that conflict with this plan.
-
-**Do not modify production code until that review is complete.**
-
-If current `main` differs materially from this plan, update the plan first.
+- The Git service split is already done; the new snapshot is a separate sync-only abstraction, not a replacement for `IGitRepositoryReader`.
+- A quiet sync already used at most 5 git processes; the target is 2 (fetch + hooks location), not "near zero rev-parse" (hooks keep one `rev-parse`).
+- `GetUpstreamRefAsync` is not on the sync path; `describe` and `branch --show-current` are.
+- Upstream counts depend on GitVersion's branch: the snapshot counts the checked-out branch, and the tail uses them only when the branch names match.
+- A repair can make no-upstream counts stale: take a fresh snapshot after a successful repair.
+- Decisions approved: fix ambiguous short branch names (CLI reads too); keep the CLI read lane as the single explicit, logged fallback.
 
 ## 1. Baseline
 
-Record:
+- `main` SHA: `e8ebf8e`.
+- Quiet sync with an upstream: at most 5 git processes (`fetch`, `for-each-ref` listing, `rev-list` vs default, `rev-parse --git-common-dir --git-path hooks`, `for-each-ref` tracking), plus `symbolic-ref`/`describe`/`branch --show-current` on detached or unborn HEADs, and a gone-upstream `rev-list`.
+- Tests before the change: Worker 478 passed / 1 skipped.
+- VDI benchmark baseline: the 82.1 s clean sync recorded in the gitignore design (after #393 the `check-ignore` part is gone); a fresh quiet-sync baseline should be taken from `main` when the benchmark is rerun.
 
-- current `main` SHA;
-- quiet sync Git process counts;
-- current enterprise VDI benchmark;
-- exact local Git commands used during sync;
-- relevant test-suite state.
+## 2. Sync-time call audit
 
-## 2. Audit current local-read methods
+See design section 3 (method, command, caller, condition, outcome for every call).
 
-Map every sync-time reader to its Git command(s).
+## 3. Abstraction and model (done)
 
-Expected areas include:
+- `src/GrayMoon.Worker/Abstractions/ILocalGitSnapshotReader.cs`: `ILocalGitSnapshotReader`, `LocalGitSnapshotRequest`, `LocalGitReadException`.
+- `src/GrayMoon.Worker/Models/LocalGitSnapshot.cs`: immutable result; embeds `RefSnapshot`.
+- `src/GrayMoon.Worker/Services/LibGit2SharpLocalGitSnapshotReader.cs`: one `using var repository = new Repository(path)` per call; registered as a singleton in `RunCommandHandler`.
 
-```text
-GetRefSnapshotAsync
-GetCurrentBranchNameAsync
-GetCheckedOutTagAsync
-GetTagsAsync
-GetLocalBranchesAsync
-GetRemoteBranchesFromRefsAsync
-GetDefaultBranchOriginRefAsync
-GetCommitCountsVsDefaultAsync
-ProbeCommitCountsAsync
-GetUpstreamRefAsync
-```
+## 4. Parity tests (done)
 
-Search current `main`; do not assume the list is complete.
+`src/GrayMoon.Worker.Tests/LocalGitSnapshotParityTests.cs` (36 tests) compares every snapshot field with the CLI read answering the same question: attached/detached/unborn/empty/orphan; tag order with ties and fixed dates; describe priority; tag of a tag and tag on a tree; awkward branch lists; ambiguous names; dangling, missing and non-main origin/HEAD; ahead/behind/diverged; gone, foreign-remote and local upstreams; no default; divergence base with and without `origin/` and missing; shallow clone; tag named like the divergence base; linked worktrees (with upstream, with divergence base, detached on a tag); not a repository, broken HEAD, bare, cancellation, handle release before `git worktree remove`.
 
-Deliver a table:
+The parity tests caught one real defect during implementation: LibGit2Sharp's `Branch.UpstreamBranchCanonicalName` is the upstream's name on the remote (`refs/heads/main`), not the local tracking ref; the reader uses `TrackedBranch` instead.
 
-```text
-method
-command
-sync caller
-required output
-candidate for snapshot
-```
+## 5. Ambiguous-name fix (done)
 
-## 3. Add snapshot abstraction
+`GitCliRepositoryReader.GetRefSnapshotAsync` uses full ref names (`%(refname:strip=2)` / the name below `refs/remotes/origin/`), `GetLocalBranchesAsync` uses `%(refname:strip=2)`, `GetRemoteBranchesFromRefsAsync` uses `%(refname:strip=3)`. The snapshot does the same.
 
-Introduce `ILocalGitRepositorySnapshotReader` and a LibGit2Sharp implementation.
+## 6. Sync integration (done)
 
-Keep it focused and separate from `IGitService`.
+`SyncRepositoryCommand`:
 
-## 4. Define request/result model
+- read lane: write the divergence base file, then `Task.Run(snapshotReader.Read)`; no `.git` of its own -> no refs, no fallback; `GIT_DIR` set -> CLI lane; `LocalGitReadException` -> Warning + CLI lane (unchanged code);
+- the branch fallback after GitVersion runs only when the lane did not read the branch (CLI lane);
+- counts: `snapshot.CurrentBranchCounts` when the chosen branch is the checked-out one, else the CLI `ProbeCommitCountsAsync`;
+- repair: CLI mutation, then a fresh snapshot (or the CLI re-read when the lane was the CLI or the fresh snapshot fails, in which case the counts go back to the CLI probe);
+- timing line names the lane and counts sources; one Debug record per snapshot.
 
-The request should state which graph relationships are needed.
+Sync-level tests: `SyncRepositoryLocalSnapshotTests` (fallback gives the same response, no-own-`.git` guard, non-checked-out version-provider branch counted by git, tag checkout without a read process); `GitServiceFewerProcessesTests` budgets tightened to 2 processes with no local-read commands, plus an ahead/behind sync.
 
-The result must be immutable/detached from the disposed LibGit2Sharp `Repository`.
+## 7. Test gate (done)
 
-Avoid lazy properties that reopen the repository later.
+- Worker: 519 passed, 1 skipped (the pre-existing skip).
+- Common: 261 passed. App: 1130 passed.
+- Solution build: 0 warnings.
 
-## 5. Implement repository lifetime
+## 8. Performance gate (open)
 
-Pattern:
+Rerun the enterprise VDI AVR workspace (39 repositories, 16 sync workers, at least three quiet syncs) on `main` and on this branch. Compare wall clock, `SyncRepository` p50/p90, total git process count, per-command counts (`for-each-ref`, `rev-list`, `symbolic-ref`, `rev-parse`, `describe`), GitVersion and fetch duration, and the `Local snapshot` elapsed time. Expected per quiet repository: `for-each-ref`, `rev-list`, `symbolic-ref`, `describe` = 0; `rev-parse` = 1 (hooks); total = 2 plus GitVersion when versioning is on. Check the logs for `falling back to git CLI reads` warnings (ownership or unsupported repository formats).
 
-```csharp
-using var repo = new Repository(repositoryPath);
+## 9. Living documentation (done)
 
-// read all required state
-
-return immutableSnapshot;
-```
-
-No sharing, pooling, or global cache.
-
-## 6. Branch / HEAD state
-
-Tests first:
-
-- attached branch;
-- detached HEAD;
-- unborn branch;
-- empty repository.
-
-Preserve current GrayMoon semantics.
-
-## 7. Tags and checked-out tag
-
-Cover:
-
-- lightweight tags;
-- annotated tags;
-- multiple tags at HEAD;
-- detached commit with no tag.
-
-Document deterministic behavior if multiple tags point to HEAD.
-
-## 8. Local and remote branches
-
-Return names matching current contracts.
-
-Review handling of `origin/HEAD` so it is not accidentally exposed as an ordinary remote branch if existing UI excludes it.
-
-## 9. Default origin branch
-
-Resolve the current equivalent of `refs/remotes/origin/HEAD`.
-
-Return:
-
-```text
-DefaultOriginRef
-OriginHeadResolved
-```
-
-Do not repair here.
-
-## 10. Upstream
-
-Return:
-
-```text
-HasUpstream
-UpstreamRef
-```
-
-Test stale/deleted upstream and detached HEAD behavior.
-
-## 11. Ahead/behind
-
-Use LibGit2Sharp commit graph APIs.
-
-Support:
-
-- current branch vs upstream;
-- branch vs divergence/default base;
-- default branch counts used by sync.
-
-Add parity tests against current `rev-list --left-right --count` behavior.
-
-## 12. Integrate with SyncRepositoryCommand
-
-Keep this structure:
-
-```text
-fetch
-  |
-parallel:
-  GitVersion
-  local snapshot
-  project discovery
-```
-
-Use snapshot values for branch/tag/ref/count/upstream state.
-
-Do not alter GitVersion behavior in this phase.
-
-## 13. Preserve origin HEAD repair
-
-If snapshot reports missing/dangling origin HEAD:
-
-- call the existing repair mutation;
-- re-read only the minimum state required afterward.
-
-Do not rewrite remote authentication.
-
-## 14. Remove redundant sync CLI reads
-
-After integration, search the sync path.
-
-Normal successful sync should no longer need the migrated:
-
-```text
-for-each-ref
-rev-parse
-symbolic-ref
-rev-list
-```
-
-calls.
-
-Document any remaining exceptional calls.
-
-## 15. Locking review
-
-Verify:
-
-- snapshot reads do not overlap unsafe mutations;
-- no `Repository` instance escapes an operation;
-- no lock inversion is introduced;
-- origin-head repair cannot deadlock with snapshot execution.
-
-## 16. Worktree integration tests
-
-Use real linked worktrees.
-
-Verify:
-
-- branch;
-- HEAD SHA;
-- tags;
-- upstream;
-- branch lists;
-- default branch;
-- ahead/behind.
-
-## 17. Failure handling
-
-Cover:
-
-- missing repository;
-- repository deleted mid-operation;
-- corrupt repository;
-- invalid HEAD;
-- missing refs;
-- empty repository.
-
-Avoid broad silent catches.
-
-## 18. Instrumentation
-
-Add one Debug timing record per snapshot:
-
-```text
-repo
-elapsedMs
-tagCount
-localBranchCount
-remoteBranchCount
-hasUpstream
-originHeadResolved
-graphCalculations
-```
-
-Keep existing `SyncRepository` timing logs.
-
-## 19. Test gate
-
-Run:
-
-- new snapshot parity tests;
-- existing Git reader tests;
-- sync tests;
-- worktree tests;
-- full Worker test suite.
-
-Do not simply rewrite expectations to match LibGit2Sharp if GrayMoon behavior changes.
-
-## 20. Performance gate
-
-Re-run the same enterprise VDI AVR workspace where possible:
-
-```text
-39 repositories
-16 sync workers
-```
-
-Collect at least three quiet syncs.
-
-Compare:
-
-- wall clock;
-- SyncRepository p50/p90;
-- total Git command count;
-- for-each-ref count;
-- rev-parse count;
-- symbolic-ref count;
-- rev-list count;
-- GitVersion duration;
-- fetch duration;
-- LibGit2Sharp snapshot duration.
-
-Expected normal target:
-
-```text
-for-each-ref -> 0 in snapshot path
-rev-list     -> 0 in snapshot path
-rev-parse    -> near-zero / exceptional only
-symbolic-ref -> exceptional/repair only
-```
-
-## 21. Cleanup
-
-After tests and benchmark:
-
-- remove obsolete sync-only readers if unused;
-- keep CLI readers still required elsewhere;
-- avoid unrelated Git-service refactoring;
-- update stale XML comments.
-
-## 22. Living documentation
-
-Update the Git architecture docs to reflect:
-
-```text
-LibGit2Sharp:
-  ignore evaluation
-  local repository snapshot reads
-
-Git CLI:
-  network
-  authentication
-  mutations
-  worktree changes
-  repair operations
-```
-
-Record measured before/after performance.
+- This plan and the design describe the as-built state.
+- `docs/architecture/04-runtime-communication-and-concurrency.md` section 16 records the LibGit2Sharp / Git CLI split.
+- `docs/git-service/graymoon-git-service-split-design.md` notes that its "future `LibGit2RepositoryReader`" follow-up was superseded.
 
 ## Checklist
 
-- [ ] pre-implementation code review complete
-- [ ] current main SHA recorded
-- [ ] sync local-read call graph documented
-- [ ] snapshot abstraction added
-- [ ] branch/HEAD parity tests
-- [ ] tags parity tests
-- [ ] branch-list parity tests
-- [ ] origin HEAD tests
-- [ ] upstream tests
-- [ ] ahead/behind parity tests
-- [ ] linked worktree tests
-- [ ] `SyncRepositoryCommand` integrated
-- [ ] origin HEAD repair preserved
-- [ ] redundant CLI reads removed
-- [ ] locking review complete
-- [ ] failure handling reviewed
-- [ ] snapshot timings added
-- [ ] Worker tests pass
+- [x] pre-implementation code review complete
+- [x] current main SHA recorded
+- [x] sync local-read call graph documented
+- [x] snapshot abstraction added
+- [x] branch/HEAD parity tests
+- [x] tags parity tests
+- [x] branch-list parity tests (ambiguous names fixed)
+- [x] origin HEAD tests
+- [x] upstream tests
+- [x] ahead/behind parity tests
+- [x] linked worktree tests
+- [x] `SyncRepositoryCommand` integrated
+- [x] origin HEAD repair preserved (fresh snapshot after repair)
+- [x] redundant CLI reads removed from the normal sync path (kept as the fallback lane)
+- [x] locking review complete (no lock taken, no inversion, repair after dispose)
+- [x] failure handling reviewed (typed exception, single logged fallback, no-own-`.git` guard)
+- [x] snapshot timings added
+- [x] Worker tests pass
 - [ ] enterprise VDI benchmark rerun
-- [ ] living docs updated
+- [x] living docs updated
 
 ## Final acceptance criteria
 
-1. Sync opens one LibGit2Sharp `Repository` for its local snapshot.
-2. The snapshot returns all local-read state required by sync.
-3. Normal sync no longer shells out for migrated ref/graph reads.
-4. Fetch/network/auth flows remain Git CLI.
-5. Mutations remain Git CLI.
-6. Origin HEAD repair remains separate and correct.
-7. Worktrees are covered by real integration tests.
-8. Existing public sync behavior remains compatible.
-9. The VDI benchmark shows the expected command-count reduction.
-10. Architecture docs match the implementation.
+1. Sync opens one LibGit2Sharp `Repository` for its local snapshot (one more only after an origin/HEAD repair). Done.
+2. The snapshot returns all local-read state required by sync. Done.
+3. Normal sync no longer shells out for migrated ref/graph reads. Done (pinned by process-budget tests).
+4. Fetch/network/auth flows remain Git CLI. Done.
+5. Mutations remain Git CLI. Done.
+6. Origin HEAD repair remains separate and correct. Done.
+7. Worktrees are covered by real integration tests. Done.
+8. Existing public sync behaviour remains compatible, except the approved branch-name fix. Done.
+9. The VDI benchmark shows the expected command-count reduction. Open.
+10. Architecture docs match the implementation. Done.
