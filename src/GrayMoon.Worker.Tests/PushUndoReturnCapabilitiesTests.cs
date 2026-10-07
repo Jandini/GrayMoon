@@ -1,6 +1,7 @@
 using GrayMoon.Abstractions.Workspaces;
 using GrayMoon.Common;
 using GrayMoon.Common.Git;
+using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Commands;
 using GrayMoon.Worker.Jobs.Requests;
 using GrayMoon.Worker.Services;
@@ -29,7 +30,7 @@ public sealed class PushUndoReturnCapabilitiesTests : IDisposable
         var commandLine = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
         var runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
         _reader = new GitCliRepositoryReader(runner, NullLogger<GitCliRepositoryReader>.Instance);
-        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, _reader);
+        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, _reader, new LibGit2SharpGitIgnoreService());
     }
 
     public void Dispose()
@@ -156,6 +157,28 @@ public sealed class PushUndoReturnCapabilitiesTests : IDisposable
         Assert.NotNull(notification.Projects);
         Assert.True(notification.State!.ProjectsProbed);
         Assert.False(notification.State.GitVersionProbed);
+    }
+
+    [Fact]
+    public async Task Push_refresh_with_failed_project_discovery_reports_projects_unprobed_without_failing()
+    {
+        var repoPath = await CloneOnFeatureBranchAsync();
+        var scanner = new CountingCsProjFileService(failWith: new ProjectDiscoveryException(repoPath, "boom"));
+
+        var notification = await NewPushCommand(scanner, CapabilityTestDoubles.RealFactory(_git)).BuildPostOperationNotificationAsync(
+            new PushRepositoryRequest
+            {
+                WorkspaceId = 1,
+                RepositoryId = 2,
+                Capabilities = RepositoryOperationCapabilities.For(calculateVersion: false, discoverProjects: true),
+            },
+            repoPath,
+            "feature/x",
+            versionOnly: true);
+
+        Assert.Equal(1, scanner.FindCalls);
+        Assert.Null(notification.Projects);
+        Assert.False(notification.State!.ProjectsProbed);
     }
 
     private (CountingCsProjFileService ProjectScanner, CountingVersionProviderFactory VersionProviders) NewDoubles()

@@ -20,7 +20,7 @@ public sealed class GitServiceStageAndCommitTests : IDisposable
         _recorder = new RecordingCommandLineService(inner);
         var runner = new GitProcessRunner(_recorder, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
         _reader = new GitCliRepositoryReader(runner, NullLogger<GitCliRepositoryReader>.Instance);
-        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, _reader);
+        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, _reader, new LibGit2SharpGitIgnoreService());
     }
 
     public void Dispose() => _repo.Dispose();
@@ -123,7 +123,7 @@ public sealed class GitServiceStageAndCommitTests : IDisposable
     }
 
     [Fact]
-    public async Task Ignored_path_add_failure_drops_ignored_and_commits_the_rest()
+    public async Task Ignored_paths_are_dropped_before_a_single_add_and_the_rest_is_committed()
     {
         _repo.CommitInitial();
         _repo.WriteFile(".gitignore", ".work\n");
@@ -143,8 +143,9 @@ public sealed class GitServiceStageAndCommitTests : IDisposable
         Assert.True(committed);
         Assert.Null(error);
 
-        Assert.Contains(_recorder.ArgumentListCalls, c => c.Contains("check-ignore"));
-        Assert.Equal(2, _recorder.ArgumentListCalls.Count(c => c.Contains("add")));
+        Assert.DoesNotContain(_recorder.ArgumentListCalls, c => c.Contains("check-ignore"));
+        Assert.Equal(1, _recorder.ArgumentListCalls.Count(c => c.Contains("add")));
+        Assert.Contains(_recorder.ArgumentListCalls, c => c.Contains("--literal-pathspecs"));
         Assert.DoesNotContain(_recorder.ArgumentListCalls, c => c.Contains("-f"));
 
         var names = _repo.RunGit("log", "-1", "--name-only", "--pretty=format:").Stdout;
@@ -157,7 +158,7 @@ public sealed class GitServiceStageAndCommitTests : IDisposable
     }
 
     [Fact]
-    public async Task All_ignored_paths_is_nothing_staged()
+    public async Task All_ignored_paths_is_nothing_staged_and_runs_no_add()
     {
         _repo.CommitInitial();
         _repo.WriteFile(".gitignore", ".work\n");
@@ -174,7 +175,57 @@ public sealed class GitServiceStageAndCommitTests : IDisposable
         Assert.True(success);
         Assert.False(committed);
         Assert.Null(error);
-        Assert.Contains(_recorder.ArgumentListCalls, c => c.Contains("check-ignore"));
+        Assert.DoesNotContain(_recorder.ArgumentListCalls, c => c.Contains("check-ignore"));
+        Assert.DoesNotContain(_recorder.ArgumentListCalls, c => c.Contains("add"));
+    }
+
+    [Theory]
+    [InlineData("../outside.txt")]
+    [InlineData("C:/outside.txt")]
+    [InlineData("/outside.txt")]
+    public async Task Invalid_paths_are_rejected_before_any_git_call(string path)
+    {
+        _repo.CommitInitial();
+
+        var (success, committed, error) = await _git.StageAndCommitAsync(
+            _repo.RepositoryPath, [path], "msg", CancellationToken.None);
+
+        Assert.False(success);
+        Assert.False(committed);
+        Assert.False(string.IsNullOrWhiteSpace(error));
+        Assert.DoesNotContain(_recorder.ArgumentListCalls, c => c.Contains("add"));
+    }
+
+    [Fact]
+    public async Task Deleted_tracked_file_matching_an_ignore_rule_is_staged_and_committed()
+    {
+        _repo.CommitInitial("tracked.csproj", "<Project />\n");
+        _repo.WriteFile(".gitignore", "tracked.csproj\n");
+        _repo.RunGit("add", ".gitignore");
+        _repo.RunGit("commit", "-m", "ignore tracked csproj");
+        _repo.DeleteFile("tracked.csproj");
+
+        var (success, committed, error) = await _git.StageAndCommitAsync(
+            _repo.RepositoryPath, ["tracked.csproj"], "chore: remove", CancellationToken.None);
+
+        Assert.True(success, error);
+        Assert.True(committed);
+        Assert.True(string.IsNullOrWhiteSpace(_repo.RunGit("ls-files", "tracked.csproj").Stdout));
+    }
+
+    [Fact]
+    public async Task Path_with_glob_characters_is_staged_literally()
+    {
+        _repo.CommitInitial();
+        _repo.WriteFile("[x].cs", "a\n");
+        _repo.WriteFile("x.cs", "b\n");
+
+        var (success, committed, error) = await _git.StageAndCommitAsync(
+            _repo.RepositoryPath, ["[x].cs"], "chore: literal", CancellationToken.None);
+
+        Assert.True(success, error);
+        Assert.True(committed);
+        Assert.Equal("[x].cs", _repo.RunGit("ls-files", "*.cs").Stdout.Trim());
     }
 
     [Fact]

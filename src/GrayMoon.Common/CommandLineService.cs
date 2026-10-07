@@ -174,7 +174,7 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
         }
 
         // See the string-stdin overload: consumers + timeout before stdin write avoid pipe deadlocks
-        // (e.g. git check-ignore -z --stdin with a large path list that also emits ignored paths).
+        // (e.g. a command fed a large stdin path list that also writes a large amount to stdout).
         using var timeoutCts = new CancellationTokenSource(effectiveTimeout);
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
         var runToken = linkedCts.Token;

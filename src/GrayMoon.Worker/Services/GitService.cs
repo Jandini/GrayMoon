@@ -12,7 +12,7 @@ using static GrayMoon.Worker.Services.GitCliOutput;
 
 namespace GrayMoon.Worker.Services;
 
-public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitService> logger, GitProcessRunner runner, IGitRepositoryReader reader) : IGitService
+public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitService> logger, GitProcessRunner runner, IGitRepositoryReader reader, IGitIgnoreService ignore) : IGitService
 {
     private readonly int _listenPort = options.Value.ListenPort;
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
@@ -880,24 +880,49 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         if (string.IsNullOrWhiteSpace(commitMessage))
             return (false, false, "Commit message is required");
 
-        var paths = pathsToStage.Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => p!.Trim().Replace('\\', '/')).Distinct().ToList();
+        var paths = new List<string>(pathsToStage.Count);
+        foreach (var requested in pathsToStage.Where(p => !string.IsNullOrWhiteSpace(p)))
+        {
+            var validation = GitRepositoryPathValidator.Validate(repoPath, requested);
+            if (!validation.IsValid)
+                return (false, false, validation.ErrorMessage);
+            if (!paths.Contains(validation.NormalizedRelativePath!, StringComparer.Ordinal))
+                paths.Add(validation.NormalizedRelativePath!);
+        }
         if (paths.Count == 0)
             return (false, false, "No paths to stage");
 
         var hooksArgs = GetHooksConfigArgs(skipHooks);
-        var addPrefix = hooksArgs.Concat(["add"]).ToArray();
-        var (addExit, addOut, addErr) = await GitIgnoredPathFilter.AddWithIgnoredFallbackAsync(
-            runner,
-            logger,
-            repoPath,
-            paths,
-            remaining => RunPathspecOperationAsync(repoPath, addPrefix, remaining, ct),
-            ct);
-        if (addExit != 0)
+
+        GitStageSelection selection;
+        try
         {
-            var err = (addErr ?? addOut ?? "").Trim();
-            logger.LogError("Git add failed for {RepoPath}. ExitCode={ExitCode}, Stderr={Stderr}", repoPath, addExit, err);
-            return (false, false, err);
+            var classifyStart = Stopwatch.GetTimestamp();
+            using var session = ignore.Open(repoPath);
+            selection = session.SelectStageable(paths);
+            logger.LogDebug(
+                "Git ignore classification: repo={RepoPath} elapsedMs={ElapsedMs} requested={Requested} excludedUntracked={Excluded} stageable={Stageable}",
+                repoPath, (long)Stopwatch.GetElapsedTime(classifyStart).TotalMilliseconds, paths.Count, selection.ExcludedUntracked.Count, selection.Stageable.Count);
+        }
+        catch (GitIgnoreException ex)
+        {
+            logger.LogError(ex, "Git ignore classification failed for {RepoPath}", repoPath);
+            return (false, false, ex.Message);
+        }
+
+        if (selection.ExcludedUntracked.Count > 0)
+            logger.LogInformation("Skipping {Count} gitignored path(s) in {RepoPath}", selection.ExcludedUntracked.Count, repoPath);
+
+        if (selection.Stageable.Count > 0)
+        {
+            var addPrefix = hooksArgs.Concat(["--literal-pathspecs", "add"]).ToArray();
+            var (addExit, addOut, addErr) = await RunPathspecOperationAsync(repoPath, addPrefix, selection.Stageable, ct);
+            if (addExit != 0)
+            {
+                var err = (addErr ?? addOut ?? "").Trim();
+                logger.LogError("Git add failed for {RepoPath}. ExitCode={ExitCode}, Stderr={Stderr}", repoPath, addExit, err);
+                return (false, false, err);
+            }
         }
 
         var (stagedExit, _, stagedErr) = await runner.RunAsync("git", "diff --cached --quiet", repoPath, ct);

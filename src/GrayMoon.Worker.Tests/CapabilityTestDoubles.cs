@@ -56,7 +56,7 @@ internal sealed class CountingVersionProviderFactory(IRepositoryVersionProviderF
 /// Stand-in for the csproj scanner that reports nothing and counts how often it was asked. Same shape as
 /// the <c>NoProjects</c> fakes the neighbouring tests already use, plus the call counter.
 /// </summary>
-internal sealed class CountingCsProjFileService(IReadOnlyList<CsProjFileInfo>? projects = null) : ICsProjFileService
+internal sealed class CountingCsProjFileService(IReadOnlyList<CsProjFileInfo>? projects = null, Exception? failWith = null) : ICsProjFileService
 {
     private readonly IReadOnlyList<CsProjFileInfo> _projects = projects ?? [];
     private int _findCalls;
@@ -66,6 +66,8 @@ internal sealed class CountingCsProjFileService(IReadOnlyList<CsProjFileInfo>? p
     public Task<IReadOnlyList<CsProjFileInfo>> FindAsync(string repoPath, CancellationToken cancellationToken = default, int? maxParallel = null)
     {
         Interlocked.Increment(ref _findCalls);
+        if (failWith is not null)
+            throw failWith;
         return Task.FromResult(_projects);
     }
 

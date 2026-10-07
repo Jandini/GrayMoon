@@ -24,7 +24,7 @@ public sealed class GitWorktreeCommandTests : IDisposable
         var runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
         _reader = new GitCliRepositoryReader(runner, NullLogger<GitCliRepositoryReader>.Instance);
         _worktrees = new GitWorktreeService(runner, _reader, NullLogger<GitWorktreeService>.Instance);
-        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, _reader);
+        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, _reader, new LibGit2SharpGitIgnoreService());
         _list = new ListGitWorktreesCommand(_worktrees);
         _create = new CreateGitWorktreeCommand(_git, _worktrees);
         _remove = new RemoveGitWorktreeCommand(_worktrees);

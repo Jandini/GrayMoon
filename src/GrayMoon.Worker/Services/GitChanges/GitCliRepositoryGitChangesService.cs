@@ -12,7 +12,7 @@ namespace GrayMoon.Worker.Services.GitChanges;
 /// through <see cref="GitProcessRunner"/>'s <c>ArgumentList</c> overload (never an interpolated argument
 /// string) and every path is validated with <see cref="GitRepositoryPathValidator"/> before use.
 /// </summary>
-public sealed class GitCliRepositoryGitChangesService(GitProcessRunner runner, ILogger<GitCliRepositoryGitChangesService> logger)
+public sealed class GitCliRepositoryGitChangesService(GitProcessRunner runner, IGitIgnoreService ignore, ILogger<GitCliRepositoryGitChangesService> logger)
     : IRepositoryGitChangesService
 {
     private const int SoftSizeLimitBytes = 5 * 1024 * 1024;
@@ -311,16 +311,33 @@ public sealed class GitCliRepositoryGitChangesService(GitProcessRunner runner, I
                 return new GitMutationResult { Success = false, ErrorCode = "NoPaths", ErrorMessage = "No paths to stage." };
             }
 
-            var (exitCode, stdout, stderr) = await GitIgnoredPathFilter.AddWithIgnoredFallbackAsync(
-                runner,
-                logger,
-                repoPath,
-                normalized,
-                remaining => RunPathspecOperationAsync(repoPath, ["add"], remaining, cancellationToken),
-                cancellationToken);
-            if (exitCode != 0)
+            GitStageSelection selection;
+            try
             {
-                return await MutationFailureAsync(repoPath, "StageFailed", (stderr ?? stdout ?? "git add failed").Trim(), nextSnapshotVersion, cancellationToken);
+                var classifyStart = System.Diagnostics.Stopwatch.GetTimestamp();
+                using var session = ignore.Open(repoPath);
+                selection = session.SelectStageable(normalized);
+                logger.LogDebug(
+                    "Git ignore classification: repo={RepoPath} elapsedMs={ElapsedMs} requested={Requested} excludedUntracked={Excluded} stageable={Stageable}",
+                    repoPath, (long)System.Diagnostics.Stopwatch.GetElapsedTime(classifyStart).TotalMilliseconds, normalized.Count, selection.ExcludedUntracked.Count, selection.Stageable.Count);
+            }
+            catch (GitIgnoreException ex)
+            {
+                return await MutationFailureAsync(repoPath, "StageFailed", ex.Message, nextSnapshotVersion, cancellationToken);
+            }
+
+            if (selection.ExcludedUntracked.Count > 0)
+            {
+                logger.LogInformation("Skipping {Count} gitignored path(s) in {RepoPath}", selection.ExcludedUntracked.Count, repoPath);
+            }
+
+            if (selection.Stageable.Count > 0)
+            {
+                var (exitCode, stdout, stderr) = await RunPathspecOperationAsync(repoPath, ["--literal-pathspecs", "add"], selection.Stageable, cancellationToken);
+                if (exitCode != 0)
+                {
+                    return await MutationFailureAsync(repoPath, "StageFailed", (stderr ?? stdout ?? "git add failed").Trim(), nextSnapshotVersion, cancellationToken);
+                }
             }
         }
 

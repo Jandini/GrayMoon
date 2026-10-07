@@ -26,7 +26,7 @@ public sealed class GitServiceSyncHooksTests : IDisposable
         var inner = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
         var runner = new GitProcessRunner(inner, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
         _reader = new GitCliRepositoryReader(runner, NullLogger<GitCliRepositoryReader>.Instance);
-        _git = new GitService(Options.Create(new WorkerOptions()), _logger, runner, _reader);
+        _git = new GitService(Options.Create(new WorkerOptions()), _logger, runner, _reader, new LibGit2SharpGitIgnoreService());
     }
 
     public void Dispose()
