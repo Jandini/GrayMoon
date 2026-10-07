@@ -118,6 +118,7 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<IWorkerSecretProvider, WorkerSecretProvider>();
         builder.Services.AddSingleton<IWorkerTokenProvider, WorkerTokenProvider>();
         builder.Services.AddSingleton<IWorkspaceCapabilityProvider, WorkspaceCapabilityProvider>();
+        builder.Services.AddSingleton<IGitIgnoreService, LibGit2SharpGitIgnoreService>();
         builder.Services.AddSingleton<ICsProjFileParser, CsProjFileParser>();
         builder.Services.AddSingleton<ICsProjFileService, CsProjFileService>();
         builder.Services.AddSingleton<GitVersionRepositoryVersionProvider>();
