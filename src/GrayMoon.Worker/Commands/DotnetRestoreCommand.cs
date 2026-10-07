@@ -7,7 +7,7 @@ using GrayMoon.Worker.Services;
 
 namespace GrayMoon.Worker.Commands;
 
-public sealed class DotnetRestoreCommand(IGitService git, ICommandLineService commandLine, ILogger<DotnetRestoreCommand> logger)
+public sealed class DotnetRestoreCommand(ICommandLineService commandLine, ILogger<DotnetRestoreCommand> logger)
     : ICommandHandler<DotnetRestoreRequest, DotnetRestoreResponse>
 {
     public async Task<DotnetRestoreResponse> ExecuteAsync(DotnetRestoreRequest request, CancellationToken cancellationToken = default)
@@ -17,10 +17,10 @@ public sealed class DotnetRestoreCommand(IGitService git, ICommandLineService co
             var workspaceName = request.WorkspaceName ?? throw new ArgumentException("workspaceName required");
             var repositoryName = request.RepositoryName ?? throw new ArgumentException("repositoryName required");
 
-            var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
+            var workspacePath = WorkerRepositoryPaths.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
             var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
 
-            if (!git.DirectoryExists(repoPath))
+            if (!Directory.Exists(repoPath))
                 return new DotnetRestoreResponse { Success = true };
 
             var projectPaths = request.ProjectPaths;

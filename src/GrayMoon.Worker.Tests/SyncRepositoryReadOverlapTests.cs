@@ -26,12 +26,14 @@ public sealed class SyncRepositoryReadOverlapTests : IDisposable
     private readonly string _root = Directory.CreateTempSubdirectory("graymoon-overlap-").FullName;
     private readonly GitProcessRunner _runner;
     private readonly GitService _git;
+    private GitCliRepositoryReader _reader = null!;
 
     public SyncRepositoryReadOverlapTests()
     {
         var commandLine = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
         _runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
-        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, _runner);
+        _reader = new GitCliRepositoryReader(_runner, NullLogger<GitCliRepositoryReader>.Instance);
+        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, _runner, _reader);
     }
 
     public void Dispose()
@@ -48,46 +50,20 @@ public sealed class SyncRepositoryReadOverlapTests : IDisposable
     }
 
     [Fact]
-    public async Task Read_intent_ignores_the_repository_write_lock()
+    public async Task Reader_ignores_the_repository_write_lock()
     {
         var repoPath = await CloneCommittedRepositoryAsync();
         await RunGitAsync(repoPath, "tag v1.0.0");
 
-        // Write-intent versions of these calls would wait for the lock held below and hang, so only the
-        // read-intent versions are called inside it.
+        // Reads go through the read lane, so none of these may wait for the lock held below.
         await _runner.WithRepoWriteLockAsync(repoPath, async ct =>
         {
-            await FinishesInTimeAsync(_git.GetTagsAsync(repoPath, ct, GitLockIntent.Read));
-            await FinishesInTimeAsync(_git.GetLocalBranchesAsync(repoPath, ct, GitLockIntent.Read));
-            await FinishesInTimeAsync(_git.GetCheckedOutTagAsync(repoPath, ct, GitLockIntent.Read));
-            await FinishesInTimeAsync(_git.ProbeCommitCountsAsync(repoPath, "main", null, ct, intent: GitLockIntent.Read));
+            await FinishesInTimeAsync(_reader.GetTagsAsync(repoPath, ct));
+            await FinishesInTimeAsync(_reader.GetLocalBranchesAsync(repoPath, ct));
+            await FinishesInTimeAsync(_reader.GetCheckedOutTagAsync(repoPath, ct));
+            await FinishesInTimeAsync(_reader.ProbeCommitCountsAsync(repoPath, "main", null, ct));
             return 0;
         }, CancellationToken.None);
-    }
-
-    [Fact]
-    public async Task Read_and_write_intent_agree()
-    {
-        var repoPath = await CloneCommittedRepositoryAsync();
-        await RunGitAsync(repoPath, "tag v1.0.0");
-        await RunGitAsync(repoPath, "branch other");
-        const GitLockIntent read = GitLockIntent.Read;
-        var ct = CancellationToken.None;
-
-        Assert.Equal(await _git.GetCurrentBranchNameAsync(repoPath, ct), await _git.GetCurrentBranchNameAsync(repoPath, ct, read));
-        Assert.Equal(await _git.GetCheckedOutTagAsync(repoPath, ct), await _git.GetCheckedOutTagAsync(repoPath, ct, read));
-        Assert.Equal(await _git.GetTagsAsync(repoPath, ct), await _git.GetTagsAsync(repoPath, ct, read));
-        Assert.Equal(await _git.GetLocalBranchesAsync(repoPath, ct), await _git.GetLocalBranchesAsync(repoPath, ct, read));
-        Assert.Equal(await _git.GetRemoteBranchesFromRefsAsync(repoPath, ct), await _git.GetRemoteBranchesFromRefsAsync(repoPath, ct, read));
-
-        var defaultRef = await _git.GetDefaultBranchOriginRefAsync(repoPath, ct);
-        Assert.Equal(defaultRef, await _git.GetDefaultBranchOriginRefAsync(repoPath, ct, read));
-        Assert.Equal(
-            await _git.GetCommitCountsVsDefaultAsync(repoPath, defaultRef, ct),
-            await _git.GetCommitCountsVsDefaultAsync(repoPath, defaultRef, ct, read));
-        Assert.Equal(
-            await _git.ProbeCommitCountsAsync(repoPath, "main", defaultRef, ct),
-            await _git.ProbeCommitCountsAsync(repoPath, "main", defaultRef, ct, intent: read));
     }
 
     [Fact]
@@ -144,7 +120,7 @@ public sealed class SyncRepositoryReadOverlapTests : IDisposable
 
         var request = NewRequest(RepositoryOperationCapabilities.For(calculateVersion: false, discoverProjects: false));
         request.DivergenceBaseBranch = "parent";
-        var response = await new SyncRepositoryCommand(_git, new CountingCsProjFileService(), CapabilityTestDoubles.RealFactory(_git))
+        var response = await new SyncRepositoryCommand(_git, _reader, new CountingCsProjFileService(), CapabilityTestDoubles.RealFactory(_git))
             .ExecuteAsync(request);
 
         Assert.True(response.Success, response.ErrorMessage);
@@ -189,7 +165,7 @@ public sealed class SyncRepositoryReadOverlapTests : IDisposable
         await CloneCommittedRepositoryAsync();
         var log = new CapturingLogger();
 
-        var response = await new SyncRepositoryCommand(_git, new CountingCsProjFileService(), CapabilityTestDoubles.RealFactory(_git), log)
+        var response = await new SyncRepositoryCommand(_git, _reader, new CountingCsProjFileService(), CapabilityTestDoubles.RealFactory(_git), log)
             .ExecuteAsync(NewRequest(RepositoryOperationCapabilities.For(calculateVersion: false, discoverProjects: false)));
 
         Assert.True(response.Success, response.ErrorMessage);
@@ -225,17 +201,17 @@ public sealed class SyncRepositoryReadOverlapTests : IDisposable
         await RunGitAsync(repoPath, "tag v1.0.0");
         await RunGitAsync(repoPath, "branch other");
         await RunGitAsync(repoPath, "checkout -q other");
-        Assert.Equal("other", (await _git.GetRefSnapshotAsync(repoPath, CancellationToken.None, GitLockIntent.Read))!.CheckedOutBranch);
-        Assert.Equal("other", await _git.GetCurrentBranchNameAsync(repoPath, CancellationToken.None));
-        Assert.Null(await _git.GetCheckedOutTagAsync(repoPath, CancellationToken.None));
+        Assert.Equal("other", (await _reader.GetRefSnapshotAsync(repoPath, CancellationToken.None))!.CheckedOutBranch);
+        Assert.Equal("other", await _reader.GetCurrentBranchNameAsync(repoPath, CancellationToken.None));
+        Assert.Null(await _reader.GetCheckedOutTagAsync(repoPath, CancellationToken.None));
 
         // Detached at a commit that a branch also points to: HEAD is not attached to that branch.
         await RunGitAsync(repoPath, "checkout -q --detach main");
-        Assert.Null((await _git.GetRefSnapshotAsync(repoPath, CancellationToken.None, GitLockIntent.Read))!.CheckedOutBranch);
-        Assert.Null(await _git.GetCurrentBranchNameAsync(repoPath, CancellationToken.None));
+        Assert.Null((await _reader.GetRefSnapshotAsync(repoPath, CancellationToken.None))!.CheckedOutBranch);
+        Assert.Null(await _reader.GetCurrentBranchNameAsync(repoPath, CancellationToken.None));
 
         await RunGitAsync(repoPath, "checkout -q --detach v1.0.0");
-        Assert.Null((await _git.GetRefSnapshotAsync(repoPath, CancellationToken.None, GitLockIntent.Read))!.CheckedOutBranch);
+        Assert.Null((await _reader.GetRefSnapshotAsync(repoPath, CancellationToken.None))!.CheckedOutBranch);
         await AssertSnapshotMatchesAsync(repoPath);
     }
 
@@ -251,11 +227,11 @@ public sealed class SyncRepositoryReadOverlapTests : IDisposable
         var repoPath = Path.Combine(workspace, "repo");
 
         // The ref listing sees no branch here, but git does: sync has to fall back to asking git.
-        var snapshot = await _git.GetRefSnapshotAsync(repoPath, CancellationToken.None, GitLockIntent.Read);
+        var snapshot = await _reader.GetRefSnapshotAsync(repoPath, CancellationToken.None);
         Assert.NotNull(snapshot);
         Assert.Null(snapshot!.CheckedOutBranch);
         Assert.Empty(snapshot.Tags);
-        Assert.Equal("main", await _git.GetCurrentBranchNameAsync(repoPath, CancellationToken.None));
+        Assert.Equal("main", await _reader.GetCurrentBranchNameAsync(repoPath, CancellationToken.None));
 
         var response = await SyncAsync(RepositoryOperationCapabilities.For(calculateVersion: false, discoverProjects: false));
 
@@ -267,11 +243,11 @@ public sealed class SyncRepositoryReadOverlapTests : IDisposable
     private async Task AssertSnapshotMatchesAsync(string repoPath)
     {
         var ct = CancellationToken.None;
-        var snapshot = await _git.GetRefSnapshotAsync(repoPath, ct, GitLockIntent.Read);
+        var snapshot = await _reader.GetRefSnapshotAsync(repoPath, ct);
         Assert.NotNull(snapshot);
-        Assert.Equal(await _git.GetTagsAsync(repoPath, ct), snapshot!.Tags);
-        Assert.Equal(await _git.GetLocalBranchesAsync(repoPath, ct), snapshot.LocalBranches);
-        Assert.Equal(await _git.GetRemoteBranchesFromRefsAsync(repoPath, ct), snapshot.RemoteBranches);
+        Assert.Equal(await _reader.GetTagsAsync(repoPath, ct), snapshot!.Tags);
+        Assert.Equal(await _reader.GetLocalBranchesAsync(repoPath, ct), snapshot.LocalBranches);
+        Assert.Equal(await _reader.GetRemoteBranchesFromRefsAsync(repoPath, ct), snapshot.RemoteBranches);
     }
 
     private sealed class FixedVersionProviderFactory(RepositoryVersionResult result) : IRepositoryVersionProviderFactory
@@ -310,6 +286,7 @@ public sealed class SyncRepositoryReadOverlapTests : IDisposable
         IRepositoryVersionProviderFactory? versionProviders = null)
         => new SyncRepositoryCommand(
                 _git,
+                _reader,
                 projectScanner ?? new CountingCsProjFileService(),
                 versionProviders ?? CapabilityTestDoubles.RealFactory(_git))
             .ExecuteAsync(NewRequest(capabilities));

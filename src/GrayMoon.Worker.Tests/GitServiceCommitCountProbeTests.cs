@@ -16,12 +16,14 @@ public sealed class GitServiceCommitCountProbeTests : IDisposable
 {
     private readonly TempGitRepositoryFixture _repo = new();
     private readonly GitService _git;
+    private GitCliRepositoryReader _reader = null!;
 
     public GitServiceCommitCountProbeTests()
     {
         var commandLine = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
         var runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
-        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner);
+        _reader = new GitCliRepositoryReader(runner, NullLogger<GitCliRepositoryReader>.Instance);
+        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, _reader);
     }
 
     public void Dispose() => _repo.Dispose();
@@ -33,7 +35,7 @@ public sealed class GitServiceCommitCountProbeTests : IDisposable
         var events = new List<CommandLineStreamEvent>();
         using var _ = new CommandLineStreamScope(events.Add);
 
-        var (behind, ahead, name) = await _git.GetCommitCountsVsDefaultAsync(_repo.RepositoryPath, "origin/main", CancellationToken.None);
+        var (behind, ahead, name) = await _reader.GetCommitCountsVsDefaultAsync(_repo.RepositoryPath, "origin/main", CancellationToken.None);
 
         Assert.Null(behind);
         Assert.Null(ahead);
@@ -54,7 +56,7 @@ public sealed class GitServiceCommitCountProbeTests : IDisposable
         var events = new List<CommandLineStreamEvent>();
         using var _ = new CommandLineStreamScope(events.Add);
 
-        var probe = await _git.ProbeCommitCountsAsync(_repo.RepositoryPath, "dropdown-highlight", "origin/main", CancellationToken.None);
+        var probe = await _reader.ProbeCommitCountsAsync(_repo.RepositoryPath, "dropdown-highlight", "origin/main", CancellationToken.None);
 
         Assert.False(probe.CountsProbed);
         Assert.Null(probe.Outgoing);
@@ -79,7 +81,7 @@ public sealed class GitServiceCommitCountProbeTests : IDisposable
         var events = new List<CommandLineStreamEvent>();
         using var _ = new CommandLineStreamScope(events.Add);
 
-        var probe = await _git.ProbeCommitCountsAsync(_repo.RepositoryPath, "main", "origin/main", CancellationToken.None);
+        var probe = await _reader.ProbeCommitCountsAsync(_repo.RepositoryPath, "main", "origin/main", CancellationToken.None);
 
         Assert.False(probe.CountsProbed);
         Assert.Contains(events, e => e.Text.Contains("rev-list", StringComparison.Ordinal));
@@ -97,7 +99,7 @@ public sealed class GitServiceCommitCountProbeTests : IDisposable
         _repo.RunGit("add", "--all");
         _repo.RunGit("commit", "-m", "ahead of origin/main");
 
-        var (behind, ahead, name) = await _git.GetCommitCountsVsDefaultAsync(_repo.RepositoryPath, "origin/main", CancellationToken.None);
+        var (behind, ahead, name) = await _reader.GetCommitCountsVsDefaultAsync(_repo.RepositoryPath, "origin/main", CancellationToken.None);
 
         Assert.Equal(0, behind);
         Assert.Equal(1, ahead);
@@ -111,7 +113,7 @@ public sealed class GitServiceCommitCountProbeTests : IDisposable
         _repo.RunGit("checkout", "-b", "feature");
         await _git.SetDivergenceBaseBranchAsync(_repo.RepositoryPath, "main", CancellationToken.None);
 
-        var probe = await _git.ProbeCommitCountsAsync(_repo.RepositoryPath, "feature", "origin/main", CancellationToken.None);
+        var probe = await _reader.ProbeCommitCountsAsync(_repo.RepositoryPath, "feature", "origin/main", CancellationToken.None);
 
         Assert.True(probe.CountsProbed);
         Assert.False(probe.HasUpstream);
@@ -129,7 +131,7 @@ public sealed class GitServiceCommitCountProbeTests : IDisposable
         _repo.RunGit("add", "--all");
         _repo.RunGit("commit", "-m", "feature commit");
 
-        var probe = await _git.ProbeCommitCountsAsync(_repo.RepositoryPath, "feature", "origin/main", CancellationToken.None);
+        var probe = await _reader.ProbeCommitCountsAsync(_repo.RepositoryPath, "feature", "origin/main", CancellationToken.None);
 
         Assert.True(probe.CountsProbed);
         Assert.False(probe.HasUpstream);
@@ -153,7 +155,7 @@ public sealed class GitServiceCommitCountProbeTests : IDisposable
         _repo.RunGit("checkout", "-b", "feature");
         await _git.SetDivergenceBaseBranchAsync(_repo.RepositoryPath, "main", CancellationToken.None);
 
-        var probe = await _git.ProbeCommitCountsAsync(_repo.RepositoryPath, "feature", "origin/main", CancellationToken.None);
+        var probe = await _reader.ProbeCommitCountsAsync(_repo.RepositoryPath, "feature", "origin/main", CancellationToken.None);
 
         Assert.True(probe.CountsProbed);
         Assert.False(probe.HasUpstream);
@@ -173,7 +175,7 @@ public sealed class GitServiceCommitCountProbeTests : IDisposable
         _repo.RunGit("add", "--all");
         _repo.RunGit("commit", "-m", "ahead of origin/main");
 
-        var probe = await _git.ProbeCommitCountsAsync(_repo.RepositoryPath, "workspace-branch", "origin/main", CancellationToken.None);
+        var probe = await _reader.ProbeCommitCountsAsync(_repo.RepositoryPath, "workspace-branch", "origin/main", CancellationToken.None);
 
         Assert.True(probe.CountsProbed);
         Assert.False(probe.HasUpstream);

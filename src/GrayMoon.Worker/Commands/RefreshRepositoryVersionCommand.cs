@@ -6,7 +6,7 @@ using GrayMoon.Worker.Services;
 namespace GrayMoon.Worker.Commands;
 
 public sealed class RefreshRepositoryVersionCommand(
-    IGitService git,
+    IGitService git, IGitRepositoryReader reader,
     IWorkerTokenProvider tokenProvider,
     IRepositoryVersionProviderFactory versionProviderFactory) : ICommandHandler<RefreshRepositoryVersionRequest, RefreshRepositoryVersionResponse>
 {
@@ -15,14 +15,14 @@ public sealed class RefreshRepositoryVersionCommand(
         var workspaceName = request.WorkspaceName ?? throw new ArgumentException("workspaceName required");
         var repositoryName = request.RepositoryName ?? throw new ArgumentException("repositoryName required");
 
-        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
+        var workspacePath = WorkerRepositoryPaths.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
 
         var version = "-";
         var branch = "-";
         int? outgoingCommits = null;
         int? incomingCommits = null;
-        if (git.DirectoryExists(repoPath))
+        if (Directory.Exists(repoPath))
         {
             var versionResult = await versionProviderFactory
                 .Create(request.EffectiveCapabilities)
@@ -33,10 +33,10 @@ public sealed class RefreshRepositoryVersionCommand(
 
             // A version provider that failed, or that is switched off, leaves the version unresolved; it must
             // not cost the repository its branch.
-            branch = await git.ResolveBranchAsync(versionResult.Result, repoPath, cancellationToken) ?? "-";
+            branch = await reader.ResolveBranchAsync(versionResult.Result, repoPath, cancellationToken) ?? "-";
 
             // Detect tag/detached HEAD; when on a tag we don't have a real branch.
-            var currentTag = await git.GetCheckedOutTagAsync(repoPath, cancellationToken);
+            var currentTag = await reader.GetCheckedOutTagAsync(repoPath, cancellationToken);
             if (currentTag != null)
                 branch = "-";
 
@@ -45,11 +45,11 @@ public sealed class RefreshRepositoryVersionCommand(
             bool? hasUpstream = null;
             if (branch != "-")
             {
-                var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, cancellationToken);
+                var defaultRef = await reader.GetDefaultBranchOriginRefAsync(repoPath, cancellationToken);
                 await git.SetDivergenceBaseBranchAsync(repoPath, request.DivergenceBaseBranch, cancellationToken);
-                var divergenceRef = git.ToOriginBranchRef(request.DivergenceBaseBranch) ?? defaultRef;
-                var countsTask = git.ProbeCommitCountsAsync(repoPath, branch, defaultRef, cancellationToken);
-                var vsDefaultTask = git.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, cancellationToken);
+                var divergenceRef = OriginDefaultRef.ToOriginBranchRef(request.DivergenceBaseBranch) ?? defaultRef;
+                var countsTask = reader.ProbeCommitCountsAsync(repoPath, branch, defaultRef, cancellationToken);
+                var vsDefaultTask = reader.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, cancellationToken);
                 await Task.WhenAll(countsTask, vsDefaultTask);
                 var counts = await countsTask;
                 (defaultBehind, defaultAhead, _) = await vsDefaultTask;
@@ -69,7 +69,7 @@ public sealed class RefreshRepositoryVersionCommand(
             var remoteBranches = token == null
                 ? Array.Empty<string>()
                 : await git.GetRemoteBranchesAsync(repoPath, token, cancellationToken);
-            var localBranches = await git.GetLocalBranchesAsync(repoPath, cancellationToken);
+            var localBranches = await reader.GetLocalBranchesAsync(repoPath, cancellationToken);
 
             return new RefreshRepositoryVersionResponse
             {

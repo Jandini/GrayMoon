@@ -17,6 +17,8 @@ public sealed class GitServiceLongPathsTests : IDisposable
 {
     private readonly string _root = Directory.CreateTempSubdirectory("graymoon-lp-").FullName;
     private readonly GitService _git;
+    private GitCliRepositoryReader _reader = null!;
+    private GitWorktreeService _worktrees = null!;
     private readonly CreateGitWorktreeCommand _create;
     private readonly RemoveGitWorktreeCommand _remove;
 
@@ -24,9 +26,11 @@ public sealed class GitServiceLongPathsTests : IDisposable
     {
         var commandLine = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
         var runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
-        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner);
-        _create = new CreateGitWorktreeCommand(_git);
-        _remove = new RemoveGitWorktreeCommand(_git);
+        _reader = new GitCliRepositoryReader(runner, NullLogger<GitCliRepositoryReader>.Instance);
+        _worktrees = new GitWorktreeService(runner, _reader, NullLogger<GitWorktreeService>.Instance);
+        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, _reader);
+        _create = new CreateGitWorktreeCommand(_git, _worktrees);
+        _remove = new RemoveGitWorktreeCommand(_worktrees);
     }
 
     public void Dispose()
@@ -38,7 +42,7 @@ public sealed class GitServiceLongPathsTests : IDisposable
     public async Task Create_sets_core_longpaths_in_the_repository_config_on_Windows_only()
     {
         var main = await CreateRepoAsync("main1");
-        var head = await _git.GetHeadCommitAsync(main, CancellationToken.None);
+        var head = await _reader.GetHeadCommitAsync(main, CancellationToken.None);
         Assert.Null(await GetLocalLongPathsAsync(main));
 
         var created = await _create.ExecuteAsync(new CreateGitWorktreeRequest
@@ -62,7 +66,7 @@ public sealed class GitServiceLongPathsTests : IDisposable
     {
         var main = await CreateRepoAsync("main2");
         await RunGitAsync(main, "config --local core.longpaths true");
-        var head = await _git.GetHeadCommitAsync(main, CancellationToken.None);
+        var head = await _reader.GetHeadCommitAsync(main, CancellationToken.None);
 
         var created = await _create.ExecuteAsync(new CreateGitWorktreeRequest
         {
@@ -123,7 +127,7 @@ public sealed class GitServiceLongPathsTests : IDisposable
     public async Task Remove_sets_core_longpaths_for_a_Feature_created_before_the_setting_existed()
     {
         var main = await CreateRepoAsync("main4");
-        var head = await _git.GetHeadCommitAsync(main, CancellationToken.None);
+        var head = await _reader.GetHeadCommitAsync(main, CancellationToken.None);
         var worktreePath = Path.Combine(_root, "features", "lp-old", "main4");
         var created = await _create.ExecuteAsync(new CreateGitWorktreeRequest
         {
@@ -180,7 +184,7 @@ public sealed class GitServiceLongPathsTests : IDisposable
         var sha = (await RunGitOutputAsync(repoPath, $"hash-object -w \"{blobSource}\"")).Trim();
         await RunGitAsync(repoPath, $"update-index --add --cacheinfo 100644,{sha},{relativePath}");
         await RunGitAsync(repoPath, "commit -m deep");
-        return (await _git.GetHeadCommitAsync(repoPath, CancellationToken.None))!;
+        return (await _reader.GetHeadCommitAsync(repoPath, CancellationToken.None))!;
     }
 
     private async Task<string?> GetLocalLongPathsAsync(string repoPath)

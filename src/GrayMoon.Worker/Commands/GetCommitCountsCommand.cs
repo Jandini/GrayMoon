@@ -6,30 +6,30 @@ using GrayMoon.Worker.Services;
 namespace GrayMoon.Worker.Commands;
 
 /// <summary>Returns only outgoing and incoming commit counts for the current branch. Used after push to refresh counts without running GitVersion or branch listing.</summary>
-public sealed class GetCommitCountsCommand(IGitService git) : ICommandHandler<GetCommitCountsRequest, GetCommitCountsResponse>
+public sealed class GetCommitCountsCommand(IGitRepositoryReader reader) : ICommandHandler<GetCommitCountsRequest, GetCommitCountsResponse>
 {
     public async Task<GetCommitCountsResponse> ExecuteAsync(GetCommitCountsRequest request, CancellationToken cancellationToken = default)
     {
         var workspaceName = request.WorkspaceName ?? throw new ArgumentException("workspaceName required");
         var repositoryName = request.RepositoryName ?? throw new ArgumentException("repositoryName required");
 
-        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
+        var workspacePath = WorkerRepositoryPaths.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
 
-        if (!git.DirectoryExists(repoPath))
+        if (!Directory.Exists(repoPath))
             return new GetCommitCountsResponse();
 
-        var branch = await git.GetCurrentBranchNameAsync(repoPath, cancellationToken);
+        var branch = await reader.GetCurrentBranchNameAsync(repoPath, cancellationToken);
         if (string.IsNullOrWhiteSpace(branch))
             return new GetCommitCountsResponse();
 
-        var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, cancellationToken);
+        var defaultRef = await reader.GetDefaultBranchOriginRefAsync(repoPath, cancellationToken);
         // Read-only: do not clear/persist here (Return-to-default safety checks use this command).
-        var divergenceRef = git.ToOriginBranchRef(request.DivergenceBaseBranch)
-            ?? git.ToOriginBranchRef(await git.GetDivergenceBaseBranchAsync(repoPath, cancellationToken))
+        var divergenceRef = OriginDefaultRef.ToOriginBranchRef(request.DivergenceBaseBranch)
+            ?? OriginDefaultRef.ToOriginBranchRef(await reader.GetDivergenceBaseBranchAsync(repoPath, cancellationToken))
             ?? defaultRef;
-        var (outgoing, incoming, hasUpstream) = await git.GetCommitCountsAsync(repoPath, branch, defaultRef, cancellationToken);
-        var (defaultBehind, defaultAhead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, cancellationToken);
+        var (outgoing, incoming, hasUpstream) = await reader.GetCommitCountsAsync(repoPath, branch, defaultRef, cancellationToken);
+        var (defaultBehind, defaultAhead, _) = await reader.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, cancellationToken);
         return new GetCommitCountsResponse
         {
             OutgoingCommits = outgoing,

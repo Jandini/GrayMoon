@@ -20,12 +20,14 @@ public sealed class WorktreeAndProjectRefreshCapabilitiesTests : IDisposable
 {
     private readonly string _root = Directory.CreateTempSubdirectory("graymoon-wt-caps-").FullName;
     private readonly GitService _git;
+    private GitCliRepositoryReader _reader = null!;
 
     public WorktreeAndProjectRefreshCapabilitiesTests()
     {
         var commandLine = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
         var runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
-        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner);
+        _reader = new GitCliRepositoryReader(runner, NullLogger<GitCliRepositoryReader>.Instance);
+        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, _reader);
     }
 
     public void Dispose()
@@ -89,7 +91,7 @@ public sealed class WorktreeAndProjectRefreshCapabilitiesTests : IDisposable
     {
         CreateRepositoryDirectory();
         var scanner = new CountingCsProjFileService();
-        var command = new RefreshRepositoryProjectsCommand(_git, scanner);
+        var command = new RefreshRepositoryProjectsCommand(scanner);
 
         var response = await command.ExecuteAsync(NewRefreshRequest(
             RepositoryOperationCapabilities.For(calculateVersion: true, discoverProjects: false)));
@@ -103,7 +105,7 @@ public sealed class WorktreeAndProjectRefreshCapabilitiesTests : IDisposable
     {
         CreateRepositoryDirectory();
         var scanner = new CountingCsProjFileService();
-        var command = new RefreshRepositoryProjectsCommand(_git, scanner);
+        var command = new RefreshRepositoryProjectsCommand(scanner);
 
         var response = await command.ExecuteAsync(NewRefreshRequest(
             RepositoryOperationCapabilities.For(calculateVersion: true, discoverProjects: true)));
@@ -117,7 +119,7 @@ public sealed class WorktreeAndProjectRefreshCapabilitiesTests : IDisposable
     {
         CreateRepositoryDirectory();
         var scanner = new CountingCsProjFileService();
-        var command = new RefreshRepositoryProjectsCommand(_git, scanner);
+        var command = new RefreshRepositoryProjectsCommand(scanner);
 
         var response = await command.ExecuteAsync(NewRefreshRequest(capabilities: null));
 
@@ -134,7 +136,7 @@ public sealed class WorktreeAndProjectRefreshCapabilitiesTests : IDisposable
     };
 
     private void CreateRepositoryDirectory()
-        => Directory.CreateDirectory(Path.Combine(_git.GetWorkspacePath(_root, "ws"), "repo"));
+        => Directory.CreateDirectory(Path.Combine(WorkerRepositoryPaths.GetWorkspacePath(_root, "ws"), "repo"));
 
     /// <summary>
     /// The dispatcher takes one handler per command; only the capability provider matters for warming, so

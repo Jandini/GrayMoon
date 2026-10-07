@@ -1,3 +1,4 @@
+using GrayMoon.Worker.Services;
 using GrayMoon.Abstractions.Worker;
 using GrayMoon.Abstractions.Notifications;
 using GrayMoon.Worker.Abstractions;
@@ -13,7 +14,7 @@ namespace GrayMoon.Worker.Commands;
 /// and tags (full fetch is done by Sync and branch list flows).
 /// </summary>
 public sealed class CheckoutHookSyncCommand(
-    IGitService git,
+    IGitService git, IGitRepositoryReader reader,
     IRepositoryStateProbe stateProbe,
     IWorkerTokenProvider tokenProvider,
     IWorkspaceCapabilityProvider capabilityProvider,
@@ -32,13 +33,13 @@ public sealed class CheckoutHookSyncCommand(
         var capabilities = await capabilityProvider.GetAsync(payload.WorkspaceId, cancellationToken);
 
         // Resolve default origin ref once so minimal fetch and the probe's commit-count calls share it.
-        var defaultRef = await git.GetDefaultBranchOriginRefAsync(payload.RepositoryPath, cancellationToken);
+        var defaultRef = await reader.GetDefaultBranchOriginRefAsync(payload.RepositoryPath, cancellationToken);
 
         // Resolve the current branch cheaply (before running GitVersion) so the minimal fetch below can
         // target this branch's own configured upstream, not just the default branch. Using a placeholder
         // here would make FetchMinimalAsync's upstream lookup miss (no branch named "-"), silently skipping
         // the fetch of this branch's own remote-tracking ref and leaving it stale for the HasUpstream check below.
-        var currentBranchForFetch = await git.GetCurrentBranchNameAsync(payload.RepositoryPath, cancellationToken) ?? "-";
+        var currentBranchForFetch = await reader.GetCurrentBranchNameAsync(payload.RepositoryPath, cancellationToken) ?? "-";
 
         // Minimal fetch: only current branch and default branch, not all branches/tags.
         string? token = await tokenProvider.GetTokenForRepositoryAsync(payload.RepositoryId, cancellationToken);
@@ -79,7 +80,7 @@ public sealed class CheckoutHookSyncCommand(
             var (fetchTagsSuccess, fetchTagsError) = await git.FetchTagsAsync(payload.RepositoryPath, token, cancellationToken);
             if (!fetchTagsSuccess)
                 logger.LogWarning("CheckoutHookSync: tag fetch failed for repo {RepositoryId}: {Error}", payload.RepositoryId, fetchTagsError);
-            remoteTags = await git.GetTagsAsync(payload.RepositoryPath, cancellationToken);
+            remoteTags = await reader.GetTagsAsync(payload.RepositoryPath, cancellationToken);
         }
 
         var version = state.GitVersion ?? "-";

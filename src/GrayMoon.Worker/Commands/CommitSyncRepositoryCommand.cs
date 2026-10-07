@@ -33,10 +33,10 @@ public sealed class CommitSyncRepositoryCommand(
         var repositoryName = request.RepositoryName ?? throw new ArgumentException("repositoryName required");
         var bearerToken = request.BearerToken;
 
-        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
+        var workspacePath = WorkerRepositoryPaths.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
 
-        if (!git.DirectoryExists(repoPath))
+        if (!Directory.Exists(repoPath))
         {
             return new CommitSyncRepositoryResponse
             {

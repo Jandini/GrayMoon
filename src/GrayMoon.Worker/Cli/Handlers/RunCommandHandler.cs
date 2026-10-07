@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+using System.Reflection;
 using GrayMoon.Worker.Abstractions;
 using GrayMoon.Common;
 using GrayMoon.Common.Git;
@@ -111,7 +111,9 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<CommandJobCancellationRegistry>();
         builder.Services.AddSingleton<ICommandLineService, CommandLineService>();
         builder.Services.AddSingleton<GitProcessRunner>();
+        builder.Services.AddSingleton<IGitRepositoryReader, GitCliRepositoryReader>();
         builder.Services.AddSingleton<IGitService, GitService>();
+        builder.Services.AddSingleton<IGitWorktreeService, GitWorktreeService>();
         builder.Services.AddSingleton<GitRemoteIntegrateService>();
         builder.Services.AddSingleton<IWorkerSecretProvider, WorkerSecretProvider>();
         builder.Services.AddSingleton<IWorkerTokenProvider, WorkerTokenProvider>();

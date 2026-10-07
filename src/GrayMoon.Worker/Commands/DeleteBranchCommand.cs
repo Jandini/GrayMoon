@@ -17,10 +17,10 @@ public sealed class DeleteBranchCommand(IGitService git) : ICommandHandler<Delet
         if (string.IsNullOrWhiteSpace(request.WorkspaceRoot))
             throw new ArgumentException("workspaceRoot required");
 
-        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
+        var workspacePath = WorkerRepositoryPaths.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
 
-        if (!git.DirectoryExists(repoPath))
+        if (!Directory.Exists(repoPath))
         {
             return new DeleteBranchResponse
             {

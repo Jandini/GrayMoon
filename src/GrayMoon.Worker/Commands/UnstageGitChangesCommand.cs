@@ -7,7 +7,7 @@ using GrayMoon.Worker.Services;
 
 namespace GrayMoon.Worker.Commands;
 
-public sealed class UnstageGitChangesCommand(IGitService git, IRepositoryGitChangesService gitChangesService, GitChangesSnapshotCache snapshotCache)
+public sealed class UnstageGitChangesCommand(IRepositoryGitChangesService gitChangesService, GitChangesSnapshotCache snapshotCache)
     : ICommandHandler<UnstageGitChangesRequest, GitMutationResponse>
 {
     public async Task<GitMutationResponse> ExecuteAsync(UnstageGitChangesRequest request, CancellationToken cancellationToken = default)
@@ -15,10 +15,10 @@ public sealed class UnstageGitChangesCommand(IGitService git, IRepositoryGitChan
         var workspaceName = request.WorkspaceName ?? throw new ArgumentException("workspaceName required");
         var repositoryName = request.RepositoryName ?? throw new ArgumentException("repositoryName required");
 
-        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
+        var workspacePath = WorkerRepositoryPaths.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
 
-        if (!git.DirectoryExists(repoPath))
+        if (!Directory.Exists(repoPath))
         {
             return new GitMutationResponse { Success = false, ErrorCode = "RepositoryNotFound", ErrorMessage = "Repository not found." };
         }

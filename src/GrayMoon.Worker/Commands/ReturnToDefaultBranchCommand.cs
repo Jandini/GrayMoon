@@ -6,7 +6,7 @@ using GrayMoon.Worker.Services;
 
 namespace GrayMoon.Worker.Commands;
 
-public sealed class ReturnToDefaultBranchCommand(IGitService git, IRepositoryStateProbe stateProbe, ILogger<ReturnToDefaultBranchCommand> logger) : ICommandHandler<ReturnToDefaultBranchRequest, ReturnToDefaultBranchResponse>
+public sealed class ReturnToDefaultBranchCommand(IGitService git, IGitRepositoryReader reader, IRepositoryStateProbe stateProbe, ILogger<ReturnToDefaultBranchCommand> logger) : ICommandHandler<ReturnToDefaultBranchRequest, ReturnToDefaultBranchResponse>
 {
     public async Task<ReturnToDefaultBranchResponse> ExecuteAsync(ReturnToDefaultBranchRequest request, CancellationToken cancellationToken = default)
     {
@@ -14,10 +14,10 @@ public sealed class ReturnToDefaultBranchCommand(IGitService git, IRepositorySta
         var repositoryName = request.RepositoryName ?? throw new ArgumentException("repositoryName required");
         var currentBranchName = request.CurrentBranchName ?? throw new ArgumentException("currentBranchName required");
 
-        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
+        var workspacePath = WorkerRepositoryPaths.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
 
-        if (!git.DirectoryExists(repoPath))
+        if (!Directory.Exists(repoPath))
         {
             return new ReturnToDefaultBranchResponse
             {
@@ -27,7 +27,7 @@ public sealed class ReturnToDefaultBranchCommand(IGitService git, IRepositorySta
         }
 
         // Resolve default branch name first (needed for safety check before remote delete)
-        var defaultBranch = await git.GetDefaultBranchNameAsync(repoPath, cancellationToken);
+        var defaultBranch = await reader.GetDefaultBranchNameAsync(repoPath, cancellationToken);
         if (string.IsNullOrWhiteSpace(defaultBranch))
         {
             return new ReturnToDefaultBranchResponse

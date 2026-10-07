@@ -6,15 +6,15 @@ using GrayMoon.Worker.Services;
 
 namespace GrayMoon.Worker.Commands;
 
-public sealed class GetWorkspaceRepositoriesCommand(IGitService git) : ICommandHandler<GetWorkspaceRepositoriesRequest, GetWorkspaceRepositoriesResponse>
+public sealed class GetWorkspaceRepositoriesCommand(IGitRepositoryReader reader) : ICommandHandler<GetWorkspaceRepositoriesRequest, GetWorkspaceRepositoriesResponse>
 {
     private const int DefaultMaxConcurrentRepos = 8;
 
     public async Task<GetWorkspaceRepositoriesResponse> ExecuteAsync(GetWorkspaceRepositoriesRequest request, CancellationToken cancellationToken = default)
     {
         var workspaceName = request.WorkspaceName ?? throw new ArgumentException("workspaceName required");
-        var path = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
-        var repositories = git.GetDirectories(path)
+        var path = WorkerRepositoryPaths.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
+        var repositories = WorkerRepositoryPaths.GetDirectoryNames(path)
             .Where(name => WorkerRepositoryPaths.HasGitMetadata(Path.Combine(path, name)))
             .ToArray();
 
@@ -49,7 +49,7 @@ public sealed class GetWorkspaceRepositoriesCommand(IGitService git) : ICommandH
             try
             {
                 var repoPath = Path.Combine(workspacePath, name);
-                var originUrl = await git.GetRemoteOriginUrlAsync(repoPath, ct);
+                var originUrl = await reader.GetRemoteOriginUrlAsync(repoPath, ct);
 
                 target[index] = new WorkspaceRepositoryInfo
                 {

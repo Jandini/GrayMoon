@@ -25,8 +25,9 @@ public sealed class SearchFilesWorkspaceRepositoryTests : IDisposable
     {
         var commandLine = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
         var runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
-        var git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner);
-        _command = new SearchFilesCommand(git, new WorkspaceFileSearchService());
+        var reader = new GitCliRepositoryReader(runner, NullLogger<GitCliRepositoryReader>.Instance);
+        var git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, reader);
+        _command = new SearchFilesCommand(new WorkspaceFileSearchService());
 
         // Workspace repository: the workspace folder itself.
         var workspacePath = Path.Combine(_workspaceRoot, WorkspaceFolder);

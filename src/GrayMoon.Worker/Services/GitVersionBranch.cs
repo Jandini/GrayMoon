@@ -15,7 +15,7 @@ internal static class GitVersionBranch
     /// Null for a detached HEAD, which callers already treat as "no branch".
     /// </summary>
     public static async Task<string?> ResolveBranchAsync(
-        this IGitService git,
+        this IGitRepositoryReader reader,
         GitVersionResult? versionResult,
         string repoPath,
         CancellationToken cancellationToken)
@@ -24,7 +24,7 @@ internal static class GitVersionBranch
         if (!string.IsNullOrWhiteSpace(fromGitVersion))
             return fromGitVersion;
 
-        return Choose(null, await git.GetCurrentBranchNameAsync(repoPath, cancellationToken));
+        return Choose(null, await reader.GetCurrentBranchNameAsync(repoPath, cancellationToken));
     }
 
     /// <summary>

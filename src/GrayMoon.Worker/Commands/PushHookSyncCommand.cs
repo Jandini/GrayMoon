@@ -1,3 +1,4 @@
+using GrayMoon.Worker.Services;
 using GrayMoon.Abstractions.Worker;
 using GrayMoon.Abstractions.Notifications;
 using GrayMoon.Abstractions.Workspaces;
@@ -14,7 +15,7 @@ namespace GrayMoon.Worker.Commands;
 /// originated from GrayMoon or an external IDE.
 /// </summary>
 public sealed class PushHookSyncCommand(
-    IGitService git,
+    IGitRepositoryReader reader,
     IRepositoryStateProbe stateProbe,
     IWorkspaceCapabilityProvider capabilityProvider,
     IHubConnectionProvider hubProvider,
@@ -47,7 +48,7 @@ public sealed class PushHookSyncCommand(
         // The ref name as git knows it, which is what the deferred pass counts against and compares HEAD to.
         // The version provider's branch name can be escaped (slashes replaced), so it is not usable as a ref.
         var pushedBranch = state.CheckedOutTag == null
-            ? await git.GetCurrentBranchNameAsync(payload.RepositoryPath, cancellationToken)
+            ? await reader.GetCurrentBranchNameAsync(payload.RepositoryPath, cancellationToken)
             : null;
 
         var connection = hubProvider.Connection;
@@ -110,8 +111,8 @@ public sealed class PushHookSyncCommand(
 
                 // The wait itself stays a bare count: polling must not relaunch the version provider or the
                 // project scan on every attempt.
-                var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, CancellationToken.None);
-                var (outgoing, _, _) = await git.GetCommitCountsAsync(repoPath, branch, defaultRef, CancellationToken.None);
+                var defaultRef = await reader.GetDefaultBranchOriginRefAsync(repoPath, CancellationToken.None);
+                var (outgoing, _, _) = await reader.GetCommitCountsAsync(repoPath, branch, defaultRef, CancellationToken.None);
 
                 // Keep polling while push is still in progress (outgoing > 0) unless this is the last attempt
                 if (outgoing > 0 && attempt < maxChecks - 1)
@@ -174,7 +175,7 @@ public sealed class PushHookSyncCommand(
     /// </summary>
     private async Task<bool> StillOnPushedBranchAsync(string repoPath, string pushedBranch, int repositoryId)
     {
-        var currentBranch = await git.GetCurrentBranchNameAsync(repoPath, CancellationToken.None);
+        var currentBranch = await reader.GetCurrentBranchNameAsync(repoPath, CancellationToken.None);
         if (string.Equals(currentBranch, pushedBranch, StringComparison.Ordinal))
             return true;
 

@@ -40,4 +40,24 @@ internal static class OriginDefaultRef
             return "origin/master";
         return null;
     }
+
+    /// <summary>
+    /// Builds <c>origin/&lt;branch&gt;</c> for an ahead/behind comparison base. Returns null when
+    /// <paramref name="branchName"/> is null/whitespace. Accepts a name already prefixed with <c>origin/</c>.
+    /// </summary>
+    public static string? ToOriginBranchRef(string? branchName)
+    {
+        if (string.IsNullOrWhiteSpace(branchName))
+            return null;
+        var trimmed = branchName.Trim();
+        if (trimmed.StartsWith("origin/", StringComparison.OrdinalIgnoreCase))
+            return trimmed;
+        return $"origin/{trimmed}";
+    }
+
+    /// <summary>A ref name that survives being put into an argument string: no spaces, quotes, glob characters or leading dash.</summary>
+    public static bool IsPlainRefName(string name)
+        => name.Length > 0
+           && name[0] != '-'
+           && name.IndexOfAny([' ', '\t', '\r', '\n', '"', '\'', '*', '?', '[', '\\']) < 0;
 }

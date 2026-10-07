@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Jobs.Requests;
 using GrayMoon.Worker.Jobs.Response;
@@ -19,7 +19,7 @@ namespace GrayMoon.Worker.Commands;
 /// scan, hooks and counts).
 /// </summary>
 public sealed class SyncRepositoryCommand(
-    IGitService git,
+    IGitService git, IGitRepositoryReader reader,
     ICsProjFileService csProjFileService,
     IRepositoryVersionProviderFactory versionProviderFactory,
     ILogger<SyncRepositoryCommand>? logger = null) : ICommandHandler<SyncRepositoryRequest, SyncRepositoryResponse>
@@ -48,12 +48,12 @@ public sealed class SyncRepositoryCommand(
         var workspaceId = request.WorkspaceId;
         var capabilities = request.EffectiveCapabilities;
 
-        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
+        var workspacePath = WorkerRepositoryPaths.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
 
-        git.CreateDirectory(workspacePath);
+        Directory.CreateDirectory(workspacePath);
 
-        if (!git.DirectoryExists(repoPath) && !string.IsNullOrWhiteSpace(cloneUrl))
+        if (!Directory.Exists(repoPath) && !string.IsNullOrWhiteSpace(cloneUrl))
         {
             var ok = await git.CloneAsync(workspacePath, cloneUrl, bearerToken, cancellationToken);
             if (ok)
@@ -69,7 +69,7 @@ public sealed class SyncRepositoryCommand(
         var upstreamProbed = false;
         string? versionError = null;
         string? fetchError = null;
-        if (git.DirectoryExists(repoPath))
+        if (Directory.Exists(repoPath))
         {
             var totalStart = Stopwatch.GetTimestamp();
             await git.AddSafeDirectoryAsync(repoPath, cancellationToken);
@@ -142,7 +142,7 @@ public sealed class SyncRepositoryCommand(
             if (!readBranchInLane && string.IsNullOrWhiteSpace(GitVersionBranch.Choose(versionResult.Result, null)))
             {
                 var fallbackStart = Stopwatch.GetTimestamp();
-                gitBranch = await git.GetCurrentBranchNameAsync(repoPath, cancellationToken, GitLockIntent.Read);
+                gitBranch = await reader.GetCurrentBranchNameAsync(repoPath, cancellationToken);
                 branchFallbackMs = ElapsedMs(fallbackStart);
             }
 
@@ -174,7 +174,7 @@ public sealed class SyncRepositoryCommand(
             // Counts are taken against whichever branch name won. The divergence base file was already written
             // in the read lane, which the no-upstream path of the probe reads back.
             var countsTask = branch != "-"
-                ? TimedAsync(() => git.ProbeCommitCountsAsync(repoPath, branch, refs.DefaultRef, cancellationToken, intent: GitLockIntent.Read))
+                ? TimedAsync(() => reader.ProbeCommitCountsAsync(repoPath, branch, refs.DefaultRef, cancellationToken))
                 : null;
 
             var hooksMs = hooksTask != null ? (await hooksTask).Ms : 0;
@@ -254,7 +254,6 @@ public sealed class SyncRepositoryCommand(
     /// </summary>
     private async Task<SyncRefs> ReadRefsAsync(string repoPath, string? divergenceBaseBranch, bool readCurrentBranch, CancellationToken ct)
     {
-        const GitLockIntent read = GitLockIntent.Read;
         var laneStart = Stopwatch.GetTimestamp();
         var steps = new List<string>(8);
         var lap = Stopwatch.GetTimestamp();
@@ -274,7 +273,7 @@ public sealed class SyncRepositoryCommand(
         // is no extra network) come from one for-each-ref, and the same listing says whether HEAD is attached to
         // a branch. Attached means no tag checkout, so the symbolic-ref and describe calls are not needed, and the
         // branch name is already known.
-        var snapshot = await git.GetRefSnapshotAsync(repoPath, ct, read);
+        var snapshot = await reader.GetRefSnapshotAsync(repoPath, ct);
         Lap("refs");
         if (snapshot != null)
         {
@@ -291,11 +290,11 @@ public sealed class SyncRepositoryCommand(
             else
             {
                 // Detached HEAD, or an unborn branch the listing cannot see: ask git, as before.
-                currentTag = await git.GetCheckedOutTagAsync(repoPath, ct, read);
+                currentTag = await reader.GetCheckedOutTagAsync(repoPath, ct);
                 Lap("checkedOutTag");
                 if (readCurrentBranch)
                 {
-                    currentBranch = await git.GetCurrentBranchNameAsync(repoPath, ct, read);
+                    currentBranch = await reader.GetCurrentBranchNameAsync(repoPath, ct);
                     Lap("branch");
                 }
             }
@@ -305,19 +304,19 @@ public sealed class SyncRepositoryCommand(
             // The combined listing failed: fall back to the separate reads, which keep their own failure handling.
             if (readCurrentBranch)
             {
-                currentBranch = await git.GetCurrentBranchNameAsync(repoPath, ct, read);
+                currentBranch = await reader.GetCurrentBranchNameAsync(repoPath, ct);
                 Lap("branch");
             }
 
-            currentTag = await git.GetCheckedOutTagAsync(repoPath, ct, read);
+            currentTag = await reader.GetCheckedOutTagAsync(repoPath, ct);
             Lap("checkedOutTag");
-            tags = await git.GetTagsAsync(repoPath, ct, read);
+            tags = await reader.GetTagsAsync(repoPath, ct);
             Lap("tags");
 
             try
             {
-                localBranches = await git.GetLocalBranchesAsync(repoPath, ct, read);
-                remoteBranches = await git.GetRemoteBranchesFromRefsAsync(repoPath, ct, read);
+                localBranches = await reader.GetLocalBranchesAsync(repoPath, ct);
+                remoteBranches = await reader.GetRemoteBranchesFromRefsAsync(repoPath, ct);
             }
             catch
             {
@@ -333,16 +332,16 @@ public sealed class SyncRepositoryCommand(
         // there means the repository has no default branch. Only when the listing failed is git asked.
         var defaultRef = snapshot != null
             ? snapshot.DefaultOriginRef
-            : await git.GetDefaultBranchOriginRefAsync(repoPath, ct, read);
+            : await reader.GetDefaultBranchOriginRefAsync(repoPath, ct);
         Lap("defaultBranch");
         await git.SetDivergenceBaseBranchAsync(repoPath, divergenceBaseBranch, ct);
-        var divergenceRef = git.ToOriginBranchRef(divergenceBaseBranch) ?? defaultRef;
+        var divergenceRef = OriginDefaultRef.ToOriginBranchRef(divergenceBaseBranch) ?? defaultRef;
         Lap("divergenceBase");
 
         int? defaultBehind = null;
         int? defaultAhead = null;
         if (divergenceRef != null)
-            (defaultBehind, defaultAhead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, ct, read);
+            (defaultBehind, defaultAhead, _) = await reader.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, ct);
         Lap("defaultCounts");
 
         // Only a listing that succeeded can say origin/HEAD is missing or dangling; when it failed nothing is known.
@@ -365,18 +364,18 @@ public sealed class SyncRepositoryCommand(
         if (!await git.RepairOriginHeadAsync(repoPath, bearerToken, ct))
             return refs;
 
-        var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, ct, GitLockIntent.Read);
+        var defaultRef = await reader.GetDefaultBranchOriginRefAsync(repoPath, ct);
         if (defaultRef == refs.DefaultRef)
             return refs;
 
         var behind = refs.DefaultBehind;
         var ahead = refs.DefaultAhead;
-        if (git.ToOriginBranchRef(divergenceBaseBranch) == null)
+        if (OriginDefaultRef.ToOriginBranchRef(divergenceBaseBranch) == null)
         {
             behind = null;
             ahead = null;
             if (defaultRef != null)
-                (behind, ahead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, defaultRef, ct, GitLockIntent.Read);
+                (behind, ahead, _) = await reader.GetCommitCountsVsDefaultAsync(repoPath, defaultRef, ct);
         }
 
         return refs with { DefaultRef = defaultRef, DefaultBehind = behind, DefaultAhead = ahead };

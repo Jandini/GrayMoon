@@ -19,8 +19,9 @@ public sealed class WriteRepositoryFileCommandTests : IDisposable
     {
         var commandLine = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
         var runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
-        var git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner);
-        _command = new WriteRepositoryFileCommand(git);
+        var reader = new GitCliRepositoryReader(runner, NullLogger<GitCliRepositoryReader>.Instance);
+        var git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, reader);
+        _command = new WriteRepositoryFileCommand();
 
         // The repository is the Workspace repository, so its working tree is the workspace folder itself.
         Directory.CreateDirectory(RootPath);

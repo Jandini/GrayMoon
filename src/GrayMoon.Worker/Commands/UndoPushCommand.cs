@@ -11,7 +11,7 @@ namespace GrayMoon.Worker.Commands;
 
 /// <summary>Resets the current branch to origin/branch (mixed or hard) to undo local outgoing commits.</summary>
 public sealed class UndoPushCommand(
-    IGitService git,
+    IGitService git, IGitRepositoryReader reader,
     IRepositoryVersionProviderFactory versionProviderFactory,
     IHubConnectionProvider hubProvider,
     ILogger<UndoPushCommand> logger) : ICommandHandler<UndoPushRequest, UndoPushResponse>
@@ -33,16 +33,16 @@ public sealed class UndoPushCommand(
         var workspaceName = request.WorkspaceName ?? throw new ArgumentException("workspaceName required");
         var repositoryName = request.RepositoryName ?? throw new ArgumentException("repositoryName required");
 
-        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
+        var workspacePath = WorkerRepositoryPaths.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
 
-        if (!git.DirectoryExists(repoPath))
+        if (!Directory.Exists(repoPath))
             return new UndoPushResponse { Success = false, ErrorMessage = "Repository not found" };
 
         var branch = request.BranchName?.Trim();
         if (string.IsNullOrEmpty(branch))
         {
-            branch = await git.GetCurrentBranchNameAsync(repoPath, cancellationToken);
+            branch = await reader.GetCurrentBranchNameAsync(repoPath, cancellationToken);
             if (string.IsNullOrWhiteSpace(branch))
                 return new UndoPushResponse { Success = false, ErrorMessage = "Could not determine branch name" };
         }
@@ -75,11 +75,11 @@ public sealed class UndoPushCommand(
 
     internal async Task<RepositorySyncNotification> BuildPostResetNotificationAsync(UndoPushRequest request, string repoPath, string branch)
     {
-        var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, CancellationToken.None);
-        var divergenceRef = git.ToOriginBranchRef(await git.GetDivergenceBaseBranchAsync(repoPath, CancellationToken.None))
+        var defaultRef = await reader.GetDefaultBranchOriginRefAsync(repoPath, CancellationToken.None);
+        var divergenceRef = OriginDefaultRef.ToOriginBranchRef(await reader.GetDivergenceBaseBranchAsync(repoPath, CancellationToken.None))
             ?? defaultRef;
-        var (outgoing, incoming, hasUpstream) = await git.GetCommitCountsAsync(repoPath, branch, defaultRef, CancellationToken.None);
-        var (defaultBehind, defaultAhead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, CancellationToken.None);
+        var (outgoing, incoming, hasUpstream) = await reader.GetCommitCountsAsync(repoPath, branch, defaultRef, CancellationToken.None);
+        var (defaultBehind, defaultAhead, _) = await reader.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, CancellationToken.None);
         var versionResult = await versionProviderFactory
             .Create(request.Capabilities)
             .GetVersionAsync(repoPath, new RepositoryVersionOptions { NonNormalize = true }, CancellationToken.None);

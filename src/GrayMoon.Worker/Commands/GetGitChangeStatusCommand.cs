@@ -12,7 +12,6 @@ namespace GrayMoon.Worker.Commands;
 /// even after this specific request completes - a subsequent status request renews the lease.
 /// </summary>
 public sealed class GetGitChangeStatusCommand(
-    IGitService git,
     GitStatusRefreshCoordinator coordinator,
     GitChangesRepositoryRegistry registry,
     GitRepositoryWatcherManager watcherManager) : ICommandHandler<GetGitChangeStatusRequest, GetGitChangeStatusResponse>
@@ -22,10 +21,10 @@ public sealed class GetGitChangeStatusCommand(
         var workspaceName = request.WorkspaceName ?? throw new ArgumentException("workspaceName required");
         var repositoryName = request.RepositoryName ?? throw new ArgumentException("repositoryName required");
 
-        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
+        var workspacePath = WorkerRepositoryPaths.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
 
-        if (!git.DirectoryExists(repoPath))
+        if (!Directory.Exists(repoPath))
         {
             return new GetGitChangeStatusResponse { Success = false, ErrorCode = "RepositoryNotFound", ErrorMessage = "Repository not found." };
         }

@@ -5,7 +5,7 @@ using GrayMoon.Worker.Services;
 
 namespace GrayMoon.Worker.Commands;
 
-public sealed class CreateBranchCommand(IGitService git, IWorkerTokenProvider tokenProvider) : ICommandHandler<CreateBranchRequest, CreateBranchResponse>
+public sealed class CreateBranchCommand(IGitService git, IGitRepositoryReader reader, IWorkerTokenProvider tokenProvider) : ICommandHandler<CreateBranchRequest, CreateBranchResponse>
 {
     public async Task<CreateBranchResponse> ExecuteAsync(CreateBranchRequest request, CancellationToken cancellationToken = default)
     {
@@ -14,10 +14,10 @@ public sealed class CreateBranchCommand(IGitService git, IWorkerTokenProvider to
         var newBranchName = request.NewBranchName ?? throw new ArgumentException("newBranchName required");
         var baseBranchName = request.BaseBranchName ?? throw new ArgumentException("baseBranchName required");
 
-        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
+        var workspacePath = WorkerRepositoryPaths.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
 
-        if (!git.DirectoryExists(repoPath))
+        if (!Directory.Exists(repoPath))
         {
             return new CreateBranchResponse
             {
@@ -36,7 +36,7 @@ public sealed class CreateBranchCommand(IGitService git, IWorkerTokenProvider to
             };
         }
 
-        var currentBranch = await git.GetCurrentBranchNameAsync(repoPath, cancellationToken);
+        var currentBranch = await reader.GetCurrentBranchNameAsync(repoPath, cancellationToken);
 
         if (!request.SkipHooks)
         {
@@ -49,7 +49,7 @@ public sealed class CreateBranchCommand(IGitService git, IWorkerTokenProvider to
 
         // Inline sync: collect the same state as CheckoutHookSyncCommand so the app
         // can persist it immediately without waiting for the suppressed post-checkout hook.
-        var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, cancellationToken);
+        var defaultRef = await reader.GetDefaultBranchOriginRefAsync(repoPath, cancellationToken);
 
         string? token = await tokenProvider.GetTokenForRepositoryAsync(request.RepositoryId, cancellationToken);
         string? fetchError = null;
@@ -64,9 +64,9 @@ public sealed class CreateBranchCommand(IGitService git, IWorkerTokenProvider to
             ? await git.GetVersionAsync(repoPath, nonNormalize: true, cancellationToken)
             : (null, null);
         var version = versionResult?.InformationalVersion ?? "-";
-        var branch = await git.ResolveBranchAsync(versionResult, repoPath, cancellationToken) ?? "-";
+        var branch = await reader.ResolveBranchAsync(versionResult, repoPath, cancellationToken) ?? "-";
 
-        var currentTag = await git.GetCheckedOutTagAsync(repoPath, cancellationToken);
+        var currentTag = await reader.GetCheckedOutTagAsync(repoPath, cancellationToken);
         if (currentTag != null)
             branch = "-";
 
@@ -77,16 +77,16 @@ public sealed class CreateBranchCommand(IGitService git, IWorkerTokenProvider to
         bool? hasUpstream = null;
         if (branch != "-")
         {
-            var divergenceRef = git.ToOriginBranchRef(await git.GetDivergenceBaseBranchAsync(repoPath, cancellationToken))
+            var divergenceRef = OriginDefaultRef.ToOriginBranchRef(await reader.GetDivergenceBaseBranchAsync(repoPath, cancellationToken))
                 ?? defaultRef;
-            var (o, i, _) = await git.GetCommitCountsAsync(repoPath, branch, defaultRef, cancellationToken, skipUpstreamCheck: true);
+            var (o, i, _) = await reader.GetCommitCountsAsync(repoPath, branch, defaultRef, cancellationToken, skipUpstreamCheck: true);
             outgoing = o;
             incoming = i;
-            var (db, da, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, cancellationToken);
+            var (db, da, _) = await reader.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, cancellationToken);
             defaultBehind = db;
             defaultAhead = da;
 
-            var remoteBranches = await git.GetRemoteBranchesFromRefsAsync(repoPath, cancellationToken);
+            var remoteBranches = await reader.GetRemoteBranchesFromRefsAsync(repoPath, cancellationToken);
             hasUpstream = remoteBranches.Any(r => string.Equals(r, branch, StringComparison.OrdinalIgnoreCase));
         }
 

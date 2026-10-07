@@ -1,10 +1,11 @@
+using GrayMoon.Worker.Services;
 using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Jobs.Requests;
 using GrayMoon.Worker.Jobs.Response;
 
 namespace GrayMoon.Worker.Commands;
 
-public sealed class RemoveGitWorktreeCommand(IGitService git)
+public sealed class RemoveGitWorktreeCommand(IGitWorktreeService worktreeService)
     : ICommandHandler<RemoveGitWorktreeRequest, RemoveGitWorktreeResponse>
 {
     public async Task<RemoveGitWorktreeResponse> ExecuteAsync(RemoveGitWorktreeRequest request, CancellationToken cancellationToken = default)
@@ -12,7 +13,7 @@ public sealed class RemoveGitWorktreeCommand(IGitService git)
         var mainPath = request.MainRepositoryPath ?? throw new ArgumentException("mainRepositoryPath required");
         var worktreePath = request.WorktreePath ?? throw new ArgumentException("worktreePath required");
 
-        var (success, alreadyRemoved, errorCode, errorMessage, residue) = await git.RemoveWorktreeAsync(
+        var (success, alreadyRemoved, errorCode, errorMessage, residue) = await worktreeService.RemoveWorktreeAsync(
             mainPath,
             worktreePath,
             force: request.Force,

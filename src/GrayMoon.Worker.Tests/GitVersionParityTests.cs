@@ -20,14 +20,16 @@ public sealed class GitVersionParityTests : IDisposable
 {
     private readonly string _root = Directory.CreateTempSubdirectory("graymoon-gv-").FullName;
     private readonly GitService _git;
+    private GitCliRepositoryReader _reader = null!;
     private readonly GetGitVersionAtDefaultTipCommand _command;
 
     public GitVersionParityTests()
     {
         var commandLine = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
         var runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
-        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner);
-        _command = new GetGitVersionAtDefaultTipCommand(_git, new GitVersionRepositoryVersionProvider(_git));
+        _reader = new GitCliRepositoryReader(runner, NullLogger<GitCliRepositoryReader>.Instance);
+        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, _reader);
+        _command = new GetGitVersionAtDefaultTipCommand(_reader, new GitVersionRepositoryVersionProvider(_git));
     }
 
     public void Dispose()
