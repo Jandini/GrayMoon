@@ -49,4 +49,29 @@ public static class NewPullRequestTargetBranch
         var other = candidates.FirstOrDefault(c => !string.Equals(c, headBranch, StringComparison.OrdinalIgnoreCase));
         return other ?? defaultBranch;
     }
+
+    /// <summary>
+    /// Target-branch state for one repository from persisted (cached) branch data. <paramref name="currentSelection"/> is the
+    /// user's choice before a refresh; it is kept while it is still a valid base. <see cref="NewPrBranchResolution.NeedsRefresh"/>
+    /// is true when no remote branches are persisted yet (never synced or refreshed), so the dialog fetches that repository in the
+    /// background instead of every repository on open.
+    /// </summary>
+    public static NewPrBranchResolution Resolve(NewPrTargetRepo target, WorkspaceBranchesSnapshot? snapshot, string? currentSelection = null)
+    {
+        if (snapshot is null)
+            return new NewPrBranchResolution([], target.DefaultBranch, NeedsRefresh: true);
+
+        var candidates = BuildBaseCandidates(snapshot);
+        var keep = !string.IsNullOrWhiteSpace(currentSelection)
+                   && candidates.Any(c => string.Equals(c, currentSelection, StringComparison.OrdinalIgnoreCase))
+                   && !string.Equals(currentSelection, target.HeadBranch, StringComparison.OrdinalIgnoreCase);
+        var selected = keep
+            ? currentSelection!
+            : ResolveInitialBase(target.ParentBranchName, target.DefaultBranch, target.HeadBranch, candidates);
+
+        return new NewPrBranchResolution(candidates, selected, NeedsRefresh: snapshot.RemoteBranches.Count == 0);
+    }
 }
+
+/// <summary>Result of <see cref="NewPullRequestTargetBranch.Resolve"/>.</summary>
+public sealed record NewPrBranchResolution(IReadOnlyList<string> Candidates, string SelectedBase, bool NeedsRefresh);

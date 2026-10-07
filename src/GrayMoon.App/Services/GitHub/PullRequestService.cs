@@ -1,6 +1,8 @@
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
+using System.Diagnostics;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services.GitHub;
@@ -20,15 +22,123 @@ public interface IPullRequestService
     Task<IReadOnlyList<string>> GetCollaboratorLoginsAsync(int repositoryId, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<string>> GetTeamSlugsAsync(int repositoryId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Union of collaborator logins and team slugs for <paramref name="repositoryIds"/>, for the New Pull Request reviewer list.
+    /// Repositories are resolved in one query, each distinct GitHub repository is asked at most once per call, and answers are
+    /// cached for a few minutes so reopening the dialog does not repeat the GitHub requests. Never throws for a GitHub failure;
+    /// that repository simply contributes nothing.
+    /// </summary>
+    Task<PullRequestReviewerCandidates> GetReviewerCandidatesAsync(IReadOnlyCollection<int> repositoryIds, CancellationToken cancellationToken);
+}
+
+/// <summary>Reviewer options offered by the New Pull Request dialog.</summary>
+public sealed record PullRequestReviewerCandidates(IReadOnlyList<string> Users, IReadOnlyList<string> Teams)
+{
+    public static PullRequestReviewerCandidates Empty { get; } = new([], []);
 }
 
 public sealed class PullRequestService(
     AppDbContext dbContext,
     GitHubService gitHubService,
     IOptions<WorkspaceOptions> workspaceOptions,
+    IMemoryCache memoryCache,
     ILogger<PullRequestService> logger) : IPullRequestService
 {
+    /// <summary>How long reviewer lists are reused; collaborators and teams rarely change while a dialog is reopened.</summary>
+    internal static readonly TimeSpan ReviewerCacheDuration = TimeSpan.FromMinutes(5);
+
     private int MaxConcurrency => Math.Max(1, workspaceOptions.Value.MaxParallelOperations);
+
+    public async Task<PullRequestReviewerCandidates> GetReviewerCandidatesAsync(IReadOnlyCollection<int> repositoryIds, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(repositoryIds);
+        if (repositoryIds.Count == 0)
+            return PullRequestReviewerCandidates.Empty;
+
+        var started = Stopwatch.GetTimestamp();
+        var ids = repositoryIds.Distinct().ToList();
+        var repos = await dbContext.Repositories
+            .AsNoTracking()
+            .Include(r => r.Connector)
+            .Where(r => ids.Contains(r.RepositoryId))
+            .ToListAsync(cancellationToken);
+
+        // Several workspace repositories can point at the same GitHub repository (same connector, owner and name).
+        var targets = new Dictionary<string, (Connector Connector, string Owner, string Name)>(StringComparer.OrdinalIgnoreCase);
+        foreach (var repo in repos)
+        {
+            if (repo.Connector is not { } connector || connector.ConnectorType != ConnectorType.GitHub)
+                continue;
+            if (!RepositoryUrlHelper.TryParseGitHubOwnerRepo(repo.CloneUrl, out var owner, out var name) || owner == null || name == null)
+                continue;
+            targets.TryAdd($"{connector.ConnectorId}:{owner}/{name}", (connector, owner, name));
+        }
+
+        var users = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var teams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var cacheHits = 0;
+        using var gate = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
+        await Task.WhenAll(targets.Select(async kvp =>
+        {
+            var (key, target) = (kvp.Key, kvp.Value);
+            var userTask = GetCachedAsync($"pr-reviewers:users:{key}", async ct =>
+            {
+                var collaborators = await gitHubService.GetCollaboratorsAsync(target.Connector, target.Owner, target.Name, ct);
+                return collaborators.Select(c => c.Login).Where(l => !string.IsNullOrWhiteSpace(l)).ToList();
+            });
+            var teamTask = GetCachedAsync($"pr-reviewers:teams:{key}", async ct =>
+            {
+                var repoTeams = await gitHubService.GetTeamsAsync(target.Connector, target.Owner, target.Name, ct);
+                return repoTeams.Select(t => t.Slug).Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
+            });
+            var (userList, teamList) = (await userTask, await teamTask);
+            lock (users)
+            {
+                users.UnionWith(userList);
+                teams.UnionWith(teamList);
+            }
+        }));
+
+        logger.LogInformation(
+            "New PR reviewers: {RepositoryCount} repositories, {GitHubRepositoryCount} distinct GitHub repositories, {CacheHits} cache hits, {ElapsedMs}ms",
+            ids.Count, targets.Count, cacheHits, (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+
+        return new PullRequestReviewerCandidates(
+            users.OrderBy(u => u, StringComparer.OrdinalIgnoreCase).ToList(),
+            teams.OrderBy(t => t, StringComparer.OrdinalIgnoreCase).ToList());
+
+        async Task<IReadOnlyList<string>> GetCachedAsync(string cacheKey, Func<CancellationToken, Task<List<string>>> fetch)
+        {
+            if (memoryCache.TryGetValue(cacheKey, out IReadOnlyList<string>? cached) && cached is not null)
+            {
+                Interlocked.Increment(ref cacheHits);
+                return cached;
+            }
+
+            await gate.WaitAsync(cancellationToken);
+            try
+            {
+                var fetched = await fetch(cancellationToken);
+                // Only successful answers are cached, so a transient GitHub failure is retried next time.
+                memoryCache.Set(cacheKey, (IReadOnlyList<string>)fetched, ReviewerCacheDuration);
+                return fetched;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "Reviewer lookup failed for {CacheKey}", cacheKey);
+                return [];
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }
+    }
 
     public async Task<CreatePullRequestResult> CreatePullRequestAsync(
         CreatePullRequestRequest request,

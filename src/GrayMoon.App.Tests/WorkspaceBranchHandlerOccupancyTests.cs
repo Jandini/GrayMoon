@@ -185,6 +185,9 @@ public sealed class WorkspaceBranchHandlerOccupancyTests
         public Task<BranchHttpOutcome> GetBranchesAsync(int workspaceId, WorkspaceFeatureContextId contextId, int repositoryId, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
+        public Task<IReadOnlyDictionary<int, WorkspaceBranchesSnapshot>> GetBranchesForRepositoriesAsync(int workspaceId, WorkspaceFeatureContextId contextId, IReadOnlyCollection<int> repositoryIds, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
         public Task<BranchHttpOutcome> RefreshBranchesAsync(int workspaceId, WorkspaceFeatureContextId contextId, int repositoryId, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 

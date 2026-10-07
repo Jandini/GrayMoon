@@ -13,7 +13,7 @@ This document tracks the analysis, plan and progress for the three feedback item
 | 2 | IMPROVEMENT - New Pull Request initialization performance | Medium | Bulk persisted-branch query, modal rewiring off `RefreshBranches`, reviewer de-duplication by owner + short cache, optional background freshness, tests |
 | 3 | BUG - Git Changes directory rendering | Small | Root cause found; fix in tree builder + regression tests |
 
-Order of work: 1 -> (commit/test by user) -> 2 -> 3.
+Order of work: 1 -> 2 -> 3. Each item is committed and pushed to `feedback` when done; the user tests each Desktop Release build.
 
 ---
 
@@ -105,7 +105,7 @@ UX (Remove Feature modal):
 
 ## 2. IMPROVEMENT - New Pull Request initialization performance
 
-Status: not started (analysis done)
+Status: **implemented and committed** (2026-10-08)
 
 ### Analysis
 
@@ -113,13 +113,31 @@ Status: not started (analysis done)
 - `LoadReviewersAsync` issues 2 GitHub calls per target repository (users + teams), all on modal open.
 - `CheckUnpushedCommitsAsync` already runs independently and does not gate branch selectors.
 
-### Plan
+### What was done
 
-- Bulk `GetBranchesForRepositoriesAsync` (one DbContext, bulk queries, no Worker, no persistence, no broadcast).
-- Modal uses the bulk read for first paint; optional explicit "Refresh" in Branch tab using refresh only for selected repos.
-- Reviewers: group by GitHub owner, one users + teams request per owner, short memory cache; lazy load when Reviewers is opened.
-- Timings logged.
-- Tests: projection, parent/default/head rules, no Worker calls, bounded queries for 100 repos.
+- `IWorkspaceBranchOperations.GetBranchesForRepositoriesAsync`: one fresh DbContext and a fixed number of queries (links, branch rows, Feature context info, context states, Feature repositories) regardless of repository count. No Worker, no remote access, no persistence, no `WorkspaceSynced`. The single-repository `GetBranchesAsync` now shares the same snapshot builder, so both reads mean the same thing.
+- `NewPullRequestModal` first paint uses the bulk read. Selection rules are unchanged (Feature parent -> default -> another remote branch, never the head branch), now in `NewPullRequestTargetBranch.Resolve`.
+- Freshness is off the critical path:
+  - Repositories with no persisted remote branches (never synced) are refreshed in the background; they show the default branch (or a spinner when nothing is known) meanwhile.
+  - A new **Refresh** link in the branch panel fetches every target from the remote on demand and keeps the user's selection when it is still valid.
+- Reviewers: loaded only when the Review tab is first opened (they are optional). `IPullRequestService.GetReviewerCandidatesAsync` resolves all repositories in one query, asks each distinct GitHub repository once, and caches answers for 5 minutes (failures are not cached).
+- Unpushed check unchanged (already a single bulk DB read that never gated the selectors).
+- Timings logged: cached first paint (count, ms, how many need a background refresh), background / explicit refresh (count, ms, failures), reviewers (repositories, distinct GitHub repositories, cache hits, ms).
+
+### Tests added
+
+- `NewPullRequestBranchLoadingTests`: selection rules (parent, default, head never base, no valid base, no persisted remotes, keep / drop selection after refresh); bulk read correctness; bulk equals single-repository read; repositories outside the workspace skipped; 100 repositories with no Worker call, no broadcast and the same SQL query count as 3 repositories (N+1 guard via an EF command interceptor).
+
+### Notes
+
+- The explicit Refresh still uses the existing `RefreshBranches` path (it emits `WorkspaceSynced` per repository). That only runs when the user asks for it or for never-synced repositories, never for the whole workspace on open.
+- Full run: Common 261, Worker 561 (+1 pre-existing skip), App 1164 - all passed; build 0 warnings.
+
+### Manual test checklist
+
+1. Open New Pull Request on a 20+ repository workspace: target selectors appear immediately (no "Loading..." wave).
+2. Branch tab -> Refresh: spinner on the link, selectors stay usable, a manually chosen target is kept.
+3. Review tab: reviewers load on first open; close and reopen the dialog within 5 minutes - reviewers appear without GitHub calls (see "cache hits" in the App log).
 
 ---
 

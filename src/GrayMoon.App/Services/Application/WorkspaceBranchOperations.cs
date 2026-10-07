@@ -69,89 +69,153 @@ public sealed class WorkspaceBranchOperations(
                 .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId)
                 .ToListAsync(cancellationToken);
 
-            var localBranches = rows
-                .Where(b => !b.IsRemote && !b.IsTag)
-                .Select(b => b.BranchName)
-                .OrderBy(b => b)
-                .ToList();
+            var featureView = contextId is { } cid
+                ? await LoadFeatureBranchViewAsync(db, workspaceId, cid, [wr.WorkspaceRepositoryId], cancellationToken)
+                : null;
 
-            var remoteBranches = rows
-                .Where(b => b.IsRemote && !b.IsTag)
-                .Select(b => b.BranchName)
-                .OrderBy(b => b)
-                .ToList();
-
-            // Tags are persisted with SortIndex matching the worker's "newest first" (creator-date descending) order.
-            var tags = rows
-                .Where(b => b.IsTag)
-                .OrderBy(b => b.SortIndex)
-                .ThenBy(b => b.BranchName)
-                .Select(b => b.BranchName)
-                .ToList();
-
-            string? currentBranch = wr.BranchName;
-            string? currentTag = wr.CheckedOutTag;
-
-            if (contextId is { } cid)
-            {
-                var info = await contextResolver.GetRequiredAsync(cid, workspaceId, cancellationToken);
-                if (!info.IsSpecialWorkspace)
-                {
-                    var state = await db.WorkspaceRepositoryContextStates
-                        .AsNoTracking()
-                        .FirstOrDefaultAsync(
-                            s => s.WorkspaceFeatureContextId == cid.Value
-                                 && s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId,
-                            cancellationToken);
-                    if (state != null)
-                    {
-                        currentBranch = state.BranchName;
-                        currentTag = state.CheckedOutTag;
-                    }
-
-                    // Feature branch may not yet be in shared RepositoryBranches (until Fetch).
-                    AddLocalBranch(localBranches, currentBranch);
-
-                    // The App cannot see whether the branch still exists, so it is offered whenever the Feature
-                    // repository has a live worktree and is not pinned to a tag.
-                    var featureRepository = await db.WorkspaceFeatureRepositories
-                        .AsNoTracking()
-                        .FirstOrDefaultAsync(
-                            r => r.WorkspaceFeatureContextId == cid.Value
-                                 && r.WorkspaceRepositoryId == wr.WorkspaceRepositoryId,
-                            cancellationToken);
-                    if (featureRepository is { State: WorkspaceFeatureRepositoryState.Ready or WorkspaceFeatureRepositoryState.NeedsRepair }
-                        && info.FeatureName is { } featureName)
-                    {
-                        AddLocalBranch(localBranches, FeatureBranchPolicy.ExpectedBranch(featureName, featureRepository.PinnedTag));
-                    }
-                }
-            }
-
-            var defaultBranchRow = rows.FirstOrDefault(b => b.IsDefault && !b.IsTag);
-            var defaultBranch = defaultBranchRow?.BranchName;
-            if (defaultBranch == null && remoteBranches.Count > 0)
-            {
-                if (remoteBranches.Contains("main")) defaultBranch = "main";
-                else if (remoteBranches.Contains("master")) defaultBranch = "master";
-                else defaultBranch = remoteBranches.FirstOrDefault();
-            }
-
-            return BranchHttpOutcome.Ok(new WorkspaceBranchesSnapshot
-            {
-                LocalBranches = localBranches,
-                RemoteBranches = remoteBranches,
-                CurrentBranch = currentBranch,
-                DefaultBranch = defaultBranch,
-                Tags = tags,
-                CurrentTag = currentTag
-            });
+            return BranchHttpOutcome.Ok(BuildSnapshot(wr, rows, featureView));
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Error getting branches for repository {RepositoryId}", repositoryId);
             return BranchHttpOutcome.Problem("An error occurred while getting branches", 500);
         }
+    }
+
+    public async Task<IReadOnlyDictionary<int, WorkspaceBranchesSnapshot>> GetBranchesForRepositoriesAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        IReadOnlyCollection<int> repositoryIds,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(repositoryIds);
+        if (repositoryIds.Count == 0)
+            return new Dictionary<int, WorkspaceBranchesSnapshot>();
+
+        var ids = repositoryIds.Distinct().ToList();
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var links = await db.WorkspaceRepositories
+            .AsNoTracking()
+            .Where(x => x.WorkspaceId == workspaceId && ids.Contains(x.RepositoryId))
+            .ToListAsync(cancellationToken);
+        if (links.Count == 0)
+            return new Dictionary<int, WorkspaceBranchesSnapshot>();
+
+        var linkIds = links.Select(l => l.WorkspaceRepositoryId).ToList();
+        var rowsByLinkId = (await db.RepositoryBranches
+                .AsNoTracking()
+                .Where(rb => linkIds.Contains(rb.WorkspaceRepositoryId))
+                .ToListAsync(cancellationToken))
+            .ToLookup(rb => rb.WorkspaceRepositoryId);
+        var featureView = await LoadFeatureBranchViewAsync(db, workspaceId, contextId, linkIds, cancellationToken);
+
+        return links.ToDictionary(
+            l => l.RepositoryId,
+            l => BuildSnapshot(l, rowsByLinkId[l.WorkspaceRepositoryId].ToList(), featureView));
+    }
+
+    /// <summary>
+    /// What a Feature context changes about the persisted branch view, read in bulk for <paramref name="workspaceRepositoryIds"/>:
+    /// the Feature's own current branch / tag and its expected Feature branch. Null for the special Workspace context.
+    /// </summary>
+    private sealed record FeatureBranchView(
+        IReadOnlyDictionary<int, WorkspaceRepositoryContextState> StateByLinkId,
+        IReadOnlyDictionary<int, WorkspaceFeatureRepository> FeatureRepositoryByLinkId,
+        string? FeatureName);
+
+    private async Task<FeatureBranchView?> LoadFeatureBranchViewAsync(
+        AppDbContext db,
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        IReadOnlyCollection<int> workspaceRepositoryIds,
+        CancellationToken cancellationToken)
+    {
+        var info = await contextResolver.GetRequiredAsync(contextId, workspaceId, cancellationToken);
+        if (info.IsSpecialWorkspace)
+            return null;
+
+        var states = await db.WorkspaceRepositoryContextStates
+            .AsNoTracking()
+            .Where(s => s.WorkspaceFeatureContextId == contextId.Value && workspaceRepositoryIds.Contains(s.WorkspaceRepositoryId))
+            .ToListAsync(cancellationToken);
+        var featureRepositories = await db.WorkspaceFeatureRepositories
+            .AsNoTracking()
+            .Where(r => r.WorkspaceFeatureContextId == contextId.Value && workspaceRepositoryIds.Contains(r.WorkspaceRepositoryId))
+            .ToListAsync(cancellationToken);
+
+        return new FeatureBranchView(
+            states.GroupBy(s => s.WorkspaceRepositoryId).ToDictionary(g => g.Key, g => g.First()),
+            featureRepositories.GroupBy(r => r.WorkspaceRepositoryId).ToDictionary(g => g.Key, g => g.First()),
+            info.FeatureName);
+    }
+
+    private static WorkspaceBranchesSnapshot BuildSnapshot(
+        WorkspaceRepositoryLink wr,
+        IReadOnlyList<RepositoryBranch> rows,
+        FeatureBranchView? featureView)
+    {
+        var localBranches = rows
+            .Where(b => !b.IsRemote && !b.IsTag)
+            .Select(b => b.BranchName)
+            .OrderBy(b => b)
+            .ToList();
+
+        var remoteBranches = rows
+            .Where(b => b.IsRemote && !b.IsTag)
+            .Select(b => b.BranchName)
+            .OrderBy(b => b)
+            .ToList();
+
+        // Tags are persisted with SortIndex matching the worker's "newest first" (creator-date descending) order.
+        var tags = rows
+            .Where(b => b.IsTag)
+            .OrderBy(b => b.SortIndex)
+            .ThenBy(b => b.BranchName)
+            .Select(b => b.BranchName)
+            .ToList();
+
+        string? currentBranch = wr.BranchName;
+        string? currentTag = wr.CheckedOutTag;
+
+        if (featureView is not null)
+        {
+            if (featureView.StateByLinkId.TryGetValue(wr.WorkspaceRepositoryId, out var state))
+            {
+                currentBranch = state.BranchName;
+                currentTag = state.CheckedOutTag;
+            }
+
+            // Feature branch may not yet be in shared RepositoryBranches (until Fetch).
+            AddLocalBranch(localBranches, currentBranch);
+
+            // The App cannot see whether the branch still exists, so it is offered whenever the Feature
+            // repository has a live worktree and is not pinned to a tag.
+            if (featureView.FeatureRepositoryByLinkId.TryGetValue(wr.WorkspaceRepositoryId, out var featureRepository)
+                && featureRepository.State is WorkspaceFeatureRepositoryState.Ready or WorkspaceFeatureRepositoryState.NeedsRepair
+                && featureView.FeatureName is { } featureName)
+            {
+                AddLocalBranch(localBranches, FeatureBranchPolicy.ExpectedBranch(featureName, featureRepository.PinnedTag));
+            }
+        }
+
+        var defaultBranchRow = rows.FirstOrDefault(b => b.IsDefault && !b.IsTag);
+        var defaultBranch = defaultBranchRow?.BranchName;
+        if (defaultBranch == null && remoteBranches.Count > 0)
+        {
+            if (remoteBranches.Contains("main")) defaultBranch = "main";
+            else if (remoteBranches.Contains("master")) defaultBranch = "master";
+            else defaultBranch = remoteBranches.FirstOrDefault();
+        }
+
+        return new WorkspaceBranchesSnapshot
+        {
+            LocalBranches = localBranches,
+            RemoteBranches = remoteBranches,
+            CurrentBranch = currentBranch,
+            DefaultBranch = defaultBranch,
+            Tags = tags,
+            CurrentTag = currentTag
+        };
     }
 
     private static void AddLocalBranch(List<string> localBranches, string? branchName)

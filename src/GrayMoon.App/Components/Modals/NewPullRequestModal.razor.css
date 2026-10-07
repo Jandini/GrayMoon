@@ -105,6 +105,14 @@
     z-index: 1;
 }
 
+/* Explicit remote refresh; the first paint uses persisted branches only. */
+.new-pr-branch-refresh {
+    margin-left: auto !important;
+    z-index: 1;
+    font-size: 0.8125rem;
+    text-decoration: none;
+}
+
 /* Centered on the panel midline (equal source/target columns). */
 .new-pr-branch-direction {
     position: absolute;

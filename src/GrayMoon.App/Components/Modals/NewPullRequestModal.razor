@@ -79,6 +79,17 @@
                                             <span class="new-pr-branch-arrow">→</span>
                                             <span class="new-pr-branch-caption">Target</span>
                                         </span>
+                                        <button type="button"
+                                                class="btn btn-link btn-sm p-0 ms-2 text-nowrap new-pr-branch-refresh"
+                                                title="Fetch the latest branches from the remote"
+                                                disabled="@(IsBusy || _refreshingBranches)"
+                                                @onclick="RefreshAllTargetBranchesAsync">
+                                            @if (_refreshingBranches)
+                                            {
+                                                <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                                            }
+                                            Refresh
+                                        </button>
                                     </div>
                                     <div id="new-pr-branch"
                                          class="new-pr-branch-panel @(_openTargetMenuRepoId.HasValue ? "new-pr-branch-panel--menu-open" : null)"
@@ -197,6 +208,17 @@
                                         <span class="new-pr-branch-arrow">→</span>
                                         <span class="new-pr-branch-caption">Target</span>
                                     </span>
+                                    <button type="button"
+                                            class="btn btn-link btn-sm p-0 ms-2 text-nowrap new-pr-branch-refresh"
+                                            title="Fetch the latest branches from the remote"
+                                            disabled="@(IsBusy || _refreshingBranches)"
+                                            @onclick="RefreshAllTargetBranchesAsync">
+                                        @if (_refreshingBranches)
+                                        {
+                                            <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                                        }
+                                        Refresh
+                                    </button>
                                 </div>
                                 <div id="new-pr-branch"
                                      class="new-pr-branch-panel new-pr-branch-panel--scroll @(_openTargetMenuRepoId.HasValue ? "new-pr-branch-panel--menu-open" : null)"
@@ -395,6 +417,8 @@
     private List<ReviewerItem> _allReviewers = new();
     private readonly HashSet<string> _selectedReviewerKeys = new(StringComparer.OrdinalIgnoreCase);
     private bool _isLoadingReviewers;
+    private bool _reviewersRequested;
+    private bool _refreshingBranches;
     private bool _wasVisible;
     private bool _focusTitleOnNextRender;
     private CancellationTokenSource? _reviewersCts;
@@ -440,6 +464,13 @@
 
         _activeTab = tab;
         CloseTargetMenu();
+
+        // Reviewers are optional, so they are only fetched from GitHub once the Review tab is actually opened.
+        if (tab == "review" && !_reviewersRequested)
+        {
+            _reviewersRequested = true;
+            _ = LoadReviewersAsync();
+        }
     }
 
     private string TabPanelClass(string tab) =>
@@ -467,8 +498,10 @@
                 _branchByRepoId[t.RepositoryId] = new RepoBranchUiState { IsLoading = true };
             }
 
+            _reviewersRequested = false;
+            _refreshingBranches = false;
+
             _ = LoadTargetBranchesAsync();
-            _ = LoadReviewersAsync();
             _ = CheckUnpushedCommitsAsync();
         }
     }
@@ -564,6 +597,10 @@
         _branchByRepoId[repositoryId] = state with { SelectedBase = value.Trim() };
     }
 
+    /// <summary>
+    /// First paint: one bulk read of the persisted branch state for every target (no Worker, no fetch, no persistence).
+    /// Only repositories with no persisted remote branches yet are then refreshed from the remote, in the background.
+    /// </summary>
     private async Task LoadTargetBranchesAsync()
     {
         if (Targets.Count == 0) return;
@@ -572,18 +609,37 @@
         _branchesCts?.Dispose();
         _branchesCts = new CancellationTokenSource();
         var ct = _branchesCts.Token;
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
 
         try
         {
-            using var semaphore = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
-            var tasks = Targets.Select(t => LoadOneRepoBranchesAsync(t, semaphore, ct)).ToList();
-            await Task.WhenAll(tasks);
+            var snapshots = await BranchOperations.GetBranchesForRepositoriesAsync(
+                WorkspaceId, ContextId, Targets.Select(t => t.RepositoryId).ToList(), ct);
             if (ct.IsCancellationRequested) return;
 
-            if (_branchByRepoId.Values.Any(s => !string.IsNullOrEmpty(s.Error)))
-                _branchLoadError = "Some repositories could not load target branches.";
-            else
-                _branchLoadError = null;
+            var needRefresh = new List<NewPrTargetRepo>();
+            foreach (var target in Targets)
+            {
+                var resolution = NewPullRequestTargetBranch.Resolve(target, snapshots.GetValueOrDefault(target.RepositoryId));
+                if (resolution.NeedsRefresh)
+                    needRefresh.Add(target);
+                _branchByRepoId[target.RepositoryId] = new RepoBranchUiState
+                {
+                    // Nothing persisted to choose from yet: keep the spinner until the background refresh answers.
+                    IsLoading = resolution.Candidates.Count == 0 && resolution.NeedsRefresh,
+                    Candidates = resolution.Candidates,
+                    SelectedBase = resolution.SelectedBase,
+                };
+            }
+
+            _branchLoadError = null;
+            Logger.LogInformation(
+                "New PR target branches: {Count} repositories rendered from persisted state in {ElapsedMs}ms; {RefreshCount} without persisted remote branches refreshed in the background",
+                Targets.Count, (long)System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds, needRefresh.Count);
+            StateHasChanged();
+
+            if (needRefresh.Count > 0)
+                await RefreshTargetBranchesAsync(needRefresh, ct);
         }
         catch (OperationCanceledException)
         {
@@ -610,62 +666,88 @@
         }
     }
 
-    private async Task LoadOneRepoBranchesAsync(NewPrTargetRepo target, SemaphoreSlim semaphore, CancellationToken ct)
+    /// <summary>"Refresh" in the branch panel: fetch every target's branches from the remote, keeping the user's choices.</summary>
+    private async Task RefreshAllTargetBranchesAsync()
     {
-        await semaphore.WaitAsync(ct);
+        if (_refreshingBranches || Targets.Count == 0) return;
+        var ct = _branchesCts?.Token ?? CancellationToken.None;
         try
         {
-            // Refresh then read - remote branch list suitable for GitHub PR bases. Does not checkout.
-            await BranchOperations.RefreshBranchesAsync(WorkspaceId, ContextId, target.RepositoryId, ct);
-            if (ct.IsCancellationRequested) return;
-
-            var outcome = await BranchOperations.GetBranchesAsync(WorkspaceId, ContextId, target.RepositoryId, ct);
-            if (ct.IsCancellationRequested) return;
-
-            if (!outcome.IsSuccessStatus || outcome.Body is not WorkspaceBranchesSnapshot snapshot)
-            {
-                _branchByRepoId[target.RepositoryId] = new RepoBranchUiState
-                {
-                    IsLoading = false,
-                    Error = outcome.ErrorText ?? "Could not load branches",
-                    Candidates = [],
-                    SelectedBase = target.DefaultBranch,
-                };
-                return;
-            }
-
-            var candidates = NewPullRequestTargetBranch.BuildBaseCandidates(snapshot);
-            var selected = NewPullRequestTargetBranch.ResolveInitialBase(
-                target.ParentBranchName,
-                target.DefaultBranch,
-                target.HeadBranch,
-                candidates);
-
-            _branchByRepoId[target.RepositoryId] = new RepoBranchUiState
-            {
-                IsLoading = false,
-                Candidates = candidates,
-                SelectedBase = selected,
-            };
+            await RefreshTargetBranchesAsync(Targets, ct);
         }
         catch (OperationCanceledException)
         {
             // ignored
         }
-        catch (Exception ex)
+    }
+
+    /// <summary>
+    /// Refreshes <paramref name="targets"/> from the remote (bounded concurrency) and re-reads their persisted state in one bulk
+    /// query. Selectors stay usable while this runs; a selection that is still valid afterwards is kept.
+    /// </summary>
+    private async Task RefreshTargetBranchesAsync(IReadOnlyList<NewPrTargetRepo> targets, CancellationToken ct)
+    {
+        _refreshingBranches = true;
+        StateHasChanged();
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        var failed = new HashSet<int>();
+        try
         {
-            Logger.LogDebug(ex, "Load target branches failed for RepositoryId={RepositoryId}", target.RepositoryId);
-            _branchByRepoId[target.RepositoryId] = new RepoBranchUiState
+            using var semaphore = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
+            await Task.WhenAll(targets.Select(async target =>
             {
-                IsLoading = false,
-                Error = "Could not load branches",
-                Candidates = [],
-                SelectedBase = target.DefaultBranch,
-            };
+                await semaphore.WaitAsync(ct);
+                try
+                {
+                    var outcome = await BranchOperations.RefreshBranchesAsync(WorkspaceId, ContextId, target.RepositoryId, ct);
+                    if (!outcome.IsSuccessStatus)
+                        lock (failed) failed.Add(target.RepositoryId);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogDebug(ex, "Refresh target branches failed for RepositoryId={RepositoryId}", target.RepositoryId);
+                    lock (failed) failed.Add(target.RepositoryId);
+                }
+                finally
+                {
+                    semaphore.Release();
+                }
+            }));
+            if (ct.IsCancellationRequested) return;
+
+            var snapshots = await BranchOperations.GetBranchesForRepositoriesAsync(
+                WorkspaceId, ContextId, targets.Select(t => t.RepositoryId).ToList(), ct);
+            if (ct.IsCancellationRequested) return;
+
+            foreach (var target in targets)
+            {
+                var previous = GetRepoBranchState(target.RepositoryId);
+                var resolution = NewPullRequestTargetBranch.Resolve(
+                    target, snapshots.GetValueOrDefault(target.RepositoryId), previous.SelectedBase);
+                _branchByRepoId[target.RepositoryId] = new RepoBranchUiState
+                {
+                    IsLoading = false,
+                    Candidates = resolution.Candidates,
+                    SelectedBase = resolution.SelectedBase,
+                    Error = resolution.Candidates.Count == 0
+                        ? (failed.Contains(target.RepositoryId) ? "Could not load branches" : "No target branches available")
+                        : null,
+                };
+            }
+
+            _branchLoadError = failed.Count > 0 ? "Some repositories could not refresh target branches." : null;
+            Logger.LogInformation(
+                "New PR target branches: refreshed {Count} repositories from the remote in {ElapsedMs}ms ({Failed} failed)",
+                targets.Count, (long)System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds, failed.Count);
         }
         finally
         {
-            semaphore.Release();
+            _refreshingBranches = false;
+            StateHasChanged();
         }
     }
 
@@ -690,23 +772,14 @@
 
         try
         {
-            var users = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var teams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            using var semaphore = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
-            var tasks = Targets.SelectMany(t => new Task[]
-            {
-                FetchThrottledAsync(() => FetchUsersAsync(t.RepositoryId, users, ct), semaphore, ct),
-                FetchThrottledAsync(() => FetchTeamsAsync(t.RepositoryId, teams, ct), semaphore, ct)
-            }).ToList();
-
-            await Task.WhenAll(tasks);
+            // One call: repositories resolved in bulk, each distinct GitHub repository asked once, answers cached briefly.
+            var candidates = await PullRequestService.GetReviewerCandidatesAsync(Targets.Select(t => t.RepositoryId).ToList(), ct);
 
             if (ct.IsCancellationRequested) return;
 
-            _allReviewers = teams
+            _allReviewers = candidates.Teams
                 .Select(t => new ReviewerItem(t, IsTeam: true))
-                .Concat(users.Select(u => new ReviewerItem(u, IsTeam: false)))
+                .Concat(candidates.Users.Select(u => new ReviewerItem(u, IsTeam: false)))
                 .OrderByDescending(r => r.IsTeam)
                 .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
                 .ToList();
@@ -760,63 +833,6 @@
         {
             _isCheckingUnpushed = false;
             StateHasChanged();
-        }
-    }
-
-    private static async Task FetchThrottledAsync(Func<Task> action, SemaphoreSlim semaphore, CancellationToken ct)
-    {
-        try
-        {
-            await semaphore.WaitAsync(ct);
-        }
-        catch (OperationCanceledException)
-        {
-            return;
-        }
-
-        try
-        {
-            await action();
-        }
-        finally
-        {
-            semaphore.Release();
-        }
-    }
-
-    private async Task FetchUsersAsync(int repositoryId, HashSet<string> sink, CancellationToken ct)
-    {
-        try
-        {
-            var users = await PullRequestService.GetCollaboratorLoginsAsync(repositoryId, ct);
-            lock (sink)
-            {
-                foreach (var u in users)
-                    if (!string.IsNullOrWhiteSpace(u))
-                        sink.Add(u);
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.LogDebug(ex, "GetCollaboratorLogins failed for RepositoryId={RepositoryId}", repositoryId);
-        }
-    }
-
-    private async Task FetchTeamsAsync(int repositoryId, HashSet<string> sink, CancellationToken ct)
-    {
-        try
-        {
-            var teams = await PullRequestService.GetTeamSlugsAsync(repositoryId, ct);
-            lock (sink)
-            {
-                foreach (var t in teams)
-                    if (!string.IsNullOrWhiteSpace(t))
-                        sink.Add(t);
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.LogDebug(ex, "GetTeamSlugs failed for RepositoryId={RepositoryId}", repositoryId);
         }
     }
 
