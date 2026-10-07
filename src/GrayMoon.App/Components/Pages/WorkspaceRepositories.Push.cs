@@ -33,9 +33,10 @@ public sealed partial class WorkspaceRepositories
                 .Where(wr => !wr.IsOnTag && (wr.OutgoingCommits ?? 0) > 0)
                 .Select(wr => wr.RepositoryId)
                 .ToHashSet();
-            if (_capabilities is null || !_capabilities.UsesDependencyAwarePush)
+            if (PushClickRouter.ForCapabilities(_capabilities) == PushClickRoute.StartDirect)
             {
-                await OnPushWithDependenciesProceedAsync(synchronizedPush: false);
+                // No dependency modal state exists on this path (it is only built below), so start the job directly.
+                StartPushJob(repoIdsWithUnpushed, synchronizedPush: false, plan.RequiredPackageIds);
                 return;
             }
 
@@ -44,7 +45,12 @@ public sealed partial class WorkspaceRepositories
                 contextId.Value,
                 repoIdsWithUnpushed,
                 CancellationToken.None);
-            if (depInfo == null)
+            var route = PushClickRouter.ForDependencies(
+                dependencyInfoLoaded: depInfo != null,
+                hasNoDependencies: depInfo != null
+                    && depInfo.PayloadForRepo.RequiredPackages.Count == 0 && depInfo.DependencyRepoIds.Count == 0,
+                anyDependencyNeedsPush: WorkspaceDependencyService.ShouldShowSynchronizedPushModal(depInfo, repoIdsThatNeedPush));
+            if (route == PushClickRoute.LoadFailed)
             {
                 ToastService.ShowError("Could not load push plan. Try again.");
                 return;
@@ -58,8 +64,7 @@ public sealed partial class WorkspaceRepositories
             };
 
             // Push immediately without dialog when there are no deps, or when no dependency repo needs push.
-            if ((depInfo.PayloadForRepo.RequiredPackages.Count == 0 && depInfo.DependencyRepoIds.Count == 0)
-                || !WorkspaceDependencyService.ShouldShowSynchronizedPushModal(depInfo, repoIdsThatNeedPush))
+            if (route == PushClickRoute.StartDirect)
             {
                 await OnPushWithDependenciesProceedAsync(synchronizedPush: false);
                 return;
@@ -170,6 +175,13 @@ public sealed partial class WorkspaceRepositories
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         ClosePushWithDependenciesModal();
 
+        StartPushJob(repoIds, synchronizedPush, requiredPackageIds);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Starts the page push job. Shared by the dependency modal flow and the Basic (non-dependency-aware) Push click, which has no modal state.</summary>
+    private void StartPushJob(IReadOnlySet<int> repoIds, bool synchronizedPush, IReadOnlySet<string> requiredPackageIds)
+    {
         JobService.StartJob(PageJobKey, "Preparing push...", async (job, ct) =>
         {
             try
@@ -190,8 +202,6 @@ public sealed partial class WorkspaceRepositories
                     confirmButtonText: "Continue"));
             }
         });
-
-        return Task.CompletedTask;
     }
 
     private async Task<(IReadOnlySet<int> PushRepoIds, IReadOnlySet<string> RequiredPackageIds)?> BuildPushPlanAsync(
