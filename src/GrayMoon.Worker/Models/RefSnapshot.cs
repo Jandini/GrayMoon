@@ -19,9 +19,17 @@ namespace GrayMoon.Worker.Models;
 /// A null here is a real answer ("no default branch"), not "ask git": the listing already contains every
 /// remote-tracking ref the probes would have looked at.
 /// </param>
+/// <param name="OriginHeadResolved">
+/// Whether <c>refs/remotes/origin/HEAD</c> exists and points at an <c>origin</c> branch that exists. False when
+/// it is missing (a clone of an empty remote, a repository set up with <c>git remote add</c>) or dangling - a
+/// fetch never repoints it, so it dangles once the remote renames or replaces its default branch. A dangling
+/// symref is not listed at all, so the two cannot be told apart here and do not need to be: both are repaired
+/// the same way.
+/// </param>
 public sealed record RefSnapshot(
     IReadOnlyList<string> Tags,
     IReadOnlyList<string> LocalBranches,
     IReadOnlyList<string> RemoteBranches,
     string? CheckedOutBranch,
-    string? DefaultOriginRef);
+    string? DefaultOriginRef,
+    bool OriginHeadResolved);

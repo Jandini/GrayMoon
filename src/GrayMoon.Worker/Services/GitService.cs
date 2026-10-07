@@ -790,16 +790,16 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
             }
         }
 
-        var defaultOriginRef = OriginDefaultRef.Pick(
-            OriginDefaultRef.HeadTargetBranch(originHeadSymref),
-            remoteBranchNames.Contains);
+        var originHeadTarget = OriginDefaultRef.HeadTargetBranch(originHeadSymref);
+        var defaultOriginRef = OriginDefaultRef.Pick(originHeadTarget, remoteBranchNames.Contains);
 
         return new RefSnapshot(
             tags,
             local.OrderBy(b => b).ToList(),
             remote.OrderBy(b => b).ToList(),
             checkedOutBranch,
-            defaultOriginRef);
+            defaultOriginRef,
+            originHeadTarget != null && remoteBranchNames.Contains(originHeadTarget));
     }
 
     public async Task<IReadOnlyList<string>> GetRemoteBranchesFromRefsAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write)
@@ -1768,6 +1768,61 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
                 return name;
         }
         return null;
+    }
+
+    /// <summary>How long a repository is left alone after a repair attempt that did not repair it.</summary>
+    private static readonly long OriginHeadRepairRetryMs = (long)TimeSpan.FromMinutes(15).TotalMilliseconds;
+
+    /// <summary>Last unsuccessful repair attempt per repository path (<see cref="Environment.TickCount64"/>).</summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, long> _originHeadRepairAttempts = new(StringComparer.OrdinalIgnoreCase);
+
+    public async Task<bool> RepairOriginHeadAsync(string repoPath, string? bearerToken, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
+            return false;
+
+        // A repository whose remote cannot answer (an empty remote, a HEAD pointing at an unborn branch, a branch
+        // that was not fetched) would otherwise cost a network round trip on every sync. The attempt is recorded
+        // before the question is asked, so a hang or a failure is not retried until the interval has passed.
+        var key = Path.GetFullPath(repoPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var now = Environment.TickCount64;
+        if (_originHeadRepairAttempts.TryGetValue(key, out var last) && now - last < OriginHeadRepairRetryMs)
+        {
+            logger.LogDebug("Skipping origin/HEAD repair for {RepoPath}: tried {AgoMs}ms ago without success", repoPath, now - last);
+            return false;
+        }
+
+        _originHeadRepairAttempts[key] = now;
+
+        try
+        {
+            var branch = await GetRemoteDefaultBranchAsync(repoPath, bearerToken, ct);
+            if (string.IsNullOrWhiteSpace(branch) || !IsPlainRefName(branch))
+            {
+                logger.LogDebug("Remote of {RepoPath} did not name a default branch; origin/HEAD left as it is", repoPath);
+                return false;
+            }
+
+            // Explicit name, so no second network call. set-head refuses a branch that has no remote-tracking
+            // ref here (not fetched), which is exactly the case where repointing would only trade one dangling
+            // pointer for another.
+            var (exitCode, stdout, stderr) = await runner.RunAsync("git", $"remote set-head origin {branch}", repoPath, ct);
+            if (exitCode != 0)
+            {
+                logger.LogDebug("git remote set-head origin {Branch} did not apply for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", branch, repoPath, exitCode, stdout, stderr);
+                return false;
+            }
+
+            _originHeadRepairAttempts.TryRemove(key, out _);
+            logger.LogInformation("Repointed origin/HEAD to origin/{Branch} for {RepoPath}: the remote's default branch had changed", branch, repoPath);
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Repairing a pointer is never a reason to fail a sync.
+            logger.LogWarning(ex, "Could not repair origin/HEAD for {RepoPath}", repoPath);
+            return false;
+        }
     }
 
     public async Task<(bool Success, string? Error)> CheckoutTrackingAsync(string repoPath, string branch, CancellationToken ct)

@@ -768,21 +768,209 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
         Assert.Equal(0, response.DefaultBranchBehind);
     }
 
+    // ---------------------------------------------------------------- origin/HEAD repair
+
     [Fact]
-    public async Task A_sync_after_the_remote_default_was_renamed_reports_no_default_branch_and_still_succeeds()
+    public async Task A_sync_after_the_remote_default_was_renamed_repoints_origin_head_and_reports_the_new_default()
     {
         var origin = await SeedOriginAsync("main");
         var repo = await CloneAsync(origin);
         await RenameRemoteDefaultAsync(origin, "main", "trunk");
 
-        var response = await new SyncRepositoryCommand(_git, new CountingCsProjFileService(), CapabilityTestDoubles.RealFactory(_git))
-            .ExecuteAsync(NewRequest(RepositoryOperationCapabilities.For(calculateVersion: false, discoverProjects: false)));
+        var (response, commands) = await RecordAsync(() => SyncAsync());
 
         Assert.True(response.Success, response.ErrorMessage);
-        Assert.Null(response.DefaultBranch);
-        Assert.Null(response.DefaultBranchAhead);
-        Assert.Null(response.DefaultBranchBehind);
+        Assert.Equal("trunk", response.DefaultBranch);
+        Assert.NotNull(response.DefaultBranchAhead);
+        Assert.NotNull(response.DefaultBranchBehind);
         Assert.Equal("main", response.Branch);
+        Assert.Equal("refs/remotes/origin/trunk", (await GitAsync(repo, "symbolic-ref refs/remotes/origin/HEAD")).Trim());
+        Assert.Single(commands, c => c.Contains("ls-remote", StringComparison.Ordinal));
+        Assert.Single(commands, c => c.Contains("remote set-head origin trunk", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task The_sync_after_a_repair_asks_the_remote_nothing_and_stays_within_the_process_budget()
+    {
+        var origin = await SeedOriginAsync("main");
+        await CloneAsync(origin);
+        await RenameRemoteDefaultAsync(origin, "main", "trunk");
+        await SyncAsync();
+
+        var (response, commands) = await RecordAsync(() => SyncAsync());
+
+        Assert.True(response.Success, response.ErrorMessage);
+        Assert.Equal("trunk", response.DefaultBranch);
+        Assert.DoesNotContain(commands, c => c.Contains("ls-remote", StringComparison.Ordinal));
+        Assert.DoesNotContain(commands, c => c.Contains("set-head", StringComparison.Ordinal));
+        // Fetch, listing, counts, hooks, and the tracking read. Local main still tracks the renamed (pruned)
+        // origin/main here, so the gone-upstream compare path adds one rev-list on top of the usual five.
+        Assert.True(commands.Count <= 6, string.Join(Environment.NewLine, commands));
+    }
+
+    [Fact]
+    public async Task A_sync_leaves_an_origin_head_that_resolves_alone_even_when_it_is_not_the_remote_default()
+    {
+        var origin = await SeedOriginAsync("main");
+        var repo = await CloneAsync(origin);
+        await GitAsync(repo, "push origin main:other");
+        await GitAsync(repo, "fetch origin");
+        await GitAsync(repo, "remote set-head origin other");
+
+        var (response, commands) = await RecordAsync(() => SyncAsync());
+
+        Assert.True(response.Success, response.ErrorMessage);
+        Assert.Equal("other", response.DefaultBranch);
+        Assert.Equal("refs/remotes/origin/other", (await GitAsync(repo, "symbolic-ref refs/remotes/origin/HEAD")).Trim());
+        Assert.DoesNotContain(commands, c => c.Contains("ls-remote", StringComparison.Ordinal));
+        Assert.DoesNotContain(commands, c => c.Contains("set-head", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_sync_of_a_repository_that_is_not_dangling_does_not_try_to_repair()
+    {
+        var origin = await SeedOriginAsync("main");
+        await CloneAsync(origin);
+
+        var (response, commands) = await RecordAsync(() => SyncAsync());
+
+        Assert.True(response.Success, response.ErrorMessage);
+        Assert.Equal("main", response.DefaultBranch);
+        Assert.DoesNotContain(commands, c => c.Contains("ls-remote", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_repair_repoints_a_dangling_origin_head_at_the_remote_default()
+    {
+        var origin = await SeedOriginAsync("main");
+        var repo = await CloneAsync(origin);
+        await RenameRemoteDefaultAsync(origin, "main", "trunk");
+        await GitAsync(repo, "fetch --prune origin");
+        Assert.Null(await _git.GetDefaultBranchOriginRefAsync(repo, CancellationToken.None));
+
+        var repaired = await _git.RepairOriginHeadAsync(repo, null, CancellationToken.None);
+
+        Assert.True(repaired);
+        Assert.Equal("origin/trunk", await _git.GetDefaultBranchOriginRefAsync(repo, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task A_repair_can_run_again_straight_after_a_success_when_the_default_moves_again()
+    {
+        var origin = await SeedOriginAsync("main");
+        var repo = await CloneAsync(origin);
+        await RenameRemoteDefaultAsync(origin, "main", "trunk");
+        await GitAsync(repo, "fetch --prune origin");
+        Assert.True(await _git.RepairOriginHeadAsync(repo, null, CancellationToken.None));
+
+        await RenameRemoteDefaultAsync(origin, "trunk", "develop");
+        await GitAsync(repo, "fetch --prune origin");
+
+        Assert.True(await _git.RepairOriginHeadAsync(repo, null, CancellationToken.None));
+        Assert.Equal("origin/develop", await _git.GetDefaultBranchOriginRefAsync(repo, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task A_repair_the_remote_cannot_answer_returns_false_and_is_not_retried_straight_away()
+    {
+        var origin = await SeedOriginAsync("main");
+        var repo = await CloneAsync(origin);
+        await GitAsync(repo, "remote set-url origin \"" + Path.Combine(_root, "does-not-exist.git") + "\"");
+        await GitAsync(repo, "remote set-head origin --delete");
+
+        var (first, firstCalls) = await CountingAsync(() => _git.RepairOriginHeadAsync(repo, null, CancellationToken.None));
+        var (second, secondCalls) = await CountingAsync(() => _git.RepairOriginHeadAsync(repo, null, CancellationToken.None));
+
+        Assert.False(first);
+        Assert.True(firstCalls >= 1);
+        Assert.False(second);
+        Assert.Equal(0, secondCalls);
+    }
+
+    [Fact]
+    public async Task A_repair_towards_a_branch_that_was_not_fetched_returns_false_and_changes_nothing()
+    {
+        var origin = await SeedOriginAsync("main");
+        var repo = await CloneAsync(origin);
+        var seed = Path.Combine(_root, "seed");
+        await GitAsync(seed, "branch trunk");
+        await GitAsync(seed, "push origin trunk");
+        await GitAsync(origin, "symbolic-ref HEAD refs/heads/trunk");
+        await GitAsync(repo, "remote set-head origin --delete");
+
+        var repaired = await _git.RepairOriginHeadAsync(repo, null, CancellationToken.None);
+
+        Assert.False(repaired);
+        var (exit, _, _) = await GitRawAsync(repo, "symbolic-ref refs/remotes/origin/HEAD");
+        Assert.NotEqual(0, exit);
+    }
+
+    [Fact]
+    public async Task A_repair_of_a_missing_folder_is_a_no_op()
+    {
+        Assert.False(await _git.RepairOriginHeadAsync(Path.Combine(_root, "nope"), null, CancellationToken.None));
+        Assert.False(await _git.RepairOriginHeadAsync("", null, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task A_sync_whose_remote_cannot_name_a_default_still_succeeds_and_keeps_the_fallback_default()
+    {
+        var origin = await SeedOriginAsync("main");
+        var repo = await CloneAsync(origin);
+        // origin/HEAD gone and the remote's own HEAD points at a branch that does not exist: the lookup finds nothing.
+        await GitAsync(repo, "remote set-head origin --delete");
+        await GitAsync(origin, "symbolic-ref HEAD refs/heads/ghost");
+
+        var (response, commands) = await RecordAsync(() => SyncAsync());
+
+        Assert.True(response.Success, response.ErrorMessage);
+        Assert.Equal("main", response.DefaultBranch);
+        Assert.Equal(1, commands.Count(c => c.Contains("ls-remote", StringComparison.Ordinal)));
+        Assert.DoesNotContain(commands, c => c.Contains("set-head", StringComparison.Ordinal));
+
+        var (again, againCommands) = await RecordAsync(() => SyncAsync());
+        Assert.True(again.Success, again.ErrorMessage);
+        Assert.DoesNotContain(againCommands, c => c.Contains("ls-remote", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_features_counts_stay_against_its_divergence_base_when_the_default_is_repaired()
+    {
+        var origin = await SeedOriginAsync("main");
+        var repo = await CloneAsync(origin);
+        await GitAsync(repo, "push origin main:parent");
+        await GitAsync(repo, "checkout -b feature");
+        await CommitAsync(repo, "f.txt", "feature work");
+        await RenameRemoteDefaultAsync(origin, "main", "trunk");
+        // The new default has a commit the feature lacks, so counting against it instead of the parent would show.
+        await PushFromSeedAsync(origin, "t.txt", "trunk work");
+
+        var request = NewRequest(RepositoryOperationCapabilities.For(calculateVersion: false, discoverProjects: false));
+        request.DivergenceBaseBranch = "parent";
+        var (response, commands) = await RecordAsync(() => RunSyncAsync(request));
+
+        Assert.True(response.Success, response.ErrorMessage);
+        Assert.Equal("trunk", response.DefaultBranch);
+        Assert.Equal(1, response.DefaultBranchAhead);
+        Assert.Equal(0, response.DefaultBranchBehind);
+        Assert.Equal("refs/remotes/origin/trunk", (await GitAsync(repo, "symbolic-ref refs/remotes/origin/HEAD")).Trim());
+        Assert.Single(commands, c => c.Contains("remote set-head origin trunk", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_sync_that_repairs_the_default_counts_against_the_new_default()
+    {
+        var origin = await SeedOriginAsync("main");
+        var repo = await CloneAsync(origin);
+        await RenameRemoteDefaultAsync(origin, "main", "trunk");
+        await PushFromSeedAsync(origin, "t.txt", "trunk work");
+
+        var response = await SyncAsync();
+
+        Assert.True(response.Success, response.ErrorMessage);
+        Assert.Equal("trunk", response.DefaultBranch);
+        Assert.Equal(0, response.DefaultBranchAhead);
+        Assert.Equal(1, response.DefaultBranchBehind);
         _ = repo;
     }
 
@@ -792,6 +980,23 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
 
     private static bool IsGit(CommandLineStreamEvent e)
         => e.Kind == WorkerCommandStreamKind.CommandLine && e.Text.StartsWith("$ git", StringComparison.Ordinal);
+
+    private Task<SyncRepositoryResponse> SyncAsync()
+        => RunSyncAsync(NewRequest(RepositoryOperationCapabilities.For(calculateVersion: false, discoverProjects: false)));
+
+    private Task<SyncRepositoryResponse> RunSyncAsync(SyncRepositoryRequest request)
+        => new SyncRepositoryCommand(_git, new CountingCsProjFileService(), CapabilityTestDoubles.RealFactory(_git))
+            .ExecuteAsync(request);
+
+    /// <summary>Runs <paramref name="action"/> and returns the text of every git command it started.</summary>
+    private static async Task<(T Result, List<string> Commands)> RecordAsync<T>(Func<Task<T>> action)
+    {
+        var events = new ConcurrentQueue<CommandLineStreamEvent>();
+        T result;
+        using (new CommandLineStreamScope(events.Enqueue))
+            result = await action();
+        return (result, events.Where(IsGit).Select(e => e.Text).ToList());
+    }
 
     private async Task<(T Result, int GitCalls)> CountingAsync<T>(Func<Task<T>> action)
     {

@@ -121,6 +121,10 @@ public interface IGitService
     Task<(bool Success, string? Error)> AddRemoteAsync(string repoPath, string name, string url, CancellationToken ct);
     /// <summary>Returns the remote HEAD branch name (from <c>git ls-remote --symref origin HEAD</c>), or null when the remote is empty or unreachable.</summary>
     Task<string?> GetRemoteDefaultBranchAsync(string repoPath, string? bearerToken, CancellationToken ct);
+    /// <summary>
+    /// Points <c>refs/remotes/origin/HEAD</c> at the remote's current default branch (asked with <c>ls-remote --symref</c>, set with <c>git remote set-head origin &lt;branch&gt;</c>). Meant for when it is missing or dangling, which a fetch never repairs. Returns true only when it was repointed. Never throws for a failed lookup or a refused <c>set-head</c>; after an attempt that did not repair it, the same repository is not asked again for a while, so a remote that cannot answer does not cost a round trip on every sync.
+    /// </summary>
+    Task<bool> RepairOriginHeadAsync(string repoPath, string? bearerToken, CancellationToken ct);
     /// <summary>Runs <c>git checkout -b &lt;branch&gt; --track origin/&lt;branch&gt;</c>; the error is git's own message verbatim.</summary>
     Task<(bool Success, string? Error)> CheckoutTrackingAsync(string repoPath, string branch, CancellationToken ct);
     /// <summary>Points HEAD at an unborn branch with <c>git symbolic-ref HEAD refs/heads/&lt;branch&gt;</c>.</summary>

@@ -34,6 +34,7 @@ public sealed class SyncRepositoryCommand(
         string? DefaultRef,
         int? DefaultBehind,
         int? DefaultAhead,
+        bool OriginHeadUnresolved,
         long ElapsedMs,
         string StepTimings);
 
@@ -151,6 +152,16 @@ public sealed class SyncRepositoryCommand(
             if (refs.CurrentTag != null)
                 branch = "-";
 
+            // The default branch is known by now; if it came out of a missing or dangling origin/HEAD, repoint
+            // that before the counts below are taken against it.
+            var headRepairMs = 0L;
+            if (refs.OriginHeadUnresolved)
+            {
+                var repairStart = Stopwatch.GetTimestamp();
+                refs = await RepairOriginHeadAsync(refs, repoPath, request.DivergenceBaseBranch, bearerToken, cancellationToken);
+                headRepairMs = ElapsedMs(repairStart);
+            }
+
             // Tag checkouts need current hooks too: hooks are shared with linked Feature worktrees, and a
             // stale static-path hook attributes every Feature worktree event to the special Workspace.
             // Only a valid checkout is required: a workspace that does not version its repositories resolves
@@ -197,9 +208,9 @@ public sealed class SyncRepositoryCommand(
             // the overlap waited for.
             logger?.LogDebug(
                 "SyncRepository timings for {RepoPath}: fetch={FetchMs}ms, overlap={OverlapMs}ms (version={VersionMs}ms, lane={LaneMs}ms, projects={ProjectsMs}ms), " +
-                "branchFallback={BranchFallbackMs}ms, tail={TailMs}ms (hooks={HooksMs}ms, counts={CountsMs}ms), total={TotalMs}ms. Lane steps: {LaneSteps}",
+                "branchFallback={BranchFallbackMs}ms, headRepair={HeadRepairMs}ms, tail={TailMs}ms (hooks={HooksMs}ms, counts={CountsMs}ms), total={TotalMs}ms. Lane steps: {LaneSteps}",
                 repoPath, fetchMs, overlapMs, versionMs, refs.ElapsedMs, projectsMs,
-                branchFallbackMs, tailMs, hooksMs, countsMs, ElapsedMs(totalStart), refs.StepTimings);
+                branchFallbackMs, headRepairMs, tailMs, hooksMs, countsMs, ElapsedMs(totalStart), refs.StepTimings);
             return new SyncRepositoryResponse
             {
                 Success = true,
@@ -334,9 +345,41 @@ public sealed class SyncRepositoryCommand(
             (defaultBehind, defaultAhead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, ct, read);
         Lap("defaultCounts");
 
+        // Only a listing that succeeded can say origin/HEAD is missing or dangling; when it failed nothing is known.
         return new SyncRefs(
             currentBranch, currentTag, tags, localBranches, remoteBranches, defaultRef, defaultBehind, defaultAhead,
+            snapshot is { OriginHeadResolved: false },
             ElapsedMs(laneStart), string.Join(", ", steps));
+    }
+
+    /// <summary>
+    /// A fetch never repoints <c>origin/HEAD</c>, so when the remote renames or replaces its default branch it
+    /// dangles, and the default branch (and the counts against it) is lost or silently wrong until it is repointed.
+    /// This asks the remote and repoints it, then takes the default branch again, and the counts against it when
+    /// they were taken against the default (a Feature's divergence base is unaffected). It runs after GitVersion
+    /// has finished because it writes a ref and so needs the repository write lock the version provider holds.
+    /// Any failure leaves the refs as they were.
+    /// </summary>
+    private async Task<SyncRefs> RepairOriginHeadAsync(SyncRefs refs, string repoPath, string? divergenceBaseBranch, string? bearerToken, CancellationToken ct)
+    {
+        if (!await git.RepairOriginHeadAsync(repoPath, bearerToken, ct))
+            return refs;
+
+        var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, ct, GitLockIntent.Read);
+        if (defaultRef == refs.DefaultRef)
+            return refs;
+
+        var behind = refs.DefaultBehind;
+        var ahead = refs.DefaultAhead;
+        if (git.ToOriginBranchRef(divergenceBaseBranch) == null)
+        {
+            behind = null;
+            ahead = null;
+            if (defaultRef != null)
+                (behind, ahead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, defaultRef, ct, GitLockIntent.Read);
+        }
+
+        return refs with { DefaultRef = defaultRef, DefaultBehind = behind, DefaultAhead = ahead };
     }
 
     /// <summary>Runs the project scan off the calling thread so its directory walk does not block the sync.</summary>
