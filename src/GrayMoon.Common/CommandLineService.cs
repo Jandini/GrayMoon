@@ -302,8 +302,18 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
     /// </summary>
     internal static void ApplyNonInteractiveGitEnvironment(ProcessStartInfo startInfo, string fileName)
     {
-        if (string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase))
-            startInfo.Environment["GIT_TERMINAL_PROMPT"] = "0";
+        if (!string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        startInfo.Environment["GIT_TERMINAL_PROMPT"] = "0";
+        // Git Credential Manager ignores GIT_TERMINAL_PROMPT and can open a GUI prompt; cached credentials still work.
+        startInfo.Environment["GCM_INTERACTIVE"] = "never";
+
+        var ambient = GitProcessEnvironmentAmbient.Current.Value;
+        if (ambient == null)
+            return;
+        foreach (var (key, value) in ambient)
+            startInfo.Environment[key] = value;
     }
 
     /// <summary>

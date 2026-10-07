@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace GrayMoon.Common;
 
 /// <summary>
@@ -19,8 +21,15 @@ public static class LogSafe
         var s = text;
         if (s.IndexOf("http.extraHeader=", StringComparison.OrdinalIgnoreCase) >= 0)
             s = RedactHttpExtraHeader(s);
+        if (s.IndexOf("Authorization:", StringComparison.OrdinalIgnoreCase) >= 0)
+            s = AuthorizationHeaderRegex.Replace(s, "${prefix}" + Replacement);
         return s;
     }
+
+    // Covers a header echoed outside the http.extraHeader="..." form (GIT_TRACE_CURL output, GIT_CONFIG_VALUE_n dumps, etc.).
+    private static readonly Regex AuthorizationHeaderRegex = new(
+        @"(?<prefix>Authorization:\s*(?:Basic|Bearer)\s+)[A-Za-z0-9+/=._~-]+",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static string RedactHttpExtraHeader(string s)
     {

@@ -52,6 +52,23 @@ public sealed class CommandLineServiceTests
         CommandLineService.ApplyNonInteractiveGitEnvironment(startInfo, "git");
 
         Assert.Equal("0", startInfo.Environment["GIT_TERMINAL_PROMPT"]);
+        Assert.Equal("never", startInfo.Environment["GCM_INTERACTIVE"]);
+    }
+
+    [Fact]
+    public void ApplyNonInteractiveGitEnvironment_AppliesAmbientVariables_OnlyForGit()
+    {
+        var variables = new Dictionary<string, string> { ["GIT_CONFIG_COUNT"] = "1" };
+        using var _ = new GitProcessEnvironmentScope(variables);
+
+        var git = new ProcessStartInfo { FileName = "git" };
+        CommandLineService.ApplyNonInteractiveGitEnvironment(git, "git");
+        var other = new ProcessStartInfo { FileName = "dotnet" };
+        other.Environment.Remove("GIT_CONFIG_COUNT");
+        CommandLineService.ApplyNonInteractiveGitEnvironment(other, "dotnet");
+
+        Assert.Equal("1", git.Environment["GIT_CONFIG_COUNT"]);
+        Assert.False(other.Environment.ContainsKey("GIT_CONFIG_COUNT"));
     }
 
     [Fact]

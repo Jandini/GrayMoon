@@ -30,14 +30,13 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         if (!Directory.Exists(workingDir))
             Directory.CreateDirectory(workingDir);
 
-        var args = BuildCloneArguments(cloneUrl, bearerToken);
+        var args = $"clone \"{cloneUrl}\"";
         var sw = Stopwatch.StartNew();
-        var (exitCode, stdout, stderr) = await runner.ClonePipeline.ExecuteAsync(
-            async (cancellationToken) => await runner.RunAsync("git", args, workingDir, cancellationToken),
-            ct);
+        var (exitCode, stdout, stderr) = await runner.RunRemoteAsync(GitRemoteOperation.Clone, args, workingDir, bearerToken, ct);
         sw.Stop();
         if (exitCode != 0)
         {
+            LogIfAuthFailure("clone", workingDir, stdout, stderr);
             logger.LogError("Git clone failed after retries in {ElapsedMs}ms. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", sw.ElapsedMilliseconds, exitCode, stdout, stderr);
             return false;
         }
@@ -185,31 +184,17 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
             return (true, null);
 
-        string args;
-        var logArgs = "";
-        if (string.IsNullOrWhiteSpace(bearerToken))
-        {
-            args = includeTags ? "fetch origin --prune --tags" : "fetch origin --prune";
-            logArgs = args;
-        }
-        else
-        {
-            var fetchCmd = includeTags ? "fetch origin --prune --tags" : "fetch origin --prune";
-            args = $"{BuildAuthHeaderArgs(bearerToken)} {fetchCmd}";
-            logArgs = "***";
-        }
+        var args = includeTags ? "fetch origin --prune --tags" : "fetch origin --prune";
         var sw = Stopwatch.StartNew();
-        var (exitCode, stdout, stderr) = await runner.FetchPipeline.ExecuteAsync(
-            async cancellationToken => await runner.RunAsync("git", args, repoPath, cancellationToken),
-            ct);
+        var (exitCode, stdout, stderr) = await runner.RunRemoteAsync(GitRemoteOperation.Fetch, args, repoPath, bearerToken, ct);
         sw.Stop();
         if (exitCode != 0)
         {
-            var combined = CombineOutput(stdout, stderr) ?? $"Git fetch failed (exit code {exitCode})";
-            logger.LogError("Git fetch failed in {ElapsedMs}ms for {RepoPath}. Args={Args}, ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", sw.ElapsedMilliseconds, repoPath, logArgs, exitCode, stdout, stderr);
+            var combined = GitRemoteAuth.WithAuthHint(CombineOutput(stdout, stderr)) ?? $"Git fetch failed (exit code {exitCode})";
+            logger.LogError("Git fetch failed in {ElapsedMs}ms for {RepoPath}. Args={Args}, ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", sw.ElapsedMilliseconds, repoPath, args, exitCode, stdout, stderr);
             return (false, combined);
         }
-        logger.LogDebug("Git fetch completed in {ElapsedMs}ms for {RepoPath}. Args={Args}", sw.ElapsedMilliseconds, repoPath, logArgs);
+        logger.LogDebug("Git fetch completed in {ElapsedMs}ms for {RepoPath}. Args={Args}", sw.ElapsedMilliseconds, repoPath, args);
         return (true, null);
     }
 
@@ -284,7 +269,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         logger.LogDebug("Git minimal fetch git process completed for {RepoPath} in {ElapsedMs}ms. ExitCode={ExitCode}", repoPath, sw.ElapsedMilliseconds, exitCode);
         if (exitCode != 0)
         {
-            var combined = CombineOutput(stdout, stderr) ?? $"Git fetch (minimal) failed (exit code {exitCode})";
+            var combined = GitRemoteAuth.WithAuthHint(CombineOutput(stdout, stderr)) ?? $"Git fetch (minimal) failed (exit code {exitCode})";
             logger.LogError("Git minimal fetch failed in {ElapsedMs}ms for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", sw.ElapsedMilliseconds, repoPath, exitCode, stdout, stderr);
             return (false, combined);
         }
@@ -296,16 +281,12 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
     private async Task<(int ExitCode, string? Stdout, string? Stderr)> RunMinimalFetchAsync(string repoPath, IReadOnlyList<string> refsToFetch, string? bearerToken, CancellationToken ct)
     {
         var refArgs = string.Join(" ", refsToFetch);
-        var args = string.IsNullOrWhiteSpace(bearerToken)
-            ? $"fetch origin --prune {refArgs}"
-            : $"{BuildAuthHeaderArgs(bearerToken)} fetch origin --prune {refArgs}";
+        var args = $"fetch origin --prune {refArgs}";
 
         logger.LogDebug("Git minimal fetch invoking git for {RepoPath}. Args={Args}, Refs={Refs}",
-            repoPath, string.IsNullOrWhiteSpace(bearerToken) ? args : "***", string.Join(", ", refsToFetch));
+            repoPath, args, string.Join(", ", refsToFetch));
 
-        return await runner.MinimalFetchPipeline.ExecuteAsync(
-            async cancellationToken => await runner.RunAsync("git", args, repoPath, cancellationToken),
-            ct);
+        return await runner.RunRemoteAsync(GitRemoteOperation.MinimalFetch, args, repoPath, bearerToken, ct);
     }
 
     /// <summary>Ref names git reported as absent on the remote, from "couldn't find remote ref &lt;name&gt;" lines.</summary>
@@ -341,28 +322,16 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
 
         var hooksPrefix = GetHooksConfigPrefix(skipHooks);
 
-        string args;
-        var logArgs = "";
-        if (string.IsNullOrWhiteSpace(bearerToken))
-        {
-            args = $"{hooksPrefix}pull origin {branchName}";
-            logArgs = args;
-        }
-        else
-        {
-            args = $"{BuildAuthHeaderArgs(bearerToken)} {hooksPrefix}pull origin {branchName}";
-            logArgs = "***";
-        }
+        var args = $"{hooksPrefix}pull origin {branchName}";
+        var logArgs = args;
 
         var sw = Stopwatch.StartNew();
-        var (exitCode, stdout, stderr) = await runner.PullPipeline.ExecuteAsync(
-            async cancellationToken => await runner.RunAsync("git", args, repoPath, cancellationToken),
-            ct);
+        var (exitCode, stdout, stderr) = await runner.RunRemoteAsync(GitRemoteOperation.Pull, args, repoPath, bearerToken, ct);
         sw.Stop();
 
         if (exitCode != 0)
         {
-            var combinedOutput = CombineOutput(stdout, stderr) ?? "";
+            var combinedOutput = GitRemoteAuth.WithAuthHint(CombineOutput(stdout, stderr)) ?? "";
             if (GitResiliencePipelines.IsMergeConflict(stdout, stderr))
             {
                 logger.LogWarning("Git pull merge conflict detected for {RepoPath}. Branch={Branch}", repoPath, branchName);
@@ -383,27 +352,15 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
             return (false, "Invalid repository path or branch name");
 
         var pushOpts = setTracking ? "-u " : "";
-        string args;
-        var logArgs = "";
-        if (string.IsNullOrWhiteSpace(bearerToken))
-        {
-            args = $"push {pushOpts}origin {branchName}";
-            logArgs = args;
-        }
-        else
-        {
-            args = $"{BuildAuthHeaderArgs(bearerToken)} push {pushOpts}origin {branchName}";
-            logArgs = "***";
-        }
+        var args = $"push {pushOpts}origin {branchName}";
+        var logArgs = args;
 
         var sw = Stopwatch.StartNew();
-        var (exitCode, stdout, stderr) = await runner.PushPipeline.ExecuteAsync(
-            async cancellationToken => await runner.RunAsync("git", args, repoPath, cancellationToken),
-            ct);
+        var (exitCode, stdout, stderr) = await runner.RunRemoteAsync(GitRemoteOperation.Push, args, repoPath, bearerToken, ct);
         sw.Stop();
         if (exitCode != 0)
         {
-            var combined = CombineOutput(stdout, stderr) ?? "";
+            var combined = GitRemoteAuth.WithAuthHint(CombineOutput(stdout, stderr)) ?? "";
             logger.LogError("Git push failed in {ElapsedMs}ms for {RepoPath}. Args={Args}, ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", sw.ElapsedMilliseconds, repoPath, logArgs, exitCode, stdout, stderr);
             return (false, combined);
         }
@@ -483,26 +440,15 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
             return Array.Empty<string>();
 
-        string args;
-        var logArgs = "";
-        if (string.IsNullOrWhiteSpace(bearerToken))
-        {
-            args = "ls-remote --heads origin";
-            logArgs = args;
-        }
-        else
-        {
-            args = $"{BuildAuthHeaderArgs(bearerToken)} ls-remote --heads origin";
-            logArgs = "***";
-        }
+        const string args = "ls-remote --heads origin";
+        var logArgs = args;
 
         var sw = Stopwatch.StartNew();
-        var (exitCode, stdout, stderr) = await runner.LsRemotePipeline.ExecuteAsync(
-            async cancellationToken => await runner.RunAsync("git", args, repoPath, cancellationToken),
-            ct);
+        var (exitCode, stdout, stderr) = await runner.RunRemoteAsync(GitRemoteOperation.LsRemote, args, repoPath, bearerToken, ct);
         sw.Stop();
         if (exitCode != 0)
         {
+            LogIfAuthFailure("ls-remote", repoPath, stdout, stderr);
             logger.LogWarning("Git ls-remote failed in {ElapsedMs}ms for {RepoPath}. Args={Args}, ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", sw.ElapsedMilliseconds, repoPath, logArgs, exitCode, stdout, stderr);
             return Array.Empty<string>();
         }
@@ -658,15 +604,11 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
                 }
 
                 var leaseSpec = $"refs/heads/{name}:{expectedSha.Trim()}";
-                var leaseArgs = string.IsNullOrWhiteSpace(bearerToken)
-                    ? $"{hooksPrefix}push --force-with-lease={leaseSpec} origin :{name}"
-                    : $"{BuildAuthHeaderArgs(bearerToken)} {hooksPrefix}push --force-with-lease={leaseSpec} origin :{name}";
-                var (leaseExit, leaseStdout, leaseStderr) = await runner.PushPipeline.ExecuteAsync(
-                    async cancellationToken => await runner.RunAsync("git", leaseArgs, repoPath, cancellationToken),
-                    ct);
+                var leaseArgs = $"{hooksPrefix}push --force-with-lease={leaseSpec} origin :{name}";
+                var (leaseExit, leaseStdout, leaseStderr) = await runner.RunRemoteAsync(GitRemoteOperation.Push, leaseArgs, repoPath, bearerToken, ct);
                 if (leaseExit != 0)
                 {
-                    var combined = CombineOutput(leaseStdout, leaseStderr) ?? "";
+                    var combined = GitRemoteAuth.WithAuthHint(CombineOutput(leaseStdout, leaseStderr)) ?? "";
                     if (IsRemoteBranchAlreadyDeleted(combined))
                     {
                         logger.LogInformation("Git remote branch already deleted for {RepoPath}. Branch={Branch}", repoPath, name);
@@ -691,15 +633,11 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
                 return (true, null);
             }
 
-            var args = string.IsNullOrWhiteSpace(bearerToken)
-                ? $"{hooksPrefix}push origin --delete {name}"
-                : $"{BuildAuthHeaderArgs(bearerToken)} {hooksPrefix}push origin --delete {name}";
-            var (exitCode, stdout, stderr) = await runner.PushPipeline.ExecuteAsync(
-                async cancellationToken => await runner.RunAsync("git", args, repoPath, cancellationToken),
-                ct);
+            var args = $"{hooksPrefix}push origin --delete {name}";
+            var (exitCode, stdout, stderr) = await runner.RunRemoteAsync(GitRemoteOperation.Push, args, repoPath, bearerToken, ct);
             if (exitCode != 0)
             {
-                var combined = CombineOutput(stdout, stderr) ?? "";
+                var combined = GitRemoteAuth.WithAuthHint(CombineOutput(stdout, stderr)) ?? "";
                 if (IsRemoteBranchAlreadyDeleted(combined))
                 {
                     logger.LogInformation("Git remote branch already deleted for {RepoPath}. Branch={Branch}", repoPath, name);
@@ -793,20 +731,12 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
             return (true, null);
 
-        string args;
-        if (string.IsNullOrWhiteSpace(bearerToken))
-            args = "fetch origin --tags";
-        else
-            args = $"{BuildAuthHeaderArgs(bearerToken)} fetch origin --tags";
-
         var sw = Stopwatch.StartNew();
-        var (exitCode, stdout, stderr) = await runner.FetchPipeline.ExecuteAsync(
-            async cancellationToken => await runner.RunAsync("git", args, repoPath, cancellationToken),
-            ct);
+        var (exitCode, stdout, stderr) = await runner.RunRemoteAsync(GitRemoteOperation.Fetch, "fetch origin --tags", repoPath, bearerToken, ct);
         sw.Stop();
         if (exitCode != 0)
         {
-            var combined = CombineOutput(stdout, stderr) ?? $"Git fetch tags failed (exit code {exitCode})";
+            var combined = GitRemoteAuth.WithAuthHint(CombineOutput(stdout, stderr)) ?? $"Git fetch tags failed (exit code {exitCode})";
             logger.LogWarning("Git fetch tags failed in {ElapsedMs}ms for {RepoPath}. ExitCode={ExitCode}", sw.ElapsedMilliseconds, repoPath, exitCode);
             return (false, combined);
         }
@@ -995,14 +925,13 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         if (!Directory.Exists(targetDir))
             Directory.CreateDirectory(targetDir);
 
-        var args = BuildCloneArguments(cloneUrl, bearerToken) + " .";
+        var args = $"clone \"{cloneUrl}\" .";
         var sw = Stopwatch.StartNew();
-        var (exitCode, stdout, stderr) = await runner.ClonePipeline.ExecuteAsync(
-            async (cancellationToken) => await runner.RunAsync("git", args, targetDir, cancellationToken),
-            ct);
+        var (exitCode, stdout, stderr) = await runner.RunRemoteAsync(GitRemoteOperation.Clone, args, targetDir, bearerToken, ct);
         sw.Stop();
         if (exitCode != 0)
         {
+            LogIfAuthFailure("clone", targetDir, stdout, stderr);
             logger.LogError("Git clone into {Dir} failed after retries in {ElapsedMs}ms. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", targetDir, sw.ElapsedMilliseconds, exitCode, stdout, stderr);
             return false;
         }
@@ -1035,15 +964,10 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
     public async Task<string?> GetRemoteDefaultBranchAsync(string repoPath, string? bearerToken, CancellationToken ct)
     {
         const string headRefPrefix = "ref: refs/heads/";
-        var args = string.IsNullOrWhiteSpace(bearerToken)
-            ? "ls-remote --symref origin HEAD"
-            : $"{BuildAuthHeaderArgs(bearerToken)} ls-remote --symref origin HEAD";
-
-        var (exitCode, stdout, stderr) = await runner.LsRemotePipeline.ExecuteAsync(
-            async cancellationToken => await runner.RunAsync("git", args, repoPath, cancellationToken),
-            ct);
+        var (exitCode, stdout, stderr) = await runner.RunRemoteAsync(GitRemoteOperation.LsRemote, "ls-remote --symref origin HEAD", repoPath, bearerToken, ct);
         if (exitCode != 0)
         {
+            LogIfAuthFailure("ls-remote --symref", repoPath, stdout, stderr);
             logger.LogWarning("Git ls-remote --symref failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
             return null;
         }
@@ -1364,45 +1288,16 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
             File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
     }
 
-    // TODO: Harden and centralize GrayMoon Git remote authentication.
-    // Audit all remote Git operations (clone, fetch, pull, push, remote delete, ls-remote, and future
-    // remote operations) and ensure connector authentication is applied consistently from one
-    // well-defined layer. Review non-interactive credential behavior, authentication-error
-    // classification, safe logging/redaction, and fresh-machine behavior for private repositories.
-    // Reduce the possibility that an individual caller can accidentally omit authentication.
-    // This is intentionally deferred so the immediate private-repository fix remains minimal and
-    // easy to transfer between branches.
-    //
-    // --- Audit (2026-09-26): remote ops vs connector token on a fresh machine (no GCM cache) ---
-    // GitService network APIs already accept bearerToken and apply BuildAuthHeaderArgs when present:
-    //   CloneAsync, FetchAsync, FetchMinimalAsync, PullAsync, PushAsync, GetRemoteBranchesAsync
-    //   (ls-remote), FetchTagsAsync, DeleteBranchAsync (remote), ResetToRemoteAsync (conditional push).
-    // Callers that DO pass a token today (via request.BearerToken or IWorkerTokenProvider):
-    //   SyncRepository, FetchCommits, ReturnToDefaultBranch (incl. remote delete),
-    //   DeleteBranch (remote; Switch Branch modal / API via WorkspaceBranchOperations),
-    //   UpdateBranchFromDefault, PushRepository, CommitSyncRepository, UndoPush,
-    //   GetBranches, RefreshBranches, SetUpstreamBranch, CreateBranch (minimal fetch),
-    //   CheckoutHookSync (minimal fetch + fetch tags), CommitHookSync (ls-remote),
-    //   RefreshRepositoryVersion (ls-remote when needed).
-    // Local DeleteBranch is fine (no network).
-    // Remaining gap off this branch: WorkspaceFeatureOperations remote-branch cleanup (when that
-    // code is present) must also send bearerToken on the DeleteBranch payload.
-    // Note: if the connector token itself is missing/null, authenticated callers still fail; that is
-    // connector configuration, not a propagation bug. GIT_TERMINAL_PROMPT=0 makes those fail fast.
-    private static string BuildAuthHeaderArgs(string bearerToken)
-    {
-        var credentials = "x-access-token:" + bearerToken;
-        var base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(credentials));
-        var headerValue = "Authorization: Basic " + base64;
-        var escaped = headerValue.Replace("\\", "\\\\").Replace("\"", "\\\"");
-        return $"-c core.askpass=true -c credential.helper= -c \"http.extraHeader={escaped}\"";
-    }
+    // Remote authentication lives in GitRemoteAuth + GitProcessRunner.RunRemoteAsync: every clone, fetch, pull,
+    // push and ls-remote goes through RunRemoteAsync, which takes the connector token explicitly and applies it
+    // (environment transport on git 2.31+, command-line fallback otherwise). Do not run those git subcommands
+    // through runner.RunAsync directly. A missing/expired token still fails fast (GIT_TERMINAL_PROMPT=0,
+    // GCM_INTERACTIVE=never) and the error is prefixed with GitRemoteAuth.AuthFailureHint.
 
-    private static string BuildCloneArguments(string cloneUrl, string? bearerToken)
+    private void LogIfAuthFailure(string operation, string path, string? stdout, string? stderr)
     {
-        if (string.IsNullOrWhiteSpace(bearerToken))
-            return $"clone \"{cloneUrl}\"";
-        return $"{BuildAuthHeaderArgs(bearerToken)} clone \"{cloneUrl}\"";
+        if (GitRemoteAuth.IsAuthFailure(CombineOutput(stdout, stderr)))
+            logger.LogWarning("Git {Operation} failed authentication for {Path}. {Hint}", operation, path, GitRemoteAuth.AuthFailureHint);
     }
 
 
@@ -1501,12 +1396,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
     /// <summary>True only when ls-remote succeeded and origin has no such branch; any failure returns false so the normal delete path decides.</summary>
     private async Task<bool> IsRemoteBranchAbsentAsync(string repoPath, string name, string? bearerToken, CancellationToken ct)
     {
-        var args = string.IsNullOrWhiteSpace(bearerToken)
-            ? $"ls-remote --heads origin refs/heads/{name}"
-            : $"{BuildAuthHeaderArgs(bearerToken)} ls-remote --heads origin refs/heads/{name}";
-        var (exit, stdout, _) = await runner.LsRemotePipeline.ExecuteAsync(
-            async cancellationToken => await runner.RunAsync("git", args, repoPath, cancellationToken),
-            ct);
+        var (exit, stdout, _) = await runner.RunRemoteAsync(GitRemoteOperation.LsRemote, $"ls-remote --heads origin refs/heads/{name}", repoPath, bearerToken, ct);
         return exit == 0 && string.IsNullOrWhiteSpace(stdout);
     }
 

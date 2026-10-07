@@ -23,6 +23,17 @@ public enum GitLockIntent
     Read,
 }
 
+/// <summary>Remote-touching git operation kinds; selects the resilience pipeline in <see cref="GitProcessRunner.RunRemoteAsync"/>.</summary>
+internal enum GitRemoteOperation
+{
+    Clone,
+    Fetch,
+    MinimalFetch,
+    Pull,
+    Push,
+    LsRemote,
+}
+
 public sealed class GitProcessRunner(ICommandLineService commandLine, IOptions<GitProcessOptions> gitProcessOptions, ILogger<GitProcessRunner> logger)
 {
     private static readonly string[] NetworkSubcommands = ["fetch", "pull", "push", "ls-remote"];
@@ -64,6 +75,75 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, IOptions<G
 
     internal readonly ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> MinimalFetchPipeline =
         GitResiliencePipelines.CreateMinimalFetchPipeline(logger, TimeSpan.FromSeconds(Math.Max(1, gitProcessOptions.Value.NetworkTimeoutSeconds)));
+
+    /// <summary>
+    /// Whether this machine's git understands <c>GIT_CONFIG_COUNT</c>/<c>GIT_CONFIG_KEY_n</c> (2.31+). Resolved by a
+    /// single <c>git --version</c> the first time an authenticated remote call needs it, then cached for the life of
+    /// the process (the installed git does not change while the Worker runs). Detection failure means "no", which
+    /// selects the command-line transport.
+    /// </summary>
+    private readonly object _envConfigProbeLock = new();
+    private Task<bool>? _envConfigSupport;
+
+    private Task<bool> SupportsEnvConfigAsync()
+    {
+        lock (_envConfigProbeLock)
+            return _envConfigSupport ??= DetectEnvConfigSupportAsync();
+    }
+
+    private async Task<bool> DetectEnvConfigSupportAsync()
+    {
+        try
+        {
+            var r = await commandLine.RunAsync("git", "--version", null, null, CancellationToken.None, false, false, _gitVersionTimeout);
+            var version = GitRemoteAuth.ParseGitVersion(r.Stdout);
+            var supported = r.ExitCode == 0 && GitRemoteAuth.SupportsEnvConfig(version);
+            logger.LogDebug("Git remote auth transport: git {Version} -> {Transport}", version?.ToString() ?? "<unknown>", supported ? "environment" : "command line");
+            return supported;
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Git version probe failed; using command-line auth transport.");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// The only entry point for git operations that talk to the remote (clone, fetch, pull, push, ls-remote).
+    /// Callers pass the plain git arguments and the connector token (<c>null</c>/blank = unauthenticated); this
+    /// method applies authentication, the operation's resilience pipeline, and non-interactive behaviour, so no
+    /// individual caller can forget or hand-roll auth.
+    /// </summary>
+    internal async Task<(int ExitCode, string? Stdout, string? Stderr)> RunRemoteAsync(
+        GitRemoteOperation operation,
+        string arguments,
+        string workingDirectory,
+        string? bearerToken,
+        CancellationToken ct)
+    {
+        var pipeline = operation switch
+        {
+            GitRemoteOperation.Clone => ClonePipeline,
+            GitRemoteOperation.Fetch => FetchPipeline,
+            GitRemoteOperation.MinimalFetch => MinimalFetchPipeline,
+            GitRemoteOperation.Pull => PullPipeline,
+            GitRemoteOperation.Push => PushPipeline,
+            GitRemoteOperation.LsRemote => LsRemotePipeline,
+            _ => throw new ArgumentOutOfRangeException(nameof(operation), operation, null),
+        };
+
+        if (string.IsNullOrWhiteSpace(bearerToken))
+            return await pipeline.ExecuteAsync(async c => await RunAsync("git", arguments, workingDirectory, c), ct);
+
+        if (await SupportsEnvConfigAsync())
+        {
+            using var _ = new GitProcessEnvironmentScope(GitRemoteAuth.BuildEnvironment(bearerToken, GitRemoteAuth.ReadExistingConfigCount()));
+            return await pipeline.ExecuteAsync(async c => await RunAsync("git", arguments, workingDirectory, c), ct);
+        }
+
+        var authedArguments = $"{GitRemoteAuth.BuildArgumentPrefix(bearerToken)} {arguments}";
+        return await pipeline.ExecuteAsync(async c => await RunAsync("git", authedArguments, workingDirectory, c), ct);
+    }
 
     internal async Task<(int ExitCode, string? Stdout, string? Stderr)> RunAsync(
         string fileName,
