@@ -146,6 +146,7 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<ICommandHandler<GetRepositoryVersionRequest, GetRepositoryVersionResponse>, GetRepositoryVersionCommand>();
         builder.Services.AddSingleton<ICommandHandler<GetWorkspaceExistsRequest, GetWorkspaceExistsResponse>, GetWorkspaceExistsCommand>();
         builder.Services.AddSingleton<ICommandHandler<GetHostInfoRequest, GetHostInfoResponse>, GetHostInfoCommand>();
+        builder.Services.AddSingleton<ICommandHandler<GetCapabilitiesRequest, GetCapabilitiesResponse>, GetCapabilitiesCommand>();
         builder.Services.AddSingleton<ICommandHandler<SyncRepositoryDependenciesRequest, SyncRepositoryDependenciesResponse>, SyncRepositoryDependenciesCommand>();
         builder.Services.AddSingleton<ICommandHandler<RefreshRepositoryProjectsRequest, RefreshRepositoryProjectsResponse>, RefreshRepositoryProjectsCommand>();
         builder.Services.AddSingleton<ICommandHandler<CommitSyncRepositoryRequest, CommitSyncRepositoryResponse>, CommitSyncRepositoryCommand>();

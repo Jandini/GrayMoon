@@ -26,7 +26,6 @@ public sealed class GetHostInfoCommand(ICommandLineService commandLine) : IComma
             GitVersion = gitVersion,
             GitVersionToolVersion = gitVersionToolVersion,
             UserProfilePath = userProfile,
-            SupportedFeatures = [WorkerFeatures.WorkspaceRepository]
         };
     }
 

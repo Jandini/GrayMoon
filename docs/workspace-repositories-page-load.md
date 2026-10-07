@@ -61,6 +61,63 @@ Worker**. `WorkerFeatureSupportService` caches the answer for only **60 seconds*
 This matches "sometimes a few seconds" very well, and it is used only to decide whether to show a rarely-needed
 banner ("Worker does not support Workspace repositories"). It should not block the grid.
 
+#### Why the App has to ask the Worker at all (`supportedFeatures`)
+
+The App cannot know what the Worker can do from its own code, for these reasons:
+
+- **They are two separately installed and versioned processes.** The App runs in Docker or as the Desktop child
+  process. The Worker (`graymoon-worker`) is a dotnet tool or Windows service on the developer's machine and is
+  updated independently (self-update, or the user installs it manually). Any App/Worker version pair can be
+  connected, including a new App with an old Worker.
+- **The App only holds a SignalR connection to the Worker.** Hub connection details and the App's own build version
+  do not say which commands the connected Worker implements. The only reliable source is the Worker itself.
+- **An old Worker fails badly without a check.** A command it does not know either errors or times out. For
+  Workspace repositories the App would send a multi-step operation (create or restore the Workspace repo on disk)
+  that the old Worker cannot complete, so the user gets a confusing failure part way through, not a clear message.
+  `WorkspaceRepositoryOperations` (lines 136 and 200) therefore gates on `SupportsAsync(WorkspaceRepository)` and
+  returns "update the Worker" up front.
+- **A feature flag is more robust than a version number.** The Worker lists capabilities it really has
+  (`SupportedFeatures = [WorkerFeatures.WorkspaceRepository]` in `GetHostInfoCommand`). The App does not need to keep
+  a table of "feature X needs Worker >= 1.4.2", and it still works with pre-release or backported Workers. An
+  older Worker that predates the field returns no list, which is treated as "not supported".
+- **The answer can change at runtime.** The Worker can disconnect, reconnect, or self-update to a newer version
+  while the App stays up. That is why the result is cached with a TTL and not read once at App startup, and why a
+  failed or disconnected call is never cached.
+
+**There is a second, bigger cost: `GetHostInfo` is not a lightweight "features" call.** The feature list is a
+by-product of a command that, every time it runs, starts **three child processes on the host**
+(`GetHostInfoCommand.ExecuteAsync`):
+
+1. `dotnet --version`
+2. `git --version`
+3. `dotnet gitversion version` (starts the GitVersion tool, typically the slowest of the three)
+
+It also goes through the Worker's main job queue, so it can wait behind long-running commands. So a cache miss
+on the page costs: SignalR hop + queue wait + up to three process launches + the return hop. Process launches on
+Windows are commonly hundreds of milliseconds each, which fits a "sometimes a few seconds" delay far better than
+SQLite does. The 60 s TTL means only the first open after a pause pays it.
+
+**What this implies for the fix (idea 1 below):**
+- The feature list is static for the life of a Worker process. It does not need the three version probes at all.
+  Best option: send `supportedFeatures` **when the Worker connects** (in the SignalR handshake or a first
+  `ReportHostInfo` message, as it already does for `ReportQueueStatus`), store it in `WorkerConnectionTracker`, and
+  drop it on disconnect. Then `SupportsAsync` becomes an in-memory read with no Worker round trip, no process
+  launches, and no TTL.
+- Alternatively, split a cheap `GetCapabilities` command (no child processes) from `GetHostInfo` (versions).
+- Either way, the page should still not await it before first paint, because it only drives a banner.
+
+#### Current feature flags
+
+There is exactly **one** feature flag today (`GrayMoon.Abstractions/Worker/WorkerFeatures.cs`):
+
+| Flag | Advertised by | Checked by (App side) | What it protects |
+|---|---|---|---|
+| `workspaceRepository` | `GetHostInfoCommand` (`SupportedFeatures = [WorkerFeatures.WorkspaceRepository]`) | `WorkspaceRepositoryOperations` (2 gates, lines 136 and 200: create and restore of the Workspace repository); `WorkspaceRepositories.Display.cs:39` (warning banner) | Workspace-role repository operations. An older Worker would fail part way through them. |
+
+So the whole round trip exists to protect one feature, and the page-load check only runs for workspaces that already
+have a Workspace-role repository. Any future flag would be added to `WorkerFeatures` and to the Worker's list, and
+would reuse the same mechanism, which is a further reason to move delivery to connect time (see below).
+
 ### Cause B: Blazor Server cold start (`prerender: false`)
 On a fresh load, hard refresh, or Desktop app start, the user waits for the circuit before *any* page code runs.
 This is a fixed cost every time the browser connects, and it is worse on the first navigation after the
@@ -184,3 +241,8 @@ and idea 1 alone should remove the "sometimes".
    *after* the grid?
 3. Do you want stale-while-revalidate on repeat visits (idea 7), or always-fresh data?
 4. Do you want me to add the timing instrumentation first (section 5), or go straight to the recommended option?
+
+## 7. Implemented so far
+
+- Idea 1a: the Worker support check no longer blocks first paint (`WorkspaceRepositories.Display.cs`); the banner can only appear after the grid.
+- Feature flags moved to a new cheap `GetCapabilities` Worker command (no child processes, routed to the read pool). `GetHostInfo` no longer carries `supportedFeatures`. The App has no fallback because GrayMoon is not released yet.

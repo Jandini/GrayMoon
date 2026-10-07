@@ -21,6 +21,8 @@ public sealed class CommandJobFactory
     {
         if (args == null || args.Value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
         {
+            if (command == "GetCapabilities")
+                return new GetCapabilitiesRequest();
             if (command == "GetHostInfo")
                 return new GetHostInfoRequest();
             if (command == WorkerHubMethods.SelfUpdate)
@@ -50,6 +52,7 @@ public sealed class CommandJobFactory
             "GetWorkspaceExists" => JsonSerializer.Deserialize<GetWorkspaceExistsRequest>(json, options)
                 ?? throw new ArgumentException("Invalid GetWorkspaceExists args"),
             "GetHostInfo" => JsonSerializer.Deserialize<GetHostInfoRequest>(json, options) ?? new GetHostInfoRequest(),
+            "GetCapabilities" => JsonSerializer.Deserialize<GetCapabilitiesRequest>(json, options) ?? new GetCapabilitiesRequest(),
             "SyncRepositoryDependencies" => JsonSerializer.Deserialize<SyncRepositoryDependenciesRequest>(json, options)
                 ?? throw new ArgumentException("Invalid SyncRepositoryDependencies args"),
             "RefreshRepositoryProjects" => JsonSerializer.Deserialize<RefreshRepositoryProjectsRequest>(json, options)
