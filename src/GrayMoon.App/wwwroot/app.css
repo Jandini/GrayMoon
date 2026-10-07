@@ -1594,3 +1594,50 @@ table.resizable-columns th:hover .resize-handle::after {
 .gm-gh-dropdown-item:hover i {
     color: #aaa;
 }
+
+/* Worker badge activity frame. The comet is a layer behind the badge, sticking
+   out 2px, so the pill covers the middle and only a snake remains around the
+   edge. Absolute positioning leaves the badge box the same size. */
+@property --gm-worker-spin {
+    syntax: '<angle>';
+    inherits: false;
+    initial-value: 0deg;
+}
+
+.worker-status-frame {
+    position: relative;
+    z-index: 0;
+    display: inline-flex;
+    vertical-align: middle;
+}
+
+.worker-status-frame--busy::before {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    inset: -2px;
+    border-radius: calc(0.25rem + 2px);
+    background: conic-gradient(
+        from var(--gm-worker-spin),
+        transparent 0deg,
+        transparent 236deg,
+        color-mix(in srgb, var(--success) 40%, transparent) 278deg,
+        #6dce96 314deg,
+        var(--success) 340deg,
+        #e9fff1 356deg,
+        transparent 360deg
+    );
+    pointer-events: none;
+    animation: gm-worker-badge-spin 2.6s linear infinite;
+}
+
+@keyframes gm-worker-badge-spin {
+    to { --gm-worker-spin: 360deg; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .worker-status-frame--busy::before {
+        animation: none;
+        background: var(--success);
+    }
+}

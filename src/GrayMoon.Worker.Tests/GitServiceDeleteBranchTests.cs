@@ -45,12 +45,28 @@ public sealed class GitServiceDeleteBranchTests : IDisposable
 
         var push = Assert.Single(_recorder.StringArgumentCalls, c => c.Contains("push origin --delete", StringComparison.Ordinal));
         Assert.Contains("push origin --delete feature/matt", push, StringComparison.Ordinal);
-        Assert.Contains("http.extraHeader=", push, StringComparison.Ordinal);
-        Assert.Contains(Convert.ToBase64String(Encoding.UTF8.GetBytes("x-access-token:" + token)), push, StringComparison.Ordinal);
-        Assert.Contains("core.askpass=true", push, StringComparison.Ordinal);
-        Assert.Contains("credential.helper=", push, StringComparison.Ordinal);
         Assert.Contains("core.hooksPath=", push, StringComparison.Ordinal);
         Assert.Contains("GrayMoon-empty-hooks", push, StringComparison.Ordinal);
+
+        // The token is delivered through GIT_CONFIG_* (git 2.31+) or -c arguments (older git), never both,
+        // and never in plain text.
+        Assert.DoesNotContain(token, push, StringComparison.Ordinal);
+        var expectedHeader = "Authorization: Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes("x-access-token:" + token));
+        var env = _recorder.AmbientEnvironmentFor(push);
+        if (env != null)
+        {
+            Assert.DoesNotContain("http.extraHeader", push, StringComparison.Ordinal);
+            Assert.Contains(expectedHeader, env.Values);
+            Assert.Contains("http.extraHeader", env.Values);
+            Assert.Contains("credential.helper", env.Values);
+        }
+        else
+        {
+            Assert.Contains("http.extraHeader=", push, StringComparison.Ordinal);
+            Assert.Contains(expectedHeader.Substring("Authorization: Basic ".Length), push, StringComparison.Ordinal);
+            Assert.Contains("core.askpass=true", push, StringComparison.Ordinal);
+            Assert.Contains("credential.helper=", push, StringComparison.Ordinal);
+        }
     }
 
     [Fact]
@@ -100,7 +116,9 @@ public sealed class GitServiceDeleteBranchTests : IDisposable
         var push = Assert.Single(_recorder.StringArgumentCalls, c => c.Contains("--force-with-lease=", StringComparison.Ordinal));
         Assert.Contains($"--force-with-lease=refs/heads/feature/lease:{sha}", push, StringComparison.Ordinal);
         Assert.Contains("origin :feature/lease", push, StringComparison.Ordinal);
-        Assert.Contains("http.extraHeader=", push, StringComparison.Ordinal);
+        Assert.True(
+            _recorder.AmbientEnvironmentFor(push) != null || push.Contains("http.extraHeader=", StringComparison.Ordinal),
+            "The lease push must carry the connector token.");
     }
 
     [Fact]
@@ -124,6 +142,12 @@ public sealed class GitServiceDeleteBranchTests : IDisposable
     {
         public List<string> StringArgumentCalls { get; } = [];
 
+        private readonly Dictionary<string, IReadOnlyDictionary<string, string>?> _ambientEnvironment = new();
+
+        /// <summary>The <c>GIT_CONFIG_*</c> variables in effect when <paramref name="arguments"/> were run, or null when none.</summary>
+        public IReadOnlyDictionary<string, string>? AmbientEnvironmentFor(string arguments)
+            => _ambientEnvironment.GetValueOrDefault(arguments);
+
         public Task<CommandLineResult> RunAsync(
             string fileName,
             string arguments,
@@ -135,6 +159,7 @@ public sealed class GitServiceDeleteBranchTests : IDisposable
             TimeSpan? timeout = null)
         {
             StringArgumentCalls.Add(arguments);
+            _ambientEnvironment[arguments] = GitProcessEnvironmentAmbient.Current.Value;
             // Remote delete needs a network push; short-circuit so the test stays offline.
             if (arguments.Contains("push origin --delete", StringComparison.Ordinal)
                 || arguments.Contains("--force-with-lease=", StringComparison.Ordinal)

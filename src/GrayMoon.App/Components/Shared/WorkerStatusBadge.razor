@@ -28,11 +28,13 @@ else if (State == WorkerConnectionState.VersionMismatch && !IsUpdating)
 }
 else
 {
-    <a href="/worker" class="@BadgeClassFull"
-       title="@TitleText"
-       style="cursor: pointer; display: inline-flex; align-items: center; vertical-align: middle; @BadgeStyle">
-        @StateLabel
-    </a>
+    <span class="worker-status-frame ms-2@(ShowActivityFrame ? " worker-status-frame--busy" : "")">
+        <a href="/worker" class="@BadgeLinkClass"
+           title="@TitleText"
+           style="cursor: pointer; display: inline-flex; align-items: center; vertical-align: middle; @BadgeStyle">
+            @StateLabel
+        </a>
+    </span>
 }
 
 @implements IDisposable
@@ -82,13 +84,20 @@ else
         _ => ""
     };
 
+    private bool ShowActivityFrame =>
+        !IsUpdating
+        && !LogonPasswordRequired
+        && State == WorkerConnectionState.Online
+        && WorkerQueueStateService.GetTotalPendingCount() > 0;
+
     private string BadgeClassFull => $"badge {BadgeClass} text-decoration-none ms-2";
+
+    private string BadgeLinkClass => $"badge {BadgeClass} text-decoration-none";
 
     private string StateLabel => WorkerStatusText.Label(
         IsUpdating,
         LogonPasswordRequired,
-        State,
-        WorkerQueueStateService.GetTotalPendingCount());
+        State);
 
     private string TitleText => WorkerStatusText.Title(
         IsUpdating,
