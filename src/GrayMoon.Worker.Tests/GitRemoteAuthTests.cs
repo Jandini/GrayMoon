@@ -115,12 +115,14 @@ public sealed class GitRemoteAuthTests
 
         using var _ = new GitProcessEnvironmentScope(GitRemoteAuth.BuildEnvironment("tok", GitRemoteAuth.ReadExistingConfigCount()));
         var header = await service.RunAsync("git", "config --get http.extraHeader");
-        var helper = await service.RunAsync("git", "config --get-all credential.helper");
+        var helper = await service.RunAsync("git", "config --show-origin --get-all credential.helper");
 
         Assert.Equal(0, header.ExitCode);
         Assert.Equal(GitRemoteAuth.BuildAuthHeaderValue("tok"), header.Stdout?.Trim());
-        // An empty value resets the helper list, so the last credential.helper git sees is empty.
-        Assert.Equal("", helper.Stdout?.TrimEnd('\r', '\n').Split('\n').Last().Trim());
+        // The empty value resets the helper list: it is the last entry git sees and comes from the command-line scope
+        // (stdout is trimmed, so the empty value itself is not visible - only its origin line is).
+        var lastEntry = (helper.Stdout ?? "").Replace("\r\n", "\n").Split('\n', StringSplitOptions.RemoveEmptyEntries).Last();
+        Assert.StartsWith("command line:", lastEntry, StringComparison.Ordinal);
     }
 
     [Fact]
