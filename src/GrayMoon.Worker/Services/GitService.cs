@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -8,23 +8,17 @@ using GrayMoon.Worker.Services.GitChanges;
 using GrayMoon.Common.Git;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using static GrayMoon.Worker.Services.GitCliOutput;
 
 namespace GrayMoon.Worker.Services;
 
-public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitService> logger, GitProcessRunner runner) : IGitService
+public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitService> logger, GitProcessRunner runner, IGitRepositoryReader reader) : IGitService
 {
     private readonly int _listenPort = options.Value.ListenPort;
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _safeRepoCache = new(StringComparer.OrdinalIgnoreCase);
     private static string? _emptyHooksPath;
 
-    public string GetWorkspacePath(string root, string workspaceName)
-    {
-        if (string.IsNullOrWhiteSpace(root))
-            throw new ArgumentException("Workspace root path is required.", nameof(root));
-        var safe = SanitizeDirectoryName(workspaceName ?? "");
-        return Path.Combine(root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), safe);
-    }
 
     public async Task<bool> CloneAsync(string workingDir, string cloneUrl, string? bearerToken, CancellationToken ct)
     {
@@ -180,99 +174,11 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         return ("dotnet-gitversion", commonArgs);
     }
 
-    /// <summary>
-    /// Runs a git command with the given lock intent. Read intent skips the per-repository write lock and
-    /// puts <c>--no-optional-locks</c> in front of the subcommand, as <see cref="GitLockIntent"/> requires.
-    /// </summary>
-    private Task<(int ExitCode, string? Stdout, string? Stderr)> RunGitWithIntentAsync(
-        string arguments,
-        string repoPath,
-        CancellationToken ct,
-        GitLockIntent intent,
-        bool? streamStderrAsStdout = null,
-        bool? mirrorFailureOutputAsStderr = null)
-        => runner.RunAsync(
-            "git",
-            intent == GitLockIntent.Read ? "--no-optional-locks " + arguments : arguments,
-            repoPath,
-            ct,
-            streamStderrAsStdout,
-            mirrorFailureOutputAsStderr,
-            intent);
 
-    public async Task<string?> GetCurrentBranchNameAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write)
-    {
-        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
-            return null;
 
-        var (exitCode, stdout, _) = await RunGitWithIntentAsync("branch --show-current", repoPath, ct, intent);
-        if (exitCode != 0)
-            return null;
 
-        var name = (stdout ?? "").Trim();
-        return string.IsNullOrWhiteSpace(name) ? null : name;
-    }
 
-    public async Task<string?> GetHeadCommitAsync(string repoPath, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
-            return null;
 
-        var (exitCode, stdout, _) = await runner.RunAsync("git", ["rev-parse", "HEAD"], repoPath, null, ct);
-        if (exitCode != 0)
-            return null;
-
-        var sha = (stdout ?? "").Trim();
-        return string.IsNullOrWhiteSpace(sha) ? null : sha;
-    }
-
-    public async Task<IReadOnlyList<string>> FindBranchCollisionsAsync(string repoPath, string branchName, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
-            return [];
-
-        var name = branchName.Trim();
-        var (exitCode, stdout, _) = await runner.RunAsync(
-            "git",
-            ["for-each-ref", "--format=%(refname:short)", $"refs/heads/{name}", $"refs/remotes/*/{name}"],
-            repoPath,
-            null,
-            ct);
-        if (exitCode != 0)
-            return [];
-
-        return (stdout ?? "")
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .ToList();
-    }
-
-    public async Task<string?> RevParseAsync(string repoPath, string rev, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(rev))
-            return null;
-
-        var (exitCode, stdout, _) = await runner.RunAsync("git", ["rev-parse", rev.Trim()], repoPath, null, ct);
-        if (exitCode != 0)
-            return null;
-
-        var sha = (stdout ?? "").Trim();
-        return string.IsNullOrWhiteSpace(sha) ? null : sha;
-    }
-
-    public async Task<string?> GetRemoteOriginUrlAsync(string repoPath, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
-            return null;
-
-        var (exitCode, stdout, stderr) = await runner.RunAsync("git", "config --get remote.origin.url", repoPath, ct);
-        if (exitCode != 0)
-        {
-            logger.LogError("Git config remote.origin.url failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
-            return null;
-        }
-
-        return (stdout ?? "").Trim();
-    }
 
     public async Task<(bool Success, string? ErrorMessage)> FetchAsync(string repoPath, bool includeTags, string? bearerToken, CancellationToken ct)
     {
@@ -317,7 +223,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
 
         var refsToFetch = new List<string>();
 
-        var upstreamRef = skipUpstreamCheck ? null : await GetUpstreamRefAsync(repoPath, branchName, ct);
+        var upstreamRef = skipUpstreamCheck ? null : await reader.GetUpstreamRefAsync(repoPath, branchName, ct);
         logger.LogDebug("Git minimal fetch upstream ref for {RepoPath}: {UpstreamRef}", repoPath, upstreamRef ?? "<none>");
 
         if (!string.IsNullOrWhiteSpace(upstreamRef))
@@ -329,7 +235,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
                 refsToFetch.Add(upstream);
         }
 
-        var defaultRef = defaultBranchOriginRef ?? await GetDefaultBranchAsync(repoPath, ct);
+        var defaultRef = defaultBranchOriginRef ?? await reader.GetDefaultBranchOriginRefAsync(repoPath, ct);
         logger.LogDebug("Git minimal fetch default branch ref for {RepoPath}: {DefaultRef}", repoPath, defaultRef ?? "<none>");
 
         if (!string.IsNullOrWhiteSpace(defaultRef))
@@ -425,128 +331,8 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         @"couldn't find remote ref (\S+)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    public async Task<(int? Outgoing, int? Incoming, bool HasUpstream)> GetCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct, bool skipUpstreamCheck = false)
-    {
-        var probe = await ProbeCommitCountsAsync(repoPath, branchName, defaultBranchOriginRef, ct, skipUpstreamCheck);
-        return (probe.Outgoing, probe.Incoming, probe.HasUpstream);
-    }
 
-    public async Task<CommitCountsProbeResult> ProbeCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct, bool skipUpstreamCheck = false, GitLockIntent intent = GitLockIntent.Write)
-    {
-        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
-            return CommitCountsProbeResult.Unknown;
 
-        var sw = Stopwatch.StartNew();
-
-        // Whether the branch has a configured upstream is only knowable when we actually ask git for it.
-        var upstreamProbed = !skipUpstreamCheck;
-
-        // The divergence base is a file read. Its local branch is looked up first because every path without a
-        // usable upstream needs it, and it rides along in the one listing below instead of costing its own
-        // existence probe.
-        var divergenceLocal = await GetDivergenceLocalBranchAsync(repoPath, ct);
-
-        BranchTracking? tracking = skipUpstreamCheck
-            ? null
-            : await ReadBranchTrackingAsync(repoPath, branchName, divergenceLocal, ct, intent);
-        var upstreamRef = tracking?.Upstream;
-        if (string.IsNullOrWhiteSpace(upstreamRef))
-        {
-            var compareRef = await ResolveNoUpstreamCompareRefAsync(repoPath, defaultBranchOriginRef, divergenceLocal, tracking?.DivergenceLocalExists, ct, intent);
-            return await CountAheadOfCompareRefAsync(repoPath, branchName, compareRef, upstreamProbed, sw, "no upstream", ct, intent);
-        }
-
-        var originBranch = upstreamRef!;
-
-        // The listing already said whether the upstream still exists ("gone" when its remote-tracking ref was
-        // pruned or never fetched), so there is no separate existence probe.
-        if (tracking!.UpstreamGone)
-        {
-            var compareRef = await ResolveNoUpstreamCompareRefAsync(repoPath, defaultBranchOriginRef, divergenceLocal, tracking.DivergenceLocalExists, ct, intent);
-            if (compareRef == null)
-            {
-                logger.LogDebug("Configured upstream for {Branch}, but remote {OriginBranch} not found and no compare ref for {RepoPath}, skipping commit counts", branchName, originBranch, repoPath);
-                return new CommitCountsProbeResult(null, null, false, CountsProbed: false, UpstreamProbed: upstreamProbed);
-            }
-
-            return await CountAheadOfCompareRefAsync(repoPath, branchName, compareRef, upstreamProbed, sw, "missing remote upstream", ct, intent);
-        }
-
-        // The checked-out branch: its ahead/behind against its upstream is what the rev-list below prints for
-        // "<upstream>...HEAD", and the listing carries it already. Only when HEAD really is this branch - for any
-        // other branch (a version provider can report a name that is not checked out, HEAD can be broken
-        // mid-checkout) the counts have to be taken against HEAD, so those fall through to the rev-list.
-        if (tracking.IsHead && tracking.CountsKnown)
-        {
-            sw.Stop();
-            logger.LogDebug("GetCommitCounts completed in {ElapsedMs}ms for {RepoPath} (up{Outgoing} dn{Incoming}, from branch listing)", sw.ElapsedMilliseconds, repoPath, tracking.Ahead, tracking.Behind);
-            return new CommitCountsProbeResult(tracking.Ahead, tracking.Behind, true, CountsProbed: true, UpstreamProbed: upstreamProbed);
-        }
-
-        // Single atomic call: left=incoming (in originBranch not HEAD), right=outgoing (in HEAD not originBranch).
-        // originBranch is known to exist, but HEAD can still be unborn (no commits yet) right
-        // after a checkout - an expected, already-handled miss here (falls back to unknown counts below),
-        // not a real command failure, so it must not be mirrored to the overlay as a red stderr line.
-        var (exitLR, stdoutLR, stderrLR) = await RunGitWithIntentAsync(
-            $"rev-list --left-right --count {originBranch}...HEAD",
-            repoPath,
-            ct,
-            intent,
-            streamStderrAsStdout: true,
-            mirrorFailureOutputAsStderr: false);
-        if (exitLR != 0)
-        {
-            logger.LogWarning("Git rev-list --left-right (commit counts) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitLR, stdoutLR, stderrLR);
-            return new CommitCountsProbeResult(null, null, true, CountsProbed: false, UpstreamProbed: upstreamProbed);
-        }
-
-        var parts = (stdoutLR ?? "").Trim().Split('\t', StringSplitOptions.RemoveEmptyEntries);
-        var inVal = parts.Length >= 1 && int.TryParse(parts[0], out var ic) ? ic : (int?)null;
-        var outVal = parts.Length >= 2 && int.TryParse(parts[1], out var oc) ? oc : (int?)null;
-        sw.Stop();
-        logger.LogDebug("GetCommitCounts completed in {ElapsedMs}ms for {RepoPath} (up{Outgoing} dn{Incoming})", sw.ElapsedMilliseconds, repoPath, outVal, inVal);
-        return new CommitCountsProbeResult(outVal, inVal, true, CountsProbed: true, UpstreamProbed: upstreamProbed);
-    }
-
-    public async Task<(int? DefaultBehind, int? DefaultAhead, string? DefaultBranchName)> GetCommitCountsVsDefaultAsync(string repoPath, string? defaultBranchOriginRef, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write)
-    {
-        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
-            return (null, null, null);
-
-        var defaultBranch = defaultBranchOriginRef ?? await GetDefaultBranchAsync(repoPath, ct, intent);
-        if (defaultBranch == null)
-        {
-            logger.LogDebug("GetCommitCountsVsDefault: no default branch for {RepoPath}", repoPath);
-            return (null, null, null);
-        }
-
-        var sw = Stopwatch.StartNew();
-
-        // Single call: --left-right gives both counts atomically; left=behind (in defaultBranch not HEAD), right=ahead (in HEAD not defaultBranch).
-        // defaultBranch may be stale (resolved earlier, or not yet fetched) and simply not exist locally -
-        // that is an expected, already-handled miss here, not a real command failure, so it must not be
-        // mirrored to the overlay as a red stderr line (see RefExistsAsync for the same policy).
-        var (exitCode, stdout, stderr) = await RunGitWithIntentAsync(
-            $"rev-list --left-right --count {defaultBranch}...HEAD",
-            repoPath,
-            ct,
-            intent,
-            streamStderrAsStdout: true,
-            mirrorFailureOutputAsStderr: false);
-        if (exitCode != 0)
-        {
-            logger.LogDebug("GetCommitCountsVsDefault failed for {RepoPath}. ExitCode={ExitCode}", repoPath, exitCode);
-            return (null, null, null);
-        }
-
-        var parts = (stdout ?? "").Trim().Split('\t', StringSplitOptions.RemoveEmptyEntries);
-        var behind = parts.Length >= 1 && int.TryParse(parts[0], out var b) ? b : (int?)null;
-        var ahead = parts.Length >= 2 && int.TryParse(parts[1], out var a) ? a : (int?)null;
-        var defaultBranchName = defaultBranch.StartsWith("origin/") ? defaultBranch.Substring("origin/".Length) : defaultBranch;
-        sw.Stop();
-        logger.LogDebug("GetCommitCountsVsDefault completed in {ElapsedMs}ms for {RepoPath}: behind={Behind}, ahead={Ahead}", sw.ElapsedMilliseconds, repoPath, behind, ahead);
-        return (behind, ahead, defaultBranchName);
-    }
 
     public async Task<(bool Success, bool MergeConflict, string? ErrorMessage)> PullAsync(string repoPath, string branchName, string? bearerToken, CancellationToken ct, bool skipHooks = false)
     {
@@ -689,140 +475,8 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
             .ToList();
     }
 
-    public async Task<IReadOnlyList<string>> GetLocalBranchesAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write)
-    {
-        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
-            return Array.Empty<string>();
 
-        var (exitCode, stdout, stderr) = await RunGitWithIntentAsync("for-each-ref refs/heads --format=%(refname:short)", repoPath, ct, intent);
-        if (exitCode != 0)
-        {
-            logger.LogWarning("Git for-each-ref refs/heads failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
-            return Array.Empty<string>();
-        }
 
-        return (stdout ?? "")
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(b => !string.IsNullOrWhiteSpace(b))
-            .OrderBy(b => b)
-            .ToList();
-    }
-
-    public async Task<RefSnapshot?> GetRefSnapshotAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write)
-    {
-        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
-            return null;
-
-        // One listing over the three namespaces. The fields (tab separated; a ref name cannot contain a tab):
-        //   %(HEAD)            "*" on the local branch HEAD is attached to, otherwise " " (also " " when detached)
-        //   %(refname)         full name, used only to tell the namespaces apart
-        //   %(refname:short)   what the single-purpose branch reads use, ambiguity quirks included
-        //   %(refname:strip=2) what "git tag" prints, and the branch name "git branch --show-current" prints
-        //   %(symref)          where a symbolic ref points; only refs/remotes/origin/HEAD is one that matters here,
-        //                      and it is what the default branch is read from
-        // --sort=-creatordate is "git tag --sort=-creatordate" applied to every ref; only the tags' relative order
-        // is used, and the branch lists are sorted below exactly as the single-purpose reads sort them.
-        var (exitCode, stdout, stderr) = await RunGitWithIntentAsync(
-            "for-each-ref --sort=-creatordate --format=%(HEAD)%09%(refname)%09%(refname:short)%09%(refname:strip=2)%09%(symref) refs/heads refs/remotes/origin refs/tags",
-            repoPath,
-            ct,
-            intent);
-        if (exitCode != 0)
-        {
-            // Callers fall back to the single-purpose reads, which keep their own failure handling.
-            logger.LogDebug("Git for-each-ref (ref snapshot) failed for {RepoPath}. ExitCode={ExitCode}, Stderr={Stderr}", repoPath, exitCode, stderr);
-            return null;
-        }
-
-        const string originPrefix = "origin/";
-        const string remoteRefPrefix = "refs/remotes/origin/";
-        var tags = new List<string>();
-        var local = new List<string>();
-        var remote = new List<string>();
-        string? checkedOutBranch = null;
-
-        // What the default-branch probes would have looked at, taken from the full ref names so the answer does
-        // not depend on how git abbreviates an ambiguous name. A dangling origin/HEAD (its branch was pruned or
-        // renamed on the remote) is not listed at all, which is the same answer the existence probe gave.
-        var remoteBranchNames = new HashSet<string>(StringComparer.Ordinal);
-        string? originHeadSymref = null;
-
-        foreach (var rawLine in (stdout ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries))
-        {
-            var parts = rawLine.TrimEnd('\r').Split('\t');
-            if (parts.Length != 5)
-                continue;
-
-            var isHead = parts[0] == "*";
-            var fullName = parts[1];
-            var shortName = parts[2].Trim();
-            var strippedName = parts[3].Trim();
-
-            if (fullName.StartsWith(remoteRefPrefix, StringComparison.Ordinal))
-            {
-                var remoteName = fullName[remoteRefPrefix.Length..];
-                if (remoteName == "HEAD")
-                    originHeadSymref = parts[4];
-                else if (remoteName.Length > 0)
-                    remoteBranchNames.Add(remoteName);
-            }
-
-            if (fullName.StartsWith("refs/tags/", StringComparison.Ordinal))
-            {
-                if (!string.IsNullOrWhiteSpace(strippedName))
-                    tags.Add(strippedName);
-            }
-            else if (fullName.StartsWith("refs/heads/", StringComparison.Ordinal))
-            {
-                if (!string.IsNullOrWhiteSpace(shortName))
-                    local.Add(shortName);
-                if (isHead && !string.IsNullOrWhiteSpace(strippedName))
-                    checkedOutBranch = strippedName;
-            }
-            else if (fullName.StartsWith("refs/remotes/origin/", StringComparison.Ordinal))
-            {
-                if (!string.IsNullOrWhiteSpace(shortName) && shortName.StartsWith(originPrefix, StringComparison.Ordinal))
-                {
-                    var name = shortName.Substring(originPrefix.Length);
-                    if (!string.IsNullOrWhiteSpace(name) && name != "HEAD")
-                        remote.Add(name);
-                }
-            }
-        }
-
-        var originHeadTarget = OriginDefaultRef.HeadTargetBranch(originHeadSymref);
-        var defaultOriginRef = OriginDefaultRef.Pick(originHeadTarget, remoteBranchNames.Contains);
-
-        return new RefSnapshot(
-            tags,
-            local.OrderBy(b => b).ToList(),
-            remote.OrderBy(b => b).ToList(),
-            checkedOutBranch,
-            defaultOriginRef,
-            originHeadTarget != null && remoteBranchNames.Contains(originHeadTarget));
-    }
-
-    public async Task<IReadOnlyList<string>> GetRemoteBranchesFromRefsAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write)
-    {
-        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
-            return Array.Empty<string>();
-
-        var (exitCode, stdout, stderr) = await RunGitWithIntentAsync("for-each-ref refs/remotes/origin --format=%(refname:short)", repoPath, ct, intent);
-        if (exitCode != 0)
-        {
-            logger.LogDebug("Git for-each-ref refs/remotes/origin failed for {RepoPath}. ExitCode={ExitCode}", repoPath, exitCode);
-            return Array.Empty<string>();
-        }
-
-        const string originPrefix = "origin/";
-        return (stdout ?? "")
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(b => !string.IsNullOrWhiteSpace(b) && b.StartsWith(originPrefix, StringComparison.Ordinal))
-            .Select(b => b.Substring(originPrefix.Length))
-            .Where(b => !string.IsNullOrWhiteSpace(b) && b != "HEAD")
-            .OrderBy(b => b)
-            .ToList();
-    }
 
     public async Task<IReadOnlyList<string>> GetRemoteBranchesAsync(string repoPath, string? bearerToken, CancellationToken ct)
     {
@@ -877,7 +531,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
 
         var hooksPrefix = GetHooksConfigPrefix(skipHooks);
 
-        if (await RefExistsAsync(repoPath, $"refs/heads/{branchName}", ct))
+        if (await reader.RefExistsAsync(repoPath, $"refs/heads/{branchName}", ct))
         {
             var (exitCode, stdout, stderr) = await runner.RunAsync("git", $"{hooksPrefix}checkout {branchName}", repoPath, ct);
             if (exitCode != 0)
@@ -888,7 +542,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         }
         else
         {
-            if (await RefExistsAsync(repoPath, $"origin/{branchName}", ct))
+            if (await reader.RefExistsAsync(repoPath, $"origin/{branchName}", ct))
             {
                 var (exitCode, stdout, stderr) = await runner.RunAsync("git", $"{hooksPrefix}checkout -b {branchName} origin/{branchName}", repoPath, ct);
                 if (exitCode != 0)
@@ -923,7 +577,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
             ? trimmedBase
             : "origin/" + trimmedBase;
 
-        if (await RefExistsAsync(repoPath, remoteCandidate, ct))
+        if (await reader.RefExistsAsync(repoPath, remoteCandidate, ct))
             startPoint = remoteCandidate;
 
         var hooksPrefix = GetHooksConfigPrefix(skipHooks);
@@ -931,7 +585,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         var (exitCode, stdout, stderr) = await runner.RunAsync("git", $"{hooksPrefix}checkout -b {newBranchName} --no-track {startPoint}", repoPath, ct);
         if (exitCode != 0)
         {
-            if (await RefExistsAsync(repoPath, $"refs/heads/{newBranchName}", ct))
+            if (await reader.RefExistsAsync(repoPath, $"refs/heads/{newBranchName}", ct))
             {
                 logger.LogWarning("Branch {Branch} already exists in {RepoPath}; checking out existing branch.", newBranchName, repoPath);
                 var (coExit, coOut, coErr) = await runner.RunAsync("git", $"{hooksPrefix}checkout {newBranchName}", repoPath, ct);
@@ -963,7 +617,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
             if (string.IsNullOrWhiteSpace(name))
                 return (false, "Invalid branch name");
 
-            var defaultBranch = await GetDefaultBranchNameAsync(repoPath, ct);
+            var defaultBranch = await reader.GetDefaultBranchNameAsync(repoPath, ct);
             if (!string.IsNullOrWhiteSpace(defaultBranch)
                 && name.Equals(defaultBranch.Trim(), StringComparison.OrdinalIgnoreCase))
             {
@@ -1052,7 +706,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         if (string.IsNullOrWhiteSpace(localName))
             return (false, "Invalid branch name");
 
-        if (!await RefExistsAsync(repoPath, $"refs/heads/{localName}", ct))
+        if (!await reader.RefExistsAsync(repoPath, $"refs/heads/{localName}", ct))
         {
             logger.LogWarning("Branch {Branch} does not exist in {RepoPath}", localName, repoPath);
             return (false, "Branch does not exist.");
@@ -1088,33 +742,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         return (true, null);
     }
 
-    public async Task<string?> GetDefaultBranchNameAsync(string repoPath, CancellationToken ct)
-    {
-        var defaultBranch = await GetDefaultBranchAsync(repoPath, ct);
-        if (defaultBranch == null)
-            return null;
-        if (defaultBranch.StartsWith("origin/"))
-            return defaultBranch.Substring("origin/".Length);
-        return defaultBranch;
-    }
 
-    public async Task<IReadOnlyList<string>> GetTagsAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write)
-    {
-        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
-            return Array.Empty<string>();
-
-        var (exitCode, stdout, stderr) = await RunGitWithIntentAsync("tag --sort=-creatordate", repoPath, ct, intent);
-        if (exitCode != 0)
-        {
-            logger.LogDebug("Git tag list failed for {RepoPath}. ExitCode={ExitCode}, Stderr={Stderr}", repoPath, exitCode, stderr);
-            return Array.Empty<string>();
-        }
-
-        return (stdout ?? "")
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(t => !string.IsNullOrWhiteSpace(t))
-            .ToList();
-    }
 
     public async Task<(bool Success, string? ErrorMessage)> FetchTagsAsync(string repoPath, string? bearerToken, CancellationToken ct)
     {
@@ -1148,7 +776,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
             return (false, "Invalid repository path or tag name");
 
         var name = tagName.Trim();
-        if (!await RefExistsAsync(repoPath, $"refs/tags/{name}", ct))
+        if (!await reader.RefExistsAsync(repoPath, $"refs/tags/{name}", ct))
             return (false, $"Tag '{name}' does not exist.");
 
         var (exitCode, stdout, stderr) = await runner.RunAsync("git", $"-c advice.detachedHead=false checkout refs/tags/{name}", repoPath, ct);
@@ -1162,39 +790,12 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         return (true, null);
     }
 
-    public async Task<string?> GetCheckedOutTagAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write)
-    {
-        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
-            return null;
 
-        var (symExit, _, _) = await RunGitWithIntentAsync("symbolic-ref -q HEAD", repoPath, ct, intent);
-        if (symExit == 0)
-            return null;
 
-        var (descExit, stdout, _) = await RunGitWithIntentAsync("describe --tags --exact-match", repoPath, ct, intent);
-        if (descExit != 0)
-            return null;
-
-        var tag = (stdout ?? "").Trim();
-        return string.IsNullOrWhiteSpace(tag) ? null : tag;
-    }
-
-    public Task<string?> GetDefaultBranchOriginRefAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write)
-        => GetDefaultBranchAsync(repoPath, ct, intent);
-
-    public string? ToOriginBranchRef(string? branchName)
-    {
-        if (string.IsNullOrWhiteSpace(branchName))
-            return null;
-        var trimmed = branchName.Trim();
-        if (trimmed.StartsWith("origin/", StringComparison.OrdinalIgnoreCase))
-            return trimmed;
-        return $"origin/{trimmed}";
-    }
 
     public async Task SetDivergenceBaseBranchAsync(string repoPath, string? divergenceBaseBranch, CancellationToken ct)
     {
-        var path = await ResolveDivergenceBaseFilePathAsync(repoPath, ct);
+        var path = await GitDirectoryLocator.ResolveDivergenceBaseFilePathAsync(runner, repoPath, ct);
         if (path is null)
             return;
 
@@ -1212,400 +813,19 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         await File.WriteAllTextAsync(path, name + "\n", ct);
     }
 
-    public async Task<string?> GetDivergenceBaseBranchAsync(string repoPath, CancellationToken ct)
-    {
-        var path = await ResolveDivergenceBaseFilePathAsync(repoPath, ct);
-        if (path is null || !File.Exists(path))
-            return null;
 
-        var text = (await File.ReadAllTextAsync(path, ct)).Trim();
-        return string.IsNullOrWhiteSpace(text) ? null : text;
-    }
 
-    /// <summary>
-    /// Worktree-private file (not the common git dir) so Feature worktrees keep their own parent-branch base.
-    /// </summary>
-    private async Task<string?> ResolveDivergenceBaseFilePathAsync(string repoPath, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
-            return null;
 
-        // Where the git directory is does not need a process in the normal layouts: it is the .git folder, or
-        // the folder a linked worktree's .git file points at. Anything else asks git, as before.
-        var fullGitDir = TryReadGitDirFromWorkTree(repoPath);
-        if (fullGitDir is null)
-        {
-            var (exitCode, stdout, _) = await runner.RunAsync(
-                "git",
-                "rev-parse --git-dir",
-                repoPath,
-                ct,
-                streamStderrAsStdout: true,
-                mirrorFailureOutputAsStderr: false,
-                intent: GitLockIntent.Read);
 
-            if (exitCode != 0 || string.IsNullOrWhiteSpace(stdout))
-                return null;
 
-            var gitDir = stdout.Trim();
-            fullGitDir = Path.IsPathRooted(gitDir)
-                ? gitDir
-                : Path.GetFullPath(Path.Combine(repoPath, gitDir));
-        }
 
-        return Path.Combine(fullGitDir, "graymoon-divergence-base");
-    }
 
-    /// <summary>
-    /// The git directory of the working tree at <paramref name="repoPath"/> (what <c>git rev-parse --git-dir</c>
-    /// prints), read from the file system: <c>.git</c> itself when it is a folder, or the target of its
-    /// <c>gitdir:</c> line when it is a file (a linked worktree or a submodule). Null whenever that is not
-    /// plainly the case - no <c>.git</c> entry, an unreadable or unfamiliar file, a target without a <c>HEAD</c>,
-    /// or <c>GIT_DIR</c> set in the environment - so the caller asks git instead of guessing. Read on every call,
-    /// never cached, so a worktree that is removed and added again is never answered from a stale path.
-    /// </summary>
-    internal static string? TryReadGitDirFromWorkTree(string repoPath)
-    {
-        if (string.IsNullOrWhiteSpace(repoPath) || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("GIT_DIR")))
-            return null;
 
-        try
-        {
-            var dotGit = Path.Combine(repoPath, ".git");
-            string candidate;
-            if (Directory.Exists(dotGit))
-            {
-                candidate = Path.GetFullPath(dotGit);
-            }
-            else if (File.Exists(dotGit))
-            {
-                const string prefix = "gitdir:";
-                var first = File.ReadLines(dotGit).FirstOrDefault();
-                if (first is null || !first.StartsWith(prefix, StringComparison.Ordinal))
-                    return null;
 
-                var target = first[prefix.Length..].Trim();
-                if (target.Length == 0)
-                    return null;
 
-                candidate = Path.GetFullPath(Path.IsPathRooted(target) ? target : Path.Combine(repoPath, target));
-            }
-            else
-            {
-                return null;
-            }
 
-            // A real git directory always has a HEAD; an empty or foreign .git folder is not one, and git itself
-            // would look further up the tree for the repository.
-            return File.Exists(Path.Combine(candidate, "HEAD")) ? candidate : null;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
-        {
-            return null;
-        }
-    }
 
-    /// <summary>
-    /// Default branch as <c>origin/&lt;name&gt;</c>, or null. One listing answers the common cases: it shows
-    /// where <c>origin/HEAD</c> points and whether <c>origin/main</c> / <c>origin/master</c> exist. Only when
-    /// <c>origin/HEAD</c> points at some other branch is that branch's existence probed separately, and when the
-    /// listing itself fails the original probe-by-probe lookup runs, so a failure here is never "no default".
-    /// Sync does not come through here: it reads the same answer from its ref snapshot.
-    /// </summary>
-    private async Task<string?> GetDefaultBranchAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write)
-    {
-        const string remoteRefPrefix = "refs/remotes/origin/";
 
-        // A missing pattern is not an error for for-each-ref (exit 0, no line), and a dangling origin/HEAD is
-        // silently left out, so the usual "not there" answers cost no failed process and paint nothing red.
-        var (exit, stdout, _) = await RunGitWithIntentAsync(
-            "for-each-ref --format=%(refname)%09%(symref) refs/remotes/origin/HEAD refs/remotes/origin/main refs/remotes/origin/master",
-            repoPath,
-            ct,
-            intent,
-            streamStderrAsStdout: true,
-            mirrorFailureOutputAsStderr: false);
-        if (exit != 0)
-            return await GetDefaultBranchByProbesAsync(repoPath, ct, intent);
-
-        var existing = new HashSet<string>(StringComparer.Ordinal);
-        string? headSymref = null;
-        foreach (var rawLine in (stdout ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries))
-        {
-            var parts = rawLine.TrimEnd('\r').Split('\t');
-            if (parts.Length != 2 || !parts[0].StartsWith(remoteRefPrefix, StringComparison.Ordinal))
-                continue;
-
-            var name = parts[0][remoteRefPrefix.Length..];
-            if (name == "HEAD")
-                headSymref = parts[1];
-            else
-                existing.Add(name);
-        }
-
-        var headTarget = OriginDefaultRef.HeadTargetBranch(headSymref);
-        if (headTarget != null && headTarget != "main" && headTarget != "master")
-        {
-            // The listing only looked at main and master, so it cannot say whether this branch exists.
-            if (await RefExistsAsync(repoPath, $"origin/{headTarget}", ct, intent))
-                return $"origin/{headTarget}";
-            headTarget = null;
-        }
-
-        return OriginDefaultRef.Pick(headTarget, existing.Contains);
-    }
-
-    /// <summary>The original lookup: one probe per step. Kept as the fallback for when the listing fails.</summary>
-    private async Task<string?> GetDefaultBranchByProbesAsync(string repoPath, CancellationToken ct, GitLockIntent intent)
-    {
-        var (exitHead, stdoutHead, _) = await RunGitWithIntentAsync(
-            "symbolic-ref -q refs/remotes/origin/HEAD",
-            repoPath,
-            ct,
-            intent,
-            streamStderrAsStdout: true,
-            mirrorFailureOutputAsStderr: false);
-        if (exitHead == 0 && !string.IsNullOrWhiteSpace(stdoutHead))
-        {
-            var refName = stdoutHead.Trim();
-            if (refName.StartsWith("refs/remotes/origin/"))
-            {
-                var branch = refName.Substring("refs/remotes/origin/".Length);
-                if (!string.IsNullOrEmpty(branch) && branch != "HEAD")
-                {
-                    var originRef = $"origin/{branch}";
-                    if (await RefExistsAsync(repoPath, originRef, ct, intent))
-                        return originRef;
-                }
-            }
-        }
-
-        if (await RefExistsAsync(repoPath, "origin/main", ct, intent))
-            return "origin/main";
-
-        if (await RefExistsAsync(repoPath, "origin/master", ct, intent))
-            return "origin/master";
-
-        return null;
-    }
-
-    private async Task<string?> GetUpstreamRefAsync(string repoPath, string branchName, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write)
-    {
-        var (exitCode, stdout, _) = await RunGitWithIntentAsync(
-            $"for-each-ref --format=%(upstream:short) refs/heads/{branchName}",
-            repoPath,
-            ct,
-            intent);
-
-        if (exitCode != 0)
-            return null;
-
-        var name = (stdout ?? "").Trim();
-        return string.IsNullOrWhiteSpace(name) ? null : name;
-    }
-
-    /// <summary>
-    /// Existence probe for a revision. Uses <c>rev-parse --verify --quiet</c> so a missing ref is a silent
-    /// non-zero exit instead of <c>fatal: Needed a single revision</c> on the overlay (red). Overlay
-    /// remirroring on failure is also off: these checks are expected to miss (try local, then remote;
-    /// try origin/main, then origin/master).
-    /// </summary>
-    private async Task<bool> RefExistsAsync(string repoPath, string revision, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write)
-    {
-        if (string.IsNullOrWhiteSpace(revision))
-            return false;
-
-        var (exit, _, _) = await RunGitWithIntentAsync(
-            $"rev-parse --verify --quiet {revision}",
-            repoPath,
-            ct,
-            intent,
-            streamStderrAsStdout: true,
-            mirrorFailureOutputAsStderr: false);
-        return exit == 0;
-    }
-
-    /// <summary>
-    /// When a branch has no usable upstream, Features count ahead of the local parent
-    /// (<c>graymoon-divergence-base</c>) so a tip that still matches the parent reports 0.
-    /// Workspace branches without a divergence base keep the default-branch fallback.
-    /// </summary>
-    /// <param name="divergenceLocal">The divergence base as a local branch name, from <see cref="GetDivergenceLocalBranchAsync"/>.</param>
-    /// <param name="divergenceLocalExists">
-    /// Whether that branch exists when the caller already learned it from a listing; null means "not known",
-    /// and it is probed here.
-    /// </param>
-    private async Task<string?> ResolveNoUpstreamCompareRefAsync(
-        string repoPath,
-        string? defaultBranchOriginRef,
-        string? divergenceLocal,
-        bool? divergenceLocalExists,
-        CancellationToken ct,
-        GitLockIntent intent = GitLockIntent.Write)
-    {
-        if (divergenceLocal != null)
-        {
-            var exists = divergenceLocalExists ?? await RefExistsAsync(repoPath, divergenceLocal, ct, intent);
-            if (exists)
-                return divergenceLocal;
-        }
-
-        return defaultBranchOriginRef ?? await GetDefaultBranchAsync(repoPath, ct, intent);
-    }
-
-    /// <summary>
-    /// The divergence base (a Feature's parent branch) as a local branch name - without the <c>origin/</c> prefix
-    /// - or null when there is none. A file read only; see <see cref="GetDivergenceBaseBranchAsync"/>.
-    /// </summary>
-    private async Task<string?> GetDivergenceLocalBranchAsync(string repoPath, CancellationToken ct)
-    {
-        var divergenceBase = await GetDivergenceBaseBranchAsync(repoPath, ct);
-        if (string.IsNullOrWhiteSpace(divergenceBase))
-            return null;
-
-        var local = divergenceBase.Trim();
-        if (local.StartsWith("origin/", StringComparison.OrdinalIgnoreCase))
-            local = local["origin/".Length..];
-        return string.IsNullOrWhiteSpace(local) ? null : local;
-    }
-
-    /// <summary>
-    /// What one <c>for-each-ref</c> says about a branch's upstream. <paramref name="Upstream"/> is null when the
-    /// branch has none (or does not exist). <paramref name="Ahead"/>/<paramref name="Behind"/> are only to be used
-    /// when <paramref name="CountsKnown"/> is set and the branch is the one HEAD is on.
-    /// <paramref name="DivergenceLocalExists"/> is null when the divergence branch was not part of the listing.
-    /// </summary>
-    private sealed record BranchTracking(
-        string? Upstream,
-        bool UpstreamGone,
-        bool IsHead,
-        bool CountsKnown,
-        int Ahead,
-        int Behind,
-        bool? DivergenceLocalExists);
-
-    private static readonly Regex TrackAheadRegex = new(@"ahead (\d+)", RegexOptions.Compiled);
-    private static readonly Regex TrackBehindRegex = new(@"behind (\d+)", RegexOptions.Compiled);
-
-    /// <summary>
-    /// One <c>for-each-ref</c> for a branch: its configured upstream, whether that upstream is gone, whether HEAD
-    /// is on the branch, and - for the checked-out branch - how far ahead and behind it is, which is what the
-    /// separate upstream lookup, existence probe and <c>rev-list --left-right</c> used to answer in three
-    /// processes. The divergence-base branch is listed too, so its existence needs no probe either. Null when the
-    /// command fails, which callers treat as "no upstream", exactly as a failed upstream lookup always was.
-    /// </summary>
-    private async Task<BranchTracking?> ReadBranchTrackingAsync(
-        string repoPath,
-        string branchName,
-        string? divergenceLocal,
-        CancellationToken ct,
-        GitLockIntent intent)
-    {
-        var branchRef = $"refs/heads/{branchName}";
-
-        // The divergence branch only joins the listing when it is a plain name that cannot be mistaken for
-        // several arguments or a pattern; otherwise it keeps its own probe. Patterns match a ref exactly or up
-        // to a slash, so lines are matched on the full ref name below, never taken as they come.
-        var divergenceRef = divergenceLocal != null && IsPlainRefName(divergenceLocal)
-            ? $"refs/heads/{divergenceLocal}"
-            : null;
-        var patterns = divergenceRef == null || divergenceRef == branchRef ? branchRef : $"{branchRef} {divergenceRef}";
-
-        var (exitCode, stdout, _) = await RunGitWithIntentAsync(
-            $"for-each-ref --format=%(HEAD)%09%(refname)%09%(upstream:short)%09%(upstream:track) {patterns}",
-            repoPath,
-            ct,
-            intent);
-        if (exitCode != 0)
-            return null;
-
-        string? upstream = null;
-        var gone = false;
-        var isHead = false;
-        var countsKnown = false;
-        var ahead = 0;
-        var behind = 0;
-        var divergenceExists = false;
-
-        foreach (var rawLine in (stdout ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries))
-        {
-            var parts = rawLine.TrimEnd('\r').Split('\t');
-            if (parts.Length != 4)
-                continue;
-
-            var fullName = parts[1];
-            if (fullName == divergenceRef)
-                divergenceExists = true;
-
-            if (fullName != branchRef)
-                continue;
-
-            isHead = parts[0] == "*";
-            var name = parts[2].Trim();
-            upstream = string.IsNullOrWhiteSpace(name) ? null : name;
-
-            // "[ahead 1, behind 2]", "[ahead 1]", "[behind 2]", "[gone]", or empty when level with the upstream.
-            // The brackets are stripped here rather than asked of git (":nobracket" needs a newer git).
-            var track = parts[3].Trim().Trim('[', ']');
-            gone = track == "gone";
-            var aheadMatch = TrackAheadRegex.Match(track);
-            var behindMatch = TrackBehindRegex.Match(track);
-            if (aheadMatch.Success)
-                ahead = int.Parse(aheadMatch.Groups[1].Value);
-            if (behindMatch.Success)
-                behind = int.Parse(behindMatch.Groups[1].Value);
-
-            // Empty means level with the upstream. Anything else that is not ahead/behind/gone is something this
-            // code does not know, and a zero would be a wrong answer - leave the counts to the rev-list.
-            countsKnown = track.Length == 0 || gone || aheadMatch.Success || behindMatch.Success;
-        }
-
-        return new BranchTracking(upstream, gone, isHead, countsKnown, ahead, behind, divergenceRef == null ? null : divergenceExists);
-    }
-
-    /// <summary>A ref name that survives being put into an argument string: no spaces, quotes, glob characters or leading dash.</summary>
-    private static bool IsPlainRefName(string name)
-        => name.Length > 0
-           && name[0] != '-'
-           && name.IndexOfAny([' ', '\t', '\r', '\n', '"', '\'', '*', '?', '[', '\\']) < 0;
-
-    private async Task<CommitCountsProbeResult> CountAheadOfCompareRefAsync(
-        string repoPath,
-        string branchName,
-        string? compareRef,
-        bool upstreamProbed,
-        Stopwatch sw,
-        string reason,
-        CancellationToken ct,
-        GitLockIntent intent = GitLockIntent.Write)
-    {
-        if (compareRef == null)
-        {
-            logger.LogDebug("No compare ref found for {RepoPath} ({Reason}), skipping commit counts for {Branch}", repoPath, reason, branchName);
-            return new CommitCountsProbeResult(null, null, false, CountsProbed: false, UpstreamProbed: upstreamProbed);
-        }
-
-        // compareRef may be stale (resolved earlier, or not yet fetched) and simply not exist locally -
-        // that is an expected, already-handled miss here, not a real command failure, so it must not be
-        // mirrored to the overlay as a red stderr line (see RefExistsAsync for the same policy).
-        var (exitDefault, stdoutDefault, stderrDefault) = await RunGitWithIntentAsync(
-            $"rev-list --count {compareRef}..HEAD",
-            repoPath,
-            ct,
-            intent,
-            streamStderrAsStdout: true,
-            mirrorFailureOutputAsStderr: false);
-        if (exitDefault != 0)
-        {
-            logger.LogWarning("Git rev-list (outgoing vs {CompareRef}) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", compareRef, repoPath, exitDefault, stdoutDefault, stderrDefault);
-            return new CommitCountsProbeResult(null, null, false, CountsProbed: false, UpstreamProbed: upstreamProbed);
-        }
-
-        var aheadCount = int.TryParse((stdoutDefault ?? "").Trim(), out var ahead) ? ahead : (int?)null;
-        sw.Stop();
-        logger.LogDebug("GetCommitCounts (vs {CompareRef}, {Reason}) completed in {ElapsedMs}ms for {RepoPath}", compareRef, reason, sw.ElapsedMilliseconds, repoPath);
-        return new CommitCountsProbeResult(aheadCount, null, false, CountsProbed: true, UpstreamProbed: upstreamProbed);
-    }
 
     public async Task<(bool Success, bool Committed, string? ErrorMessage)> StageAndCommitAsync(string repoPath, IReadOnlyList<string> pathsToStage, string commitMessage, CancellationToken ct, bool skipHooks = false)
     {
@@ -1669,7 +889,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
             return (false, "Invalid repository path or branch name");
 
-        if (!await RefExistsAsync(repoPath, $"origin/{branchName}", ct))
+        if (!await reader.RefExistsAsync(repoPath, $"origin/{branchName}", ct))
         {
             logger.LogInformation("Remote ref origin/{BranchName} not found in {RepoPath} - pushing branch upstream first", branchName, repoPath);
             var (pushOk, pushErr) = await PushAsync(repoPath, branchName, bearerToken, setTracking: true, ct: ct);
@@ -1797,7 +1017,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         try
         {
             var branch = await GetRemoteDefaultBranchAsync(repoPath, bearerToken, ct);
-            if (string.IsNullOrWhiteSpace(branch) || !IsPlainRefName(branch))
+            if (string.IsNullOrWhiteSpace(branch) || !OriginDefaultRef.IsPlainRefName(branch))
             {
                 logger.LogDebug("Remote of {RepoPath} did not name a default branch; origin/HEAD left as it is", repoPath);
                 return false;
@@ -1847,22 +1067,8 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         return (true, null);
     }
 
-    public void CreateDirectory(string path)
-    {
-        if (Directory.Exists(path))
-            return;
-        Directory.CreateDirectory(path);
-        logger.LogInformation("Created directory: {Path}", path);
-    }
 
-    public bool DirectoryExists(string path) => !string.IsNullOrWhiteSpace(path) && Directory.Exists(path);
 
-    public string[] GetDirectories(string path)
-    {
-        if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
-            return [];
-        return Directory.GetDirectories(path).Select(Path.GetFileName).Where(n => n != null).Cast<string>().ToArray();
-    }
 
     // Persisted in users' .git/hooks files since before the Agent -> Worker rename. Do not change the text:
     // existing hooks are recognized (and replaced/removed) by this exact prefix.
@@ -2058,874 +1264,28 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         return normalizedPath.StartsWith(normalizedParent, comparison);
     }
 
-    public async Task<(bool Success, IReadOnlyList<GitWorktreeInfo> Worktrees, string? ErrorCode, string? ErrorMessage)> ListWorktreesAsync(
-        string mainRepositoryPath,
-        CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(mainRepositoryPath) || !Directory.Exists(mainRepositoryPath))
-            return (false, [], "RepositoryNotFound", "Repository not found.");
 
-        var (exitCode, stdout, stderr) = await runner.RunAsync(
-            "git",
-            ["worktree", "list", "--porcelain"],
-            mainRepositoryPath,
-            null,
-            ct,
-            GitLockIntent.Read);
 
-        if (exitCode != 0)
-        {
-            var error = CombineOutput(stdout, stderr) ?? "git worktree list failed";
-            logger.LogError("Git worktree list failed for {RepoPath}. ExitCode={ExitCode}", mainRepositoryPath, exitCode);
-            return (false, [], "GitFailed", error);
-        }
 
-        return (true, GitWorktreePorcelainParser.Parse(stdout), null, null);
-    }
 
-    public async Task<(bool Success, GitWorktreeInfo? Worktree, bool AlreadyExisted, string? ErrorCode, string? ErrorMessage)> CreateWorktreeAsync(
-        string mainRepositoryPath,
-        string worktreePath,
-        string? branchName,
-        string baseCommitSha,
-        CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(mainRepositoryPath) || !Directory.Exists(mainRepositoryPath))
-            return (false, null, false, "RepositoryNotFound", "Repository not found.");
-        if (string.IsNullOrWhiteSpace(worktreePath))
-            return (false, null, false, "InvalidWorktreePath", "worktreePath is required.");
-        var detach = string.IsNullOrWhiteSpace(branchName);
-        if (string.IsNullOrWhiteSpace(baseCommitSha))
-            return (false, null, false, "InvalidBaseCommit", "baseCommitSha is required.");
 
-        string canonicalWorktreePath;
-        try
-        {
-            canonicalWorktreePath = Path.GetFullPath(worktreePath);
-        }
-        catch (Exception ex)
-        {
-            return (false, null, false, "InvalidWorktreePath", ex.Message);
-        }
 
-        var (listOk, worktrees, listCode, listError) = await ListWorktreesAsync(mainRepositoryPath, ct);
-        if (!listOk)
-            return (false, null, false, listCode, listError);
 
-        var existingAtPath = GitWorktreeOccupancy.FindByPath(worktrees, canonicalWorktreePath);
-        if (existingAtPath != null)
-        {
-            var matches = detach
-                ? existingAtPath.IsDetached
-                  && string.Equals(existingAtPath.HeadSha, baseCommitSha, StringComparison.OrdinalIgnoreCase)
-                : GitWorktreeOccupancy.MatchesExpected(existingAtPath, branchName);
-            if (matches)
-            {
-                logger.LogInformation(
-                    "Worktree already exists at {WorktreePath} on {Branch}; treating create as idempotent success.",
-                    canonicalWorktreePath, branchName ?? "(detached)");
-                return (true, existingAtPath, true, null, null);
-            }
 
-            return (false, existingAtPath, false, "WorktreePathConflict",
-                $"Path already hosts a worktree on branch '{existingAtPath.BranchName ?? "(detached)"}'.");
-        }
 
-        var branchOccupied = detach ? null : GitWorktreeOccupancy.FindByBranch(worktrees, branchName);
-        if (branchOccupied != null)
-        {
-            return (false, branchOccupied, false, "BranchOccupied",
-                $"Branch '{branchName}' is already checked out at '{branchOccupied.WorktreePath}'.");
-        }
 
-        if (File.Exists(canonicalWorktreePath))
-        {
-            return (false, null, false, "PathExists",
-                $"Worktree path already exists on disk: {canonicalWorktreePath}");
-        }
 
-        // An existing, empty folder is allowed (D1): residue cleanup can legitimately leave an empty
-        // worktree folder behind, and git worktree add works fine with an empty target directory.
-        if (Directory.Exists(canonicalWorktreePath) && Directory.EnumerateFileSystemEntries(canonicalWorktreePath).Any())
-        {
-            return (false, null, false, "PathExists",
-                $"Worktree path already exists on disk: {canonicalWorktreePath}");
-        }
 
-        var parent = Path.GetDirectoryName(canonicalWorktreePath);
-        if (!string.IsNullOrWhiteSpace(parent) && !Directory.Exists(parent))
-        {
-            Directory.CreateDirectory(parent);
-            logger.LogInformation("Created worktree parent directory: {Path}", parent);
-        }
 
-        // Feature worktrees live deeper than Workspace checkouts; allow paths over 260 characters on Windows.
-        await EnsureLongPathsAsync(mainRepositoryPath, ct);
 
-        // Offline-safe: start from local commit SHA; never --force for normal creation.
-        string[] addArgs = detach
-            ? ["worktree", "add", "--detach", canonicalWorktreePath, baseCommitSha]
-            : ["worktree", "add", "-b", branchName!, canonicalWorktreePath, baseCommitSha];
-        var (exitCode, stdout, stderr) = await runner.RunAsync(
-            "git",
-            addArgs,
-            mainRepositoryPath,
-            null,
-            ct);
 
-        if (exitCode != 0)
-        {
-            var error = CombineOutput(stdout, stderr) ?? "git worktree add failed";
-            logger.LogError(
-                "Git worktree add failed for {RepoPath}. Branch={Branch}, Path={WorktreePath}, ExitCode={ExitCode}",
-                mainRepositoryPath, branchName, canonicalWorktreePath, exitCode);
-            return (false, null, false, "GitFailed", error);
-        }
 
-        var (verifyOk, after, verifyCode, verifyError) = await ListWorktreesAsync(mainRepositoryPath, ct);
-        if (!verifyOk)
-            return (false, null, false, verifyCode, verifyError);
 
-        var created = GitWorktreeOccupancy.FindByPath(after, canonicalWorktreePath)
-            ?? GitWorktreeOccupancy.FindByBranch(after, branchName);
-        if (created == null)
-        {
-            return (false, null, false, "VerifyFailed",
-                "Worktree was created but could not be found in git worktree list.");
-        }
 
-        logger.LogInformation(
-            "Git worktree created for {RepoPath}. Branch={Branch}, Path={WorktreePath}, Head={Head}",
-            mainRepositoryPath, created.BranchName, created.WorktreePath, created.HeadSha);
-        return (true, created, false, null, null);
-    }
 
-    /// <summary>
-    /// On Windows, makes sure <c>core.longpaths</c> is <c>true</c> for the repository (which every linked
-    /// worktree shares), so Feature worktrees with deep trees (for example <c>node_modules</c>) can be
-    /// checked out, used and removed past the 260-character limit. The value is written to the repository's
-    /// own config (not global, not per-worktree) and only when it is not already <c>true</c> there, so it is
-    /// written at most once. Does nothing on other operating systems. Never throws: a failure is logged and
-    /// the caller carries on.
-    /// </summary>
-    internal async Task EnsureLongPathsAsync(string repositoryPath, CancellationToken ct)
-    {
-        if (!OperatingSystem.IsWindows())
-            return;
 
-        try
-        {
-            var (getExit, getOut, _) = await runner.RunAsync(
-                "git", ["config", "--local", "--get", "core.longpaths"], repositoryPath, null, ct, GitLockIntent.Read);
-            if (getExit == 0 && string.Equals(getOut?.Trim(), "true", StringComparison.OrdinalIgnoreCase))
-                return;
 
-            var (setExit, setOut, setErr) = await runner.RunAsync(
-                "git", ["config", "--local", "core.longpaths", "true"], repositoryPath, null, ct);
-            if (setExit != 0)
-            {
-                logger.LogWarning(
-                    "Could not set core.longpaths for {RepoPath}; very long paths in Feature worktrees may fail. {Error}",
-                    repositoryPath, CombineOutput(setOut, setErr));
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Could not set core.longpaths for {RepoPath}", repositoryPath);
-        }
-    }
 
-    public async Task<(bool Success, bool AlreadyRemoved, string? ErrorCode, string? ErrorMessage, WorktreeResidueResult Residue)> RemoveWorktreeAsync(
-        string mainRepositoryPath,
-        string worktreePath,
-        bool force,
-        CancellationToken ct,
-        string? featureRootPath = null,
-        string? featureStorageRoot = null,
-        bool unlock = false)
-    {
-        if (string.IsNullOrWhiteSpace(mainRepositoryPath) || !Directory.Exists(mainRepositoryPath))
-            return (false, false, "RepositoryNotFound", "Repository not found.", WorktreeResidueResult.None);
-        if (string.IsNullOrWhiteSpace(worktreePath))
-            return (false, false, "InvalidWorktreePath", "worktreePath is required.", WorktreeResidueResult.None);
-
-        string canonicalWorktreePath;
-        try
-        {
-            canonicalWorktreePath = Path.GetFullPath(worktreePath);
-        }
-        catch (Exception ex)
-        {
-            return (false, false, "InvalidWorktreePath", ex.Message, WorktreeResidueResult.None);
-        }
-
-        var (listOk, worktrees, listCode, listError) = await ListWorktreesAsync(mainRepositoryPath, ct);
-        if (!listOk)
-            return (false, false, listCode, listError, WorktreeResidueResult.None);
-
-        var existing = GitWorktreeOccupancy.FindByPath(worktrees, canonicalWorktreePath);
-        if (existing == null)
-        {
-            logger.LogInformation("Worktree {WorktreePath} already absent from inventory; treating remove as success.", canonicalWorktreePath);
-            var residueWhenAlreadyGone = await RemoveWorktreeResidueAsync(
-                mainRepositoryPath, canonicalWorktreePath, featureRootPath, featureStorageRoot, isRegisteredWorktree: false, ct);
-            return (true, true, null, null, residueWhenAlreadyGone);
-        }
-
-        // Never remove the main (first / primary) worktree via this primitive.
-        var primary = worktrees.FirstOrDefault(w => !w.IsBare && !string.IsNullOrWhiteSpace(w.WorktreePath));
-        if (primary != null && GitWorktreeOccupancy.PathsEqual(primary.WorktreePath, canonicalWorktreePath))
-        {
-            return (false, false, "CannotRemovePrimary", "Cannot remove the primary repository worktree.", WorktreeResidueResult.None);
-        }
-
-        // D5: unlock is only authorized after explicit consent, surfaced in the Remove dialog when
-        // InspectWorktree reports the worktree as locked. A failed unlock (for example it was not
-        // actually locked) is logged and the remove below is attempted anyway, so git reports the
-        // real reason for any remaining failure.
-        if (unlock)
-        {
-            var (unlockExitCode, unlockStdout, unlockStderr) = await runner.RunAsync(
-                "git", new[] { "worktree", "unlock", canonicalWorktreePath }, mainRepositoryPath, null, ct);
-            if (unlockExitCode != 0)
-            {
-                logger.LogWarning(
-                    "git worktree unlock failed for {WorktreePath}: {Error}",
-                    canonicalWorktreePath, CombineOutput(unlockStdout, unlockStderr));
-            }
-        }
-
-        // Also covers Features created before long-path support was added.
-        await EnsureLongPathsAsync(mainRepositoryPath, ct);
-
-        var args = force
-            ? new[] { "worktree", "remove", "--force", canonicalWorktreePath }
-            : new[] { "worktree", "remove", canonicalWorktreePath };
-
-        var (exitCode, stdout, stderr) = await runner.RunAsync("git", args, mainRepositoryPath, null, ct);
-        var gitError = exitCode != 0 ? CombineOutput(stdout, stderr) ?? "git worktree remove failed" : null;
-
-        var (verifyOk, after, verifyCode, verifyError) = await ListWorktreesAsync(mainRepositoryPath, ct);
-        if (!verifyOk)
-        {
-            if (gitError != null)
-                return (false, false, "GitFailed", gitError, WorktreeResidueResult.None);
-            return (false, false, verifyCode, verifyError, WorktreeResidueResult.None);
-        }
-
-        if (GitWorktreeOccupancy.FindByPath(after, canonicalWorktreePath) != null)
-        {
-            // Still registered: git genuinely refused (for example dirty without force).
-            logger.LogError(
-                "Git worktree remove failed for {RepoPath}. Path={WorktreePath}, Force={Force}, ExitCode={ExitCode}",
-                mainRepositoryPath, canonicalWorktreePath, force, exitCode);
-            return gitError != null
-                ? (false, false, "GitFailed", gitError, WorktreeResidueResult.None)
-                : (false, false, "VerifyFailed", "Worktree remove reported success but path is still listed.", WorktreeResidueResult.None);
-        }
-
-        // Git unregistered the worktree either way. On Windows, deleting the directory itself can fail
-        // (for example a file still open elsewhere) even though git already removed its own bookkeeping;
-        // residue cleanup below retries the folder and reports the truth instead of a bare git error.
-        if (gitError != null)
-        {
-            logger.LogWarning(
-                "Git worktree remove exited {ExitCode} for {WorktreePath} but the worktree is unregistered; checking for leftover files. {Error}",
-                exitCode, canonicalWorktreePath, gitError);
-        }
-        else
-        {
-            logger.LogInformation("Git worktree removed for {RepoPath}. Path={WorktreePath}, Force={Force}", mainRepositoryPath, canonicalWorktreePath, force);
-        }
-
-        var residue = await RemoveWorktreeResidueAsync(
-            mainRepositoryPath, canonicalWorktreePath, featureRootPath, featureStorageRoot, isRegisteredWorktree: false, ct);
-        return (true, false, null, null, residue);
-    }
-
-    /// <summary>
-    /// After Git's own worktree removal, deletes any leftover files in <paramref name="worktreePath"/> with a
-    /// custom walk (retries, reparse-point-safe) when every safety guard in
-    /// <see cref="ValidateResidueRemovalGuards"/> passes, and reports anything left when it does not or when
-    /// deletion could not finish (for example a file still open elsewhere). When <paramref name="featureRootPath"/>
-    /// becomes empty afterward, it is removed too. Without <paramref name="featureRootPath"/> or
-    /// <paramref name="featureStorageRoot"/>, nothing is deleted and only today's folder state is reported.
-    /// </summary>
-    private async Task<WorktreeResidueResult> RemoveWorktreeResidueAsync(
-        string mainRepositoryPath,
-        string worktreePath,
-        string? featureRootPath,
-        string? featureStorageRoot,
-        bool isRegisteredWorktree,
-        CancellationToken ct)
-    {
-        var guardFailure = ValidateResidueRemovalGuards(worktreePath, mainRepositoryPath, featureRootPath, featureStorageRoot, isRegisteredWorktree);
-
-        if (!Directory.Exists(worktreePath))
-        {
-            if (guardFailure == null)
-                TryRemoveEmptyFeatureRoot(featureRootPath);
-            return WorktreeResidueResult.None;
-        }
-
-        if (guardFailure != null)
-        {
-            logger.LogWarning("Worktree residue cleanup skipped for {WorktreePath}: {Guard}", worktreePath, guardFailure);
-            var (skippedCount, skippedSample) = ScanResidueFiles(worktreePath);
-            return new WorktreeResidueResult(true, skippedCount, skippedSample, guardFailure);
-        }
-
-        await DeleteFolderRecursivelyWithRetryAsync(worktreePath, ct);
-
-        if (Directory.Exists(worktreePath))
-        {
-            try
-            {
-                if (!Directory.EnumerateFileSystemEntries(worktreePath).Any())
-                    Directory.Delete(worktreePath, false);
-            }
-            catch
-            {
-                // Best effort; the residue scan below reports the true state either way.
-            }
-        }
-
-        if (Directory.Exists(worktreePath))
-        {
-            var (remainingCount, remainingSample) = ScanResidueFiles(worktreePath);
-            var message = remainingCount > 0
-                ? "Some files could not be deleted. They may still be open in another program."
-                : "The worktree folder could not be removed.";
-            logger.LogWarning("Worktree residue remains at {WorktreePath}: {Count} file(s). {Message}", worktreePath, remainingCount, message);
-            return new WorktreeResidueResult(true, remainingCount, remainingSample, message);
-        }
-
-        TryRemoveEmptyFeatureRoot(featureRootPath);
-        return WorktreeResidueResult.None;
-    }
-
-    /// <summary>
-    /// Deletes <paramref name="featureRootPath"/> only when it exists and is empty. A reparse point at
-    /// this level is never treated as empty content and is left alone (should not occur for a Feature root).
-    /// </summary>
-    private void TryRemoveEmptyFeatureRoot(string? featureRootPath)
-    {
-        if (string.IsNullOrWhiteSpace(featureRootPath) || !Directory.Exists(featureRootPath))
-            return;
-
-        try
-        {
-            if (!Directory.EnumerateFileSystemEntries(featureRootPath).Any())
-            {
-                Directory.Delete(featureRootPath, false);
-                logger.LogInformation("Removed empty Feature root folder {FeatureRootPath}.", featureRootPath);
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Could not remove Feature root folder {FeatureRootPath}.", featureRootPath);
-        }
-    }
-
-    private static readonly char[] PathSeparators = [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar];
-    private static readonly int[] ResidueDeleteRetryDelaysMs = [200, 400, 800, 1600, 3200];
-
-    /// <summary>
-    /// Checks every safety guard before any residue deletion is allowed. Returns null when all guards pass,
-    /// or a short description of the first guard that failed. Pure (no deletion); callers must still check
-    /// disk state separately. Depth is checked before the Feature-root relationship so a path that is both
-    /// too shallow and outside the root is reported as too shallow, matching the dedicated test for that guard.
-    /// </summary>
-    internal static string? ValidateResidueRemovalGuards(
-        string worktreePath,
-        string mainRepositoryPath,
-        string? featureRootPath,
-        string? featureStorageRoot,
-        bool isRegisteredWorktree)
-    {
-        if (string.IsNullOrWhiteSpace(featureStorageRoot) || string.IsNullOrWhiteSpace(featureRootPath))
-            return "No Feature storage root was provided; residue was only reported, not removed.";
-
-        string normalizedWorktreePath;
-        string normalizedMainRepositoryPath;
-        string normalizedFeatureRootPath;
-        string normalizedFeatureStorageRoot;
-        try
-        {
-            normalizedWorktreePath = NormalizeResiduePath(worktreePath);
-            normalizedMainRepositoryPath = NormalizeResiduePath(mainRepositoryPath);
-            normalizedFeatureRootPath = NormalizeResiduePath(featureRootPath);
-            normalizedFeatureStorageRoot = NormalizeResiduePath(featureStorageRoot);
-        }
-        catch (Exception ex)
-        {
-            return $"Could not resolve the Feature storage paths: {ex.Message}";
-        }
-
-        // Guard: at least 2 levels below featureStorageRoot (features\<FeatureName>\<Repo>).
-        var relativeToStorageRoot = Path.GetRelativePath(normalizedFeatureStorageRoot, normalizedWorktreePath);
-        var escapesStorageRoot = relativeToStorageRoot.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relativeToStorageRoot);
-        if (!escapesStorageRoot)
-        {
-            var depthSegments = relativeToStorageRoot.Split(PathSeparators, StringSplitOptions.RemoveEmptyEntries);
-            if (depthSegments.Length < 2)
-                return "Worktree path is too shallow under the Feature storage root.";
-        }
-
-        // Guard: worktreePath is strictly under featureStorageRoot\<FeatureName>\, and featureRootPath
-        // equals featureStorageRoot\<FeatureName>. Worktrees under the legacy drive-root path fail here.
-        var featureRootParent = Path.GetDirectoryName(normalizedFeatureRootPath);
-        if (!string.Equals(featureRootParent, normalizedFeatureStorageRoot, StringComparison.OrdinalIgnoreCase)
-            || !IsStrictlyUnderResiduePath(normalizedWorktreePath, normalizedFeatureRootPath))
-        {
-            return "Worktree path is not under this Feature's storage root.";
-        }
-
-        // Guard: never the primary repository checkout, and never a path that contains it.
-        if (string.Equals(normalizedWorktreePath, normalizedMainRepositoryPath, StringComparison.OrdinalIgnoreCase)
-            || IsStrictlyUnderResiduePath(normalizedMainRepositoryPath, normalizedWorktreePath))
-        {
-            return "Worktree path is or contains the primary repository checkout.";
-        }
-
-        // Guard: must not currently be a registered worktree.
-        if (isRegisteredWorktree)
-            return "Path is still a registered Git worktree.";
-
-        // Guard: a real repository has a .git directory at its top level; a linked worktree does not.
-        if (Directory.Exists(Path.Combine(normalizedWorktreePath, ".git")))
-            return "Path contains a .git directory and looks like a real repository, not a linked worktree.";
-
-        return null;
-    }
-
-    private static string NormalizeResiduePath(string path) =>
-        Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-
-    private static bool IsStrictlyUnderResiduePath(string path, string potentialAncestor)
-    {
-        var prefix = potentialAncestor + Path.DirectorySeparatorChar;
-        return path.Length > prefix.Length && path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
-    }
-
-    /// <summary>Counts files under <paramref name="folderPath"/> (never entering a reparse point) and samples up to 5 relative paths. No deletion.</summary>
-    private static (int Count, List<string> Sample) ScanResidueFiles(string folderPath)
-    {
-        var count = 0;
-        var sample = new List<string>();
-        VisitResidueEntries(folderPath, entry =>
-        {
-            count++;
-            if (sample.Count < 5)
-                sample.Add(Path.GetRelativePath(folderPath, entry.FullName));
-        });
-        return (count, sample);
-    }
-
-    private static void VisitResidueEntries(string folderPath, Action<FileSystemInfo> onFileOrLink)
-    {
-        IEnumerable<FileSystemInfo> entries;
-        try
-        {
-            entries = new DirectoryInfo(folderPath).EnumerateFileSystemInfos();
-        }
-        catch
-        {
-            return;
-        }
-
-        foreach (var entry in entries)
-        {
-            var isReparsePoint = entry.Attributes.HasFlag(FileAttributes.ReparsePoint);
-            if (entry is DirectoryInfo && !isReparsePoint)
-            {
-                VisitResidueEntries(entry.FullName, onFileOrLink);
-                continue;
-            }
-
-            // A file, or a reparse point (junction/symlink): never enter the link, only count/report it.
-            onFileOrLink(entry);
-        }
-    }
-
-    /// <summary>
-    /// Deletes everything under <paramref name="folderPath"/> with a custom walk (never
-    /// <c>Directory.Delete(path, true)</c>): clears read-only attributes, deletes reparse points
-    /// (junctions/symlinks) as the link itself without entering them, and retries each entry up to 5
-    /// times (200, 400, 800, 1600, 3200 ms) on <see cref="IOException"/> or
-    /// <see cref="UnauthorizedAccessException"/> (for example a file still open in another program).
-    /// Leaves whatever it could not delete in place; the caller reports that as residue.
-    /// </summary>
-    private static async Task DeleteFolderRecursivelyWithRetryAsync(string folderPath, CancellationToken ct)
-    {
-        List<FileSystemInfo> entries;
-        try
-        {
-            entries = new DirectoryInfo(folderPath).EnumerateFileSystemInfos().ToList();
-        }
-        catch
-        {
-            return;
-        }
-
-        foreach (var entry in entries)
-        {
-            ct.ThrowIfCancellationRequested();
-            var isReparsePoint = entry.Attributes.HasFlag(FileAttributes.ReparsePoint);
-            if (entry is DirectoryInfo && !isReparsePoint)
-                await DeleteFolderRecursivelyWithRetryAsync(entry.FullName, ct);
-
-            await DeleteResidueEntryWithRetryAsync(entry, ct);
-        }
-    }
-
-    private static async Task DeleteResidueEntryWithRetryAsync(FileSystemInfo entry, CancellationToken ct)
-    {
-        for (var attempt = 0; attempt <= ResidueDeleteRetryDelaysMs.Length; attempt++)
-        {
-            ct.ThrowIfCancellationRequested();
-            try
-            {
-                if (entry.Attributes.HasFlag(FileAttributes.ReadOnly))
-                    entry.Attributes &= ~FileAttributes.ReadOnly;
-
-                if (entry is DirectoryInfo directory)
-                {
-                    // Delete the entry itself only (reparse point: the link; otherwise an already-emptied directory).
-                    directory.Delete(false);
-                }
-                else
-                {
-                    entry.Delete();
-                }
-
-                return;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                if (attempt == ResidueDeleteRetryDelaysMs.Length)
-                    return;
-                await Task.Delay(ResidueDeleteRetryDelaysMs[attempt], ct);
-            }
-            catch
-            {
-                return;
-            }
-        }
-    }
-
-    public async Task<WorktreeInspectionResult> InspectWorktreeAsync(
-        string mainRepositoryPath,
-        string worktreePath,
-        string? defaultBranch,
-        string? featureBranch,
-        CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(mainRepositoryPath) || !Directory.Exists(mainRepositoryPath))
-            return new WorktreeInspectionResult(false, false, false, null, null, null, null, null, null, null, null, null, null, null, null, "Repository not found.");
-        if (string.IsNullOrWhiteSpace(worktreePath))
-            return new WorktreeInspectionResult(false, false, false, null, null, null, null, null, null, null, null, null, null, null, null, "worktreePath is required.");
-
-        string canonicalWorktreePath;
-        try
-        {
-            canonicalWorktreePath = Path.GetFullPath(worktreePath);
-        }
-        catch (Exception ex)
-        {
-            return new WorktreeInspectionResult(false, false, false, null, null, null, null, null, null, null, null, null, null, null, null, ex.Message);
-        }
-
-        var (listOk, worktrees, _, listError) = await ListWorktreesAsync(mainRepositoryPath, ct);
-        if (!listOk)
-            return new WorktreeInspectionResult(false, false, false, null, null, null, null, null, null, null, null, null, null, null, null, listError ?? "Failed to list worktrees.");
-
-        var registered = GitWorktreeOccupancy.FindByPath(worktrees, canonicalWorktreePath);
-        var isRegistered = registered != null;
-        var isLocked = registered?.IsLocked ?? false;
-        var lockReason = registered?.LockReason;
-
-        if (!Directory.Exists(canonicalWorktreePath))
-        {
-            return new WorktreeInspectionResult(isRegistered, false, isLocked, lockReason, null, null, null, null, null, null, null, null, null, null, null, null);
-        }
-
-        var headSha = await GetHeadCommitAsync(canonicalWorktreePath, ct);
-        var branch = await GetCurrentBranchNameAsync(canonicalWorktreePath, ct);
-
-        var (statusOk, staged, unstaged, untracked, conflicts, statusError) = await ProbeWorktreeStatusAsync(canonicalWorktreePath, ct);
-        bool? isDirty = statusOk ? staged + unstaged + untracked + conflicts > 0 : null;
-
-        bool? hasUpstream = null;
-        int? aheadOfUpstream = null;
-        int? behindUpstream = null;
-        if (!string.IsNullOrWhiteSpace(branch))
-        {
-            var (upstreamKnown, ahead, behind) = await ProbeUpstreamCountsAsync(canonicalWorktreePath, branch, ct);
-            hasUpstream = upstreamKnown;
-            aheadOfUpstream = ahead;
-            behindUpstream = behind;
-        }
-
-        // A Feature worktree carries its own persisted "divergence base" (the branch it was actually
-        // created from - its parent, which can itself be another unmerged, not-yet-pushed Feature
-        // branch, not necessarily the repository's true default branch). "Ahead of default" must be
-        // judged against that parent when one was recorded, or deleting a nested Feature branch
-        // would be reported as losing every commit the parent branch is already ahead of main by,
-        // even though those commits stay reachable from the parent branch and are never actually
-        // lost. Falls back to the repository's true default branch when no divergence base was
-        // recorded, or it no longer resolves to an existing ref.
-        var aheadOfDefaultCompareRef = await ResolveAheadOfDefaultCompareRefAsync(canonicalWorktreePath, defaultBranch, ct);
-
-        var aheadOfDefault = await ProbeAheadOfDefaultAsync(canonicalWorktreePath, aheadOfDefaultCompareRef, ct);
-
-        bool? featureBranchExists = null;
-        string? featureBranchSha = null;
-        int? featureBranchAheadOfDefault = null;
-        bool? featureBranchHasUpstream = null;
-        int? featureBranchAheadOfUpstream = null;
-        if (!string.IsNullOrWhiteSpace(featureBranch))
-        {
-            featureBranchSha = await GetRevisionShaAsync(canonicalWorktreePath, $"refs/heads/{featureBranch}", ct);
-            featureBranchExists = featureBranchSha != null;
-            if (featureBranchExists == true)
-            {
-                featureBranchAheadOfDefault = await ProbeAheadOfDefaultForRefAsync(
-                    canonicalWorktreePath, aheadOfDefaultCompareRef, $"refs/heads/{featureBranch}", ct);
-                var (featureUpstreamKnown, featureAhead) = await ProbeFeatureBranchUpstreamCountAsync(
-                    canonicalWorktreePath, featureBranch, ct);
-                featureBranchHasUpstream = featureUpstreamKnown;
-                featureBranchAheadOfUpstream = featureAhead;
-            }
-        }
-
-        return new WorktreeInspectionResult(
-            isRegistered,
-            true,
-            isLocked,
-            lockReason,
-            headSha,
-            branch,
-            isDirty,
-            statusOk ? staged : null,
-            statusOk ? unstaged : null,
-            statusOk ? untracked : null,
-            statusOk ? conflicts : null,
-            hasUpstream,
-            aheadOfUpstream,
-            behindUpstream,
-            aheadOfDefault,
-            statusOk ? null : statusError,
-            featureBranchExists,
-            featureBranchSha,
-            featureBranchAheadOfDefault,
-            featureBranchHasUpstream,
-            featureBranchAheadOfUpstream);
-    }
-
-    /// <summary>
-    /// Resolves the ref to count "ahead of default" against: this worktree's own persisted
-    /// divergence base (<see cref="GetDivergenceBaseBranchAsync"/>, the Feature's actual parent
-    /// branch) when one was recorded and still exists - checked as a local branch name first since a
-    /// parent that is itself an unmerged, unpushed Feature branch never has an <c>origin/</c> ref -
-    /// falling back to <see cref="ToOriginBranchRef"/> of <paramref name="defaultBranch"/> otherwise
-    /// (same resolution order as <see cref="ResolveNoUpstreamCompareRefAsync"/>/GetCommitCountsCommand).
-    /// </summary>
-    private async Task<string?> ResolveAheadOfDefaultCompareRefAsync(string repoPath, string? defaultBranch, CancellationToken ct)
-    {
-        var divergenceBase = await GetDivergenceBaseBranchAsync(repoPath, ct);
-        if (!string.IsNullOrWhiteSpace(divergenceBase))
-        {
-            var local = divergenceBase.Trim();
-            if (local.StartsWith("origin/", StringComparison.OrdinalIgnoreCase))
-                local = local["origin/".Length..];
-            if (await RefExistsAsync(repoPath, local, ct))
-                return local;
-
-            var originRef = $"origin/{local}";
-            if (await RefExistsAsync(repoPath, originRef, ct))
-                return originRef;
-        }
-
-        return ToOriginBranchRef(defaultBranch);
-    }
-
-    /// <summary>
-    /// Like <see cref="ProbeAheadOfDefaultAsync"/> but against an arbitrary ref instead of always
-    /// HEAD, so a Feature branch can be judged without checking it out (09 SB-2, plan unit I1).
-    /// </summary>
-    private async Task<int?> ProbeAheadOfDefaultForRefAsync(string repoPath, string? defaultRef, string compareRef, CancellationToken ct)
-    {
-        if (defaultRef == null || !await RefExistsAsync(repoPath, defaultRef, ct))
-            return null;
-
-        var (exitCode, stdout, stderr) = await runner.RunAsync(
-            "git",
-            $"rev-list --count {defaultRef}..{compareRef}",
-            repoPath,
-            ct,
-            streamStderrAsStdout: true,
-            mirrorFailureOutputAsStderr: false);
-        if (exitCode != 0)
-        {
-            logger.LogWarning("Git rev-list (InspectWorktree Feature branch ahead of default) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
-            return null;
-        }
-
-        return int.TryParse((stdout ?? "").Trim(), out var count) ? count : (int?)null;
-    }
-
-    /// <summary>
-    /// Like <see cref="ProbeUpstreamCountsAsync"/> but for an arbitrary local branch instead of
-    /// always HEAD, so a Feature branch's upstream state can be judged without checking it out
-    /// (09 SB-2, plan unit I1). Behind-count is not needed by any caller, so it is not computed.
-    /// </summary>
-    private async Task<(bool HasUpstream, int? Ahead)> ProbeFeatureBranchUpstreamCountAsync(string repoPath, string branchName, CancellationToken ct)
-    {
-        var upstreamRef = await GetUpstreamRefAsync(repoPath, branchName, ct);
-        if (string.IsNullOrWhiteSpace(upstreamRef) || !await RefExistsAsync(repoPath, upstreamRef, ct))
-            return (false, null);
-
-        var (exitCode, stdout, stderr) = await runner.RunAsync(
-            "git",
-            $"rev-list --left-right --count {upstreamRef}...refs/heads/{branchName}",
-            repoPath,
-            ct,
-            streamStderrAsStdout: true,
-            mirrorFailureOutputAsStderr: false);
-        if (exitCode != 0)
-        {
-            logger.LogWarning("Git rev-list --left-right (InspectWorktree Feature branch upstream count) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
-            return (true, null);
-        }
-
-        var parts = (stdout ?? "").Trim().Split('\t', StringSplitOptions.RemoveEmptyEntries);
-        var ahead = parts.Length >= 2 && int.TryParse(parts[1], out var a) ? a : (int?)null;
-        return (true, ahead);
-    }
-
-    /// <summary>
-    /// SHA of a revision if it exists, or null. Uses <c>rev-parse --verify --quiet</c> so a missing
-    /// ref is a silent non-zero exit instead of a visible Git error (same reasoning as <see cref="RefExistsAsync"/>).
-    /// </summary>
-    private async Task<string?> GetRevisionShaAsync(string repoPath, string revision, CancellationToken ct)
-    {
-        var (exitCode, stdout, _) = await runner.RunAsync(
-            "git",
-            $"rev-parse --verify --quiet {revision}",
-            repoPath,
-            ct,
-            streamStderrAsStdout: true,
-            mirrorFailureOutputAsStderr: false);
-        if (exitCode != 0)
-            return null;
-
-        var sha = (stdout ?? "").Trim();
-        return string.IsNullOrWhiteSpace(sha) ? null : sha;
-    }
-
-    private async Task<(bool Success, int Staged, int Unstaged, int Untracked, int Conflicts, string? Error)> ProbeWorktreeStatusAsync(
-        string repoPath,
-        CancellationToken ct)
-    {
-        var (exitCode, stdout, stderr) = await runner.RunAsync(
-            "git",
-            "--no-optional-locks status --porcelain=v1",
-            repoPath,
-            ct,
-            streamStderrAsStdout: true,
-            mirrorFailureOutputAsStderr: false,
-            intent: GitLockIntent.Read);
-        if (exitCode != 0)
-            return (false, 0, 0, 0, 0, CombineOutput(stdout, stderr) ?? "git status failed");
-
-        var staged = 0;
-        var unstaged = 0;
-        var untracked = 0;
-        var conflicts = 0;
-        foreach (var line in (stdout ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries))
-        {
-            if (line.Length < 2)
-                continue;
-            var x = line[0];
-            var y = line[1];
-            if (x == '?' && y == '?')
-            {
-                untracked++;
-                continue;
-            }
-            if (IsUnmergedStatusCode(x, y))
-            {
-                conflicts++;
-                continue;
-            }
-            if (x != ' ')
-                staged++;
-            if (y != ' ')
-                unstaged++;
-        }
-
-        return (true, staged, unstaged, untracked, conflicts, null);
-    }
-
-    private static bool IsUnmergedStatusCode(char x, char y)
-        => x == 'U' || y == 'U' || (x == 'A' && y == 'A') || (x == 'D' && y == 'D');
-
-    /// <summary>Ahead/behind strictly against the branch's configured upstream; no fallback to the default branch
-    /// or a Feature divergence base, unlike <see cref="ProbeCommitCountsAsync"/>, so the InspectWorktree caller
-    /// gets a clean null when there is no upstream instead of a value computed against something else.</summary>
-    private async Task<(bool HasUpstream, int? Ahead, int? Behind)> ProbeUpstreamCountsAsync(
-        string repoPath,
-        string branchName,
-        CancellationToken ct)
-    {
-        var upstreamRef = await GetUpstreamRefAsync(repoPath, branchName, ct);
-        if (string.IsNullOrWhiteSpace(upstreamRef) || !await RefExistsAsync(repoPath, upstreamRef, ct))
-            return (false, null, null);
-
-        var (exitCode, stdout, stderr) = await runner.RunAsync(
-            "git",
-            $"rev-list --left-right --count {upstreamRef}...HEAD",
-            repoPath,
-            ct,
-            streamStderrAsStdout: true,
-            mirrorFailureOutputAsStderr: false);
-        if (exitCode != 0)
-        {
-            logger.LogWarning("Git rev-list --left-right (InspectWorktree upstream counts) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
-            return (true, null, null);
-        }
-
-        var parts = (stdout ?? "").Trim().Split('\t', StringSplitOptions.RemoveEmptyEntries);
-        var behind = parts.Length >= 1 && int.TryParse(parts[0], out var b) ? b : (int?)null;
-        var ahead = parts.Length >= 2 && int.TryParse(parts[1], out var a) ? a : (int?)null;
-        return (true, ahead, behind);
-    }
-
-    private async Task<int?> ProbeAheadOfDefaultAsync(string repoPath, string? defaultRef, CancellationToken ct)
-    {
-        if (defaultRef == null || !await RefExistsAsync(repoPath, defaultRef, ct))
-            return null;
-
-        var (exitCode, stdout, stderr) = await runner.RunAsync(
-            "git",
-            $"rev-list --count {defaultRef}..HEAD",
-            repoPath,
-            ct,
-            streamStderrAsStdout: true,
-            mirrorFailureOutputAsStderr: false);
-        if (exitCode != 0)
-        {
-            logger.LogWarning("Git rev-list (InspectWorktree ahead of default) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
-            return null;
-        }
-
-        return int.TryParse((stdout ?? "").Trim(), out var count) ? count : (int?)null;
-    }
 
     private static void WriteHookFile(string path, string content, Encoding encoding)
     {
@@ -2976,28 +1336,6 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         return $"{BuildAuthHeaderArgs(bearerToken)} clone \"{cloneUrl}\"";
     }
 
-    private static string SanitizeDirectoryName(string name)
-    {
-        if (string.IsNullOrWhiteSpace(name))
-            return "workspace";
-        var invalid = Path.GetInvalidFileNameChars();
-        var sanitized = string.Join("_", name.Trim().Split(invalid, StringSplitOptions.RemoveEmptyEntries));
-        return string.IsNullOrWhiteSpace(sanitized) ? "workspace" : sanitized;
-    }
-
-    private static string? CombineOutput(string? stdout, string? stderr)
-    {
-        var outStr = (stdout ?? "").Trim();
-        var errStr = (stderr ?? "").Trim();
-        if (string.IsNullOrWhiteSpace(outStr) && string.IsNullOrWhiteSpace(errStr))
-            return null;
-        return string.IsNullOrWhiteSpace(outStr) ? errStr
-             : string.IsNullOrWhiteSpace(errStr) ? outStr
-             : $"{outStr}\n{errStr}";
-    }
-
-    private static string BuildProcessError(string? stderr, string? stdout, string fallback)
-        => (!string.IsNullOrWhiteSpace(stderr) ? stderr : stdout)?.Trim() ?? fallback;
 
     private static bool ShouldAttemptDotNetToolRestore(string fileName, string? stderr, string? stdout)
     {

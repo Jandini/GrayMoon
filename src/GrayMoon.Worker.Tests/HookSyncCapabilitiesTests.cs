@@ -20,12 +20,14 @@ public sealed class HookSyncCapabilitiesTests : IDisposable
 {
     private readonly string _root = Directory.CreateTempSubdirectory("graymoon-hook-caps-").FullName;
     private readonly GitService _git;
+    private GitCliRepositoryReader _reader = null!;
 
     public HookSyncCapabilitiesTests()
     {
         var commandLine = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
         var runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
-        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner);
+        _reader = new GitCliRepositoryReader(runner, NullLogger<GitCliRepositoryReader>.Instance);
+        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, _reader);
     }
 
     public void Dispose()
@@ -76,7 +78,7 @@ public sealed class HookSyncCapabilitiesTests : IDisposable
         var repoPath = await CloneCommittedRepositoryAsync();
         var projectScanner = new CountingCsProjFileService();
         var versionProviders = CapabilityTestDoubles.RealFactory(_git);
-        var probe = new RepositoryStateProbe(_git, projectScanner, versionProviders);
+        var probe = new RepositoryStateProbe(_reader, projectScanner, versionProviders);
 
         // The real provider, pointed at a port nothing is listening on. Never fail a hook sync because
         // capabilities could not be resolved: an existing .NET workspace losing its version because the app
@@ -97,7 +99,7 @@ public sealed class HookSyncCapabilitiesTests : IDisposable
     {
         var repoPath = await CloneCommittedRepositoryAsync();
         var projectScanner = new CountingCsProjFileService();
-        var probe = new RepositoryStateProbe(_git, projectScanner, CapabilityTestDoubles.RealFactory(_git));
+        var probe = new RepositoryStateProbe(_reader, projectScanner, CapabilityTestDoubles.RealFactory(_git));
 
         // The pre-push pass runs before the push data is transferred, so counts read now are stale. They
         // must stay unprobed, or the app would persist them over the real ones.
@@ -125,16 +127,16 @@ public sealed class HookSyncCapabilitiesTests : IDisposable
     {
         var projectScanner = new CountingCsProjFileService();
         var versionProviders = CapabilityTestDoubles.RealFactory(_git);
-        var probe = new RepositoryStateProbe(_git, projectScanner, versionProviders);
+        var probe = new RepositoryStateProbe(_reader, projectScanner, versionProviders);
         var capabilityProvider = new FakeWorkspaceCapabilityProvider(capabilities);
         var hubProvider = new DisconnectedHubProvider();
         var tokenProvider = new NoWorkerToken();
 
         var dispatcher = new HookSyncDispatcher(
-            new CheckoutHookSyncCommand(_git, probe, tokenProvider, capabilityProvider, hubProvider, NullLogger<CheckoutHookSyncCommand>.Instance),
+            new CheckoutHookSyncCommand(_git, _reader, probe, tokenProvider, capabilityProvider, hubProvider, NullLogger<CheckoutHookSyncCommand>.Instance),
             new CommitHookSyncCommand(probe, capabilityProvider, hubProvider, NullLogger<CommitHookSyncCommand>.Instance),
             new MergeHookSyncCommand(probe, capabilityProvider, hubProvider, NullLogger<MergeHookSyncCommand>.Instance),
-            new PushHookSyncCommand(_git, probe, capabilityProvider, hubProvider, NullLogger<PushHookSyncCommand>.Instance));
+            new PushHookSyncCommand(_reader, probe, capabilityProvider, hubProvider, NullLogger<PushHookSyncCommand>.Instance));
 
         return new Harness(dispatcher, projectScanner, versionProviders, capabilityProvider);
     }

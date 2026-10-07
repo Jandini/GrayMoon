@@ -14,8 +14,9 @@ public sealed class CheckFileVersionsCommandTests : IDisposable
     {
         var commandLine = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
         var runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
-        var git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner);
-        _command = new CheckFileVersionsCommand(git, NullLogger<CheckFileVersionsCommand>.Instance);
+        var reader = new GitCliRepositoryReader(runner, NullLogger<GitCliRepositoryReader>.Instance);
+        var git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, reader);
+        _command = new CheckFileVersionsCommand(NullLogger<CheckFileVersionsCommand>.Instance);
     }
     public void Dispose()
     {

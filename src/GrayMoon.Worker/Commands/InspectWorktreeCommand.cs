@@ -1,10 +1,11 @@
+using GrayMoon.Worker.Services;
 using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Jobs.Requests;
 using GrayMoon.Worker.Jobs.Response;
 
 namespace GrayMoon.Worker.Commands;
 
-public sealed class InspectWorktreeCommand(IGitService git)
+public sealed class InspectWorktreeCommand(IGitWorktreeService worktreeService)
     : ICommandHandler<InspectWorktreeRequest, InspectWorktreeResponse>
 {
     public async Task<InspectWorktreeResponse> ExecuteAsync(InspectWorktreeRequest request, CancellationToken cancellationToken = default)
@@ -12,7 +13,7 @@ public sealed class InspectWorktreeCommand(IGitService git)
         var mainPath = request.MainRepositoryPath ?? throw new ArgumentException("mainRepositoryPath required");
         var worktreePath = request.WorktreePath ?? throw new ArgumentException("worktreePath required");
 
-        var result = await git.InspectWorktreeAsync(mainPath, worktreePath, request.DefaultBranch, request.FeatureBranch, cancellationToken);
+        var result = await worktreeService.InspectWorktreeAsync(mainPath, worktreePath, request.DefaultBranch, request.FeatureBranch, cancellationToken);
 
         return new InspectWorktreeResponse
         {

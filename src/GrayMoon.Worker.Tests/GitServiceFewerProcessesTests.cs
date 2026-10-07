@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using GrayMoon.Abstractions.Worker;
 using GrayMoon.Abstractions.Workspaces;
 using GrayMoon.Common;
@@ -23,13 +23,15 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
 {
     private readonly string _root = Directory.CreateTempSubdirectory("graymoon-fewer-").FullName;
     private readonly GitService _git;
+    private GitCliRepositoryReader _reader = null!;
     private int _clones;
 
     public GitServiceFewerProcessesTests()
     {
         var commandLine = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
         var runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
-        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner);
+        _reader = new GitCliRepositoryReader(runner, NullLogger<GitCliRepositoryReader>.Instance);
+        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, _reader);
     }
 
     public void Dispose()
@@ -52,7 +54,7 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
     {
         var repo = await CloneAsync(await SeedOriginAsync("main"));
 
-        var (result, gitCalls) = await CountingAsync(() => _git.GetDefaultBranchOriginRefAsync(repo, CancellationToken.None));
+        var (result, gitCalls) = await CountingAsync(() => _reader.GetDefaultBranchOriginRefAsync(repo, CancellationToken.None));
 
         Assert.Equal("origin/main", result);
         Assert.Equal(1, gitCalls);
@@ -63,7 +65,7 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
     {
         var repo = await CloneAsync(await SeedOriginAsync("develop"));
 
-        var (result, gitCalls) = await CountingAsync(() => _git.GetDefaultBranchOriginRefAsync(repo, CancellationToken.None));
+        var (result, gitCalls) = await CountingAsync(() => _reader.GetDefaultBranchOriginRefAsync(repo, CancellationToken.None));
 
         Assert.Equal("origin/develop", result);
         Assert.Equal(2, gitCalls);
@@ -81,7 +83,7 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
         await CommitAsync(repo, "a.txt", "a");
         await GitAsync(repo, "push -u origin main");
 
-        Assert.Equal("origin/main", await _git.GetDefaultBranchOriginRefAsync(repo, CancellationToken.None));
+        Assert.Equal("origin/main", await _reader.GetDefaultBranchOriginRefAsync(repo, CancellationToken.None));
         Assert.Equal("origin/main", (await Snapshot(repo)).DefaultOriginRef);
     }
 
@@ -95,7 +97,7 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
         await RenameRemoteDefaultAsync(origin, "main", "trunk");
         await GitAsync(repo, "fetch --prune");
 
-        Assert.Null(await _git.GetDefaultBranchOriginRefAsync(repo, CancellationToken.None));
+        Assert.Null(await _reader.GetDefaultBranchOriginRefAsync(repo, CancellationToken.None));
         Assert.Null((await Snapshot(repo)).DefaultOriginRef);
     }
 
@@ -107,7 +109,7 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
         await RenameRemoteDefaultAsync(origin, "main", "master");
         await GitAsync(repo, "fetch --prune");
 
-        Assert.Equal("origin/master", await _git.GetDefaultBranchOriginRefAsync(repo, CancellationToken.None));
+        Assert.Equal("origin/master", await _reader.GetDefaultBranchOriginRefAsync(repo, CancellationToken.None));
         Assert.Equal("origin/master", (await Snapshot(repo)).DefaultOriginRef);
     }
 
@@ -135,7 +137,7 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
         await GitAsync(repo, "config user.name T");
         await CommitAsync(repo, "a.txt", "a");
 
-        Assert.Null(await _git.GetDefaultBranchOriginRefAsync(repo, CancellationToken.None));
+        Assert.Null(await _reader.GetDefaultBranchOriginRefAsync(repo, CancellationToken.None));
         Assert.Null((await Snapshot(repo)).DefaultOriginRef);
     }
 
@@ -150,7 +152,7 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
         await PushFromSeedAsync(origin, "remote.txt", "remote"); // behind 1
         await GitAsync(repo, "fetch");
 
-        var (probe, gitCalls) = await CountingAsync(() => _git.ProbeCommitCountsAsync(repo, "main", "origin/main", CancellationToken.None));
+        var (probe, gitCalls) = await CountingAsync(() => _reader.ProbeCommitCountsAsync(repo, "main", "origin/main", CancellationToken.None));
 
         Assert.Equal("1\t1", (await GitAsync(repo, "rev-list --left-right --count origin/main...HEAD")).Trim());
         Assert.True(probe.CountsProbed);
@@ -176,7 +178,7 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
             await PushFromSeedAsync(origin, $"r{i}.txt", "r");
         await GitAsync(repo, "fetch");
 
-        var probe = await _git.ProbeCommitCountsAsync(repo, "main", "origin/main", CancellationToken.None);
+        var probe = await _reader.ProbeCommitCountsAsync(repo, "main", "origin/main", CancellationToken.None);
 
         Assert.True(probe.CountsProbed);
         Assert.Equal(ahead, probe.Outgoing);
@@ -191,7 +193,7 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
         await CommitAsync(repo, "local.txt", "local");
         await GitAsync(repo, "config status.aheadBehind false");
 
-        var probe = await _git.ProbeCommitCountsAsync(repo, "main", "origin/main", CancellationToken.None);
+        var probe = await _reader.ProbeCommitCountsAsync(repo, "main", "origin/main", CancellationToken.None);
 
         Assert.Equal(1, probe.Outgoing);
         Assert.Equal(0, probe.Incoming);
@@ -208,7 +210,7 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
         await GitAsync(origin, "branch -D feat");
         await GitAsync(repo, "fetch --prune");
 
-        var (probe, gitCalls) = await CountingAsync(() => _git.ProbeCommitCountsAsync(repo, "feat", "origin/main", CancellationToken.None));
+        var (probe, gitCalls) = await CountingAsync(() => _reader.ProbeCommitCountsAsync(repo, "feat", "origin/main", CancellationToken.None));
 
         Assert.True(probe.CountsProbed);
         Assert.False(probe.HasUpstream);
@@ -228,12 +230,12 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
         await GitAsync(origin, "branch -D feat");
         await GitAsync(repo, "fetch --prune");
 
-        var probe = await _git.ProbeCommitCountsAsync(repo, "feat", null, CancellationToken.None);
+        var probe = await _reader.ProbeCommitCountsAsync(repo, "feat", null, CancellationToken.None);
         // The default is still there (origin/main), so counts exist; remove it to reach the unknown case.
         Assert.True(probe.CountsProbed);
 
         await GitAsync(repo, "update-ref -d refs/remotes/origin/main");
-        probe = await _git.ProbeCommitCountsAsync(repo, "feat", null, CancellationToken.None);
+        probe = await _reader.ProbeCommitCountsAsync(repo, "feat", null, CancellationToken.None);
 
         Assert.False(probe.CountsProbed);
         Assert.Null(probe.Outgoing);
@@ -253,7 +255,7 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
         await GitAsync(repo, "push -u origin feat");
         await GitAsync(repo, "checkout main");
 
-        var probe = await _git.ProbeCommitCountsAsync(repo, "feat", "origin/main", CancellationToken.None);
+        var probe = await _reader.ProbeCommitCountsAsync(repo, "feat", "origin/main", CancellationToken.None);
 
         var expected = (await GitAsync(repo, "rev-list --left-right --count origin/feat...HEAD")).Trim().Split('\t');
         Assert.True(probe.CountsProbed);
@@ -276,7 +278,7 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
         await GitAsync(repo, $"worktree add \"{worktree}\" -b side");
 
         // In the linked worktree HEAD is "side"; "feat" is not what it has checked out.
-        var probe = await _git.ProbeCommitCountsAsync(worktree, "feat", "origin/main", CancellationToken.None);
+        var probe = await _reader.ProbeCommitCountsAsync(worktree, "feat", "origin/main", CancellationToken.None);
 
         var expected = (await GitAsync(worktree, "rev-list --left-right --count origin/feat...HEAD")).Trim().Split('\t');
         Assert.True(probe.CountsProbed);
@@ -295,7 +297,7 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
         await CommitAsync(repo, "feature.txt", "feature");
         await _git.SetDivergenceBaseBranchAsync(repo, "parent", CancellationToken.None);
 
-        var (probe, gitCalls) = await CountingAsync(() => _git.ProbeCommitCountsAsync(repo, "feature", "origin/main", CancellationToken.None));
+        var (probe, gitCalls) = await CountingAsync(() => _reader.ProbeCommitCountsAsync(repo, "feature", "origin/main", CancellationToken.None));
 
         Assert.True(probe.CountsProbed);
         Assert.False(probe.HasUpstream);
@@ -312,7 +314,7 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
         await CommitAsync(repo, "feature.txt", "feature");
         await _git.SetDivergenceBaseBranchAsync(repo, "origin/ghost", CancellationToken.None);
 
-        var probe = await _git.ProbeCommitCountsAsync(repo, "feature", "origin/main", CancellationToken.None);
+        var probe = await _reader.ProbeCommitCountsAsync(repo, "feature", "origin/main", CancellationToken.None);
 
         Assert.True(probe.CountsProbed);
         Assert.Equal(1, probe.Outgoing);
@@ -330,7 +332,7 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
         await CommitAsync(repo, "feature.txt", "feature");
         await _git.SetDivergenceBaseBranchAsync(repo, "par", CancellationToken.None);
 
-        var probe = await _git.ProbeCommitCountsAsync(repo, "feature", "origin/main", CancellationToken.None);
+        var probe = await _reader.ProbeCommitCountsAsync(repo, "feature", "origin/main", CancellationToken.None);
 
         Assert.True(probe.CountsProbed);
         Assert.Equal(2, probe.Outgoing);   // "par" does not exist, so the default (origin/main) is the base
@@ -344,7 +346,7 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
         await CommitAsync(repo, "local.txt", "local");
         await _git.SetDivergenceBaseBranchAsync(repo, "two words", CancellationToken.None);
 
-        var probe = await _git.ProbeCommitCountsAsync(repo, "main", "origin/main", CancellationToken.None);
+        var probe = await _reader.ProbeCommitCountsAsync(repo, "main", "origin/main", CancellationToken.None);
 
         Assert.True(probe.CountsProbed);
         Assert.True(probe.HasUpstream);
@@ -363,7 +365,7 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
         await CommitAsync(repo, "feature.txt", "feature");
         await _git.SetDivergenceBaseBranchAsync(repo, "parent", CancellationToken.None);
 
-        var probe = await _git.ProbeCommitCountsAsync(repo, "feature", "origin/main", CancellationToken.None, skipUpstreamCheck: true);
+        var probe = await _reader.ProbeCommitCountsAsync(repo, "feature", "origin/main", CancellationToken.None, skipUpstreamCheck: true);
 
         Assert.True(probe.CountsProbed);
         Assert.False(probe.UpstreamProbed);
@@ -378,7 +380,7 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
         await CommitAsync(repo, "local.txt", "local");
         await GitAsync(repo, "checkout --detach");
 
-        var probe = await _git.ProbeCommitCountsAsync(repo, "no-such-branch", "origin/main", CancellationToken.None);
+        var probe = await _reader.ProbeCommitCountsAsync(repo, "no-such-branch", "origin/main", CancellationToken.None);
 
         Assert.True(probe.CountsProbed);
         Assert.False(probe.HasUpstream);
@@ -393,11 +395,11 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
         await CommitAsync(repo, "local.txt", "local");
 
         Assert.Equal(
-            await _git.ProbeCommitCountsAsync(repo, "main", "origin/main", CancellationToken.None),
-            await _git.ProbeCommitCountsAsync(repo, "main", "origin/main", CancellationToken.None, intent: GitLockIntent.Read));
+            await _reader.ProbeCommitCountsAsync(repo, "main", "origin/main", CancellationToken.None),
+            await _reader.ProbeCommitCountsAsync(repo, "main", "origin/main", CancellationToken.None));
         Assert.Equal(
-            await _git.GetDefaultBranchOriginRefAsync(repo, CancellationToken.None),
-            await _git.GetDefaultBranchOriginRefAsync(repo, CancellationToken.None, GitLockIntent.Read));
+            await _reader.GetDefaultBranchOriginRefAsync(repo, CancellationToken.None),
+            await _reader.GetDefaultBranchOriginRefAsync(repo, CancellationToken.None));
     }
 
     // ---------------------------------------------------------------- old behaviour as an oracle
@@ -412,8 +414,8 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
         async Task AssertAgreesAsync(string state)
         {
             var oracleTask = OracleDefaultAsync(repo);
-            var standalone = _git.GetDefaultBranchOriginRefAsync(repo, CancellationToken.None);
-            var readIntent = _git.GetDefaultBranchOriginRefAsync(repo, CancellationToken.None, GitLockIntent.Read);
+            var standalone = _reader.GetDefaultBranchOriginRefAsync(repo, CancellationToken.None);
+            var readIntent = _reader.GetDefaultBranchOriginRefAsync(repo, CancellationToken.None);
             var snapshot = Snapshot(repo);
             var oracle = await oracleTask;
             Assert.True(oracle == await standalone, $"standalone lookup differs: {state}");
@@ -492,7 +494,7 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
                     .Select(async p =>
                     {
                         var expected = await OracleProbeAsync(repo, p.branch, p.defaultRef);
-                        var actual = await _git.ProbeCommitCountsAsync(repo, p.branch, p.defaultRef, CancellationToken.None);
+                        var actual = await _reader.ProbeCommitCountsAsync(repo, p.branch, p.defaultRef, CancellationToken.None);
                         return (Same: expected == actual, Actual: actual, Description:
                             $"HEAD={state}, divergence={divergence ?? "none"}, branch={p.branch}, default={p.defaultRef ?? "lookup"}\n  expected {expected}\n  actual   {actual}");
                     })
@@ -546,7 +548,7 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
 
         async Task<string?> CompareRefAsync()
         {
-            var divergence = await _git.GetDivergenceBaseBranchAsync(repo, CancellationToken.None);
+            var divergence = await _reader.GetDivergenceBaseBranchAsync(repo, CancellationToken.None);
             if (!string.IsNullOrWhiteSpace(divergence))
             {
                 var local = divergence.Trim();
@@ -603,11 +605,11 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
         var (_, gitCalls) = await CountingAsync(async () =>
         {
             await _git.SetDivergenceBaseBranchAsync(repo, "main", CancellationToken.None);
-            return await _git.GetDivergenceBaseBranchAsync(repo, CancellationToken.None);
+            return await _reader.GetDivergenceBaseBranchAsync(repo, CancellationToken.None);
         });
 
         Assert.Equal(0, gitCalls);
-        Assert.Equal("main", await _git.GetDivergenceBaseBranchAsync(repo, CancellationToken.None));
+        Assert.Equal("main", await _reader.GetDivergenceBaseBranchAsync(repo, CancellationToken.None));
         Assert.True(File.Exists(Path.Combine(repo, ".git", "graymoon-divergence-base")));
     }
 
@@ -624,8 +626,8 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
         Assert.Contains(Path.Combine(".git", "worktrees"), gitDir);
         Assert.True(File.Exists(Path.Combine(gitDir, "graymoon-divergence-base")));
         Assert.False(File.Exists(Path.Combine(repo, ".git", "graymoon-divergence-base")));
-        Assert.Null(await _git.GetDivergenceBaseBranchAsync(repo, CancellationToken.None));
-        Assert.Equal("main", await _git.GetDivergenceBaseBranchAsync(worktree, CancellationToken.None));
+        Assert.Null(await _reader.GetDivergenceBaseBranchAsync(repo, CancellationToken.None));
+        Assert.Equal("main", await _reader.GetDivergenceBaseBranchAsync(worktree, CancellationToken.None));
     }
 
     [Fact]
@@ -723,7 +725,7 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
     public async Task A_sync_of_a_repository_with_an_upstream_needs_at_most_five_git_processes()
     {
         var repo = await CloneAsync(await SeedOriginAsync("main"));
-        var command = new SyncRepositoryCommand(_git, new CountingCsProjFileService(), CapabilityTestDoubles.RealFactory(_git));
+        var command = new SyncRepositoryCommand(_git, _reader, new CountingCsProjFileService(), CapabilityTestDoubles.RealFactory(_git));
         var request = NewRequest(RepositoryOperationCapabilities.For(calculateVersion: false, discoverProjects: false));
         await command.ExecuteAsync(request); // first sync of a process also runs the one-off safe.directory check
 
@@ -757,7 +759,7 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
 
         var request = NewRequest(RepositoryOperationCapabilities.For(calculateVersion: false, discoverProjects: false));
         request.DivergenceBaseBranch = "parent";
-        var response = await new SyncRepositoryCommand(_git, new CountingCsProjFileService(), CapabilityTestDoubles.RealFactory(_git)).ExecuteAsync(request);
+        var response = await new SyncRepositoryCommand(_git, _reader, new CountingCsProjFileService(), CapabilityTestDoubles.RealFactory(_git)).ExecuteAsync(request);
 
         Assert.True(response.Success, response.ErrorMessage);
         Assert.Equal("feature", response.Branch);
@@ -846,12 +848,12 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
         var repo = await CloneAsync(origin);
         await RenameRemoteDefaultAsync(origin, "main", "trunk");
         await GitAsync(repo, "fetch --prune origin");
-        Assert.Null(await _git.GetDefaultBranchOriginRefAsync(repo, CancellationToken.None));
+        Assert.Null(await _reader.GetDefaultBranchOriginRefAsync(repo, CancellationToken.None));
 
         var repaired = await _git.RepairOriginHeadAsync(repo, null, CancellationToken.None);
 
         Assert.True(repaired);
-        Assert.Equal("origin/trunk", await _git.GetDefaultBranchOriginRefAsync(repo, CancellationToken.None));
+        Assert.Equal("origin/trunk", await _reader.GetDefaultBranchOriginRefAsync(repo, CancellationToken.None));
     }
 
     [Fact]
@@ -867,7 +869,7 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
         await GitAsync(repo, "fetch --prune origin");
 
         Assert.True(await _git.RepairOriginHeadAsync(repo, null, CancellationToken.None));
-        Assert.Equal("origin/develop", await _git.GetDefaultBranchOriginRefAsync(repo, CancellationToken.None));
+        Assert.Equal("origin/develop", await _reader.GetDefaultBranchOriginRefAsync(repo, CancellationToken.None));
     }
 
     [Fact]
@@ -976,7 +978,7 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
 
     // ---------------------------------------------------------------- helpers
 
-    private static string? TryRead(string path) => GitService.TryReadGitDirFromWorkTree(path);
+    private static string? TryRead(string path) => GitDirectoryLocator.TryReadGitDirFromWorkTree(path);
 
     private static bool IsGit(CommandLineStreamEvent e)
         => e.Kind == WorkerCommandStreamKind.CommandLine && e.Text.StartsWith("$ git", StringComparison.Ordinal);
@@ -985,7 +987,7 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
         => RunSyncAsync(NewRequest(RepositoryOperationCapabilities.For(calculateVersion: false, discoverProjects: false)));
 
     private Task<SyncRepositoryResponse> RunSyncAsync(SyncRepositoryRequest request)
-        => new SyncRepositoryCommand(_git, new CountingCsProjFileService(), CapabilityTestDoubles.RealFactory(_git))
+        => new SyncRepositoryCommand(_git, _reader, new CountingCsProjFileService(), CapabilityTestDoubles.RealFactory(_git))
             .ExecuteAsync(request);
 
     /// <summary>Runs <paramref name="action"/> and returns the text of every git command it started.</summary>
@@ -1011,7 +1013,7 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
 
     private async Task<GrayMoon.Worker.Models.RefSnapshot> SnapshotCoreAsync(string repo)
     {
-        var snapshot = await _git.GetRefSnapshotAsync(repo, CancellationToken.None, GitLockIntent.Read);
+        var snapshot = await _reader.GetRefSnapshotAsync(repo, CancellationToken.None);
         Assert.NotNull(snapshot);
         return snapshot!;
     }

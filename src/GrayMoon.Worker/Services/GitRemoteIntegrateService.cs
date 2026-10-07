@@ -17,7 +17,7 @@ public sealed record GitRemoteIntegrateResult(
 /// Single source of truth for remote integration (fetch + conditional pull).
 /// Resolves branch via git only; Version is always null - callers that need SemVer run GitVersion themselves.
 /// </summary>
-public sealed class GitRemoteIntegrateService(IGitService git)
+public sealed class GitRemoteIntegrateService(IGitService git, IGitRepositoryReader reader)
 {
     public async Task<GitRemoteIntegrateResult> IntegrateAsync(
         string repoPath,
@@ -38,7 +38,7 @@ public sealed class GitRemoteIntegrateService(IGitService git)
                 ErrorMessage: fetchError ?? "Fetch failed");
         }
 
-        var branch = await git.GetCurrentBranchNameAsync(repoPath, cancellationToken);
+        var branch = await reader.GetCurrentBranchNameAsync(repoPath, cancellationToken);
         if (string.IsNullOrWhiteSpace(branch))
         {
             return new GitRemoteIntegrateResult(
@@ -52,7 +52,7 @@ public sealed class GitRemoteIntegrateService(IGitService git)
                 ErrorMessage: "Could not determine branch name");
         }
 
-        var (outgoing, incoming, hasUpstream) = await git.GetCommitCountsAsync(repoPath, branch, null, cancellationToken);
+        var (outgoing, incoming, hasUpstream) = await reader.GetCommitCountsAsync(repoPath, branch, null, cancellationToken);
 
         if (!incoming.HasValue || incoming.Value <= 0)
         {
@@ -75,7 +75,7 @@ public sealed class GitRemoteIntegrateService(IGitService git)
         {
             await git.AbortMergeAsync(repoPath, cancellationToken);
             await git.FetchAsync(repoPath, includeTags: true, bearerToken, cancellationToken);
-            (outgoing, incoming, hasUpstream) = await git.GetCommitCountsAsync(repoPath, branch, null, cancellationToken);
+            (outgoing, incoming, hasUpstream) = await reader.GetCommitCountsAsync(repoPath, branch, null, cancellationToken);
 
             return new GitRemoteIntegrateResult(
                 Success: false,
@@ -101,7 +101,7 @@ public sealed class GitRemoteIntegrateService(IGitService git)
                 ErrorMessage: pullError ?? "Pull failed");
         }
 
-        (outgoing, incoming, hasUpstream) = await git.GetCommitCountsAsync(repoPath, branch, null, cancellationToken);
+        (outgoing, incoming, hasUpstream) = await reader.GetCommitCountsAsync(repoPath, branch, null, cancellationToken);
 
         return new GitRemoteIntegrateResult(
             Success: true,

@@ -18,4 +18,30 @@ public static class WorkerRepositoryPaths
         var git = Path.Combine(path, ".git");
         return Directory.Exists(git) || File.Exists(git);
     }
+
+    /// <summary>Absolute path of the workspace folder <paramref name="workspaceName"/> under <paramref name="root"/>.</summary>
+    public static string GetWorkspacePath(string root, string workspaceName)
+    {
+        if (string.IsNullOrWhiteSpace(root))
+            throw new ArgumentException("Workspace root path is required.", nameof(root));
+        var safe = SanitizeDirectoryName(workspaceName ?? "");
+        return Path.Combine(root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), safe);
+    }
+
+    /// <summary>Names (not paths) of the immediate sub-folders of <paramref name="path"/>; empty when it does not exist.</summary>
+    public static string[] GetDirectoryNames(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+            return [];
+        return Directory.GetDirectories(path).Select(Path.GetFileName).Where(n => n != null).Cast<string>().ToArray();
+    }
+
+    private static string SanitizeDirectoryName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return "workspace";
+        var invalid = Path.GetInvalidFileNameChars();
+        var sanitized = string.Join("_", name.Trim().Split(invalid, StringSplitOptions.RemoveEmptyEntries));
+        return string.IsNullOrWhiteSpace(sanitized) ? "workspace" : sanitized;
+    }
 }

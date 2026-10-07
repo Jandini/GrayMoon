@@ -22,12 +22,14 @@ public sealed class PushUndoReturnCapabilitiesTests : IDisposable
 
     private readonly string _root = Directory.CreateTempSubdirectory("graymoon-push-caps-").FullName;
     private readonly GitService _git;
+    private GitCliRepositoryReader _reader = null!;
 
     public PushUndoReturnCapabilitiesTests()
     {
         var commandLine = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
         var runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
-        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner);
+        _reader = new GitCliRepositoryReader(runner, NullLogger<GitCliRepositoryReader>.Instance);
+        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, _reader);
     }
 
     public void Dispose()
@@ -97,7 +99,7 @@ public sealed class PushUndoReturnCapabilitiesTests : IDisposable
     {
         var repoPath = await CloneOnFeatureBranchAsync();
         var (_, versionProviders) = NewDoubles();
-        var command = new UndoPushCommand(_git, versionProviders, new DisconnectedHubProvider(), NullLogger<UndoPushCommand>.Instance);
+        var command = new UndoPushCommand(_git, _reader, versionProviders, new DisconnectedHubProvider(), NullLogger<UndoPushCommand>.Instance);
 
         var notification = await command.BuildPostResetNotificationAsync(
             new UndoPushRequest { WorkspaceId = 1, RepositoryId = 2, Capabilities = BasicWithoutVersioning },
@@ -160,15 +162,15 @@ public sealed class PushUndoReturnCapabilitiesTests : IDisposable
         => (new CountingCsProjFileService(), CapabilityTestDoubles.RealFactory(_git));
 
     private PushRepositoryCommand NewPushCommand(CountingCsProjFileService projectScanner, CountingVersionProviderFactory versionProviders)
-        => new(_git, projectScanner, versionProviders, new GitRemoteIntegrateService(_git), new DisconnectedHubProvider(), NullLogger<PushRepositoryCommand>.Instance);
+        => new(_git, _reader, projectScanner, versionProviders, new GitRemoteIntegrateService(_git, _reader), new DisconnectedHubProvider(), NullLogger<PushRepositoryCommand>.Instance);
 
     private Task<Jobs.Response.ReturnToDefaultBranchResponse> ReturnToDefaultAsync(
         CountingCsProjFileService projectScanner,
         CountingVersionProviderFactory versionProviders,
         RepositoryOperationCapabilities? capabilities)
     {
-        var probe = new RepositoryStateProbe(_git, projectScanner, versionProviders);
-        var command = new ReturnToDefaultBranchCommand(_git, probe, NullLogger<ReturnToDefaultBranchCommand>.Instance);
+        var probe = new RepositoryStateProbe(_reader, projectScanner, versionProviders);
+        var command = new ReturnToDefaultBranchCommand(_git, _reader, probe, NullLogger<ReturnToDefaultBranchCommand>.Instance);
         return command.ExecuteAsync(new ReturnToDefaultBranchRequest
         {
             WorkspaceRoot = _root,

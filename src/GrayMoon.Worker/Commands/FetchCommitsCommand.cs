@@ -9,17 +9,17 @@ namespace GrayMoon.Worker.Commands;
 /// Runs git fetch (with tags) + commit counts per repo. Skips GitVersion, csproj scan,
 /// branch listing, and hook writing. Used by the Quick Fetch workspace action.
 /// </summary>
-public sealed class FetchCommitsCommand(IGitService git) : ICommandHandler<FetchCommitsRequest, FetchCommitsResponse>
+public sealed class FetchCommitsCommand(IGitService git, IGitRepositoryReader reader) : ICommandHandler<FetchCommitsRequest, FetchCommitsResponse>
 {
     public async Task<FetchCommitsResponse> ExecuteAsync(FetchCommitsRequest request, CancellationToken cancellationToken = default)
     {
         var workspaceName = request.WorkspaceName ?? throw new ArgumentException("workspaceName required");
         var repositoryName = request.RepositoryName ?? throw new ArgumentException("repositoryName required");
 
-        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
+        var workspacePath = WorkerRepositoryPaths.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
 
-        if (!git.DirectoryExists(repoPath))
+        if (!Directory.Exists(repoPath))
             return new FetchCommitsResponse { Success = false, ErrorMessage = "Repository not cloned yet." };
 
         await git.AddSafeDirectoryAsync(repoPath, cancellationToken);
@@ -28,8 +28,8 @@ public sealed class FetchCommitsCommand(IGitService git) : ICommandHandler<Fetch
         if (!fetchOk)
             return new FetchCommitsResponse { Success = false, ErrorMessage = fetchErr ?? "Git fetch failed." };
 
-        var currentTag = await git.GetCheckedOutTagAsync(repoPath, cancellationToken);
-        var tags = await git.GetTagsAsync(repoPath, cancellationToken);
+        var currentTag = await reader.GetCheckedOutTagAsync(repoPath, cancellationToken);
+        var tags = await reader.GetTagsAsync(repoPath, cancellationToken);
 
         int? outgoing = null;
         int? incoming = null;
@@ -39,14 +39,14 @@ public sealed class FetchCommitsCommand(IGitService git) : ICommandHandler<Fetch
 
         if (currentTag == null)
         {
-            var branch = await git.GetCurrentBranchNameAsync(repoPath, cancellationToken);
+            var branch = await reader.GetCurrentBranchNameAsync(repoPath, cancellationToken);
             if (!string.IsNullOrWhiteSpace(branch))
             {
-                var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, cancellationToken);
+                var defaultRef = await reader.GetDefaultBranchOriginRefAsync(repoPath, cancellationToken);
                 await git.SetDivergenceBaseBranchAsync(repoPath, request.DivergenceBaseBranch, cancellationToken);
-                var divergenceRef = git.ToOriginBranchRef(request.DivergenceBaseBranch) ?? defaultRef;
-                var countsTask = git.GetCommitCountsAsync(repoPath, branch, defaultRef, cancellationToken);
-                var vsDefaultTask = git.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, cancellationToken);
+                var divergenceRef = OriginDefaultRef.ToOriginBranchRef(request.DivergenceBaseBranch) ?? defaultRef;
+                var countsTask = reader.GetCommitCountsAsync(repoPath, branch, defaultRef, cancellationToken);
+                var vsDefaultTask = reader.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, cancellationToken);
                 await Task.WhenAll(countsTask, vsDefaultTask);
                 (outgoing, incoming, var upstream) = await countsTask;
                 (defaultBehind, defaultAhead, _) = await vsDefaultTask;

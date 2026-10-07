@@ -10,7 +10,7 @@ namespace GrayMoon.Worker.Commands;
 /// capabilities switch project discovery off gets a null project list - not scanned - rather than an empty one,
 /// which would read as "this repository has no projects" and prune whatever is persisted.
 /// </summary>
-public sealed class RefreshRepositoryProjectsCommand(IGitService git, ICsProjFileService csProjFileService) : ICommandHandler<RefreshRepositoryProjectsRequest, RefreshRepositoryProjectsResponse>
+public sealed class RefreshRepositoryProjectsCommand(ICsProjFileService csProjFileService) : ICommandHandler<RefreshRepositoryProjectsRequest, RefreshRepositoryProjectsResponse>
 {
     public async Task<RefreshRepositoryProjectsResponse> ExecuteAsync(RefreshRepositoryProjectsRequest request, CancellationToken cancellationToken = default)
     {
@@ -22,10 +22,10 @@ public sealed class RefreshRepositoryProjectsCommand(IGitService git, ICsProjFil
         if (!discoverProjects)
             return new RefreshRepositoryProjectsResponse { Projects = null };
 
-        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
+        var workspacePath = WorkerRepositoryPaths.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
 
-        if (!git.DirectoryExists(repoPath))
+        if (!Directory.Exists(repoPath))
             return new RefreshRepositoryProjectsResponse { Projects = [] };
 
         var maxParallel = request.MaxParallelOperations is > 0 ? request.MaxParallelOperations : null;

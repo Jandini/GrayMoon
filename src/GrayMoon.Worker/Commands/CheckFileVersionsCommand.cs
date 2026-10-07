@@ -5,7 +5,7 @@ using GrayMoon.Common.FileVersions;
 using Microsoft.Extensions.Logging;
 using GrayMoon.Worker.Services;
 namespace GrayMoon.Worker.Commands;
-public sealed class CheckFileVersionsCommand(IGitService git, ILogger<CheckFileVersionsCommand> logger) : ICommandHandler<CheckFileVersionsRequest, CheckFileVersionsResponse>
+public sealed class CheckFileVersionsCommand(ILogger<CheckFileVersionsCommand> logger) : ICommandHandler<CheckFileVersionsRequest, CheckFileVersionsResponse>
 {
     public async Task<CheckFileVersionsResponse> ExecuteAsync(CheckFileVersionsRequest request, CancellationToken cancellationToken = default)
     {
@@ -13,7 +13,7 @@ public sealed class CheckFileVersionsCommand(IGitService git, ILogger<CheckFileV
         var items = request.Files;
         if (items == null || items.Count == 0)
             return new CheckFileVersionsResponse { Files = [] };
-        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
+        var workspacePath = WorkerRepositoryPaths.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var results = new List<CheckFileVersionsResult>();
         foreach (var item in items)
         {

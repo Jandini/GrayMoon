@@ -6,7 +6,7 @@ using GrayMoon.Worker.Services;
 
 namespace GrayMoon.Worker.Commands;
 
-public sealed class UpdateBranchFromDefaultCommand(IGitService git, ILogger<UpdateBranchFromDefaultCommand> logger) : ICommandHandler<UpdateBranchFromDefaultRequest, UpdateBranchFromDefaultResponse>
+public sealed class UpdateBranchFromDefaultCommand(IGitService git, IGitRepositoryReader reader, ILogger<UpdateBranchFromDefaultCommand> logger) : ICommandHandler<UpdateBranchFromDefaultRequest, UpdateBranchFromDefaultResponse>
 {
     public async Task<UpdateBranchFromDefaultResponse> ExecuteAsync(UpdateBranchFromDefaultRequest request, CancellationToken cancellationToken = default)
     {
@@ -15,10 +15,10 @@ public sealed class UpdateBranchFromDefaultCommand(IGitService git, ILogger<Upda
         var currentBranchName = request.CurrentBranchName ?? throw new ArgumentException("currentBranchName required");
         var defaultBranchName = request.DefaultBranchName ?? throw new ArgumentException("defaultBranchName required");
 
-        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
+        var workspacePath = WorkerRepositoryPaths.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
 
-        if (!git.DirectoryExists(repoPath))
+        if (!Directory.Exists(repoPath))
         {
             return new UpdateBranchFromDefaultResponse
             {
@@ -79,11 +79,11 @@ public sealed class UpdateBranchFromDefaultCommand(IGitService git, ILogger<Upda
         // post-commit hook fires automatically for the merge commit and will send a full sync,
         // but we return fresh counts here so the App can persist them without waiting.
         // Count vs the same base we merged from (Feature parent or repository default).
-        var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, cancellationToken);
-        var divergenceRef = git.ToOriginBranchRef(defaultBranchName) ?? defaultRef;
+        var defaultRef = await reader.GetDefaultBranchOriginRefAsync(repoPath, cancellationToken);
+        var divergenceRef = OriginDefaultRef.ToOriginBranchRef(defaultBranchName) ?? defaultRef;
         await git.SetDivergenceBaseBranchAsync(repoPath, defaultBranchName, cancellationToken);
-        var (outgoing, incoming, _) = await git.GetCommitCountsAsync(repoPath, currentBranchName, defaultRef, cancellationToken);
-        var (defaultBehind, defaultAhead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, cancellationToken);
+        var (outgoing, incoming, _) = await reader.GetCommitCountsAsync(repoPath, currentBranchName, defaultRef, cancellationToken);
+        var (defaultBehind, defaultAhead, _) = await reader.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, cancellationToken);
 
         return new UpdateBranchFromDefaultResponse
         {

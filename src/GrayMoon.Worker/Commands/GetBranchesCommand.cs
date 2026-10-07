@@ -5,17 +5,17 @@ using GrayMoon.Worker.Services;
 
 namespace GrayMoon.Worker.Commands;
 
-public sealed class GetBranchesCommand(IGitService git, IWorkerTokenProvider tokenProvider) : ICommandHandler<GetBranchesRequest, GetBranchesResponse>
+public sealed class GetBranchesCommand(IGitService git, IGitRepositoryReader reader, IWorkerTokenProvider tokenProvider) : ICommandHandler<GetBranchesRequest, GetBranchesResponse>
 {
     public async Task<GetBranchesResponse> ExecuteAsync(GetBranchesRequest request, CancellationToken cancellationToken = default)
     {
         var workspaceName = request.WorkspaceName ?? throw new ArgumentException("workspaceName required");
         var repositoryName = request.RepositoryName ?? throw new ArgumentException("repositoryName required");
 
-        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
+        var workspacePath = WorkerRepositoryPaths.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
 
-        if (!git.DirectoryExists(repoPath))
+        if (!Directory.Exists(repoPath))
         {
             return new GetBranchesResponse
             {
@@ -43,12 +43,12 @@ public sealed class GetBranchesCommand(IGitService git, IWorkerTokenProvider tok
             }
         }
 
-        var localBranches = await git.GetLocalBranchesAsync(repoPath, cancellationToken);
-        var remoteBranches = await git.GetRemoteBranchesFromRefsAsync(repoPath, cancellationToken);
-        var defaultBranch = await git.GetDefaultBranchNameAsync(repoPath, cancellationToken);
-        var currentBranch = await git.GetCurrentBranchNameAsync(repoPath, cancellationToken);
-        var tags = await git.GetTagsAsync(repoPath, cancellationToken);
-        var currentTag = await git.GetCheckedOutTagAsync(repoPath, cancellationToken);
+        var localBranches = await reader.GetLocalBranchesAsync(repoPath, cancellationToken);
+        var remoteBranches = await reader.GetRemoteBranchesFromRefsAsync(repoPath, cancellationToken);
+        var defaultBranch = await reader.GetDefaultBranchNameAsync(repoPath, cancellationToken);
+        var currentBranch = await reader.GetCurrentBranchNameAsync(repoPath, cancellationToken);
+        var tags = await reader.GetTagsAsync(repoPath, cancellationToken);
+        var currentTag = await reader.GetCheckedOutTagAsync(repoPath, cancellationToken);
 
         return new GetBranchesResponse
         {

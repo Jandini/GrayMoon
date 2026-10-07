@@ -7,7 +7,7 @@ using GrayMoon.Worker.Services;
 
 namespace GrayMoon.Worker.Commands;
 
-public sealed class SyncRepositoryDependenciesCommand(IGitService git, ICsProjFileService csProjFileService, ILogger<SyncRepositoryDependenciesCommand> logger) : ICommandHandler<SyncRepositoryDependenciesRequest, SyncRepositoryDependenciesResponse>
+public sealed class SyncRepositoryDependenciesCommand(ICsProjFileService csProjFileService, ILogger<SyncRepositoryDependenciesCommand> logger) : ICommandHandler<SyncRepositoryDependenciesRequest, SyncRepositoryDependenciesResponse>
 {
     public async Task<SyncRepositoryDependenciesResponse> ExecuteAsync(SyncRepositoryDependenciesRequest request, CancellationToken cancellationToken = default)
     {
@@ -15,10 +15,10 @@ public sealed class SyncRepositoryDependenciesCommand(IGitService git, ICsProjFi
         var repositoryName = request.RepositoryName ?? throw new ArgumentException("repositoryName required");
         var projectUpdates = request.ProjectUpdates ?? [];
 
-        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
+        var workspacePath = WorkerRepositoryPaths.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
 
-        if (!git.DirectoryExists(repoPath))
+        if (!Directory.Exists(repoPath))
             return new SyncRepositoryDependenciesResponse { UpdatedCount = 0 };
 
         var updates = projectUpdates

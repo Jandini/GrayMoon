@@ -14,13 +14,14 @@ public sealed class ReturnToDefaultBranchCommandTests
     [Fact]
     public async Task ExecuteAsync_PassesBearerToken_ToRemoteBranchDelete()
     {
+        using var workspace = new TempWorkspaceRoot("ws", "repo");
         var git = new RecordingGitService();
         var probe = new StubRepositoryStateProbe();
-        var command = new ReturnToDefaultBranchCommand(git, probe, NullLogger<ReturnToDefaultBranchCommand>.Instance);
+        var command = new ReturnToDefaultBranchCommand(git, new StubRepositoryReader(), probe, NullLogger<ReturnToDefaultBranchCommand>.Instance);
 
         var response = await command.ExecuteAsync(new ReturnToDefaultBranchRequest
         {
-            WorkspaceRoot = @"C:\workspaces",
+            WorkspaceRoot = workspace.Path,
             WorkspaceName = "ws",
             RepositoryName = "repo",
             CurrentBranchName = "matt",
@@ -50,9 +51,6 @@ public sealed class ReturnToDefaultBranchCommandTests
 
         public sealed record DeleteCall(string BranchName, bool IsRemote, bool Force, bool SkipHooks, string? BearerToken);
 
-        public string GetWorkspacePath(string root, string workspaceName) => Path.Combine(root, workspaceName);
-        public bool DirectoryExists(string path) => true;
-        public Task<string?> GetDefaultBranchNameAsync(string repoPath, CancellationToken ct) => Task.FromResult<string?>("main");
 
         public Task<(bool Success, string? ErrorMessage)> DeleteBranchAsync(
             string repoPath, string branchName, bool isRemote, bool force, CancellationToken ct, bool skipHooks = false, string? bearerToken = null, string? expectedSha = null)
@@ -75,31 +73,15 @@ public sealed class ReturnToDefaultBranchCommandTests
         public Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, CancellationToken ct) => throw new NotImplementedException();
         public Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, bool nonNormalize, CancellationToken ct) => throw new NotImplementedException();
         public Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, bool nonNormalize, string? commitSha, CancellationToken ct) => throw new NotImplementedException();
-        public Task<string?> GetCurrentBranchNameAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write) => throw new NotImplementedException();
-        public Task<string?> GetHeadCommitAsync(string repoPath, CancellationToken ct) => throw new NotImplementedException();
-        public Task<IReadOnlyList<string>> FindBranchCollisionsAsync(string repoPath, string branchName, CancellationToken ct) => throw new NotImplementedException();
-        public Task<string?> RevParseAsync(string repoPath, string rev, CancellationToken ct) => throw new NotImplementedException();
-        public Task<string?> GetRemoteOriginUrlAsync(string repoPath, CancellationToken ct) => throw new NotImplementedException();
         public Task<(bool Success, string? ErrorMessage)> FetchMinimalAsync(string repoPath, string branchName, string? defaultBranchOriginRef, string? bearerToken, CancellationToken ct, bool skipUpstreamCheck = false) => throw new NotImplementedException();
-        public Task<(int? Outgoing, int? Incoming, bool HasUpstream)> GetCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct, bool skipUpstreamCheck = false) => throw new NotImplementedException();
-        public Task<CommitCountsProbeResult> ProbeCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct, bool skipUpstreamCheck = false, GitLockIntent intent = GitLockIntent.Write) => throw new NotImplementedException();
-        public Task<(int? DefaultBehind, int? DefaultAhead, string? DefaultBranchName)> GetCommitCountsVsDefaultAsync(string repoPath, string? defaultBranchOriginRef, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write) => throw new NotImplementedException();
         public Task<(bool Success, string? ErrorMessage)> PushAsync(string repoPath, string branchName, string? bearerToken, bool setTracking = false, CancellationToken ct = default) => throw new NotImplementedException();
         public Task AbortMergeAsync(string repoPath, CancellationToken ct) => throw new NotImplementedException();
         public Task<(bool Success, bool HasConflicts, IReadOnlyList<string> ConflictFiles, string? ErrorMessage)> MergeFromRemoteAsync(string repoPath, string remoteBranch, CancellationToken ct) => throw new NotImplementedException();
-        public Task<IReadOnlyList<string>> GetLocalBranchesAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write) => throw new NotImplementedException();
-        public Task<RefSnapshot?> GetRefSnapshotAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write) => throw new NotImplementedException();
-        public Task<IReadOnlyList<string>> GetRemoteBranchesFromRefsAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write) => throw new NotImplementedException();
         public Task<IReadOnlyList<string>> GetRemoteBranchesAsync(string repoPath, string? bearerToken, CancellationToken ct) => throw new NotImplementedException();
         public Task<(bool Success, string? ErrorMessage)> CreateBranchAsync(string repoPath, string newBranchName, string baseBranchName, CancellationToken ct, bool skipHooks = false) => throw new NotImplementedException();
-        public Task<IReadOnlyList<string>> GetTagsAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write) => throw new NotImplementedException();
         public Task<(bool Success, string? ErrorMessage)> FetchTagsAsync(string repoPath, string? bearerToken, CancellationToken ct) => throw new NotImplementedException();
         public Task<(bool Success, string? ErrorMessage)> CheckoutTagAsync(string repoPath, string tagName, CancellationToken ct) => throw new NotImplementedException();
-        public Task<string?> GetCheckedOutTagAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write) => throw new NotImplementedException();
-        public Task<string?> GetDefaultBranchOriginRefAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write) => throw new NotImplementedException();
-        public string? ToOriginBranchRef(string? branchName) => throw new NotImplementedException();
         public Task SetDivergenceBaseBranchAsync(string repoPath, string? divergenceBaseBranch, CancellationToken ct) => throw new NotImplementedException();
-        public Task<string?> GetDivergenceBaseBranchAsync(string repoPath, CancellationToken ct) => throw new NotImplementedException();
         public Task<(bool Success, bool Committed, string? ErrorMessage)> StageAndCommitAsync(string repoPath, IReadOnlyList<string> pathsToStage, string commitMessage, CancellationToken ct, bool skipHooks = false) => throw new NotImplementedException();
         public Task<bool> CloneIntoAsync(string targetDir, string cloneUrl, string? bearerToken, CancellationToken ct) => throw new NotSupportedException();
         public Task<(bool Success, string? Error)> InitAsync(string repoPath, CancellationToken ct) => throw new NotSupportedException();
@@ -109,12 +91,6 @@ public sealed class ReturnToDefaultBranchCommandTests
         public Task<(bool Success, string? Error)> CheckoutTrackingAsync(string repoPath, string branch, CancellationToken ct) => throw new NotSupportedException();
         public Task<(bool Success, string? Error)> SetUnbornHeadAsync(string repoPath, string branch, CancellationToken ct) => throw new NotSupportedException();
         public Task<(bool Success, string? ErrorMessage)> ResetToRemoteAsync(string repoPath, string branchName, bool keepChanges, string? bearerToken, CancellationToken ct) => throw new NotImplementedException();
-        public void CreateDirectory(string path) => throw new NotImplementedException();
-        public string[] GetDirectories(string path) => throw new NotImplementedException();
         public Task WriteSyncHooksAsync(string repoPath, int workspaceId, int repositoryId, CancellationToken ct) => throw new NotImplementedException();
-        public Task<(bool Success, IReadOnlyList<GitWorktreeInfo> Worktrees, string? ErrorCode, string? ErrorMessage)> ListWorktreesAsync(string mainRepositoryPath, CancellationToken ct) => throw new NotImplementedException();
-        public Task<(bool Success, GitWorktreeInfo? Worktree, bool AlreadyExisted, string? ErrorCode, string? ErrorMessage)> CreateWorktreeAsync(string mainRepositoryPath, string worktreePath, string? branchName, string baseCommitSha, CancellationToken ct) => throw new NotImplementedException();
-        public Task<(bool Success, bool AlreadyRemoved, string? ErrorCode, string? ErrorMessage, GrayMoon.Worker.Models.WorktreeResidueResult Residue)> RemoveWorktreeAsync(string mainRepositoryPath, string worktreePath, bool force, CancellationToken ct, string? featureRootPath = null, string? featureStorageRoot = null, bool unlock = false) => throw new NotImplementedException();
-        public Task<GrayMoon.Worker.Models.WorktreeInspectionResult> InspectWorktreeAsync(string mainRepositoryPath, string worktreePath, string? defaultBranch, string? featureBranch, CancellationToken ct) => throw new NotImplementedException();
     }
 }

@@ -12,13 +12,15 @@ public sealed class GitServiceDeleteBranchTests : IDisposable
     private readonly TempGitRepositoryFixture _repo = new();
     private readonly RecordingCommandLineService _recorder;
     private readonly GitService _git;
+    private GitCliRepositoryReader _reader = null!;
 
     public GitServiceDeleteBranchTests()
     {
         var inner = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
         _recorder = new RecordingCommandLineService(inner);
         var runner = new GitProcessRunner(_recorder, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
-        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner);
+        _reader = new GitCliRepositoryReader(runner, NullLogger<GitCliRepositoryReader>.Instance);
+        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, _reader);
     }
 
     public void Dispose() => _repo.Dispose();

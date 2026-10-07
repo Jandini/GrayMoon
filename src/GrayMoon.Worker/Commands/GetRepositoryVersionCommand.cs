@@ -6,7 +6,7 @@ using GrayMoon.Worker.Services;
 namespace GrayMoon.Worker.Commands;
 
 public sealed class GetRepositoryVersionCommand(
-    IGitService git,
+    IGitRepositoryReader reader,
     IRepositoryVersionProviderFactory versionProviderFactory) : ICommandHandler<GetRepositoryVersionRequest, GetRepositoryVersionResponse>
 {
     public async Task<GetRepositoryVersionResponse> ExecuteAsync(GetRepositoryVersionRequest request, CancellationToken cancellationToken = default)
@@ -14,9 +14,9 @@ public sealed class GetRepositoryVersionCommand(
         var workspaceName = request.WorkspaceName ?? throw new ArgumentException("workspaceName required");
         var repositoryName = request.RepositoryName ?? throw new ArgumentException("repositoryName required");
 
-        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
+        var workspacePath = WorkerRepositoryPaths.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
-        var exists = git.DirectoryExists(repoPath);
+        var exists = Directory.Exists(repoPath);
 
         string? version = null;
         string? branch = null;
@@ -30,7 +30,7 @@ public sealed class GetRepositoryVersionCommand(
             versionProbed = versionResult.Probed;
             // A version provider that failed, or that is switched off, leaves the version unresolved; it must
             // not cost the repository its branch.
-            branch = await git.ResolveBranchAsync(versionResult.Result, repoPath, cancellationToken);
+            branch = await reader.ResolveBranchAsync(versionResult.Result, repoPath, cancellationToken);
         }
 
         return new GetRepositoryVersionResponse

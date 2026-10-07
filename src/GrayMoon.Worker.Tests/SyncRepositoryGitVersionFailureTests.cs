@@ -21,18 +21,20 @@ public sealed class SyncRepositoryGitVersionFailureTests : IDisposable
     private readonly string _root = Directory.CreateTempSubdirectory("graymoon-sync-").FullName;
     private readonly SyncRepositoryCommand _command;
     private readonly GitService _git;
+    private GitCliRepositoryReader _reader = null!;
     private readonly RepositoryStateProbe _probe;
 
     public SyncRepositoryGitVersionFailureTests()
     {
         var commandLine = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
         var runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
-        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner);
+        _reader = new GitCliRepositoryReader(runner, NullLogger<GitCliRepositoryReader>.Instance);
+        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, _reader);
         var versionProviderFactory = new RepositoryVersionProviderFactory(
             new GitVersionRepositoryVersionProvider(_git),
             new NoRepositoryVersionProvider());
-        _command = new SyncRepositoryCommand(_git, new NoProjects(), versionProviderFactory);
-        _probe = new RepositoryStateProbe(_git, new NoProjects(), versionProviderFactory);
+        _command = new SyncRepositoryCommand(_git, _reader, new NoProjects(), versionProviderFactory);
+        _probe = new RepositoryStateProbe(_reader, new NoProjects(), versionProviderFactory);
     }
 
     public void Dispose()
@@ -105,10 +107,10 @@ public sealed class SyncRepositoryGitVersionFailureTests : IDisposable
         var repoPath = await CloneEmptyOriginAsync();
         var current = await CurrentBranchAsync(repoPath);
 
-        Assert.Equal(current, await _git.ResolveBranchAsync(null, repoPath, CancellationToken.None));
-        Assert.Equal(current, await _git.ResolveBranchAsync(new GitVersionResult(), repoPath, CancellationToken.None));
-        Assert.Equal("from-gitversion", await _git.ResolveBranchAsync(new GitVersionResult { BranchName = "from-gitversion" }, repoPath, CancellationToken.None));
-        Assert.Equal("escaped", await _git.ResolveBranchAsync(new GitVersionResult { EscapedBranchName = "escaped" }, repoPath, CancellationToken.None));
+        Assert.Equal(current, await _reader.ResolveBranchAsync(null, repoPath, CancellationToken.None));
+        Assert.Equal(current, await _reader.ResolveBranchAsync(new GitVersionResult(), repoPath, CancellationToken.None));
+        Assert.Equal("from-gitversion", await _reader.ResolveBranchAsync(new GitVersionResult { BranchName = "from-gitversion" }, repoPath, CancellationToken.None));
+        Assert.Equal("escaped", await _reader.ResolveBranchAsync(new GitVersionResult { EscapedBranchName = "escaped" }, repoPath, CancellationToken.None));
     }
 
     /// <summary>

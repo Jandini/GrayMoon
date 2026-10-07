@@ -11,7 +11,7 @@ namespace GrayMoon.Worker.Commands;
 /// Writes one text file into a repository working tree (UTF-8, no BOM) through a temp file in the same
 /// directory so a crash never leaves a half-written file. Performs no git operation.
 /// </summary>
-public sealed class WriteRepositoryFileCommand(IGitService git)
+public sealed class WriteRepositoryFileCommand()
     : ICommandHandler<WriteRepositoryFileRequest, WriteRepositoryFileResponse>
 {
     private const string TempSuffix = ".graymoon-tmp";
@@ -24,7 +24,7 @@ public sealed class WriteRepositoryFileCommand(IGitService git)
         var workspaceRoot = request.WorkspaceRoot ?? throw new ArgumentException("workspaceRoot required");
         var content = request.Content ?? throw new ArgumentException("content required");
 
-        var workspacePath = git.GetWorkspacePath(workspaceRoot, workspaceName);
+        var workspacePath = WorkerRepositoryPaths.GetWorkspacePath(workspaceRoot, workspaceName);
         var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
 
         var validation = GitRepositoryPathValidator.Validate(repoPath, filePath);

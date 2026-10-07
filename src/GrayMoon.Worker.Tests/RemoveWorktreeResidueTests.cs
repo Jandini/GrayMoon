@@ -12,13 +12,15 @@ namespace GrayMoon.Worker.Tests;
 
 /// <summary>
 /// D1: Worker-side residue cleanup after <c>git worktree remove</c>. Guard tests exercise
-/// <see cref="GitService.ValidateResidueRemovalGuards"/> directly (pure, no git needed); the rest use
+/// <see cref="GitWorktreeService.ValidateResidueRemovalGuards"/> directly (pure, no git needed); the rest use
 /// real git, matching the pattern in <see cref="GitWorktreeCommandTests"/>.
 /// </summary>
 public sealed class RemoveWorktreeResidueTests : IDisposable
 {
     private readonly string _root = Directory.CreateTempSubdirectory("graymoon-wtr-").FullName;
     private readonly GitService _git;
+    private GitCliRepositoryReader _reader = null!;
+    private GitWorktreeService _worktrees = null!;
     private readonly CreateGitWorktreeCommand _create;
     private readonly RemoveGitWorktreeCommand _remove;
 
@@ -26,9 +28,11 @@ public sealed class RemoveWorktreeResidueTests : IDisposable
     {
         var commandLine = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
         var runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
-        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner);
-        _create = new CreateGitWorktreeCommand(_git);
-        _remove = new RemoveGitWorktreeCommand(_git);
+        _reader = new GitCliRepositoryReader(runner, NullLogger<GitCliRepositoryReader>.Instance);
+        _worktrees = new GitWorktreeService(runner, _reader, NullLogger<GitWorktreeService>.Instance);
+        _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, _reader);
+        _create = new CreateGitWorktreeCommand(_git, _worktrees);
+        _remove = new RemoveGitWorktreeCommand(_worktrees);
     }
 
     public void Dispose()
@@ -45,7 +49,7 @@ public sealed class RemoveWorktreeResidueTests : IDisposable
         var featureRoot = Path.Combine(storageRoot, "FeatureA");
         var outsidePath = Path.Combine(_root, "guard1", "elsewhere", "repo");
 
-        var failure = GitService.ValidateResidueRemovalGuards(
+        var failure = GitWorktreeService.ValidateResidueRemovalGuards(
             worktreePath: outsidePath,
             mainRepositoryPath: Path.Combine(_root, "guard1", "main"),
             featureRootPath: featureRoot,
@@ -63,7 +67,7 @@ public sealed class RemoveWorktreeResidueTests : IDisposable
         var featureRoot = Path.Combine(storageRoot, "FeatureA");
         var worktreePath = Path.Combine(featureRoot, "repo");
 
-        var failure = GitService.ValidateResidueRemovalGuards(
+        var failure = GitWorktreeService.ValidateResidueRemovalGuards(
             worktreePath: worktreePath,
             mainRepositoryPath: worktreePath,
             featureRootPath: featureRoot,
@@ -81,7 +85,7 @@ public sealed class RemoveWorktreeResidueTests : IDisposable
         var featureRoot = Path.Combine(storageRoot, "FeatureA");
         var worktreePath = Path.Combine(featureRoot, "repo");
 
-        var failure = GitService.ValidateResidueRemovalGuards(
+        var failure = GitWorktreeService.ValidateResidueRemovalGuards(
             worktreePath: worktreePath,
             mainRepositoryPath: Path.Combine(_root, "guard3", "main"),
             featureRootPath: featureRoot,
@@ -100,7 +104,7 @@ public sealed class RemoveWorktreeResidueTests : IDisposable
         var worktreePath = Path.Combine(featureRoot, "repo");
         Directory.CreateDirectory(Path.Combine(worktreePath, ".git"));
 
-        var failure = GitService.ValidateResidueRemovalGuards(
+        var failure = GitWorktreeService.ValidateResidueRemovalGuards(
             worktreePath: worktreePath,
             mainRepositoryPath: Path.Combine(_root, "guard4", "main"),
             featureRootPath: featureRoot,
@@ -117,7 +121,7 @@ public sealed class RemoveWorktreeResidueTests : IDisposable
         var storageRoot = Path.Combine(_root, "guard5", "features");
         var worktreePath = Path.Combine(storageRoot, "OnlyOneLevel");
 
-        var failure = GitService.ValidateResidueRemovalGuards(
+        var failure = GitWorktreeService.ValidateResidueRemovalGuards(
             worktreePath: worktreePath,
             mainRepositoryPath: Path.Combine(_root, "guard5", "main"),
             featureRootPath: Path.Combine(storageRoot, "FeatureA"),
@@ -135,7 +139,7 @@ public sealed class RemoveWorktreeResidueTests : IDisposable
         var featureRoot = Path.Combine(storageRoot, "FeatureA");
         var worktreePath = Path.Combine(featureRoot, "repo");
 
-        var failure = GitService.ValidateResidueRemovalGuards(
+        var failure = GitWorktreeService.ValidateResidueRemovalGuards(
             worktreePath: worktreePath,
             mainRepositoryPath: Path.Combine(_root, "guard6", "main"),
             featureRootPath: featureRoot,
@@ -153,7 +157,7 @@ public sealed class RemoveWorktreeResidueTests : IDisposable
         var mainPath = Path.Combine(_root, "main1");
         Directory.CreateDirectory(mainPath);
         await InitGitWithCommitAsync(mainPath);
-        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+        var head = await _reader.GetHeadCommitAsync(mainPath, CancellationToken.None);
 
         var storageRoot = Path.Combine(_root, "features");
         var featureRoot = Path.Combine(storageRoot, "orphan-feat");
@@ -197,7 +201,7 @@ public sealed class RemoveWorktreeResidueTests : IDisposable
         var mainPath = Path.Combine(_root, "main2");
         Directory.CreateDirectory(mainPath);
         await InitGitWithCommitAsync(mainPath);
-        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+        var head = await _reader.GetHeadCommitAsync(mainPath, CancellationToken.None);
 
         var storageRoot = Path.Combine(_root, "features");
         var featureRoot = Path.Combine(storageRoot, "locked-feat");
@@ -274,7 +278,7 @@ public sealed class RemoveWorktreeResidueTests : IDisposable
         var mainPath = Path.Combine(_root, "main3");
         Directory.CreateDirectory(mainPath);
         await InitGitWithCommitAsync(mainPath);
-        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+        var head = await _reader.GetHeadCommitAsync(mainPath, CancellationToken.None);
 
         var storageRoot = Path.Combine(_root, "features");
         var featureRoot = Path.Combine(storageRoot, "two-repo-feat");
@@ -321,7 +325,7 @@ public sealed class RemoveWorktreeResidueTests : IDisposable
         var mainPath = Path.Combine(_root, "main4");
         Directory.CreateDirectory(mainPath);
         await InitGitWithCommitAsync(mainPath);
-        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+        var head = await _reader.GetHeadCommitAsync(mainPath, CancellationToken.None);
 
         var worktreePath = Path.Combine(_root, "features", "empty-feat", "main4");
         Directory.CreateDirectory(worktreePath);
@@ -344,7 +348,7 @@ public sealed class RemoveWorktreeResidueTests : IDisposable
         var mainPath = Path.Combine(_root, "main5");
         Directory.CreateDirectory(mainPath);
         await InitGitWithCommitAsync(mainPath);
-        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+        var head = await _reader.GetHeadCommitAsync(mainPath, CancellationToken.None);
 
         var worktreePath = Path.Combine(_root, "features", "nonempty-feat", "main5");
         Directory.CreateDirectory(worktreePath);
@@ -368,7 +372,7 @@ public sealed class RemoveWorktreeResidueTests : IDisposable
         var mainPath = Path.Combine(_root, "main6");
         Directory.CreateDirectory(mainPath);
         await InitGitWithCommitAsync(mainPath);
-        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+        var head = await _reader.GetHeadCommitAsync(mainPath, CancellationToken.None);
 
         var storageRoot = Path.Combine(_root, "features");
         var featureRoot = Path.Combine(storageRoot, "junction-feat");
@@ -414,7 +418,7 @@ public sealed class RemoveWorktreeResidueTests : IDisposable
         var mainPath = Path.Combine(_root, "main8");
         Directory.CreateDirectory(mainPath);
         await InitGitWithCommitAsync(mainPath);
-        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+        var head = await _reader.GetHeadCommitAsync(mainPath, CancellationToken.None);
 
         var worktreePath = Path.Combine(_root, "features", "locked-unlock-feat", "main8");
         var created = await _create.ExecuteAsync(new CreateGitWorktreeRequest
@@ -436,7 +440,7 @@ public sealed class RemoveWorktreeResidueTests : IDisposable
 
         Assert.True(result.Success, result.ErrorMessage);
         Assert.False(Directory.Exists(worktreePath));
-        var (listOk, worktrees, _, _) = await _git.ListWorktreesAsync(mainPath, CancellationToken.None);
+        var (listOk, worktrees, _, _) = await _worktrees.ListWorktreesAsync(mainPath, CancellationToken.None);
         Assert.True(listOk);
         Assert.DoesNotContain(worktrees, w => string.Equals(
             Path.GetFullPath(w.WorktreePath ?? ""), Path.GetFullPath(worktreePath), StringComparison.OrdinalIgnoreCase));
@@ -448,7 +452,7 @@ public sealed class RemoveWorktreeResidueTests : IDisposable
         var mainPath = Path.Combine(_root, "main9");
         Directory.CreateDirectory(mainPath);
         await InitGitWithCommitAsync(mainPath);
-        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+        var head = await _reader.GetHeadCommitAsync(mainPath, CancellationToken.None);
 
         var worktreePath = Path.Combine(_root, "features", "locked-no-unlock-feat", "main9");
         var created = await _create.ExecuteAsync(new CreateGitWorktreeRequest
@@ -469,7 +473,7 @@ public sealed class RemoveWorktreeResidueTests : IDisposable
 
         Assert.False(result.Success);
         Assert.True(Directory.Exists(worktreePath));
-        var (listOk, worktrees, _, _) = await _git.ListWorktreesAsync(mainPath, CancellationToken.None);
+        var (listOk, worktrees, _, _) = await _worktrees.ListWorktreesAsync(mainPath, CancellationToken.None);
         Assert.True(listOk);
         var still = worktrees.Single(w => string.Equals(
             Path.GetFullPath(w.WorktreePath ?? ""), Path.GetFullPath(worktreePath), StringComparison.OrdinalIgnoreCase));
@@ -501,7 +505,7 @@ public sealed class RemoveWorktreeResidueTests : IDisposable
         var mainPath = Path.Combine(_root, "main7");
         Directory.CreateDirectory(mainPath);
         await InitGitWithCommitAsync(mainPath);
-        var head = await _git.GetHeadCommitAsync(mainPath, CancellationToken.None);
+        var head = await _reader.GetHeadCommitAsync(mainPath, CancellationToken.None);
 
         var worktreePath = Path.Combine(_root, "features", "old-app-feat", "main7");
         var created = await _create.ExecuteAsync(new CreateGitWorktreeRequest

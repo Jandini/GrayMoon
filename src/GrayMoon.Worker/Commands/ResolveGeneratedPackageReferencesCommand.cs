@@ -10,7 +10,7 @@ namespace GrayMoon.Worker.Commands;
 /// so multiline attributes, attribute ordering, and whitespace variations are handled the same way as normal
 /// PackageReference parsing/updating.
 /// </summary>
-public sealed class ResolveGeneratedPackageReferencesCommand(IGitService git, ICsProjFileParser csProjFileParser)
+public sealed class ResolveGeneratedPackageReferencesCommand(ICsProjFileParser csProjFileParser)
     : ICommandHandler<ResolveGeneratedPackageReferencesRequest, ResolveGeneratedPackageReferencesResponse>
 {
     public async Task<ResolveGeneratedPackageReferencesResponse> ExecuteAsync(ResolveGeneratedPackageReferencesRequest request, CancellationToken cancellationToken = default)
@@ -19,7 +19,7 @@ public sealed class ResolveGeneratedPackageReferencesCommand(IGitService git, IC
         var items = request.Files;
         if (items == null || items.Count == 0)
             return new ResolveGeneratedPackageReferencesResponse { Files = [] };
-        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
+        var workspacePath = WorkerRepositoryPaths.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var results = new List<ResolveGeneratedPackageReferencesFileResult>();
         foreach (var item in items)
         {
