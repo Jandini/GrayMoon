@@ -317,8 +317,12 @@ public sealed class SyncRepositoryCommand(
         }
 
         // Resolve default branch once. Divergence may be vs Feature parent (request / persisted) rather than
-        // the repository default.
-        var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, ct, read);
+        // the repository default. The listing above already contains what the lookup needs (where origin/HEAD
+        // points and which origin branches exist), so no further git call is made when it succeeded; a null
+        // there means the repository has no default branch. Only when the listing failed is git asked.
+        var defaultRef = snapshot != null
+            ? snapshot.DefaultOriginRef
+            : await git.GetDefaultBranchOriginRefAsync(repoPath, ct, read);
         Lap("defaultBranch");
         await git.SetDivergenceBaseBranchAsync(repoPath, divergenceBaseBranch, ct);
         var divergenceRef = git.ToOriginBranchRef(divergenceBaseBranch) ?? defaultRef;

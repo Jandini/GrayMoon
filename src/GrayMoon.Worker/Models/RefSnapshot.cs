@@ -13,8 +13,15 @@ namespace GrayMoon.Worker.Models;
 /// unborn branch (a repository with no commits yet), which the ref listing cannot tell apart, so a null here
 /// means "ask git" rather than "there is no branch".
 /// </param>
+/// <param name="DefaultOriginRef">
+/// The repository's default branch as <c>origin/&lt;name&gt;</c>, or null when it has none - what
+/// <c>GetDefaultBranchOriginRefAsync</c> returns, answered from the same listing instead of two more probes.
+/// A null here is a real answer ("no default branch"), not "ask git": the listing already contains every
+/// remote-tracking ref the probes would have looked at.
+/// </param>
 public sealed record RefSnapshot(
     IReadOnlyList<string> Tags,
     IReadOnlyList<string> LocalBranches,
     IReadOnlyList<string> RemoteBranches,
-    string? CheckedOutBranch);
+    string? CheckedOutBranch,
+    string? DefaultOriginRef);

@@ -18,10 +18,10 @@ This is everything that runs after GitVersion today, in order, with the git comm
 | Branch fallback | `ResolveBranchAsync` → `GetCurrentBranchNameAsync` | `branch --show-current` (only when GitVersion gave no branch) | no |
 | Checked-out tag | `GetCheckedOutTagAsync` | `symbolic-ref -q HEAD`, then `describe --tags --exact-match` | no |
 | Tag list | `GetTagsAsync` | `tag --sort=-creatordate` | no |
-| Hooks | `WriteSyncHooksAsync` | 3 to 4 read-intent `rev-parse`/`config` calls, then file writes under the common `hooks` dir | needs branch **or** tag |
-| Default branch | `GetDefaultBranchOriginRefAsync` | `symbolic-ref -q refs/remotes/origin/HEAD`, 1 to 3 `rev-parse --verify` | no |
-| Divergence base | `SetDivergenceBaseBranchAsync` | `rev-parse --git-dir` (already read intent), then writes or deletes `<git-dir>/graymoon-divergence-base` | no |
-| Upstream counts | `ProbeCommitCountsAsync` | `for-each-ref %(upstream:short)`, `rev-parse --verify`, maybe a divergence-base read, `rev-list --left-right --count` | **yes** |
+| Hooks | `WriteSyncHooksAsync` | 3 to 4 read-intent `rev-parse`/`config` calls, then file writes under the common `hooks` dir (**now 1**, see "Fewer git processes") | needs branch **or** tag |
+| Default branch | `GetDefaultBranchOriginRefAsync` | `symbolic-ref -q refs/remotes/origin/HEAD`, 1 to 3 `rev-parse --verify` (**now none in a sync, 1 elsewhere**) | no |
+| Divergence base | `SetDivergenceBaseBranchAsync` | `rev-parse --git-dir` (already read intent), then writes or deletes `<git-dir>/graymoon-divergence-base` (**now no process** in a normal checkout) | no |
+| Upstream counts | `ProbeCommitCountsAsync` | `for-each-ref %(upstream:short)`, `rev-parse --verify`, maybe a divergence-base read, `rev-list --left-right --count` (**now 1**, or 2 without an upstream) | **yes** |
 | Default-branch counts | `GetCommitCountsVsDefaultAsync` | `rev-list --left-right --count <divergenceRef>...HEAD` | no (uses `HEAD`) |
 | Branch lists | `GetLocalBranchesAsync`, `GetRemoteBranchesFromRefsAsync` | two `for-each-ref` | no |
 | Projects | `ICsProjFileService.FindAsync` | none; file system only | no |
@@ -66,6 +66,28 @@ Read-intent calls add `--no-optional-locks` in front of the subcommand. That is 
 ### What stays on the write lock
 
 Fetch, clone, checkout, merge, commit, push, safe-directory setup, and GitVersion stay one writer per repository. Every other caller of the changed helpers keeps the write intent, because the new parameter defaults to `Write`.
+
+## Fewer git processes
+
+Starting a process costs tens of milliseconds on Windows, so the read lane was also cut down to what each answer really needs. A typical sync of a repository on a branch with an upstream went from about twelve processes (fetch, GitVersion and ten short git commands) to six: fetch, GitVersion, the ref listing, the counts against the default branch, the hook install and the branch's upstream listing. Five when the profile does not calculate versions. The answers do not change; `GitServiceFewerProcessesTests` compares the new code with a copy of the old probe-by-probe logic across a matrix of repository states.
+
+| Answer | Before | Now |
+| --- | --- | --- |
+| Default branch, in a sync | `symbolic-ref`, then `rev-parse --verify` (1 to 3) | none: the ref listing also prints `%(symref)`, and "does `origin/<x>` exist" is a lookup in the same listing |
+| Default branch, anywhere else | the same probes | one `for-each-ref` over `origin/HEAD`, `origin/main`, `origin/master`; one extra existence probe only when `origin/HEAD` points at some other branch; the old probes remain as the fallback when the listing fails |
+| Upstream, gone, ahead and behind | `for-each-ref %(upstream:short)`, `rev-parse --verify`, `rev-list --left-right --count` | one `for-each-ref` with `%(HEAD)`, `%(upstream:short)` and `%(upstream:track)` |
+| Divergence base's local branch exists | `rev-parse --verify` | the same `for-each-ref`, when the name is a plain ref name |
+| Git directory (divergence-base file) | `rev-parse --git-dir` | read from `.git` (a folder, or a `gitdir:` pointer); `rev-parse` only for a layout it does not recognise |
+| Hooks folder | `rev-parse --git-path hooks`, `config --get core.hooksPath`, `rev-parse --git-common-dir` | one `rev-parse --git-common-dir --git-path hooks`; `config` only when the hooks folder is outside the git directory |
+
+Decisions that keep this safe:
+
+- **A snapshot is never reused across syncs.** Every sync takes a fresh listing after its own fetch, and the listing is used only inside that sync. The git directory is read on every call, never cached, so a worktree removed and added again at the same path is never answered from a stale path.
+- **The checked-out branch only.** `%(upstream:track)` is relative to the branch itself, while the old `rev-list` counted `<upstream>...HEAD`. They are the same only when HEAD is on that branch (`%(HEAD)` says so, per worktree). For any other branch name - a version provider can report one that is not checked out, and HEAD can be broken mid-checkout - the counts still come from `rev-list` against HEAD.
+- **Unrecognised tracking text** (anything other than empty, `ahead N`, `behind N`, both, or `gone`) falls back to `rev-list` instead of reporting 0/0.
+- **A dangling `origin/HEAD`.** A fetch never repoints `origin/HEAD`, so after the remote renames its default branch it dangles. `for-each-ref` leaves a dangling symref out, which is the same answer the old existence probe gave: fall back to `origin/main`, then `origin/master`, then no default. This is not fixed here; repointing it is a separate change (`git remote set-head origin -a`, which needs the network).
+- **Existence is matched on the full ref name** (`refs/remotes/origin/<x>`, `refs/heads/<x>`), and `for-each-ref` lines are matched exactly. The old `rev-parse --verify <x>` also accepted a tag or a local branch that happened to be named `origin/main`; that is deliberately no longer treated as the remote's default.
+- **Failure behaves as before.** A failed listing means "no upstream" for the counts, exactly as a failed upstream lookup did, and a failed default-branch listing falls back to the old probes.
 
 ## Risks and how they are handled
 

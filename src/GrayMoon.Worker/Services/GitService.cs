@@ -440,18 +440,29 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
 
         // Whether the branch has a configured upstream is only knowable when we actually ask git for it.
         var upstreamProbed = !skipUpstreamCheck;
-        var upstreamRef = skipUpstreamCheck ? null : await GetUpstreamRefAsync(repoPath, branchName, ct, intent);
+
+        // The divergence base is a file read. Its local branch is looked up first because every path without a
+        // usable upstream needs it, and it rides along in the one listing below instead of costing its own
+        // existence probe.
+        var divergenceLocal = await GetDivergenceLocalBranchAsync(repoPath, ct);
+
+        BranchTracking? tracking = skipUpstreamCheck
+            ? null
+            : await ReadBranchTrackingAsync(repoPath, branchName, divergenceLocal, ct, intent);
+        var upstreamRef = tracking?.Upstream;
         if (string.IsNullOrWhiteSpace(upstreamRef))
         {
-            var compareRef = await ResolveNoUpstreamCompareRefAsync(repoPath, defaultBranchOriginRef, ct, intent);
+            var compareRef = await ResolveNoUpstreamCompareRefAsync(repoPath, defaultBranchOriginRef, divergenceLocal, tracking?.DivergenceLocalExists, ct, intent);
             return await CountAheadOfCompareRefAsync(repoPath, branchName, compareRef, upstreamProbed, sw, "no upstream", ct, intent);
         }
 
         var originBranch = upstreamRef!;
 
-        if (!await RefExistsAsync(repoPath, originBranch, ct, intent))
+        // The listing already said whether the upstream still exists ("gone" when its remote-tracking ref was
+        // pruned or never fetched), so there is no separate existence probe.
+        if (tracking!.UpstreamGone)
         {
-            var compareRef = await ResolveNoUpstreamCompareRefAsync(repoPath, defaultBranchOriginRef, ct, intent);
+            var compareRef = await ResolveNoUpstreamCompareRefAsync(repoPath, defaultBranchOriginRef, divergenceLocal, tracking.DivergenceLocalExists, ct, intent);
             if (compareRef == null)
             {
                 logger.LogDebug("Configured upstream for {Branch}, but remote {OriginBranch} not found and no compare ref for {RepoPath}, skipping commit counts", branchName, originBranch, repoPath);
@@ -461,8 +472,19 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
             return await CountAheadOfCompareRefAsync(repoPath, branchName, compareRef, upstreamProbed, sw, "missing remote upstream", ct, intent);
         }
 
+        // The checked-out branch: its ahead/behind against its upstream is what the rev-list below prints for
+        // "<upstream>...HEAD", and the listing carries it already. Only when HEAD really is this branch - for any
+        // other branch (a version provider can report a name that is not checked out, HEAD can be broken
+        // mid-checkout) the counts have to be taken against HEAD, so those fall through to the rev-list.
+        if (tracking.IsHead && tracking.CountsKnown)
+        {
+            sw.Stop();
+            logger.LogDebug("GetCommitCounts completed in {ElapsedMs}ms for {RepoPath} (up{Outgoing} dn{Incoming}, from branch listing)", sw.ElapsedMilliseconds, repoPath, tracking.Ahead, tracking.Behind);
+            return new CommitCountsProbeResult(tracking.Ahead, tracking.Behind, true, CountsProbed: true, UpstreamProbed: upstreamProbed);
+        }
+
         // Single atomic call: left=incoming (in originBranch not HEAD), right=outgoing (in HEAD not originBranch).
-        // originBranch was just confirmed to exist, but HEAD can still be unborn (no commits yet) right
+        // originBranch is known to exist, but HEAD can still be unborn (no commits yet) right
         // after a checkout - an expected, already-handled miss here (falls back to unknown counts below),
         // not a real command failure, so it must not be mirrored to the overlay as a red stderr line.
         var (exitLR, stdoutLR, stderrLR) = await RunGitWithIntentAsync(
@@ -696,10 +718,12 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         //   %(refname)         full name, used only to tell the namespaces apart
         //   %(refname:short)   what the single-purpose branch reads use, ambiguity quirks included
         //   %(refname:strip=2) what "git tag" prints, and the branch name "git branch --show-current" prints
+        //   %(symref)          where a symbolic ref points; only refs/remotes/origin/HEAD is one that matters here,
+        //                      and it is what the default branch is read from
         // --sort=-creatordate is "git tag --sort=-creatordate" applied to every ref; only the tags' relative order
         // is used, and the branch lists are sorted below exactly as the single-purpose reads sort them.
         var (exitCode, stdout, stderr) = await RunGitWithIntentAsync(
-            "for-each-ref --sort=-creatordate --format=%(HEAD)%09%(refname)%09%(refname:short)%09%(refname:strip=2) refs/heads refs/remotes/origin refs/tags",
+            "for-each-ref --sort=-creatordate --format=%(HEAD)%09%(refname)%09%(refname:short)%09%(refname:strip=2)%09%(symref) refs/heads refs/remotes/origin refs/tags",
             repoPath,
             ct,
             intent);
@@ -711,21 +735,37 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         }
 
         const string originPrefix = "origin/";
+        const string remoteRefPrefix = "refs/remotes/origin/";
         var tags = new List<string>();
         var local = new List<string>();
         var remote = new List<string>();
         string? checkedOutBranch = null;
 
+        // What the default-branch probes would have looked at, taken from the full ref names so the answer does
+        // not depend on how git abbreviates an ambiguous name. A dangling origin/HEAD (its branch was pruned or
+        // renamed on the remote) is not listed at all, which is the same answer the existence probe gave.
+        var remoteBranchNames = new HashSet<string>(StringComparer.Ordinal);
+        string? originHeadSymref = null;
+
         foreach (var rawLine in (stdout ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries))
         {
             var parts = rawLine.TrimEnd('\r').Split('\t');
-            if (parts.Length != 4)
+            if (parts.Length != 5)
                 continue;
 
             var isHead = parts[0] == "*";
             var fullName = parts[1];
             var shortName = parts[2].Trim();
             var strippedName = parts[3].Trim();
+
+            if (fullName.StartsWith(remoteRefPrefix, StringComparison.Ordinal))
+            {
+                var remoteName = fullName[remoteRefPrefix.Length..];
+                if (remoteName == "HEAD")
+                    originHeadSymref = parts[4];
+                else if (remoteName.Length > 0)
+                    remoteBranchNames.Add(remoteName);
+            }
 
             if (fullName.StartsWith("refs/tags/", StringComparison.Ordinal))
             {
@@ -750,11 +790,16 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
             }
         }
 
+        var defaultOriginRef = OriginDefaultRef.Pick(
+            OriginDefaultRef.HeadTargetBranch(originHeadSymref),
+            remoteBranchNames.Contains);
+
         return new RefSnapshot(
             tags,
             local.OrderBy(b => b).ToList(),
             remote.OrderBy(b => b).ToList(),
-            checkedOutBranch);
+            checkedOutBranch,
+            defaultOriginRef);
     }
 
     public async Task<IReadOnlyList<string>> GetRemoteBranchesFromRefsAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write)
@@ -1185,27 +1230,133 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
             return null;
 
-        var (exitCode, stdout, _) = await runner.RunAsync(
-            "git",
-            "rev-parse --git-dir",
-            repoPath,
-            ct,
-            streamStderrAsStdout: true,
-            mirrorFailureOutputAsStderr: false,
-            intent: GitLockIntent.Read);
+        // Where the git directory is does not need a process in the normal layouts: it is the .git folder, or
+        // the folder a linked worktree's .git file points at. Anything else asks git, as before.
+        var fullGitDir = TryReadGitDirFromWorkTree(repoPath);
+        if (fullGitDir is null)
+        {
+            var (exitCode, stdout, _) = await runner.RunAsync(
+                "git",
+                "rev-parse --git-dir",
+                repoPath,
+                ct,
+                streamStderrAsStdout: true,
+                mirrorFailureOutputAsStderr: false,
+                intent: GitLockIntent.Read);
 
-        if (exitCode != 0 || string.IsNullOrWhiteSpace(stdout))
-            return null;
+            if (exitCode != 0 || string.IsNullOrWhiteSpace(stdout))
+                return null;
 
-        var gitDir = stdout.Trim();
-        var fullGitDir = Path.IsPathRooted(gitDir)
-            ? gitDir
-            : Path.GetFullPath(Path.Combine(repoPath, gitDir));
+            var gitDir = stdout.Trim();
+            fullGitDir = Path.IsPathRooted(gitDir)
+                ? gitDir
+                : Path.GetFullPath(Path.Combine(repoPath, gitDir));
+        }
 
         return Path.Combine(fullGitDir, "graymoon-divergence-base");
     }
 
+    /// <summary>
+    /// The git directory of the working tree at <paramref name="repoPath"/> (what <c>git rev-parse --git-dir</c>
+    /// prints), read from the file system: <c>.git</c> itself when it is a folder, or the target of its
+    /// <c>gitdir:</c> line when it is a file (a linked worktree or a submodule). Null whenever that is not
+    /// plainly the case - no <c>.git</c> entry, an unreadable or unfamiliar file, a target without a <c>HEAD</c>,
+    /// or <c>GIT_DIR</c> set in the environment - so the caller asks git instead of guessing. Read on every call,
+    /// never cached, so a worktree that is removed and added again is never answered from a stale path.
+    /// </summary>
+    internal static string? TryReadGitDirFromWorkTree(string repoPath)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("GIT_DIR")))
+            return null;
+
+        try
+        {
+            var dotGit = Path.Combine(repoPath, ".git");
+            string candidate;
+            if (Directory.Exists(dotGit))
+            {
+                candidate = Path.GetFullPath(dotGit);
+            }
+            else if (File.Exists(dotGit))
+            {
+                const string prefix = "gitdir:";
+                var first = File.ReadLines(dotGit).FirstOrDefault();
+                if (first is null || !first.StartsWith(prefix, StringComparison.Ordinal))
+                    return null;
+
+                var target = first[prefix.Length..].Trim();
+                if (target.Length == 0)
+                    return null;
+
+                candidate = Path.GetFullPath(Path.IsPathRooted(target) ? target : Path.Combine(repoPath, target));
+            }
+            else
+            {
+                return null;
+            }
+
+            // A real git directory always has a HEAD; an empty or foreign .git folder is not one, and git itself
+            // would look further up the tree for the repository.
+            return File.Exists(Path.Combine(candidate, "HEAD")) ? candidate : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Default branch as <c>origin/&lt;name&gt;</c>, or null. One listing answers the common cases: it shows
+    /// where <c>origin/HEAD</c> points and whether <c>origin/main</c> / <c>origin/master</c> exist. Only when
+    /// <c>origin/HEAD</c> points at some other branch is that branch's existence probed separately, and when the
+    /// listing itself fails the original probe-by-probe lookup runs, so a failure here is never "no default".
+    /// Sync does not come through here: it reads the same answer from its ref snapshot.
+    /// </summary>
     private async Task<string?> GetDefaultBranchAsync(string repoPath, CancellationToken ct, GitLockIntent intent = GitLockIntent.Write)
+    {
+        const string remoteRefPrefix = "refs/remotes/origin/";
+
+        // A missing pattern is not an error for for-each-ref (exit 0, no line), and a dangling origin/HEAD is
+        // silently left out, so the usual "not there" answers cost no failed process and paint nothing red.
+        var (exit, stdout, _) = await RunGitWithIntentAsync(
+            "for-each-ref --format=%(refname)%09%(symref) refs/remotes/origin/HEAD refs/remotes/origin/main refs/remotes/origin/master",
+            repoPath,
+            ct,
+            intent,
+            streamStderrAsStdout: true,
+            mirrorFailureOutputAsStderr: false);
+        if (exit != 0)
+            return await GetDefaultBranchByProbesAsync(repoPath, ct, intent);
+
+        var existing = new HashSet<string>(StringComparer.Ordinal);
+        string? headSymref = null;
+        foreach (var rawLine in (stdout ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = rawLine.TrimEnd('\r').Split('\t');
+            if (parts.Length != 2 || !parts[0].StartsWith(remoteRefPrefix, StringComparison.Ordinal))
+                continue;
+
+            var name = parts[0][remoteRefPrefix.Length..];
+            if (name == "HEAD")
+                headSymref = parts[1];
+            else
+                existing.Add(name);
+        }
+
+        var headTarget = OriginDefaultRef.HeadTargetBranch(headSymref);
+        if (headTarget != null && headTarget != "main" && headTarget != "master")
+        {
+            // The listing only looked at main and master, so it cannot say whether this branch exists.
+            if (await RefExistsAsync(repoPath, $"origin/{headTarget}", ct, intent))
+                return $"origin/{headTarget}";
+            headTarget = null;
+        }
+
+        return OriginDefaultRef.Pick(headTarget, existing.Contains);
+    }
+
+    /// <summary>The original lookup: one probe per step. Kept as the fallback for when the listing fails.</summary>
+    private async Task<string?> GetDefaultBranchByProbesAsync(string repoPath, CancellationToken ct, GitLockIntent intent)
     {
         var (exitHead, stdoutHead, _) = await RunGitWithIntentAsync(
             "symbolic-ref -q refs/remotes/origin/HEAD",
@@ -1279,24 +1430,144 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
     /// (<c>graymoon-divergence-base</c>) so a tip that still matches the parent reports 0.
     /// Workspace branches without a divergence base keep the default-branch fallback.
     /// </summary>
+    /// <param name="divergenceLocal">The divergence base as a local branch name, from <see cref="GetDivergenceLocalBranchAsync"/>.</param>
+    /// <param name="divergenceLocalExists">
+    /// Whether that branch exists when the caller already learned it from a listing; null means "not known",
+    /// and it is probed here.
+    /// </param>
     private async Task<string?> ResolveNoUpstreamCompareRefAsync(
         string repoPath,
         string? defaultBranchOriginRef,
+        string? divergenceLocal,
+        bool? divergenceLocalExists,
         CancellationToken ct,
         GitLockIntent intent = GitLockIntent.Write)
     {
-        var divergenceBase = await GetDivergenceBaseBranchAsync(repoPath, ct);
-        if (!string.IsNullOrWhiteSpace(divergenceBase))
+        if (divergenceLocal != null)
         {
-            var local = divergenceBase.Trim();
-            if (local.StartsWith("origin/", StringComparison.OrdinalIgnoreCase))
-                local = local["origin/".Length..];
-            if (await RefExistsAsync(repoPath, local, ct, intent))
-                return local;
+            var exists = divergenceLocalExists ?? await RefExistsAsync(repoPath, divergenceLocal, ct, intent);
+            if (exists)
+                return divergenceLocal;
         }
 
         return defaultBranchOriginRef ?? await GetDefaultBranchAsync(repoPath, ct, intent);
     }
+
+    /// <summary>
+    /// The divergence base (a Feature's parent branch) as a local branch name - without the <c>origin/</c> prefix
+    /// - or null when there is none. A file read only; see <see cref="GetDivergenceBaseBranchAsync"/>.
+    /// </summary>
+    private async Task<string?> GetDivergenceLocalBranchAsync(string repoPath, CancellationToken ct)
+    {
+        var divergenceBase = await GetDivergenceBaseBranchAsync(repoPath, ct);
+        if (string.IsNullOrWhiteSpace(divergenceBase))
+            return null;
+
+        var local = divergenceBase.Trim();
+        if (local.StartsWith("origin/", StringComparison.OrdinalIgnoreCase))
+            local = local["origin/".Length..];
+        return string.IsNullOrWhiteSpace(local) ? null : local;
+    }
+
+    /// <summary>
+    /// What one <c>for-each-ref</c> says about a branch's upstream. <paramref name="Upstream"/> is null when the
+    /// branch has none (or does not exist). <paramref name="Ahead"/>/<paramref name="Behind"/> are only to be used
+    /// when <paramref name="CountsKnown"/> is set and the branch is the one HEAD is on.
+    /// <paramref name="DivergenceLocalExists"/> is null when the divergence branch was not part of the listing.
+    /// </summary>
+    private sealed record BranchTracking(
+        string? Upstream,
+        bool UpstreamGone,
+        bool IsHead,
+        bool CountsKnown,
+        int Ahead,
+        int Behind,
+        bool? DivergenceLocalExists);
+
+    private static readonly Regex TrackAheadRegex = new(@"ahead (\d+)", RegexOptions.Compiled);
+    private static readonly Regex TrackBehindRegex = new(@"behind (\d+)", RegexOptions.Compiled);
+
+    /// <summary>
+    /// One <c>for-each-ref</c> for a branch: its configured upstream, whether that upstream is gone, whether HEAD
+    /// is on the branch, and - for the checked-out branch - how far ahead and behind it is, which is what the
+    /// separate upstream lookup, existence probe and <c>rev-list --left-right</c> used to answer in three
+    /// processes. The divergence-base branch is listed too, so its existence needs no probe either. Null when the
+    /// command fails, which callers treat as "no upstream", exactly as a failed upstream lookup always was.
+    /// </summary>
+    private async Task<BranchTracking?> ReadBranchTrackingAsync(
+        string repoPath,
+        string branchName,
+        string? divergenceLocal,
+        CancellationToken ct,
+        GitLockIntent intent)
+    {
+        var branchRef = $"refs/heads/{branchName}";
+
+        // The divergence branch only joins the listing when it is a plain name that cannot be mistaken for
+        // several arguments or a pattern; otherwise it keeps its own probe. Patterns match a ref exactly or up
+        // to a slash, so lines are matched on the full ref name below, never taken as they come.
+        var divergenceRef = divergenceLocal != null && IsPlainRefName(divergenceLocal)
+            ? $"refs/heads/{divergenceLocal}"
+            : null;
+        var patterns = divergenceRef == null || divergenceRef == branchRef ? branchRef : $"{branchRef} {divergenceRef}";
+
+        var (exitCode, stdout, _) = await RunGitWithIntentAsync(
+            $"for-each-ref --format=%(HEAD)%09%(refname)%09%(upstream:short)%09%(upstream:track) {patterns}",
+            repoPath,
+            ct,
+            intent);
+        if (exitCode != 0)
+            return null;
+
+        string? upstream = null;
+        var gone = false;
+        var isHead = false;
+        var countsKnown = false;
+        var ahead = 0;
+        var behind = 0;
+        var divergenceExists = false;
+
+        foreach (var rawLine in (stdout ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = rawLine.TrimEnd('\r').Split('\t');
+            if (parts.Length != 4)
+                continue;
+
+            var fullName = parts[1];
+            if (fullName == divergenceRef)
+                divergenceExists = true;
+
+            if (fullName != branchRef)
+                continue;
+
+            isHead = parts[0] == "*";
+            var name = parts[2].Trim();
+            upstream = string.IsNullOrWhiteSpace(name) ? null : name;
+
+            // "[ahead 1, behind 2]", "[ahead 1]", "[behind 2]", "[gone]", or empty when level with the upstream.
+            // The brackets are stripped here rather than asked of git (":nobracket" needs a newer git).
+            var track = parts[3].Trim().Trim('[', ']');
+            gone = track == "gone";
+            var aheadMatch = TrackAheadRegex.Match(track);
+            var behindMatch = TrackBehindRegex.Match(track);
+            if (aheadMatch.Success)
+                ahead = int.Parse(aheadMatch.Groups[1].Value);
+            if (behindMatch.Success)
+                behind = int.Parse(behindMatch.Groups[1].Value);
+
+            // Empty means level with the upstream. Anything else that is not ahead/behind/gone is something this
+            // code does not know, and a zero would be a wrong answer - leave the counts to the rev-list.
+            countsKnown = track.Length == 0 || gone || aheadMatch.Success || behindMatch.Success;
+        }
+
+        return new BranchTracking(upstream, gone, isHead, countsKnown, ahead, behind, divergenceRef == null ? null : divergenceExists);
+    }
+
+    /// <summary>A ref name that survives being put into an argument string: no spaces, quotes, glob characters or leading dash.</summary>
+    private static bool IsPlainRefName(string name)
+        => name.Length > 0
+           && name[0] != '-'
+           && name.IndexOfAny([' ', '\t', '\r', '\n', '"', '\'', '*', '?', '[', '\\']) < 0;
 
     private async Task<CommitCountsProbeResult> CountAheadOfCompareRefAsync(
         string repoPath,
@@ -1697,28 +1968,28 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
     /// </summary>
     private async Task<GitHooksLocation> ResolveGitHooksLocationAsync(string repoPath, CancellationToken ct)
     {
-        var (hooksExit, hooksOut, _) = await runner.RunAsync(
-            "git", ["rev-parse", "--git-path", "hooks"], repoPath, null, ct, GitLockIntent.Read);
-        var hooksRaw = hooksOut?.Trim();
-        if (hooksExit != 0 || string.IsNullOrWhiteSpace(hooksRaw))
+        // One call answers both questions: where git will look for hooks (which honours core.hooksPath) and where
+        // the common git directory is. Output is one line per argument, in argument order. A hooks folder inside
+        // the common directory is where we may write, whether or not core.hooksPath is set, so the config only
+        // has to be read in the other case - to name the setting that sent hooks elsewhere.
+        var (exit, stdout, _) = await runner.RunAsync(
+            "git", ["rev-parse", "--git-common-dir", "--git-path", "hooks"], repoPath, null, ct, GitLockIntent.Read);
+        if (exit != 0)
             return new GitHooksLocation(null, null);
 
-        var hooksDir = Path.GetFullPath(Path.Combine(repoPath, hooksRaw));
+        var lines = (stdout ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (lines.Length != 2 || string.IsNullOrWhiteSpace(lines[0]) || string.IsNullOrWhiteSpace(lines[1]))
+            return new GitHooksLocation(null, null);
+
+        var commonDir = Path.GetFullPath(Path.Combine(repoPath, lines[0]));
+        var hooksDir = Path.GetFullPath(Path.Combine(repoPath, lines[1]));
+        if (IsPathInside(hooksDir, commonDir))
+            return new GitHooksLocation(hooksDir, null);
 
         var (configExit, configOut, _) = await runner.RunAsync(
             "git", ["config", "--get", "core.hooksPath"], repoPath, null, ct, GitLockIntent.Read);
         var configured = configExit == 0 ? configOut?.Trim() : null;
-        if (string.IsNullOrEmpty(configured))
-            return new GitHooksLocation(hooksDir, null);
-
-        var (commonExit, commonOut, _) = await runner.RunAsync(
-            "git", ["rev-parse", "--git-common-dir"], repoPath, null, ct, GitLockIntent.Read);
-        var commonRaw = commonOut?.Trim();
-        if (commonExit != 0 || string.IsNullOrWhiteSpace(commonRaw))
-            return new GitHooksLocation(null, null);
-
-        var commonDir = Path.GetFullPath(Path.Combine(repoPath, commonRaw));
-        return IsPathInside(hooksDir, commonDir)
+        return string.IsNullOrEmpty(configured)
             ? new GitHooksLocation(hooksDir, null)
             : new GitHooksLocation(hooksDir, configured);
     }
