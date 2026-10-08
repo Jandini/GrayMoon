@@ -15,6 +15,9 @@
         ? $"{repoUrl}/compare/{defaultBranch}...{Uri.EscapeDataString(Link.BranchName)}"
         : null;
     var isWorkspaceRepository = Link.Role == WorkspaceRepositoryRole.Workspace;
+    var repositoryDisplayName = isWorkspaceRepository
+        ? WorkspaceRepositoryDisplayName.ForWorkspaceRole(repo.RepositoryName)
+        : repo.RepositoryName;
     var depCount = Link.Dependencies ?? 0;
     var unmatchedDeps = Link.UnmatchedDeps ?? 0;
     var fileMismatchRepos = Link.OutOfDateFileRepos ?? 0;
@@ -39,7 +42,7 @@
             {
                 <span class="repo-name-cell gm-menu-trigger">
                     <a href="@repoUrl" target="_blank" rel="noopener noreferrer" class="repo-link">
-                        <strong>@repo.RepositoryName</strong>
+                        <strong>@repositoryDisplayName</strong>
                     </a>
                     @if (isWorkspaceRepository)
                     {
@@ -60,7 +63,7 @@
             else
             {
                 <span class="repo-name-cell">
-                    <strong>@repo.RepositoryName</strong>
+                    <strong>@repositoryDisplayName</strong>
                     @if (isWorkspaceRepository)
                     {
                         <span class="badge workspace-role-badge text-nowrap">Workspace</span>
