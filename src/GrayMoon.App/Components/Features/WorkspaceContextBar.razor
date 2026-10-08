@@ -1,5 +1,5 @@
-﻿@using GrayMoon.Application.Features
-@using GrayMoon.App.Components.Features
+﻿@using GrayMoon.App.Services.Queries
+@using GrayMoon.Application.Features
 
 <div class="workspace-context-search">
     @if (WorkspaceId > 0)
@@ -8,7 +8,7 @@
                                  WorkspaceName="@WorkspaceName"
                                  SelectedContextId="SelectedContextId"
                                  SelectedContextIdChanged="SelectedContextIdChanged"
-                                 OnRequestCreateFeature="OnRequestCreateFeature"
+                                 OnRequestCreateFeature="OpenCreateFeatureAsync"
                                  OnRequestRemoveFeature="OnRequestRemoveFeature"
                                  Disabled="Disabled" />
     }
@@ -19,14 +19,142 @@
         </div>
     }
 </div>
+<CreateFeatureModal IsVisible="_createFeatureModalVisible"
+                    WorkspaceId="WorkspaceId"
+                    InitialName="@_createFeatureInitialName"
+                    WorkspaceBranchName="@_createFeatureWorkspaceBranch"
+                    OnCancel="CloseCreateFeatureAsync"
+                    OnCreated="OnFeatureCreatedAsync" />
+<FeatureStatusPanel IsVisible="_featureStatusVisible"
+                    FeatureContextId="_featureStatusContextId"
+                    OnClose="CloseFeatureStatusAsync"
+                    OnContinueRemoval="OnRequestRemoveFeature"
+                    OnRequestRemove="OnRequestRemoveFeature"
+                    OnChanged="OnFeatureStatusChangedAsync" />
 
 @code {
     [Parameter] public int WorkspaceId { get; set; }
     [Parameter] public string? WorkspaceName { get; set; }
     [Parameter] public WorkspaceFeatureContextId? SelectedContextId { get; set; }
     [Parameter] public EventCallback<WorkspaceFeatureContextId> SelectedContextIdChanged { get; set; }
-    [Parameter] public EventCallback<string> OnRequestCreateFeature { get; set; }
     [Parameter] public EventCallback<WorkspaceFeatureContextId> OnRequestRemoveFeature { get; set; }
     [Parameter] public bool Disabled { get; set; }
     [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    [Inject] private IWorkspaceRepositoryLinkListQueryService LinkListQuery { get; set; } = default!;
+    [Inject] private IWorkspaceFeatureContextResolver ContextResolver { get; set; } = default!;
+    [Inject] private IWorkspaceSelectedFeatureContextService SelectedContextService { get; set; } = default!;
+    [Inject] private NavigationManager Navigation { get; set; } = default!;
+    [Inject] private IToastService ToastService { get; set; } = default!;
+    [Inject] private ILogger<WorkspaceContextBar> Logger { get; set; } = default!;
+
+    private bool _createFeatureModalVisible;
+    private string? _createFeatureInitialName;
+    private string? _createFeatureWorkspaceBranch;
+    private bool _featureStatusVisible;
+    private WorkspaceFeatureContextId? _featureStatusContextId;
+
+    private async Task OpenCreateFeatureAsync(string name)
+    {
+        _createFeatureInitialName = name;
+        _createFeatureWorkspaceBranch = await ResolveCurrentWorkspaceBranchNameAsync();
+        _createFeatureModalVisible = true;
+    }
+
+    private Task CloseCreateFeatureAsync()
+    {
+        _createFeatureModalVisible = false;
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Unified branch across special Workspace repos (Features base on Current Workspace, not the viewed Feature).</summary>
+    private async Task<string?> ResolveCurrentWorkspaceBranchNameAsync()
+    {
+        try
+        {
+            var snapshots = await LinkListQuery.GetAllSnapshotsAsync(WorkspaceId, null, isSpecialWorkspace: true);
+            var links = snapshots.Select(WorkspaceRepositoryLinkListMapper.ToLink).ToList();
+            return UnifiedWorkspaceBranch(links);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Could not resolve Current Workspace branch for Create Feature modal");
+            return null;
+        }
+    }
+
+    private static string? UnifiedWorkspaceBranch(IReadOnlyList<WorkspaceRepositoryLink> links)
+    {
+        var branchLinks = links.Where(l => !l.IsOnTag).ToList();
+        if (branchLinks.Count == 0)
+            return null;
+        string? first = null;
+        foreach (var link in branchLinks)
+        {
+            var branchName = link.BranchName?.Trim();
+            if (string.IsNullOrWhiteSpace(branchName))
+                return null;
+            first ??= branchName;
+            if (!string.Equals(first, branchName, StringComparison.OrdinalIgnoreCase))
+                return null;
+        }
+        return first;
+    }
+
+    private async Task OnFeatureCreatedAsync(CreateFeatureResult result)
+    {
+        _createFeatureModalVisible = false;
+        if (result.ContextId is not WorkspaceFeatureContextId created)
+            return;
+
+        await SelectContextAsync(created, isSpecialWorkspace: false);
+
+        if (!result.Success && string.Equals(result.Condition, "NeedsRepair", StringComparison.Ordinal))
+        {
+            _featureStatusContextId = created;
+            _featureStatusVisible = true;
+            return;
+        }
+
+        ToastService.Show("Feature created.");
+    }
+
+    private Task CloseFeatureStatusAsync()
+    {
+        _featureStatusVisible = false;
+        _featureStatusContextId = null;
+        return Task.CompletedTask;
+    }
+
+    private async Task OnFeatureStatusChangedAsync()
+    {
+        if (_featureStatusContextId is not { } id)
+            return;
+
+        try
+        {
+            await ContextResolver.GetRequiredAsync(id, WorkspaceId);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("was not found", StringComparison.Ordinal))
+        {
+            var special = await ContextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(WorkspaceId);
+            _featureStatusVisible = false;
+            _featureStatusContextId = null;
+            await SelectContextAsync(special, isSpecialWorkspace: true);
+            return;
+        }
+
+        await SelectedContextIdChanged.InvokeAsync(id);
+    }
+
+    private async Task SelectContextAsync(WorkspaceFeatureContextId contextId, bool isSpecialWorkspace)
+    {
+        await SelectedContextService.SetSelectedAsync(WorkspaceId, contextId);
+        await SelectedContextIdChanged.InvokeAsync(contextId);
+        var path = new Uri(Navigation.Uri).GetLeftPart(UriPartial.Path);
+        if (isSpecialWorkspace)
+            Navigation.NavigateTo(path, replace: true);
+        else
+            Navigation.NavigateTo($"{path}?context={contextId.Value}", replace: true);
+    }
 }

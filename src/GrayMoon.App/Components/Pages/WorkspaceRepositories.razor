@@ -22,7 +22,6 @@
                                     IsFeatureContext="_isFeatureContext"
                                     IsReadOnlyContext="_isReadOnlyContext"
                                     OnSelectedContextChanged="OnSelectedContextChangedAsync"
-                                    OnRequestCreateFeature="OnRequestCreateFeatureAsync"
                                     OnRequestRemoveFeature="OnRequestRemoveFeatureFromSelectorAsync"
                                     OnRemoveFeature="OnRemoveFeatureAsync"
                                     OnShowFeatureStatus="() => OpenFeatureStatusPanel()"
@@ -72,12 +71,6 @@
                                     OnSearchChanged="OnSearchChanged"
                                     OnClearSearch="ClearSearchFilter"
                                     OnSearchKeyDown="OnSearchKeyDown" />
-        <CreateFeatureModal IsVisible="_createFeatureModalVisible"
-                            WorkspaceId="WorkspaceId"
-                            InitialName="@_createFeatureInitialName"
-                            WorkspaceBranchName="@_createFeatureWorkspaceBranch"
-                            OnCancel="() => _createFeatureModalVisible = false"
-                            OnCreated="OnFeatureCreatedAsync" />
         <RemoveFeatureModal IsVisible="_removeFeatureModalVisible"
                             FeatureContextId="_removeFeatureContextId"
                             InitialPlan="_removeFeaturePlan"
