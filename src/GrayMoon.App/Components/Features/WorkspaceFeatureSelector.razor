@@ -414,11 +414,13 @@
     {
         // Blazor paints once OnParametersSetAsync reaches its first await. Load the recent-tool
         // buttons before that, or they show up a frame after New Feature.
+        // ParameterView expires at the first real await, so apply it synchronously first and hand
+        // the base an empty view (it still runs OnInitialized/OnParametersSet as usual).
+        parameters.SetParameterProperties(this);
         ApplyDesktopOpenInState();
-        if (parameters.TryGetValue<int>(nameof(WorkspaceId), out var workspaceId))
-            await EnsureRecentOpenInToolsAsync(workspaceId);
+        await EnsureRecentOpenInToolsAsync(WorkspaceId);
 
-        await base.SetParametersAsync(parameters);
+        await base.SetParametersAsync(ParameterView.Empty);
     }
 
     protected override void OnInitialized() => ApplyDesktopOpenInState();
