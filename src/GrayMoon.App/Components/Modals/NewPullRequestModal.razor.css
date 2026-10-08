@@ -111,6 +111,18 @@
     z-index: 1;
     font-size: 0.8125rem;
     text-decoration: none;
+    color: var(--text-secondary);
+    transition: color 0.15s ease-in-out;
+}
+
+.new-pr-branch-refresh:hover:not(:disabled),
+.new-pr-branch-refresh:focus-visible {
+    color: #f0f0f0;
+}
+
+.new-pr-branch-refresh:disabled {
+    color: var(--text-muted);
+    opacity: 1;
 }
 
 /* Centered on the panel midline (equal source/target columns). */
