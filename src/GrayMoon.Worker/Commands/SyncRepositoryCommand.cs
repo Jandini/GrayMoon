@@ -26,7 +26,8 @@ public sealed class SyncRepositoryCommand(
     ILocalGitSnapshotReader snapshotReader,
     ICsProjFileService csProjFileService,
     IRepositoryVersionProviderFactory versionProviderFactory,
-    ILogger<SyncRepositoryCommand>? logger = null) : ICommandHandler<SyncRepositoryRequest, SyncRepositoryResponse>
+    ILogger<SyncRepositoryCommand>? logger = null,
+    IGitChangesRefreshSuppressor? refreshSuppressor = null) : ICommandHandler<SyncRepositoryRequest, SyncRepositoryResponse>
 {
     /// <summary>Where the read lane's answers came from.</summary>
     private enum RefsSource
@@ -95,6 +96,11 @@ public sealed class SyncRepositoryCommand(
         string? fetchError = null;
         if (Directory.Exists(repoPath))
         {
+            // Fetch rewrites refs under .git, which the Git Changes watchers see as repository changes. Hold
+            // their per-event status refreshes back for the whole sync and let the scope's end schedule the one
+            // refresh; released on every exit (failed fetch, exception, cancellation) when this block ends.
+            using var refreshScope = refreshSuppressor?.BeginExternalRepositoryMutation(repoPath);
+
             var totalStart = Stopwatch.GetTimestamp();
             await git.AddSafeDirectoryAsync(repoPath, cancellationToken);
 

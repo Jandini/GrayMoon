@@ -20,7 +20,11 @@ public sealed class FakeRepositoryGitChangesService : IRepositoryGitChangesServi
     /// tests identify which scan (first vs. follow-up) a given caller's result actually came from.</summary>
     public readonly ConcurrentQueue<long> ObservedVersions = new();
 
+    private readonly ConcurrentDictionary<string, int> _callsPerRepo = new(StringComparer.OrdinalIgnoreCase);
+
     public int MaxConcurrentCalls => _maxConcurrentCalls;
+
+    public int CallsFor(string repoPath) => _callsPerRepo.GetValueOrDefault(repoPath, 0);
 
     public int MaxConcurrentCallsForRepo(string repoPath) =>
         _maxConcurrentCallsPerRepo.GetValueOrDefault(repoPath, 0);
@@ -29,6 +33,7 @@ public sealed class FakeRepositoryGitChangesService : IRepositoryGitChangesServi
     {
         Interlocked.Increment(ref CallCount);
         ObservedVersions.Enqueue(snapshotVersion);
+        _callsPerRepo.AddOrUpdate(repoPath, 1, (_, c) => c + 1);
 
         var globalActive = Interlocked.Increment(ref _activeCalls);
         InterlockedMax(ref _maxConcurrentCalls, globalActive);

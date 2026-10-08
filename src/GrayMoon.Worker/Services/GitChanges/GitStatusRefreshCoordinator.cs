@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using GrayMoon.Worker.Abstractions;
 using GrayMoon.Common.Git;
 using Microsoft.Extensions.Logging;
@@ -23,7 +24,7 @@ public enum RepositoryRefreshState
 /// runs. A dirty event that arrives while a scan is already in flight is coalesced into a single
 /// follow-up scan - a repository never has more than one active and one pending refresh.
 /// </summary>
-public sealed class GitStatusRefreshCoordinator : IDisposable
+public sealed class GitStatusRefreshCoordinator : IDisposable, IGitChangesRefreshSuppressor
 {
     private readonly IRepositoryGitChangesService _gitChangesService;
     private readonly GitChangesSnapshotCache _snapshotCache;
@@ -66,6 +67,7 @@ public sealed class GitStatusRefreshCoordinator : IDisposable
     public async Task<GitChangeStatusResult> RefreshNowAsync(string repoPath, CancellationToken cancellationToken, bool includeLineStats = false)
     {
         var tracker = GetOrAddTracker(repoPath);
+        tracker.NoteManualRefresh();
         var result = await RunScanAsync(repoPath, tracker, cancellationToken, includeLineStats);
         if (includeLineStats && result.Success && result.Snapshot != null && result.Snapshot.Insertions is null)
         {
@@ -83,6 +85,53 @@ public sealed class GitStatusRefreshCoordinator : IDisposable
     }
 
     public RepositoryRefreshState GetState(string repoPath) => GetOrAddTracker(repoPath).State;
+
+    /// <inheritdoc />
+    public IDisposable BeginExternalRepositoryMutation(string repoPath)
+    {
+        // The scope holds the tracker instance rather than looking it up again, so a RemoveTracker while the
+        // operation runs cannot strand the suppression count on a tracker nobody will release.
+        var tracker = GetOrAddTracker(repoPath);
+        tracker.BeginSuppression();
+        _logger.LogDebug("Git Changes refresh suppression entered for {RepoPath}", repoPath);
+        return new SuppressionScope(this, repoPath, tracker);
+    }
+
+    private void EndSuppression(string repoPath, RepositoryRefreshTracker tracker)
+    {
+        var end = tracker.EndSuppression();
+        if (!end.Released)
+        {
+            return;
+        }
+
+        // One debounced scan, through the same path a watcher event takes, so a watcher event that lands just
+        // after the last git process exits is absorbed into it instead of starting another.
+        var scheduled = end.Dirtied && !_disposed;
+        if (scheduled)
+        {
+            tracker.ScheduleDebouncedRefresh(
+                _options.WatcherDebounceMilliseconds,
+                () => _ = RunWatcherScanAsync(repoPath, tracker));
+        }
+
+        _logger.LogDebug(
+            "Git Changes refresh suppression released for {RepoPath}: duration={DurationMs}ms, watcherRefreshesCoalesced={Coalesced}, manualRefreshBypasses={Bypasses}, authoritativeRefreshScheduled={Scheduled}",
+            repoPath, (long)Stopwatch.GetElapsedTime(end.StartedAt).TotalMilliseconds, end.Coalesced, end.ManualBypasses, scheduled);
+    }
+
+    private sealed class SuppressionScope(GitStatusRefreshCoordinator owner, string repoPath, RepositoryRefreshTracker tracker) : IDisposable
+    {
+        private int _disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                owner.EndSuppression(repoPath, tracker);
+            }
+        }
+    }
 
     /// <summary>
     /// Drops the refresh tracker for a repository that is no longer being watched (its
@@ -220,6 +269,58 @@ internal sealed class RepositoryRefreshTracker : IDisposable
     private int _debounceGeneration;
     private TaskCompletionSource<GitChangeStatusResult>? _pendingCompletion;
 
+    // Sync suppression: open scopes, whether a watcher event was swallowed while any were open, and per-episode
+    // counters for the release log line. An episode runs from the first scope opening to the last one closing.
+    private int _suppressionCount;
+    private bool _dirtiedWhileSuppressed;
+    private int _coalescedEvents;
+    private int _manualBypasses;
+    private long _suppressionStartedAt;
+
+    /// <summary>What closing a suppression scope left behind. Counters are meaningful only when <see cref="Released"/>.</summary>
+    public readonly record struct SuppressionEnd(bool Released, bool Dirtied, int Coalesced, int ManualBypasses, long StartedAt);
+
+    public void BeginSuppression()
+    {
+        lock (_gate)
+        {
+            if (_suppressionCount++ == 0)
+            {
+                _dirtiedWhileSuppressed = false;
+                _coalescedEvents = 0;
+                _manualBypasses = 0;
+                _suppressionStartedAt = Stopwatch.GetTimestamp();
+            }
+        }
+    }
+
+    public SuppressionEnd EndSuppression()
+    {
+        lock (_gate)
+        {
+            if (_suppressionCount == 0 || --_suppressionCount > 0)
+            {
+                return default;
+            }
+
+            var end = new SuppressionEnd(true, _dirtiedWhileSuppressed, _coalescedEvents, _manualBypasses, _suppressionStartedAt);
+            _dirtiedWhileSuppressed = false;
+            return end;
+        }
+    }
+
+    /// <summary>Counts a manual refresh that ran while a suppression scope was open (it is never suppressed).</summary>
+    public void NoteManualRefresh()
+    {
+        lock (_gate)
+        {
+            if (_suppressionCount > 0)
+            {
+                _manualBypasses++;
+            }
+        }
+    }
+
     public RepositoryRefreshState State
     {
         get { lock (_gate) { return _state; } }
@@ -229,6 +330,15 @@ internal sealed class RepositoryRefreshTracker : IDisposable
     {
         lock (_gate)
         {
+            // A Sync is rewriting this repository's .git metadata: remember that something changed and let the
+            // end of the scope schedule the one refresh, rather than scanning (or queueing a follow-up) per event.
+            if (_suppressionCount > 0 && _state != RepositoryRefreshState.Disposed)
+            {
+                _dirtiedWhileSuppressed = true;
+                _coalescedEvents++;
+                return;
+            }
+
             switch (_state)
             {
                 case RepositoryRefreshState.Disposed:
@@ -277,6 +387,15 @@ internal sealed class RepositoryRefreshTracker : IDisposable
                 return;
             }
 
+            // A timer armed before the scope opened: keep the repository Dirty without a timer; the scope's end
+            // re-arms it.
+            if (_suppressionCount > 0)
+            {
+                _dirtiedWhileSuppressed = true;
+                _coalescedEvents++;
+                return;
+            }
+
             generation = _debounceGeneration;
             callback = _onDebounceElapsed;
         }
@@ -285,6 +404,13 @@ internal sealed class RepositoryRefreshTracker : IDisposable
         // Starting that scan would be the burst's first event, and the later events would queue a follow-up.
         lock (_gate)
         {
+            if (_suppressionCount > 0 && _state == RepositoryRefreshState.Dirty)
+            {
+                _dirtiedWhileSuppressed = true;
+                _coalescedEvents++;
+                return;
+            }
+
             if (_state != RepositoryRefreshState.Dirty || generation != _debounceGeneration)
             {
                 return;
