@@ -124,6 +124,8 @@ public sealed class WorkspaceOpenInRecentToolsTests
         Assert.Equal([FeatureOpenInTools.ClaudeCli], tools);
         Assert.DoesNotContain(fixture.Bridge.Sent, sent => sent.Command == "WriteRepositoryFile");
         Assert.Equal([FeatureOpenInTools.ClaudeCli], await recent.GetAsync(workspace.WorkspaceId));
+        Assert.True(recent.TryGetCached(workspace.WorkspaceId, out var cached));
+        Assert.Equal([FeatureOpenInTools.ClaudeCli], cached);
     }
 
     [Fact]
