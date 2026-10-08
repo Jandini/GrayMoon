@@ -93,7 +93,11 @@ internal static class FeatureOpenInTools
         return next;
     }
 
-    /// <summary>Recent tools that can be launched. IDEs are omitted when they are not installed.</summary>
+    /// <summary>
+    /// Tools from <paramref name="recent"/> that can be launched. Being listed is not enough:
+    /// Cursor, Claude CLI, VS Code, and Visual Studio are omitted unless installed.
+    /// Terminal and Explorer stay, because Desktop can always open them.
+    /// </summary>
     public static IReadOnlyList<string> VisibleButtons(
         IReadOnlyList<string> recent,
         bool cursor,

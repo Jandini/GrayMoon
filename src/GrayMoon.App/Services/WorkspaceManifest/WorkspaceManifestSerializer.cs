@@ -110,7 +110,7 @@ public static class WorkspaceManifestSerializer
         }
     }
 
-    /// <summary>True when the content is JSON whose <c>schemaVersion</c> is newer than this GrayMoon understands.</summary>
+    /// <summary>True when the content is JSON whose <c>version</c> is newer than this GrayMoon understands.</summary>
     public static bool IsNewerSchema(string content)
     {
         if (string.IsNullOrWhiteSpace(content))
@@ -134,11 +134,11 @@ public static class WorkspaceManifestSerializer
 
         foreach (var property in doc.RootElement.EnumerateObject())
         {
-            if (!string.Equals(property.Name, "schemaVersion", StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(property.Name, "version", StringComparison.OrdinalIgnoreCase))
                 continue;
             if (property.Value.ValueKind == JsonValueKind.Number && property.Value.TryGetInt32(out var version))
                 return version;
-            throw new JsonException("schemaVersion must be an integer.");
+            throw new JsonException("version must be an integer.");
         }
 
         return CurrentSchemaVersion;
