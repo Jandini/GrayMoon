@@ -347,7 +347,7 @@
     private bool editorUseGitHubActions = true;
     private int? editorWorkspaceRepositoryId;
     private int? editingWorkspaceRepositoryOriginalId;
-    private IReadOnlyList<WorkspaceModal.WorkspaceRepositoryChoice> editorWorkspaceRepositoryChoices = Array.Empty<WorkspaceModal.WorkspaceRepositoryChoice>();
+    private IReadOnlyList<RepositoryPickerChoice> editorWorkspaceRepositoryChoices = Array.Empty<RepositoryPickerChoice>();
     private const string WorkspaceRepositoryFeaturesExistMessage = "Rename and root changes are not possible while Features exist. Remove Features first.";
     private string? deleteBlockedMessage;
     private HashSet<int> editingWorkspaceRepositoryIds = new();
@@ -1050,7 +1050,7 @@
     /// Imported repositories offered by the "Workspace repository" select: everything that is not a Source of this
     /// Workspace (D13). Uses a short-lived factory context (AGENTS.md DbContext handling).
     /// </summary>
-    private async Task<IReadOnlyList<WorkspaceModal.WorkspaceRepositoryChoice>> LoadWorkspaceRepositoryChoicesAsync(
+    private async Task<IReadOnlyList<RepositoryPickerChoice>> LoadWorkspaceRepositoryChoicesAsync(
         IReadOnlySet<int> sourceRepositoryIds)
     {
         try
@@ -1067,7 +1067,7 @@
         catch (Exception ex)
         {
             Logger.LogError(ex, "Failed to load repositories for the Workspace repository select.");
-            return Array.Empty<WorkspaceModal.WorkspaceRepositoryChoice>();
+            return Array.Empty<RepositoryPickerChoice>();
         }
     }
 

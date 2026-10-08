@@ -196,3 +196,39 @@ Source: [graymoon-restore-workspace-and-worker-version-lock.md](graymoon-restore
 - Found and fixed: a restore with missing repositories used to rewrite `.graymoon.json` from the database and drop them; unknown profile values were silently ignored; a cancelled restore left the Workspace row behind.
 - The `workspaceRepository` capability (`GetCapabilities`, `IWorkerFeatureSupportService`) and the Repositories-page banner are removed. `WorkerVersionPolicy` defines the App/Worker version lock; `WorkerBridge` refuses every command except `SelfUpdate` and `GetHostInfo` on a version mismatch, so the Worker update works against any Worker version.
 - Full run: Common 261, Worker 567 (+1 pre-existing skip), App 1230 - all passed; build 0 warnings.
+
+---
+
+## 5. IMPROVEMENT - Restore Workspace dialog UX
+
+Status: **implemented - awaiting user commit / manual test** (2026-10-08)
+
+Source: [graymoon-restore-workspace-dialog-ux-improvements.md](graymoon-restore-workspace-dialog-ux-improvements.md).
+
+### Review against the code
+
+- Already in place from item 4: preflight on selection with a stale-answer gate, `org/repository` choices with connector text only when ambiguous, name following until edited, name / folder validation, the folder verdicts, the Worker unavailable / version mismatch callouts, and Restore enabled only when everything is ready.
+- Gaps: Restore used a separate search box plus a native `<select>`; the empty state had no Open Connectors action; the preview packed type, versioning and CI into one cell; and `OnAfterRenderAsync` focused the dialog on every render, which would take focus away from the search input (and close the picker) after every keystroke.
+
+### What was done
+
+- Extracted the Add Workspace picker into `Components/Shared/RepositoryPicker.razor` (+ `.razor.css`, with the CSS moved over unchanged). Its open / filter / highlight / keyboard logic is in `RepositoryPickerState` so it can be tested without a renderer. `RepositoryPickerChoice` replaces `WorkspaceModal.WorkspaceRepositoryChoice`.
+- `WorkspaceModal` uses it with `AllowNone="true"` and `Placeholder="None"`. The markup, class names, keyboard handling, highlight rules and case-insensitive filter are the same as before.
+- `RestoreWorkspaceModal` uses it with `AllowNone=false` ("Select a repository" / "Search repositories"). The search box + `<select>` and `RestoreWorkspaceFlow.FilterChoices` are removed. Choices are loaded once when the dialog opens and filtered in memory.
+- Empty catalog: an Open Connectors button now sits in the callout.
+- Preview: separate Profile / Versioning / CI / Repositories / Connectors rows (`restore-preview-grid`).
+- Missing summary wording: "N repositories are not currently available in GrayMoon. ... The Workspace can still be restored."
+- The dialog takes focus only once when it opens and once when the result panel appears.
+
+### Tests added
+
+- `RepositoryPickerStateTests` (replaces `WorkspaceRepositoryPickerFilterTests`): filtering, open with all choices, highlighting the current selection, filter reset on reopen, closed display text with and without None, arrow keys and their limits, None only when offered, Enter / NumpadEnter, Enter on None, Escape, no-matches state, empty catalog, and connector disambiguation feeding the picker.
+- `RestoreWorkspaceFlowTests`: a failed preflight leaves the picker usable and a new selection is checked; a typed name survives later selections; the picker choices match the Restore choices; updated missing-summary wording.
+- App tests: 1248 passed; build 0 warnings.
+
+### Manual test checklist
+
+1. Add / Edit Workspace: the Workspace repository picker looks and behaves exactly as before (None, current selection, disabled while Features exist, keyboard).
+2. Restore Workspace: one picker; typing filters immediately; arrows / Enter / Escape behave as in Add Workspace; Escape inside the open picker closes only the picker, not the dialog.
+3. Selecting a repository shows "Checking Workspace definition..." and then either an error (with the picker still usable) or the preview.
+4. No GitHub repositories: callout with Open Connectors; Restore disabled.

@@ -1,4 +1,5 @@
 using GrayMoon.Abstractions.Workspaces;
+using GrayMoon.App.Components.Shared;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services;
@@ -38,9 +39,9 @@ public sealed partial class RestoreWorkspaceModal : ComponentBase, IDisposable
 
     private ElementReference _modalElement;
     private IReadOnlyList<RestoreRepositoryChoice> _choices = Array.Empty<RestoreRepositoryChoice>();
+    private IReadOnlyList<RepositoryPickerChoice> _pickerChoices = Array.Empty<RepositoryPickerChoice>();
     private HashSet<string> _existingNames = new(StringComparer.OrdinalIgnoreCase);
     private int? _repositoryId;
-    private string _filter = string.Empty;
     private string _name = string.Empty;
     private string _autoName = string.Empty;
     private WorkspaceDirectoryState? _folder;
@@ -54,12 +55,10 @@ public sealed partial class RestoreWorkspaceModal : ComponentBase, IDisposable
     private string? _errorResidue;
     private bool _busy;
     private bool _wasVisible;
+    private bool _focusPending;
     private bool _disposed;
     private RestoreResultPanel? _panel;
     private int? _restoredWorkspaceId;
-
-    private IReadOnlyList<RestoreRepositoryChoice> FilteredChoices =>
-        RestoreWorkspaceFlow.FilterChoices(_choices, _filter);
 
     private string? NameError => string.IsNullOrWhiteSpace(_name) ? null : RestoreWorkspaceFlow.ValidateName(_name, _existingNames);
 
@@ -99,8 +98,11 @@ public sealed partial class RestoreWorkspaceModal : ComponentBase, IDisposable
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (IsVisible && !_busy && _panel is null)
+        // Focus the dialog once when it opens (and when the result panel replaces the form) so Enter / Escape work;
+        // focusing on every render would pull focus out of the repository picker and the name field.
+        if (IsVisible && !_busy && _focusPending)
         {
+            _focusPending = false;
             try
             {
                 await _modalElement.FocusAsync();
@@ -115,7 +117,6 @@ public sealed partial class RestoreWorkspaceModal : ComponentBase, IDisposable
     private async Task ResetAsync()
     {
         _repositoryId = null;
-        _filter = string.Empty;
         _name = string.Empty;
         _autoName = string.Empty;
         _folder = null;
@@ -127,6 +128,7 @@ public sealed partial class RestoreWorkspaceModal : ComponentBase, IDisposable
         _busy = false;
         _panel = null;
         _restoredWorkspaceId = null;
+        _focusPending = true;
 
         try
         {
@@ -137,6 +139,7 @@ public sealed partial class RestoreWorkspaceModal : ComponentBase, IDisposable
                 .ToListAsync();
             _choices = RestoreWorkspaceFlow.BuildChoices(
                 rows.Select(r => new RestoreRepositorySource(r.RepositoryId, r.RepositoryName, r.OrgName, r.ConnectorName)));
+            _pickerChoices = RestoreWorkspaceFlow.ToPickerChoices(_choices);
 
             var names = await db.Workspaces.AsNoTracking().Select(w => w.Name).ToListAsync();
             _existingNames = new HashSet<string>(names, StringComparer.OrdinalIgnoreCase);
@@ -145,15 +148,15 @@ public sealed partial class RestoreWorkspaceModal : ComponentBase, IDisposable
         {
             Logger.LogError(ex, "Failed to load repositories for the restore dialog.");
             _choices = Array.Empty<RestoreRepositoryChoice>();
+            _pickerChoices = Array.Empty<RepositoryPickerChoice>();
             _error = "Failed to load repositories. Please try again.";
         }
     }
 
-    private void OnFilterChanged(ChangeEventArgs e) => _filter = e.Value?.ToString() ?? string.Empty;
-
-    private async Task OnRepositoryChangedAsync(ChangeEventArgs e)
+    /// <summary>Selecting a repository (also the same one again, which re-checks it) starts the preflight right away.</summary>
+    private async Task OnRepositoryChangedAsync(int? repositoryId)
     {
-        _repositoryId = int.TryParse(e.Value?.ToString(), out var id) ? id : null;
+        _repositoryId = repositoryId;
         _error = null;
         _errorResidue = null;
         var choice = _choices.FirstOrDefault(c => c.RepositoryId == _repositoryId);
@@ -362,6 +365,7 @@ public sealed partial class RestoreWorkspaceModal : ComponentBase, IDisposable
         }
 
         _panel = panel;
+        _focusPending = true;
         StateHasChanged();
     }
 
@@ -441,7 +445,7 @@ public sealed record FolderCheck(string? Error, string? Note);
 /// <summary>One imported repository as the dialog lists it.</summary>
 public sealed record RestoreRepositorySource(int RepositoryId, string RepositoryName, string? OrgName, string? ConnectorName);
 
-/// <summary>One entry of the repository select: "org/repository", with the connector when that alone is ambiguous.</summary>
+/// <summary>One repository the dialog offers: "org/repository", with the connector when that alone is ambiguous.</summary>
 public sealed record RestoreRepositoryChoice(int RepositoryId, string RepositoryName, string DisplayName);
 
 /// <summary>Everything that decides whether Restore is enabled.</summary>
@@ -578,16 +582,9 @@ public static class RestoreWorkspaceFlow
             .ToList();
     }
 
-    public static IReadOnlyList<RestoreRepositoryChoice> FilterChoices(IReadOnlyList<RestoreRepositoryChoice> choices, string? filter)
-    {
-        if (string.IsNullOrWhiteSpace(filter))
-            return choices;
-
-        var terms = filter.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        return choices
-            .Where(c => terms.All(t => c.DisplayName.Contains(t, StringComparison.OrdinalIgnoreCase)))
-            .ToList();
-    }
+    /// <summary>The same rows for the shared repository picker (filtered in memory there, without a "None" row).</summary>
+    public static IReadOnlyList<RepositoryPickerChoice> ToPickerChoices(IEnumerable<RestoreRepositoryChoice> choices) =>
+        choices.Select(c => new RepositoryPickerChoice(c.RepositoryId, c.DisplayName)).ToList();
 
     /// <summary>Default Workspace name for a repository: its name without the organisation prefix of "org/name".</summary>
     public static string DefaultWorkspaceName(string? repositoryDisplayName)
@@ -683,8 +680,8 @@ public static class RestoreWorkspaceFlow
         if (repositories > 0)
         {
             parts.Add(repositories == 1
-                ? "1 repository is not currently imported into GrayMoon."
-                : $"{repositories} repositories are not currently imported into GrayMoon.");
+                ? "1 repository is not currently available in GrayMoon."
+                : $"{repositories} repositories are not currently available in GrayMoon.");
         }
 
         if (connectors > 0)
@@ -697,9 +694,7 @@ public static class RestoreWorkspaceFlow
         if (parts.Count == 0)
             return null;
 
-        parts.Add(repositories > 0
-            ? "The Workspace can be restored now, but those repositories will be missing."
-            : "The Workspace can be restored now.");
+        parts.Add("The Workspace can still be restored.");
         return string.Join(" ", parts);
     }
 

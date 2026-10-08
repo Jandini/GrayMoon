@@ -1,0 +1,80 @@
+@* Searchable repository picker: one input that shows the selection while closed and becomes the search field while open. *@
+<div class="workspace-repository-picker @(Disabled ? "disabled" : "")">
+    <input type="text"
+           class="form-control workspace-repository-select"
+           id="@Id"
+           autocomplete="off"
+           placeholder="@(_state.IsOpen ? SearchPlaceholder : Placeholder)"
+           value="@(_state.IsOpen ? _state.Filter : RepositoryPickerState.ClosedText(Choices, SelectedRepositoryId, AllowNone, NoneLabel))"
+           disabled="@Disabled"
+           @onfocus="Open"
+           @onclick="Open"
+           @onblur="() => _state.Close()"
+           @oninput="OnFilterChanged"
+           @onkeydown="OnKeyDownAsync"
+           @onkeydown:stopPropagation="_state.IsOpen" />
+    @if (_state.IsOpen && !Disabled)
+    {
+        var filteredChoices = _state.Filtered(Choices);
+        <div class="workspace-repository-list" role="listbox">
+            @if (AllowNone)
+            {
+                <button type="button" role="option"
+                        class="workspace-repository-option text-nowrap @(SelectedRepositoryId is null ? "active" : "") @(_state.IsNoneHighlighted ? "highlighted" : "")"
+                        @onmousedown="() => SelectAsync(null)"
+                        @onmousedown:preventDefault>@NoneLabel</button>
+            }
+            @for (var i = 0; i < filteredChoices.Count; i++)
+            {
+                var choice = filteredChoices[i];
+                <button type="button" role="option"
+                        class="workspace-repository-option text-nowrap @(choice.RepositoryId == SelectedRepositoryId ? "active" : "") @(_state.IsChoiceHighlighted(i) ? "highlighted" : "")"
+                        @onmousedown="() => SelectAsync(choice.RepositoryId)"
+                        @onmousedown:preventDefault>@choice.DisplayName</button>
+            }
+            @if (filteredChoices.Count == 0)
+            {
+                <div class="workspace-repository-empty text-nowrap">No matching repositories</div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public int? SelectedRepositoryId { get; set; }
+    [Parameter] public EventCallback<int?> SelectedRepositoryIdChanged { get; set; }
+    [Parameter] public IReadOnlyList<RepositoryPickerChoice> Choices { get; set; } = Array.Empty<RepositoryPickerChoice>();
+    [Parameter] public string Placeholder { get; set; } = "Select a repository";
+    [Parameter] public string SearchPlaceholder { get; set; } = "Search repositories";
+    [Parameter] public bool AllowNone { get; set; }
+    [Parameter] public string NoneLabel { get; set; } = "None";
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public string? Id { get; set; }
+
+    private readonly RepositoryPickerState _state = new();
+
+    protected override void OnParametersSet() => _state.AllowNone = AllowNone;
+
+    private void Open()
+    {
+        if (!Disabled)
+            _state.Open(Choices, SelectedRepositoryId);
+    }
+
+    private void OnFilterChanged(ChangeEventArgs e) => _state.SetFilter(Choices, e.Value?.ToString());
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (_state.HandleKey(e.Key, Choices) is { } selection)
+            await SelectAsync(selection.RepositoryId);
+    }
+
+    private async Task SelectAsync(int? repositoryId)
+    {
+        if (Disabled)
+            return;
+
+        _state.Close();
+        await SelectedRepositoryIdChanged.InvokeAsync(repositoryId);
+    }
+}

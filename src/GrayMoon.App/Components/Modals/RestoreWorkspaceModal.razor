@@ -71,33 +71,23 @@
                         }
 
                         <div class="mb-3">
-                            <label class="form-label text-nowrap" for="restore-workspace-filter">Workspace repository</label>
+                            <label class="form-label text-nowrap" for="restore-workspace-repository">Workspace repository</label>
                             @if (_choices.Count == 0)
                             {
                                 <div class="gm-callout gm-callout--warning" role="alert">
                                     <div>No GitHub repositories are available.</div>
                                     <div class="small mt-1">Import the Workspace repository through Connectors first, then return here.</div>
+                                    <button type="button" class="btn btn-sm btn-outline-dark text-nowrap mt-2" @onclick="OpenConnectors">Open Connectors</button>
                                 </div>
                             }
                             else
                             {
-                                <input type="text"
-                                       id="restore-workspace-filter"
-                                       class="form-control mb-2"
-                                       autocomplete="off"
-                                       placeholder="Search repositories"
-                                       value="@_filter"
-                                       @oninput="OnFilterChanged" />
-                                <select class="form-select"
-                                        id="restore-workspace-repository"
-                                        aria-label="Workspace repository"
-                                        @onchange="OnRepositoryChangedAsync">
-                                    <option value="" selected="@(_repositoryId is null)">Select a repository</option>
-                                    @foreach (var choice in FilteredChoices)
-                                    {
-                                        <option value="@choice.RepositoryId" selected="@(choice.RepositoryId == _repositoryId)">@choice.DisplayName</option>
-                                    }
-                                </select>
+                                <RepositoryPicker Id="restore-workspace-repository"
+                                                  Choices="@_pickerChoices"
+                                                  SelectedRepositoryId="@_repositoryId"
+                                                  SelectedRepositoryIdChanged="OnRepositoryChangedAsync"
+                                                  Placeholder="Select a repository"
+                                                  SearchPlaceholder="Search repositories" />
                             }
                         </div>
 
@@ -117,18 +107,18 @@
                             {
                                 <div class="restore-preview border rounded p-2 mb-3">
                                     <div class="fw-semibold mb-1">GrayMoon Workspace</div>
-                                    <div class="row small g-1">
-                                        <div class="col-4 text-muted">Profile</div>
-                                        <div class="col-8">
-                                            @RestoreWorkspaceFlow.ProfileTypeLabel(preview.WorkspaceType)<br />
-                                            @RestoreWorkspaceFlow.VersioningLabel(preview.VersioningMode)<br />
-                                            @RestoreWorkspaceFlow.CiLabel(preview.CiProvider)
-                                        </div>
-                                        <div class="col-4 text-muted">Repositories</div>
-                                        <div class="col-8">@preview.RepositoryCount</div>
-                                        <div class="col-4 text-muted">Connectors</div>
-                                        <div class="col-8">@preview.ConfiguredConnectorCount configured locally, @preview.MissingConnectors.Count missing</div>
-                                    </div>
+                                    <dl class="restore-preview-grid small mb-0">
+                                        <dt class="text-muted">Profile</dt>
+                                        <dd>@RestoreWorkspaceFlow.ProfileTypeLabel(preview.WorkspaceType)</dd>
+                                        <dt class="text-muted">Versioning</dt>
+                                        <dd>@RestoreWorkspaceFlow.VersioningLabel(preview.VersioningMode)</dd>
+                                        <dt class="text-muted">CI</dt>
+                                        <dd>@RestoreWorkspaceFlow.CiLabel(preview.CiProvider)</dd>
+                                        <dt class="text-muted">Repositories</dt>
+                                        <dd>@preview.RepositoryCount</dd>
+                                        <dt class="text-muted">Connectors</dt>
+                                        <dd>@preview.ConfiguredConnectorCount configured locally<br />@preview.MissingConnectors.Count missing</dd>
+                                    </dl>
                                 </div>
                                 @if (RestoreWorkspaceFlow.MissingSummary(preview) is { } missingSummary)
                                 {

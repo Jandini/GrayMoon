@@ -274,8 +274,42 @@ public sealed class RestoreWorkspaceFlowTests
             choices.Select(c => c.DisplayName).ToArray());
         Assert.Equal("ws", choices.Single(c => c.RepositoryId == 1).RepositoryName);
 
-        Assert.Equal([3], RestoreWorkspaceFlow.FilterChoices(choices, "acme api").Select(c => c.RepositoryId).ToArray());
-        Assert.Equal(4, RestoreWorkspaceFlow.FilterChoices(choices, "  ").Count);
+        Assert.Equal(
+            choices.Select(c => (c.RepositoryId, c.DisplayName)),
+            RestoreWorkspaceFlow.ToPickerChoices(choices).Select(c => (c.RepositoryId, c.DisplayName)));
+    }
+
+    [Fact]
+    public void Selecting_a_repository_starts_a_preflight_and_a_failed_one_leaves_the_picker_usable()
+    {
+        var gate = new RestorePreflightGate();
+
+        // Selecting repository 1 starts its check; Restore waits for it.
+        var invalid = gate.Begin(1);
+        Assert.True(gate.IsPending);
+        Assert.True(gate.TryComplete(invalid, selectedRepositoryId: 1));
+
+        // Its definition was invalid: Restore stays disabled, but choosing another repository checks that one.
+        var failed = new RestoreReadinessBuilder().Build() with { Preflight = RestoreWorkspacePreflight.Failed("This repository does not contain .graymoon.json.") };
+        Assert.False(RestoreWorkspaceFlow.CanRestore(failed));
+
+        var next = gate.Begin(2);
+        Assert.True(gate.IsPending);
+        Assert.True(gate.TryComplete(next, selectedRepositoryId: 2));
+        Assert.True(RestoreWorkspaceFlow.CanRestore(failed with { RepositoryId = 2, Preflight = Preview() }));
+    }
+
+    [Fact]
+    public void A_typed_name_survives_later_repository_selections()
+    {
+        var (name, autoName) = RestoreWorkspaceFlow.FollowRepositoryName("", "", "GrayMoon.Workspace");
+        Assert.Equal("GrayMoon.Workspace", name);
+
+        // The user types their own name; neither another selection nor re-selecting the same repository replaces it.
+        (name, autoName) = RestoreWorkspaceFlow.FollowRepositoryName("MyWorkspace", autoName, "Platform.Workspace");
+        Assert.Equal("MyWorkspace", name);
+        (name, _) = RestoreWorkspaceFlow.FollowRepositoryName(name, autoName, "GrayMoon.Workspace");
+        Assert.Equal("MyWorkspace", name);
     }
 
     [Fact]
@@ -284,8 +318,8 @@ public sealed class RestoreWorkspaceFlowTests
         Assert.Null(RestoreWorkspaceFlow.MissingSummary(Preview()));
 
         Assert.Equal(
-            "2 repositories are not currently imported into GrayMoon. 1 connector is not configured on this computer. "
-            + "The Workspace can be restored now, but those repositories will be missing.",
+            "2 repositories are not currently available in GrayMoon. 1 connector is not configured on this computer. "
+            + "The Workspace can still be restored.",
             RestoreWorkspaceFlow.MissingSummary(Preview() with
             {
                 MissingRepositories = ["acme/a", "acme/b"],
@@ -293,7 +327,7 @@ public sealed class RestoreWorkspaceFlowTests
             }));
 
         Assert.Equal(
-            "1 connector is not configured on this computer. The Workspace can be restored now.",
+            "1 connector is not configured on this computer. The Workspace can still be restored.",
             RestoreWorkspaceFlow.MissingSummary(Preview() with { MissingConnectors = ["ghe.example"] }));
     }
 
