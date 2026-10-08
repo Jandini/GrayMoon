@@ -169,6 +169,7 @@ public sealed class CommandLineServiceTests
         // stdin, parent used to write-all-stdin before starting stdout consumers (and before the timeout
         // CTS existed). With consumers+timeout first, this completes instead of hanging forever.
         var service = CreateService();
+        using var workDir = TestProcess.CreateLargeStdoutWorkDirectory();
         var (fileName, arguments) = TestProcess.WriteLargeStdoutThenDrainStdin();
         var stdin = new byte[262_144];
         Array.Fill(stdin, (byte)'Y');
@@ -180,6 +181,7 @@ public sealed class CommandLineServiceTests
         var result = await service.RunAsync(
             fileName,
             arguments,
+            workingDirectory: workDir.Path,
             stdinBytes: stdin,
             cancellationToken: cts.Token,
             timeout: TimeSpan.FromSeconds(30));
@@ -193,6 +195,7 @@ public sealed class CommandLineServiceTests
     public async Task RunAsync_StringStdinOverload_DoesNotDeadlock_WhenChildWritesStdoutWhileReadingStdin()
     {
         var service = CreateService();
+        using var workDir = TestProcess.CreateLargeStdoutWorkDirectory();
         var (fileName, arguments) = TestProcess.WriteLargeStdoutThenDrainStdinAsArgumentsString();
         var stdin = new string('Y', 262_144);
 
@@ -203,6 +206,7 @@ public sealed class CommandLineServiceTests
         var result = await service.RunAsync(
             fileName,
             arguments,
+            workingDirectory: workDir.Path,
             stdin: stdin,
             cancellationToken: cts.Token,
             timeout: TimeSpan.FromSeconds(30));
@@ -243,21 +247,44 @@ public sealed class CommandLineServiceTests
         /// Writes ~256 KiB to stdout, then drains stdin to EOF. Used to detect stdin-before-stdout
         /// pipe deadlocks in <see cref="CommandLineService"/>.
         /// </summary>
+        /// <summary>Name of the 256 KB file the Windows large-stdout helper prints (see <see cref="CreateLargeStdoutWorkDirectory"/>).</summary>
+        private const string LargeStdoutFileName = "large-stdout.txt";
+
+        // Windows: cmd built-ins only (type, then more.com draining stdin to nul). This used to be a PowerShell
+        // byte-by-byte loop, whose cold start plus interpreted loop could exceed the 30 s timeout on a loaded CI
+        // runner while the test assemblies run in parallel; cmd starts and finishes in milliseconds. more.com is
+        // called by full path so Git for Windows' Unix tools on PATH are never picked up instead.
+        private const string WindowsWriteThenDrain = "type " + LargeStdoutFileName + " & %SystemRoot%\\System32\\more.com >nul";
+
+        /// <summary>
+        /// Temporary working directory for the large-stdout helpers; on Windows it holds the 256 KB file the child
+        /// writes to stdout before it starts reading stdin. Deleted on dispose.
+        /// </summary>
+        public static TempDirectory CreateLargeStdoutWorkDirectory()
+        {
+            var directory = new TempDirectory(Directory.CreateTempSubdirectory("graymoon-cls-").FullName);
+            File.WriteAllText(System.IO.Path.Combine(directory.Path, LargeStdoutFileName), new string('X', 262_144));
+            return directory;
+        }
+
         public static (string FileName, IReadOnlyList<string> Arguments) WriteLargeStdoutThenDrainStdin()
             => OperatingSystem.IsWindows()
-                ? ("powershell.exe",
-                [
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-Command",
-                    "$out = [Console]::OpenStandardOutput(); $data = New-Object byte[] 262144; for ($i = 0; $i -lt $data.Length; $i++) { $data[$i] = 88 }; $out.Write($data, 0, $data.Length); $out.Flush(); $in = [Console]::OpenStandardInput(); $buf = New-Object byte[] 4096; while ($in.Read($buf, 0, $buf.Length) -gt 0) { }",
-                ])
+                ? ("cmd.exe", ["/d", "/c", WindowsWriteThenDrain])
                 : ("/bin/sh", ["-c", "dd if=/dev/zero bs=1024 count=256 status=none; cat >/dev/null"]);
 
         public static (string FileName, string Arguments) WriteLargeStdoutThenDrainStdinAsArgumentsString()
             => OperatingSystem.IsWindows()
-                ? ("powershell.exe",
-                    "-NoProfile -NonInteractive -Command \"$out = [Console]::OpenStandardOutput(); $data = New-Object byte[] 262144; for ($i = 0; $i -lt $data.Length; $i++) { $data[$i] = 88 }; $out.Write($data, 0, $data.Length); $out.Flush(); $in = [Console]::OpenStandardInput(); $buf = New-Object byte[] 4096; while ($in.Read($buf, 0, $buf.Length) -gt 0) { }\"")
+                ? ("cmd.exe", $"/d /c \"{WindowsWriteThenDrain}\"")
                 : ("/bin/sh", "-c \"dd if=/dev/zero bs=1024 count=256 status=none; cat >/dev/null\"");
+
+        public sealed class TempDirectory(string path) : IDisposable
+        {
+            public string Path { get; } = path;
+
+            public void Dispose()
+            {
+                try { Directory.Delete(Path, true); } catch { /* best-effort */ }
+            }
+        }
     }
 }
