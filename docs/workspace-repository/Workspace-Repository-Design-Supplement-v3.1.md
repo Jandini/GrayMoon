@@ -1,5 +1,7 @@
 # Workspace as a Git Repository - Design Supplement v3.1
 
+> **Superseded in part (2026-10-08):** the `workspaceRepository` Worker capability (`supportedFeatures`, `GetCapabilities`, `IWorkerFeatureSupportService`) and the Repositories-page compatibility banner were removed. App/Worker compatibility is now the version lock (`WorkerVersionPolicy`), and Restore validates `.graymoon.json` before creating anything; "Restored without definition" no longer exists. See `docs/feedback/graymoon-restore-workspace-and-worker-version-lock.md`.
+
 **Status:** Binding amendments to `GrayMoon-Workspace-As-Git-Repository-Design-v3.md`  
 **Why it exists:** The v3 review (`Workspace-Repository-Design-Review-2026-10-06.md`) found that v3 assumes the App resolves repository paths and writes files. In GrayMoon the Worker does both. This document records the decisions that make v3 implementable. Where v3 and this document disagree, this document wins.  
 **Date:** 2026-10-06

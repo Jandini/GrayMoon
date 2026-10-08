@@ -3,10 +3,12 @@ using GrayMoon.Abstractions.Workspaces;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
+using GrayMoon.App.Services.GitChanges;
 using GrayMoon.App.Services.GitHub;
 using GrayMoon.App.Services.Jobs;
 using GrayMoon.App.Services.Worker;
 using GrayMoon.App.Services.WorkspaceManifest;
+using GrayMoon.App.Services.Workspaces;
 using GrayMoon.Application;
 using GrayMoon.Application.Features;
 using GrayMoon.Application.WorkspaceManifest;
@@ -20,21 +22,25 @@ namespace GrayMoon.App.Services.Application;
 
 /// <summary>
 /// Enable, disable and restore of the Workspace repository (D3, D4, D14). Enabling runs under the Workspace's
-/// structural lock; every database change goes through factory-created contexts.
+/// structural lock; every database change goes through factory-created contexts. Worker compatibility is not a
+/// per-feature question: the App/Worker version lock (<see cref="WorkerVersionPolicy"/>) decides whether the Worker
+/// may run commands at all.
 /// </summary>
 public sealed class WorkspaceRepositoryOperations(
     IDbContextFactory<AppDbContext> dbContextFactory,
     IWorkerBridge workerBridge,
-    IWorkerFeatureSupportService featureSupport,
+    IRemoteWorkspaceManifestReader remoteManifestReader,
     IWorkspaceManifestService manifestService,
     IWorkspaceOperationLock operationLock,
     IWorkspaceContextPathResolver pathResolver,
     IWorkspaceFeatureContextResolver contextResolver,
     WorkspaceRepositoryEntity workspaceRepository,
+    WorkspaceService workspaceService,
+    IGitChangesWorkspaceScanner gitChangesScanner,
     ILogger<WorkspaceRepositoryOperations> logger) : IWorkspaceRepositoryOperations
 {
-    internal const string UnsupportedWorkerMessage =
-        "The connected Worker does not support Workspace repositories. Update the Worker and try again.";
+    internal const string NonEmptyFolderMessage =
+        "This folder already contains files. Choose another Workspace name or move the existing files.";
 
     internal const string FeaturesExistOnEnableMessage =
         "Cannot enable a Workspace repository while Features exist. Remove Features first.";
@@ -109,6 +115,34 @@ public sealed class WorkspaceRepositoryOperations(
         return OperationResult.Ok();
     }
 
+    public async Task<RestoreWorkspacePreflight> PreflightRestoreAsync(int repositoryId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var (plan, error) = await CheckRemoteDefinitionAsync(repositoryId, cancellationToken);
+            if (plan is null)
+                return RestoreWorkspacePreflight.Failed(error!);
+
+            return new RestoreWorkspacePreflight
+            {
+                Success = true,
+                DefinitionName = plan.Plan.Manifest.Workspace.Name,
+                WorkspaceType = plan.Plan.Type,
+                VersioningMode = plan.Plan.Versioning,
+                CiProvider = plan.Plan.Ci,
+                RepositoryCount = plan.Plan.RepositoryCount,
+                ConnectorCount = plan.Plan.ConnectorCount,
+                MissingConnectors = plan.Plan.MissingConnectors,
+                MissingRepositories = plan.Plan.MissingRepositories,
+            };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Restore preflight threw. RepositoryId={RepositoryId}", repositoryId);
+            return RestoreWorkspacePreflight.Failed(ex.Message);
+        }
+    }
+
     public async Task<RestoreWorkspaceResult> RestoreFromRepositoryAsync(
         int repositoryId,
         string workspaceName,
@@ -122,7 +156,7 @@ public sealed class WorkspaceRepositoryOperations(
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogWarning(ex, "Restore from Workspace repository threw. RepositoryId={RepositoryId}", repositoryId);
-            return RestoreFailure(ex.Message);
+            return RestoreWorkspaceResult.Failed(ex.Message);
         }
     }
 
@@ -132,9 +166,9 @@ public sealed class WorkspaceRepositoryOperations(
         IProgress<OperationProgress> progress,
         CancellationToken cancellationToken)
     {
-        // (a) compatibility gate (D2)
-        if (!await featureSupport.SupportsAsync(WorkerFeatures.WorkspaceRepository, cancellationToken))
-            return OperationResult.Fail(UnsupportedWorkerMessage);
+        // (a) the Worker must be connected and version-matched before anything changes
+        if (workerBridge.GetUnavailableReason() is { } workerUnavailable)
+            return OperationResult.Fail(workerUnavailable);
 
         await using (var db = await dbContextFactory.CreateDbContextAsync(cancellationToken))
         {
@@ -183,8 +217,38 @@ public sealed class WorkspaceRepositoryOperations(
                 $"The Workspace repository was attached, but the Workspace definition could not be written: {manifest.Error}");
         }
 
+        // Clone plus the .gitignore and definition writes leave uncommitted files. Scan now so the
+        // nav dot and Changes data update without opening the Changes page.
+        var contextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+        await RefreshGitChangesAfterEnableAsync(workspaceId, contextId, repositoryId, cancellationToken);
+
         // (h)
         return OperationResult.Ok();
+    }
+
+    private async Task RefreshGitChangesAfterEnableAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        int repositoryId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await gitChangesScanner.ScanWorkspaceAsync(
+                workspaceId,
+                contextId,
+                cancellationToken,
+                repositoryId: repositoryId,
+                persistImmediately: true);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            logger.LogDebug("Git Changes refresh after enabling the Workspace repository was cancelled. WorkspaceId={WorkspaceId}", workspaceId);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Git Changes refresh after enabling the Workspace repository failed. WorkspaceId={WorkspaceId}", workspaceId);
+        }
     }
 
     private async Task<RestoreWorkspaceResult> RestoreCoreAsync(
@@ -193,125 +257,257 @@ public sealed class WorkspaceRepositoryOperations(
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken)
     {
-        // D14 step 1
-        if (string.IsNullOrWhiteSpace(workspaceName))
-            return RestoreFailure("Workspace name is required.");
+        // Everything below until the Workspace row is created only reads: a failure here changes nothing.
+        var name = workspaceName?.Trim() ?? string.Empty;
+        if (name.Length == 0)
+            return RestoreWorkspaceResult.Failed("Workspace name is required.");
 
-        if (!await featureSupport.SupportsAsync(WorkerFeatures.WorkspaceRepository, cancellationToken))
-            return RestoreFailure(UnsupportedWorkerMessage);
+        if (workerBridge.GetUnavailableReason() is { } workerUnavailable)
+            return RestoreWorkspaceResult.Failed(workerUnavailable);
 
-        await using (var db = await dbContextFactory.CreateDbContextAsync(cancellationToken))
-        {
-            if (!await db.Repositories.AnyAsync(r => r.RepositoryId == repositoryId, cancellationToken))
-                return RestoreFailure("Repository not found.");
-        }
+        progress.Report("Checking Workspace definition...");
+        var (checkedDefinition, definitionError) = await CheckRemoteDefinitionAsync(repositoryId, cancellationToken);
+        if (checkedDefinition is null)
+            return RestoreWorkspaceResult.Failed(definitionError!);
 
-        // D14 step 2: Workspace row (Basic / None / None) + Workspace-role link, then attach.
-        progress.Report("Creating Workspace...");
+        var folder = await workspaceService.GetDirectoryStateAsync(name, null, cancellationToken);
+        if (folder.Error is not null)
+            return RestoreWorkspaceResult.Failed($"Could not check the Workspace folder: {folder.Error}");
+        if (folder.Exists && folder.IsEmpty != true)
+            return RestoreWorkspaceResult.Failed(NonEmptyFolderMessage);
+
+        // D14 step 2: Workspace row (Basic / None / None); from here on a failure rolls the Workspace back.
+        progress.Report("Preparing Workspace...");
         WorkspaceEntity workspace;
         try
         {
             workspace = await workspaceRepository.AddAsync(
-                workspaceName, [], WorkspaceType.Basic, WorkspaceVersioningMode.None, WorkspaceCiProvider.None);
+                name, [], WorkspaceType.Basic, WorkspaceVersioningMode.None, WorkspaceCiProvider.None);
         }
         catch (InvalidOperationException ex)
         {
-            return RestoreFailure(ex.Message);
+            return RestoreWorkspaceResult.Failed(ex.Message);
         }
 
         var workspaceId = workspace.WorkspaceId;
-        var attach = await LinkAndAttachAsync(workspaceId, repositoryId, progress, cancellationToken, requireEmptyRoot: true);
-        if (!attach.Success)
+        var cloneUrl = checkedDefinition.Context.CloneUrl;
+        try
         {
-            await DeleteWorkspaceAsync(workspaceId);
-            return RestoreFailure(attach.Error ?? "Attaching the Workspace repository failed.");
-        }
+            var (result, error) = await RestoreIntoWorkspaceAsync(workspaceId, repositoryId, checkedDefinition.Context, progress, cancellationToken);
+            if (result is not null)
+                return result;
 
-        // D14 step 3
-        progress.Report("Reading Workspace definition...");
+            var residue = await RollbackRestoreAsync(workspaceId, cloneUrl, folder.Exists);
+            return RestoreWorkspaceResult.Failed(error!, residue);
+        }
+        catch (OperationCanceledException)
+        {
+            await RollbackRestoreAsync(workspaceId, cloneUrl, folder.Exists);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Restore failed after the Workspace was created. WorkspaceId={WorkspaceId}", workspaceId);
+            var residue = await RollbackRestoreAsync(workspaceId, cloneUrl, folder.Exists);
+            return RestoreWorkspaceResult.Failed(ex.Message, residue);
+        }
+    }
+
+    /// <summary>
+    /// D14 steps 2-7 for a Workspace row that already exists. Returns the result on success, or the error that must
+    /// roll the Workspace back. Writing .gitignore and the definition happens after the Workspace is usable, so those
+    /// failures are warnings: the drift banner offers "Write Workspace definition to disk" to repair them.
+    /// </summary>
+    private async Task<(RestoreWorkspaceResult? Result, string? Error)> RestoreIntoWorkspaceAsync(
+        int workspaceId,
+        int repositoryId,
+        RestoreContext context,
+        IProgress<OperationProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        var attach = await LinkAndAttachAsync(
+            workspaceId, repositoryId, progress, cancellationToken, requireEmptyRoot: true, attachMessage: "Cloning Workspace repository...");
+        if (!attach.Success)
+            return (null, attach.Error ?? "Cloning the Workspace repository failed.");
+
+        // D14 step 3: the remote branch may have changed since the preflight, so the local copy is validated again.
         var (_, args) = await GetSpecialContextArgsAsync(workspaceId, cancellationToken);
         var read = await WorkspaceRepositoryFileAccess.ReadAsync(
             workerBridge, args, WorkspaceRepositoryFileAccess.ManifestFilePath, cancellationToken);
         if (read.Error is not null)
-            return RestoredWithoutDefinition(workspaceId, read.Error);
-        if (!read.Found)
-            return RestoredWithoutDefinition(workspaceId, $"{WorkspaceRepositoryFileAccess.ManifestFilePath} was not found in the Workspace repository");
-        if (!manifestService.TryParse(read.Content ?? string.Empty, out var manifest, out var parseError) || manifest is null)
-            return RestoredWithoutDefinition(workspaceId, parseError ?? "Workspace definition could not be read");
+            return (null, $"The Workspace definition could not be read after cloning: {read.Error}");
+
+        var localContent = read.Found ? read.Content ?? string.Empty : null;
+        var (plan, planError) = RestoreDefinitionEvaluator.Evaluate(localContent, context.CloneUrl, context.Connectors, context.Catalog);
+        if (plan is null)
+            return (null, planError);
 
         // D14 step 4
         progress.Report("Applying Workspace profile...");
-        await ApplyProfileAsync(workspaceId, manifest.Workspace.Profile, cancellationToken);
+        await ApplyProfileAsync(workspaceId, plan.Type, plan.Versioning, plan.Ci, cancellationToken);
 
-        await using var restoreDb = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        // D14 steps 5-6: every Source repository that resolves locally; the rest is reported, never fabricated.
+        progress.Report(plan.SourceRepositoryIds.Count > 0
+            ? $"Linking {plan.SourceRepositoryIds.Count} repositories..."
+            : "Linking repositories...");
+        if (plan.SourceRepositoryIds.Count > 0)
+        {
+            await using var linkDb = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+            foreach (var resolvedId in plan.SourceRepositoryIds)
+            {
+                linkDb.WorkspaceRepositories.Add(new WorkspaceRepositoryLink
+                {
+                    WorkspaceId = workspaceId,
+                    RepositoryId = resolvedId,
+                    Role = WorkspaceRepositoryRole.Source,
+                    SyncStatus = RepoSyncStatus.NeedsSync,
+                });
+            }
 
-        // D14 step 5: connectors (D11). Nothing is fabricated for an unresolved one.
-        progress.Report("Resolving connectors...");
-        var localConnectors = await restoreDb.Connectors
+            await linkDb.SaveChangesAsync(cancellationToken);
+        }
+
+        // D14 step 7. Step 8 (the Sync) is requested by the caller.
+        progress.Report("Preparing Workspace files...");
+        string? warning = null;
+        var gitIgnore = await manifestService.WriteManagedGitIgnoreAsync(workspaceId, cancellationToken);
+        if (!gitIgnore.Success)
+        {
+            warning = $"Workspace restored, but .gitignore could not be updated: {gitIgnore.Error}";
+        }
+        else if (await IsDefinitionRewriteRequiredAsync(workspaceId, plan, localContent!, cancellationToken))
+        {
+            var written = await manifestService.WriteAuthoritativeManifestAsync(workspaceId, cancellationToken);
+            if (!written.Success)
+                warning = $"Workspace restored, but the Workspace definition could not be written: {written.Error}";
+        }
+
+        return (new RestoreWorkspaceResult
+        {
+            Success = true,
+            WorkspaceId = workspaceId,
+            Warning = warning,
+            UnresolvedConnectors = plan.MissingConnectors,
+            UnresolvedRepositories = plan.MissingRepositories,
+        }, null);
+    }
+
+    /// <summary>
+    /// The restored definition is rewritten only when it is complete on this computer and its canonical form differs
+    /// (for example duplicate entries, or the Workspace repository listed as its own Source repository). A definition
+    /// with repositories or connectors that are missing here is never rewritten: that would drop them from the file.
+    /// The Workspace name in the file is not a reason to rewrite, so choosing a local name does not dirty the repository.
+    /// </summary>
+    private async Task<bool> IsDefinitionRewriteRequiredAsync(
+        int workspaceId,
+        RestoreDefinitionPlan plan,
+        string fileContent,
+        CancellationToken cancellationToken)
+    {
+        if (plan.MissingRepositories.Count > 0 || plan.MissingConnectors.Count > 0)
+            return false;
+
+        var database = await manifestService.BuildFromDatabaseAsync(workspaceId, cancellationToken);
+        var canonical = manifestService.Serialize(database with
+        {
+            Workspace = database.Workspace with { Name = plan.Manifest.Workspace.Name },
+        });
+        return !string.Equals(canonical, fileContent.Replace("\r\n", "\n"), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Removes a Workspace whose restore failed: the root folder first (the Worker deletes it only when it can prove
+    /// the restore created it), then the database row and links. Never throws; returns what was left behind, if any.
+    /// </summary>
+    private async Task<string?> RollbackRestoreAsync(int workspaceId, string cloneUrl, bool folderExisted)
+    {
+        var residue = new List<string>();
+        try
+        {
+            var (_, args) = await GetSpecialContextArgsAsync(workspaceId, CancellationToken.None);
+            var folderPath = Path.Combine(args.WorkspaceRoot ?? string.Empty, args.WorkspaceFolderName ?? string.Empty);
+            var response = await workerBridge.SendCommandAsync(
+                WorkerHubMethods.DiscardWorkspaceRoot,
+                new
+                {
+                    workspaceName = args.WorkspaceFolderName,
+                    workspaceRoot = args.WorkspaceRoot,
+                    cloneUrl,
+                    keepFolder = folderExisted,
+                },
+                CancellationToken.None);
+            var data = response.Success
+                ? WorkerResponseJson.DeserializeWorkerResponse<DiscardWorkspaceRootWorkerResponse>(response.Data)
+                : null;
+            if (!response.Success)
+                residue.Add($"The Workspace folder {folderPath} could not be cleaned up: {response.Error}");
+            else if (data is null)
+                residue.Add($"The Workspace folder {folderPath} could not be cleaned up: the Worker returned an unreadable response.");
+            else if (!data.Removed)
+                residue.Add($"The Workspace folder {folderPath} was left in place: {data.Reason}");
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Restore rollback could not clean the Workspace folder. WorkspaceId={WorkspaceId}", workspaceId);
+            residue.Add($"The Workspace folder could not be cleaned up: {ex.Message}");
+        }
+
+        try
+        {
+            await DeleteWorkspaceAsync(workspaceId);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Restore rollback could not delete the Workspace. WorkspaceId={WorkspaceId}", workspaceId);
+            residue.Add($"The Workspace could not be removed from GrayMoon: {ex.Message}");
+        }
+
+        logger.LogInformation(
+            "Restore rolled back. WorkspaceId={WorkspaceId} ResidueCount={ResidueCount}", workspaceId, residue.Count);
+        return residue.Count == 0 ? null : string.Join(" ", residue);
+    }
+
+    /// <summary>Reads the repository's definition through its connector and evaluates it against this computer.</summary>
+    private async Task<(CheckedDefinition? Definition, string? Error)> CheckRemoteDefinitionAsync(int repositoryId, CancellationToken cancellationToken)
+    {
+        var context = await LoadRestoreContextAsync(repositoryId, cancellationToken);
+        if (context is null)
+            return (null, "Repository not found.");
+
+        var read = await remoteManifestReader.ReadAsync(repositoryId, cancellationToken);
+        if (read.Error is not null)
+            return (null, read.Error);
+
+        var (plan, error) = RestoreDefinitionEvaluator.Evaluate(
+            read.Found ? read.Content ?? string.Empty : null, context.CloneUrl, context.Connectors, context.Catalog);
+        return plan is null ? (null, error) : (new CheckedDefinition(context, plan), null);
+    }
+
+    private async Task<RestoreContext?> LoadRestoreContextAsync(int repositoryId, CancellationToken cancellationToken)
+    {
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var cloneUrl = await db.Repositories
+            .AsNoTracking()
+            .Where(r => r.RepositoryId == repositoryId)
+            .Select(r => r.CloneUrl)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (cloneUrl is null)
+            return null;
+
+        var connectors = await db.Connectors
             .AsNoTracking()
             .Where(c => c.ConnectorType == ConnectorType.GitHub)
             .ToListAsync(cancellationToken);
-        var unresolvedConnectors = new List<string>();
-        foreach (var connector in manifest.Connectors)
-        {
-            if (ResolveConnector(localConnectors, connector) is null)
-                unresolvedConnectors.Add(connector.Url);
-        }
-
-        // D14 step 6: repositories by normalized URL among the imported catalog.
-        progress.Report("Resolving repositories...");
-        var catalog = await restoreDb.Repositories
+        var catalog = await db.Repositories
             .AsNoTracking()
-            .Select(r => new { r.RepositoryId, r.CloneUrl })
+            .Select(r => new RestoreCatalogEntry(r.RepositoryId, r.CloneUrl))
             .ToListAsync(cancellationToken);
-        var catalogByUrl = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        foreach (var entry in catalog.OrderBy(e => e.RepositoryId))
-            catalogByUrl.TryAdd(RepositoryUrlIdentity.NormalizeRepositoryUrl(entry.CloneUrl), entry.RepositoryId);
-
-        var resolvedIds = new HashSet<int>();
-        var unresolvedRepositories = new List<string>();
-        foreach (var repository in manifest.Repositories)
-        {
-            var key = RepositoryUrlIdentity.NormalizeRepositoryUrl(repository.RepositoryUrl);
-            if (catalogByUrl.TryGetValue(key, out var resolvedId))
-            {
-                if (resolvedId != repositoryId)
-                    resolvedIds.Add(resolvedId);
-            }
-            else
-            {
-                unresolvedRepositories.Add(string.IsNullOrWhiteSpace(repository.ConnectorUrl)
-                    ? repository.RepositoryUrl
-                    : $"{repository.RepositoryUrl} (connector {repository.ConnectorUrl})");
-            }
-        }
-
-        foreach (var resolvedId in resolvedIds.OrderBy(id => id))
-        {
-            restoreDb.WorkspaceRepositories.Add(new WorkspaceRepositoryLink
-            {
-                WorkspaceId = workspaceId,
-                RepositoryId = resolvedId,
-                Role = WorkspaceRepositoryRole.Source,
-                SyncStatus = RepoSyncStatus.NeedsSync,
-            });
-        }
-
-        if (resolvedIds.Count > 0)
-            await restoreDb.SaveChangesAsync(cancellationToken);
-
-        // D14 step 7: disk and database agree. Step 8 (the sync) is triggered by the caller.
-        progress.Report("Writing .gitignore and Workspace definition...");
-        var gitIgnore = await manifestService.WriteManagedGitIgnoreAsync(workspaceId, cancellationToken);
-        var written = gitIgnore.Success
-            ? await manifestService.WriteAuthoritativeManifestAsync(workspaceId, cancellationToken)
-            : gitIgnore;
-        var warning = written.Success
-            ? null
-            : $"Workspace restored, but the Workspace definition could not be written: {written.Error}";
-
-        return new RestoreWorkspaceResult(true, workspaceId, warning, unresolvedConnectors, unresolvedRepositories);
+        return new RestoreContext(cloneUrl, connectors, catalog);
     }
+
+    private sealed record RestoreContext(string CloneUrl, IReadOnlyList<Connector> Connectors, IReadOnlyList<RestoreCatalogEntry> Catalog);
+
+    private sealed record CheckedDefinition(RestoreContext Context, RestoreDefinitionPlan Plan);
 
     /// <summary>
     /// Adds the Workspace-role link (<c>Role = Workspace</c>) and attaches the repository to the Workspace root
@@ -322,7 +518,8 @@ public sealed class WorkspaceRepositoryOperations(
         int repositoryId,
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken,
-        bool requireEmptyRoot = false)
+        bool requireEmptyRoot = false,
+        string attachMessage = "Attaching Workspace repository...")
     {
         int workspaceRepositoryId;
         string cloneUrl;
@@ -363,7 +560,7 @@ public sealed class WorkspaceRepositoryOperations(
         string? error;
         try
         {
-            progress.Report("Attaching Workspace repository...");
+            progress.Report(attachMessage);
             error = await AttachAsync(workspaceId, repositoryId, cloneUrl, bearerToken, requireEmptyRoot, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -447,32 +644,18 @@ public sealed class WorkspaceRepositoryOperations(
         await db.Workspaces.Where(w => w.WorkspaceId == workspaceId).ExecuteDeleteAsync();
     }
 
-    private async Task ApplyProfileAsync(int workspaceId, WorkspaceManifestProfile profile, CancellationToken cancellationToken)
+    /// <summary>The profile was validated by <see cref="RestoreDefinitionEvaluator"/>; unknown values never get here.</summary>
+    private async Task ApplyProfileAsync(
+        int workspaceId,
+        WorkspaceType type,
+        WorkspaceVersioningMode versioning,
+        WorkspaceCiProvider ci,
+        CancellationToken cancellationToken)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var workspace = await db.Workspaces.FirstAsync(w => w.WorkspaceId == workspaceId, cancellationToken);
-
-        // A value this GrayMoon does not know keeps the Basic / None / None default for that axis.
-        var type = WorkspaceManifestProfileNames.TryParse(profile.Type, out WorkspaceType parsedType) ? parsedType : workspace.Type;
-        var versioning = WorkspaceManifestProfileNames.TryParse(profile.Versioning, out WorkspaceVersioningMode parsedVersioning) ? parsedVersioning : workspace.VersioningMode;
-        var ci = WorkspaceManifestProfileNames.TryParse(profile.Ci, out WorkspaceCiProvider parsedCi) ? parsedCi : workspace.CiProvider;
-
         await WorkspaceProfileTransition.ApplyAsync(db, workspace, type, versioning, ci, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
-    }
-
-    private static Connector? ResolveConnector(IReadOnlyList<Connector> localConnectors, WorkspaceManifestConnector connector)
-    {
-        if (!string.Equals(connector.Type, "github", StringComparison.OrdinalIgnoreCase))
-            return null;
-
-        var wanted = RepositoryUrlIdentity.NormalizeConnectorUrl(connector.Url);
-        return localConnectors
-            .Where(c => RepositoryUrlIdentity.NormalizeConnectorUrl(
-                RepositoryUrlHelper.GetWebRootFromConnectorApiBase(c.ApiBaseUrl)) == wanted)
-            .OrderByDescending(c => c.IsHealthy)
-            .ThenBy(c => c.ConnectorId)
-            .FirstOrDefault();
     }
 
     private async Task<(WorkspaceFeatureContextId ContextId, WorkerWorkspaceArgs Args)> GetSpecialContextArgsAsync(
@@ -483,12 +666,6 @@ public sealed class WorkspaceRepositoryOperations(
         var args = await pathResolver.GetWorkerArgsAsync(contextId, cancellationToken);
         return (contextId, args);
     }
-
-    private static RestoreWorkspaceResult RestoreFailure(string error) =>
-        new(false, null, error, [], []);
-
-    private static RestoreWorkspaceResult RestoredWithoutDefinition(int workspaceId, string reason) =>
-        new(true, workspaceId, $"Restored without definition: {reason}", [], []);
 
     private static IProgress<OperationProgress> BindProgress(IWorkspaceLockedOperation op, IProgress<OperationProgress>? progress) =>
         new Progress<OperationProgress>(p =>
@@ -510,5 +687,14 @@ public sealed class WorkspaceRepositoryOperations(
 
         [System.Text.Json.Serialization.JsonPropertyName("isUnborn")]
         public bool IsUnborn { get; set; }
+    }
+
+    private sealed class DiscardWorkspaceRootWorkerResponse
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("removed")]
+        public bool Removed { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("reason")]
+        public string? Reason { get; set; }
     }
 }

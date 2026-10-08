@@ -6,7 +6,7 @@
 {
     <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
          @onkeydown="HandleKeyDown">
-        <div class="modal-dialog modal-lg">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">@Title</h5>
@@ -79,44 +79,16 @@
                     </div>
 
                     <div class="mb-3">
-                        <label class="form-label text-nowrap" for="workspaceRepositorySelect">Workspace repository (optional)</label>
-                        <div class="workspace-repository-picker @(IsWorkspaceRepositoryDisabled ? "disabled" : "")">
-                            <input type="text"
-                                   class="form-control workspace-repository-select"
-                                   id="workspaceRepositorySelect"
-                                   autocomplete="off"
-                                   placeholder="@(_repositoryPickerOpen ? "Search repositories" : "None")"
-                                   value="@(_repositoryPickerOpen ? _repositoryFilter : SelectedRepositoryDisplayName)"
-                                   disabled="@IsWorkspaceRepositoryDisabled"
-                                   @onfocus="OpenRepositoryPicker"
-                                   @onclick="OpenRepositoryPicker"
-                                   @onblur="CloseRepositoryPicker"
-                                   @oninput="OnRepositoryFilterChanged"
-                                   @onkeydown="OnRepositoryPickerKeyDown"
-                                   @onkeydown:stopPropagation="_repositoryPickerOpen" />
-                            @if (_repositoryPickerOpen && !IsWorkspaceRepositoryDisabled)
-                            {
-                                var filteredChoices = FilteredRepositoryChoices;
-                                <div class="workspace-repository-list" role="listbox">
-                                    <button type="button" role="option"
-                                            class="workspace-repository-option text-nowrap @(WorkspaceRepositoryId is null ? "active" : "") @(_repositoryHighlightIndex == 0 ? "highlighted" : "")"
-                                            @onmousedown="() => SelectRepositoryAsync(null)"
-                                            @onmousedown:preventDefault>None</button>
-                                    @for (var i = 0; i < filteredChoices.Count; i++)
-                                    {
-                                        var choice = filteredChoices[i];
-                                        <button type="button" role="option"
-                                                class="workspace-repository-option text-nowrap @(choice.RepositoryId == WorkspaceRepositoryId ? "active" : "") @(_repositoryHighlightIndex == i + 1 ? "highlighted" : "")"
-                                                @onmousedown="() => SelectRepositoryAsync(choice.RepositoryId)"
-                                                @onmousedown:preventDefault>@choice.DisplayName</button>
-                                    }
-                                    @if (filteredChoices.Count == 0)
-                                    {
-                                        <div class="workspace-repository-empty text-nowrap">No matching repositories</div>
-                                    }
-                                </div>
-                            }
-                        </div>
+                        <label class="form-label text-nowrap" for="workspaceRepositorySelect">@RepositoryFieldLabel</label>
+                        <RepositoryPicker Id="workspaceRepositorySelect"
+                                          Choices="@WorkspaceRepositoryChoices"
+                                          SelectedRepositoryId="@WorkspaceRepositoryId"
+                                          SelectedRepositoryIdChanged="WorkspaceRepositoryIdChanged"
+                                          AllowNone="true"
+                                          Placeholder="None"
+                                          Disabled="@IsWorkspaceRepositoryDisabled"
+                                          OnFetch="OnFetchRepositories"
+                                          FetchDisabled="@FetchDisabled" />
                         <div class="form-text">The Workspace's own Git repository. Its working tree is the Workspace root and it is the root of every Feature.</div>
                         @if (IsWorkspaceRepositoryDisabled && !string.IsNullOrWhiteSpace(WorkspaceRepositoryDisabledHint))
                         {
@@ -177,24 +149,25 @@
     [Parameter] public string? TypeDisabledHint { get; set; }
     [Parameter] public int? WorkspaceRepositoryId { get; set; }
     [Parameter] public EventCallback<int?> WorkspaceRepositoryIdChanged { get; set; }
-    [Parameter] public IReadOnlyList<WorkspaceRepositoryChoice> WorkspaceRepositoryChoices { get; set; } = Array.Empty<WorkspaceRepositoryChoice>();
+    [Parameter] public IReadOnlyList<RepositoryPickerChoice> WorkspaceRepositoryChoices { get; set; } = Array.Empty<RepositoryPickerChoice>();
     [Parameter] public bool IsWorkspaceRepositoryDisabled { get; set; }
     [Parameter] public string? WorkspaceRepositoryDisabledHint { get; set; }
+    [Parameter] public EventCallback OnFetchRepositories { get; set; }
+    [Parameter] public bool FetchDisabled { get; set; }
 
-    /// <summary>One entry of the "Workspace repository" select.</summary>
-    public sealed record WorkspaceRepositoryChoice(int RepositoryId, string DisplayName);
+    public const string RepositoryFieldLabel = "Workspace repository";
 
     /// <summary>
     /// Imported repositories that can become the Workspace repository: every repository that is not already a
     /// Source of this Workspace (the Workspace's current Workspace repository is therefore included so an edit
     /// shows it selected), sorted by display name.
     /// </summary>
-    public static IReadOnlyList<WorkspaceRepositoryChoice> BuildWorkspaceRepositoryChoices(
+    public static IReadOnlyList<RepositoryPickerChoice> BuildWorkspaceRepositoryChoices(
         IEnumerable<(int RepositoryId, string RepositoryName, string? OrgName)> repositories,
         IReadOnlySet<int> sourceRepositoryIds) =>
         repositories
             .Where(r => !sourceRepositoryIds.Contains(r.RepositoryId))
-            .Select(r => new WorkspaceRepositoryChoice(
+            .Select(r => new RepositoryPickerChoice(
                 r.RepositoryId,
                 string.IsNullOrWhiteSpace(r.OrgName) ? r.RepositoryName : $"{r.OrgName}/{r.RepositoryName}"))
             .OrderBy(c => c.DisplayName, StringComparer.OrdinalIgnoreCase)
@@ -245,93 +218,6 @@
         await UseGitHubActionsChanged.InvokeAsync(defaults.Ci == WorkspaceCiProvider.GitHubActions);
     }
 
-    private bool _repositoryPickerOpen;
-    private string _repositoryFilter = string.Empty;
-    private int _repositoryHighlightIndex;
-
-    private IReadOnlyList<WorkspaceRepositoryChoice> FilteredRepositoryChoices =>
-        FilterWorkspaceRepositoryChoices(WorkspaceRepositoryChoices, _repositoryFilter);
-
-    private string SelectedRepositoryDisplayName =>
-        WorkspaceRepositoryChoices.FirstOrDefault(c => c.RepositoryId == WorkspaceRepositoryId)?.DisplayName ?? "None";
-
-    /// <summary>Case-insensitive "contains" filter on display name; an empty term returns all, order preserved.</summary>
-    public static IReadOnlyList<WorkspaceRepositoryChoice> FilterWorkspaceRepositoryChoices(
-        IEnumerable<WorkspaceRepositoryChoice> choices, string? term)
-    {
-        var trimmed = term?.Trim();
-        if (string.IsNullOrEmpty(trimmed))
-            return choices.ToList();
-        return choices
-            .Where(c => c.DisplayName.Contains(trimmed, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-    }
-
-    /// <summary>Clamps a highlight move within the picker list, where index 0 is "None" and 1..n are the filtered choices. No wrapping.</summary>
-    public static int MoveRepositoryHighlight(int currentIndex, int delta, int filteredChoiceCount)
-    {
-        var lastIndex = Math.Max(filteredChoiceCount, 0);
-        return Math.Clamp(currentIndex + delta, 0, lastIndex);
-    }
-
-    /// <summary>Highlight index after the filter text changes: the first filtered choice (index 1), or "None" (index 0) when nothing matches.</summary>
-    public static int ResetRepositoryHighlight(int filteredChoiceCount) => filteredChoiceCount > 0 ? 1 : 0;
-
-    private void OpenRepositoryPicker()
-    {
-        if (IsWorkspaceRepositoryDisabled || _repositoryPickerOpen)
-            return;
-        _repositoryFilter = string.Empty;
-        _repositoryPickerOpen = true;
-        var selectedIndex = FilteredRepositoryChoices.ToList().FindIndex(c => c.RepositoryId == WorkspaceRepositoryId);
-        _repositoryHighlightIndex = selectedIndex >= 0 ? selectedIndex + 1 : 0;
-    }
-
-    private void CloseRepositoryPicker() => _repositoryPickerOpen = false;
-
-    private void OnRepositoryFilterChanged(ChangeEventArgs e)
-    {
-        _repositoryFilter = e.Value?.ToString() ?? string.Empty;
-        _repositoryHighlightIndex = ResetRepositoryHighlight(FilteredRepositoryChoices.Count);
-    }
-
-    private async Task OnRepositoryPickerKeyDown(KeyboardEventArgs e)
-    {
-        if (!_repositoryPickerOpen)
-            return;
-
-        switch (e.Key)
-        {
-            case "Escape":
-                _repositoryPickerOpen = false;
-                break;
-            case "ArrowDown":
-                _repositoryHighlightIndex = MoveRepositoryHighlight(_repositoryHighlightIndex, 1, FilteredRepositoryChoices.Count);
-                break;
-            case "ArrowUp":
-                _repositoryHighlightIndex = MoveRepositoryHighlight(_repositoryHighlightIndex, -1, FilteredRepositoryChoices.Count);
-                break;
-            case "Enter":
-            case "NumpadEnter":
-                var filtered = FilteredRepositoryChoices;
-                if (filtered.Count == 0 && !string.IsNullOrWhiteSpace(_repositoryFilter))
-                    break;
-                if (_repositoryHighlightIndex <= 0)
-                    await SelectRepositoryAsync(null);
-                else if (_repositoryHighlightIndex <= filtered.Count)
-                    await SelectRepositoryAsync(filtered[_repositoryHighlightIndex - 1].RepositoryId);
-                break;
-        }
-    }
-
-    private async Task SelectRepositoryAsync(int? id)
-    {
-        if (IsWorkspaceRepositoryDisabled)
-            return;
-
-        _repositoryPickerOpen = false;
-        await WorkspaceRepositoryIdChanged.InvokeAsync(id);
-    }
     private Task OnGitVersionChanged(ChangeEventArgs e) =>
         UseGitVersionChanged.InvokeAsync(e.Value is true or "true" or "on");
 

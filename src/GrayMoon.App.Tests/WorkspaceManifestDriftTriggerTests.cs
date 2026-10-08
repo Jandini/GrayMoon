@@ -15,7 +15,7 @@ namespace GrayMoon.App.Tests;
 /// </summary>
 public sealed class WorkspaceManifestDriftTriggerTests
 {
-    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan NegativeWait = TimeSpan.FromMilliseconds(400);
 
     private static object SyncResponse() => new

@@ -71,7 +71,7 @@
                                        OnKeyDown="OnSearchKeyDown"
                                        OnClear="ClearSearchFilter" />
                 </div>
-                <button class="btn btn-outline-primary text-nowrap flex-shrink-0" @onclick="ShowRestoreModal">
+                <button class="btn btn-outline-primary text-nowrap flex-shrink-0" @onclick="ShowRestoreModalAsync">
                     Restore from repository
                 </button>
                 <button class="btn btn-primary flex-shrink-0" @onclick="ShowCreateModalAsync">
@@ -206,6 +206,8 @@
                WorkspaceRepositoryChoices="@editorWorkspaceRepositoryChoices"
                IsWorkspaceRepositoryDisabled="@(editingWorkspaceId != null && editingWorkspaceHasFeatures)"
                WorkspaceRepositoryDisabledHint="@(editingWorkspaceHasFeatures ? WorkspaceRepositoryFeaturesExistMessage : null)"
+               OnFetchRepositories="FetchRepositoriesAsync"
+               FetchDisabled="@(!hasConnectors || isPersisting)"
                IsSaving="@isSaving"
                IsCheckingDirectory="@isLoadingDirectoryInfo"
                ErrorMessage="@editorErrorMessage"
@@ -213,9 +215,12 @@
                OnSave="@SaveWorkspaceAsync"
                OnCancel="@CloseEditorModal" />
 
-<RestoreWorkspaceModal IsVisible="@showRestoreModal"
+<RestoreWorkspaceModal @ref="_restoreModal"
+                        IsVisible="@showRestoreModal"
                         OnCancel="@CloseRestoreModal"
-                        OnRestored="@OnWorkspaceRestoredAsync" />
+                        OnRestored="@OnWorkspaceRestoredAsync"
+                        OnFetchRepositories="FetchRepositoriesAsync"
+                        FetchDisabled="@(!hasConnectors || isPersisting)" />
 
 <WorkspaceImportModal IsVisible="@showImportModal"
                       MatchingCount="@importMatchingCount"
@@ -270,7 +275,7 @@
     </div>
 }
 
-<LoadingOverlay IsVisible="@isPersisting" Message="@(fetchedRepositoryCount is null || fetchedRepositoryCount == 0 ? "Fetching repositories..." : $"Fetched {fetchedRepositoryCount} {(fetchedRepositoryCount == 1 ? "repository" : "repositories")}")" OnAbort="AbortFetchRepositories" />
+<LoadingOverlay IsVisible="@isPersisting" Message="@(fetchedRepositoryCount is null || fetchedRepositoryCount == 0 ? "Fetching repositories..." : $"Fetched {fetchedRepositoryCount} {(fetchedRepositoryCount == 1 ? "repository" : "repositories")}")" TerminalBuffer="@_fetchTerminal" OnAbort="AbortFetchRepositories" />
 
 @code {
     private List<WorkspaceModel>? workspaces;
@@ -347,7 +352,9 @@
     private bool editorUseGitHubActions = true;
     private int? editorWorkspaceRepositoryId;
     private int? editingWorkspaceRepositoryOriginalId;
-    private IReadOnlyList<WorkspaceModal.WorkspaceRepositoryChoice> editorWorkspaceRepositoryChoices = Array.Empty<WorkspaceModal.WorkspaceRepositoryChoice>();
+    private IReadOnlyList<RepositoryPickerChoice> editorWorkspaceRepositoryChoices = Array.Empty<RepositoryPickerChoice>();
+    private HashSet<int> editorSourceRepositoryIds = new();
+    private RestoreWorkspaceModal? _restoreModal;
     private const string WorkspaceRepositoryFeaturesExistMessage = "Rename and root changes are not possible while Features exist. Remove Features first.";
     private string? deleteBlockedMessage;
     private HashSet<int> editingWorkspaceRepositoryIds = new();
@@ -356,6 +363,7 @@
     private HashSet<int> excludedRepositoryIds = new();
     private int? fetchedRepositoryCount;
     private CancellationTokenSource? _fetchRepositoriesCts;
+    private JobTerminalBuffer? _fetchTerminal;
     private bool directoryExists;
     private int existingRepositoryCount;
     private CancellationTokenSource? _directoryInfoCts;
@@ -455,7 +463,9 @@
         editorUseGitHubActions = true;
         editorWorkspaceRepositoryId = null;
         editingWorkspaceRepositoryOriginalId = null;
-        editorWorkspaceRepositoryChoices = await LoadWorkspaceRepositoryChoicesAsync(new HashSet<int>());
+        editorSourceRepositoryIds = new HashSet<int>();
+        editorWorkspaceRepositoryChoices = await LoadWorkspaceRepositoryChoicesAsync(editorSourceRepositoryIds);
+        await RefreshConnectorAvailabilityAsync();
         editorTitle = "Add Workspace";
         workspaceName = string.Empty;
         directoryExists = false;
@@ -480,7 +490,11 @@
 
     private bool showRestoreModal;
 
-    private void ShowRestoreModal() => showRestoreModal = true;
+    private async Task ShowRestoreModalAsync()
+    {
+        await RefreshConnectorAvailabilityAsync();
+        showRestoreModal = true;
+    }
 
     private void CloseRestoreModal() => showRestoreModal = false;
 
@@ -517,11 +531,12 @@
         var workspaceRepositoryLink = workspace.Repositories.FirstOrDefault(l => l.Role == WorkspaceRepositoryRole.Workspace);
         editingWorkspaceRepositoryOriginalId = workspaceRepositoryLink?.RepositoryId;
         editorWorkspaceRepositoryId = workspaceRepositoryLink?.RepositoryId;
-        editorWorkspaceRepositoryChoices = await LoadWorkspaceRepositoryChoicesAsync(
-            workspace.Repositories
-                .Where(l => l.Role != WorkspaceRepositoryRole.Workspace)
-                .Select(l => l.RepositoryId)
-                .ToHashSet());
+        editorSourceRepositoryIds = workspace.Repositories
+            .Where(l => l.Role != WorkspaceRepositoryRole.Workspace)
+            .Select(l => l.RepositoryId)
+            .ToHashSet();
+        editorWorkspaceRepositoryChoices = await LoadWorkspaceRepositoryChoicesAsync(editorSourceRepositoryIds);
+        await RefreshConnectorAvailabilityAsync();
 
         directoryExists = false;
         existingRepositoryCount = 0;
@@ -552,16 +567,8 @@
             .Select(link => link.RepositoryId)
             .ToHashSet();
 
-        try
-        {
-            var connectors = await ConnectorRepository.GetAllAsync();
-            hasConnectors = connectors.Count > 0;
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Failed to load connectors for repositories modal.");
+        if (!await RefreshConnectorAvailabilityAsync())
             repositoriesModalErrorMessage = "Failed to load repositories. Please try again.";
-        }
 
         repositoriesModalRefreshGeneration++;
         showRepositoriesModal = true;
@@ -801,6 +808,22 @@
         }
     }
 
+    private async Task<bool> RefreshConnectorAvailabilityAsync()
+    {
+        try
+        {
+            var connectors = await ConnectorRepository.GetAllAsync();
+            hasConnectors = connectors.Count > 0;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load connectors.");
+            hasConnectors = false;
+            return false;
+        }
+    }
+
     private void AbortFetchRepositories()
     {
         _fetchRepositoriesCts?.Cancel();
@@ -816,6 +839,7 @@
         _fetchRepositoriesCts?.Cancel();
         _fetchRepositoriesCts = new CancellationTokenSource();
 
+        _fetchTerminal = new JobTerminalBuffer();
         try
         {
             isPersisting = true;
@@ -828,22 +852,30 @@
                 fetchedRepositoryCount = count;
                 _ = InvokeAsync(StateHasChanged);
             });
+            using var terminal = TerminalSinkContext.Use(_fetchTerminal);
             var result = await RepositoryService.RefreshRepositoriesAsync(progress, _fetchRepositoriesCts.Token);
             repositoriesModalRenameWarnings = result.RenamedRepositories.Count > 0 ? result.RenamedRepositories : null;
             if (result.MergedRepositoryIdMap.Count > 0)
                 TranslateStaleRepositoryIds(result.MergedRepositoryIdMap);
             await PruneInvalidSelectedRepositoryIdsAsync();
             repositoriesModalRefreshGeneration++;
+            if (showEditorModal && editorErrorMessage == RestoreWorkspaceModal.FetchRepositoriesError)
+                editorErrorMessage = null;
+            await RefreshOpenRepositoryPickersAsync(result.MergedRepositoryIdMap);
         }
         catch (OperationCanceledException)
         {
             await PruneInvalidSelectedRepositoryIdsAsync();
             repositoriesModalRefreshGeneration++;
+            await RefreshOpenRepositoryPickersAsync(null);
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error fetching repositories");
-            repositoriesModalErrorMessage = "Failed to fetch repositories. Please try again later.";
+            repositoriesModalErrorMessage = RestoreWorkspaceModal.FetchRepositoriesError;
+            if (showEditorModal)
+                editorErrorMessage = RestoreWorkspaceModal.FetchRepositoriesError;
+            _restoreModal?.ShowFetchError(RestoreWorkspaceModal.FetchRepositoriesError);
         }
         finally
         {
@@ -863,6 +895,37 @@
         var before = selectedRepositoryIds.Count;
         selectedRepositoryIds.RemoveWhere(repositoryId => !validSet.Contains(repositoryId));
         return before - selectedRepositoryIds.Count;
+    }
+
+    /// <summary>
+    /// Reloads whichever repository picker is open and keeps its selection when the repository survived the fetch.
+    /// </summary>
+    private async Task RefreshOpenRepositoryPickersAsync(IReadOnlyDictionary<int, int>? mergedRepositoryIdMap)
+    {
+        var map = mergedRepositoryIdMap ?? new Dictionary<int, int>();
+        if (showEditorModal)
+        {
+            if (map.Count > 0)
+                TranslateRepositoryIds(editorSourceRepositoryIds, map);
+
+            editorWorkspaceRepositoryChoices = await LoadWorkspaceRepositoryChoicesAsync(editorSourceRepositoryIds);
+            editorWorkspaceRepositoryId = RepositoryPickerState.ReconcileSelection(
+                editorWorkspaceRepositoryId,
+                map,
+                editorWorkspaceRepositoryChoices.Select(c => c.RepositoryId));
+        }
+
+        if (showRestoreModal && _restoreModal is not null)
+            await _restoreModal.ApplyCatalogRefreshAsync(map);
+    }
+
+    private static void TranslateRepositoryIds(ISet<int> ids, IReadOnlyDictionary<int, int> mergedIdMap)
+    {
+        foreach (var staleId in ids.Where(mergedIdMap.ContainsKey).ToList())
+        {
+            ids.Remove(staleId);
+            ids.Add(mergedIdMap[staleId]);
+        }
     }
 
     private void TranslateStaleRepositoryIds(IReadOnlyDictionary<int, int> mergedIdMap)
@@ -1050,7 +1113,7 @@
     /// Imported repositories offered by the "Workspace repository" select: everything that is not a Source of this
     /// Workspace (D13). Uses a short-lived factory context (AGENTS.md DbContext handling).
     /// </summary>
-    private async Task<IReadOnlyList<WorkspaceModal.WorkspaceRepositoryChoice>> LoadWorkspaceRepositoryChoicesAsync(
+    private async Task<IReadOnlyList<RepositoryPickerChoice>> LoadWorkspaceRepositoryChoicesAsync(
         IReadOnlySet<int> sourceRepositoryIds)
     {
         try
@@ -1067,7 +1130,7 @@
         catch (Exception ex)
         {
             Logger.LogError(ex, "Failed to load repositories for the Workspace repository select.");
-            return Array.Empty<WorkspaceModal.WorkspaceRepositoryChoice>();
+            return Array.Empty<RepositoryPickerChoice>();
         }
     }
 

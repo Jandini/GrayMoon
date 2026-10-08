@@ -1,0 +1,76 @@
+.modal-dialog.modal-dialog-centered {
+    display: flex;
+    align-items: center;
+    min-height: calc(100% - 2rem);
+    margin: 1rem auto;
+}
+
+.modal-content {
+    width: 100%;
+    max-height: calc(100vh - 2rem);
+}
+
+.form-control.is-invalid {
+    border-color: rgba(180, 140, 132, 0.55) !important;
+    background-image: none;
+}
+
+.restore-name-error {
+    color: #d7b1a8;
+}
+
+.restore-location {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.restore-location-spinner {
+    margin-left: auto;
+    flex-shrink: 0;
+    width: 0.75rem;
+    height: 0.75rem;
+    border-width: 0.1em;
+}
+
+.modal-body {
+    overflow-y: auto;
+}
+
+.restore-preview {
+    background-color: var(--bg-input, #3c3c3c);
+    border: 1px solid var(--border-color, #3e3e42);
+    border-radius: 0.25rem;
+    color: var(--text-primary);
+}
+
+.restore-validation-error {
+    background: rgba(244, 135, 113, 0.12);
+    color: var(--text-primary);
+    border: 1px solid rgba(244, 135, 113, 0.35);
+    box-shadow: none;
+    border-radius: 0.25rem;
+}
+
+.restore-missing-list {
+    max-height: 9rem;
+    overflow-y: auto;
+    padding-left: 1.25rem;
+}
+
+.restore-preview-grid {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    column-gap: 1.5rem;
+    row-gap: 0.15rem;
+}
+
+.restore-preview-grid dt {
+    font-weight: normal;
+    white-space: nowrap;
+    color: var(--text-secondary, #858585);
+}
+
+.restore-preview-grid dd {
+    margin: 0;
+}

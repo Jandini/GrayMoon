@@ -24,7 +24,8 @@ public interface IGitChangesWorkspaceScanner
         CancellationToken cancellationToken,
         Action<GitChangesWorkspaceScanProgress>? onProgress = null,
         bool includeLineStats = false,
-        int? repositoryId = null);
+        int? repositoryId = null,
+        bool persistImmediately = false);
 }
 
 public sealed class GitChangesWorkspaceScanner(
@@ -38,7 +39,8 @@ public sealed class GitChangesWorkspaceScanner(
         CancellationToken cancellationToken,
         Action<GitChangesWorkspaceScanProgress>? onProgress = null,
         bool includeLineStats = false,
-        int? repositoryId = null)
+        int? repositoryId = null,
+        bool persistImmediately = false)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var workerBridge = scope.ServiceProvider.GetRequiredService<IWorkerBridge>();
@@ -127,9 +129,10 @@ public sealed class GitChangesWorkspaceScanner(
                         Snapshot = result.Snapshot,
                     };
 
-                    // Refresh / warm-up persist immediately so LoadAsync after the scan sees +/-.
-                    // Watcher and background sweeps stay on the write queue.
-                    if (includeLineStats)
+                    // Refresh / warm-up and post-sync scans persist immediately so the nav dot and
+                    // repository badges update without opening Changes. Watcher and background sweeps
+                    // stay on the write queue.
+                    if (includeLineStats || persistImmediately)
                     {
                         await pushHandler.HandleAsync(notification, cancellationToken);
                     }

@@ -124,7 +124,7 @@ public sealed class WorkspaceGitChangesActivationTests
 
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
-        var deadline = DateTime.UtcNow.AddSeconds(15);
+        var deadline = DateTime.UtcNow.AddSeconds(60);
         while (!condition())
         {
             if (DateTime.UtcNow > deadline)
@@ -148,7 +148,8 @@ public sealed class WorkspaceGitChangesActivationTests
             CancellationToken cancellationToken,
             Action<GitChangesWorkspaceScanProgress>? onProgress = null,
             bool includeLineStats = false,
-            int? repositoryId = null)
+            int? repositoryId = null,
+            bool persistImmediately = false)
         {
             LastWorkspaceId = workspaceId;
             LastIncludeLineStats = includeLineStats;

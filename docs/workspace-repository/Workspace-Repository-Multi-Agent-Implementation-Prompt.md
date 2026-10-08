@@ -1,5 +1,7 @@
 # GrayMoon Workspace Repository - Multi-Agent Implementation Prompt
 
+> **Superseded in part (2026-10-08):** the `workspaceRepository` Worker capability (`supportedFeatures`, `GetCapabilities`, `IWorkerFeatureSupportService`) and the Repositories-page compatibility banner were removed. App/Worker compatibility is now the version lock (`WorkerVersionPolicy`), and Restore validates `.graymoon.json` before creating anything; "Restored without definition" no longer exists. See `docs/feedback/graymoon-restore-workspace-and-worker-version-lock.md`.
+
 Paste this whole file as the first message to the orchestrating model. It runs the plan in
 `Workspace-Repository-Implementation-Plan.md` by delegating one plan unit at a time to subagents and
 integrating their work wave by wave.

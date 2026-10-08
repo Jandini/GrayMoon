@@ -189,10 +189,15 @@ internal sealed class ScriptedWorkerBridge : IWorkerBridge
 {
     public bool IsWorkerConnected { get; set; } = true;
 
+    /// <summary>Simulates a Worker that cannot run normal commands (for example a version mismatch).</summary>
+    public string? UnavailableReason { get; set; }
+
+    public string? GetUnavailableReason() => UnavailableReason ?? (IsWorkerConnected ? null : "Worker not connected.");
+
     public List<(string Command, object Args)> Sent { get; } = [];
 
     public Func<string, object, WorkerCommandResponse> Handler { get; set; } =
-        (_, _) => new WorkerCommandResponse(true, new { success = true }, null);
+        (_, _) => new WorkerCommandResponse(true, new { success = true, removed = true }, null);
 
     public Task<WorkerCommandResponse> SendCommandAsync(string command, object args, CancellationToken cancellationToken = default)
     {
@@ -204,7 +209,7 @@ internal sealed class ScriptedWorkerBridge : IWorkerBridge
     public void RespondWithFile(string content) =>
         Handler = (command, _) => command == "GetFileContents"
             ? new WorkerCommandResponse(true, new { content }, null)
-            : new WorkerCommandResponse(true, new { success = true, written = true }, null);
+            : new WorkerCommandResponse(true, new { success = true, written = true, removed = true }, null);
 }
 
 internal sealed class FakeFeatureContextResolver(bool isSpecialWorkspace = true) : IWorkspaceFeatureContextResolver

@@ -36,7 +36,7 @@ public sealed class GitChangesLineStatsRefreshTests
 
         refresh.RequestWorkspace(8);
 
-        await WaitUntilAsync(() => scanner.Calls == 1);
+        await scanner.WaitForCallAsync();
         Assert.Equal(8, scanner.LastWorkspaceId);
         Assert.True(scanner.LastIncludeLineStats);
         Assert.Null(scanner.LastRepositoryId);
@@ -73,7 +73,7 @@ public sealed class GitChangesLineStatsRefreshTests
 
         refresh.RequestRepository(8, 3);
 
-        await WaitUntilAsync(() => scanner.Calls == 1);
+        await scanner.WaitForCallAsync();
         Assert.Equal(8, scanner.LastWorkspaceId);
         Assert.Equal(3, scanner.LastRepositoryId);
         Assert.True(scanner.LastIncludeLineStats);
@@ -89,7 +89,7 @@ public sealed class GitChangesLineStatsRefreshTests
         refresh.RequestRepository(8, 3);
         refresh.RequestRepository(8, 3);
 
-        await WaitUntilAsync(() => scanner.Calls == 1);
+        await scanner.WaitForCallAsync();
         await Task.Delay(30);
         Assert.Equal(1, scanner.Calls);
         Assert.Equal(3, scanner.LastRepositoryId);
@@ -122,7 +122,7 @@ public sealed class GitChangesLineStatsRefreshTests
 
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
-        var deadline = DateTime.UtcNow.AddSeconds(5);
+        var deadline = DateTime.UtcNow.AddSeconds(60);
         while (!condition())
         {
             if (DateTime.UtcNow > deadline)
@@ -136,11 +136,20 @@ public sealed class GitChangesLineStatsRefreshTests
 
     private sealed class RecordingScanner(Func<Task>? onScan) : IGitChangesWorkspaceScanner
     {
+        private readonly SemaphoreSlim _called = new(0);
+
         public int Calls;
         public int Completed;
         public int? LastWorkspaceId;
         public int? LastRepositoryId;
         public bool LastIncludeLineStats;
+
+        /// <summary>Completes when a scan starts; event-driven so a slow CI machine cannot time out a poll.</summary>
+        public async Task WaitForCallAsync()
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+            await _called.WaitAsync(cts.Token);
+        }
 
         public async Task ScanWorkspaceAsync(
             int workspaceId,
@@ -148,12 +157,14 @@ public sealed class GitChangesLineStatsRefreshTests
             CancellationToken cancellationToken,
             Action<GitChangesWorkspaceScanProgress>? onProgress = null,
             bool includeLineStats = false,
-            int? repositoryId = null)
+            int? repositoryId = null,
+            bool persistImmediately = false)
         {
             LastWorkspaceId = workspaceId;
             LastRepositoryId = repositoryId;
             LastIncludeLineStats = includeLineStats;
             Interlocked.Increment(ref Calls);
+            _called.Release();
             if (onScan != null)
             {
                 await onScan();

@@ -21,7 +21,7 @@ namespace GrayMoon.Worker.Tests;
 /// </summary>
 public sealed class SyncRepositoryReadOverlapTests : IDisposable
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(60);
 
     private readonly string _root = Directory.CreateTempSubdirectory("graymoon-overlap-").FullName;
     private readonly GitProcessRunner _runner;

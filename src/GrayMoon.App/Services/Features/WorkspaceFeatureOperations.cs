@@ -741,6 +741,7 @@ public sealed class WorkspaceFeatureOperations(
         var repositoryIds = links.Select(l => l.RepositoryId).Distinct().ToList();
 
         var errorsByWrId = new ConcurrentDictionary<int, string>();
+        var blockersByWrId = new ConcurrentDictionary<int, RemoveFeatureRepositoryBlockers>();
         var reportByWrId = new ConcurrentDictionary<int, RemoveFeatureRepositoryReport>();
         var removeCompleted = 0;
         var removeTotal = rows.Count;
@@ -818,6 +819,21 @@ public sealed class WorkspaceFeatureOperations(
                         errorsByWrId[row.WorkspaceRepositoryId] = string.IsNullOrWhiteSpace(response.Error)
                             ? $"Failed to remove worktree {row.WorktreePath}."
                             : response.Error;
+
+                        // The Worker looks up blocking processes only when the failure is "in use" or "access denied";
+                        // an old Worker never sends them, which leaves today's plain error.
+                        var failed = WorkerResponseJson.DeserializeWorkerResponse<RemoveGitWorktreeResult>(response.Data);
+                        if (failed?.BlockingProcesses is not null)
+                        {
+                            blockersByWrId[row.WorkspaceRepositoryId] = new RemoveFeatureRepositoryBlockers(
+                                row.WorkspaceRepositoryId,
+                                repoName,
+                                row.WorktreePath,
+                                ToBlockingProcesses(failed.BlockingProcesses),
+                                failed.BlockersMayBeIncomplete,
+                                failed.BlockersDiagnostic);
+                        }
+
                         return;
                     }
 
@@ -990,19 +1006,34 @@ public sealed class WorkspaceFeatureOperations(
                         ? planRow.CheckedOutBranch ?? "(detached commit)"
                         : null;
 
+                    var residueRemaining = worktreeResult?.ResidueRemaining ?? false;
                     reportByWrId[row.WorkspaceRepositoryId] = new RemoveFeatureRepositoryReport(
                         row.WorkspaceRepositoryId,
                         repoName,
                         WorktreeRemoved: true,
                         branchOutcome,
                         branchMessage,
-                        worktreeResult?.ResidueRemaining ?? false,
+                        residueRemaining,
                         worktreeResult?.ResidueFileCount ?? 0,
                         worktreeResult?.ResidueSampleFiles,
                         worktreeResult?.ResidueMessage,
                         keptBranchName,
                         remoteOutcome,
-                        remoteMessage);
+                        remoteMessage)
+                    {
+                        BlockingProcesses = worktreeResult?.BlockingProcesses is { } blockers ? ToBlockingProcesses(blockers) : null,
+                        BlockersMayBeIncomplete = worktreeResult?.BlockersMayBeIncomplete ?? false,
+                        BlockersDiagnostic = worktreeResult?.BlockersDiagnostic,
+                        // Retry re-runs the Worker's guarded cleanup, which only deletes with both Feature storage
+                        // paths; the root worktree is never cleaned by GrayMoon, so it gets no retry target.
+                        ResidueTarget = residueRemaining
+                            && !isRootRow
+                            && !string.IsNullOrWhiteSpace(mainPath)
+                            && !string.IsNullOrWhiteSpace(featureRootPath)
+                            && !string.IsNullOrWhiteSpace(featureStorageRoot)
+                                ? new RemoveFeatureResidueTarget(mainPath, row.WorktreePath, featureRootPath, featureStorageRoot)
+                                : null,
+                    };
                     logger.FeatureRepositoryDone("Remove", info.WorkspaceId, info.FeatureName, repoName, "WorktreeRemoved");
                 }
                 finally
@@ -1052,7 +1083,12 @@ public sealed class WorkspaceFeatureOperations(
             feature.LastError = firstError;
             feature.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(cancellationToken);
-            return OperationResult.Fail(firstError);
+            return OperationResult.Fail(firstError) with
+            {
+                RemoveFeatureBlockers = blockersByWrId.IsEmpty
+                    ? null
+                    : blockersByWrId.Values.OrderBy(b => b.RepositoryName, StringComparer.OrdinalIgnoreCase).ToList()
+            };
         }
 
         // Refresh special Workspace snapshot before dropping Feature rows so the grid is not stale
@@ -1113,6 +1149,139 @@ public sealed class WorkspaceFeatureOperations(
         public int ResidueFileCount { get; set; }
         public List<string>? ResidueSampleFiles { get; set; }
         public string? ResidueMessage { get; set; }
+        public string? FailureKind { get; set; }
+        public List<BlockingProcessWire>? BlockingProcesses { get; set; }
+        public bool BlockersMayBeIncomplete { get; set; }
+        public string? BlockersDiagnostic { get; set; }
+    }
+
+    /// <summary>App-side shape of the Worker's BlockingProcessResponse.</summary>
+    private sealed class BlockingProcessWire
+    {
+        public int ProcessId { get; set; }
+        public string? ProcessName { get; set; }
+        public string? ExecutablePath { get; set; }
+        public string? ServiceName { get; set; }
+        public string? Kind { get; set; }
+        public string? Reason { get; set; }
+    }
+
+    /// <summary>App-side shape of the Worker's InspectPathLocks response.</summary>
+    private sealed class InspectPathLocksWorkerResponse
+    {
+        public bool Success { get; set; }
+        public List<InspectPathLocksWorkerResult>? Results { get; set; }
+    }
+
+    private sealed class InspectPathLocksWorkerResult
+    {
+        public string? Path { get; set; }
+        public bool Exists { get; set; }
+        public List<BlockingProcessWire>? BlockingProcesses { get; set; }
+        public bool MayBeIncomplete { get; set; }
+        public string? Diagnostic { get; set; }
+    }
+
+    private static IReadOnlyList<RemoveFeatureBlockingProcess> ToBlockingProcesses(IEnumerable<BlockingProcessWire> processes) =>
+        processes
+            .Select(p => new RemoveFeatureBlockingProcess(p.ProcessId, p.ProcessName, p.ExecutablePath, p.ServiceName, p.Kind, p.Reason))
+            .ToList();
+
+    private const string BlockerLookupUnavailable =
+        "Could not find out which programs are using the folder. Make sure the Worker is running and up to date.";
+
+    public async Task<IReadOnlyList<RemoveFeatureRepositoryBlockers>> InspectRemoveFeatureBlockersAsync(
+        IReadOnlyList<RemoveFeatureRepositoryBlockers> targets,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(targets);
+        if (targets.Count == 0)
+            return [];
+
+        var response = await workerBridge.SendCommandAsync(
+            WorkerHubMethods.InspectPathLocks,
+            new { paths = targets.Select(t => t.WorktreePath).ToList() },
+            cancellationToken);
+        var parsed = response.Success
+            ? WorkerResponseJson.DeserializeWorkerResponse<InspectPathLocksWorkerResponse>(response.Data)
+            : null;
+        if (parsed?.Results is null || parsed.Results.Count != targets.Count)
+        {
+            logger.LogWarning("InspectPathLocks failed: {Error}", FeatureOperationLog.Redact(response.Error));
+            return targets
+                .Select(t => t with { MayBeIncomplete = true, Diagnostic = BlockerLookupUnavailable })
+                .ToList();
+        }
+
+        return targets
+            .Select((t, i) =>
+            {
+                var r = parsed.Results[i];
+                return t with
+                {
+                    Processes = r.Exists && r.BlockingProcesses is { } blockers ? ToBlockingProcesses(blockers) : [],
+                    MayBeIncomplete = r.Exists && r.MayBeIncomplete,
+                    Diagnostic = r.Exists ? r.Diagnostic : null,
+                    PathExists = r.Exists,
+                };
+            })
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<RemoveFeatureRepositoryReport>> RetryRemoveFeatureResidueAsync(
+        IReadOnlyList<RemoveFeatureRepositoryReport> report,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+        var updated = new List<RemoveFeatureRepositoryReport>(report.Count);
+        foreach (var entry in report)
+        {
+            if (entry.ResidueTarget is not { } target || !entry.ResidueRemaining)
+            {
+                updated.Add(entry);
+                continue;
+            }
+
+            // The worktree is already unregistered, so the Worker goes straight to its guarded residue cleanup.
+            var response = await workerBridge.SendCommandAsync(
+                WorkerHubMethods.RemoveGitWorktree,
+                new
+                {
+                    mainRepositoryPath = target.MainRepositoryPath,
+                    worktreePath = target.WorktreePath,
+                    force = false,
+                    featureRootPath = target.FeatureRootPath,
+                    featureStorageRoot = target.FeatureStorageRoot,
+                    unlock = false
+                },
+                cancellationToken);
+            var result = WorkerResponseJson.DeserializeWorkerResponse<RemoveGitWorktreeResult>(response.Data);
+            if (!response.Success || result is null)
+            {
+                logger.LogWarning(
+                    "Retry of leftover cleanup failed for {Repository}: {Error}",
+                    entry.RepositoryName, FeatureOperationLog.Redact(response.Error));
+                updated.Add(entry with
+                {
+                    ResidueMessage = string.IsNullOrWhiteSpace(response.Error) ? entry.ResidueMessage : response.Error,
+                });
+                continue;
+            }
+
+            updated.Add(entry with
+            {
+                ResidueRemaining = result.ResidueRemaining,
+                ResidueFileCount = result.ResidueFileCount,
+                ResidueSampleFiles = result.ResidueSampleFiles,
+                ResidueMessage = result.ResidueMessage,
+                BlockingProcesses = result.BlockingProcesses is { } blockers ? ToBlockingProcesses(blockers) : null,
+                BlockersMayBeIncomplete = result.BlockersMayBeIncomplete,
+                BlockersDiagnostic = result.BlockersDiagnostic,
+                ResidueTarget = result.ResidueRemaining ? target : null,
+            });
+        }
+
+        return updated;
     }
 
     /// <summary>

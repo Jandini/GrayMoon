@@ -21,8 +21,6 @@ public sealed class CommandJobFactory
     {
         if (args == null || args.Value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
         {
-            if (command == "GetCapabilities")
-                return new GetCapabilitiesRequest();
             if (command == "GetHostInfo")
                 return new GetHostInfoRequest();
             if (command == WorkerHubMethods.SelfUpdate)
@@ -52,7 +50,6 @@ public sealed class CommandJobFactory
             "GetWorkspaceExists" => JsonSerializer.Deserialize<GetWorkspaceExistsRequest>(json, options)
                 ?? throw new ArgumentException("Invalid GetWorkspaceExists args"),
             "GetHostInfo" => JsonSerializer.Deserialize<GetHostInfoRequest>(json, options) ?? new GetHostInfoRequest(),
-            "GetCapabilities" => JsonSerializer.Deserialize<GetCapabilitiesRequest>(json, options) ?? new GetCapabilitiesRequest(),
             "SyncRepositoryDependencies" => JsonSerializer.Deserialize<SyncRepositoryDependenciesRequest>(json, options)
                 ?? throw new ArgumentException("Invalid SyncRepositoryDependencies args"),
             "RefreshRepositoryProjects" => JsonSerializer.Deserialize<RefreshRepositoryProjectsRequest>(json, options)
@@ -123,8 +120,12 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid RemoveGitWorktree args"),
             WorkerHubMethods.InspectWorktree => JsonSerializer.Deserialize<InspectWorktreeRequest>(json, options)
                 ?? throw new ArgumentException("Invalid InspectWorktree args"),
+            WorkerHubMethods.InspectPathLocks => JsonSerializer.Deserialize<InspectPathLocksRequest>(json, options)
+                ?? throw new ArgumentException("Invalid InspectPathLocks args"),
             WorkerHubMethods.AttachWorkspaceRepository => JsonSerializer.Deserialize<AttachWorkspaceRepositoryRequest>(json, options)
                 ?? throw new ArgumentException("Invalid AttachWorkspaceRepository args"),
+            WorkerHubMethods.DiscardWorkspaceRoot => JsonSerializer.Deserialize<DiscardWorkspaceRootRequest>(json, options)
+                ?? throw new ArgumentException("Invalid DiscardWorkspaceRoot args"),
             WorkerHubMethods.WriteRepositoryFile => JsonSerializer.Deserialize<WriteRepositoryFileRequest>(json, options)
                 ?? throw new ArgumentException("Invalid WriteRepositoryFile args"),
             _ => throw new NotSupportedException($"Unknown command: {command}")

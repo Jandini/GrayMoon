@@ -15,6 +15,12 @@ public sealed record OperationResult(
     /// </summary>
     public IReadOnlyList<RemoveFeatureRepositoryReport>? RemoveFeatureReport { get; init; }
 
+    /// <summary>
+    /// For a Remove Feature that failed because a worktree folder is in use (or access was denied): the processes the
+    /// Worker found holding each such folder. Null for every other operation and failure.
+    /// </summary>
+    public IReadOnlyList<RemoveFeatureRepositoryBlockers>? RemoveFeatureBlockers { get; init; }
+
     public static OperationResult Ok(
         IReadOnlyDictionary<int, string>? repoErrors = null,
         IReadOnlyDictionary<int, string>? levelErrors = null)
@@ -73,7 +79,65 @@ public sealed record RemoveFeatureRepositoryReport(
     /// </summary>
     string? KeptBranchName = null,
     RemoveFeatureRemoteBranchOutcome RemoteBranchOutcome = RemoveFeatureRemoteBranchOutcome.NotApplicable,
-    string? RemoteBranchMessage = null);
+    string? RemoteBranchMessage = null)
+{
+    /// <summary>Processes keeping the leftover folder in use, when the Worker looked them up; null when it did not (old Worker, no residue).</summary>
+    public IReadOnlyList<RemoveFeatureBlockingProcess>? BlockingProcesses { get; init; }
+
+    /// <summary>True when <see cref="BlockingProcesses"/> may miss some blockers.</summary>
+    public bool BlockersMayBeIncomplete { get; init; }
+
+    /// <summary>Short explanation for an incomplete blocker lookup; null when there is nothing to add.</summary>
+    public string? BlockersDiagnostic { get; init; }
+
+    /// <summary>
+    /// What "Retry" needs to delete the leftover files again once the blockers are closed; null when a retry cannot help
+    /// (no residue, or the Workspace-role root worktree, whose leftovers GrayMoon never deletes itself).
+    /// </summary>
+    public RemoveFeatureResidueTarget? ResidueTarget { get; init; }
+}
+
+/// <summary>
+/// One local process keeping a Feature worktree folder in use (Remove Feature diagnostics). Local only: never persisted
+/// or sent to a connector. <see cref="Kind"/> and <see cref="Reason"/> are the Worker's names
+/// (Kind: Unknown, Application, Service, Explorer, Console, Critical; Reason: OpenFile, WorkingDirectory).
+/// </summary>
+public sealed record RemoveFeatureBlockingProcess(
+    int ProcessId,
+    string? ProcessName,
+    string? ExecutablePath,
+    string? ServiceName,
+    string? Kind,
+    string? Reason)
+{
+    public const string WorkingDirectoryReason = "WorkingDirectory";
+
+    /// <summary>True when the process's current folder is inside the worktree (a shell or an AI tool left there).</summary>
+    public bool IsWorkingDirectory => string.Equals(Reason, WorkingDirectoryReason, StringComparison.Ordinal);
+}
+
+/// <summary>The blockers found for one repository's worktree folder.</summary>
+public sealed record RemoveFeatureRepositoryBlockers(
+    int WorkspaceRepositoryId,
+    string RepositoryName,
+    string WorktreePath,
+    IReadOnlyList<RemoveFeatureBlockingProcess> Processes,
+    bool MayBeIncomplete,
+    string? Diagnostic)
+{
+    /// <summary>False once the folder no longer exists (after a refresh): nothing is left to block.</summary>
+    public bool PathExists { get; init; } = true;
+}
+
+/// <summary>
+/// Paths needed to retry the Worker's guarded leftover-file cleanup for one repository of an already removed Feature.
+/// Built by the App from its own database at remove time; never from user input.
+/// </summary>
+public sealed record RemoveFeatureResidueTarget(
+    string MainRepositoryPath,
+    string WorktreePath,
+    string? FeatureRootPath,
+    string? FeatureStorageRoot);
 
 /// <summary>
 /// Result of a dependency-update run. <see cref="Success"/> is false when any repo or workspace-level

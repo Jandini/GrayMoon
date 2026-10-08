@@ -518,7 +518,7 @@ public sealed class GitWorktreeService(GitProcessRunner runner, IGitRepositoryRe
     /// <see cref="UnauthorizedAccessException"/> (for example a file still open in another program).
     /// Leaves whatever it could not delete in place; the caller reports that as residue.
     /// </summary>
-    private static async Task DeleteFolderRecursivelyWithRetryAsync(string folderPath, CancellationToken ct)
+    internal static async Task DeleteFolderRecursivelyWithRetryAsync(string folderPath, CancellationToken ct)
     {
         List<FileSystemInfo> entries;
         try

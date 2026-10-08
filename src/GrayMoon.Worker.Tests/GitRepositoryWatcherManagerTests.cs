@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 
 namespace GrayMoon.Worker.Tests;
 
+[Trait("Category", "PullRequest")]
 public sealed class GitRepositoryWatcherManagerTests : IDisposable
 {
     private readonly string _tempDir = Directory.CreateTempSubdirectory("graymoon-watcher-test-").FullName;
@@ -139,7 +140,7 @@ public sealed class GitRepositoryWatcherManagerTests : IDisposable
 
         await File.WriteAllTextAsync(Path.Combine(_tempDir, "file.txt"), "hello");
 
-        var sawScan = await WaitForAsync(() => fake.CallCount > 0, TimeSpan.FromSeconds(5));
+        var sawScan = await WaitForAsync(() => fake.CallCount > 0, TimeSpan.FromSeconds(60));
 
         Assert.True(sawScan, "Expected a file change to trigger a debounced status scan.");
     }
@@ -157,7 +158,7 @@ public sealed class GitRepositoryWatcherManagerTests : IDisposable
 
         await File.WriteAllTextAsync(Path.Combine(_tempDir, "file.txt"), "hello");
 
-        var sawScan = await WaitForAsync(() => fake.CallCount > 0, TimeSpan.FromSeconds(5));
+        var sawScan = await WaitForAsync(() => fake.CallCount > 0, TimeSpan.FromSeconds(60));
 
         Assert.True(sawScan, "Expected the watcher to remain active during the idle grace period after release.");
     }

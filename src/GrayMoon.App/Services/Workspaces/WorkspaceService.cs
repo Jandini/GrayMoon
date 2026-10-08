@@ -86,6 +86,27 @@ public sealed class WorkspaceService(IWorkerBridge workerBridge, ILogger<Workspa
         return data?.Exists ?? false;
     }
 
+    /// <summary>
+    /// Whether the Workspace folder exists and, if so, whether it is empty. <c>Error</c> is set when the Worker could
+    /// not answer; <c>IsEmpty</c> is null when the folder does not exist.
+    /// </summary>
+    public async Task<WorkspaceDirectoryState> GetDirectoryStateAsync(string workspaceName, string? rootOverride = null, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(workspaceName))
+            return new WorkspaceDirectoryState(false, null, null);
+
+        var root = !string.IsNullOrWhiteSpace(rootOverride) ? rootOverride : await GetRootPathAsync(cancellationToken);
+        var response = await workerBridge.SendCommandAsync("GetWorkspaceExists", new { workspaceName, workspaceRoot = root }, cancellationToken);
+        if (!response.Success)
+            return new WorkspaceDirectoryState(false, null, response.Error ?? "The Worker could not check the Workspace folder.");
+
+        var data = WorkerResponseJson.DeserializeWorkerResponse<WorkerWorkspaceExistsResponse>(response.Data);
+        if (data is null)
+            return new WorkspaceDirectoryState(false, null, "The Worker returned an unreadable response for the Workspace folder.");
+
+        return new WorkspaceDirectoryState(data.Exists, data.Exists ? data.IsEmpty : null, null);
+    }
+
     public async Task<int> GetRepositoryCountAsync(string workspaceName, string? rootOverride = null, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(workspaceName))
@@ -298,3 +319,6 @@ public sealed class WorkspaceService(IWorkerBridge workerBridge, ILogger<Workspa
         return string.IsNullOrWhiteSpace(sanitized) ? "workspace" : sanitized;
     }
 }
+
+/// <summary>Workspace folder state as seen by the Worker (see <see cref="WorkspaceService.GetDirectoryStateAsync"/>).</summary>
+public sealed record WorkspaceDirectoryState(bool Exists, bool? IsEmpty, string? Error);

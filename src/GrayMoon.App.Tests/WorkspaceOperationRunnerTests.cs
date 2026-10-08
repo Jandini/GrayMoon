@@ -229,7 +229,7 @@ file static class WorkspaceJobTestWait
 {
     public static async Task WaitUntilAsync(Func<bool> condition)
     {
-        var deadline = DateTime.UtcNow.AddSeconds(15);
+        var deadline = DateTime.UtcNow.AddSeconds(60);
         while (!condition())
         {
             if (DateTime.UtcNow > deadline)

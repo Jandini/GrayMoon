@@ -1,9 +1,12 @@
-::deep .modal-dialog {
-    max-height: calc(100vh - 2rem);
+::deep .modal-dialog.modal-dialog-centered {
+    display: flex;
+    align-items: center;
+    min-height: calc(100% - 2rem);
     margin: 1rem auto;
 }
 
 ::deep .modal-content {
+    width: 100%;
     max-height: calc(100vh - 2rem);
 }
 
@@ -14,75 +17,4 @@
 ::deep .form-check-input:not(:checked) {
     background-color: #6c757d;
     border-color: #6c757d;
-}
-
-.workspace-repository-picker {
-    position: relative;
-}
-
-.workspace-repository-list {
-    margin-top: 2px;
-    max-height: 10.3rem;
-    overflow-y: auto;
-    overflow-x: hidden;
-    -webkit-overflow-scrolling: touch;
-    background-color: var(--bg-input, #252526);
-    border: 1px solid var(--border-input, var(--border-color, #3c3c3c));
-    border-radius: 0.25rem;
-    scrollbar-width: auto;
-    scrollbar-color: #5a5a5a var(--bg-input, #252526);
-}
-
-.workspace-repository-list::-webkit-scrollbar {
-    width: 8px;
-}
-
-.workspace-repository-list::-webkit-scrollbar-track {
-    background: var(--bg-input, #252526);
-}
-
-.workspace-repository-list::-webkit-scrollbar-thumb {
-    background: #5a5a5a;
-    border-radius: 4px;
-}
-
-.workspace-repository-list::-webkit-scrollbar-thumb:hover {
-    background: #6a6a6a;
-}
-
-.workspace-repository-option {
-    display: block;
-    width: 100%;
-    text-align: left;
-    border: none;
-    background: transparent;
-    padding: 0.35rem 0.75rem;
-    color: var(--text-primary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    cursor: pointer;
-}
-
-.workspace-repository-option:hover {
-    background: var(--bs-primary, #2d2d30);
-}
-
-.workspace-repository-option.active {
-    background: var(--bs-gray, #2d2d30);
-}
-
-.workspace-repository-option.highlighted {
-    background: var(--bs-primary, #2d2d30);
-    outline: 1px solid var(--bs-primary, #0d6efd);
-    outline-offset: -1px;
-}
-
-.workspace-repository-empty {
-    padding: 0.35rem 0.75rem;
-    color: var(--bs-muted, #9d9d9d);
-}
-
-.workspace-repository-picker.disabled .workspace-repository-select {
-    opacity: 0.6;
-    cursor: not-allowed;
 }

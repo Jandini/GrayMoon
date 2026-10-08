@@ -14,7 +14,6 @@ public sealed class CommandDispatcher(
     ICommandHandler<GetRepositoryVersionRequest, GetRepositoryVersionResponse> getRepositoryVersionCommand,
     ICommandHandler<GetWorkspaceExistsRequest, GetWorkspaceExistsResponse> getWorkspaceExistsCommand,
     ICommandHandler<GetHostInfoRequest, GetHostInfoResponse> getHostInfoCommand,
-    ICommandHandler<GetCapabilitiesRequest, GetCapabilitiesResponse> getCapabilitiesCommand,
     ICommandHandler<SyncRepositoryDependenciesRequest, SyncRepositoryDependenciesResponse> syncRepositoryDependenciesCommand,
     ICommandHandler<RefreshRepositoryProjectsRequest, RefreshRepositoryProjectsResponse> refreshRepositoryProjectsCommand,
     ICommandHandler<CommitSyncRepositoryRequest, CommitSyncRepositoryResponse> commitSyncRepositoryCommand,
@@ -51,7 +50,9 @@ public sealed class CommandDispatcher(
     ICommandHandler<RemoveGitWorktreeRequest, RemoveGitWorktreeResponse> removeGitWorktreeCommand,
     ICommandHandler<GetGitVersionAtDefaultTipRequest, GetGitVersionAtDefaultTipResponse> getGitVersionAtDefaultTipCommand,
     ICommandHandler<InspectWorktreeRequest, InspectWorktreeResponse> inspectWorktreeCommand,
+    ICommandHandler<InspectPathLocksRequest, InspectPathLocksResponse> inspectPathLocksCommand,
     ICommandHandler<AttachWorkspaceRepositoryRequest, AttachWorkspaceRepositoryResponse> attachWorkspaceRepositoryCommand,
+    ICommandHandler<DiscardWorkspaceRootRequest, DiscardWorkspaceRootResponse> discardWorkspaceRootCommand,
     ICommandHandler<WriteRepositoryFileRequest, WriteRepositoryFileResponse> writeRepositoryFileCommand,
     IWorkspaceCapabilityProvider capabilityProvider) : ICommandDispatcher
     {
@@ -67,7 +68,6 @@ public sealed class CommandDispatcher(
         ["GetGitVersionAtDefaultTip"] = async (req, ct) => await getGitVersionAtDefaultTipCommand.ExecuteAsync((GetGitVersionAtDefaultTipRequest)req, ct),
         ["GetWorkspaceExists"] = async (req, ct) => await getWorkspaceExistsCommand.ExecuteAsync((GetWorkspaceExistsRequest)req, ct),
         ["GetHostInfo"] = async (req, ct) => await getHostInfoCommand.ExecuteAsync((GetHostInfoRequest)req, ct),
-        ["GetCapabilities"] = async (req, ct) => await getCapabilitiesCommand.ExecuteAsync((GetCapabilitiesRequest)req, ct),
         ["SyncRepositoryDependencies"] = async (req, ct) => await syncRepositoryDependenciesCommand.ExecuteAsync((SyncRepositoryDependenciesRequest)req, ct),
         ["CommitSyncRepository"] = async (req, ct) => await commitSyncRepositoryCommand.ExecuteAsync((CommitSyncRepositoryRequest)req, ct),
         ["GetBranches"] = async (req, ct) => await getBranchesCommand.ExecuteAsync((GetBranchesRequest)req, ct),
@@ -102,7 +102,9 @@ public sealed class CommandDispatcher(
         [WorkerHubMethods.CreateGitWorktree] = async (req, ct) => await createGitWorktreeCommand.ExecuteAsync((CreateGitWorktreeRequest)req, ct),
         [WorkerHubMethods.RemoveGitWorktree] = async (req, ct) => await removeGitWorktreeCommand.ExecuteAsync((RemoveGitWorktreeRequest)req, ct),
         [WorkerHubMethods.InspectWorktree] = async (req, ct) => await inspectWorktreeCommand.ExecuteAsync((InspectWorktreeRequest)req, ct),
+        [WorkerHubMethods.InspectPathLocks] = async (req, ct) => await inspectPathLocksCommand.ExecuteAsync((InspectPathLocksRequest)req, ct),
         [WorkerHubMethods.AttachWorkspaceRepository] = async (req, ct) => await attachWorkspaceRepositoryCommand.ExecuteAsync((AttachWorkspaceRepositoryRequest)req, ct),
+        [WorkerHubMethods.DiscardWorkspaceRoot] = async (req, ct) => await discardWorkspaceRootCommand.ExecuteAsync((DiscardWorkspaceRootRequest)req, ct),
         [WorkerHubMethods.WriteRepositoryFile] = async (req, ct) => await writeRepositoryFileCommand.ExecuteAsync((WriteRepositoryFileRequest)req, ct),
     };
 

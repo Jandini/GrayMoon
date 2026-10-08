@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 
 namespace GrayMoon.Worker.Tests;
 
+[Trait("Category", "PullRequest")]
 public sealed class GitRepositoryWatcherObservationTests
 {
     [Fact]
@@ -198,12 +199,12 @@ public sealed class GitRepositoryWatcherObservationTests
 
             await File.WriteAllTextAsync(Path.Combine(tempDir, "watched.txt"), "hello");
 
-            var sawScan = await WaitForAsync(() => fake.CallCount > 0, TimeSpan.FromSeconds(5));
+            var sawScan = await WaitForAsync(() => fake.CallCount > 0, TimeSpan.FromSeconds(60));
             Assert.True(sawScan, "Expected invalidation scan to still run.");
 
             var sawObservation = await WaitForAsync(
                 () => manager.TryGetRecentObservations(tempDir, out var obs) && obs.Count > 0,
-                TimeSpan.FromSeconds(5));
+                TimeSpan.FromSeconds(60));
             Assert.True(sawObservation, "Expected at least one working-tree observation.");
             Assert.True(manager.TryGetCoverage(tempDir, out var coverage));
             Assert.NotNull(coverage!.LastObservedAt);

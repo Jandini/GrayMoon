@@ -1,7 +1,3 @@
-using GrayMoon.Abstractions.Worker;
-using GrayMoon.Common;
-using GrayMoon.Worker.Commands;
-using GrayMoon.Worker.Jobs.Requests;
 using GrayMoon.Worker.Services;
 
 namespace GrayMoon.Worker.Tests;
@@ -53,42 +49,5 @@ public sealed class WorkerRepositoryPathsTests
         {
             try { Directory.Delete(root, true); } catch { /* best-effort */ }
         }
-    }
-
-    [Fact]
-    public async Task GetCapabilities_response_contains_workspaceRepository_feature()
-    {
-        var command = new GetCapabilitiesCommand();
-
-        var response = await command.ExecuteAsync(new GetCapabilitiesRequest());
-
-        Assert.NotNull(response.SupportedFeatures);
-        Assert.Contains(WorkerFeatures.WorkspaceRepository, response.SupportedFeatures!);
-        Assert.Contains("workspaceRepository", response.SupportedFeatures!);
-    }
-
-    private sealed class ThrowingCommandLineService : ICommandLineService
-    {
-        public Task<CommandLineResult> RunAsync(
-            string fileName,
-            string arguments,
-            string? workingDirectory = null,
-            string? stdin = null,
-            CancellationToken cancellationToken = default,
-            bool streamStderrAsStdout = false,
-            bool mirrorFailureOutputAsStderr = false,
-            TimeSpan? timeout = null)
-            => throw new InvalidOperationException("no process in this test");
-
-        public Task<CommandLineResult> RunAsync(
-            string fileName,
-            IReadOnlyList<string> arguments,
-            string? workingDirectory = null,
-            byte[]? stdinBytes = null,
-            CancellationToken cancellationToken = default,
-            bool streamStderrAsStdout = false,
-            bool mirrorFailureOutputAsStderr = false,
-            TimeSpan? timeout = null)
-            => throw new InvalidOperationException("no process in this test");
     }
 }

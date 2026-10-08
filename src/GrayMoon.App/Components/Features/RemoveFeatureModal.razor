@@ -22,7 +22,39 @@
                     <button type="button" class="btn-close" aria-label="Close" @onclick="@(_report is null ? Cancel : Done)" disabled="@_analyzing"></button>
                 </div>
                 <div class="modal-body">
-                    @if (!string.IsNullOrEmpty(_error))
+                    @if (HasInUseBlockers)
+                    {
+                        @* Remove failed because a worktree folder is in use: name the programs instead of a bare Git/IO error. *@
+                        <div class="gm-callout gm-callout--warning mb-3" role="alert">
+                            <div class="fw-semibold">@RemoveFeatureBlockerText.InUseTitle</div>
+                            <div>@RemoveFeatureBlockerText.InUseBody</div>
+                        </div>
+                        @foreach (var repoBlockers in _blockers!)
+                        {
+                            <div class="mb-2" @key="repoBlockers.WorkspaceRepositoryId">
+                                <div class="small fw-semibold mb-1">@repoBlockers.RepositoryName</div>
+                                @if (repoBlockers.PathExists)
+                                {
+                                    <BlockingProcessList Processes="repoBlockers.Processes"
+                                                         MayBeIncomplete="repoBlockers.MayBeIncomplete"
+                                                         Diagnostic="@repoBlockers.Diagnostic" />
+                                }
+                                else
+                                {
+                                    <p class="text-muted small mb-1">The folder is gone. Select Retry to finish removing the Feature.</p>
+                                }
+                            </div>
+                        }
+                        <p class="text-muted small mb-2">@RemoveFeatureBlockerText.CloseAndRetry</p>
+                        @if (!string.IsNullOrEmpty(_error))
+                        {
+                            <details class="small text-muted mb-3">
+                                <summary>Details</summary>
+                                <div class="text-break">@_error</div>
+                            </details>
+                        }
+                    }
+                    else if (!string.IsNullOrEmpty(_error))
                     {
                         <div class="gm-callout gm-callout--error mb-3" role="alert">@_error</div>
                     }
@@ -37,10 +69,22 @@
                                 @foreach (var warning in ReportWarnings)
                                 {
                                     <li class="mb-2">
-                                        <div class="text-muted small">@warning</div>
+                                        <div class="text-muted small">@warning.Text</div>
+                                        @if (warning.Leftover?.BlockingProcesses is { } leftoverBlockers)
+                                        {
+                                            <div class="mt-1 ms-2">
+                                                <BlockingProcessList Processes="leftoverBlockers"
+                                                                     MayBeIncomplete="warning.Leftover.BlockersMayBeIncomplete"
+                                                                     Diagnostic="@warning.Leftover.BlockersDiagnostic" />
+                                            </div>
+                                        }
                                     </li>
                                 }
                             </ul>
+                            @if (CanRetryLeftovers)
+                            {
+                                <p class="text-muted small mb-0 mt-2">@RemoveFeatureBlockerText.CloseAndRetry</p>
+                            }
                         }
                     }
                     else if (_plan is null)
@@ -185,14 +229,41 @@
                 <div class="modal-footer">
                     @if (_report is not null)
                     {
-                        <button type="button" class="btn btn-primary" data-default-action @onclick="Done">Done</button>
+                        @if (CanRetryLeftovers)
+                        {
+                            <button type="button" class="btn btn-outline-secondary text-nowrap" @onclick="RefreshBlockersAsync" disabled="@BlockerActionBusy">
+                                @if (_refreshingBlockers)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                                }
+                                Refresh blockers
+                            </button>
+                            <button type="button" class="btn btn-outline-primary text-nowrap" @onclick="RetryLeftoversAsync" disabled="@BlockerActionBusy">
+                                @if (_retryingLeftovers)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                                }
+                                Retry
+                            </button>
+                        }
+                        <button type="button" class="btn btn-primary text-nowrap" data-default-action @onclick="Done" disabled="@BlockerActionBusy">Done</button>
                     }
                     else
                     {
-                        <button type="button" class="btn btn-outline-secondary" @onclick="Cancel" disabled="@_analyzing">Cancel</button>
-                        <button type="button" class="@RemoveCtaClass" data-default-action @onclick="RemoveAsync"
-                                disabled="@(_analyzing || _plan is null || !CanRemove(AnyRepoStatusUnknown, ShowDiscardCheckbox, _allowDiscard, ShowForceCheckbox, _allowForce, ShowUnlockCheckbox, _allowUnlock))">
-                            Remove Feature
+                        <button type="button" class="btn btn-outline-secondary text-nowrap" @onclick="Cancel" disabled="@(_analyzing || BlockerActionBusy)">Cancel</button>
+                        @if (HasInUseBlockers)
+                        {
+                            <button type="button" class="btn btn-outline-secondary text-nowrap" @onclick="RefreshBlockersAsync" disabled="@(_analyzing || BlockerActionBusy)">
+                                @if (_refreshingBlockers)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                                }
+                                Refresh blockers
+                            </button>
+                        }
+                        <button type="button" class="@RemoveCtaClass text-nowrap" data-default-action @onclick="RemoveAsync"
+                                disabled="@(_analyzing || BlockerActionBusy || _plan is null || !CanRemove(AnyRepoStatusUnknown, ShowDiscardCheckbox, _allowDiscard, ShowForceCheckbox, _allowForce, ShowUnlockCheckbox, _allowUnlock))">
+                            @(HasInUseBlockers ? "Retry" : "Remove Feature")
                         </button>
                     }
                 </div>
@@ -230,6 +301,21 @@
     private string? _featureName;
     private int? _featureNameLoadedFor;
 
+    /// <summary>Processes holding worktree folders after a Remove that failed because they are in use; null otherwise.</summary>
+    private IReadOnlyList<RemoveFeatureRepositoryBlockers>? _blockers;
+    private bool _refreshingBlockers;
+    private bool _retryingLeftovers;
+
+    private bool HasInUseBlockers => _report is null && _blockers is { Count: > 0 };
+
+    private bool BlockerActionBusy => _refreshingBlockers || _retryingLeftovers;
+
+    /// <summary>True when a removed Feature left files behind that a Retry can try to delete again.</summary>
+    private bool CanRetryLeftovers => _report?.Any(r => r.ResidueRemaining && r.ResidueTarget is not null) == true;
+
+    /// <summary>One line of the "removed with warnings" report; <see cref="Leftover"/> is set for a leftover-files line.</summary>
+    internal sealed record ReportWarning(string Text, RemoveFeatureRepositoryReport? Leftover = null);
+
     /// <summary>
     /// True when a successful remove left something the user should acknowledge: kept/failed branch,
     /// leftover files, or a branch kept because the worktree was off its Feature branch.
@@ -259,45 +345,46 @@
     }
 
     /// <summary>One line per repository that was not fully cleaned up: kept/failed branch, or leftover files.</summary>
-    private IReadOnlyList<string> ReportWarnings
+    private IReadOnlyList<ReportWarning> ReportWarnings => BuildReportWarnings(_report);
+
+    internal static IReadOnlyList<ReportWarning> BuildReportWarnings(IReadOnlyList<RemoveFeatureRepositoryReport>? report)
     {
-        get
+        if (report is null)
+            return [];
+
+        var warnings = new List<ReportWarning>();
+        foreach (var repo in report)
         {
-            if (_report is null)
-                return [];
+            if (repo.BranchOutcome == RemoveFeatureBranchOutcome.KeptUnmerged)
+                warnings.Add(new($"{repo.RepositoryName}: local branch kept (has commits not in the default branch)."));
+            else if (repo.BranchOutcome == RemoveFeatureBranchOutcome.Kept)
+                warnings.Add(new($"{repo.RepositoryName}: local Feature branch kept."));
+            else if (repo.BranchOutcome == RemoveFeatureBranchOutcome.Failed)
+                warnings.Add(new($"{repo.RepositoryName}: local branch delete failed. {repo.BranchMessage}".TrimEnd()));
 
-            var warnings = new List<string>();
-            foreach (var repo in _report)
+            if (repo.RemoteBranchOutcome == RemoveFeatureRemoteBranchOutcome.Kept)
+                warnings.Add(new($"{repo.RepositoryName}: remote Feature branch kept."));
+            else if (repo.RemoteBranchOutcome == RemoveFeatureRemoteBranchOutcome.RefusedLease)
+                warnings.Add(new($"{repo.RepositoryName}: remote branch kept (tip no longer matches this Feature). {repo.RemoteBranchMessage}".TrimEnd()));
+            else if (repo.RemoteBranchOutcome == RemoveFeatureRemoteBranchOutcome.Failed)
+                warnings.Add(new($"{repo.RepositoryName}: remote branch delete failed. {repo.RemoteBranchMessage}".TrimEnd()));
+
+            // 09 SB-2: the worktree was on another branch (or a detached commit) instead of its
+            // Feature branch; that branch was never deleted and is still in the Workspace.
+            if (!string.IsNullOrWhiteSpace(repo.KeptBranchName))
+                warnings.Add(new($"{repo.RepositoryName}: {repo.KeptBranchName} kept (this repository was not on its Feature branch)."));
+
+            if (repo.ResidueRemaining)
             {
-                if (repo.BranchOutcome == RemoveFeatureBranchOutcome.KeptUnmerged)
-                    warnings.Add($"{repo.RepositoryName}: local branch kept (has commits not in the default branch).");
-                else if (repo.BranchOutcome == RemoveFeatureBranchOutcome.Kept)
-                    warnings.Add($"{repo.RepositoryName}: local Feature branch kept.");
-                else if (repo.BranchOutcome == RemoveFeatureBranchOutcome.Failed)
-                    warnings.Add($"{repo.RepositoryName}: local branch delete failed. {repo.BranchMessage}".TrimEnd());
-
-                if (repo.RemoteBranchOutcome == RemoveFeatureRemoteBranchOutcome.Kept)
-                    warnings.Add($"{repo.RepositoryName}: remote Feature branch kept.");
-                else if (repo.RemoteBranchOutcome == RemoveFeatureRemoteBranchOutcome.RefusedLease)
-                    warnings.Add($"{repo.RepositoryName}: remote branch kept (tip no longer matches this Feature). {repo.RemoteBranchMessage}".TrimEnd());
-                else if (repo.RemoteBranchOutcome == RemoveFeatureRemoteBranchOutcome.Failed)
-                    warnings.Add($"{repo.RepositoryName}: remote branch delete failed. {repo.RemoteBranchMessage}".TrimEnd());
-
-                // 09 SB-2: the worktree was on another branch (or a detached commit) instead of its
-                // Feature branch; that branch was never deleted and is still in the Workspace.
-                if (!string.IsNullOrWhiteSpace(repo.KeptBranchName))
-                    warnings.Add($"{repo.RepositoryName}: {repo.KeptBranchName} kept (this repository was not on its Feature branch).");
-
-                if (repo.ResidueRemaining)
-                {
-                    var fileWord = repo.ResidueFileCount == 1 ? "file" : "files";
-                    warnings.Add(
-                        $"{repo.RepositoryName}: {repo.ResidueFileCount} leftover {fileWord} could not be removed. {repo.ResidueMessage}".TrimEnd());
-                }
+                // Files are often all deleted while the folder itself stays in use (a shell or AI tool sitting in it).
+                var text = repo.ResidueFileCount > 0
+                    ? $"{repo.RepositoryName}: {repo.ResidueFileCount} leftover {(repo.ResidueFileCount == 1 ? "file" : "files")} could not be removed. {repo.ResidueMessage}"
+                    : $"{repo.RepositoryName}: {(string.IsNullOrWhiteSpace(repo.ResidueMessage) ? "The worktree folder could not be removed." : repo.ResidueMessage)}";
+                warnings.Add(new(text.TrimEnd(), repo));
             }
-
-            return warnings;
         }
+
+        return warnings;
     }
 
     /// <summary>True when the Worker could not confirm disk state for one or more repositories. Remove is disabled in that case.</summary>
@@ -748,6 +835,7 @@
         _plan = plan;
         _analyzedFor = FeatureContextId?.Value;
         _report = null;
+        _blockers = null;
         _allowDiscard = false;
         _allowForce = false;
         _allowUnlock = false;
@@ -792,6 +880,7 @@
         _removing = true;
         _error = null;
         _report = null;
+        _blockers = null;
         try
         {
             var result = await FeatureOperations.RemoveFeatureAsync(
@@ -807,9 +896,11 @@
                 });
             if (!result.Success)
             {
-                // Hard failure: error only - never pair with a green/success report.
+                // Hard failure: error only - never pair with a green/success report. When the Worker found the
+                // processes holding a worktree folder, the dialog names them and offers Retry / Refresh blockers.
                 _report = null;
                 _error = result.Error ?? "Remove Feature failed.";
+                _blockers = result.RemoveFeatureBlockers is { Count: > 0 } blockers ? blockers : null;
                 await RefreshPlanAsync();
                 return;
             }
@@ -841,9 +932,118 @@
         }
     }
 
+    /// <summary>Looks the blockers up again: for the failed Remove's worktrees, or for a removed Feature's leftover folders.</summary>
+    private async Task RefreshBlockersAsync()
+    {
+        if (BlockerActionBusy)
+            return;
+
+        _refreshingBlockers = true;
+        try
+        {
+            if (_report is not null)
+            {
+                var targets = LeftoverBlockerTargets(_report);
+                if (targets.Count > 0)
+                    _report = ApplyRefreshedBlockers(_report, await FeatureOperations.InspectRemoveFeatureBlockersAsync(targets));
+            }
+            else if (_blockers is { Count: > 0 })
+            {
+                _blockers = await FeatureOperations.InspectRemoveFeatureBlockersAsync(_blockers);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Refreshing Remove Feature blockers failed");
+        }
+        finally
+        {
+            _refreshingBlockers = false;
+        }
+    }
+
+    /// <summary>Retries deleting a removed Feature's leftover files; closes the dialog when nothing is left to report.</summary>
+    private async Task RetryLeftoversAsync()
+    {
+        if (_report is null || BlockerActionBusy)
+            return;
+
+        _retryingLeftovers = true;
+        try
+        {
+            _report = await FeatureOperations.RetryRemoveFeatureResidueAsync(_report);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Retrying Remove Feature leftover cleanup failed");
+        }
+        finally
+        {
+            _retryingLeftovers = false;
+        }
+
+        if (!HasReportWarnings(_report))
+            await Done();
+    }
+
+    /// <summary>Leftover folders a refresh can inspect: report entries that still have files and a retry target.</summary>
+    internal static IReadOnlyList<RemoveFeatureRepositoryBlockers> LeftoverBlockerTargets(IReadOnlyList<RemoveFeatureRepositoryReport> report) =>
+        report
+            .Where(r => r.ResidueRemaining && r.ResidueTarget is not null)
+            .Select(r => new RemoveFeatureRepositoryBlockers(
+                r.WorkspaceRepositoryId,
+                r.RepositoryName,
+                r.ResidueTarget!.WorktreePath,
+                r.BlockingProcesses ?? [],
+                r.BlockersMayBeIncomplete,
+                r.BlockersDiagnostic))
+            .ToList();
+
+    /// <summary>
+    /// Folds refreshed blockers back into the report. A leftover folder that no longer exists is no longer residue, so
+    /// it drops out of the warnings (and Retry is no longer offered for it).
+    /// </summary>
+    internal static IReadOnlyList<RemoveFeatureRepositoryReport> ApplyRefreshedBlockers(
+        IReadOnlyList<RemoveFeatureRepositoryReport> report,
+        IReadOnlyList<RemoveFeatureRepositoryBlockers> refreshed)
+    {
+        var byRepository = refreshed.ToDictionary(b => b.WorkspaceRepositoryId);
+        return report
+            .Select(r =>
+            {
+                if (!byRepository.TryGetValue(r.WorkspaceRepositoryId, out var b))
+                    return r;
+                if (!b.PathExists)
+                {
+                    return r with
+                    {
+                        ResidueRemaining = false,
+                        ResidueFileCount = 0,
+                        ResidueSampleFiles = null,
+                        ResidueMessage = null,
+                        BlockingProcesses = null,
+                        BlockersMayBeIncomplete = false,
+                        BlockersDiagnostic = null,
+                        ResidueTarget = null,
+                    };
+                }
+
+                return r with
+                {
+                    BlockingProcesses = b.Processes,
+                    BlockersMayBeIncomplete = b.MayBeIncomplete,
+                    BlockersDiagnostic = b.Diagnostic,
+                };
+            })
+            .ToList();
+    }
+
     private void ResetDialogState()
     {
         _plan = null;
+        _blockers = null;
+        _refreshingBlockers = false;
+        _retryingLeftovers = false;
         _analyzedFor = null;
         _appliedInitialPlanFor = null;
         _featureName = null;

@@ -369,6 +369,270 @@ public sealed class RemoveFeatureReportTests
         Assert.False(pause.IsPaused(featureContextId.Value));
     }
 
+    // ---- Blocker diagnostics (processes keeping a worktree in use) --------------------------------
+
+    private static object InUseFailure() => new
+    {
+        success = false,
+        errorCode = "GitFailed",
+        errorMessage = "error: failed to delete 'C:/f/repo': Permission denied",
+        failureKind = "PathInUse",
+        blockingProcesses = new[]
+        {
+            new { processId = 18472, processName = "claude", executablePath = @"C:\tools\claude.exe", serviceName = (string?)null, kind = "Application", reason = "WorkingDirectory" },
+            new { processId = 22140, processName = "dotnet", executablePath = @"C:\Program Files\dotnet\dotnet.exe", serviceName = (string?)null, kind = "Console", reason = "OpenFile" },
+        },
+        blockersMayBeIncomplete = false,
+    };
+
+    [Fact]
+    public async Task In_use_failure_returns_the_blocking_processes_and_keeps_the_original_error()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var featureContextId = await SeedRemovableFeatureAsync(ctx);
+
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree());
+        ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, _ =>
+            new WorkerCommandResponse(false, InUseFailure(), "error: failed to delete 'C:/f/repo': Permission denied"));
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var result = await ops.RemoveFeatureAsync(
+            featureContextId,
+            new RemoveFeatureOptions { AllowDiscardUncommitted = true, AllowForceDeleteLocalBranches = true });
+
+        Assert.False(result.Success);
+        Assert.Contains("Permission denied", result.Error);
+        var repo = Assert.Single(result.RemoveFeatureBlockers!);
+        Assert.Equal("graymoon-api", repo.RepositoryName);
+        Assert.EndsWith("graymoon-api", repo.WorktreePath);
+        Assert.Equal(2, repo.Processes.Count);
+        var claude = Assert.Single(repo.Processes, p => p.ProcessId == 18472);
+        Assert.True(claude.IsWorkingDirectory);
+        Assert.Equal(@"C:\tools\claude.exe", claude.ExecutablePath);
+        Assert.Contains(repo.Processes, p => p.ProcessId == 22140 && !p.IsWorkingDirectory);
+
+        // The Feature is kept for Retry, exactly as before blocker diagnostics existed.
+        await using var read = ctx.CreateScope();
+        var db = read.ServiceProvider.GetRequiredService<AppDbContext>();
+        var feature = await db.WorkspaceFeatures.SingleAsync(f => f.Name == "feat-refresh" && f.WorkspaceId == ctx.WorkspaceId);
+        Assert.Equal(WorkspaceFeatureLifecycleState.NeedsRepair, feature.LifecycleState);
+    }
+
+    [Fact]
+    public async Task Failure_without_blockers_from_the_Worker_has_no_blocker_list()
+    {
+        // An old Worker, or a failure the Worker did not classify as "in use", sends no blockingProcesses.
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var featureContextId = await SeedRemovableFeatureAsync(ctx);
+
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree());
+        ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, _ =>
+            new WorkerCommandResponse(false, new { success = false, errorMessage = "fatal: validation failed" }, "fatal: validation failed"));
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var result = await ops.RemoveFeatureAsync(
+            featureContextId,
+            new RemoveFeatureOptions { AllowDiscardUncommitted = true, AllowForceDeleteLocalBranches = true });
+
+        Assert.False(result.Success);
+        Assert.Equal("fatal: validation failed", result.Error);
+        Assert.Null(result.RemoveFeatureBlockers);
+        Assert.DoesNotContain(ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.InspectPathLocks);
+    }
+
+    [Fact]
+    public async Task Clean_remove_never_asks_the_Worker_for_blockers()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var featureContextId = await SeedRemovableFeatureAsync(ctx);
+
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree());
+        ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new { success = true });
+        ctx.WorkerBridge.Respond("DeleteBranch", new { success = true });
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var result = await ops.RemoveFeatureAsync(
+            featureContextId,
+            new RemoveFeatureOptions { AllowDiscardUncommitted = true, AllowForceDeleteLocalBranches = true });
+
+        Assert.True(result.Success, result.Error);
+        Assert.Null(result.RemoveFeatureBlockers);
+        var repo = Assert.Single(result.RemoveFeatureReport!);
+        Assert.Null(repo.BlockingProcesses);
+        Assert.Null(repo.ResidueTarget);
+        Assert.DoesNotContain(ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.InspectPathLocks);
+    }
+
+    [Fact]
+    public async Task Leftover_files_report_carries_blockers_and_a_retry_target()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var featureContextId = await SeedRemovableFeatureAsync(ctx);
+
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree());
+        ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new
+        {
+            success = true,
+            residueRemaining = true,
+            residueFileCount = 0,
+            residueMessage = "The worktree folder could not be removed.",
+            blockingProcesses = new[]
+            {
+                new { processId = 31337, processName = "pwsh", executablePath = (string?)null, serviceName = (string?)null, kind = "Application", reason = "WorkingDirectory" },
+            },
+            blockersMayBeIncomplete = true,
+            blockersDiagnostic = "Only the first 4000 files were checked.",
+        });
+        ctx.WorkerBridge.Respond("DeleteBranch", new { success = true });
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var result = await ops.RemoveFeatureAsync(
+            featureContextId,
+            new RemoveFeatureOptions { AllowDiscardUncommitted = true, AllowForceDeleteLocalBranches = true });
+
+        Assert.True(result.Success, result.Error);
+        var repo = Assert.Single(result.RemoveFeatureReport!);
+        Assert.True(repo.ResidueRemaining);
+        var blocker = Assert.Single(repo.BlockingProcesses!);
+        Assert.Equal(31337, blocker.ProcessId);
+        Assert.True(blocker.IsWorkingDirectory);
+        Assert.True(repo.BlockersMayBeIncomplete);
+        Assert.Equal("Only the first 4000 files were checked.", repo.BlockersDiagnostic);
+
+        var call = Assert.Single(ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.RemoveGitWorktree);
+        var sentFeatureRoot = call.Args.GetType().GetProperty("featureRootPath")!.GetValue(call.Args) as string;
+        if (sentFeatureRoot is null)
+        {
+            // Without the Feature storage paths the Worker only reports leftovers, so Retry could not help.
+            Assert.Null(repo.ResidueTarget);
+        }
+        else
+        {
+            Assert.NotNull(repo.ResidueTarget);
+            Assert.Equal(GetWorktreePath(call.Args), repo.ResidueTarget!.WorktreePath);
+            Assert.Equal(sentFeatureRoot, repo.ResidueTarget.FeatureRootPath);
+        }
+    }
+
+    [Fact]
+    public async Task Retry_leftovers_resends_the_guarded_cleanup_and_clears_residue_when_it_succeeds()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new { success = true, alreadyRemoved = true, residueRemaining = false });
+
+        var target = new RemoveFeatureResidueTarget(@"C:\ws\api", @"C:\f\feat\api", @"C:\f\feat", @"C:\f");
+        IReadOnlyList<RemoveFeatureRepositoryReport> report =
+        [
+            new RemoveFeatureRepositoryReport(1, "api", true, RemoveFeatureBranchOutcome.Deleted, null, true, 1, ["a.dll"], "in use")
+            {
+                BlockingProcesses = [new RemoveFeatureBlockingProcess(9, "dotnet", null, null, "Console", "OpenFile")],
+                ResidueTarget = target,
+            },
+            new RemoveFeatureRepositoryReport(2, "web", true, RemoveFeatureBranchOutcome.Kept, null, false, 0, null, null),
+        ];
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var updated = await ops.RetryRemoveFeatureResidueAsync(report);
+
+        var call = Assert.Single(ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.RemoveGitWorktree);
+        Assert.Equal(target.WorktreePath, GetWorktreePath(call.Args));
+        Assert.Equal(target.FeatureStorageRoot, call.Args.GetType().GetProperty("featureStorageRoot")!.GetValue(call.Args));
+        Assert.Equal(false, call.Args.GetType().GetProperty("force")!.GetValue(call.Args));
+
+        Assert.False(updated[0].ResidueRemaining);
+        Assert.Null(updated[0].ResidueTarget);
+        Assert.Null(updated[0].BlockingProcesses);
+        Assert.Same(report[1], updated[1]);
+    }
+
+    [Fact]
+    public async Task Retry_leftovers_keeps_the_entry_and_its_target_when_files_are_still_in_use()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new
+        {
+            success = true,
+            alreadyRemoved = true,
+            residueRemaining = true,
+            residueFileCount = 1,
+            residueMessage = "Some files could not be deleted. They may still be open in another program.",
+            blockingProcesses = new[] { new { processId = 9, processName = "dotnet", kind = "Console", reason = "OpenFile" } },
+        });
+
+        var target = new RemoveFeatureResidueTarget(@"C:\ws\api", @"C:\f\feat\api", @"C:\f\feat", @"C:\f");
+        IReadOnlyList<RemoveFeatureRepositoryReport> report =
+        [
+            new RemoveFeatureRepositoryReport(1, "api", true, RemoveFeatureBranchOutcome.Deleted, null, true, 3, null, "in use")
+            {
+                ResidueTarget = target,
+            },
+        ];
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var updated = await ops.RetryRemoveFeatureResidueAsync(report);
+
+        var entry = Assert.Single(updated);
+        Assert.True(entry.ResidueRemaining);
+        Assert.Equal(1, entry.ResidueFileCount);
+        Assert.Equal(target, entry.ResidueTarget);
+        Assert.Equal(9, Assert.Single(entry.BlockingProcesses!).ProcessId);
+    }
+
+    [Fact]
+    public async Task Inspect_blockers_maps_Worker_results_and_marks_gone_folders()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectPathLocks, new
+        {
+            success = true,
+            results = new object[]
+            {
+                new { path = @"C:\f\a", exists = true, blockingProcesses = new[] { new { processId = 5, processName = "Code", kind = "Application", reason = "OpenFile" } }, mayBeIncomplete = false },
+                new { path = @"C:\f\b", exists = false, blockingProcesses = Array.Empty<object>(), mayBeIncomplete = false },
+            },
+        });
+
+        IReadOnlyList<RemoveFeatureRepositoryBlockers> targets =
+        [
+            new(1, "a", @"C:\f\a", [], false, null),
+            new(2, "b", @"C:\f\b", [new RemoveFeatureBlockingProcess(7, "old", null, null, "Console", "OpenFile")], false, null),
+        ];
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var refreshed = await ops.InspectRemoveFeatureBlockersAsync(targets);
+
+        Assert.Equal(5, Assert.Single(refreshed[0].Processes).ProcessId);
+        Assert.True(refreshed[0].PathExists);
+        Assert.False(refreshed[1].PathExists);
+        Assert.Empty(refreshed[1].Processes);
+    }
+
+    [Fact]
+    public async Task Inspect_blockers_on_an_old_Worker_keeps_the_last_list_and_says_it_may_be_incomplete()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectPathLocks, data: null, success: false, error: "Unknown command: InspectPathLocks");
+
+        var previous = new RemoveFeatureBlockingProcess(7, "dotnet", null, null, "Console", "OpenFile");
+        IReadOnlyList<RemoveFeatureRepositoryBlockers> targets = [new(1, "a", @"C:\f\a", [previous], false, null)];
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var refreshed = await ops.InspectRemoveFeatureBlockersAsync(targets);
+
+        var entry = Assert.Single(refreshed);
+        Assert.Same(previous, Assert.Single(entry.Processes));
+        Assert.True(entry.MayBeIncomplete);
+        Assert.False(string.IsNullOrWhiteSpace(entry.Diagnostic));
+    }
+
     private static string GetWorktreePath(object args)
     {
         var prop = args.GetType().GetProperty("worktreePath");

@@ -668,6 +668,14 @@
     opacity: 0.85;
 }
 
+/* Directory entry (untracked nested repository): not a file, no actions. */
+.git-changes-tree__directory-hint {
+    margin-left: 0.4rem;
+    font-size: 0.78rem;
+    font-style: italic;
+    white-space: nowrap;
+}
+
 .git-changes-tree__rename-from {
     margin-left: 0.4rem;
     font-size: 0.78rem;

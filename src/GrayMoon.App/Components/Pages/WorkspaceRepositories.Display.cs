@@ -1,4 +1,3 @@
-using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
@@ -13,64 +12,10 @@ namespace GrayMoon.App.Components.Pages;
 public sealed partial class WorkspaceRepositories
 {
     [Inject] private IDbContextFactory<AppDbContext> DbContextFactory { get; set; } = default!;
-    [Inject] private IWorkerFeatureSupportService WorkerFeatureSupport { get; set; } = default!;
 
-    /// <summary>True when the Workspace has a Workspace-role link (D13); drives the Worker compatibility banner.</summary>
-    private bool _hasWorkspaceRepositoryLink;
-    private bool _workerSupportsWorkspaceRepository = true;
     private bool _isResolvingManifestDrift;
 
     private bool ShowManifestDriftBanner => !_isFeatureContext && workspace?.ManifestDriftDetectedAt != null;
-
-    private bool ShowWorkerCompatibilityBanner =>
-        !_isFeatureContext && _hasWorkspaceRepositoryLink && !_workerSupportsWorkspaceRepository;
-
-    /// <summary>
-    /// Banner data: whether a Workspace-role link exists and, if so, whether the connected Worker advertises
-    /// <see cref="WorkerFeatures.WorkspaceRepository"/> (D2). Never throws; a failed read leaves the banner hidden.
-    /// Only the local DB read is awaited; the Worker round trip runs in the background so it never delays the first
-    /// paint of the grid. The flag defaults to "supported", so the banner can only appear once the answer arrives.
-    /// </summary>
-    private async Task RefreshWorkspaceRepositoryBannerStateAsync()
-    {
-        try
-        {
-            await using var db = await DbContextFactory.CreateDbContextAsync();
-            _hasWorkspaceRepositoryLink = await db.WorkspaceRepositories.AsNoTracking()
-                .AnyAsync(l => l.WorkspaceId == WorkspaceId && l.Role == WorkspaceRepositoryRole.Workspace);
-            _workerSupportsWorkspaceRepository = true;
-            if (_hasWorkspaceRepositoryLink)
-                _ = RefreshWorkerSupportInBackgroundAsync(WorkspaceId);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Logger.LogDebug(ex, "Could not read Workspace repository banner state for workspace {WorkspaceId}", WorkspaceId);
-            _hasWorkspaceRepositoryLink = false;
-            _workerSupportsWorkspaceRepository = true;
-        }
-    }
-
-    private async Task RefreshWorkerSupportInBackgroundAsync(int workspaceId)
-    {
-        try
-        {
-            var supported = await WorkerFeatureSupport.SupportsAsync(WorkerFeatures.WorkspaceRepository);
-            if (_disposed || workspaceId != WorkspaceId || supported == _workerSupportsWorkspaceRepository)
-                return;
-
-            await InvokeAsync(() =>
-            {
-                if (_disposed || workspaceId != WorkspaceId)
-                    return;
-                _workerSupportsWorkspaceRepository = supported;
-                StateHasChanged();
-            });
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Logger.LogDebug(ex, "Could not read Worker feature support for workspace {WorkspaceId}", workspaceId);
-        }
-    }
 
     private async Task ReloadWorkspaceHeaderRowAsync()
     {
