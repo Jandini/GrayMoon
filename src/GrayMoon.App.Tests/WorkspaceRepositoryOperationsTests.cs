@@ -7,6 +7,7 @@ using GrayMoon.App.Services;
 using GrayMoon.App.Services.Application;
 using GrayMoon.App.Services.GitChanges;
 using GrayMoon.App.Services.WorkspaceManifest;
+using GrayMoon.Application.Features;
 using GrayMoon.Application.WorkspaceManifest;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -31,6 +32,7 @@ public sealed class WorkspaceRepositoryOperationsTests
         Assert.False(result.Success);
         Assert.Equal(MismatchMessage, result.Error);
         Assert.Empty(fixture.Bridge.Sent);
+        Assert.Empty(fixture.GitChangesScans);
         Assert.Empty(await fixture.GetLinksAsync(workspace.WorkspaceId));
     }
 
@@ -46,6 +48,7 @@ public sealed class WorkspaceRepositoryOperationsTests
         Assert.False(result.Success);
         Assert.Contains("Features exist", result.Error);
         Assert.Empty(fixture.Bridge.Sent);
+        Assert.Empty(fixture.GitChangesScans);
         Assert.Empty(await fixture.GetLinksAsync(workspace.WorkspaceId));
     }
 
@@ -61,6 +64,7 @@ public sealed class WorkspaceRepositoryOperationsTests
         Assert.False(result.Success);
         Assert.Contains("already a Source", result.Error);
         Assert.Empty(fixture.Bridge.Sent);
+        Assert.Empty(fixture.GitChangesScans);
         var link = Assert.Single(await fixture.GetLinksAsync(workspace.WorkspaceId));
         Assert.Equal(WorkspaceRepositoryRole.Source, link.Role);
     }
@@ -78,6 +82,7 @@ public sealed class WorkspaceRepositoryOperationsTests
 
         Assert.False(result.Success);
         Assert.Equal("Root already has a different Git repository", result.Error);
+        Assert.Empty(fixture.GitChangesScans);
         Assert.Empty(await fixture.GetLinksAsync(workspace.WorkspaceId, WorkspaceRepositoryRole.Workspace));
         Assert.Empty(fixture.Manifest.Calls);
     }
@@ -92,6 +97,7 @@ public sealed class WorkspaceRepositoryOperationsTests
 
         Assert.True(result.Success, result.Error);
         Assert.Equal(["gitignore", "manifest"], fixture.Manifest.Calls.ToArray());
+        Assert.Equal([root.RepositoryId], fixture.GitChangesScans);
         var link = Assert.Single(await fixture.GetLinksAsync(workspace.WorkspaceId));
         Assert.Equal(WorkspaceRepositoryRole.Workspace, link.Role);
         Assert.Equal(root.RepositoryId, link.RepositoryId);
@@ -663,6 +669,8 @@ internal sealed class OperationsFixture : IAsyncDisposable
 
     public RecordingManifestService Manifest { get; }
 
+    public List<int> GitChangesScans { get; } = [];
+
     public WorkspaceRepositoryOperations Operations { get; }
 
     private OperationsFixture(ManifestTestFixture seed)
@@ -692,6 +700,7 @@ internal sealed class OperationsFixture : IAsyncDisposable
             new FakeFeatureContextResolver(),
             workspaceRepository,
             workspaceService,
+            new RecordingGitChangesScanner(GitChangesScans),
             NullLogger<WorkspaceRepositoryOperations>.Instance);
     }
 
@@ -821,4 +830,21 @@ internal sealed class RecordingManifestService(IWorkspaceManifestService? inner 
 
     public Task<WorkspaceManifestDrift> DetectDriftAsync(int workspaceId, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
+}
+
+internal sealed class RecordingGitChangesScanner(List<int> repositoryIds) : IGitChangesWorkspaceScanner
+{
+    public Task ScanWorkspaceAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        CancellationToken cancellationToken,
+        Action<GitChangesWorkspaceScanProgress>? onProgress = null,
+        bool includeLineStats = false,
+        int? repositoryId = null,
+        bool persistImmediately = false)
+    {
+        if (repositoryId is int id)
+            repositoryIds.Add(id);
+        return Task.CompletedTask;
+    }
 }

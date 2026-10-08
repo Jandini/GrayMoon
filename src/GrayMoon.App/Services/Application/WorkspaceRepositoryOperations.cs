@@ -3,6 +3,7 @@ using GrayMoon.Abstractions.Workspaces;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
+using GrayMoon.App.Services.GitChanges;
 using GrayMoon.App.Services.GitHub;
 using GrayMoon.App.Services.Jobs;
 using GrayMoon.App.Services.Worker;
@@ -35,6 +36,7 @@ public sealed class WorkspaceRepositoryOperations(
     IWorkspaceFeatureContextResolver contextResolver,
     WorkspaceRepositoryEntity workspaceRepository,
     WorkspaceService workspaceService,
+    IGitChangesWorkspaceScanner gitChangesScanner,
     ILogger<WorkspaceRepositoryOperations> logger) : IWorkspaceRepositoryOperations
 {
     internal const string NonEmptyFolderMessage =
@@ -215,8 +217,38 @@ public sealed class WorkspaceRepositoryOperations(
                 $"The Workspace repository was attached, but the Workspace definition could not be written: {manifest.Error}");
         }
 
+        // Clone plus the .gitignore and definition writes leave uncommitted files. Scan now so the
+        // nav dot and Changes data update without opening the Changes page.
+        var contextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+        await RefreshGitChangesAfterEnableAsync(workspaceId, contextId, repositoryId, cancellationToken);
+
         // (h)
         return OperationResult.Ok();
+    }
+
+    private async Task RefreshGitChangesAfterEnableAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        int repositoryId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await gitChangesScanner.ScanWorkspaceAsync(
+                workspaceId,
+                contextId,
+                cancellationToken,
+                repositoryId: repositoryId,
+                persistImmediately: true);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            logger.LogDebug("Git Changes refresh after enabling the Workspace repository was cancelled. WorkspaceId={WorkspaceId}", workspaceId);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Git Changes refresh after enabling the Workspace repository failed. WorkspaceId={WorkspaceId}", workspaceId);
+        }
     }
 
     private async Task<RestoreWorkspaceResult> RestoreCoreAsync(

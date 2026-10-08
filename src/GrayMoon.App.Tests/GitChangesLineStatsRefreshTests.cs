@@ -157,7 +157,8 @@ public sealed class GitChangesLineStatsRefreshTests
             CancellationToken cancellationToken,
             Action<GitChangesWorkspaceScanProgress>? onProgress = null,
             bool includeLineStats = false,
-            int? repositoryId = null)
+            int? repositoryId = null,
+            bool persistImmediately = false)
         {
             LastWorkspaceId = workspaceId;
             LastRepositoryId = repositoryId;

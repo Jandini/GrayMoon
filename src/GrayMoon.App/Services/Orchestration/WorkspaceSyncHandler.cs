@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using GrayMoon.App.Models;
+using GrayMoon.App.Services.GitChanges;
 using GrayMoon.App.Services.Queries;
 using GrayMoon.Application.Features;
 using Microsoft.Extensions.Options;
@@ -51,12 +52,61 @@ public sealed class WorkspaceSyncHandler(
                 skipDependencyLevelPersistence: skipDependencyLevelPersistence,
                 cancellationToken: cancellationToken);
 
+            await RefreshGitChangesAfterSyncAsync(workspaceId, contextId, repositoryIds, cancellationToken);
             return results;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogError(ex, "Error running workspace sync for WorkspaceId={WorkspaceId}", workspaceId);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// A sync can clone a repository that no watcher is leasing yet (a new Workspace repository) and
+    /// then write files into it. The layout warm-up may already have run before that clone, and it
+    /// does not run again until Changes is opened. Refresh here and persist before returning.
+    /// A cancelled follow-up scan does not fail the sync that already completed.
+    /// </summary>
+    private async Task RefreshGitChangesAfterSyncAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        IReadOnlyList<int>? repositoryIds,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var scope = serviceScopeFactory.CreateAsyncScope();
+            var scanner = scope.ServiceProvider.GetRequiredService<IGitChangesWorkspaceScanner>();
+            if (repositoryIds is { Count: > 0 })
+            {
+                foreach (var repositoryId in repositoryIds.Distinct())
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await scanner.ScanWorkspaceAsync(
+                        workspaceId,
+                        contextId,
+                        cancellationToken,
+                        repositoryId: repositoryId,
+                        persistImmediately: true);
+                }
+            }
+            else
+            {
+                await scanner.ScanWorkspaceAsync(
+                    workspaceId,
+                    contextId,
+                    cancellationToken,
+                    persistImmediately: true);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            logger.LogDebug("Git Changes refresh after sync was cancelled for workspace {WorkspaceId}", workspaceId);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Git Changes refresh after sync failed for workspace {WorkspaceId}", workspaceId);
         }
     }
 
