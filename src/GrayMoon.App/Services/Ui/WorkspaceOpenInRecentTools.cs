@@ -30,6 +30,22 @@ public sealed class WorkspaceOpenInRecentTools(
         return _session.TryGetValue(workspaceId, out var session) ? session : [];
     }
 
+    /// <summary>
+    /// The list already known for this circuit, with no worker read. The feature selector uses
+    /// this so a later page can paint the buttons with New Feature instead of after the file read.
+    /// </summary>
+    public bool TryGetCached(int workspaceId, out IReadOnlyList<string> tools)
+    {
+        if (_session.TryGetValue(workspaceId, out var session))
+        {
+            tools = session;
+            return true;
+        }
+
+        tools = [];
+        return false;
+    }
+
     public async Task<IReadOnlyList<string>> RecordAsync(
         int workspaceId,
         string toolId,
