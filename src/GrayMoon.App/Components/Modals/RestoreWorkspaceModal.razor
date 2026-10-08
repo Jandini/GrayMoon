@@ -3,7 +3,7 @@
     <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
          @onkeydown="HandleKeyDownAsync"
          @ref="_modalElement">
-        <div class="modal-dialog">
+        <div class="@DialogCssClass">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title text-nowrap">Restore Workspace</h5>
@@ -58,7 +58,7 @@
 
                         @if (IsWorkerVersionMismatch)
                         {
-                            <div class="gm-callout gm-callout--error mb-3" role="alert">
+                            <div class="@ValidationCalloutClass" role="alert">
                                 <div class="mb-1">Update the GrayMoon Worker before restoring this Workspace.</div>
                                 <div class="small font-monospace">App:&nbsp;&nbsp;&nbsp; @(WorkerConnectionTracker.AppSemVer ?? "unknown")</div>
                                 <div class="small font-monospace mb-2">Worker: @(WorkerConnectionTracker.WorkerSemVer ?? "unknown")</div>
@@ -67,27 +67,26 @@
                         }
                         else if (WorkerUnavailable is not null)
                         {
-                            <div class="gm-callout gm-callout--error mb-3" role="alert">Worker is not available. Start the GrayMoon Worker to restore a Workspace.</div>
+                            <div class="@ValidationCalloutClass" role="alert">Worker is not available. Start the GrayMoon Worker to restore a Workspace.</div>
                         }
 
                         <div class="mb-3">
                             <label class="form-label text-nowrap" for="restore-workspace-repository">Workspace repository</label>
+                            <RepositoryPicker Id="restore-workspace-repository"
+                                              Choices="@_pickerChoices"
+                                              SelectedRepositoryId="@_repositoryId"
+                                              SelectedRepositoryIdChanged="OnRepositoryChangedAsync"
+                                              Placeholder="Select a repository"
+                                              SearchPlaceholder="Search repositories"
+                                              OnFetch="OnFetchRepositories"
+                                              FetchDisabled="@FetchDisabled" />
                             @if (_choices.Count == 0)
                             {
-                                <div class="gm-callout gm-callout--warning" role="alert">
+                                <div class="gm-callout gm-callout--warning mt-2" role="alert">
                                     <div>No GitHub repositories are available.</div>
                                     <div class="small mt-1">Import the Workspace repository through Connectors first, then return here.</div>
                                     <button type="button" class="btn btn-sm btn-outline-dark text-nowrap mt-2" @onclick="OpenConnectors">Open Connectors</button>
                                 </div>
-                            }
-                            else
-                            {
-                                <RepositoryPicker Id="restore-workspace-repository"
-                                                  Choices="@_pickerChoices"
-                                                  SelectedRepositoryId="@_repositoryId"
-                                                  SelectedRepositoryIdChanged="OnRepositoryChangedAsync"
-                                                  Placeholder="Select a repository"
-                                                  SearchPlaceholder="Search repositories" />
                             }
                         </div>
 
@@ -95,28 +94,26 @@
                         {
                             @if (PreflightPending)
                             {
-                                <div class="text-muted mb-3" role="status">
-                                    <span class="spinner-border spinner-border-sm me-2"></span>Checking Workspace definition...
-                                </div>
+                                <div class="text-muted small mb-3" role="status">@RestoreWorkspaceFlow.CheckingDefinitionStatus</div>
                             }
                             else if (_preflight is { Success: false } failed)
                             {
-                                <div class="gm-callout gm-callout--error mb-3" role="alert">@failed.Error</div>
+                                <div class="@ValidationCalloutClass" role="alert">@failed.Error</div>
                             }
                             else if (_preflight is { Success: true } preview)
                             {
-                                <div class="restore-preview border rounded p-2 mb-3">
+                                <div class="restore-preview p-2 mb-3">
                                     <div class="fw-semibold mb-1">GrayMoon Workspace</div>
                                     <dl class="restore-preview-grid small mb-0">
-                                        <dt class="text-muted">Profile</dt>
+                                        <dt>Profile</dt>
                                         <dd>@RestoreWorkspaceFlow.ProfileTypeLabel(preview.WorkspaceType)</dd>
-                                        <dt class="text-muted">Versioning</dt>
+                                        <dt>Versioning</dt>
                                         <dd>@RestoreWorkspaceFlow.VersioningLabel(preview.VersioningMode)</dd>
-                                        <dt class="text-muted">CI</dt>
+                                        <dt>CI</dt>
                                         <dd>@RestoreWorkspaceFlow.CiLabel(preview.CiProvider)</dd>
-                                        <dt class="text-muted">Repositories</dt>
+                                        <dt>Repositories</dt>
                                         <dd>@preview.RepositoryCount</dd>
-                                        <dt class="text-muted">Connectors</dt>
+                                        <dt>Connectors</dt>
                                         <dd>@preview.ConfiguredConnectorCount configured locally<br />@preview.MissingConnectors.Count missing</dd>
                                     </dl>
                                 </div>
@@ -149,17 +146,23 @@
                                    @oninput="OnNameChangedAsync" />
                             @if (NameError is not null)
                             {
-                                <div class="invalid-feedback d-block">@NameError</div>
+                                <div class="invalid-feedback d-block restore-name-error">@NameError</div>
                             }
                             @if (FolderPath.Length > 0)
                             {
-                                <div class="form-text">Location <span class="font-monospace text-break">@FolderPath</span></div>
+                                <div class="form-text restore-location">
+                                    <span class="text-break">Location <span class="font-monospace">@FolderPath</span></span>
+                                    @if (_checking)
+                                    {
+                                        <span class="spinner-border restore-location-spinner" role="status" aria-label="@RestoreWorkspaceFlow.CheckingFolderStatus"></span>
+                                    }
+                                </div>
                             }
                         </div>
 
                         @if (FolderState.Error is not null)
                         {
-                            <div class="gm-callout gm-callout--error mb-3" role="alert">@FolderState.Error</div>
+                            <div class="@ValidationCalloutClass" role="alert">@FolderState.Error</div>
                         }
                         else if (FolderState.Note is not null)
                         {
@@ -168,7 +171,7 @@
 
                         @if (_error is not null)
                         {
-                            <div class="gm-callout gm-callout--error" role="alert">
+                            <div class="@ValidationCalloutClass" role="alert">
                                 <div>@_error</div>
                                 @if (_errorResidue is not null)
                                 {
@@ -180,7 +183,7 @@
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary text-nowrap flex-shrink-0" @onclick="CancelAsync">Cancel</button>
                         <button type="button" class="btn btn-primary text-nowrap flex-shrink-0" data-default-action @onclick="StartRestore" disabled="@(!CanRestore)">
-                            @if (_checking || PreflightPending)
+                            @if (RestoreWorkspaceFlow.ShowRestoreButtonSpinner(_checking, PreflightPending, _busy))
                             {
                                 <span class="spinner-border spinner-border-sm me-2"></span>
                             }

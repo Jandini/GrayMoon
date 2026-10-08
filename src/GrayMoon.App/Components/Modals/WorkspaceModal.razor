@@ -6,7 +6,7 @@
 {
     <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
          @onkeydown="HandleKeyDown">
-        <div class="modal-dialog modal-lg">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">@Title</h5>
@@ -79,14 +79,16 @@
                     </div>
 
                     <div class="mb-3">
-                        <label class="form-label text-nowrap" for="workspaceRepositorySelect">Workspace repository (optional)</label>
+                        <label class="form-label text-nowrap" for="workspaceRepositorySelect">@RepositoryFieldLabel</label>
                         <RepositoryPicker Id="workspaceRepositorySelect"
                                           Choices="@WorkspaceRepositoryChoices"
                                           SelectedRepositoryId="@WorkspaceRepositoryId"
                                           SelectedRepositoryIdChanged="WorkspaceRepositoryIdChanged"
                                           AllowNone="true"
                                           Placeholder="None"
-                                          Disabled="@IsWorkspaceRepositoryDisabled" />
+                                          Disabled="@IsWorkspaceRepositoryDisabled"
+                                          OnFetch="OnFetchRepositories"
+                                          FetchDisabled="@FetchDisabled" />
                         <div class="form-text">The Workspace's own Git repository. Its working tree is the Workspace root and it is the root of every Feature.</div>
                         @if (IsWorkspaceRepositoryDisabled && !string.IsNullOrWhiteSpace(WorkspaceRepositoryDisabledHint))
                         {
@@ -150,6 +152,10 @@
     [Parameter] public IReadOnlyList<RepositoryPickerChoice> WorkspaceRepositoryChoices { get; set; } = Array.Empty<RepositoryPickerChoice>();
     [Parameter] public bool IsWorkspaceRepositoryDisabled { get; set; }
     [Parameter] public string? WorkspaceRepositoryDisabledHint { get; set; }
+    [Parameter] public EventCallback OnFetchRepositories { get; set; }
+    [Parameter] public bool FetchDisabled { get; set; }
+
+    public const string RepositoryFieldLabel = "Workspace repository";
 
     /// <summary>
     /// Imported repositories that can become the Workspace repository: every repository that is not already a

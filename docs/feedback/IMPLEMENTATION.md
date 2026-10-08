@@ -232,3 +232,72 @@ Source: [graymoon-restore-workspace-dialog-ux-improvements.md](graymoon-restore-
 2. Restore Workspace: one picker; typing filters immediately; arrows / Enter / Escape behave as in Add Workspace; Escape inside the open picker closes only the picker, not the dialog.
 3. Selecting a repository shows "Checking Workspace definition..." and then either an error (with the picker still usable) or the preview.
 4. No GitHub repositories: callout with Open Connectors; Restore disabled.
+
+---
+
+## 6. IMPROVEMENT - Add Workspace and Restore Workspace repository picker
+
+Status: **implemented - awaiting user commit / manual test** (2026-10-08)
+
+Source: [graymoon-workspace-dialogs-repository-picker-ux-prompt.md](graymoon-workspace-dialogs-repository-picker-ux-prompt.md).
+
+### What was done
+
+- Both dialogs keep the one `RepositoryPicker`. Its list is `position: absolute` (z-index 4 inside the modal, under the page loading overlay at 11050) so opening it overlays the form and does not change modal height. Add Workspace opens the list upward because that field sits at the bottom of the dialog; Restore opens it downward over the preview and name.
+- Option colors use the neutral surface tokens (`--bg-hover`, `--bg-active`, `--border-light`) instead of Bootstrap primary blue. The selected row and the keyboard row stay distinct.
+- The label is `Workspace repository`. `None` still means optional.
+- Fetch is attached to the input in both dialogs and calls the existing `RepositoryService.RefreshRepositoriesAsync` through `Workspaces.FetchRepositoriesAsync`, which already drives the page `LoadingOverlay` (progress count, abort). There is no spinner on the Fetch button. Afterward the open picker reloads. A merged id follows `MergedRepositoryIdMap`; a missing id clears the selection; `None` stays `None`. A Restore name the user typed is kept.
+- Restore uses `modal-dialog modal-lg`, still bounded by the viewport. The preview frame is `--bg-input` with a neutral border. Validation callouts in that dialog use `restore-validation-error` (softer red) and do not change the global `gm-callout--error`.
+- Typing the Workspace name still disables Restore while the folder check is pending, and shows `Checking folder...` under the location. The Restore button does not spin for that check or for preflight. The restore itself still hides the dialog under the page overlay.
+
+### Files changed
+
+- `Components/Shared/RepositoryPicker.razor` (+ `.razor.css`)
+- `Components/Shared/RepositoryPickerState.cs`
+- `Components/Modals/WorkspaceModal.razor`
+- `Components/Modals/RestoreWorkspaceModal.razor` (+ `.razor.cs`, `.razor.css`)
+- `Components/Pages/Workspaces.razor`
+- `GrayMoon.App.Tests/RepositoryPickerStateTests.cs`
+- `GrayMoon.App.Tests/RestoreWorkspaceFlowTests.cs`
+
+### Tests added
+
+- Picker: label has no `(optional)`; selection kept when the repository remains (including a new display name); selection follows a rename merge; selection clears when the repository is gone; `None` stays empty.
+- Restore: `modal-lg`; softer validation class; folder check and preflight do not request a Restore-button spinner; Restore stays disabled while the folder check is pending.
+- App tests: 1254 passed (6 new); build 0 warnings. Common and Worker were not re-run; this change is App-only.
+
+### Deviations
+
+- Add Workspace opens the list upward. A downward list would be clipped by the modal body, which has to scroll on a short screen, because that picker is the last field.
+- Fetch does not add a new terminal stream. It uses the Workspaces page overlay and the progress count the repository fetch already reports.
+- An empty Restore catalog still shows the Open Connectors callout, and now also shows the picker so Fetch is available.
+
+### Manual test checklist
+
+#### Add Workspace
+
+1. Open Add Workspace. The label reads `Workspace repository`.
+2. Open the repository picker. The modal height does not change and the list overlays the fields above it.
+3. Colors are neutral gray, not browser blue.
+4. Type to filter. Arrows and Enter select. Escape closes only the picker.
+5. Select None.
+6. Click Fetch. The normal loading overlay runs, then the picker choices refresh. A selection that still exists stays selected.
+
+#### Restore Workspace
+
+1. Open Restore Workspace. The dialog is wider (`modal-lg`) and the picker matches Add Workspace, with Fetch attached.
+2. Open the picker. The modal height does not change and the list overlays the fields below.
+3. Select a valid Workspace repository. `Checking Workspace definition...` appears, then the gray summary.
+4. Missing repositories and connectors use the warning callout, not red, and Restore stays available.
+5. An invalid repository keeps the selection, shows the softened error, and leaves the picker usable.
+6. Type a Workspace name quickly. The Restore button stays `Restore` with no spinner; `Checking folder...` may appear by the location. The destination path updates.
+7. A name that maps to a non-empty folder shows the softened error and disables Restore.
+8. Restore uses the page loading overlay for the long-running work.
+
+### Follow-up (2026-10-08)
+
+- Add Workspace and Restore Workspace use `modal-dialog-centered`, with the dialog's minimum height matched to its margin so the card sits in the middle of the page.
+- The repository list is `position: fixed` and placed from the input (`wwwroot/js/repository-picker.js`), so the dialog no longer clips it or grows a scrollbar to hold it. It opens upward only when the viewport has no room below.
+- The Restore name error ("cannot be used in a folder name") uses a muted rose (`restore-name-error`) instead of Bootstrap's bright invalid red, and the invalid icon is removed.
+- Folder checking no longer adds a line. A small spinner sits on the right of the location path while the check runs.
+- Repository fetch (Add / Restore / select-repositories dialogs, the workspace Repositories modal, and the Repositories page) sets `TerminalSinkContext` to a job terminal buffer on the loading overlay. The existing GitHub request log (`-> GET /user/repos`, status, elapsed) shows in that terminal. The overlay's terminal button still controls whether the log is visible.

@@ -1,9 +1,12 @@
-::deep .modal-dialog {
-    max-height: calc(100vh - 2rem);
+::deep .modal-dialog.modal-dialog-centered {
+    display: flex;
+    align-items: center;
+    min-height: calc(100% - 2rem);
     margin: 1rem auto;
 }
 
 ::deep .modal-content {
+    width: 100%;
     max-height: calc(100vh - 2rem);
 }
 

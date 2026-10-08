@@ -1,6 +1,7 @@
 using GrayMoon.App.Components.Shared;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services;
+using GrayMoon.App.Services.Jobs;
 using GrayMoon.App.Services.Queries;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
@@ -29,6 +30,7 @@ public sealed partial class Repositories : IAsyncDisposable, IDisposable
     private int? totalCount;
     private int? fetchedRepositoryCount;
     private CancellationTokenSource? _fetchRepositoriesCts;
+    private JobTerminalBuffer? _fetchTerminal;
     private bool _disposed;
 
     private bool HasSearchFilter => !string.IsNullOrWhiteSpace(_effectiveSearch);
@@ -223,6 +225,7 @@ public sealed partial class Repositories : IAsyncDisposable, IDisposable
         _fetchRepositoriesCts?.Dispose();
         _fetchRepositoriesCts = new CancellationTokenSource();
 
+        _fetchTerminal = new JobTerminalBuffer();
         try
         {
             isPersisting = true;
@@ -236,6 +239,7 @@ public sealed partial class Repositories : IAsyncDisposable, IDisposable
                 fetchedRepositoryCount = count;
                 _ = InvokeAsync(StateHasChanged);
             });
+            using var terminal = TerminalSinkContext.Use(_fetchTerminal);
             var result = await RepositoryService.RefreshRepositoriesAsync(progress, _fetchRepositoriesCts.Token);
             connectorErrors = result.ConnectorErrors.Count > 0 ? result.ConnectorErrors : null;
             renamedRepositories = result.RenamedRepositories.Count > 0 ? result.RenamedRepositories : null;

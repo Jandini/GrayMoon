@@ -1,70 +1,104 @@
-.workspace-repository-picker {
+/* position:fixed (placed by repository-picker.js) so the list is not clipped by the dialog. */
+.repository-picker {
     position: relative;
+    flex-wrap: nowrap;
 }
 
-.workspace-repository-list {
-    margin-top: 2px;
-    max-height: 10.3rem;
+.repository-picker-field {
+    position: relative;
+    flex: 1 1 auto;
+    width: 1%;
+    min-width: 0;
+}
+
+.repository-picker-input {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.repository-picker-fetch {
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+}
+
+.repository-picker-list {
+    position: fixed;
+    z-index: 1080;
+    visibility: hidden;
+    max-height: 11rem;
     overflow-y: auto;
     overflow-x: hidden;
     -webkit-overflow-scrolling: touch;
-    background-color: var(--bg-input, #252526);
-    border: 1px solid var(--border-input, var(--border-color, #3c3c3c));
+    background-color: var(--bg-input, #3c3c3c);
+    border: 1px solid var(--border-input, #2d2d30);
     border-radius: 0.25rem;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
     scrollbar-width: auto;
-    scrollbar-color: #5a5a5a var(--bg-input, #252526);
+    scrollbar-color: #5a5a5a var(--bg-input, #3c3c3c);
 }
 
-.workspace-repository-list::-webkit-scrollbar {
+.repository-picker-list::-webkit-scrollbar {
     width: 8px;
 }
 
-.workspace-repository-list::-webkit-scrollbar-track {
-    background: var(--bg-input, #252526);
+.repository-picker-list::-webkit-scrollbar-track {
+    background: var(--bg-input, #3c3c3c);
 }
 
-.workspace-repository-list::-webkit-scrollbar-thumb {
+.repository-picker-list::-webkit-scrollbar-thumb {
     background: #5a5a5a;
     border-radius: 4px;
 }
 
-.workspace-repository-list::-webkit-scrollbar-thumb:hover {
+.repository-picker-list::-webkit-scrollbar-thumb:hover {
     background: #6a6a6a;
 }
 
-.workspace-repository-option {
+.repository-picker-option {
     display: block;
     width: 100%;
     text-align: left;
     border: none;
     background: transparent;
     padding: 0.35rem 0.75rem;
+    font: inherit;
     color: var(--text-primary);
     overflow: hidden;
     text-overflow: ellipsis;
     cursor: pointer;
+    outline: none;
 }
 
-.workspace-repository-option:hover {
-    background: var(--bs-primary, #2d2d30);
+.repository-picker-option:hover,
+.repository-picker-option:focus {
+    background: var(--bg-hover, #2a2d2e);
+    color: var(--text-primary);
+    outline: none;
 }
 
-.workspace-repository-option.active {
-    background: var(--bs-gray, #2d2d30);
+.repository-picker-option.active {
+    background: var(--bg-active, #37373d);
+    color: var(--text-primary);
 }
 
-.workspace-repository-option.highlighted {
-    background: var(--bs-primary, #2d2d30);
-    outline: 1px solid var(--bs-primary, #0d6efd);
+.repository-picker-option.highlighted {
+    background: var(--bg-hover, #2a2d2e);
+    outline: 1px solid var(--border-light, #5a5a5a);
     outline-offset: -1px;
 }
 
-.workspace-repository-empty {
-    padding: 0.35rem 0.75rem;
-    color: var(--bs-muted, #9d9d9d);
+.repository-picker-option.active.highlighted {
+    background: var(--bg-active, #37373d);
+    outline: 1px solid var(--border-hover, #4e4e52);
+    outline-offset: -1px;
 }
 
-.workspace-repository-picker.disabled .workspace-repository-select {
+.repository-picker-empty {
+    padding: 0.35rem 0.75rem;
+    color: var(--text-secondary, #858585);
+}
+
+.repository-picker.disabled .repository-picker-input {
     opacity: 0.6;
     cursor: not-allowed;
-}
+}

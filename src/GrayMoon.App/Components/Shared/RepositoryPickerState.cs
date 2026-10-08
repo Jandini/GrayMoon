@@ -43,6 +43,31 @@ public sealed class RepositoryPickerState
         choices.FirstOrDefault(c => c.RepositoryId == selectedRepositoryId)?.DisplayName
         ?? (allowNone ? noneLabel : string.Empty);
 
+    /// <summary>
+    /// Keeps a picker selection across a catalog refresh. A merged id follows
+    /// <paramref name="mergedRepositoryIdMap"/> (the same rename reconciliation a fetch already returns).
+    /// The selection is cleared when that repository is no longer in the catalog. Null ("None") stays null.
+    /// </summary>
+    public static int? ReconcileSelection(
+        int? selectedRepositoryId,
+        IReadOnlyDictionary<int, int>? mergedRepositoryIdMap,
+        IEnumerable<int> availableRepositoryIds)
+    {
+        if (selectedRepositoryId is not int id)
+            return null;
+
+        if (mergedRepositoryIdMap is not null && mergedRepositoryIdMap.TryGetValue(id, out var canonical))
+            id = canonical;
+
+        foreach (var available in availableRepositoryIds)
+        {
+            if (available == id)
+                return id;
+        }
+
+        return null;
+    }
+
     public IReadOnlyList<RepositoryPickerChoice> Filtered(IReadOnlyList<RepositoryPickerChoice> choices) =>
         FilterChoices(choices, Filter);
 

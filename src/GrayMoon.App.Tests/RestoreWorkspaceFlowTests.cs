@@ -332,6 +332,27 @@ public sealed class RestoreWorkspaceFlowTests
     }
 
     [Fact]
+    public void Restore_dialog_uses_the_large_modal_and_a_soft_validation_callout()
+    {
+        Assert.Equal("modal-dialog modal-lg modal-dialog-centered", RestoreWorkspaceModal.DialogCssClass);
+        Assert.Contains("restore-validation-error", RestoreWorkspaceModal.ValidationCalloutClass, StringComparison.Ordinal);
+        Assert.Contains("gm-callout--error", RestoreWorkspaceModal.ValidationCalloutClass, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Folder_check_and_preflight_do_not_spin_the_restore_button()
+    {
+        Assert.False(RestoreWorkspaceFlow.ShowRestoreButtonSpinner(checkingFolder: true, preflightPending: false, restoreInProgress: false));
+        Assert.False(RestoreWorkspaceFlow.ShowRestoreButtonSpinner(checkingFolder: false, preflightPending: true, restoreInProgress: false));
+        Assert.False(RestoreWorkspaceFlow.ShowRestoreButtonSpinner(checkingFolder: true, preflightPending: true, restoreInProgress: true));
+        Assert.True(RestoreWorkspaceFlow.ShowRestoreButtonSpinner(checkingFolder: false, preflightPending: false, restoreInProgress: true));
+
+        Assert.False(RestoreWorkspaceFlow.CanRestore(new RestoreReadinessBuilder().Build() with { CheckingFolder = true }));
+        Assert.Equal("Checking folder...", RestoreWorkspaceFlow.CheckingFolderStatus);
+        Assert.Equal("Checking Workspace definition...", RestoreWorkspaceFlow.CheckingDefinitionStatus);
+    }
+
+    [Fact]
     public void Profile_labels_are_user_facing()
     {
         Assert.Equal(".NET Dependency", RestoreWorkspaceFlow.ProfileTypeLabel(WorkspaceType.DotNetDependency));

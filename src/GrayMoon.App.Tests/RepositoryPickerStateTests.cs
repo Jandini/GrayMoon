@@ -245,4 +245,42 @@ public sealed class RepositoryPickerStateTests
         state.SetFilter(choices, "work github");
         Assert.Equal([2], state.Filtered(choices).Select(c => c.RepositoryId));
     }
+
+    [Fact]
+    public void Add_workspace_label_is_not_marked_optional()
+    {
+        Assert.Equal("Workspace repository", WorkspaceModal.RepositoryFieldLabel);
+        Assert.DoesNotContain("optional", WorkspaceModal.RepositoryFieldLabel, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Selection_is_preserved_when_the_repository_remains_after_refresh()
+    {
+        var refreshed = new RepositoryPickerChoice[]
+        {
+            new(2, "acme/Beta-Renamed"),
+            new(3, "other/gamma"),
+        };
+
+        var selected = RepositoryPickerState.ReconcileSelection(2, mergedRepositoryIdMap: null, refreshed.Select(c => c.RepositoryId));
+
+        Assert.Equal(2, selected);
+        Assert.Equal("acme/Beta-Renamed", RepositoryPickerState.ClosedText(refreshed, selected, allowNone: true, "None"));
+        Assert.Equal("None", RepositoryPickerState.ClosedText(refreshed, RepositoryPickerState.ReconcileSelection(null, null, [2]), allowNone: true, "None"));
+    }
+
+    [Fact]
+    public void Selection_follows_a_renamed_repository_merge()
+    {
+        var merged = new Dictionary<int, int> { [2] = 9 };
+
+        Assert.Equal(9, RepositoryPickerState.ReconcileSelection(2, merged, [1, 9, 3]));
+    }
+
+    [Fact]
+    public void Selection_clears_when_the_repository_disappears()
+    {
+        Assert.Null(RepositoryPickerState.ReconcileSelection(2, mergedRepositoryIdMap: null, [1, 3]));
+        Assert.Null(RepositoryPickerState.ReconcileSelection(2, new Dictionary<int, int> { [2] = 9 }, [1, 3]));
+    }
 }

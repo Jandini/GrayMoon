@@ -1,4 +1,5 @@
 using GrayMoon.App.Models;
+using GrayMoon.App.Services.Jobs;
 using GrayMoon.App.Services.WorkspaceManifest;
 using GrayMoon.Application.WorkspaceManifest;
 using Microsoft.AspNetCore.Components;
@@ -10,6 +11,7 @@ public sealed partial class WorkspaceRepositories
     [Inject] private IWorkspaceManifestService ManifestService { get; set; } = default!;
 
     private RepositoriesModalState _repositoriesModal = new();
+    private JobTerminalBuffer? _repositoryFetchTerminal;
 
     private async Task ShowRepositoriesModalAsync()
     {
@@ -112,6 +114,7 @@ public sealed partial class WorkspaceRepositories
         _fetchRepositoriesCts = new CancellationTokenSource();
         var cts = _fetchRepositoriesCts;
 
+        _repositoryFetchTerminal = new JobTerminalBuffer();
         _repositoriesModal.IsFetching = true;
         _repositoriesModal.FetchedRepositoryCount = null;
         _repositoriesModal.FetchError = null;
@@ -126,6 +129,7 @@ public sealed partial class WorkspaceRepositories
                 _ = InvokeAsync(StateHasChanged);
             });
 
+            using var terminal = TerminalSinkContext.Use(_repositoryFetchTerminal);
             var result = await WorkspacePageService.RepositoryService.RefreshRepositoriesAsync(progress, cts.Token);
             _repositoriesModal.RenameWarnings = result.RenamedRepositories.Count > 0 ? result.RenamedRepositories : null;
             _repositoriesModal.RefreshGeneration++;

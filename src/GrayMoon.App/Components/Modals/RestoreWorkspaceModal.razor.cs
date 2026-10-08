@@ -22,8 +22,16 @@ namespace GrayMoon.App.Components.Modals;
 /// </summary>
 public sealed partial class RestoreWorkspaceModal : ComponentBase, IDisposable
 {
+    public const string FetchRepositoriesError = "Failed to fetch repositories. Please try again later.";
+
+    public const string DialogCssClass = "modal-dialog modal-lg modal-dialog-centered";
+
+    public const string ValidationCalloutClass = "gm-callout gm-callout--error restore-validation-error";
+
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
+    [Parameter] public EventCallback OnFetchRepositories { get; set; }
+    [Parameter] public bool FetchDisabled { get; set; }
 
     /// <summary>Raised after a restore finished (success or not) so the host can refresh its list.</summary>
     [Parameter] public EventCallback OnRestored { get; set; }
@@ -133,14 +141,7 @@ public sealed partial class RestoreWorkspaceModal : ComponentBase, IDisposable
         try
         {
             await using var db = await DbContextFactory.CreateDbContextAsync();
-            var rows = await db.Repositories.AsNoTracking()
-                .Where(r => r.Connector != null && r.Connector.ConnectorType == ConnectorType.GitHub)
-                .Select(r => new { r.RepositoryId, r.RepositoryName, r.OrgName, ConnectorName = r.Connector!.ConnectorName })
-                .ToListAsync();
-            _choices = RestoreWorkspaceFlow.BuildChoices(
-                rows.Select(r => new RestoreRepositorySource(r.RepositoryId, r.RepositoryName, r.OrgName, r.ConnectorName)));
-            _pickerChoices = RestoreWorkspaceFlow.ToPickerChoices(_choices);
-
+            await ReloadChoicesAsync(db);
             var names = await db.Workspaces.AsNoTracking().Select(w => w.Name).ToListAsync();
             _existingNames = new HashSet<string>(names, StringComparer.OrdinalIgnoreCase);
         }
@@ -151,6 +152,78 @@ public sealed partial class RestoreWorkspaceModal : ComponentBase, IDisposable
             _pickerChoices = Array.Empty<RepositoryPickerChoice>();
             _error = "Failed to load repositories. Please try again.";
         }
+    }
+
+    /// <summary>
+    /// After the page's repository fetch: reload choices, follow a rename merge, and drop a repository that is gone.
+    /// A name the user typed is left alone; a name still following the repository updates with it.
+    /// </summary>
+    public async Task ApplyCatalogRefreshAsync(IReadOnlyDictionary<int, int>? mergedRepositoryIdMap)
+    {
+        if (!IsVisible || _disposed)
+            return;
+
+        if (_error == FetchRepositoriesError)
+            _error = null;
+
+        try
+        {
+            await using var db = await DbContextFactory.CreateDbContextAsync();
+            await ReloadChoicesAsync(db);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to reload repositories after fetch.");
+            _error = "Failed to load repositories. Please try again.";
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        var next = RepositoryPickerState.ReconcileSelection(
+            _repositoryId,
+            mergedRepositoryIdMap,
+            _pickerChoices.Select(c => c.RepositoryId));
+
+        if (next != _repositoryId)
+        {
+            await OnRepositoryChangedAsync(next);
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        if (next is int id)
+        {
+            var choice = _choices.FirstOrDefault(c => c.RepositoryId == id);
+            var (name, autoName) = RestoreWorkspaceFlow.FollowRepositoryName(_name, _autoName, choice?.RepositoryName);
+            var nameChanged = !string.Equals(name, _name, StringComparison.Ordinal);
+            _name = name;
+            _autoName = autoName;
+            if (nameChanged)
+                await CheckFolderAsync();
+        }
+
+        if (!_disposed)
+            await InvokeAsync(StateHasChanged);
+    }
+
+    public void ShowFetchError(string message)
+    {
+        if (!IsVisible || _disposed)
+            return;
+
+        _error = message;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ReloadChoicesAsync(AppDbContext db)
+    {
+        var rows = await db.Repositories.AsNoTracking()
+            .Where(r => r.Connector != null && r.Connector.ConnectorType == ConnectorType.GitHub)
+            .Select(r => new { r.RepositoryId, r.RepositoryName, r.OrgName, ConnectorName = r.Connector!.ConnectorName })
+            .ToListAsync();
+        _choices = RestoreWorkspaceFlow.BuildChoices(
+            rows.Select(r => new RestoreRepositorySource(r.RepositoryId, r.RepositoryName, r.OrgName, r.ConnectorName)));
+        _pickerChoices = RestoreWorkspaceFlow.ToPickerChoices(_choices);
     }
 
     /// <summary>Selecting a repository (also the same one again, which re-checks it) starts the preflight right away.</summary>
@@ -552,6 +625,10 @@ public sealed record RestoreResultPanel(
 /// <summary>Pure and service-level pieces of the restore dialog, kept out of the component so they can be tested.</summary>
 public static class RestoreWorkspaceFlow
 {
+    public const string CheckingDefinitionStatus = "Checking Workspace definition...";
+
+    public const string CheckingFolderStatus = "Checking folder...";
+
     public const string EmptyFolderNote = "The folder already exists and is empty. GrayMoon will use it.";
 
     public const string NonEmptyFolderError = "This folder already contains files. Choose another Workspace name or move the existing files.";
@@ -642,6 +719,13 @@ public static class RestoreWorkspaceFlow
             null => new FolderCheck(null, UnknownFolderNote),
         };
     }
+
+    /// <summary>
+    /// The Restore button spins only for the restore itself. Folder checks and definition preflight stay inline,
+    /// and the page loading overlay covers the restore while this dialog is hidden.
+    /// </summary>
+    public static bool ShowRestoreButtonSpinner(bool checkingFolder, bool preflightPending, bool restoreInProgress) =>
+        restoreInProgress && !checkingFolder && !preflightPending;
 
     public static bool CanRestore(RestoreReadiness r) =>
         !r.Busy

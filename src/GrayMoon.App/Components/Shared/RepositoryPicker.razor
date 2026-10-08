@@ -1,43 +1,61 @@
 @* Searchable repository picker: one input that shows the selection while closed and becomes the search field while open. *@
-<div class="workspace-repository-picker @(Disabled ? "disabled" : "")">
-    <input type="text"
-           class="form-control workspace-repository-select"
-           id="@Id"
-           autocomplete="off"
-           placeholder="@(_state.IsOpen ? SearchPlaceholder : Placeholder)"
-           value="@(_state.IsOpen ? _state.Filter : RepositoryPickerState.ClosedText(Choices, SelectedRepositoryId, AllowNone, NoneLabel))"
-           disabled="@Disabled"
-           @onfocus="Open"
-           @onclick="Open"
-           @onblur="() => _state.Close()"
-           @oninput="OnFilterChanged"
-           @onkeydown="OnKeyDownAsync"
-           @onkeydown:stopPropagation="_state.IsOpen" />
-    @if (_state.IsOpen && !Disabled)
-    {
-        var filteredChoices = _state.Filtered(Choices);
-        <div class="workspace-repository-list" role="listbox">
-            @if (AllowNone)
-            {
-                <button type="button" role="option"
-                        class="workspace-repository-option text-nowrap @(SelectedRepositoryId is null ? "active" : "") @(_state.IsNoneHighlighted ? "highlighted" : "")"
-                        @onmousedown="() => SelectAsync(null)"
-                        @onmousedown:preventDefault>@NoneLabel</button>
-            }
-            @for (var i = 0; i < filteredChoices.Count; i++)
-            {
-                var choice = filteredChoices[i];
-                <button type="button" role="option"
-                        class="workspace-repository-option text-nowrap @(choice.RepositoryId == SelectedRepositoryId ? "active" : "") @(_state.IsChoiceHighlighted(i) ? "highlighted" : "")"
-                        @onmousedown="() => SelectAsync(choice.RepositoryId)"
-                        @onmousedown:preventDefault>@choice.DisplayName</button>
-            }
-            @if (filteredChoices.Count == 0)
-            {
-                <div class="workspace-repository-empty text-nowrap">No matching repositories</div>
-            }
-        </div>
-    }
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+<div class="repository-picker input-group @(Disabled ? "disabled" : "")">
+    <div class="repository-picker-field" @ref="_anchor">
+        <input type="text"
+               class="form-control repository-picker-input"
+               id="@Id"
+               role="combobox"
+               autocomplete="off"
+               aria-autocomplete="list"
+               aria-expanded="@(_state.IsOpen ? "true" : "false")"
+               aria-controls="@(_state.IsOpen ? ListId : null)"
+               placeholder="@(_state.IsOpen ? SearchPlaceholder : Placeholder)"
+               value="@(_state.IsOpen ? _state.Filter : RepositoryPickerState.ClosedText(Choices, SelectedRepositoryId, AllowNone, NoneLabel))"
+               disabled="@Disabled"
+               @onfocus="Open"
+               @onclick="Open"
+               @onblur="() => _state.Close()"
+               @oninput="OnFilterChanged"
+               @onkeydown="OnKeyDownAsync"
+               @onkeydown:stopPropagation="_state.IsOpen" />
+        @if (_state.IsOpen && !Disabled)
+        {
+            var filteredChoices = _state.Filtered(Choices);
+            <div @ref="_list" class="repository-picker-list" id="@ListId" role="listbox">
+                @if (AllowNone)
+                {
+                    <button type="button" role="option"
+                            aria-selected="@(SelectedRepositoryId is null ? "true" : "false")"
+                            class="repository-picker-option text-nowrap @(SelectedRepositoryId is null ? "active" : "") @(_state.IsNoneHighlighted ? "highlighted" : "")"
+                            @onmousedown="() => SelectAsync(null)"
+                            @onmousedown:preventDefault>@NoneLabel</button>
+                }
+                @for (var i = 0; i < filteredChoices.Count; i++)
+                {
+                    var choice = filteredChoices[i];
+                    var selected = choice.RepositoryId == SelectedRepositoryId;
+                    <button type="button" role="option"
+                            aria-selected="@(selected ? "true" : "false")"
+                            class="repository-picker-option text-nowrap @(selected ? "active" : "") @(_state.IsChoiceHighlighted(i) ? "highlighted" : "")"
+                            @onmousedown="() => SelectAsync(choice.RepositoryId)"
+                            @onmousedown:preventDefault>@choice.DisplayName</button>
+                }
+                @if (filteredChoices.Count == 0)
+                {
+                    <div class="repository-picker-empty text-nowrap">No matching repositories</div>
+                }
+            </div>
+        }
+    </div>
+    <button type="button"
+            class="btn btn-outline-secondary repository-picker-fetch text-nowrap"
+            title="Fetch repositories"
+            disabled="@FetchDisabled"
+            @onclick="OnFetch">
+        Fetch
+    </button>
 </div>
 
 @code {
@@ -50,8 +68,16 @@
     [Parameter] public string NoneLabel { get; set; } = "None";
     [Parameter] public bool Disabled { get; set; }
     [Parameter] public string? Id { get; set; }
+    [Parameter] public EventCallback OnFetch { get; set; }
+    [Parameter] public bool FetchDisabled { get; set; }
 
     private readonly RepositoryPickerState _state = new();
+    private ElementReference _anchor;
+    private ElementReference _list;
+    private bool _listAttached;
+    private readonly string _listId = "repository-picker-" + Guid.NewGuid().ToString("N");
+
+    private string ListId => string.IsNullOrEmpty(Id) ? _listId : Id + "-list";
 
     protected override void OnParametersSet() => _state.AllowNone = AllowNone;
 
@@ -76,5 +102,48 @@
 
         _state.Close();
         await SelectedRepositoryIdChanged.InvokeAsync(repositoryId);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        var open = _state.IsOpen && !Disabled;
+        if (open && !_listAttached)
+        {
+            _listAttached = true;
+            try
+            {
+                await JS.InvokeVoidAsync("graymoonRepositoryPicker.attach", ListId, _anchor, _list);
+            }
+            catch
+            {
+                _listAttached = false;
+            }
+        }
+        else if (!open && _listAttached)
+        {
+            _listAttached = false;
+            await DetachListAsync();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_listAttached)
+        {
+            _listAttached = false;
+            await DetachListAsync();
+        }
+    }
+
+    private async Task DetachListAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("graymoonRepositoryPicker.detach", ListId);
+        }
+        catch
+        {
+            // circuit / JS unavailable
+        }
     }
 }

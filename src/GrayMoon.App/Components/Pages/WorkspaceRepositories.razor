@@ -537,6 +537,6 @@
    Fetch-repositories keeps its own overlay below. *@
 @if (ShowRepositoriesFetchOverlay)
 {
-    <LoadingOverlay IsVisible="true" Message="@RepositoriesFetchOverlayMessage" ShowCommandTerminal="false"
+    <LoadingOverlay IsVisible="true" Message="@RepositoriesFetchOverlayMessage" TerminalBuffer="@_repositoryFetchTerminal"
                    OnAbort="@EventCallback.Factory.Create(this, (Action)AbortFetchRepositories)" />
 }

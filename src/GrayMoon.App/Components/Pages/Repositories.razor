@@ -201,4 +201,4 @@
     }
 </div>
 
-<LoadingOverlay IsVisible="@isPersisting" Message="@(fetchedRepositoryCount is null || fetchedRepositoryCount == 0 ? "Fetching repositories..." : $"Fetched {fetchedRepositoryCount} {(fetchedRepositoryCount == 1 ? "repository" : "repositories")}")" OnAbort="AbortFetchRepositories" />
+<LoadingOverlay IsVisible="@isPersisting" Message="@(fetchedRepositoryCount is null || fetchedRepositoryCount == 0 ? "Fetching repositories..." : $"Fetched {fetchedRepositoryCount} {(fetchedRepositoryCount == 1 ? "repository" : "repositories")}")" TerminalBuffer="@_fetchTerminal" OnAbort="AbortFetchRepositories" />
