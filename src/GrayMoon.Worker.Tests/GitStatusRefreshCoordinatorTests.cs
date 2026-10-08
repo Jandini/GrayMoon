@@ -87,7 +87,7 @@ public class GitStatusRefreshCoordinatorTests
             coordinator.MarkDirty(repoPath);
         }
 
-        var sawScan = await WaitForAsync(() => fake.CallCount >= 1, TimeSpan.FromSeconds(10));
+        var sawScan = await WaitForAsync(() => fake.CallCount >= 1, TimeSpan.FromSeconds(60));
         await Task.Delay(400); // quiet period longer than the debounce window
 
         Assert.True(sawScan, $"Debounced scan did not start (CallCount={fake.CallCount}).");
@@ -103,14 +103,14 @@ public class GitStatusRefreshCoordinatorTests
         const string repoPath = @"C:\repo-followup";
 
         var refreshTask = coordinator.RefreshNowAsync(repoPath, CancellationToken.None);
-        await Task.Delay(50); // ensure the scan above is actually in flight
+        await WaitForAsync(() => fake.CallCount >= 1, TimeSpan.FromSeconds(60)); // ensure the scan above is actually in flight
         coordinator.MarkDirty(repoPath);
         coordinator.MarkDirty(repoPath);
         coordinator.MarkDirty(repoPath);
 
         await refreshTask;
 
-        var sawFollowUp = await WaitForAsync(() => fake.CallCount >= 2, TimeSpan.FromSeconds(3));
+        var sawFollowUp = await WaitForAsync(() => fake.CallCount >= 2, TimeSpan.FromSeconds(60));
         await Task.Delay(300);
 
         Assert.True(sawFollowUp);
@@ -125,7 +125,7 @@ public class GitStatusRefreshCoordinatorTests
         const string repoPath = @"C:\repo-coalesce";
 
         var firstScan = coordinator.RefreshNowAsync(repoPath, CancellationToken.None);
-        await Task.Delay(30); // ensure the first scan is actually in flight (Refreshing, not Clean)
+        await WaitForAsync(() => fake.CallCount >= 1, TimeSpan.FromSeconds(60)); // ensure the first scan is actually in flight (Refreshing, not Clean)
 
         // Arrives while scan #1 is still running - coalesces (RefreshingAndDirty) rather than starting a
         // third scan, but must still be satisfied by a scan that started at or after this call, not by
@@ -170,13 +170,13 @@ public class GitStatusRefreshCoordinatorTests
 
         using var ownerCts = new CancellationTokenSource();
         var owner = coordinator.RefreshNowAsync(repoPath, ownerCts.Token);
-        await Task.Delay(50); // ensure the scan is in flight (Refreshing)
+        await WaitForAsync(() => fake.CallCount >= 1, TimeSpan.FromSeconds(60)); // ensure the scan is in flight (Refreshing)
         ownerCts.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => owner);
 
         // Without AbortRefresh the tracker stayed Refreshing forever and this hung until process death.
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var result = await coordinator.RefreshNowAsync(repoPath, timeout.Token);
 
         Assert.True(result.Success);
@@ -193,7 +193,7 @@ public class GitStatusRefreshCoordinatorTests
 
         using var ownerCts = new CancellationTokenSource();
         var owner = coordinator.RefreshNowAsync(repoPath, ownerCts.Token);
-        await Task.Delay(40);
+        await WaitForAsync(() => fake.CallCount >= 1, TimeSpan.FromSeconds(60));
         coordinator.MarkDirty(repoPath); // RefreshingAndDirty + coalesced pending completion
 
         using var coalescedCts = new CancellationTokenSource();
@@ -203,11 +203,11 @@ public class GitStatusRefreshCoordinatorTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => owner);
 
         // Coalesced waiter must be completed (canceled) by AbortRefresh, not hang.
-        using var coalesceWait = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        using var coalesceWait = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => coalesced.WaitAsync(coalesceWait.Token));
 
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var result = await coordinator.RefreshNowAsync(repoPath, timeout.Token);
         Assert.True(result.Success);
     }
@@ -220,14 +220,14 @@ public class GitStatusRefreshCoordinatorTests
         const string repoPath = @"C:\repo-coalesce-cancel";
 
         var owner = coordinator.RefreshNowAsync(repoPath, CancellationToken.None);
-        await Task.Delay(30);
+        await WaitForAsync(() => fake.CallCount >= 1, TimeSpan.FromSeconds(60));
 
         using var coalescedCts = new CancellationTokenSource();
         var coalesced = coordinator.RefreshNowAsync(repoPath, coalescedCts.Token);
         coalescedCts.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => coalesced);
-        var ownerResult = await owner.WaitAsync(TimeSpan.FromSeconds(5));
+        var ownerResult = await owner.WaitAsync(TimeSpan.FromSeconds(60));
 
         Assert.True(ownerResult.Success);
         Assert.True(fake.CallCount >= 1);

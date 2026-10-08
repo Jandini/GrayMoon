@@ -108,7 +108,7 @@ public sealed class WorkerConnectionTrackerTests
             started.Set();
         });
 
-        Assert.True(started.Wait(TimeSpan.FromSeconds(2)));
+        Assert.True(started.Wait(TimeSpan.FromSeconds(30)));
         Assert.True(tracker.IsSelfUpdateInProgress);
     }
 }

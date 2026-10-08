@@ -8,6 +8,7 @@ using Microsoft.Extensions.Options;
 
 namespace GrayMoon.Worker.Tests;
 
+[Trait("Category", "PullRequest")]
 public sealed class GitServiceSyncHooksTests : IDisposable
 {
     private const string Marker = "# Created by GrayMoon.Agent";

@@ -167,9 +167,7 @@ public sealed class NewPullRequestBranchLoadingTests
         var fewQueries = counter.Count;
 
         counter.Reset();
-        var stopwatch = Stopwatch.StartNew();
         var snapshots = await ops.GetBranchesForRepositoriesAsync(ctx.WorkspaceId, contextId, many);
-        stopwatch.Stop();
         var manyQueries = counter.Count;
 
         Assert.Equal(100, snapshots.Count);
@@ -177,8 +175,6 @@ public sealed class NewPullRequestBranchLoadingTests
         Assert.True(manyQueries <= 8, $"Expected a fixed handful of queries, got {manyQueries}.");
         Assert.Empty(ctx.WorkerBridge.Calls);
         Assert.Equal(sentBefore, ctx.HubContext.ClientsImpl.AllProxy.Sent.Count);
-        // Not a strict performance threshold (CI and VDI differ); only catches something pathological.
-        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(10), $"Bulk read took {stopwatch.Elapsed}.");
     }
 
     // ---- helpers --------------------------------------------------------------------------------

@@ -4,6 +4,7 @@ on:
   push:
     branches: ["*"]
     tags: ["*"]
+  pull_request:
   workflow_dispatch:
 
 env:
@@ -32,7 +33,14 @@ jobs:
       - name: Build
         run: dotnet build GrayMoon.slnx --configuration Release --no-restore
 
-      - name: Test
+      # Every push runs the essential suite; pull requests (and manual runs) also run the slow
+      # real-process / filesystem-watcher tests tagged [Trait("Category", "PullRequest")].
+      - name: Test (essential)
+        if: github.event_name == 'push'
+        run: dotnet test GrayMoon.slnx --configuration Release --no-build --filter "Category!=PullRequest" --logger "trx;LogFileName=test-results.trx"
+
+      - name: Test (full)
+        if: github.event_name != 'push'
         run: dotnet test GrayMoon.slnx --configuration Release --no-build --logger "trx;LogFileName=test-results.trx"
 
       - name: Upload test results

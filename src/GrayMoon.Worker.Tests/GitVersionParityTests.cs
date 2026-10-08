@@ -16,6 +16,7 @@ namespace GrayMoon.Worker.Tests;
 /// same version GitVersion reports in a fresh checkout of the default branch. Real git, real GitVersion.
 /// Skipped, with a reason, on machines where <c>dotnet-gitversion</c> is not installed.
 /// </summary>
+[Trait("Category", "PullRequest")]
 public sealed class GitVersionParityTests : IDisposable
 {
     private readonly string _root = Directory.CreateTempSubdirectory("graymoon-gv-").FullName;

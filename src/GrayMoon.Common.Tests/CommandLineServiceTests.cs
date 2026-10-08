@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 
 namespace GrayMoon.Common.Tests;
 
+[Trait("Category", "PullRequest")]
 public sealed class CommandLineServiceTests
 {
     private static CommandLineService CreateService(int defaultTimeoutSeconds = 60)

@@ -10,6 +10,7 @@ namespace GrayMoon.Worker.Tests;
 /// (Restart Manager layer) and one whose current directory is inside the folder (working-directory layer). Each test also
 /// checks that the blocker disappears once the helper exits. No-ops on other platforms.
 /// </summary>
+[Trait("Category", "PullRequest")]
 public sealed class WindowsFileLockInspectorTests : IDisposable
 {
     private static readonly TimeSpan ReadyTimeout = TimeSpan.FromSeconds(30);
