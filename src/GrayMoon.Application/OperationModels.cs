@@ -114,6 +114,23 @@ public sealed record RemoveFeatureBlockingProcess(
 
     /// <summary>True when the process's current folder is inside the worktree (a shell or an AI tool left there).</summary>
     public bool IsWorkingDirectory => string.Equals(Reason, WorkingDirectoryReason, StringComparison.Ordinal);
+
+    public const string LoadedModuleReason = "LoadedModule";
+
+    /// <summary>True when the process runs a program or library from inside the worktree (for example a test host from bin).</summary>
+    public bool IsLoadedModule => string.Equals(Reason, LoadedModuleReason, StringComparison.Ordinal);
+
+    /// <summary>When the process started (UTC). Sent back with a kill request so the Worker never ends a different process that reused the id.</summary>
+    public DateTime? StartTimeUtc { get; init; }
+
+    /// <summary>True when GrayMoon may end this process after the user confirms.</summary>
+    public bool CanTerminate { get; init; }
+
+    /// <summary>
+    /// Why GrayMoon will not end it when <see cref="CanTerminate"/> is false (Worker names: System, Service, Explorer, GrayMoon,
+    /// AccessDenied); null otherwise.
+    /// </summary>
+    public string? ProtectedReason { get; init; }
 }
 
 /// <summary>The blockers found for one repository's worktree folder.</summary>
@@ -127,6 +144,9 @@ public sealed record RemoveFeatureRepositoryBlockers(
 {
     /// <summary>False once the folder no longer exists (after a refresh): nothing is left to block.</summary>
     public bool PathExists { get; init; } = true;
+
+    /// <summary>True when the lookup itself failed (Worker unavailable, or it took too long), so nothing is known about this folder.</summary>
+    public bool LookupFailed { get; init; }
 }
 
 /// <summary>
@@ -182,4 +202,34 @@ public static class OperationProgressExtensions
         if (!result.Success && !string.IsNullOrWhiteSpace(result.Error))
             showError(result.Error);
     }
+}
+
+/// <summary>A blocking process the user selected to end in the Remove Feature dialog, with the start time the lookup reported.</summary>
+public sealed record RemoveFeatureProcessSelection(int ProcessId, DateTime? StartTimeUtc);
+
+/// <summary>What happened to one selected process.</summary>
+public sealed record RemoveFeatureProcessOutcome(int ProcessId, string? ProcessName, string Outcome)
+{
+    public const string Killed = "Killed";
+    public const string AlreadyExited = "AlreadyExited";
+    public const string NotHoldingAnymore = "NotHoldingAnymore";
+    public const string StartTimeChanged = "StartTimeChanged";
+    public const string Protected = "Protected";
+    public const string AccessDenied = "AccessDenied";
+    public const string Failed = "Failed";
+
+    /// <summary>True when the process no longer blocks anything (ended, already gone, or let go by itself).</summary>
+    public bool IsResolved => Outcome is Killed or AlreadyExited or NotHoldingAnymore;
+}
+
+/// <summary>
+/// Result of ending the selected blocking processes: one outcome per selected process, and a fresh lookup of every folder
+/// (what still blocks it). <see cref="Error"/> is set when the request could not be carried out at all.
+/// </summary>
+public sealed record RemoveFeatureTerminateResult(
+    IReadOnlyList<RemoveFeatureProcessOutcome> Outcomes,
+    IReadOnlyList<RemoveFeatureRepositoryBlockers> Remaining,
+    string? Error)
+{
+    public bool Success => Error is null;
 }

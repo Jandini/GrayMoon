@@ -59,6 +59,50 @@ internal static class WindowsProcessInspector
     [DllImport("ntdll.dll")]
     private static extern int NtQueryInformationProcess(IntPtr processHandle, int processInformationClass, out IntPtr processInformation, int processInformationLength, out int returnLength);
 
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetProcessTimes(IntPtr hProcess, out long lpCreationTime, out long lpExitTime, out long lpKernelTime, out long lpUserTime);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ProcessIdToSessionId(int dwProcessId, out int pSessionId);
+
+    private const uint ProcessTerminate = 0x0001;
+
+    /// <summary>When <paramref name="processId"/> started (UTC), or null when it cannot be read. With the id it identifies the process.</summary>
+    internal static DateTime? TryGetStartTimeUtc(int processId)
+    {
+        var handle = OpenProcess(ProcessQueryLimitedInformation, false, processId);
+        if (handle == IntPtr.Zero)
+            return null;
+
+        try
+        {
+            return GetProcessTimes(handle, out var creation, out _, out _, out _) && creation > 0
+                ? DateTime.FromFileTimeUtc(creation)
+                : null;
+        }
+        finally
+        {
+            CloseHandle(handle);
+        }
+    }
+
+    /// <summary>Terminal Services session of <paramref name="processId"/> (0 for services), or null when it cannot be read.</summary>
+    internal static int? TryGetSessionId(int processId) =>
+        ProcessIdToSessionId(processId, out var session) ? session : null;
+
+    /// <summary>True when this process may end <paramref name="processId"/> (opens and closes a terminate handle; never ends it).</summary>
+    internal static bool CanOpenForTerminate(int processId)
+    {
+        var handle = OpenProcess(ProcessTerminate, false, processId);
+        if (handle == IntPtr.Zero)
+            return false;
+
+        CloseHandle(handle);
+        return true;
+    }
+
     /// <summary>Full executable path of <paramref name="processId"/>, or null when it cannot be read.</summary>
     internal static string? TryGetExecutablePath(int processId)
     {

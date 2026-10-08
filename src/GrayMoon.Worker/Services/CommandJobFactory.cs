@@ -122,6 +122,8 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid InspectWorktree args"),
             WorkerHubMethods.InspectPathLocks => JsonSerializer.Deserialize<InspectPathLocksRequest>(json, options)
                 ?? throw new ArgumentException("Invalid InspectPathLocks args"),
+            WorkerHubMethods.TerminateBlockingProcesses => JsonSerializer.Deserialize<TerminateBlockingProcessesRequest>(json, options)
+                ?? throw new ArgumentException("Invalid TerminateBlockingProcesses args"),
             WorkerHubMethods.AttachWorkspaceRepository => JsonSerializer.Deserialize<AttachWorkspaceRepositoryRequest>(json, options)
                 ?? throw new ArgumentException("Invalid AttachWorkspaceRepository args"),
             WorkerHubMethods.DiscardWorkspaceRoot => JsonSerializer.Deserialize<DiscardWorkspaceRootRequest>(json, options)

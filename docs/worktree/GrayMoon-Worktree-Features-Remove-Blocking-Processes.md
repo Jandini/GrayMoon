@@ -1,6 +1,6 @@
 # Remove Feature: listing the processes that lock a worktree folder
 
-Status: describes the current behaviour (part 1) and proposes a pre-removal "Kill or Continue" step (part 2).
+Status: part 1 describes the behaviour before this change; part 2 is implemented (2.10 lists where the code differs from this design).
 
 Today GrayMoon names the programs that keep a Feature worktree in use only **after** Remove Feature has run: either
 Remove fails ("Feature is still in use") or it succeeds and the "Feature removed with warnings" report lists leftover
@@ -344,3 +344,35 @@ App (`GrayMoon.App.Tests`):
 2. Dialog check on Remove click with **Continue / Cancel** only (useful on its own: the user sees what will block).
 3. `TerminateBlockingProcesses` + **Kill and remove**.
 4. Kill in the leftovers report (2.7).
+
+### 2.10 As implemented
+
+Delivered in one change (steps 1-4 of 2.9). Where the code differs from the design above:
+
+- **Cancel** in the blocker step closes the dialog, like the dialog's other Cancel buttons (not "back to the plan").
+  **Refresh** returns to the plan when nothing is using the Feature any more.
+- **Kill does not take the workspace structural lock.** It changes no repository or database state, and the Worker's
+  re-verification (still holding a Feature folder, same start time, not protected) is what keeps it safe.
+- **Prefetch reuse window is 15 s** (`PrefetchMaxAge` in `RemoveFeatureModal.razor`), not 5 s: a scan takes about
+  1-3 s, and the user usually reads the plan for longer than 5 s.
+- **Kill is also offered after an "in use" Remove failure** ("Kill and retry"), not only before removal and in the
+  leftovers report.
+- **Ctrl+Enter never kills.** The Kill buttons are not the dialog's default action.
+- **A failed lookup keeps the last known list** and marks it `LookupFailed` / "may be incomplete" instead of clearing it.
+- `IFileLockInspector.InspectManyAsync` is a default interface method (sequential `InspectAsync`), so test doubles and
+  `UnsupportedFileLockInspector` need no change; `WindowsHandleLockInspector` overrides it with one pass for all roots.
+- **Pass order is current folders, then the handle table, then mapped files** (cheapest and most telling first, so a
+  scan that runs out of time still names shells and AI tools). The Worker log line for each inspection includes the time
+  per pass; on a developer machine with about 340 processes a scan takes about 1.2 s (handles about 0.4 s, mapped files
+  about 0.65 s).
+- Not done from 2.4: closing only the Explorer windows that show the Feature (`IShellWindows`); Explorer stays
+  "close it yourself".
+
+Main files:
+
+| Area | Files |
+|---|---|
+| Scan (Worker) | `Platform/Windows/WindowsHandleTable.cs`, `WindowsMappedFiles.cs`, `WindowsPathNames.cs`, `WindowsProcessInspector.cs`; `Services/WindowsLockScanner.cs`, `BlockingProcessRules.cs`, `WindowsHandleLockInspector.cs`, `LockScanChildProcess.cs`; `Cli/Handlers/InspectLocksCommandHandler.cs` |
+| Kill (Worker) | `Commands/TerminateBlockingProcessesCommand.cs`, `Services/ProcessTerminator.cs`, `Models/TerminateProcessOutcome.cs` |
+| App | `WorkspaceFeatureOperations` (`InspectFeatureBlockersAsync`, `TerminateFeatureBlockersAsync`, `TerminateLeftoverBlockersAsync`), `RemoveFeatureModal.razor`, `BlockingProcessList.razor`, `KillOutcomeLines.razor`, `RemoveFeatureBlockerText.cs` |
+| Tests | `GrayMoon.Worker.Tests/TerminateBlockingProcessesCommandTests.cs`, `WindowsHandleLockInspectorTests.cs`; `GrayMoon.App.Tests/RemoveFeatureKillTests.cs` |

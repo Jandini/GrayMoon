@@ -14,3 +14,7 @@
     font-family: var(--bs-font-monospace);
     font-size: 0.75rem;
 }
+
+.blocking-process-list__outcome {
+    color: var(--bs-warning-text-emphasis, #997404);
+}

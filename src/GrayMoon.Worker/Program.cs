@@ -8,7 +8,7 @@ Log.Logger = new LoggerConfiguration()
 try
 {
     var cliArgs = Environment.GetCommandLineArgs().Skip(1).ToArray();
-    var effectiveArgs = cliArgs.Length == 0 || cliArgs[0] is not ("run" or "install" or "uninstall" or "stop" or "start")
+    var effectiveArgs = cliArgs.Length == 0 || cliArgs[0] is not ("run" or "install" or "uninstall" or "stop" or "start" or "inspect-locks")
         ? new[] { "run" }.Concat(cliArgs).ToArray()
         : cliArgs;
     var rootCommand = WorkerCli.Build();

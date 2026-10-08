@@ -24,4 +24,12 @@ public class WorkerOptions
     /// any other write/read command.
     /// </summary>
     public int MaxConcurrentDiffCommands { get; set; } = 4;
+
+    /// <summary>
+    /// Time budget for one lock inspection (which programs keep a Feature folder in use). When it runs out the inspection
+    /// returns what it found so far, marked incomplete, so the Remove Feature dialog never waits on a stuck handle.
+    /// </summary>
+    public int LockInspectionTimeoutSeconds { get; set; } = 5;
+
+    internal TimeSpan LockInspectionBudget => TimeSpan.FromSeconds(Math.Clamp(LockInspectionTimeoutSeconds, 1, 60));
 }
