@@ -78,7 +78,7 @@ public sealed class WorkspaceManifestSerializerTests
     [Fact]
     public void Parse_rejects_schema_version_2()
     {
-        const string json = """{ "schemaVersion": 2, "workspace": { "name": "AVR" } }""";
+        const string json = """{ "version": 2, "workspace": { "name": "AVR" } }""";
 
         Assert.False(WorkspaceManifestSerializer.TryParse(json, out var manifest, out var error));
         Assert.Null(manifest);
@@ -100,7 +100,7 @@ public sealed class WorkspaceManifestSerializerTests
     public void Parse_ignores_unknown_properties()
     {
         const string json = """
-            { "SchemaVersion": 1, "future": { "a": 1 },
+            { "Version": 1, "future": { "a": 1 },
               "workspace": { "name": "AVR", "extra": true, "profile": { "type": "basic", "versioning": "none", "ci": "none", "more": 1 } },
               "connectors": null,
               "repositories": [ { "name": "Avr.Api", "repositoryUrl": "u", "connectorUrl": "c", "other": 5 } ] }
@@ -115,7 +115,7 @@ public sealed class WorkspaceManifestSerializerTests
     [Fact]
     public void Parse_fails_on_missing_workspace_name()
     {
-        const string json = """{ "schemaVersion": 1, "workspace": { "profile": { "type": "basic", "versioning": "none", "ci": "none" } } }""";
+        const string json = """{ "version": 1, "workspace": { "profile": { "type": "basic", "versioning": "none", "ci": "none" } } }""";
 
         Assert.False(WorkspaceManifestSerializer.TryParse(json, out var manifest, out var error));
         Assert.Null(manifest);

@@ -1,7 +1,9 @@
+using System.Text.Json.Serialization;
+
 namespace GrayMoon.Application.WorkspaceManifest;
 
 public sealed record WorkspaceManifest(
-    int SchemaVersion,
+    [property: JsonPropertyName("version")] int SchemaVersion,
     WorkspaceManifestWorkspace Workspace,
     IReadOnlyList<WorkspaceManifestConnector> Connectors,
     IReadOnlyList<WorkspaceManifestRepository> Repositories);

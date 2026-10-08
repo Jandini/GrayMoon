@@ -1,5 +1,6 @@
 ﻿@using System.Text.RegularExpressions
 @using GrayMoon.App.Services.Ui
+@implements IAsyncDisposable
 @using GrayMoon.Application
 @using GrayMoon.Application.Features
 @using Microsoft.AspNetCore.WebUtilities
@@ -113,7 +114,7 @@
                                 {
                                     <li class="dropdown-header workspace-feature-selector__section-title">
                                         <i class="bi bi-star-fill workspace-feature-selector__section-icon" aria-hidden="true"></i>
-                                        Frequently used
+                                        Recent
                                     </li>
                                 }
                                 @foreach (var ws in _recentSwitchWorkspaces)
@@ -234,6 +235,8 @@
     private bool _open;
     private bool _loaded;
     private bool _desktopAvailable;
+    private bool _toolAvailabilitySubscribed;
+    private DotNetObjectReference<WorkspaceFeatureSelector>? _toolAvailabilityRef;
     private int _recentOpenInWorkspaceId;
     private List<string> _recentOpenInTools = [];
     private bool _switchWorkspacesLoaded;
@@ -243,7 +246,10 @@
     private bool HasAnyIdeAvailable =>
         _toolAvailability is { } t && (t.Cursor || t.ClaudeCli || t.VsCode || t.VisualStudio);
 
-    /// <summary>Desktop only. Tools appear after they are used, most recent first, on every page that hosts this picker.</summary>
+    /// <summary>
+    /// Desktop only. A button is shown when the tool is listed in <c>.graymoon.json</c> and Desktop
+    /// reports it as installed, most recent first. Terminal and Explorer are always available on Desktop.
+    /// </summary>
     private IReadOnlyList<string> VisibleOpenInTools =>
         FeatureOpenInTools.VisibleButtons(
             _recentOpenInTools,
@@ -431,6 +437,7 @@
             _desktopAvailable = await JS.InvokeAsync<bool>("eval", "!!(window.graymoonDesktop && window.graymoonDesktop.isAvailable && window.graymoonDesktop.isAvailable())");
             if (_desktopAvailable)
             {
+                await SubscribeToolAvailabilityAsync();
                 await RefreshToolAvailabilityAsync();
                 await LoadRecentOpenInToolsAsync();
                 await InvokeAsync(StateHasChanged);
@@ -440,6 +447,51 @@
         {
             _desktopAvailable = false;
         }
+    }
+
+    private async Task SubscribeToolAvailabilityAsync()
+    {
+        if (_toolAvailabilitySubscribed)
+            return;
+
+        try
+        {
+            _toolAvailabilityRef ??= DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("graymoonDesktop.subscribeToolAvailability", _toolAvailabilityRef);
+            _toolAvailabilitySubscribed = true;
+        }
+        catch (Exception ex) when (ex is JSDisconnectedException or JSException or InvalidOperationException)
+        {
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnToolAvailabilityChanged()
+    {
+        try
+        {
+            await RefreshToolAvailabilityAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_toolAvailabilitySubscribed && _toolAvailabilityRef is not null)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("graymoonDesktop.unsubscribeToolAvailability", _toolAvailabilityRef);
+            }
+            catch (Exception ex) when (ex is JSDisconnectedException or JSException or InvalidOperationException)
+            {
+            }
+        }
+
+        _toolAvailabilityRef?.Dispose();
     }
 
     private async Task RefreshToolAvailabilityAsync()

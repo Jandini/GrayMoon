@@ -193,7 +193,7 @@ public sealed class WorkspaceRepositoryOperationsTests
     {
         await using var fixture = await OperationsFixture.CreateAsync();
         var root = await fixture.SeedRootAsync();
-        fixture.UseDefinition("{ \"schemaVersion\": 99, \"workspace\": { \"name\": \"x\" } }");
+        fixture.UseDefinition("{ \"version\": 99, \"workspace\": { \"name\": \"x\" } }");
 
         var preflight = await fixture.Operations.PreflightRestoreAsync(root.RepositoryId);
 
@@ -516,7 +516,7 @@ public sealed class WorkspaceRepositoryOperationsTests
         var root = await fixture.SeedRootAsync();
         fixture.UseDefinition(Definition(("basic", "none", "none"), []));
         // The branch changed between the preflight and the clone.
-        fixture.Bridge.RespondWithFile("{ \"schemaVersion\": 1 }");
+        fixture.Bridge.RespondWithFile("{ \"version\": 1 }");
 
         var result = await fixture.Operations.RestoreFromRepositoryAsync(root.RepositoryId, "restored");
 

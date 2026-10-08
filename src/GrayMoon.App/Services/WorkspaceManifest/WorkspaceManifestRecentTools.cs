@@ -10,7 +10,7 @@ namespace GrayMoon.App.Services.WorkspaceManifest;
 /// </summary>
 internal static class WorkspaceManifestRecentTools
 {
-    public const string PropertyName = "recentOpenInTools";
+    public const string PropertyName = "tools";
 
     private static readonly JsonSerializerOptions WriteOptions = new()
     {
@@ -51,7 +51,7 @@ internal static class WorkspaceManifestRecentTools
     }
 
     /// <summary>
-    /// Sets <c>recentOpenInTools</c> on an existing definition. Returns null when
+    /// Sets <c>tools</c> on an existing definition. Returns null when
     /// <paramref name="content"/> is not a JSON object, so a missing file is never created
     /// just to remember a tool.
     /// </summary>
