@@ -1,5 +1,7 @@
 # Workspace as a Git Repository - Design v3 Review Against the Codebase
 
+> **Superseded in part (2026-10-08):** the `workspaceRepository` Worker capability (`supportedFeatures`, `GetCapabilities`, `IWorkerFeatureSupportService`) and the Repositories-page compatibility banner were removed. App/Worker compatibility is now the version lock (`WorkerVersionPolicy`), and Restore validates `.graymoon.json` before creating anything; "Restored without definition" no longer exists. See `docs/feedback/graymoon-restore-workspace-and-worker-version-lock.md`.
+
 **Reviewed document:** `GrayMoon-Workspace-As-Git-Repository-Design-v3.md`  
 **Code baseline:** `workspace-as-git-repository` branch at `f7f94ce` (parent `ee5b536`, which includes workspace profiles `a6d951d`)  
 **Date:** 2026-10-06  

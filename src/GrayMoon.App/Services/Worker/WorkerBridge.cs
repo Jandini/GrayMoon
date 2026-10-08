@@ -10,6 +10,13 @@ namespace GrayMoon.App.Services.Worker;
 public interface IWorkerBridge
 {
     bool IsWorkerConnected { get; }
+
+    /// <summary>
+    /// Null when the Worker can run normal commands; otherwise the user-facing reason (not connected, or a Worker
+    /// version that does not match this App). Lets an operation refuse before it changes anything.
+    /// </summary>
+    string? GetUnavailableReason() => IsWorkerConnected ? null : WorkerBridge.NotConnectedMessage;
+
     Task<WorkerCommandResponse> SendCommandAsync(string command, object args, CancellationToken cancellationToken = default);
 }
 
@@ -20,9 +27,20 @@ public sealed class WorkerBridge(
     IOptions<WorkerBridgeOptions> options,
     ILogger<WorkerBridge> logger) : IWorkerBridge
 {
+    internal const string NotConnectedMessage = "Worker not connected. Start the GrayMoon Worker to sync repositories.";
+
     private readonly TimeSpan _commandTimeout = TimeSpan.FromSeconds(Math.Max(1, options.Value.CommandTimeoutSeconds));
 
     public bool IsWorkerConnected => connectionTracker.GetWorkerConnectionId() != null;
+
+    public string? GetUnavailableReason()
+    {
+        if (connectionTracker.GetWorkerConnectionId() is null)
+            return NotConnectedMessage;
+        return connectionTracker.State == WorkerConnectionState.VersionMismatch
+            ? WorkerVersionPolicy.MismatchMessage(connectionTracker.WorkerSemVer, connectionTracker.AppSemVer)
+            : null;
+    }
 
     private void EndSelfUpdateIfStillConnected()
     {
@@ -37,7 +55,16 @@ public sealed class WorkerBridge(
     {
         var connectionId = connectionTracker.GetWorkerConnectionId();
         if (string.IsNullOrEmpty(connectionId))
-            return new WorkerCommandResponse(false, null, "Worker not connected. Start the GrayMoon Worker to sync repositories.");
+            return new WorkerCommandResponse(false, null, NotConnectedMessage);
+
+        // Version lock: a Worker with a different GrayMoon version only runs the update and diagnostics commands.
+        if (connectionTracker.State == WorkerConnectionState.VersionMismatch && !WorkerVersionPolicy.IsAllowedOnVersionMismatch(command))
+        {
+            logger.LogDebug(
+                "Refused {Command}: Worker version {WorkerVersion} does not match App version {AppVersion}",
+                command, connectionTracker.WorkerSemVer, connectionTracker.AppSemVer);
+            return new WorkerCommandResponse(false, null, WorkerVersionPolicy.MismatchMessage(connectionTracker.WorkerSemVer, connectionTracker.AppSemVer));
+        }
 
         var isSelfUpdate = command == WorkerHubMethods.SelfUpdate;
         if (isSelfUpdate)

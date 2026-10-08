@@ -24,6 +24,9 @@ public sealed class WorkerWorkspaceExistsResponse
 {
     [JsonPropertyName("exists")]
     public bool Exists { get; set; }
+
+    [JsonPropertyName("isEmpty")]
+    public bool? IsEmpty { get; set; }
 }
 
 /// <summary>Worker GetWorkspaceRepositories response (repositories array only).</summary>
@@ -74,11 +77,4 @@ public sealed class GetHostInfoWorkerResponse
 {
     [JsonPropertyName("userProfilePath")]
     public string? UserProfilePath { get; set; }
-}
-
-/// <summary>Worker GetCapabilities response.</summary>
-public sealed class GetCapabilitiesWorkerResponse
-{
-    [JsonPropertyName("supportedFeatures")]
-    public List<string>? SupportedFeatures { get; set; }
 }

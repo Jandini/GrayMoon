@@ -195,8 +195,8 @@ try
     builder.Services.AddScoped<IWorkspacePullRequestOperations, WorkspacePullRequestOperations>();
     builder.Services.AddScoped<IWorkspaceFileOperations, WorkspaceFileOperations>();
     builder.Services.AddScoped<IWorkspaceGitChangesOperations, WorkspaceGitChangesOperations>();
-    builder.Services.AddSingleton<IWorkerFeatureSupportService, WorkerFeatureSupportService>();
     builder.Services.AddScoped<GrayMoon.Application.WorkspaceManifest.IWorkspaceManifestService, GrayMoon.App.Services.WorkspaceManifest.WorkspaceManifestService>();
+    builder.Services.AddScoped<GrayMoon.App.Services.WorkspaceManifest.IRemoteWorkspaceManifestReader, GrayMoon.App.Services.WorkspaceManifest.GitHubRemoteWorkspaceManifestReader>();
     builder.Services.AddScoped<IWorkspaceRepositoryOperations, GrayMoon.App.Services.Application.WorkspaceRepositoryOperations>();
     builder.Services.AddScoped<WorkspaceBranchHandler>();
     builder.Services.AddScoped<PrepareWorkspaceOrchestrator>();

@@ -12,6 +12,10 @@ public sealed class GetWorkspaceExistsCommand() : ICommandHandler<GetWorkspaceEx
         var workspaceName = request.WorkspaceName ?? throw new ArgumentException("workspaceName required");
         var path = WorkerRepositoryPaths.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var exists = Directory.Exists(path);
-        return Task.FromResult(new GetWorkspaceExistsResponse { Exists = exists });
+        return Task.FromResult(new GetWorkspaceExistsResponse
+        {
+            Exists = exists,
+            IsEmpty = exists ? !Directory.EnumerateFileSystemEntries(path).Any() : null,
+        });
     }
 }

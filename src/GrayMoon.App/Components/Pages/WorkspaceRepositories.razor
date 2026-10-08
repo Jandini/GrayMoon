@@ -105,10 +105,6 @@
                         @onclick="DismissManifestDriftAsync">Dismiss</button>
             </div>
         }
-        @if (ShowWorkerCompatibilityBanner)
-        {
-            <div class="alert alert-danger mb-2" role="alert">The connected Worker does not support Workspace repositories. Update the Worker.</div>
-        }
         @if (errorMessage != null)
         {
             <div class="page-error-callout repo-error-line" role="alert">@errorMessage</div>

@@ -12,6 +12,7 @@ This package intentionally separates observations into **BUG**, **NEW FEATURE**,
 | BUG | Git Changes renders some directories as files | High | Fix Git Changes path/tree modelling and add regression tests |
 | IMPROVEMENT | New Pull Request target-branch loading is far too slow for large workspaces | High | Replace per-repository fetch/read/persist flow with bulk cached reads and optional background freshness |
 | NEW FEATURE | Show processes blocking Feature removal | High | Add Worker-side lock diagnostics and integrate them into Remove Feature failure UX |
+| IMPROVEMENT | Restore Workspace UX and App/Worker version lock | High | Preflight `.graymoon.json` before mutating, transactional restore, replace the Workspace-repository capability gate with the version lock ([details](graymoon-restore-workspace-and-worker-version-lock.md)) |
 
 ## Suggested implementation order
 

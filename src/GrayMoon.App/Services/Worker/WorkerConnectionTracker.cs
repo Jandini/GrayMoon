@@ -10,7 +10,10 @@ public enum WorkerConnectionState
     VersionMismatch
 }
 
-/// <summary>Tracks worker SignalR connection for the UI badge and desktop notifications.</summary>
+/// <summary>
+/// Tracks worker SignalR connection for the UI badge and desktop notifications. <see cref="WorkerConnectionState.VersionMismatch"/>
+/// is authoritative: <see cref="WorkerBridge"/> refuses normal commands in that state (see <see cref="WorkerVersionPolicy"/>).
+/// </summary>
 public sealed class WorkerConnectionTracker
 {
     private readonly object _lock = new();
@@ -68,6 +71,9 @@ public sealed class WorkerConnectionTracker
                 return _logonPasswordRequired;
         }
     }
+
+    /// <summary>This App's informational version, compared with the Worker's by <see cref="WorkerVersionPolicy"/>.</summary>
+    public string? AppSemVer => _appSemVer;
 
     public string? WorkerSemVer
     {
@@ -190,7 +196,7 @@ public sealed class WorkerConnectionTracker
         if (_selfUpdateInProgress && next == WorkerConnectionState.Online)
         {
             var workerVersion = _workerVersions.Values.FirstOrDefault();
-            if (workerVersion != null && !string.IsNullOrEmpty(_appSemVer) && workerVersion == _appSemVer)
+            if (WorkerVersionPolicy.AreSameProductVersion(workerVersion, _appSemVer))
             {
                 _selfUpdateInProgress = false;
                 endedUpdate = true;
@@ -210,7 +216,7 @@ public sealed class WorkerConnectionTracker
             return WorkerConnectionState.Offline;
 
         var workerVersion = _workerVersions.Values.FirstOrDefault();
-        if (workerVersion != null && !string.IsNullOrEmpty(_appSemVer) && workerVersion != _appSemVer)
+        if (workerVersion != null && !string.IsNullOrEmpty(_appSemVer) && !WorkerVersionPolicy.AreSameProductVersion(workerVersion, _appSemVer))
             return WorkerConnectionState.VersionMismatch;
 
         return WorkerConnectionState.Online;

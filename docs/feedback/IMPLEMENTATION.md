@@ -183,3 +183,16 @@ In the current workspace these folders are now listed in the root `.gitignore`, 
 1. Remove `GrayMoon.Release/` from the Workspace `.gitignore`: Changes shows `GrayMoon.Release` as a folder with "untracked folder", no actions, nothing opens on click.
 2. Put the ignore line back: the entry disappears.
 3. Normal file changes in the Workspace and in regular repositories behave exactly as before.
+
+---
+
+## 4. IMPROVEMENT - Restore Workspace UX and App/Worker version lock
+
+Status: **implemented - awaiting user commit / manual test** (2026-10-08)
+
+Source: [graymoon-restore-workspace-and-worker-version-lock.md](graymoon-restore-workspace-and-worker-version-lock.md). The review against the code is its section 0 and the full implementation record (decisions, changes, tests, known limits, manual test gates) is its section 20; this entry only summarizes.
+
+- Restore validates `.graymoon.json` read-only through the GitHub connector before anything is created, shows a preview and what is missing on this computer, refuses non-empty folders, revalidates after the clone and rolls a failed restore back (database and, when provably owned, the root folder via the new `DiscardWorkspaceRoot` Worker command). "Restored without definition" is gone.
+- Found and fixed: a restore with missing repositories used to rewrite `.graymoon.json` from the database and drop them; unknown profile values were silently ignored; a cancelled restore left the Workspace row behind.
+- The `workspaceRepository` capability (`GetCapabilities`, `IWorkerFeatureSupportService`) and the Repositories-page banner are removed. `WorkerVersionPolicy` defines the App/Worker version lock; `WorkerBridge` refuses every command except `SelfUpdate` and `GetHostInfo` on a version mismatch, so the Worker update works against any Worker version.
+- Full run: Common 261, Worker 567 (+1 pre-existing skip), App 1230 - all passed; build 0 warnings.

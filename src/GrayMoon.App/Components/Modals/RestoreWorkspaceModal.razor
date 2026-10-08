@@ -6,74 +6,148 @@
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title text-nowrap">Restore Workspace from repository</h5>
+                    <h5 class="modal-title text-nowrap">Restore Workspace</h5>
                     <button type="button" class="btn-close" aria-label="Close" @onclick="CloseAsync"></button>
                 </div>
                 @if (_panel is not null)
                 {
                     <div class="modal-body">
-                        <p class="mb-2">Workspace restored.</p>
+                        <p class="mb-2 fw-semibold">@_panel.Headline</p>
+                        @if (_panel.SyncError is not null)
+                        {
+                            <div class="gm-callout gm-callout--warning mb-3" role="alert">
+                                <div>@RestoreResultPanel.SyncRetryHint</div>
+                                <div class="small text-muted mt-1">@_panel.SyncError</div>
+                            </div>
+                        }
                         @if (_panel.Warning is not null)
                         {
                             <div class="gm-callout gm-callout--warning mb-3" role="alert">@_panel.Warning</div>
                         }
-                        @if (_panel.UnresolvedConnectors.Count > 0)
+                        @foreach (var line in _panel.SummaryLines)
                         {
-                            <p class="mb-1 fw-semibold">Connectors not found</p>
-                            <ul class="mb-3">
-                                @foreach (var connector in _panel.UnresolvedConnectors)
-                                {
-                                    <li>@connector</li>
-                                }
-                            </ul>
+                            <p class="mb-1">@line</p>
                         }
-                        @if (_panel.UnresolvedRepositories.Count > 0)
+                        @if (_panel.HasUnresolved)
                         {
-                            <p class="mb-1 fw-semibold">Repositories not imported</p>
-                            <ul class="mb-3">
+                            <ul class="restore-missing-list small mb-2">
                                 @foreach (var repository in _panel.UnresolvedRepositories)
                                 {
                                     <li>@repository</li>
                                 }
+                                @foreach (var connector in _panel.UnresolvedConnectors)
+                                {
+                                    <li>Connector: @connector</li>
+                                }
                             </ul>
-                        }
-                        @if (_panel.ShowImportGuidance)
-                        {
-                            <p class="text-muted mb-0">@RestoreResultPanel.ImportGuidance</p>
+                            <p class="text-muted small mb-0">@RestoreResultPanel.ImportGuidance</p>
                         }
                     </div>
                     <div class="modal-footer">
+                        @if (_panel.HasUnresolved)
+                        {
+                            <button type="button" class="btn btn-secondary text-nowrap flex-shrink-0" @onclick="OpenConnectors">Open Connectors</button>
+                        }
                         <button type="button" class="btn btn-primary text-nowrap flex-shrink-0" data-default-action @onclick="OpenWorkspace">Open Workspace</button>
                     </div>
                 }
                 else
                 {
                     <div class="modal-body">
+                        <p class="text-muted mb-3">Restore a GrayMoon Workspace from a repository containing <code>.graymoon.json</code>.</p>
+
+                        @if (IsWorkerVersionMismatch)
+                        {
+                            <div class="gm-callout gm-callout--error mb-3" role="alert">
+                                <div class="mb-1">Update the GrayMoon Worker before restoring this Workspace.</div>
+                                <div class="small font-monospace">App:&nbsp;&nbsp;&nbsp; @(WorkerConnectionTracker.AppSemVer ?? "unknown")</div>
+                                <div class="small font-monospace mb-2">Worker: @(WorkerConnectionTracker.WorkerSemVer ?? "unknown")</div>
+                                <button type="button" class="btn btn-sm btn-outline-dark text-nowrap" @onclick="OpenWorkerPage">Update Worker</button>
+                            </div>
+                        }
+                        else if (WorkerUnavailable is not null)
+                        {
+                            <div class="gm-callout gm-callout--error mb-3" role="alert">Worker is not available. Start the GrayMoon Worker to restore a Workspace.</div>
+                        }
+
                         <div class="mb-3">
                             <label class="form-label text-nowrap" for="restore-workspace-filter">Workspace repository</label>
-                            <input type="text"
-                                   id="restore-workspace-filter"
-                                   class="form-control mb-2"
-                                   autocomplete="off"
-                                   placeholder="Search repositories"
-                                   value="@_filter"
-                                   @oninput="OnFilterChanged" />
-                            <select class="form-select"
-                                    id="restore-workspace-repository"
-                                    aria-label="Workspace repository"
-                                    @onchange="OnRepositoryChangedAsync">
-                                <option value="" selected="@(_repositoryId is null)">Select a repository</option>
-                                @foreach (var choice in FilteredChoices)
-                                {
-                                    <option value="@choice.RepositoryId" selected="@(choice.RepositoryId == _repositoryId)">@choice.DisplayName</option>
-                                }
-                            </select>
-                            <div class="form-text">An imported GitHub repository that contains <code>.graymoon.json</code>. It is cloned as the Workspace root.</div>
                             @if (_choices.Count == 0)
                             {
-                                <div class="form-text">No imported GitHub repositories. Import them on the Connectors page first.</div>
+                                <div class="gm-callout gm-callout--warning" role="alert">
+                                    <div>No GitHub repositories are available.</div>
+                                    <div class="small mt-1">Import the Workspace repository through Connectors first, then return here.</div>
+                                </div>
+                            }
+                            else
+                            {
+                                <input type="text"
+                                       id="restore-workspace-filter"
+                                       class="form-control mb-2"
+                                       autocomplete="off"
+                                       placeholder="Search repositories"
+                                       value="@_filter"
+                                       @oninput="OnFilterChanged" />
+                                <select class="form-select"
+                                        id="restore-workspace-repository"
+                                        aria-label="Workspace repository"
+                                        @onchange="OnRepositoryChangedAsync">
+                                    <option value="" selected="@(_repositoryId is null)">Select a repository</option>
+                                    @foreach (var choice in FilteredChoices)
+                                    {
+                                        <option value="@choice.RepositoryId" selected="@(choice.RepositoryId == _repositoryId)">@choice.DisplayName</option>
+                                    }
+                                </select>
                             }
                         </div>
+
+                        @if (_repositoryId is not null)
+                        {
+                            @if (PreflightPending)
+                            {
+                                <div class="text-muted mb-3" role="status">
+                                    <span class="spinner-border spinner-border-sm me-2"></span>Checking Workspace definition...
+                                </div>
+                            }
+                            else if (_preflight is { Success: false } failed)
+                            {
+                                <div class="gm-callout gm-callout--error mb-3" role="alert">@failed.Error</div>
+                            }
+                            else if (_preflight is { Success: true } preview)
+                            {
+                                <div class="restore-preview border rounded p-2 mb-3">
+                                    <div class="fw-semibold mb-1">GrayMoon Workspace</div>
+                                    <div class="row small g-1">
+                                        <div class="col-4 text-muted">Profile</div>
+                                        <div class="col-8">
+                                            @RestoreWorkspaceFlow.ProfileTypeLabel(preview.WorkspaceType)<br />
+                                            @RestoreWorkspaceFlow.VersioningLabel(preview.VersioningMode)<br />
+                                            @RestoreWorkspaceFlow.CiLabel(preview.CiProvider)
+                                        </div>
+                                        <div class="col-4 text-muted">Repositories</div>
+                                        <div class="col-8">@preview.RepositoryCount</div>
+                                        <div class="col-4 text-muted">Connectors</div>
+                                        <div class="col-8">@preview.ConfiguredConnectorCount configured locally, @preview.MissingConnectors.Count missing</div>
+                                    </div>
+                                </div>
+                                @if (RestoreWorkspaceFlow.MissingSummary(preview) is { } missingSummary)
+                                {
+                                    <div class="gm-callout gm-callout--warning mb-3" role="status">
+                                        <div>@missingSummary</div>
+                                        <ul class="restore-missing-list small mb-0 mt-1">
+                                            @foreach (var repository in preview.MissingRepositories)
+                                            {
+                                                <li>@repository</li>
+                                            }
+                                            @foreach (var connector in preview.MissingConnectors)
+                                            {
+                                                <li>Connector: @connector</li>
+                                            }
+                                        </ul>
+                                    </div>
+                                }
+                            }
+                        }
 
                         <div class="mb-3">
                             <label class="form-label text-nowrap" for="restore-workspace-name">Workspace name</label>
@@ -87,6 +161,10 @@
                             {
                                 <div class="invalid-feedback d-block">@NameError</div>
                             }
+                            @if (FolderPath.Length > 0)
+                            {
+                                <div class="form-text">Location <span class="font-monospace text-break">@FolderPath</span></div>
+                            }
                         </div>
 
                         @if (FolderState.Error is not null)
@@ -95,18 +173,24 @@
                         }
                         else if (FolderState.Note is not null)
                         {
-                            <div class="gm-callout gm-callout--warning mb-3" role="alert">@FolderState.Note</div>
+                            <div class="gm-callout gm-callout--info mb-3" role="status">@FolderState.Note</div>
                         }
 
                         @if (_error is not null)
                         {
-                            <div class="gm-callout gm-callout--error" role="alert">@_error</div>
+                            <div class="gm-callout gm-callout--error" role="alert">
+                                <div>@_error</div>
+                                @if (_errorResidue is not null)
+                                {
+                                    <div class="small mt-1">@_errorResidue</div>
+                                }
+                            </div>
                         }
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary text-nowrap flex-shrink-0" @onclick="CancelAsync">Cancel</button>
                         <button type="button" class="btn btn-primary text-nowrap flex-shrink-0" data-default-action @onclick="StartRestore" disabled="@(!CanRestore)">
-                            @if (_checking)
+                            @if (_checking || PreflightPending)
                             {
                                 <span class="spinner-border spinner-border-sm me-2"></span>
                             }

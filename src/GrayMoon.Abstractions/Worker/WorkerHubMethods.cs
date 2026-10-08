@@ -26,8 +26,11 @@ public static class WorkerHubMethods
     /// <summary>Worker → App: report worker job queue status (total pending, per-workspace counts).</summary>
     public const string ReportQueueStatus = "ReportQueueStatus";
 
-    /// <summary>App → Worker: request worker self-update (InstallUrl in payload).</summary>
+    /// <summary>App → Worker: request worker self-update (InstallUrl in payload). Allowed even when the Worker version does not match the App, so the payload must stay unchanged.</summary>
     public const string SelfUpdate = "SelfUpdate";
+
+    /// <summary>App → Worker: host diagnostics (Worker, dotnet, git and GitVersion versions) for the Worker page. Allowed even when the Worker version does not match the App.</summary>
+    public const string GetHostInfo = "GetHostInfo";
 
     /// <summary>App → Worker: check configured version files and return per-line staleness (read-only, no file writes).</summary>
     public const string CheckFileVersions = "CheckFileVersions";
@@ -58,6 +61,9 @@ public static class WorkerHubMethods
 
     /// <summary>App → Worker: attach a remote repository to the Workspace root as its working tree (clone into an empty root, or init + fetch + checkout in a non-empty one).</summary>
     public const string AttachWorkspaceRepository = "AttachWorkspaceRepository";
+
+    /// <summary>App → Worker: roll back the Workspace root of a failed restore; deletes only an empty folder or a clean clone of the restored repository.</summary>
+    public const string DiscardWorkspaceRoot = "DiscardWorkspaceRoot";
 
     /// <summary>App → Worker: write one text file inside a repository working tree (atomic, UTF-8 without BOM, optionally only when the content changed).</summary>
     public const string WriteRepositoryFile = "WriteRepositoryFile";

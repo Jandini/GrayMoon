@@ -1,5 +1,7 @@
 # Workspace Repositories page: why the grid sometimes renders late
 
+> **Superseded in part (2026-10-08):** the `workspaceRepository` Worker capability (`supportedFeatures`, `GetCapabilities`, `IWorkerFeatureSupportService`) and the Repositories-page compatibility banner were removed. App/Worker compatibility is now the version lock (`WorkerVersionPolicy`), and Restore validates `.graymoon.json` before creating anything; "Restored without definition" no longer exists. See `docs/feedback/graymoon-restore-workspace-and-worker-version-lock.md`.
+
 Page: `src/GrayMoon.App/Components/Pages/WorkspaceRepositories.razor` (+ `.razor.cs`, `.Loading.cs`, `.Display.cs`, `.Realtime.cs`).
 Route: `/workspaces/{WorkspaceId}`.
 

@@ -110,6 +110,22 @@ public static class WorkspaceManifestSerializer
         }
     }
 
+    /// <summary>True when the content is JSON whose <c>schemaVersion</c> is newer than this GrayMoon understands.</summary>
+    public static bool IsNewerSchema(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+            return false;
+
+        try
+        {
+            return ReadSchemaVersion(content) > CurrentSchemaVersion;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
     private static int ReadSchemaVersion(string content)
     {
         using var doc = JsonDocument.Parse(content);

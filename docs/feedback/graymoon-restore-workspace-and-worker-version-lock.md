@@ -2,7 +2,8 @@
 
 Date: 2026-10-08  
 Target branch for implementation/review: `feedback`  
-Primary repository: `Jandini/GrayMoon`
+Primary repository: `Jandini/GrayMoon`  
+Status: **Units A-E implemented, uncommitted; Unit F (manual end-to-end) pending.** See section 0 for the review against the code and section 20 for the implementation record.
 
 ## Purpose
 
@@ -20,6 +21,32 @@ The desired product rule is simpler:
 > The GrayMoon App and Worker are a matched pair. A Worker with a different GrayMoon version is not an alternate capability set. It is the wrong Worker version and should be updated.
 
 Do not build an expanding per-feature compatibility matrix between App and Worker.
+
+---
+
+# 0. Review against the code (2026-10-08)
+
+Sections 1-19 below are the original feedback. Reading the `feedback` branch confirmed them, with these corrections and additional findings.
+
+## 0.1 Confirmed
+
+- `RestoreCoreAsync` returned `Success = true` with "Restored without definition: ..." for a missing, unreadable or unparsable `.graymoon.json`, after the Workspace row, the Workspace-role link and the clone already existed.
+- `WorkerConnectionTracker` already had `VersionMismatch`, and the self-update flow already waited for a Worker reporting the App's version.
+- `GetCapabilities` had no consumer other than `WorkerFeatureSupportService` (searched the App, the Worker, the tests and `GrayMoon.Desktop`).
+
+## 0.2 Corrections to section 1
+
+- The capability did not come from `GetHostInfo` any more: it had moved to a dedicated `GetCapabilities` command on the Worker read lane, cached by the App for 60 seconds. The banner was shown only on Workspaces that have a Workspace-role link, and both Enable and Restore were gated.
+- The version comparison was an exact string compare of `AssemblyInformationalVersion`. GitVersion is configured with `assembly-informational-format: '{SemVer}'` and both projects set `IncludeSourceRevisionInInformationalVersion=false`, so no build metadata is emitted today; the risk in section 14 was latent, not live.
+- The dialog title was "Restore Workspace from repository".
+- The dialog's folder check only counted Git repositories in the folder. A folder with ordinary files passed the dialog and was refused only later by the Worker (`requireEmptyRoot`), after the Workspace row had been created.
+- There is no "Review Workspace" action in the UI. Repositories are added to a Workspace from its repository list (the repository count link on the Repositories page), so the post-restore guidance points there.
+
+## 0.3 Additional problems found
+
+- **Restore with missing repositories damaged the definition.** After linking only the locally resolvable repositories, restore always called `WriteAuthoritativeManifestAsync`, which rebuilds `.graymoon.json` from the database. Every repository that was not imported on this computer was silently removed from the file, leaving a dirty working tree that would lose them on the next commit. Fixed by section 7's "write only if required" (see 20.2).
+- **Unknown profile values were silently ignored.** An unknown `type`, `versioning` or `ci` kept the Basic / None / None default for that axis. Restore now refuses such a definition (section 3.3 example).
+- **Cancellation after the Workspace was created left it behind.** `LinkAndAttachAsync` removed the link on cancellation, but the Workspace row stayed. Restore now rolls the whole Workspace back on cancellation too.
 
 ---
 
@@ -1007,3 +1034,87 @@ Use this when handing the work to an implementation agent:
 > 2. GrayMoon App and Worker are version-locked. Replace the Workspace-repository feature-capability gate and compatibility banner with the existing App/Worker version mismatch mechanism. Do not introduce another compatibility framework.
 >
 > Split implementation into independently testable units. Prefer minimal, cohesive changes. Preserve existing Workspace/Feature behavior outside the named changes. Add regression tests before or with each behavior change. Keep the living implementation document updated with discoveries, deviations, test counts, and manual-test gates. Do not commit or push until the requested review gate.
+
+---
+
+# 20. Implementation record (2026-10-08)
+
+## 20.1 Status
+
+| Unit | Status |
+|---|---|
+| A - Restore preflight model/service | Done |
+| B - Restore dialog UX | Done |
+| C - Restore transactional behavior | Done |
+| D - Worker version lock | Done |
+| E - Remove capability system and banner | Done |
+| F - End-to-end regression | **Manual - pending** (checklist in 20.6) |
+
+All changes are uncommitted on `feedback`.
+
+## 20.2 Decisions made where the feedback left room
+
+- **Version comparison contract (section 14).** Normalized product SemVer must be equal: trim, drop a leading `v`, drop build metadata after `+`, ignore case. The pre-release label counts, so two CI builds from different commits (`0.2.0-feedback.5` and `0.2.0-feedback.6`) are different versions. One place: `WorkerVersionPolicy`. Used for both `VersionMismatch` and the end of a self-update.
+- **The Worker update works without the exact version (owner requirement).** While versions differ, `WorkerBridge` sends only `SelfUpdate` (the update) and `GetHostInfo` (the Worker page diagnostics); everything else returns "The GrayMoon Worker version (x) does not match this GrayMoon version (y). Update the Worker." The `SelfUpdate` payload (`installUrl`) is frozen so any older Worker can still be updated. This is a fixed two-command allow-list, not a per-feature list.
+- **Gate placement (section 11.3).** The gate is in `WorkerBridge.SendCommandAsync`, the single command boundary. `IWorkerBridge.GetUnavailableReason()` (default interface method, so test fakes keep compiling) lets Enable and Restore refuse before they change anything. `IsWorkerConnected` keeps its meaning (a Worker is connected), so existing pages still tell "not connected" apart from "wrong version".
+- **Preflight source (section 4).** The connector path exists: `GitHubService.GetRepositoryFileUtf8TextAsync` (contents API, default branch). `IRemoteWorkspaceManifestReader` / `GitHubRemoteWorkspaceManifestReader` wraps it; no temporary clone.
+- **One evaluator for both checks.** `RestoreDefinitionEvaluator` validates and resolves the definition for the preflight and again for the cloned copy, so the two cannot disagree.
+- **Unknown profile values block** with "The Workspace definition is invalid: Unknown workspace profile value "x"." rather than falling back silently.
+- **What rolls back (section 10).** Everything up to and including linking Source repositories is structural: a failure, an exception or a cancellation deletes the new Workspace (row, links) and asks the Worker to discard the root. The managed `.gitignore` and the definition rewrite happen after the Workspace is usable; their failures are a **warning on a successful restore**, because the existing drift banner ("Write Workspace definition to disk") repairs them. This is the defined rollback behavior for the two write steps in section 15.3.
+- **Root cleanup ownership proof.** New Worker command `DiscardWorkspaceRoot` deletes only an empty folder or a clean clone whose origin is the restored repository (`git status --porcelain --untracked-files=all` empty). Other files, another repository or local changes leave the folder in place, and the reason is returned as `CleanupResidue`. A folder that existed (empty) before the restore is emptied but kept. Deletion reuses the Feature-removal walker (read-only attributes cleared, reparse points never entered, retries for locked files).
+- **"Write the definition only if required" (section 7).** Rewritten only when nothing is missing on this computer and the canonical form built from the database differs from the file (for example non-canonical URLs, duplicates, or the Workspace repository listed as its own Source). The Workspace name in the file is not a reason to rewrite, so a local name choice does not dirty the repository.
+- **Folder state.** `GetWorkspaceExists` now also returns `isEmpty`. The dialog shows the location, "The folder already exists and is empty. GrayMoon will use it." (info) or "This folder already contains files. Choose another Workspace name or move the existing files." (blocks). Restore checks it again before creating anything.
+- **Progress (section 8).** Phases: Checking Workspace definition, Preparing Workspace, Cloning Workspace repository, Applying Workspace profile, Linking N repositories, Preparing Workspace files, Syncing repositories, Finishing. Linking is a single database batch, so there is no "8 of 24" counter.
+- **Update Worker action (section 11.4).** The dialog's "Update Worker" button opens the Worker page, which already has the update action and installer details.
+- **Missing items wording.** Repositories are shown as "owner/name" (from the URL), connectors as their host name.
+- **Choices.** "org/repository"; when two imported repositories read the same, the connector name is appended.
+
+## 20.3 What changed
+
+Worker version lock and cleanup (Units D, E):
+
+- New `WorkerVersionPolicy`; `WorkerConnectionTracker` uses it and exposes `AppSemVer`; `WorkerBridge` gates commands and implements `GetUnavailableReason()`.
+- Removed `WorkerFeatures`, `GetCapabilitiesCommand` / Request / Response, its dispatcher, job factory, DI and read-lane entries, `IWorkerFeatureSupportService` / `WorkerFeatureSupportService`, `GetCapabilitiesWorkerResponse`, the Repositories-page banner and its background capability round trip (`RefreshWorkspaceRepositoryBannerStateAsync`, which also saved a database read per page load).
+- `WorkerHubMethods.GetHostInfo` and `WorkerHubMethods.DiscardWorkspaceRoot` constants.
+
+Restore (Units A, B, C):
+
+- Application: `IWorkspaceRepositoryOperations.PreflightRestoreAsync`, `RestoreWorkspacePreflight`, `RestoreWorkspaceResult` reshaped (`Warning`, `CleanupResidue`, `UnresolvedConnectors`, `UnresolvedRepositories`).
+- App: `RestoreDefinitionEvaluator`, `GitHubRemoteWorkspaceManifestReader`, `WorkspaceService.GetDirectoryStateAsync`, `WorkspaceManifestSerializer.IsNewerSchema`, rewritten `RestoreCoreAsync` (preflight, folder check, create, clone, revalidate, profile, link, files, rollback). `RestoredWithoutDefinition` is gone.
+- Worker: `DiscardWorkspaceRootCommand`, `isEmpty` on `GetWorkspaceExists`.
+- Dialog: title "Restore Workspace", help text, actionable empty state, preflight on selection with stale-answer protection (`RestorePreflightGate`), preview (profile, repository count, connectors configured / missing), missing-items callout with a scrollable list, Location line, folder verdicts, Worker update callout with App / Worker versions, result panel only when the user must act (missing items, warning, or "Workspace restored, but the initial Sync did not complete."), "Open Connectors" secondary action. A clean success opens the Workspace directly.
+
+Docs: `docs/architecture/05-user-capability-reference.md` (Workspace repository rules, restore, version lock), project `CLAUDE.md` (version lock rule), superseded notes on the Workspace-repository design documents and `docs/workspace-repositories-page-load.md`.
+
+Not changed: `GrayMoon.Desktop/README.md` still describes the `GetCapabilities` banner in its release notes; that is a separate private repository.
+
+## 20.4 Tests
+
+| Project | File | Covers |
+|---|---|---|
+| App | `WorkspaceRepositoryOperationsTests` | Enable refused on version mismatch; preflight: valid preview without Worker or database change, missing file, invalid JSON, newer schema, three unknown profile values, connector read error, missing connectors and repositories, Workspace repository and duplicates not counted; restore: URL normalization and multiple repositories, canonical definition untouched, missing items never rewrite the definition, existing empty folder, progress phases; no mutation for missing / invalid definition (no attach), non-empty folder, version mismatch; rollback on clone failure, cloned definition invalid or missing, exception and cancellation after the clone, folder kept when it existed, residue reported; warnings (no rollback) for `.gitignore` and definition write failures |
+| App | `RestoreWorkspaceFlowTests` | Restore then Sync; no definition creates nothing and never syncs; unresolved items keep the panel open with counts; failed Sync reported as a Sync warning; name follows the selection until typed; name validation; folder verdicts; Restore enabled only for a valid preflight, name, folder and Worker (unresolved Sources allowed); stale preflight answers dropped; choices and filtering; missing summary; profile labels |
+| App | `WorkerVersionLockTests` | Normalization; same-version contract; allow-list; tracker Online / VersionMismatch / reconnect; self-update ends on the same product version with different build metadata; bridge refuses normal commands on mismatch, still sends `SelfUpdate` and `GetHostInfo`, sends normally when matched; capability types and banner members are gone |
+| Worker | `DiscardWorkspaceRootCommandTests` | Real git: clean clone deleted; pre-existing folder emptied and kept; empty / missing folder; local changes, another repository and plain files are kept with a reason; `GetWorkspaceExists` reports `isEmpty` |
+
+Build: 0 warnings, 0 errors. Full run: Common 261, Worker 567 (+1 pre-existing skip), App 1230 - all passed.
+
+## 20.5 Known limits
+
+- The definition is read from the repository's default branch through the GitHub contents API; the clone also checks out the default branch, and the cloned copy is validated again, so a change in between is caught.
+- A Worker that connects is treated as Online until it reports its version (a moment after connecting). That window existed before and is unchanged.
+- After a restore with missing repositories, drift detection will (correctly) report repositories that are in the file but not in the Workspace. The banner's "Write Workspace definition to disk" would drop them; import them first.
+
+## 20.6 Manual test gates (Unit F)
+
+1. Matching App and Worker: restore a valid Workspace repository; the dialog shows the preview, Restore opens the Workspace after Sync.
+2. Older Worker: badge says "update"; the Restore dialog shows "Update the GrayMoon Worker before restoring this Workspace." with both versions and Restore disabled; Sync and other actions fail with the version message; **Update Worker from the badge or the Worker page succeeds** and everything works after the reconnect.
+3. Repository without `.graymoon.json`: blocking error right after selection, Restore disabled, nothing created.
+4. Malformed `.graymoon.json` and an unknown profile value: blocking error, nothing created.
+5. The real 24-repository Workspace: preview shows 24 repositories and the profile; restore and Sync complete.
+6. Missing connector(s) and repository(s): preview lists them; restore succeeds; the panel lists them with Open Connectors / Open Workspace; `.graymoon.json` in the new root is unchanged (`git status` clean).
+7. Existing empty folder: info note, restore uses it.
+8. Existing folder with a file: error, Restore disabled.
+9. Force a clone failure (for example revoke the token): error, no Workspace in the list, no folder left (or a residue line naming it).
+10. Reopen the restored Workspace; restart App and Worker; the Workspace, links and profile are intact.
+11. The Repositories page of a Workspace with a Workspace repository shows no Worker compatibility banner.
