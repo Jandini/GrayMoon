@@ -11,6 +11,7 @@
 @inject WorkspaceOpenInRecentTools OpenInRecentTools
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
+@inject IConfiguration Configuration
 
 <div class="btn-group position-relative workspace-feature-selector">
     <button type="button"
@@ -235,6 +236,7 @@
     private bool _open;
     private bool _loaded;
     private bool _desktopAvailable;
+    private bool _desktopHostProbeStarted;
     private bool _toolAvailabilitySubscribed;
     private DotNetObjectReference<WorkspaceFeatureSelector>? _toolAvailabilityRef;
     private int _recentOpenInWorkspaceId;
@@ -247,8 +249,9 @@
         _toolAvailability is { } t && (t.Cursor || t.ClaudeCli || t.VsCode || t.VisualStudio);
 
     /// <summary>
-    /// Desktop only. A button is shown when the tool is listed in <c>.graymoon.json</c> and Desktop
-    /// reports it as installed, most recent first. Terminal and Explorer are always available on Desktop.
+    /// Desktop only. A button is shown when the tool is listed in <c>.graymoon.json</c> and it is
+    /// installed, most recent first. In desktop mode that is known before the first paint, so the
+    /// buttons show up with New Feature. Terminal and Explorer are always available on Desktop.
     /// </summary>
     private IReadOnlyList<string> VisibleOpenInTools =>
         FeatureOpenInTools.VisibleButtons(
@@ -407,6 +410,37 @@
         }
     }
 
+    public override async Task SetParametersAsync(ParameterView parameters)
+    {
+        // Blazor paints once OnParametersSetAsync reaches its first await. Load the recent-tool
+        // buttons before that, or they show up a frame after New Feature.
+        ApplyDesktopOpenInState();
+        if (parameters.TryGetValue<int>(nameof(WorkspaceId), out var workspaceId))
+            await EnsureRecentOpenInToolsAsync(workspaceId);
+
+        await base.SetParametersAsync(parameters);
+    }
+
+    protected override void OnInitialized() => ApplyDesktopOpenInState();
+
+    private void ApplyDesktopOpenInState()
+    {
+        if (_desktopAvailable || string.IsNullOrEmpty(Configuration["Desktop:PipeName"]))
+            return;
+
+        // GrayMoon.Desktop launches this process with --desktop, on the same machine as the
+        // WebView, so installed tools are known before the first paint.
+        var installed = InstalledOpenInTools.Detect();
+        _toolAvailability = new ToolAvailabilityDto
+        {
+            Cursor = installed.Cursor,
+            VsCode = installed.VsCode,
+            VisualStudio = installed.VisualStudio,
+            ClaudeCli = installed.ClaudeCli,
+        };
+        _desktopAvailable = true;
+    }
+
     protected override async Task OnParametersSetAsync()
     {
         if (WorkspaceId <= 0)
@@ -424,29 +458,71 @@
             _lastKnownSelectedValue = currentSelectedValue;
         }
 
-        if (_desktopAvailable && _recentOpenInWorkspaceId != WorkspaceId)
-            await LoadRecentOpenInToolsAsync();
+        await EnsureRecentOpenInToolsAsync(WorkspaceId);
+    }
+
+    private async Task EnsureRecentOpenInToolsAsync(int workspaceId)
+    {
+        if (!_desktopAvailable || workspaceId <= 0 || _recentOpenInWorkspaceId == workspaceId)
+            return;
+
+        if (OpenInRecentTools.TryGetCached(workspaceId, out var cached))
+        {
+            _recentOpenInTools = cached.ToList();
+            _recentOpenInWorkspaceId = workspaceId;
+            return;
+        }
+
+        await LoadRecentOpenInToolsAsync(workspaceId);
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender || _desktopAvailable)
+        if (!firstRender || _desktopHostProbeStarted)
             return;
+
+        _desktopHostProbeStarted = true;
+        var before = OpenInRenderSignature();
         try
         {
-            _desktopAvailable = await JS.InvokeAsync<bool>("eval", "!!(window.graymoonDesktop && window.graymoonDesktop.isAvailable && window.graymoonDesktop.isAvailable())");
-            if (_desktopAvailable)
+            var inWebView = await JS.InvokeAsync<bool>("eval", "!!(window.graymoonDesktop && window.graymoonDesktop.isAvailable && window.graymoonDesktop.isAvailable())");
+            if (!inWebView)
             {
-                await SubscribeToolAvailabilityAsync();
-                await RefreshToolAvailabilityAsync();
-                await LoadRecentOpenInToolsAsync();
-                await InvokeAsync(StateHasChanged);
+                // Desktop mode painted the buttons up front. A normal browser on the same port has
+                // no WebView bridge, so take them back off.
+                if (_desktopAvailable)
+                {
+                    _desktopAvailable = false;
+                    await InvokeAsync(StateHasChanged);
+                }
+                return;
             }
+
+            _desktopAvailable = true;
+            await SubscribeToolAvailabilityAsync();
+            await RefreshToolAvailabilityAsync();
+            if (_recentOpenInWorkspaceId != WorkspaceId)
+                await LoadRecentOpenInToolsAsync(WorkspaceId);
         }
         catch
         {
-            _desktopAvailable = false;
+            // Keep whatever the first paint already showed.
         }
+
+        if (OpenInRenderSignature() != before)
+            await InvokeAsync(StateHasChanged);
+    }
+
+    private string OpenInRenderSignature()
+    {
+        var tools = _toolAvailability;
+        return string.Join('\u001f',
+            _desktopAvailable ? "1" : "0",
+            tools?.Cursor == true ? "1" : "0",
+            tools?.ClaudeCli == true ? "1" : "0",
+            tools?.VsCode == true ? "1" : "0",
+            tools?.VisualStudio == true ? "1" : "0",
+            string.Join(',', VisibleOpenInTools));
     }
 
     private async Task SubscribeToolAvailabilityAsync()
@@ -470,8 +546,10 @@
     {
         try
         {
+            var before = OpenInRenderSignature();
             await RefreshToolAvailabilityAsync();
-            await InvokeAsync(StateHasChanged);
+            if (OpenInRenderSignature() != before)
+                await InvokeAsync(StateHasChanged);
         }
         catch (ObjectDisposedException)
         {
@@ -499,12 +577,15 @@
         try
         {
             // GrayMoon.Desktop pushes tool detection results shortly after navigation (see
-            // MainWindow.NotifyToolAvailability); may still be null on the very first render.
-            _toolAvailability = await JS.InvokeAsync<ToolAvailabilityDto?>("eval", "window.graymoonDesktop && window.graymoonDesktop.getToolAvailability && window.graymoonDesktop.getToolAvailability()");
+            // MainWindow.NotifyToolAvailability). Null means that message has not arrived yet;
+            // keep the snapshot already used for the first paint.
+            var next = await JS.InvokeAsync<ToolAvailabilityDto?>("eval", "window.graymoonDesktop && window.graymoonDesktop.getToolAvailability && window.graymoonDesktop.getToolAvailability()");
+            if (next is not null)
+                _toolAvailability = next;
         }
         catch
         {
-            _toolAvailability = null;
+            // Keep the snapshot already used for the first paint.
         }
     }
 
@@ -698,21 +779,21 @@
         }
     }
 
-    private async Task LoadRecentOpenInToolsAsync()
+    private async Task LoadRecentOpenInToolsAsync(int workspaceId)
     {
-        if (!_desktopAvailable || WorkspaceId <= 0)
+        if (!_desktopAvailable || workspaceId <= 0)
             return;
 
         try
         {
-            _recentOpenInTools = (await OpenInRecentTools.GetAsync(WorkspaceId)).ToList();
+            _recentOpenInTools = (await OpenInRecentTools.GetAsync(workspaceId)).ToList();
         }
         catch
         {
             _recentOpenInTools = [];
         }
 
-        _recentOpenInWorkspaceId = WorkspaceId;
+        _recentOpenInWorkspaceId = workspaceId;
     }
 
     private async Task RememberOpenInToolAsync(string method)
