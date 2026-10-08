@@ -16,7 +16,7 @@ Prompt: `docs/git-critical/graymoon-sync-critical-path-optimization-prompt.md`.
 |---|---|
 | 1 Sync / Git Changes coordination | Implemented, tests green, awaiting VDI benchmark |
 | 2 Hook location cache | Implemented, tests green, awaiting VDI benchmark |
-| 3 GitVersion fingerprint cache | Planned |
+| 3 GitVersion fingerprint cache | Implemented, tests green, awaiting VDI benchmark |
 | 4 Fetch policy review | Planned |
 
 ## Unit 1 - Sync / Git Changes coordination
@@ -115,6 +115,67 @@ Pending.
 | Metric | Before | After |
 |---|---|---|
 | hook-path git.exe per unchanged Sync | 1 (2 with outside hooksPath) | 0 (expected) |
+| Repository total median / P90 | | |
+| Sync wall time (workspace) | | |
+
+## Unit 3 - GitVersion result cache
+
+### Problem
+GitVersion costs about 4-6 s per repository on the VDI, mostly process startup. Its own `.git/gitversion_cache`
+only helps after the process is already running.
+
+### Design
+- `GitVersionResultCache` (Worker/Services, singleton) wraps `GitVersionRepositoryVersionProvider`. The provider takes
+  it as an optional constructor argument, so call sites that build the provider without a cache behave as before.
+- A hit returns the previous successful result without starting GitVersion. GitVersion's private cache is never read.
+- `GitVersionInputFingerprint` computes the inputs in process (LibGit2Sharp and file reads), as separate digests:
+  - `Head`: tip SHA. `HeadIdentity`: symbolic target of HEAD, or `detached`.
+  - `Refs`: sorted name and target of every ref under `refs/` except `refs/stash` (heads, remotes, tags, others), plus
+    the `shallow` file of the common git dir (so linked worktrees see refs created elsewhere).
+  - `Config`: content of every GitVersion config file name in the working tree root.
+  - `Tool`: hash of the repository's `dotnet-tools.json` (root or `.config`) when present, otherwise the global
+    `dotnet-gitversion` found on `PATH` (size, write time) plus the version folders in `.store/gitversion.tool`.
+  - `Invocation`: NonNormalize, CommitSha, any `GITVERSION*` environment variable.
+- Entries are keyed by repository, NonNormalize and CommitSha, so alternating requests do not evict each other.
+- Only successes are stored (`Probed`, no error, a result). Failures and exceptions are never cached. The fingerprint
+  is re-taken after the run and the result is stored only if it did not move meanwhile.
+- Identical concurrent requests (same key and inputs) share one run. If the request doing the run is cancelled, the
+  others retry rather than inherit the cancellation. Each caller gets its own copy of the (mutable) result.
+- Bounded: 256 entries, oldest use evicted. In memory only, no database.
+- Bypassed (GitVersion runs, nothing cached): unborn HEAD, bare or unreadable repository, global tool not found on
+  `PATH`, or a GitVersion config containing `UncommittedChanges` (the format would then depend on the working tree).
+- Working-tree edits are not an input. Parity test (real GitVersion, tag plus a commit, then a staged edit and an
+  untracked file): `InformationalVersion`, `BranchName`, `EscapedBranchName` are identical clean and dirty, and those
+  are the only fields GrayMoon reads (`GitVersionResult` has just those three).
+
+### Telemetry (Debug, no repository content)
+`GitVersion cache hit for {RepoPath}`; `GitVersion cache miss for {RepoPath}: {Reason}` with Reason one of
+`NO_PREVIOUS_SUCCESS`, `HEAD_CHANGED`, `HEAD_IDENTITY_CHANGED`, `REFS_CHANGED`, `CONFIG_CHANGED`, `TOOL_CHANGED`,
+`INVOCATION_CHANGED` (first differing input, in that precedence order of tool/config before head/refs);
+`GitVersion executed in {ElapsedMs}ms for {RepoPath}`; `GitVersion cache bypass ... inputs cannot be fingerprinted`.
+
+### Tests
+`GitVersionResultCacheTests` (20): unchanged repo hit; new commit (no stale result); branch switch at same commit; new
+and moved tag; local and remote ref changes; config change; `UncommittedChanges` config never cached; tool identity
+change; NonNormalize and CommitSha (no thrash between them); detached HEAD; linked worktree (own entry, shared ref
+changes seen, own commit); failure then success; exception; 8 concurrent identical requests share one run; cancelled
+first request does not fail the waiter; bounded; unborn HEAD bypass; working-tree edits keep the hit; real GitVersion
+parity clean vs dirty; real provider starts `dotnet-gitversion` once for two requests and once more after a commit.
+Full Worker suite: 561 passed, 1 skipped (pre-existing), 0 failed.
+
+### Known limitations
+- Anything GitVersion reads that is not in the inputs above is not tracked: CI environment variables other than
+  `GITVERSION*`, grafts, and an uncommon tool location resolved by `dotnet` rather than `PATH`.
+- The first Sync after a worker restart still runs GitVersion once per repository (in memory only).
+- Cached version is not re-verified against GitVersion; if a bug makes inputs look unchanged, restarting the worker
+  clears the cache.
+
+### Enterprise benchmark
+Pending.
+
+| Metric | Before | After |
+|---|---|---|
+| GitVersion launches per unchanged repository per Sync | 1 | 0 (expected) |
 | Repository total median / P90 | | |
 | Sync wall time (workspace) | | |
 

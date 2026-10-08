@@ -122,6 +122,7 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<IGitIgnoreService, LibGit2SharpGitIgnoreService>();
         builder.Services.AddSingleton<ICsProjFileParser, CsProjFileParser>();
         builder.Services.AddSingleton<ICsProjFileService, CsProjFileService>();
+        builder.Services.AddSingleton<GitVersionResultCache>();
         builder.Services.AddSingleton<GitVersionRepositoryVersionProvider>();
         builder.Services.AddSingleton<NoRepositoryVersionProvider>();
         builder.Services.AddSingleton<IRepositoryVersionProviderFactory, RepositoryVersionProviderFactory>();
