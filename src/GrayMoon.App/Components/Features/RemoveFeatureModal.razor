@@ -22,7 +22,42 @@
                     <button type="button" class="btn-close" aria-label="Close" @onclick="@(_report is null ? Cancel : Done)" disabled="@_analyzing"></button>
                 </div>
                 <div class="modal-body">
-                    @if (HasInUseBlockers)
+                    @if (_checkingBlockers)
+                    {
+                        <div class="gm-callout gm-callout--info mb-3" role="status">
+                            <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>@RemoveFeatureBlockerText.Checking
+                        </div>
+                    }
+                    else if (_preflightStep)
+                    {
+                        @* Remove found programs using the Feature (or could not check): Kill them and remove, or Continue without. *@
+                        var checkFailed = PreflightCheckFailed;
+                        <div class="gm-callout gm-callout--warning mb-3" role="alert">
+                            <div class="fw-semibold">@(checkFailed ? RemoveFeatureBlockerText.CheckFailedTitle : RemoveFeatureBlockerText.PreflightTitle)</div>
+                            <div>@(checkFailed ? RemoveFeatureBlockerText.CheckFailedBody : RemoveFeatureBlockerText.PreflightBody)</div>
+                        </div>
+                        @foreach (var repoBlockers in PreflightRepositories)
+                        {
+                            <div class="mb-2" @key="repoBlockers.WorkspaceRepositoryId">
+                                <div class="small fw-semibold mb-1">@repoBlockers.RepositoryName</div>
+                                <BlockingProcessList Processes="repoBlockers.Processes"
+                                                     MayBeIncomplete="repoBlockers.MayBeIncomplete"
+                                                     Diagnostic="@repoBlockers.Diagnostic"
+                                                     Selectable="true"
+                                                     SelectedIds="_selectedPids"
+                                                     SelectionChanged="OnProcessSelectionChanged"
+                                                     Disabled="BlockerActionBusy"
+                                                     Outcomes="_killOutcomes" />
+                            </div>
+                        }
+                        <KillOutcomeLines Summary="@RemoveFeatureBlockerText.KillSummary(_lastKill)" Error="@_killError" />
+                        @if (PreflightHasProcesses)
+                        {
+                            <p class="text-muted small mb-1">@RemoveFeatureBlockerText.KillExplanation</p>
+                        }
+                        <p class="text-muted small mb-0">@RemoveFeatureBlockerText.ContinueExplanation</p>
+                    }
+                    else if (HasInUseBlockers)
                     {
                         @* Remove failed because a worktree folder is in use: name the programs instead of a bare Git/IO error. *@
                         <div class="gm-callout gm-callout--warning mb-3" role="alert">
@@ -37,7 +72,12 @@
                                 {
                                     <BlockingProcessList Processes="repoBlockers.Processes"
                                                          MayBeIncomplete="repoBlockers.MayBeIncomplete"
-                                                         Diagnostic="@repoBlockers.Diagnostic" />
+                                                         Diagnostic="@repoBlockers.Diagnostic"
+                                                         Selectable="true"
+                                                         SelectedIds="_selectedPids"
+                                                         SelectionChanged="OnProcessSelectionChanged"
+                                                         Disabled="BlockerActionBusy"
+                                                         Outcomes="_killOutcomes" />
                                 }
                                 else
                                 {
@@ -45,7 +85,12 @@
                                 }
                             </div>
                         }
+                        <KillOutcomeLines Summary="@RemoveFeatureBlockerText.KillSummary(_lastKill)" Error="@_killError" />
                         <p class="text-muted small mb-2">@RemoveFeatureBlockerText.CloseAndRetry</p>
+                        @if (CanKillShown)
+                        {
+                            <p class="text-muted small mb-2">@RemoveFeatureBlockerText.KillExplanation</p>
+                        }
                         @if (!string.IsNullOrEmpty(_error))
                         {
                             <details class="small text-muted mb-3">
@@ -58,7 +103,11 @@
                     {
                         <div class="gm-callout gm-callout--error mb-3" role="alert">@_error</div>
                     }
-                    @if (_report is not null && string.IsNullOrEmpty(_error))
+                    @if (_preflightStep)
+                    {
+                        @* The blocker step replaces the plan until the user picks Kill, Continue or Cancel. *@
+                    }
+                    else if (_report is not null && string.IsNullOrEmpty(_error))
                     {
                         <div class="gm-callout gm-callout--warning mb-3" role="alert">
                             Feature removed with warnings.
@@ -75,15 +124,25 @@
                                             <div class="mt-1 ms-2">
                                                 <BlockingProcessList Processes="leftoverBlockers"
                                                                      MayBeIncomplete="warning.Leftover.BlockersMayBeIncomplete"
-                                                                     Diagnostic="@warning.Leftover.BlockersDiagnostic" />
+                                                                     Diagnostic="@warning.Leftover.BlockersDiagnostic"
+                                                                     Selectable="@(warning.Leftover.ResidueTarget is not null)"
+                                                                     SelectedIds="_selectedPids"
+                                                                     SelectionChanged="OnProcessSelectionChanged"
+                                                                     Disabled="BlockerActionBusy"
+                                                                     Outcomes="_killOutcomes" />
                                             </div>
                                         }
                                     </li>
                                 }
                             </ul>
+                            <KillOutcomeLines Summary="@RemoveFeatureBlockerText.KillSummary(_lastKill)" Error="@_killError" />
                             @if (CanRetryLeftovers)
                             {
                                 <p class="text-muted small mb-0 mt-2">@RemoveFeatureBlockerText.CloseAndRetry</p>
+                            }
+                            @if (CanKillShown)
+                            {
+                                <p class="text-muted small mb-0 mt-1">@RemoveFeatureBlockerText.LeftoverKillExplanation</p>
                             }
                         }
                     }
@@ -227,8 +286,42 @@
                     }
                 </div>
                 <div class="modal-footer">
-                    @if (_report is not null)
+                    @if (_preflightStep)
                     {
+                        <button type="button" class="btn btn-outline-secondary text-nowrap" @onclick="Cancel" disabled="@BlockerActionBusy">Cancel</button>
+                        <button type="button" class="btn btn-outline-secondary text-nowrap" @onclick="RefreshBlockersAsync" disabled="@BlockerActionBusy">
+                            @if (_refreshingBlockers)
+                            {
+                                <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                            }
+                            Refresh
+                        </button>
+                        <button type="button" class="btn btn-outline-danger text-nowrap" @onclick="ContinueRemoveAsync" disabled="@_killing">Continue</button>
+                        @if (PreflightHasProcesses)
+                        {
+                            <button type="button" class="btn btn-danger text-nowrap" @onclick="KillAndRemoveAsync"
+                                    disabled="@(BlockerActionBusy || !HasKillSelection)">
+                                @if (_killing)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                                }
+                                Kill and remove
+                            </button>
+                        }
+                    }
+                    else if (_report is not null)
+                    {
+                        @if (CanKillShown)
+                        {
+                            <button type="button" class="btn btn-outline-danger text-nowrap" @onclick="KillLeftoversAndRetryAsync"
+                                    disabled="@(BlockerActionBusy || !HasKillSelection)">
+                                @if (_killing)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                                }
+                                Kill and retry
+                            </button>
+                        }
                         @if (CanRetryLeftovers)
                         {
                             <button type="button" class="btn btn-outline-secondary text-nowrap" @onclick="RefreshBlockersAsync" disabled="@BlockerActionBusy">
@@ -250,6 +343,7 @@
                     }
                     else
                     {
+                        @* Cancel stays available while the pre-removal check runs; so does Continue, which skips it. *@
                         <button type="button" class="btn btn-outline-secondary text-nowrap" @onclick="Cancel" disabled="@(_analyzing || BlockerActionBusy)">Cancel</button>
                         @if (HasInUseBlockers)
                         {
@@ -260,11 +354,33 @@
                                 }
                                 Refresh blockers
                             </button>
+                            @if (CanKillShown)
+                            {
+                                <button type="button" class="btn btn-outline-danger text-nowrap" @onclick="KillAndRemoveAsync"
+                                        disabled="@(_analyzing || BlockerActionBusy || !HasKillSelection)">
+                                    @if (_killing)
+                                    {
+                                        <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                                    }
+                                    Kill and retry
+                                </button>
+                            }
                         }
-                        <button type="button" class="@RemoveCtaClass text-nowrap" data-default-action @onclick="RemoveAsync"
-                                disabled="@(_analyzing || BlockerActionBusy || _plan is null || !CanRemove(AnyRepoStatusUnknown, ShowDiscardCheckbox, _allowDiscard, ShowForceCheckbox, _allowForce, ShowUnlockCheckbox, _allowUnlock))">
-                            @(HasInUseBlockers ? "Retry" : "Remove Feature")
-                        </button>
+                        @if (_checkingBlockers)
+                        {
+                            <button type="button" class="btn btn-outline-danger text-nowrap" @onclick="ContinueRemoveAsync">Continue</button>
+                            <button type="button" class="@RemoveCtaClass text-nowrap" disabled>
+                                <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                                Checking...
+                            </button>
+                        }
+                        else
+                        {
+                            <button type="button" class="@RemoveCtaClass text-nowrap" data-default-action @onclick="RemoveClickedAsync"
+                                    disabled="@(_analyzing || BlockerActionBusy || _plan is null || !CanRemove(AnyRepoStatusUnknown, ShowDiscardCheckbox, _allowDiscard, ShowForceCheckbox, _allowForce, ShowUnlockCheckbox, _allowUnlock))">
+                                @(HasInUseBlockers ? "Retry" : "Remove Feature")
+                            </button>
+                        }
                     }
                 </div>
             </div>
@@ -306,9 +422,52 @@
     private bool _refreshingBlockers;
     private bool _retryingLeftovers;
 
+    /// <summary>How long the check started when the dialog opened is reused by Remove before a fresh one runs.</summary>
+    private static readonly TimeSpan PrefetchMaxAge = TimeSpan.FromSeconds(15);
+
+    /// <summary>Read-only blocker lookup started when the plan is shown; its result is null when the check could not run.</summary>
+    private Task<IReadOnlyList<RemoveFeatureRepositoryBlockers>?>? _prefetchTask;
+    private CancellationTokenSource? _prefetchCts;
+    private DateTime _prefetchStartedUtc;
+
+    /// <summary>True while Remove waits for the blocker check (Cancel and Continue stay available).</summary>
+    private bool _checkingBlockers;
+
+    /// <summary>True while the "Programs are using this Feature" step (Kill / Continue) replaces the plan.</summary>
+    private bool _preflightStep;
+    private IReadOnlyList<RemoveFeatureRepositoryBlockers>? _preflightBlockers;
+    private bool _preflightCheckFailed;
+
+    /// <summary>Process ids ticked for Kill, in whichever blocker list is shown.</summary>
+    private readonly HashSet<int> _selectedPids = [];
+    private bool _killing;
+    private IReadOnlyDictionary<int, string>? _killOutcomes;
+    private IReadOnlyList<RemoveFeatureProcessOutcome>? _lastKill;
+    private string? _killError;
+
     private bool HasInUseBlockers => _report is null && _blockers is { Count: > 0 };
 
-    private bool BlockerActionBusy => _refreshingBlockers || _retryingLeftovers;
+    private bool BlockerActionBusy => _refreshingBlockers || _retryingLeftovers || _killing;
+
+    private bool PreflightCheckFailed =>
+        _preflightCheckFailed || RemoveFeatureBlockerText.AnyLookupFailed(_preflightBlockers);
+
+    private IEnumerable<RemoveFeatureRepositoryBlockers> PreflightRepositories =>
+        (_preflightBlockers ?? []).Where(b => b.PathExists && b.Processes.Count > 0);
+
+    private bool PreflightHasProcesses => RemoveFeatureBlockerText.AnyProcesses(_preflightBlockers);
+
+    /// <summary>The processes in the blocker list currently shown (the step, an "in use" failure, or the leftovers report).</summary>
+    private IReadOnlyList<RemoveFeatureBlockingProcess> ShownProcesses =>
+        _preflightStep ? RemoveFeatureBlockerText.ShownProcesses(_preflightBlockers)
+        : _report is not null ? LeftoverProcesses(_report)
+        : HasInUseBlockers ? RemoveFeatureBlockerText.ShownProcesses(_blockers)
+        : [];
+
+    /// <summary>True when the shown list has a process GrayMoon may end (so Kill is offered).</summary>
+    private bool CanKillShown => ShownProcesses.Any(p => p.CanTerminate);
+
+    private bool HasKillSelection => ShownProcesses.Any(p => p.CanTerminate && _selectedPids.Contains(p.ProcessId));
 
     /// <summary>True when a removed Feature left files behind that a Retry can try to delete again.</summary>
     private bool CanRetryLeftovers => _report?.Any(r => r.ResidueRemaining && r.ResidueTarget is not null) == true;
@@ -842,6 +1001,9 @@
         _deleteLocalBranches = plan.Repositories.Any(HasLocalFeatureBranchToDelete);
         _deleteRemoteBranches = plan.Repositories.Any(HasRemoteFeatureBranchToDelete);
         _error = plan.Success ? null : plan.Error;
+        ClearPreflight();
+        if (plan.Success)
+            _ = StartBlockerPrefetch(); // Background check; Remove awaits it when clicked.
     }
 
     /// <summary>
@@ -861,6 +1023,7 @@
             {
                 _deleteLocalBranches = _plan.Repositories.Any(HasLocalFeatureBranchToDelete);
                 _deleteRemoteBranches = _plan.Repositories.Any(HasRemoteFeatureBranchToDelete);
+                _ = StartBlockerPrefetch(); // Background check; Remove awaits it when clicked.
             }
             if (!_plan.Success && string.IsNullOrEmpty(_error))
                 _error = _plan.Error;
@@ -873,10 +1036,240 @@
         }
     }
 
+    /// <summary>
+    /// Remove Feature / Retry: first checks which programs are using the Feature's folders (reusing the check started when the
+    /// dialog opened when it is recent). Nothing found -> removes straight away; otherwise stops at the "Programs are using
+    /// this Feature" step. Cancel and Continue stay available while the check runs.
+    /// </summary>
+    private async Task RemoveClickedAsync()
+    {
+        if (FeatureContextId is null || _checkingBlockers || BlockerActionBusy)
+            return;
+
+        _checkingBlockers = true;
+        _killError = null;
+        StateHasChanged();
+
+        var check = _prefetchTask is not null && DateTime.UtcNow - _prefetchStartedUtc <= PrefetchMaxAge
+            ? _prefetchTask
+            : StartBlockerPrefetch();
+        var blockers = check is null ? null : await check;
+
+        // Continue or Cancel was chosen while the check ran; that choice wins.
+        if (!_checkingBlockers)
+            return;
+        _checkingBlockers = false;
+
+        if (RemoveFeatureBlockerText.NeedsBlockerStep(blockers))
+        {
+            ShowBlockerStep(blockers);
+            return;
+        }
+
+        await RemoveAsync();
+    }
+
+    /// <summary>Continue: removes the Feature without ending anything (files still in use are left behind and reported).</summary>
+    private async Task ContinueRemoveAsync()
+    {
+        if (_killing)
+            return;
+
+        _checkingBlockers = false;
+        await RemoveAsync();
+    }
+
+    /// <summary>
+    /// Kill and remove (before removal or after an "in use" failure): ends the selected programs, then removes the Feature when
+    /// nothing is left using it; otherwise shows what is still there, with each process's outcome.
+    /// </summary>
+    private async Task KillAndRemoveAsync()
+    {
+        if (FeatureContextId is null || BlockerActionBusy)
+            return;
+
+        var shown = _preflightStep ? _preflightBlockers : _blockers;
+        var selections = RemoveFeatureBlockerText.Selections(RemoveFeatureBlockerText.ShownProcesses(shown), _selectedPids);
+        if (selections.Count == 0)
+            return;
+
+        _killing = true;
+        _killError = null;
+        RemoveFeatureTerminateResult result;
+        try
+        {
+            result = await FeatureOperations.TerminateFeatureBlockersAsync(FeatureContextId.Value, selections);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Ending Remove Feature blockers failed");
+            _killError = ex.Message;
+            return;
+        }
+        finally
+        {
+            _killing = false;
+        }
+
+        RecordKill(result);
+        if (!result.Success)
+            return;
+
+        if (RemoveFeatureBlockerText.NeedsBlockerStep(result.Remaining))
+        {
+            if (_preflightStep)
+                ShowBlockerStep(result.Remaining);
+            else
+            {
+                _blockers = result.Remaining;
+                ResetSelection(RemoveFeatureBlockerText.ShownProcesses(_blockers));
+            }
+
+            return;
+        }
+
+        await RemoveAsync();
+    }
+
+    /// <summary>Kill and retry in the removal report: ends the selected programs, then deletes the leftover files again.</summary>
+    private async Task KillLeftoversAndRetryAsync()
+    {
+        if (_report is null || BlockerActionBusy)
+            return;
+
+        var selections = RemoveFeatureBlockerText.Selections(LeftoverProcesses(_report), _selectedPids);
+        if (selections.Count == 0)
+            return;
+
+        _killing = true;
+        _killError = null;
+        RemoveFeatureTerminateResult result;
+        try
+        {
+            result = await FeatureOperations.TerminateLeftoverBlockersAsync(_report, selections);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Ending Remove Feature leftover blockers failed");
+            _killError = ex.Message;
+            return;
+        }
+        finally
+        {
+            _killing = false;
+        }
+
+        RecordKill(result);
+        if (result.Success)
+            await RetryLeftoversAsync();
+    }
+
+    private void RecordKill(RemoveFeatureTerminateResult result)
+    {
+        _lastKill = result.Outcomes;
+        _killOutcomes = result.Outcomes
+            .GroupBy(o => o.ProcessId)
+            .ToDictionary(g => g.Key, g => g.First().Outcome);
+        _killError = result.Error;
+    }
+
+    private void ShowBlockerStep(IReadOnlyList<RemoveFeatureRepositoryBlockers>? blockers)
+    {
+        _preflightBlockers = blockers ?? [];
+        _preflightCheckFailed = blockers is null;
+        _preflightStep = true;
+        ResetSelection(RemoveFeatureBlockerText.ShownProcesses(_preflightBlockers));
+    }
+
+    private void ClearPreflight()
+    {
+        CancelBlockerPrefetch();
+        _preflightStep = false;
+        _preflightBlockers = null;
+        _preflightCheckFailed = false;
+        _checkingBlockers = false;
+        _killing = false;
+        _killOutcomes = null;
+        _lastKill = null;
+        _killError = null;
+        _selectedPids.Clear();
+    }
+
+    private void ResetSelection(IEnumerable<RemoveFeatureBlockingProcess> processes)
+    {
+        _selectedPids.Clear();
+        _selectedPids.UnionWith(RemoveFeatureBlockerText.DefaultSelection(processes));
+    }
+
+    private void OnProcessSelectionChanged((int ProcessId, bool Selected) change)
+    {
+        if (change.Selected)
+            _selectedPids.Add(change.ProcessId);
+        else
+            _selectedPids.Remove(change.ProcessId);
+    }
+
+    /// <summary>
+    /// Starts the read-only blocker lookup for the open Feature in the background, so Remove usually does not wait for it.
+    /// Returns the lookup (null result = could not check), or null when there is nothing to check.
+    /// </summary>
+    private Task<IReadOnlyList<RemoveFeatureRepositoryBlockers>?>? StartBlockerPrefetch()
+    {
+        CancelBlockerPrefetch();
+        if (FeatureContextId is null)
+            return null;
+
+        var cts = new CancellationTokenSource();
+        _prefetchCts = cts;
+        _prefetchStartedUtc = DateTime.UtcNow;
+        _prefetchTask = LookupFeatureBlockersAsync(FeatureContextId.Value, cts.Token);
+        return _prefetchTask;
+    }
+
+    private void CancelBlockerPrefetch()
+    {
+        var cts = _prefetchCts;
+        _prefetchCts = null;
+        _prefetchTask = null;
+        if (cts is null)
+            return;
+
+        try
+        {
+            cts.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // Already finished.
+        }
+
+        cts.Dispose();
+    }
+
+    private async Task<IReadOnlyList<RemoveFeatureRepositoryBlockers>?> LookupFeatureBlockersAsync(
+        WorkspaceFeatureContextId featureContextId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await FeatureOperations.InspectFeatureBlockersAsync(featureContextId, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Checking which programs use the Feature failed");
+            return null;
+        }
+    }
+
     private async Task RemoveAsync()
     {
         if (FeatureContextId is null)
             return;
+        ClearPreflight();
         _removing = true;
         _error = null;
         _report = null;
@@ -901,6 +1294,7 @@
                 _report = null;
                 _error = result.Error ?? "Remove Feature failed.";
                 _blockers = result.RemoveFeatureBlockers is { Count: > 0 } blockers ? blockers : null;
+                ResetSelection(RemoveFeatureBlockerText.ShownProcesses(_blockers));
                 await RefreshPlanAsync();
                 return;
             }
@@ -919,6 +1313,7 @@
             _analyzedFor = null;
             _error = null;
             _report = report;
+            ResetSelection(LeftoverProcesses(report));
         }
         catch (Exception ex)
         {
@@ -939,17 +1334,32 @@
             return;
 
         _refreshingBlockers = true;
+        _killOutcomes = null;
+        _lastKill = null;
+        _killError = null;
         try
         {
-            if (_report is not null)
+            if (_preflightStep && FeatureContextId is not null)
+            {
+                var blockers = await LookupFeatureBlockersAsync(FeatureContextId.Value, CancellationToken.None);
+                if (!_preflightStep)
+                    return;
+                if (RemoveFeatureBlockerText.NeedsBlockerStep(blockers))
+                    ShowBlockerStep(blockers);
+                else
+                    _preflightStep = false; // Nothing uses the Feature any more: back to the plan and its Remove button.
+            }
+            else if (_report is not null)
             {
                 var targets = LeftoverBlockerTargets(_report);
                 if (targets.Count > 0)
                     _report = ApplyRefreshedBlockers(_report, await FeatureOperations.InspectRemoveFeatureBlockersAsync(targets));
+                ResetSelection(LeftoverProcesses(_report));
             }
             else if (_blockers is { Count: > 0 })
             {
                 _blockers = await FeatureOperations.InspectRemoveFeatureBlockersAsync(_blockers);
+                ResetSelection(RemoveFeatureBlockerText.ShownProcesses(_blockers));
             }
         }
         catch (Exception ex)
@@ -983,8 +1393,19 @@
         }
 
         if (!HasReportWarnings(_report))
+        {
             await Done();
+            return;
+        }
+
+        ResetSelection(LeftoverProcesses(_report));
     }
+
+    /// <summary>The processes holding a removed Feature's leftover folders that a Kill can target (entries with a retry target).</summary>
+    internal static IReadOnlyList<RemoveFeatureBlockingProcess> LeftoverProcesses(IReadOnlyList<RemoveFeatureRepositoryReport>? report) =>
+        RemoveFeatureBlockerText.Ordered(report?
+            .Where(r => r.ResidueRemaining && r.ResidueTarget is not null)
+            .SelectMany(r => r.BlockingProcesses ?? []));
 
     /// <summary>Leftover folders a refresh can inspect: report entries that still have files and a retry target.</summary>
     internal static IReadOnlyList<RemoveFeatureRepositoryBlockers> LeftoverBlockerTargets(IReadOnlyList<RemoveFeatureRepositoryReport> report) =>
@@ -1040,6 +1461,7 @@
 
     private void ResetDialogState()
     {
+        ClearPreflight();
         _plan = null;
         _blockers = null;
         _refreshingBlockers = false;

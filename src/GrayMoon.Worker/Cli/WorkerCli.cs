@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using GrayMoon.Common;
+using GrayMoon.Worker.Models;
 
 namespace GrayMoon.Worker.Cli;
 
@@ -38,6 +39,14 @@ internal static class WorkerCli
         var startCommand = new Command("start", "Start the GrayMoon Worker Windows service.");
         startCommand.SetAction((_, ct) => StartCommandHandler.StartAsync(ct));
         root.Subcommands.Add(startCommand);
+
+        // Internal: the isolated lock scan child process started by the running Worker (LockScanChildProcess).
+        var inspectLocksCommand = new Command(LockScanProtocol.Verb, "Internal: list the processes using the given folders (JSON on stdin).")
+        {
+            Hidden = true,
+        };
+        inspectLocksCommand.SetAction((_, ct) => InspectLocksCommandHandler.RunAsync(ct));
+        root.Subcommands.Add(inspectLocksCommand);
 
         return root;
     }

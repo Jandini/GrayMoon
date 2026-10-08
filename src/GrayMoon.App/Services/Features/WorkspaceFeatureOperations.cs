@@ -1164,6 +1164,25 @@ public sealed class WorkspaceFeatureOperations(
         public string? ServiceName { get; set; }
         public string? Kind { get; set; }
         public string? Reason { get; set; }
+        public DateTime? StartTimeUtc { get; set; }
+        public bool CanTerminate { get; set; }
+        public string? ProtectedReason { get; set; }
+    }
+
+    /// <summary>App-side shape of the Worker's TerminateBlockingProcesses response.</summary>
+    private sealed class TerminateBlockingProcessesWorkerResponse
+    {
+        public bool Success { get; set; }
+        public string? ErrorMessage { get; set; }
+        public List<TerminateProcessOutcomeWire>? Outcomes { get; set; }
+        public List<InspectPathLocksWorkerResult>? Results { get; set; }
+    }
+
+    private sealed class TerminateProcessOutcomeWire
+    {
+        public int ProcessId { get; set; }
+        public string? ProcessName { get; set; }
+        public string? Outcome { get; set; }
     }
 
     /// <summary>App-side shape of the Worker's InspectPathLocks response.</summary>
@@ -1184,11 +1203,25 @@ public sealed class WorkspaceFeatureOperations(
 
     private static IReadOnlyList<RemoveFeatureBlockingProcess> ToBlockingProcesses(IEnumerable<BlockingProcessWire> processes) =>
         processes
-            .Select(p => new RemoveFeatureBlockingProcess(p.ProcessId, p.ProcessName, p.ExecutablePath, p.ServiceName, p.Kind, p.Reason))
+            .Select(p => new RemoveFeatureBlockingProcess(p.ProcessId, p.ProcessName, p.ExecutablePath, p.ServiceName, p.Kind, p.Reason)
+            {
+                StartTimeUtc = p.StartTimeUtc,
+                CanTerminate = p.CanTerminate,
+                ProtectedReason = p.ProtectedReason,
+            })
             .ToList();
 
     private const string BlockerLookupUnavailable =
         "Could not find out which programs are using the folder. Make sure the Worker is running and up to date.";
+
+    /// <summary>
+    /// Upper bound on one blocker lookup round trip. The Worker stops its own scan after a few seconds; this only guards against
+    /// a Worker that never answers, so the dialog can always fall back to "could not check" and Continue.
+    /// </summary>
+    private static readonly TimeSpan BlockerLookupTimeout = TimeSpan.FromSeconds(30);
+
+    /// <summary>Upper bound on a kill round trip (two lookups plus up to a few seconds per process to exit).</summary>
+    private static readonly TimeSpan TerminateBlockersTimeout = TimeSpan.FromSeconds(90);
 
     public async Task<IReadOnlyList<RemoveFeatureRepositoryBlockers>> InspectRemoveFeatureBlockersAsync(
         IReadOnlyList<RemoveFeatureRepositoryBlockers> targets,
@@ -1198,35 +1231,167 @@ public sealed class WorkspaceFeatureOperations(
         if (targets.Count == 0)
             return [];
 
-        var response = await workerBridge.SendCommandAsync(
+        var response = await SendWithTimeoutAsync(
             WorkerHubMethods.InspectPathLocks,
             new { paths = targets.Select(t => t.WorktreePath).ToList() },
+            BlockerLookupTimeout,
             cancellationToken);
-        var parsed = response.Success
+        var parsed = response is { Success: true }
             ? WorkerResponseJson.DeserializeWorkerResponse<InspectPathLocksWorkerResponse>(response.Data)
             : null;
         if (parsed?.Results is null || parsed.Results.Count != targets.Count)
         {
-            logger.LogWarning("InspectPathLocks failed: {Error}", FeatureOperationLog.Redact(response.Error));
-            return targets
-                .Select(t => t with { MayBeIncomplete = true, Diagnostic = BlockerLookupUnavailable })
-                .ToList();
+            logger.LogWarning("InspectPathLocks failed: {Error}", FeatureOperationLog.Redact(response?.Error ?? "timed out"));
+            return LookupFailed(targets);
         }
 
-        return targets
+        return ApplyLockResults(targets, parsed.Results);
+    }
+
+    public async Task<IReadOnlyList<RemoveFeatureRepositoryBlockers>> InspectFeatureBlockersAsync(
+        WorkspaceFeatureContextId featureContextId,
+        CancellationToken cancellationToken = default)
+    {
+        var targets = await LoadFeatureBlockerTargetsAsync(featureContextId, cancellationToken);
+        return await InspectRemoveFeatureBlockersAsync(targets, cancellationToken);
+    }
+
+    public async Task<RemoveFeatureTerminateResult> TerminateFeatureBlockersAsync(
+        WorkspaceFeatureContextId featureContextId,
+        IReadOnlyList<RemoveFeatureProcessSelection> selections,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(selections);
+        var targets = await LoadFeatureBlockerTargetsAsync(featureContextId, cancellationToken);
+        return await TerminateBlockersAsync(targets, selections, cancellationToken);
+    }
+
+    public Task<RemoveFeatureTerminateResult> TerminateLeftoverBlockersAsync(
+        IReadOnlyList<RemoveFeatureRepositoryReport> report,
+        IReadOnlyList<RemoveFeatureProcessSelection> selections,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+        ArgumentNullException.ThrowIfNull(selections);
+        var targets = report
+            .Where(r => r.ResidueRemaining && r.ResidueTarget is not null)
+            .Select(r => new RemoveFeatureRepositoryBlockers(
+                r.WorkspaceRepositoryId, r.RepositoryName, r.ResidueTarget!.WorktreePath, [], false, null))
+            .ToList();
+        return TerminateBlockersAsync(targets, selections, cancellationToken);
+    }
+
+    /// <summary>The worktree folders of a Feature that are not removed yet, from the database (never from the caller).</summary>
+    private async Task<IReadOnlyList<RemoveFeatureRepositoryBlockers>> LoadFeatureBlockerTargetsAsync(
+        WorkspaceFeatureContextId featureContextId,
+        CancellationToken cancellationToken)
+    {
+        var info = await contextResolver.GetRequiredAsync(featureContextId, cancellationToken: cancellationToken);
+        if (info.IsSpecialWorkspace)
+            return [];
+
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var rows = await db.WorkspaceFeatureRepositories
+            .AsNoTracking()
+            .Include(r => r.WorkspaceRepository)!.ThenInclude(l => l!.Repository)
+            .Where(r => r.WorkspaceFeatureContextId == featureContextId.Value
+                && r.State != WorkspaceFeatureRepositoryState.Removed
+                && r.WorktreePath != "")
+            .ToListAsync(cancellationToken);
+
+        return rows
+            .Select(r => new RemoveFeatureRepositoryBlockers(
+                r.WorkspaceRepositoryId,
+                r.WorkspaceRepository?.Repository?.RepositoryName ?? "",
+                r.WorktreePath,
+                [],
+                false,
+                null))
+            .OrderBy(t => t.RepositoryName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private async Task<RemoveFeatureTerminateResult> TerminateBlockersAsync(
+        IReadOnlyList<RemoveFeatureRepositoryBlockers> targets,
+        IReadOnlyList<RemoveFeatureProcessSelection> selections,
+        CancellationToken cancellationToken)
+    {
+        if (targets.Count == 0)
+            return new RemoveFeatureTerminateResult([], [], "There are no Feature folders left to check.");
+        if (selections.Count == 0)
+            return new RemoveFeatureTerminateResult([], targets, "Select at least one program to end.");
+
+        var response = await SendWithTimeoutAsync(
+            WorkerHubMethods.TerminateBlockingProcesses,
+            new
+            {
+                paths = targets.Select(t => t.WorktreePath).ToList(),
+                processes = selections.Select(s => new { processId = s.ProcessId, startTimeUtc = s.StartTimeUtc }).ToList(),
+            },
+            TerminateBlockersTimeout,
+            cancellationToken);
+        var parsed = response is not null
+            ? WorkerResponseJson.DeserializeWorkerResponse<TerminateBlockingProcessesWorkerResponse>(response.Data)
+            : null;
+        if (response is not { Success: true } || parsed is not { Success: true } || parsed.Results is null || parsed.Results.Count != targets.Count)
+        {
+            var error = parsed?.ErrorMessage ?? response?.Error ?? "Ending the programs took too long.";
+            logger.LogWarning("TerminateBlockingProcesses failed: {Error}", FeatureOperationLog.Redact(error));
+            return new RemoveFeatureTerminateResult([], LookupFailed(targets), $"GrayMoon could not end the programs. {error}");
+        }
+
+        var outcomes = (parsed.Outcomes ?? [])
+            .Select(o => new RemoveFeatureProcessOutcome(o.ProcessId, o.ProcessName, o.Outcome ?? RemoveFeatureProcessOutcome.Failed))
+            .ToList();
+        logger.LogInformation(
+            "Ended blocking processes for Remove Feature: {Outcomes}",
+            string.Join(", ", outcomes.Select(o => $"{o.ProcessId}={o.Outcome}")));
+        return new RemoveFeatureTerminateResult(outcomes, ApplyLockResults(targets, parsed.Results), null);
+    }
+
+    /// <summary>Null when <paramref name="timeout"/> passed first (the caller's own cancellation still throws).</summary>
+    private async Task<WorkerCommandResponse?> SendWithTimeoutAsync(
+        string command,
+        object args,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutSource.CancelAfter(timeout);
+        try
+        {
+            return await workerBridge.SendCommandAsync(command, args, timeoutSource.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning("{Command} did not answer within {TimeoutSeconds}s", command, (int)timeout.TotalSeconds);
+            return null;
+        }
+    }
+
+    private static IReadOnlyList<RemoveFeatureRepositoryBlockers> LookupFailed(IReadOnlyList<RemoveFeatureRepositoryBlockers> targets) =>
+        targets
+            // Keeps the last known list: a failed refresh says it may be incomplete rather than claiming nothing is there.
+            .Select(t => t with { MayBeIncomplete = true, Diagnostic = BlockerLookupUnavailable, LookupFailed = true })
+            .ToList();
+
+    private static IReadOnlyList<RemoveFeatureRepositoryBlockers> ApplyLockResults(
+        IReadOnlyList<RemoveFeatureRepositoryBlockers> targets,
+        IReadOnlyList<InspectPathLocksWorkerResult> results) =>
+        targets
             .Select((t, i) =>
             {
-                var r = parsed.Results[i];
+                var r = results[i];
                 return t with
                 {
                     Processes = r.Exists && r.BlockingProcesses is { } blockers ? ToBlockingProcesses(blockers) : [],
                     MayBeIncomplete = r.Exists && r.MayBeIncomplete,
                     Diagnostic = r.Exists ? r.Diagnostic : null,
                     PathExists = r.Exists,
+                    LookupFailed = false,
                 };
             })
             .ToList();
-    }
 
     public async Task<IReadOnlyList<RemoveFeatureRepositoryReport>> RetryRemoveFeatureResidueAsync(
         IReadOnlyList<RemoveFeatureRepositoryReport> report,

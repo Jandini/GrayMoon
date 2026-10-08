@@ -2,7 +2,8 @@ namespace GrayMoon.App.Components.Features;
 
 /// <summary>
 /// Open-in tools for the feature picker. A tool appears on the button row only after it has been
-/// used, most recent first. Terminal and Explorer are remembered the same way as the IDEs.
+/// used, and it stays in that slot. A tool used for the first time is appended.
+/// Terminal and Explorer are remembered the same way as the IDEs.
 /// </summary>
 internal static class FeatureOpenInTools
 {
@@ -77,19 +78,29 @@ internal static class FeatureOpenInTools
         _ => "bi-box",
     };
 
-    /// <summary>Moves a remembered tool to the front.</summary>
+    /// <summary>
+    /// Remembers a tool the first time it is used, after tools already on the row.
+    /// A tool that is already remembered stays where it is.
+    /// </summary>
     public static IReadOnlyList<string> RecordUse(IReadOnlyList<string> recent, string toolId)
     {
         if (!IsRemembered(toolId))
             return recent;
 
-        var next = new List<string> { toolId };
         foreach (var existing in recent)
         {
-            if (IsRemembered(existing) && !string.Equals(existing, toolId, StringComparison.Ordinal))
+            if (string.Equals(existing, toolId, StringComparison.Ordinal))
+                return recent;
+        }
+
+        var next = new List<string>(recent.Count + 1);
+        foreach (var existing in recent)
+        {
+            if (IsRemembered(existing))
                 next.Add(existing);
         }
 
+        next.Add(toolId);
         return next;
     }
 

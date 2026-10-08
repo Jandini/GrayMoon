@@ -1,5 +1,6 @@
 @using GrayMoon.Application
-@* Compact list of the processes keeping a Feature worktree in use (Remove Feature diagnostics). Read-only: no kill action. *@
+@* Compact list of the processes keeping a Feature worktree in use (Remove Feature diagnostics). With Selectable, each process
+   GrayMoon may end gets a checkbox for "Kill"; the others say why they cannot be ended. *@
 
 @if (_ordered.Count == 0)
 {
@@ -11,12 +12,40 @@ else
         @foreach (var process in _ordered)
         {
             var detail = RemoveFeatureBlockerText.Detail(process);
+            var outcome = Outcomes is not null && Outcomes.TryGetValue(process.ProcessId, out var o) ? RemoveFeatureBlockerText.OutcomeText(o) : null;
+            var checkboxId = $"{_idPrefix}-{process.ProcessId}";
             <li class="blocking-process-list__item" @key="process.ProcessId">
-                <div class="fw-semibold text-break">@RemoveFeatureBlockerText.Title(process)</div>
-                <div class="text-muted small">@RemoveFeatureBlockerText.Reason(process)</div>
-                @if (detail is not null)
+                @if (Selectable && process.CanTerminate)
                 {
-                    <div class="text-muted small text-break blocking-process-list__path" title="@detail">@detail</div>
+                    <div class="form-check mb-0">
+                        <input class="form-check-input" type="checkbox" id="@checkboxId"
+                               checked="@(SelectedIds?.Contains(process.ProcessId) == true)"
+                               disabled="@Disabled"
+                               @onchange="e => OnToggleAsync(process.ProcessId, e)" />
+                        <label class="form-check-label fw-semibold text-break" for="@checkboxId">@RemoveFeatureBlockerText.Title(process)</label>
+                        <div class="text-muted small">@RemoveFeatureBlockerText.Reason(process)</div>
+                        @if (detail is not null)
+                        {
+                            <div class="text-muted small text-break blocking-process-list__path" title="@detail">@detail</div>
+                        }
+                        @if (outcome is not null)
+                        {
+                            <div class="small blocking-process-list__outcome">@outcome</div>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <div class="fw-semibold text-break">@RemoveFeatureBlockerText.Title(process)</div>
+                    <div class="text-muted small">@RemoveFeatureBlockerText.Reason(process)</div>
+                    @if (detail is not null)
+                    {
+                        <div class="text-muted small text-break blocking-process-list__path" title="@detail">@detail</div>
+                    }
+                    @if (Selectable)
+                    {
+                        <div class="small blocking-process-list__outcome">@(outcome ?? RemoveFeatureBlockerText.ProtectedText(process.ProtectedReason))</div>
+                    }
                 }
             </li>
         }
@@ -34,7 +63,24 @@ else
     [Parameter] public bool MayBeIncomplete { get; set; }
     [Parameter] public string? Diagnostic { get; set; }
 
+    /// <summary>Shows a checkbox for each process GrayMoon may end, and the reason for each one it may not.</summary>
+    [Parameter] public bool Selectable { get; set; }
+
+    [Parameter] public IReadOnlySet<int>? SelectedIds { get; set; }
+
+    [Parameter] public EventCallback<(int ProcessId, bool Selected)> SelectionChanged { get; set; }
+
+    /// <summary>Disables the checkboxes (while a Kill or a check is running).</summary>
+    [Parameter] public bool Disabled { get; set; }
+
+    /// <summary>Last Kill outcome per process id (<see cref="RemoveFeatureProcessOutcome"/> values).</summary>
+    [Parameter] public IReadOnlyDictionary<int, string>? Outcomes { get; set; }
+
+    private readonly string _idPrefix = $"blocking-process-{Guid.NewGuid():N}";
     private IReadOnlyList<RemoveFeatureBlockingProcess> _ordered = [];
 
     protected override void OnParametersSet() => _ordered = RemoveFeatureBlockerText.Ordered(Processes);
+
+    private Task OnToggleAsync(int processId, ChangeEventArgs e) =>
+        SelectionChanged.InvokeAsync((processId, e.Value is true));
 }
