@@ -17,16 +17,19 @@ public sealed class FeatureOpenInToolsTests
     }
 
     [Fact]
-    public void Record_use_puts_the_latest_tool_first_including_terminal_and_explorer()
+    public void Record_use_appends_a_new_tool_and_leaves_placed_tools_where_they_are()
     {
         var recent = FeatureOpenInTools.RecordUse([], FeatureOpenInTools.Cursor);
         recent = FeatureOpenInTools.RecordUse(recent, FeatureOpenInTools.Terminal);
         recent = FeatureOpenInTools.RecordUse(recent, FeatureOpenInTools.Explorer);
-        recent = FeatureOpenInTools.RecordUse(recent, FeatureOpenInTools.Cursor);
+        var again = FeatureOpenInTools.RecordUse(recent, FeatureOpenInTools.Cursor);
+        var ignored = FeatureOpenInTools.RecordUse(again, "not-a-tool");
 
         Assert.Equal(
-            [FeatureOpenInTools.Cursor, FeatureOpenInTools.Explorer, FeatureOpenInTools.Terminal],
+            [FeatureOpenInTools.Cursor, FeatureOpenInTools.Terminal, FeatureOpenInTools.Explorer],
             recent);
+        Assert.Same(recent, again);
+        Assert.Same(again, ignored);
     }
 
     [Fact]
