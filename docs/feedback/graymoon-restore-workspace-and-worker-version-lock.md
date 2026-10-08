@@ -1086,7 +1086,7 @@ Restore (Units A, B, C):
 
 Docs: `docs/architecture/05-user-capability-reference.md` (Workspace repository rules, restore, version lock), project `CLAUDE.md` (version lock rule), superseded notes on the Workspace-repository design documents and `docs/workspace-repositories-page-load.md`.
 
-Not changed: `GrayMoon.Desktop/README.md` still describes the `GetCapabilities` banner in its release notes; that is a separate private repository.
+`GrayMoon.Desktop/README.md` (separate private repository): release notes added for this item and the dialog UX follow-up; the older `GetCapabilities` bullet is marked superseded.
 
 ## 20.4 Tests
 
