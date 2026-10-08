@@ -122,6 +122,7 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<IGitIgnoreService, LibGit2SharpGitIgnoreService>();
         builder.Services.AddSingleton<ICsProjFileParser, CsProjFileParser>();
         builder.Services.AddSingleton<ICsProjFileService, CsProjFileService>();
+        builder.Services.AddSingleton<GitVersionResultCache>();
         builder.Services.AddSingleton<GitVersionRepositoryVersionProvider>();
         builder.Services.AddSingleton<NoRepositoryVersionProvider>();
         builder.Services.AddSingleton<IRepositoryVersionProviderFactory, RepositoryVersionProviderFactory>();
@@ -137,6 +138,7 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<GitChangesSnapshotCache>();
         builder.Services.AddSingleton<GitChangesRepositoryRegistry>();
         builder.Services.AddSingleton<GitStatusRefreshCoordinator>();
+        builder.Services.AddSingleton<IGitChangesRefreshSuppressor>(sp => sp.GetRequiredService<GitStatusRefreshCoordinator>());
         builder.Services.AddSingleton<GitRepositoryWatcherManager>();
         builder.Services.AddHostedService<GitChangesSnapshotPublisher>();
 

@@ -4,12 +4,21 @@ using GrayMoon.Worker.Abstractions;
 namespace GrayMoon.Worker.Services;
 
 /// <summary>GitVersion-backed version provider. The only thing in the worker that launches GitVersion.</summary>
-public sealed class GitVersionRepositoryVersionProvider(IGitService git) : IRepositoryVersionProvider
+/// <remarks>
+/// With a <paramref name="cache"/> a request whose version inputs are unchanged since GitVersion last succeeded
+/// is answered without starting GitVersion. Without one (as in most tests) every request runs it.
+/// </remarks>
+public sealed class GitVersionRepositoryVersionProvider(IGitService git, GitVersionResultCache? cache = null) : IRepositoryVersionProvider
 {
-    public async Task<RepositoryVersionResult> GetVersionAsync(
+    public Task<RepositoryVersionResult> GetVersionAsync(
         string repoPath,
         RepositoryVersionOptions options,
         CancellationToken ct = default)
+        => cache is null
+            ? RunAsync(repoPath, options, ct)
+            : cache.GetOrRunAsync(repoPath, options, token => RunAsync(repoPath, options, token), ct);
+
+    private async Task<RepositoryVersionResult> RunAsync(string repoPath, RepositoryVersionOptions options, CancellationToken ct)
     {
         var (result, error) = await git.GetVersionAsync(repoPath, options.NonNormalize, options.CommitSha, ct);
         return new RepositoryVersionResult(Probed: true, result, error);
