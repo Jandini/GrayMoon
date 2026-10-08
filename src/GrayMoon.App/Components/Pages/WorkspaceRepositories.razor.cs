@@ -48,9 +48,6 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     private string? _selectedFeatureName;
     /// <summary>Last <see cref="ContextQuery"/> value applied to grid state - detects URL context switches.</summary>
     private int? _boundContextQuery;
-    private bool _createFeatureModalVisible;
-    private string? _createFeatureInitialName;
-    private string? _createFeatureWorkspaceBranch;
     private bool _removeFeatureModalVisible;
     private WorkspaceFeatureContextId? _removeFeatureContextId;
     private RemoveFeaturePlan? _removeFeaturePlan;
@@ -205,29 +202,6 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         await OnSelectedContextChangedAsync(desired);
     }
 
-    private async Task OnRequestCreateFeatureAsync(string name)
-    {
-        _createFeatureInitialName = name;
-        _createFeatureWorkspaceBranch = await ResolveCurrentWorkspaceBranchNameAsync();
-        _createFeatureModalVisible = true;
-    }
-
-    /// <summary>Unified branch across special Workspace repos (Features base on Current Workspace, not the viewed Feature).</summary>
-    private async Task<string?> ResolveCurrentWorkspaceBranchNameAsync()
-    {
-        try
-        {
-            var snapshots = await LinkListQueryService.GetAllSnapshotsAsync(WorkspaceId, null, isSpecialWorkspace: true);
-            var links = snapshots.Select(WorkspaceRepositoryLinkListMapper.ToLink).ToList();
-            return GetUnifiedWorkspaceCurrentBranch(links);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "Could not resolve Current Workspace branch for Create Feature modal");
-            return null;
-        }
-    }
-
     private Task OnRemoveFeatureAsync()
     {
         if (_isFeatureContext && _selectedContextId is WorkspaceFeatureContextId ctx)
@@ -315,25 +289,6 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         _removeFeaturePlan = null;
         _removeFeatureContextId = null;
         return Task.CompletedTask;
-    }
-
-    private async Task OnFeatureCreatedAsync(CreateFeatureResult result)
-    {
-        _createFeatureModalVisible = false;
-        if (result.ContextId is not WorkspaceFeatureContextId created)
-            return;
-
-        await OnSelectedContextChangedAsync(created);
-        var path = new Uri(NavigationManager.Uri).GetLeftPart(UriPartial.Path);
-        NavigationManager.NavigateTo($"{path}?context={created.Value}", replace: true);
-
-        if (!result.Success && string.Equals(result.Condition, "NeedsRepair", StringComparison.Ordinal))
-        {
-            OpenFeatureStatusPanel(created);
-            return;
-        }
-
-        ToastService.Show("Feature created.");
     }
 
     private void OpenFeatureStatusPanel(WorkspaceFeatureContextId? contextId = null)

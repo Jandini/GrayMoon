@@ -1596,7 +1596,7 @@ table.resizable-columns th:hover .resize-handle::after {
 }
 
 /* Worker badge activity frame. The comet is a layer behind the badge, sticking
-   out 2px, so the pill covers the middle and only a snake remains around the
+   out 1px, so the pill covers the middle and only a snake remains around the
    edge. Absolute positioning leaves the badge box the same size. */
 @property --gm-worker-spin {
     syntax: '<angle>';
@@ -1615,8 +1615,8 @@ table.resizable-columns th:hover .resize-handle::after {
     content: "";
     position: absolute;
     z-index: -1;
-    inset: -2px;
-    border-radius: calc(0.25rem + 2px);
+    inset: -1px;
+    border-radius: calc(0.25rem + 1px);
     background: conic-gradient(
         from var(--gm-worker-spin),
         transparent 0deg,

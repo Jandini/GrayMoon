@@ -2,6 +2,7 @@ using System.Text.Json;
 using GrayMoon.Abstractions.Worker;
 using GrayMoon.Abstractions.Workspaces;
 using GrayMoon.Application.Features;
+using GrayMoon.App.Components.Features;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services.WorkspaceManifest;
@@ -70,7 +71,8 @@ public sealed class WorkspaceManifestServiceTests
         var result = await service.WriteAuthoritativeManifestAsync(workspace.WorkspaceId);
 
         Assert.True(result.Success, result.Error);
-        var sent = Assert.Single(fixture.Bridge.Sent);
+        Assert.Contains(fixture.Bridge.Sent, sent => sent.Command == "GetFileContents");
+        var sent = Assert.Single(fixture.Bridge.Sent, sent => sent.Command == "WriteRepositoryFile");
         Assert.Equal("WriteRepositoryFile", sent.Command);
         var args = ManifestTestFixture.ToJson(sent.Args);
         Assert.Equal(".graymoon.json", args.GetProperty("filePath").GetString());
@@ -181,6 +183,40 @@ public sealed class WorkspaceManifestServiceTests
         var drift = await service.DetectDriftAsync(workspace.WorkspaceId);
 
         Assert.False(drift.HasDrift);
+    }
+
+    [Fact]
+    public async Task Detect_drift_ignores_recent_open_in_tools()
+    {
+        await using var fixture = await ManifestTestFixture.CreateAsync();
+        var workspace = await fixture.SeedWorkspaceWithRootRepositoryAsync();
+        var service = fixture.CreateService();
+        var definition = service.Serialize(await service.BuildFromDatabaseAsync(workspace.WorkspaceId));
+        fixture.Bridge.RespondWithFile(WorkspaceManifestRecentTools.Apply(definition, [FeatureOpenInTools.VsCode])!);
+
+        var drift = await service.DetectDriftAsync(workspace.WorkspaceId);
+
+        Assert.False(drift.HasDrift);
+        Assert.Null(drift.ParseError);
+    }
+
+    [Fact]
+    public async Task Write_manifest_keeps_recent_open_in_tools()
+    {
+        await using var fixture = await ManifestTestFixture.CreateAsync();
+        var workspace = await fixture.SeedWorkspaceWithRootRepositoryAsync();
+        var service = fixture.CreateService();
+        var definition = service.Serialize(await service.BuildFromDatabaseAsync(workspace.WorkspaceId));
+        fixture.Bridge.RespondWithFile(WorkspaceManifestRecentTools.Apply(definition, [FeatureOpenInTools.Cursor, FeatureOpenInTools.ClaudeCli])!);
+
+        var result = await service.WriteAuthoritativeManifestAsync(workspace.WorkspaceId);
+
+        Assert.True(result.Success, result.Error);
+        var write = Assert.Single(fixture.Bridge.Sent, sent => sent.Command == "WriteRepositoryFile");
+        var content = ManifestTestFixture.ToJson(write.Args).GetProperty("content").GetString();
+        Assert.Equal([FeatureOpenInTools.Cursor, FeatureOpenInTools.ClaudeCli], WorkspaceManifestRecentTools.Read(content));
+        Assert.True(WorkspaceManifestSerializer.TryParse(content!, out var parsed, out var error), error);
+        Assert.Equal(definition, service.Serialize(parsed!));
     }
 }
 

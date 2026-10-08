@@ -1,4 +1,5 @@
 ﻿@using System.Text.RegularExpressions
+@using GrayMoon.App.Services.Ui
 @using GrayMoon.Application
 @using GrayMoon.Application.Features
 @using Microsoft.AspNetCore.WebUtilities
@@ -6,6 +7,7 @@
 @inject IWorkspaceSelectedFeatureContextService SelectedContextService
 @inject IWorkspaceCatalogOperations WorkspaceCatalog
 @inject IWorkspaceNativeLaunchService NativeLaunch
+@inject WorkspaceOpenInRecentTools OpenInRecentTools
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
 
@@ -45,6 +47,29 @@
                 @onclick:stopPropagation>
             <i class="bi bi-plus-lg" aria-hidden="true"></i>
         </button>
+    }
+    @if (_desktopAvailable)
+    {
+        @foreach (var toolId in VisibleOpenInTools)
+        {
+            var id = toolId;
+            <button type="button"
+                    class="workspace-feature-selector__add"
+                    disabled="@Disabled"
+                    title="@FeatureOpenInTools.Title(id)"
+                    aria-label="@FeatureOpenInTools.Title(id)"
+                    @onclick="() => LaunchAsync(FeatureOpenInTools.LaunchMethod(id))"
+                    @onclick:stopPropagation>
+                @if (FeatureOpenInTools.IconImageSrc(id) is string iconSrc)
+                {
+                    <img src="@iconSrc" alt="" class="workspace-feature-selector__tool-icon" aria-hidden="true" />
+                }
+                else
+                {
+                    <i class="bi @FeatureOpenInTools.IconClass(id) workspace-feature-selector__launch-icon workspace-feature-selector__launch-icon--glyph" aria-hidden="true"></i>
+                }
+            </button>
+        }
     }
     @if (_open)
     {
@@ -180,7 +205,7 @@
                         {
                             <li><hr class="dropdown-divider branch-menu-divider" /></li>
                         }
-                        @LaunchToolItem("openInTerminal", "Terminal", iconClass: "bi-terminal-fill")
+                        @LaunchToolItem("openInTerminal", "Terminal", iconClass: "bi-terminal")
                         @LaunchToolItem("showInExplorer", "Explorer", iconClass: "bi-folder2-open")
                     </ul>
                 </li>
@@ -209,12 +234,23 @@
     private bool _open;
     private bool _loaded;
     private bool _desktopAvailable;
+    private int _recentOpenInWorkspaceId;
+    private List<string> _recentOpenInTools = [];
     private bool _switchWorkspacesLoaded;
     private int? _lastKnownSelectedValue;
     private ToolAvailabilityDto? _toolAvailability;
 
     private bool HasAnyIdeAvailable =>
         _toolAvailability is { } t && (t.Cursor || t.ClaudeCli || t.VsCode || t.VisualStudio);
+
+    /// <summary>Desktop only. Tools appear after they are used, most recent first, on every page that hosts this picker.</summary>
+    private IReadOnlyList<string> VisibleOpenInTools =>
+        FeatureOpenInTools.VisibleButtons(
+            _recentOpenInTools,
+            _toolAvailability?.Cursor == true,
+            _toolAvailability?.ClaudeCli == true,
+            _toolAvailability?.VsCode == true,
+            _toolAvailability?.VisualStudio == true);
 
     private RenderFragment SwitchWorkspaceRow(WorkspaceCatalogItem ws) => __builder =>
     {
@@ -381,6 +417,9 @@
             _loaded = true;
             _lastKnownSelectedValue = currentSelectedValue;
         }
+
+        if (_desktopAvailable && _recentOpenInWorkspaceId != WorkspaceId)
+            await LoadRecentOpenInToolsAsync();
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -393,6 +432,7 @@
             if (_desktopAvailable)
             {
                 await RefreshToolAvailabilityAsync();
+                await LoadRecentOpenInToolsAsync();
                 await InvokeAsync(StateHasChanged);
             }
         }
@@ -606,15 +646,71 @@
         }
     }
 
+    private async Task LoadRecentOpenInToolsAsync()
+    {
+        if (!_desktopAvailable || WorkspaceId <= 0)
+            return;
+
+        try
+        {
+            _recentOpenInTools = (await OpenInRecentTools.GetAsync(WorkspaceId)).ToList();
+        }
+        catch
+        {
+            _recentOpenInTools = [];
+        }
+
+        _recentOpenInWorkspaceId = WorkspaceId;
+    }
+
+    private async Task RememberOpenInToolAsync(string method)
+    {
+        var toolId = FeatureOpenInTools.FromLaunchMethod(method);
+        if (toolId is null || !FeatureOpenInTools.IsRemembered(toolId) || WorkspaceId <= 0)
+            return;
+
+        try
+        {
+            _recentOpenInTools = (await OpenInRecentTools.RecordAsync(WorkspaceId, toolId)).ToList();
+            _recentOpenInWorkspaceId = WorkspaceId;
+        }
+        catch
+        {
+            // The button list is optional; opening the tool still proceeds.
+        }
+    }
+
+    private async Task<WorkspaceFeatureContextId?> ResolveLaunchContextAsync()
+    {
+        if (SelectedContextId is not null)
+            return SelectedContextId;
+
+        if (WorkspaceId <= 0)
+            return null;
+
+        try
+        {
+            return await SelectedContextService.GetSelectedAsync(WorkspaceId)
+                ?? await ContextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(WorkspaceId);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private async Task LaunchAsync(string method, string? repositoryPath = null)
     {
-        if (SelectedContextId is null)
-            return;
+        await RememberOpenInToolAsync(method);
 
         string? path = repositoryPath;
         if (string.IsNullOrWhiteSpace(path))
         {
-            var paths = await NativeLaunch.ResolveContextLaunchPathsAsync(SelectedContextId.Value);
+            var contextId = await ResolveLaunchContextAsync();
+            if (contextId is null)
+                return;
+
+            var paths = await NativeLaunch.ResolveContextLaunchPathsAsync(contextId.Value);
             if (paths is null || string.IsNullOrWhiteSpace(paths.ContextRoot))
                 return;
             path = paths.ContextRoot;
