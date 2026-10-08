@@ -15,7 +15,7 @@ Prompt: `docs/git-critical/graymoon-sync-critical-path-optimization-prompt.md`.
 | Unit | Status |
 |---|---|
 | 1 Sync / Git Changes coordination | Implemented, tests green, awaiting VDI benchmark |
-| 2 Hook location cache | Planned |
+| 2 Hook location cache | Implemented, tests green, awaiting VDI benchmark |
 | 3 GitVersion fingerprint cache | Planned |
 | 4 Fetch policy review | Planned |
 
@@ -71,6 +71,52 @@ Pending (39 repositories, 16 workers, restart, ignore first Sync, at least 3 qui
 | Sync wall time (workspace) | | |
 | Repository total median / P90 | | |
 | Max simultaneous git.exe | | |
+
+## Unit 2 - Hook location cache
+
+### Problem
+Every Sync ran `git rev-parse --git-common-dir --git-path hooks` (plus `git config --get core.hooksPath` when the
+hooks path pointed outside the common git directory) from `GitService.ResolveGitHooksLocationAsync`, only to learn
+an answer that almost never changes. About 3-4 s per repository on the VDI.
+
+### Design
+- `GitHooksLocationCache` (Worker/Services) sits between `GitService.WriteSyncHooksCoreAsync` and the native
+  resolution. `SyncRepositoryCommand` is untouched.
+- Native git stays authoritative: the cache only replays an answer git already gave, for the same state. The first
+  Sync of a repository after a worker start still asks git once.
+- Fingerprint (SHA-256), computed from the file system only: repository path, git dir and common dir (`.git` folder,
+  or the `gitdir:` target plus `commondir` for linked worktrees), existence/size/write time/content hash of the local
+  `config`, `config.worktree`, global (`~/.gitconfig`, XDG) and system gitconfig files, and the environment
+  (`HOME`, `USERPROFILE`, `XDG_CONFIG_HOME`, `GIT_WORK_TREE`, `PATH`, every `GIT_CONFIG*`).
+- Always native (never cached): `GIT_DIR` or `GIT_COMMON_DIR` set, a layout `GitDirectoryLocator` does not recognise,
+  an unreadable config file, or any stamped config containing `[include`/`[includeIf`.
+- Failed resolutions are not cached. The fingerprint is re-checked after the native call, so an answer is only kept
+  for the state it was asked in.
+- Hooks are still compared with what is on disk and rewritten only when different (unchanged behaviour, no process).
+- Debug line per install: `Hooks location for {RepoPath}: Cache | NativeCached | NativeUncacheable`.
+
+### Tests
+`GitHooksLocationCacheTests` (10): zero processes on unchanged repos and hook files not rewritten; `core.hooksPath`
+changed to an inside folder; absolute outside path remembered (2 processes once, then 0) and never written to,
+and removal of the setting; relative path; linked worktree (common hooks folder, own cache entry); worktree removed
+and re-added; include directive always native; repository recreated at the same path; failed resolution not cached;
+concurrent installs. The existing process-count test (1 / 1 / 2 on first call) still passes.
+Full Worker suite: 541 passed, 1 skipped (pre-existing), 0 failed.
+
+### Known limitations
+- System gitconfig is found by locating `git` on `PATH` (`<root>/etc/gitconfig`, `<root>/mingw64/etc/gitconfig`,
+  `/etc/gitconfig`); an unusual install is not stamped. Editing the system config to change `core.hooksPath` without
+  restarting the worker could therefore go unnoticed. Env-var changes are not covered by a test (process-wide state).
+- In memory only: one git call per repository after each worker restart.
+
+### Enterprise benchmark
+Pending.
+
+| Metric | Before | After |
+|---|---|---|
+| hook-path git.exe per unchanged Sync | 1 (2 with outside hooksPath) | 0 (expected) |
+| Repository total median / P90 | | |
+| Sync wall time (workspace) | | |
 
 ## Accepted / rejected ideas
 - Rejected: `Task.Delay` or time-window ignore of watcher events, global `IsSyncing` flag (brittle, not per repository).

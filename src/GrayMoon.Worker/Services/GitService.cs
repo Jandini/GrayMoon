@@ -1068,7 +1068,8 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
     private const string GrayMoonHookMarker = "# Created by GrayMoon.Agent";
     private const string ReplacedHookSuffix = ".replaced-by-graymoon";
 
-    private sealed record GitHooksLocation(string? Directory, string? OutsideGitDirHooksPath);
+    // Hooks locations git has already resolved, replayed while the repository layout and config are unchanged.
+    private readonly GitHooksLocationCache _hooksLocations = new();
 
     public async Task WriteSyncHooksAsync(string repoPath, int workspaceId, int repositoryId, CancellationToken ct)
     {
@@ -1086,7 +1087,8 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
 
     private async Task WriteSyncHooksCoreAsync(string repoPath, int workspaceId, int repositoryId, CancellationToken ct)
     {
-        var location = await ResolveGitHooksLocationAsync(repoPath, ct);
+        var (location, locationSource) = await _hooksLocations.ResolveAsync(repoPath, () => ResolveGitHooksLocationAsync(repoPath, ct));
+        logger.LogDebug("Hooks location for {RepoPath}: {Source}", repoPath, locationSource);
         if (location.Directory is null)
         {
             logger.LogWarning(
