@@ -18,7 +18,7 @@ public sealed class GitWorktreeService(
     GitProcessRunner runner,
     IGitRepositoryReader reader,
     ILogger<GitWorktreeService> logger,
-    IRepositoryPathReleaser? pathReleaser = null) : IGitWorktreeService
+    IRepositoryAccess access) : IGitWorktreeService
 {
     private static readonly char[] PathSeparators = [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar];
     private static readonly int[] ResidueDeleteRetryDelaysMs = [200, 400, 800, 1600, 3200];
@@ -240,12 +240,21 @@ public sealed class GitWorktreeService(
             return (false, false, "InvalidWorktreePath", ex.Message, WorktreeResidueResult.None);
         }
 
-        // Let go of every handle the Worker holds on the folders about to be deleted (file system watchers, and the
-        // working directory of git status scans) and keep them released until the removal, including residue cleanup, ends.
-        using var releaseScope = pathReleaser is null
-            ? null
-            : await pathReleaser.ReleaseAsync(
-                string.IsNullOrWhiteSpace(featureRootPath) ? [canonicalWorktreePath] : [canonicalWorktreePath, featureRootPath], ct);
+        // Removal always wins over the Worker's own handles: watchers on this folder are released, git processes and other
+        // holders inside it are cancelled (and killed if they ignore that), and nothing new may start there until this
+        // method ends. Programs the Worker did not start are never touched; they are the residue cleanup's problem.
+        IRepositoryExclusiveScope removalScope;
+        try
+        {
+            removalScope = await access.AcquireExclusiveAsync([canonicalWorktreePath], ct);
+        }
+        catch (RepositoryAccessException ex)
+        {
+            logger.LogError(ex, "Could not release the Worker's own handles on {WorktreePath}", canonicalWorktreePath);
+            return (false, false, "ReleaseFailed", ex.Message, WorktreeResidueResult.None);
+        }
+
+        using var releaseScope = removalScope;
 
         var (listOk, worktrees, listCode, listError) = await ListWorktreesAsync(mainRepositoryPath, ct);
         if (!listOk)

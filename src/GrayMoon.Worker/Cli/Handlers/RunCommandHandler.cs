@@ -110,7 +110,10 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<DiffJobQueue>();
         builder.Services.AddSingleton<IDiffJobQueue>(sp => sp.GetRequiredService<DiffJobQueue>());
         builder.Services.AddSingleton<CommandJobCancellationRegistry>();
-        builder.Services.AddSingleton<ICommandLineService, CommandLineService>();
+        builder.Services.AddSingleton<IRepositoryAccess, RepositoryAccess>();
+        builder.Services.AddSingleton<CommandLineService>();
+        builder.Services.AddSingleton<ICommandLineService>(sp => new RepositoryAccessCommandLineService(
+            sp.GetRequiredService<CommandLineService>(), sp.GetRequiredService<IRepositoryAccess>()));
         builder.Services.AddSingleton<GitProcessRunner>();
         builder.Services.AddSingleton<IGitRepositoryReader, GitCliRepositoryReader>();
         builder.Services.AddSingleton<ILocalGitSnapshotReader, LibGit2SharpLocalGitSnapshotReader>();
@@ -141,9 +144,7 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<GitChangesRepositoryRegistry>();
         builder.Services.AddSingleton<GitStatusRefreshCoordinator>();
         builder.Services.AddSingleton<IGitChangesRefreshSuppressor>(sp => sp.GetRequiredService<GitStatusRefreshCoordinator>());
-        builder.Services.AddSingleton<RepositoryPathGate>();
         builder.Services.AddSingleton<GitRepositoryWatcherManager>();
-        builder.Services.AddSingleton<IRepositoryPathReleaser, RepositoryPathReleaser>();
         builder.Services.AddHostedService<GitChangesSnapshotPublisher>();
 
         builder.Services.AddSingleton<ICommandHandler<SyncRepositoryRequest, SyncRepositoryResponse>, SyncRepositoryCommand>();

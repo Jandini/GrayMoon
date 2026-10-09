@@ -41,8 +41,13 @@ internal sealed record GitVersionInputFingerprint(
     /// name only, which do not move with them (see GitVersionResultCacheTests), unless the config asks for
     /// <c>UncommittedChanges</c> in its format, which is refused above.
     /// </summary>
-    public static GitVersionInputFingerprint? TryCompute(string repoPath, RepositoryVersionOptions options)
+    public static GitVersionInputFingerprint? TryCompute(string repoPath, RepositoryVersionOptions options, IRepositoryAccess? access = null)
     {
+        // Opening the repository holds its files; a folder being removed is simply not fingerprinted.
+        using var lease = access?.TryAcquireShared(repoPath, RepositoryAccessKind.ReadOnly);
+        if (access is not null && lease is null)
+            return null;
+
         try
         {
             using var repository = new Repository(repoPath);

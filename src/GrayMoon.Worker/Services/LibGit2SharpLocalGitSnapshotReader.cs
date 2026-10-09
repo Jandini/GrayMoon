@@ -13,7 +13,7 @@ namespace GrayMoon.Worker.Services;
 /// (<c>heads/dup</c> when a tag is also called <c>dup</c>), and comparison refs are resolved by their full name
 /// rather than by git's revision lookup, so a tag never stands in for a branch of the same name.
 /// </summary>
-public sealed class LibGit2SharpLocalGitSnapshotReader : ILocalGitSnapshotReader
+public sealed class LibGit2SharpLocalGitSnapshotReader(IRepositoryAccess? access = null) : ILocalGitSnapshotReader
 {
     private const string HeadsPrefix = "refs/heads/";
     private const string TagsPrefix = "refs/tags/";
@@ -25,13 +25,21 @@ public sealed class LibGit2SharpLocalGitSnapshotReader : ILocalGitSnapshotReader
             throw new ArgumentException("Repository path is required.", nameof(repositoryPath));
         ArgumentNullException.ThrowIfNull(request);
 
+        using var lease = access is null
+            ? null
+            : access.TryAcquireShared(repositoryPath, RepositoryAccessKind.ReadOnly) ?? throw new PathUnderRemovalException(repositoryPath);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, lease?.Yield ?? CancellationToken.None);
         try
         {
             using var repository = new Repository(repositoryPath);
             if (repository.Info.IsBare)
                 throw new LocalGitReadException(repositoryPath, "Repository has no work tree.");
 
-            return ReadCore(repository, request, ct);
+            return ReadCore(repository, request, linked.Token);
+        }
+        catch (OperationCanceledException) when (lease is { Yield.IsCancellationRequested: true } && !ct.IsCancellationRequested)
+        {
+            throw new PathUnderRemovalException(repositoryPath);
         }
         catch (Exception ex) when (ex is LibGit2SharpException or DllNotFoundException or TypeInitializationException or IOException or UnauthorizedAccessException)
         {

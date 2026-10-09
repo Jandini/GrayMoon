@@ -1381,6 +1381,13 @@ public sealed class WorkspaceFeatureOperations(
                 cancellationToken);
 
             var status = WorkerResponseJson.DeserializeWorkerResponse<GitChangesStatusResult>(response.Data);
+            if (status is { Success: false, ErrorCode: "PathUnderRemoval" })
+            {
+                // Expected: the Worker is removing this folder and refuses to start work in it. Not a failure.
+                logger.LogDebug("GetGitChangeStatus skipped for Feature worktree {Path}: it is being removed", row.WorktreePath);
+                return FeatureWorktreeLiveStatus.Unavailable;
+            }
+
             if (status is null || !status.Success || status.Snapshot is null)
             {
                 logger.LogWarning(

@@ -128,7 +128,8 @@ public sealed class GitRepositoryWatcherObservationTests
                 fake, new GitChangesSnapshotCache(), Options.Create(options), NullLogger<GitStatusRefreshCoordinator>.Instance);
             using var manager = new GitRepositoryWatcherManager(
                 coordinator, new GitChangesSnapshotCache(), new GitChangesRepositoryRegistry(),
-                Options.Create(options), NullLoggerFactory.Instance, NullLogger<GitRepositoryWatcherManager>.Instance);
+                Options.Create(options), NullLoggerFactory.Instance, NullLogger<GitRepositoryWatcherManager>.Instance,
+                new GrayMoon.Worker.Services.RepositoryAccess(NullLogger<GrayMoon.Worker.Services.RepositoryAccess>.Instance));
 
             using var lease = manager.Acquire(tempDir);
 
@@ -164,7 +165,8 @@ public sealed class GitRepositoryWatcherObservationTests
                 fake, new GitChangesSnapshotCache(), Options.Create(options), NullLogger<GitStatusRefreshCoordinator>.Instance);
             var manager = new GitRepositoryWatcherManager(
                 coordinator, new GitChangesSnapshotCache(), new GitChangesRepositoryRegistry(),
-                Options.Create(options), NullLoggerFactory.Instance, NullLogger<GitRepositoryWatcherManager>.Instance);
+                Options.Create(options), NullLoggerFactory.Instance, NullLogger<GitRepositoryWatcherManager>.Instance,
+                new GrayMoon.Worker.Services.RepositoryAccess(NullLogger<GrayMoon.Worker.Services.RepositoryAccess>.Instance));
 
             using var lease = manager.Acquire(tempDir);
             Assert.True(manager.TryGetCoverage(tempDir, out var coverage));
@@ -193,7 +195,8 @@ public sealed class GitRepositoryWatcherObservationTests
                 fake, new GitChangesSnapshotCache(), Options.Create(options), NullLogger<GitStatusRefreshCoordinator>.Instance);
             using var manager = new GitRepositoryWatcherManager(
                 coordinator, new GitChangesSnapshotCache(), new GitChangesRepositoryRegistry(),
-                Options.Create(options), NullLoggerFactory.Instance, NullLogger<GitRepositoryWatcherManager>.Instance);
+                Options.Create(options), NullLoggerFactory.Instance, NullLogger<GitRepositoryWatcherManager>.Instance,
+                new GrayMoon.Worker.Services.RepositoryAccess(NullLogger<GrayMoon.Worker.Services.RepositoryAccess>.Instance));
 
             using var lease = manager.Acquire(tempDir);
 

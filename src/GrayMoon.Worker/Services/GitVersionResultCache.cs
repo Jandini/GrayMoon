@@ -13,7 +13,7 @@ namespace GrayMoon.Worker.Services;
 /// cache. Bounded, in memory, thread safe; identical concurrent requests share one GitVersion run.
 /// Only successes are kept: a failed run is never replayed, and the next request runs GitVersion again.
 /// </summary>
-public sealed class GitVersionResultCache(ILogger<GitVersionResultCache>? logger = null, int maxEntries = 256)
+public sealed class GitVersionResultCache(ILogger<GitVersionResultCache>? logger = null, int maxEntries = 256, IRepositoryAccess? access = null)
 {
     private static readonly StringComparer PathComparer =
         OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
@@ -44,7 +44,7 @@ public sealed class GitVersionResultCache(ILogger<GitVersionResultCache>? logger
         {
             ct.ThrowIfCancellationRequested();
 
-            var fingerprint = GitVersionInputFingerprint.TryCompute(repoPath, options);
+            var fingerprint = GitVersionInputFingerprint.TryCompute(repoPath, options, access);
             if (fingerprint is null)
             {
                 logger?.LogDebug("GitVersion cache bypass for {RepoPath}: inputs cannot be fingerprinted", repoPath);
@@ -96,7 +96,7 @@ public sealed class GitVersionResultCache(ILogger<GitVersionResultCache>? logger
                 if (result.Probed && result.Error is null && result.Result is not null)
                 {
                     // Keep the answer only for the state it was asked in.
-                    var after = GitVersionInputFingerprint.TryCompute(repoPath, options);
+                    var after = GitVersionInputFingerprint.TryCompute(repoPath, options, access);
                     if (after is not null && after.FirstDifference(fingerprint) is null)
                         Store(key, fingerprint, result.Result);
                     else

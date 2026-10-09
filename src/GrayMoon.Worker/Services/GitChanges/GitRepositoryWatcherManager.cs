@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using GrayMoon.Common.Git;
+using GrayMoon.Worker.Abstractions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -24,51 +25,42 @@ public sealed class GitRepositoryWatcherManager(
     IOptions<GitChangesOptions> options,
     ILoggerFactory loggerFactory,
     ILogger<GitRepositoryWatcherManager> logger,
-    RepositoryPathGate? pathGate = null) : IDisposable
+    IRepositoryAccess access) : IDisposable
 {
     private readonly GitChangesOptions _options = options.Value;
     private readonly ConcurrentDictionary<string, WatcherEntry> _entries = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _createLock = new();
 
     public int ActiveWatcherCount => _entries.Count;
 
     public IDisposable Acquire(string repoPath)
     {
-        // A folder that is about to be deleted must not get a watcher: its handle would block the delete.
-        if (pathGate?.IsBlocked(repoPath) == true)
+        // A folder that is being removed must not get a watcher: its handle would block the delete.
+        if (access.IsUnderRemoval(repoPath))
         {
             return NullLease.Instance;
         }
 
         var key = GitChangesSnapshotCache.NormalizeKey(repoPath);
-        var entry = _entries.GetOrAdd(key, _ => CreateEntry(repoPath));
-        entry.CancelIdleDisposal();
-        Interlocked.Increment(ref entry.LeaseCount);
-        return new Lease(this, key);
-    }
-
-    /// <summary>
-    /// Immediately disposes every watcher whose repository is one of <paramref name="roots"/> or lies beneath one,
-    /// and prunes the matching coordinator/cache/registry entries, so the OS no longer holds those folders open.
-    /// Returns the number of watchers disposed.
-    /// </summary>
-    public int ReleaseUnder(IReadOnlyCollection<string> roots)
-    {
-        var released = 0;
-        foreach (var key in _entries.Keys)
+        lock (_createLock)
         {
-            if (!RepositoryPathGate.IsUnder(key, roots) || !_entries.TryRemove(key, out var entry))
+            if (!_entries.TryGetValue(key, out var entry))
             {
-                continue;
+                entry = CreateEntry(repoPath, key);
+                if (entry.IsReleased)
+                {
+                    // A removal claimed the folder between the check above and the registration.
+                    return NullLease.Instance;
+                }
+
+                _entries[key] = entry;
             }
 
-            entry.Dispose();
-            refreshCoordinator.RemoveTracker(key);
-            snapshotCache.Remove(key);
-            repositoryRegistry.Remove(key);
-            released++;
+            entry.CancelIdleDisposal();
+            Interlocked.Increment(ref entry.LeaseCount);
         }
 
-        return released;
+        return new Lease(this, key);
     }
 
     /// <summary>Returns coverage for a currently tracked (or still-known) watcher entry, if any.</summary>
@@ -99,7 +91,7 @@ public sealed class GitRepositoryWatcherManager(
         return false;
     }
 
-    private WatcherEntry CreateEntry(string repoPath)
+    private WatcherEntry CreateEntry(string repoPath, string key)
     {
         var coverage = new GitRepositoryWatcherCoverage { StartedAt = DateTimeOffset.UtcNow };
         var observations = new GitRepositoryWatcherObservationBuffer();
@@ -116,7 +108,31 @@ public sealed class GitRepositoryWatcherManager(
             observations.Add(observation);
         };
         logger.LogDebug("Created git repository watcher for {RepoPath}", repoPath);
-        return new WatcherEntry(watcher, coverage, observations);
+        var entry = new WatcherEntry(watcher, coverage, observations, released => OnEntryReleased(key, released));
+
+        // The access broker lets go of this watcher when the folder is removed, and pauses it while a folder beneath it is.
+        // Registering into a folder that is already claimed releases the entry on the spot (see Acquire).
+        entry.Track(access.RegisterReleasable(repoPath, entry));
+        if (!entry.IsReleased)
+        {
+            entry.Track(access.RegisterAncestorObserver(repoPath, watcher));
+        }
+
+        return entry;
+    }
+
+    private void OnEntryReleased(string key, WatcherEntry entry)
+    {
+        if (!_entries.TryRemove(new KeyValuePair<string, WatcherEntry>(key, entry)))
+        {
+            return;
+        }
+
+        // Same pruning as an expired idle lease: nothing is watching this folder any more.
+        refreshCoordinator.RemoveTracker(key);
+        snapshotCache.Remove(key);
+        repositoryRegistry.Remove(key);
+        logger.LogDebug("Released git repository watcher for {RepoPath} (folder is being removed)", key);
     }
 
     private void Release(string key)
@@ -166,12 +182,32 @@ public sealed class GitRepositoryWatcherManager(
     private sealed class WatcherEntry(
         GitRepositoryWatcher watcher,
         GitRepositoryWatcherCoverage coverage,
-        GitRepositoryWatcherObservationBuffer observations) : IDisposable
+        GitRepositoryWatcherObservationBuffer observations,
+        Action<WatcherEntry> onReleased) : IDisposable, IReleasable
     {
         public int LeaseCount;
         public GitRepositoryWatcherCoverage Coverage { get; } = coverage;
         public GitRepositoryWatcherObservationBuffer Observations { get; } = observations;
+        private readonly List<IDisposable> _registrations = [];
         private Timer? _idleTimer;
+        private volatile bool _released;
+        private int _disposed;
+
+        public bool IsReleased => _released;
+
+        public void Track(IDisposable registration)
+        {
+            lock (_registrations)
+            {
+                if (Volatile.Read(ref _disposed) == 0)
+                {
+                    _registrations.Add(registration);
+                    return;
+                }
+            }
+
+            registration.Dispose();
+        }
 
         public void ScheduleIdleDisposal(TimeSpan delay, Action onElapsed)
         {
@@ -185,14 +221,38 @@ public sealed class GitRepositoryWatcherManager(
             _idleTimer = null;
         }
 
+        /// <summary>Called by the access broker when the watched folder is being removed.</summary>
+        public void Release()
+        {
+            _released = true;
+            onReleased(this);
+            Dispose();
+        }
+
         public void Dispose()
         {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            {
+                return;
+            }
+
             _idleTimer?.Dispose();
+            List<IDisposable> registrations;
+            lock (_registrations)
+            {
+                registrations = [.. _registrations];
+                _registrations.Clear();
+            }
+
+            foreach (var registration in registrations)
+            {
+                registration.Dispose();
+            }
+
             Coverage.MarkEnded(DateTimeOffset.UtcNow);
             watcher.Dispose();
         }
     }
-
     private sealed class NullLease : IDisposable
     {
         public static readonly NullLease Instance = new();
