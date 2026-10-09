@@ -15,7 +15,16 @@
 
         const anchor = group.getBoundingClientRect();
         const menuHeight = menu.offsetHeight || 0;
-        const minWidth = Math.max(menu.offsetWidth || 0, anchor.width);
+        // The feature menu sizes to its own items (and at least the context button).
+        // It must not track the tool buttons, which change width while the menu is open.
+        let minWidth = Math.max(menu.offsetWidth || 0, anchor.width);
+        if (menu.classList.contains('workspace-feature-selector__menu')) {
+            menu.style.minWidth = '0px';
+            const contentWidth = menu.offsetWidth || 0;
+            const trigger = group.querySelector('.workspace-feature-selector__trigger');
+            const triggerWidth = trigger ? trigger.getBoundingClientRect().width : 0;
+            minWidth = Math.max(contentWidth, triggerWidth);
+        }
         menu.style.minWidth = minWidth + 'px';
 
         let top = anchor.bottom + GAP;

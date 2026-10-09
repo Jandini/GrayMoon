@@ -61,7 +61,6 @@
                 <button type="button"
                         class="workspace-feature-selector__add"
                         disabled="@Disabled"
-                        title="@ToolButtonTitle(id)"
                         aria-label="@FeatureOpenInTools.Title(id)"
                         aria-haspopup="menu"
                         @onclick="() => LaunchAsync(FeatureOpenInTools.LaunchMethod(id))"
@@ -75,26 +74,15 @@
                         <i class="bi @FeatureOpenInTools.IconClass(id) workspace-feature-selector__launch-icon workspace-feature-selector__launch-icon--glyph" aria-hidden="true"></i>
                     }
                 </button>
-                @if (!Disabled && _openToolMenuId == id)
+                @if (_toolHintId == id)
+                {
+                    <span class="workspace-feature-selector__tool-hint" role="tooltip">@FeatureOpenInTools.Title(id)</span>
+                }
+                @if (!Disabled && _openToolMenuId == id && _repositories.Count > 0)
                 {
                     <ul class="dropdown-menu show shadow workspace-feature-selector__dir-menu workspace-feature-selector__tool-menu"
                         role="menu">
-                        <li>
-                            <button type="button"
-                                    class="dropdown-item workspace-feature-selector__repo-item"
-                                    role="menuitem"
-                                    title="Remove from the bar"
-                                    @onclick="() => RemoveRecentToolAsync(id)"
-                                    @onclick:stopPropagation>
-                                <i class="bi bi-arrow-counterclockwise workspace-feature-selector__launch-icon workspace-feature-selector__remove-icon" aria-hidden="true"></i>
-                                <span>Remove</span>
-                            </button>
-                        </li>
-                        @if (_repositories.Count > 0)
-                        {
-                            <li><hr class="dropdown-divider branch-menu-divider" /></li>
-                            @RepositoryMenuItems(FeatureOpenInTools.LaunchMethod(id))
-                        }
+                        @RepositoryMenuItems(FeatureOpenInTools.LaunchMethod(id))
                     </ul>
                 }
             </div>
@@ -213,7 +201,7 @@
                         Open in...
                         <i class="bi bi-chevron-right" aria-hidden="true"></i>
                     </button>
-                    <ul class="dropdown-menu show shadow workspace-feature-selector__submenu" role="menu">
+                    <ul class="dropdown-menu show shadow workspace-feature-selector__submenu workspace-feature-selector__open-in-menu" role="menu">
                         @if (_toolAvailability?.Cursor == true)
                         {
                             @LaunchToolItem("openInCursor", "Cursor", imageSrc: "icons/cursor.svg")
@@ -257,8 +245,10 @@
     private readonly List<NativeLaunchRepositoryPath> _repositories = [];
     private int? _launchRepositoriesContextId;
     private bool _launchRepositoriesLoading;
+    private string? _hoveredToolId;
+    private string? _toolHintId;
+    private bool _toolHintCleared;
     private string? _openToolMenuId;
-    private string? _toolHintHiddenId;
     private CancellationTokenSource? _toolMenuCts;
     private readonly List<WorkspaceCatalogItem> _recentSwitchWorkspaces = [];
     private readonly List<WorkspaceCatalogItem> _otherSwitchWorkspaces = [];
@@ -373,7 +363,6 @@
                 <button type="button"
                         class="dropdown-item workspace-feature-selector__repo-item"
                         role="menuitem"
-                        title="@repoPath"
                         @onclick="() => LaunchAsync(method, repoPath)"
                         @onclick:stopPropagation>
                     <i class="bi bi-folder-fill workspace-feature-selector__launch-icon workspace-feature-selector__launch-icon--folder" aria-hidden="true"></i>
@@ -385,6 +374,8 @@
 
     private RenderFragment LaunchToolItem(string method, string label, string? imageSrc = null, string? iconClass = null) => __builder =>
     {
+        var toolId = FeatureOpenInTools.FromLaunchMethod(method);
+        var pinned = toolId is not null && IsPinned(toolId);
         <li class="workspace-feature-selector__launch-row">
             <button type="button"
                     class="dropdown-item workspace-feature-selector__launch-item"
@@ -400,10 +391,21 @@
                 }
                 <span>@label</span>
             </button>
+            @if (toolId is not null)
+            {
+                var pinId = toolId;
+                <button type="button"
+                        class="workspace-feature-selector__pin"
+                        aria-label="@(pinned ? $"Remove {label} from the bar" : $"Add {label} to the bar")"
+                        @onmousedown:preventDefault="true"
+                        @onclick="() => TogglePinnedToolAsync(pinId)"
+                        @onclick:stopPropagation>
+                    <i class="bi @(pinned ? "bi-dash-lg" : "bi-plus-lg")" aria-hidden="true"></i>
+                </button>
+            }
             @if (_repositories.Count > 0)
             {
-                <div class="workspace-feature-selector__repo-flyout"
-                     title="Open a specific repository">
+                <div class="workspace-feature-selector__repo-flyout">
                     <span class="workspace-feature-selector__repo-chevron" aria-hidden="true">
                         <i class="bi bi-chevron-right"></i>
                     </span>
@@ -810,9 +812,12 @@
             return;
 
         _ = EnsureLaunchRepositoriesAsync();
-        if (_openToolMenuId == toolId || _toolMenuCts is not null)
+        if (_hoveredToolId == toolId)
             return;
 
+        CloseToolMenu();
+        _hoveredToolId = toolId;
+        _toolHintId = toolId;
         var cts = new CancellationTokenSource();
         _toolMenuCts = cts;
         _ = OpenToolMenuAfterDelayAsync(toolId, cts.Token);
@@ -825,18 +830,19 @@
             await Task.Delay(TimeSpan.FromMilliseconds(750), cancellationToken);
             await InvokeAsync(() =>
             {
-                if (cancellationToken.IsCancellationRequested)
+                if (cancellationToken.IsCancellationRequested || _hoveredToolId != toolId)
                     return;
-                // Drop the native tooltip before the menu, or the two sit on top of each other.
-                _toolHintHiddenId = toolId;
+                // The hint is our own element. Take it out of the DOM before the menu exists.
+                _toolHintId = null;
+                _toolHintCleared = true;
                 StateHasChanged();
             });
             await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken);
             await InvokeAsync(() =>
             {
-                if (cancellationToken.IsCancellationRequested)
+                if (cancellationToken.IsCancellationRequested || _hoveredToolId != toolId)
                     return;
-                _openToolMenuId = toolId;
+                ShowToolDirectoriesIfReady(toolId);
                 StateHasChanged();
             });
         }
@@ -848,6 +854,22 @@
         }
     }
 
+    /// <summary>
+    /// Opens the folder menu only after the hint has been removed. If the directory list is still
+    /// loading, the caller tries again when it arrives. With no directories, the hint comes back.
+    /// </summary>
+    private void ShowToolDirectoriesIfReady(string toolId)
+    {
+        if (!_toolHintCleared || _hoveredToolId != toolId || _toolHintId is not null)
+            return;
+        if (_launchRepositoriesLoading)
+            return;
+        if (_repositories.Count > 0)
+            _openToolMenuId = toolId;
+        else
+            _toolHintId = toolId;
+    }
+
     private void CloseToolMenu()
     {
         if (_toolMenuCts is not null)
@@ -857,13 +879,34 @@
             _toolMenuCts = null;
         }
 
+        _hoveredToolId = null;
+        _toolHintId = null;
+        _toolHintCleared = false;
         _openToolMenuId = null;
-        _toolHintHiddenId = null;
     }
 
-    /// <summary>Null while the menu is about to open, so the browser tooltip is already gone.</summary>
-    private string? ToolButtonTitle(string toolId) =>
-        _toolHintHiddenId == toolId ? null : FeatureOpenInTools.Title(toolId);
+    private bool IsPinned(string toolId)
+    {
+        foreach (var existing in _recentOpenInTools)
+        {
+            if (string.Equals(existing, toolId, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
+    }
+
+    private async Task TogglePinnedToolAsync(string toolId)
+    {
+        if (WorkspaceId <= 0)
+            return;
+
+        var next = IsPinned(toolId)
+            ? await OpenInRecentTools.RemoveAsync(WorkspaceId, toolId)
+            : await OpenInRecentTools.RecordAsync(WorkspaceId, toolId);
+        _recentOpenInTools = next.ToList();
+        _recentOpenInWorkspaceId = WorkspaceId;
+    }
 
     private Task EnsureLaunchRepositoriesAsync()
     {
@@ -913,23 +956,21 @@
             _launchRepositoriesLoading = false;
         }
 
-        if (_openToolMenuId is not null)
+        if (_hoveredToolId is not null)
         {
             try
             {
-                await InvokeAsync(StateHasChanged);
+                await InvokeAsync(() =>
+                {
+                    if (_toolHintCleared && _hoveredToolId is string toolId)
+                        ShowToolDirectoriesIfReady(toolId);
+                    StateHasChanged();
+                });
             }
             catch (ObjectDisposedException)
             {
             }
         }
-    }
-
-    private async Task RemoveRecentToolAsync(string toolId)
-    {
-        CloseToolMenu();
-        _recentOpenInTools = (await OpenInRecentTools.RemoveAsync(WorkspaceId, toolId)).ToList();
-        _recentOpenInWorkspaceId = WorkspaceId;
     }
 
     private async Task LoadRecentOpenInToolsAsync(int workspaceId)
@@ -947,23 +988,6 @@
         }
 
         _recentOpenInWorkspaceId = workspaceId;
-    }
-
-    private async Task RememberOpenInToolAsync(string method)
-    {
-        var toolId = FeatureOpenInTools.FromLaunchMethod(method);
-        if (toolId is null || !FeatureOpenInTools.IsRemembered(toolId) || WorkspaceId <= 0)
-            return;
-
-        try
-        {
-            _recentOpenInTools = (await OpenInRecentTools.RecordAsync(WorkspaceId, toolId)).ToList();
-            _recentOpenInWorkspaceId = WorkspaceId;
-        }
-        catch
-        {
-            // The button list is optional; opening the tool still proceeds.
-        }
     }
 
     private async Task<WorkspaceFeatureContextId?> ResolveLaunchContextAsync()
@@ -988,7 +1012,6 @@
     private async Task LaunchAsync(string method, string? repositoryPath = null)
     {
         CloseToolMenu();
-        await RememberOpenInToolAsync(method);
 
         string? path = repositoryPath;
         if (string.IsNullOrWhiteSpace(path))

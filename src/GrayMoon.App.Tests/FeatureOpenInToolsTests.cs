@@ -11,7 +11,7 @@ namespace GrayMoon.App.Tests;
 public sealed class FeatureOpenInToolsTests
 {
     [Fact]
-    public void Visible_buttons_are_empty_until_a_tool_is_used()
+    public void Visible_buttons_are_empty_until_a_tool_is_added()
     {
         var buttons = FeatureOpenInTools.VisibleButtons([], cursor: true, claudeCli: true, vsCode: true, visualStudio: true);
 

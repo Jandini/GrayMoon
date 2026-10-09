@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 namespace GrayMoon.App.Services.Ui;
 
 /// <summary>
-/// Recent Open-in tools for one Workspace, stored in the workspace database.
+/// Open-in tools the user has placed on the bar for one Workspace, stored in the workspace database.
 /// The feature selector paints from <see cref="TryGetCached"/> so a later page can show the
 /// buttons with New Feature, then reads the database when this circuit has not loaded that Workspace.
 /// </summary>
