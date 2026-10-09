@@ -225,6 +225,11 @@
     [Parameter] public RemoveFeaturePlan? InitialPlan { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
     [Parameter] public EventCallback OnRemoved { get; set; }
+    /// <summary>
+    /// Raised when Remove ended in failure. A failed Remove can already have changed the Feature (worktrees gone, lifecycle
+    /// NeedsRepair), so the page must re-read it instead of keeping the grid it showed before the attempt.
+    /// </summary>
+    [Parameter] public EventCallback OnRemoveFailed { get; set; }
 
     private ElementReference _modalElement;
     private RemoveFeaturePlan? _plan;
@@ -822,6 +827,7 @@
                 _report = null;
                 _error = result.Error ?? "Remove Feature failed.";
                 await RefreshPlanAsync();
+                await OnRemoveFailed.InvokeAsync();
                 return;
             }
 

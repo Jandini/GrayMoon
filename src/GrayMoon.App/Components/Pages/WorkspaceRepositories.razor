@@ -75,7 +75,8 @@
                             FeatureContextId="_removeFeatureContextId"
                             InitialPlan="_removeFeaturePlan"
                             OnCancel="OnRemoveFeatureCancelAsync"
-                            OnRemoved="OnFeatureRemovedAsync" />
+                            OnRemoved="OnFeatureRemovedAsync"
+                            OnRemoveFailed="OnFeatureStatusChangedAsync" />
         <FeatureStatusPanel IsVisible="_featureStatusPanelVisible"
                             FeatureContextId="_featureStatusContextId"
                             OnClose="OnFeatureStatusCloseAsync"
