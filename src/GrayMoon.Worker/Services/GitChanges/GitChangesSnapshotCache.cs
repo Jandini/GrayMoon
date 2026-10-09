@@ -22,6 +22,15 @@ public sealed class GitChangesSnapshotCache
         return _versions.AddOrUpdate(NormalizeKey(repoPath), candidate, (_, current) => Math.Max(candidate, current + 1));
     }
 
+    /// <summary>
+    /// Re-stamps a mutation's resulting snapshot with a version taken now, after the mutation finished. A command reserves
+    /// its version before running git, but status scans are not blocked by the write lock, so a watcher scan can start
+    /// mid-mutation (e.g. after <c>git add</c> but before <c>git commit</c> ends), take a higher version and persist a
+    /// half-done view; the App would then reject the mutation's correct snapshot as stale and leave files shown as staged.
+    /// </summary>
+    public GitChangeSnapshot? StampAfterMutation(string repoPath, GitChangeSnapshot? snapshot) =>
+        snapshot == null ? null : snapshot with { Version = NextVersion(repoPath) };
+
     public void SetLatest(string repoPath, GitChangeSnapshot snapshot) =>
         _latestSnapshots[NormalizeKey(repoPath)] = snapshot;
 

@@ -28,9 +28,12 @@ public sealed class UnstageGitChangesCommand(IRepositoryGitChangesService gitCha
         var nextVersion = snapshotCache.NextVersion(repoPath);
 
         var result = await gitChangesService.UnstageAsync(repoPath, operationRequest, nextVersion, cancellationToken);
-        if (result.Snapshot != null)
+        // Version taken after the git work finished: a watcher scan that started mid-mutation holds a lower one, so its
+        // half-done view can never outrank this snapshot (the App rejects versions <= what it already persisted).
+        var snapshot = snapshotCache.StampAfterMutation(repoPath, result.Snapshot);
+        if (snapshot != null)
         {
-            snapshotCache.SetLatest(repoPath, result.Snapshot);
+            snapshotCache.SetLatest(repoPath, snapshot);
         }
 
         return new GitMutationResponse
@@ -38,7 +41,7 @@ public sealed class UnstageGitChangesCommand(IRepositoryGitChangesService gitCha
             Success = result.Success,
             ErrorCode = result.ErrorCode,
             ErrorMessage = result.ErrorMessage,
-            Snapshot = result.Snapshot,
+            Snapshot = snapshot,
         };
     }
 }
