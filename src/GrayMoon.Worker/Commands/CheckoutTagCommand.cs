@@ -5,7 +5,7 @@ using GrayMoon.Worker.Services;
 
 namespace GrayMoon.Worker.Commands;
 
-public sealed class CheckoutTagCommand(IGitService git) : ICommandHandler<CheckoutTagRequest, CheckoutTagResponse>
+public sealed class CheckoutTagCommand(IGitService git, IGitRepositoryReader reader) : ICommandHandler<CheckoutTagRequest, CheckoutTagResponse>
 {
     public async Task<CheckoutTagResponse> ExecuteAsync(CheckoutTagRequest request, CancellationToken cancellationToken = default)
     {
@@ -35,11 +35,22 @@ public sealed class CheckoutTagCommand(IGitService git) : ICommandHandler<Checko
             };
         }
 
+        var commit = await reader.GetHeadCommitAsync(repoPath, cancellationToken);
+        if (!GrayMoon.Common.Git.WorkspaceDefinitionTagPin.IsFullCommitHash(commit))
+        {
+            return new CheckoutTagResponse
+            {
+                Success = false,
+                ErrorMessage = $"Tag '{tagName}' was checked out, but the full commit hash could not be read."
+            };
+        }
+
         // The checkout hook will run and send a SyncCommand with the new version and tag state.
         return new CheckoutTagResponse
         {
             Success = true,
-            CurrentTag = tagName
+            CurrentTag = tagName,
+            Commit = commit!.Trim().ToLowerInvariant()
         };
     }
 }

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using GrayMoon.Common.Git;
 
 namespace GrayMoon.App.Services.WorkspaceManifest;
 
@@ -82,6 +83,33 @@ public static class WorkspaceManifestSerializer
             var profile = parsed.Workspace.Profile
                 ?? new WorkspaceManifestProfile("basic", "none", "none");
 
+            var repositories = new List<WorkspaceManifestRepository>();
+            foreach (var repository in parsed.Repositories ?? [])
+            {
+                if (repository is null)
+                    continue;
+
+                if (!WorkspaceDefinitionTagPin.TryNormalize(
+                        repository.Tag,
+                        repository.Commit,
+                        repository.Name,
+                        out var tag,
+                        out var commit,
+                        out var pinError))
+                {
+                    error = pinError;
+                    manifest = null;
+                    return false;
+                }
+
+                repositories.Add(new WorkspaceManifestRepository(
+                    repository.Name ?? string.Empty,
+                    repository.RepositoryUrl ?? string.Empty,
+                    repository.ConnectorUrl ?? string.Empty,
+                    tag,
+                    commit));
+            }
+
             manifest = new WorkspaceManifest(
                 schemaVersion,
                 new WorkspaceManifestWorkspace(
@@ -94,13 +122,7 @@ public static class WorkspaceManifestSerializer
                     .Where(c => c is not null)
                     .Select(c => new WorkspaceManifestConnector(c.Type ?? string.Empty, c.Url ?? string.Empty))
                     .ToList(),
-                (parsed.Repositories ?? [])
-                    .Where(r => r is not null)
-                    .Select(r => new WorkspaceManifestRepository(
-                        r.Name ?? string.Empty,
-                        r.RepositoryUrl ?? string.Empty,
-                        r.ConnectorUrl ?? string.Empty))
-                    .ToList());
+                repositories);
             return true;
         }
         catch (JsonException ex)

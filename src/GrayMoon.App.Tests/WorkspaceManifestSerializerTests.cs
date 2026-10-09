@@ -113,6 +113,81 @@ public sealed class WorkspaceManifestSerializerTests
     }
 
     [Fact]
+    public void Serialize_omits_tag_and_commit_when_unset()
+    {
+        var text = WorkspaceManifestSerializer.Serialize(Sample());
+
+        Assert.DoesNotContain("\"tag\"", text);
+        Assert.DoesNotContain("\"commit\"", text);
+    }
+
+    [Fact]
+    public void Tag_pin_round_trips_and_stores_the_full_commit_hash()
+    {
+        const string sha = "0123456789abcdef0123456789abcdef01234567";
+        var manifest = Sample() with
+        {
+            Repositories =
+            [
+                new WorkspaceManifestRepository(
+                    "Avr.Api",
+                    "https://github.com/example/Avr.Api.git",
+                    "https://github.com",
+                    "v1.0.0",
+                    sha)
+            ]
+        };
+
+        var text = WorkspaceManifestSerializer.Serialize(manifest);
+
+        Assert.Contains("\"tag\": \"v1.0.0\"", text);
+        Assert.Contains($"\"commit\": \"{sha}\"", text);
+        Assert.True(WorkspaceManifestSerializer.TryParse(text, out var parsed, out var error), error);
+        var repository = Assert.Single(parsed!.Repositories);
+        Assert.Equal("v1.0.0", repository.Tag);
+        Assert.Equal(sha, repository.Commit);
+        Assert.Equal(text, WorkspaceManifestSerializer.Serialize(parsed));
+    }
+
+    [Fact]
+    public void Parse_lowercases_the_commit_hash()
+    {
+        const string json = """
+            { "version": 1, "workspace": { "name": "AVR" },
+              "repositories": [ { "name": "Avr.Api", "repositoryUrl": "u", "connectorUrl": "c", "tag": "v1", "commit": "0123456789ABCDEF0123456789abcdef01234567" } ] }
+            """;
+
+        Assert.True(WorkspaceManifestSerializer.TryParse(json, out var parsed, out var error), error);
+        Assert.Equal("0123456789abcdef0123456789abcdef01234567", parsed!.Repositories[0].Commit);
+    }
+
+    [Fact]
+    public void Parse_rejects_a_tag_without_a_commit()
+    {
+        const string json = """
+            { "version": 1, "workspace": { "name": "AVR" },
+              "repositories": [ { "name": "Avr.Api", "repositoryUrl": "u", "connectorUrl": "c", "tag": "v1" } ] }
+            """;
+
+        Assert.False(WorkspaceManifestSerializer.TryParse(json, out var manifest, out var error));
+        Assert.Null(manifest);
+        Assert.Equal("Repository 'Avr.Api' is on a tag but is missing the tag name or the full commit hash.", error);
+    }
+
+    [Fact]
+    public void Parse_rejects_a_short_commit_hash()
+    {
+        const string json = """
+            { "version": 1, "workspace": { "name": "AVR" },
+              "repositories": [ { "name": "Avr.Api", "repositoryUrl": "u", "connectorUrl": "c", "tag": "v1", "commit": "abc123" } ] }
+            """;
+
+        Assert.False(WorkspaceManifestSerializer.TryParse(json, out var manifest, out var error));
+        Assert.Null(manifest);
+        Assert.Equal("Repository 'Avr.Api' commit must be the full commit hash.", error);
+    }
+
+    [Fact]
     public void Parse_fails_on_missing_workspace_name()
     {
         const string json = """{ "version": 1, "workspace": { "profile": { "type": "basic", "versioning": "none", "ci": "none" } } }""";

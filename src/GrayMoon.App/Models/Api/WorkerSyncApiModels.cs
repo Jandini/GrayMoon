@@ -21,6 +21,10 @@ public sealed class WorkerVersionBranchResponse
     [JsonPropertyName("tag")]
     public string? Tag { get; set; }
 
+    /// <summary>Full commit hash of HEAD when <see cref="Tag"/> is set.</summary>
+    [JsonPropertyName("commit")]
+    public string? Commit { get; set; }
+
     [JsonPropertyName("gitVersionError")]
     public string? GitVersionError { get; set; }
 

@@ -52,6 +52,8 @@ public interface IGitService
     Task<(bool Success, string? ErrorMessage)> FetchTagsAsync(string repoPath, string? bearerToken, CancellationToken ct);
     /// <summary>Checks out the specified tag (detached HEAD). Returns (success, errorMessage).</summary>
     Task<(bool Success, string? ErrorMessage)> CheckoutTagAsync(string repoPath, string tagName, CancellationToken ct);
+    /// <summary>Checks out the full commit hash (detached HEAD). Returns (success, errorMessage). Does not substitute another revision when the commit is missing.</summary>
+    Task<(bool Success, string? ErrorMessage)> CheckoutCommitAsync(string repoPath, string commit, CancellationToken ct);
     /// <summary>
     /// Persists or clears the worktree-local divergence base branch (Feature PR parent). Stored under the
     /// worktree-specific git dir so linked Feature worktrees do not share Workspace state. Pass null/empty to clear.

@@ -29,4 +29,11 @@ public sealed class SyncRepositoryRequest : WorkspaceCommandRequest
     /// </summary>
     [JsonPropertyName("divergenceBaseBranch")]
     public string? DivergenceBaseBranch { get; set; }
+
+    /// <summary>
+    /// When true and this call cloned the repository, check out the commit recorded for it in the Workspace
+    /// definition if that entry is on a tag. Existing checkouts are left where they are.
+    /// </summary>
+    [JsonPropertyName("applyRepositoryTagPin")]
+    public bool ApplyRepositoryTagPin { get; set; }
 }

@@ -14,4 +14,15 @@ public sealed record WorkspaceManifestProfile(string Type, string Versioning, st
 
 public sealed record WorkspaceManifestConnector(string Type, string Url);
 
-public sealed record WorkspaceManifestRepository(string Name, string RepositoryUrl, string ConnectorUrl);
+public sealed record WorkspaceManifestRepository(
+    string Name,
+    string RepositoryUrl,
+    string ConnectorUrl,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Tag = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Commit = null);
+
+/// <summary>
+/// One source repository's tag pin in the Workspace definition. Both <see cref="Tag"/> and <see cref="Commit"/>
+/// null clears the pin. Setting a pin requires both.
+/// </summary>
+public sealed record WorkspaceRepositoryTagPinChange(string RepositoryUrl, string? Tag, string? Commit);
