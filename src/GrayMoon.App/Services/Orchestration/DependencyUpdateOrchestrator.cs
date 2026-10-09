@@ -141,11 +141,8 @@ public sealed class DependencyUpdateOrchestrator(
             if (level > levelRepoIds[0].Level)
                 await fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, contextId, cancellationToken, forceFresh: true);
 
-            var freshWorkspace = await workspaceRepository.GetByIdAsync(workspaceId);
-            var outOfDateFileRepoIds = (freshWorkspace?.Repositories ?? (ICollection<WorkspaceRepositoryLink>)[])
-                .Where(l => (l.OutOfDateFileRepos ?? 0) > 0)
-                .Select(l => l.RepositoryId)
-                .ToHashSet();
+            // Context-scoped: a Feature persists the out-of-date count only on its context state, not on the shared link.
+            var outOfDateFileRepoIds = await workspaceRepository.GetRepositoryIdsWithOutOfDateFilesAsync(workspaceId, contextId.Value, cancellationToken);
 
             // Csproj sync stays scoped to the caller's selection (or all repos at this level when null).
             var csprojScope = repoIdsToUpdate != null
@@ -354,10 +351,7 @@ public sealed class DependencyUpdateOrchestrator(
             .Where(link => link.Repository != null && string.IsNullOrWhiteSpace(link.CheckedOutTag))
             .Select(link => link.RepositoryId)
             .ToHashSet();
-        var outOfDateFileRepoIds = workspace.Repositories
-            .Where(l => (l.OutOfDateFileRepos ?? 0) > 0)
-            .Select(l => l.RepositoryId)
-            .ToHashSet();
+        var outOfDateFileRepoIds = await workspaceRepository.GetRepositoryIdsWithOutOfDateFilesAsync(workspaceId, contextId.Value, cancellationToken);
 
         logger.LogInformation(
             "[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: version-file update only. Repos={RepoCount}, WithOutOfDateFiles={FileRepoCount}",

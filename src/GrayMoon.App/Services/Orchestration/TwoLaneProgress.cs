@@ -1,40 +1,10 @@
 namespace GrayMoon.App.Services.Orchestration;
 
 /// <summary>
-/// Encodes the two lanes of an update-and-push run into the single overlay message string. The lanes are joined
-/// with <see cref="Separator"/> on its own line, so the overlay can split them before parsing each lane with its
-/// usual "primary line, then level / countdown lines" rules. One lane alone is just that lane's message.
-/// </summary>
-public static class OverlayLanes
-{
-    /// <summary>ASCII record separator: never appears in a progress message, so it cannot be confused with text.</summary>
-    public const char Separator = '\u001E';
-
-    public static string Join(string? first, string? second)
-    {
-        var hasFirst = !string.IsNullOrWhiteSpace(first);
-        var hasSecond = !string.IsNullOrWhiteSpace(second);
-        if (hasFirst && hasSecond)
-            return $"{first!.Trim()}\n{Separator}\n{second!.Trim()}";
-        return hasFirst ? first!.Trim() : hasSecond ? second!.Trim() : string.Empty;
-    }
-
-    /// <summary>The non-empty lanes of <paramref name="message"/>, in order. A message without a separator is one lane.</summary>
-    public static IReadOnlyList<string> Split(string? message)
-    {
-        if (string.IsNullOrWhiteSpace(message))
-            return [];
-        return message
-            .Split(Separator)
-            .Select(lane => lane.Trim())
-            .Where(lane => lane.Length > 0)
-            .ToList();
-    }
-}
-
-/// <summary>
-/// Keeps the latest message of the update lane and of the push lane and publishes them together as one overlay
-/// message. Both lanes report from thread-pool threads, so every change is serialized and published in order.
+/// Merges the progress of the update lane and the push lane into the overlay's single message. The overlay keeps its
+/// one-operation layout: whichever lane reported last is what is shown, and the overlay transitions to it. When a lane
+/// ends, the other lane's latest message is shown again. Both lanes report from thread-pool threads, so every change
+/// is serialized and published in order.
 /// </summary>
 public sealed class TwoLaneProgress(Action<string> report)
 {
@@ -42,25 +12,20 @@ public sealed class TwoLaneProgress(Action<string> report)
     private string? _update;
     private string? _push;
 
-    public Action<string> Update => message => Set(ref _update, message);
+    public Action<string> Update => message => { lock (_gate) { _update = message; Show(message); } };
 
-    public Action<string> Push => message => Set(ref _push, message);
+    public Action<string> Push => message => { lock (_gate) { _push = message; Show(message); } };
 
-    /// <summary>Drops the update line once the update has finished, so only the push lane is shown.</summary>
-    public void EndUpdate() => Set(ref _update, null);
+    /// <summary>Drops the update lane once it has finished and shows the push lane's latest message.</summary>
+    public void EndUpdate() { lock (_gate) { _update = null; Show(_push); } }
 
-    /// <summary>Drops the push line once the push lane has finished.</summary>
-    public void EndPush() => Set(ref _push, null);
+    /// <summary>Drops the push lane once it has finished and shows the update lane's latest message.</summary>
+    public void EndPush() { lock (_gate) { _push = null; Show(_update); } }
 
-    private void Set(ref string? slot, string? message)
+    private void Show(string? message)
     {
-        lock (_gate)
-        {
-            slot = message;
-            var combined = OverlayLanes.Join(_update, _push);
-            if (combined.Length > 0)
-                report(combined);
-        }
+        if (!string.IsNullOrWhiteSpace(message))
+            report(message.Trim());
     }
 }
 

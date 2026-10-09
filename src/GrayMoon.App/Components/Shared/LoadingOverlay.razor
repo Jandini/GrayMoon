@@ -1,6 +1,5 @@
 @using GrayMoon.Abstractions.Worker
 @using GrayMoon.App.Services
-@using GrayMoon.App.Services.Orchestration
 @inject IJSRuntime JS
 @inject MatrixOverlayPreferenceService MatrixPreference
 @inject CommandTerminalOverlayPreferenceService CommandTerminalOverlayPreference
@@ -43,13 +42,11 @@
     </div>
     <div class="loading-overlay-content">
         @{
-            var lanes = OverlayLanes.Split(Message);
-            var twoLanes = lanes.Count > 1;
             var hasMessage = !string.IsNullOrEmpty(Message);
-            var parsed = hasMessage && !twoLanes ? ParseOverlayMessage(Message!) : default;
+            var parsed = hasMessage ? ParseOverlayMessage(Message!) : default;
         }
         <div class="loading-overlay-body">
-            @if (hasMessage && !twoLanes && !string.IsNullOrEmpty(parsed.LevelCaption))
+            @if (hasMessage && !string.IsNullOrEmpty(parsed.LevelCaption))
             {
                 <p class="loading-overlay-level">@parsed.LevelCaption</p>
             }
@@ -58,14 +55,7 @@
                     <span class="visually-hidden">Loading...</span>
                 </div>
             </div>
-            @if (twoLanes)
-            {
-                @foreach (var lane in lanes)
-                {
-                    <p class="loading-overlay-message">@FormatLane(lane)</p>
-                }
-            }
-            @if (!twoLanes && hasMessage)
+            @if (hasMessage)
             {
                 @if (!string.IsNullOrEmpty(parsed.CountdownBody))
                 {
@@ -261,16 +251,6 @@
 
         var countdown = otherLines.Count > 0 ? string.Join("\n", otherLines) : null;
         return new OverlayMessageParts(primary, level, countdown);
-    }
-
-    /// <summary>One lane of a two-lane message as a single line: "Level N: message", with any countdown text after it.</summary>
-    private static string FormatLane(string lane)
-    {
-        var parts = ParseOverlayMessage(lane);
-        var line = string.IsNullOrEmpty(parts.LevelCaption) ? parts.Primary : $"{parts.LevelCaption}: {parts.Primary}";
-        if (!string.IsNullOrEmpty(parts.CountdownBody))
-            line += " - " + string.Join(" - ", parts.CountdownBody.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-        return line;
     }
 
     /// <summary>Matches lines like "Level 2" from dependency-level progress (update, push, etc.).</summary>
