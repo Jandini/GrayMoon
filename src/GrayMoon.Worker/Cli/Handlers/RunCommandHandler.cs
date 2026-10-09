@@ -104,6 +104,7 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<TrackedJobQueue>();
         builder.Services.AddSingleton<IJobQueue>(sp => sp.GetRequiredService<TrackedJobQueue>());
         builder.Services.AddSingleton<IWorkerQueueTracker>(sp => sp.GetRequiredService<TrackedJobQueue>());
+        builder.Services.AddSingleton<IWorktreeCreateHookDeferral, WorktreeCreateHookDeferral>();
         builder.Services.AddSingleton<ReadJobQueue>();
         builder.Services.AddSingleton<IReadJobQueue>(sp => sp.GetRequiredService<ReadJobQueue>());
         builder.Services.AddSingleton<DiffJobQueue>();

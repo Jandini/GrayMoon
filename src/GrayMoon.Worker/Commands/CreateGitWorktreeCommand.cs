@@ -6,7 +6,9 @@ using Microsoft.Extensions.Logging;
 
 namespace GrayMoon.Worker.Commands;
 
-public sealed class CreateGitWorktreeCommand(IGitService git, IGitWorktreeService worktreeService, ILogger<CreateGitWorktreeCommand>? logger = null)
+public sealed class CreateGitWorktreeCommand(IGitService git, IGitWorktreeService worktreeService, ILogger<CreateGitWorktreeCommand>? logger = null,
+    IWorktreeCreateHookDeferral? hookDeferral = null,
+    IGitChangesRefreshSuppressor? refreshSuppressor = null)
     : ICommandHandler<CreateGitWorktreeRequest, CreateGitWorktreeResponse>
 {
     public async Task<CreateGitWorktreeResponse> ExecuteAsync(CreateGitWorktreeRequest request, CancellationToken cancellationToken = default)
@@ -26,6 +28,12 @@ public sealed class CreateGitWorktreeCommand(IGitService git, IGitWorktreeServic
             await git.WriteSyncHooksAsync(mainPath, request.WorkspaceId.Value, request.RepositoryId.Value, cancellationToken);
         var hooksMs = (long)System.Diagnostics.Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds;
         var worktreeStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
+
+        // git worktree add fires post-checkout inside this call: hold that sync back until the Feature's creates are
+        // done (it would otherwise occupy worker slots the remaining creates need), and let the Git Changes watcher
+        // coalesce the .git metadata events the add causes in the main repository into one refresh.
+        using var hookScope = hookDeferral?.BeginCreate(worktreePath);
+        using var refreshScope = refreshSuppressor?.BeginExternalRepositoryMutation(mainPath);
 
         var (success, worktree, alreadyExisted, errorCode, errorMessage) = await worktreeService.CreateWorktreeAsync(
             mainPath,
