@@ -1,3 +1,4 @@
+using System.Data.Common;
 using GrayMoon.Abstractions.Worker;
 using GrayMoon.Abstractions.Workspaces;
 using GrayMoon.App.Data;
@@ -16,6 +17,7 @@ using GrayMoon.Application.Workspaces;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -52,7 +54,11 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         Action<IServiceCollection>? configureServices = null,
         Action<DbContextOptionsBuilder>? configureDb = null)
     {
-        var connection = new SqliteConnection("Data Source=:memory:");
+        // One SqliteConnection cannot serve the parallel writes Feature removal makes. A shared-cache
+        // memory database gives every context its own connection, and this connection keeps the database alive.
+        var connectionString =
+            $"Data Source=file:gm{Guid.NewGuid():N}?mode=memory&cache=shared;Pooling=False;Default Timeout=5";
+        var connection = new SqliteConnection(connectionString);
         await connection.OpenAsync();
 
         var workerBridge = new FakeWorkerBridge();
@@ -71,7 +77,8 @@ public sealed class SyncStateTestContext : IAsyncDisposable
 
         void ConfigureDb(DbContextOptionsBuilder o)
         {
-            o.UseSqlite(connection);
+            o.UseSqlite(connectionString);
+            o.AddInterceptors(SqliteBusyTimeoutInterceptor.Instance);
             configureDb?.Invoke(o);
         }
 
@@ -289,6 +296,32 @@ public sealed class SyncStateTestContext : IAsyncDisposable
     {
         await _provider.DisposeAsync();
         await _connection.DisposeAsync();
+    }
+}
+
+/// <summary>
+/// Matches the application's per-connection busy timeout. The pragma is not stored in the database, so every
+/// connection has to set it or a second writer fails at once with "database is locked".
+/// </summary>
+file sealed class SqliteBusyTimeoutInterceptor : DbConnectionInterceptor
+{
+    public static readonly SqliteBusyTimeoutInterceptor Instance = new();
+
+    public override void ConnectionOpened(DbConnection connection, ConnectionEndEventData eventData)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA busy_timeout=5000;";
+        command.ExecuteNonQuery();
+    }
+
+    public override async Task ConnectionOpenedAsync(
+        DbConnection connection,
+        ConnectionEndEventData eventData,
+        CancellationToken cancellationToken = default)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA busy_timeout=5000;";
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 }
 
