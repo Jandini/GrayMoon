@@ -6,11 +6,13 @@ using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services.Ci;
+using GrayMoon.App.Services.Orchestration;
 using GrayMoon.Abstractions.Workspaces;
 using GrayMoon.Application.Features;
 using GrayMoon.Application.Workspaces;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using System.Threading.Channels;
 
 namespace GrayMoon.App.Services.Workspaces;
 
@@ -189,10 +191,25 @@ public sealed class WorkspacePushService(
 
         var levelsAsc = payload.Select(p => p.DependencyLevel ?? 0).Distinct().OrderBy(x => x).ToList();
         var lastLevel = levelsAsc[^1];
-        var pushedRepos = new List<PushRepoPayload>();
         var ciProvider = _ciProviderResolver == null
             ? NoCiProvider.Instance
             : await _ciProviderResolver.GetForWorkspaceAsync(workspaceId, cancellationToken);
+        var run = new SynchronizedPushRun(
+            workspace,
+            contextId,
+            workspaceRoot,
+            workspaceRepositoryName,
+            links,
+            bearerByRepoId,
+            ciProvider,
+            restorePackages,
+            syncedRepoIds,
+            RestoreOnlySyncedRepos: false,
+            runId,
+            onProgressMessage,
+            onRepoError,
+            onLevelError,
+            onAppSideComplete);
         _logger.LogInformation(
             "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: {LevelCount} level(s) to push: {Levels}",
             runId, workspaceId, levelsAsc.Count,
@@ -202,205 +219,415 @@ public sealed class WorkspacePushService(
             cancellationToken.ThrowIfCancellationRequested();
             var reposAtLevel = payload.Where(p => (p.DependencyLevel ?? 0) == level).ToList();
             if (reposAtLevel.Count == 0) continue;
-            var levelProgress = onProgressMessage == null ? (Action<string>?)null : msg => onProgressMessage($"{msg}\nLevel {level}");
-
-            _logger.LogInformation(
-                "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: starting. RepoIds=[{RepoIds}]",
-                runId, workspaceId, level, string.Join(",", reposAtLevel.Select(r => r.RepoId)));
-
-            var requiredForLevel = reposAtLevel
-                .SelectMany(r => r.RequiredPackages)
-                .DistinctBy(r => (r.PackageId, r.Version, r.MatchedConnectorId))
-                .Where(r => r.MatchedConnectorId.HasValue)
-                .ToList();
-            var totalDeps = requiredForLevel.Count;
-
-            if (totalDeps > 0)
-            {
-                _logger.LogInformation("[PushOrchestrator {RunId}] Push wait: level {Level}, waiting for {Count} package(s): {Packages}",
-                    runId,
-                    level,
-                    totalDeps,
-                    string.Join(", ", requiredForLevel.Select(r => r.PackageId + "@" + r.Version + " (connector " + r.MatchedConnectorId + ")")));
-
-                var minutesPerDep = Math.Max(0.1, workspaceOptions.Value.PushWaitDependencyTimeoutMinutesPerDependency);
-                var timeoutMinutes = totalDeps * minutesPerDep;
-                var totalTimeout = TimeSpan.FromMinutes(timeoutMinutes);
-                using var timeoutCts = new CancellationTokenSource(totalTimeout);
-                using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
-                var linkedToken = linkedCts.Token;
-                var deadline = DateTime.UtcNow + totalTimeout;
-                var foundByIndex = new bool[totalDeps];
-                var foundLock = new object();
-                var ciRunWatch = ciProvider.CreatePushRunWatch(_overlayCommandTerminalService);
-                int getFoundCount()
-                {
-                    lock (foundLock) { return foundByIndex.Count(x => x); }
-                }
-                var lastPollUtc = DateTime.MinValue;
-
-                // Prefetch all connectors for this level once to avoid concurrent DbContext reads in the polling loop
-                var connectorByIdForLevel = new Dictionary<int, Connector?>();
-                foreach (var cid in requiredForLevel.Select(r => r.MatchedConnectorId!.Value).Distinct())
-                    connectorByIdForLevel[cid] = await _connectorRepository!.GetByIdAsync(cid);
-
-                void AbortPackageWaitTimeout()
-                {
-                    _logger.LogWarning("[PushOrchestrator {RunId}] Push wait: timed out after {TotalMinutes:F1} min. Found {Found} of {Total}.", runId, totalTimeout.TotalMinutes, getFoundCount(), totalDeps);
-                    PackageWaitTimeout.Report(level, onLevelError, getFoundCount(), totalDeps, totalTimeout);
-                }
-
-                try
-                {
-                    while (getFoundCount() < totalDeps)
-                    {
-                    if (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
-                    {
-                        AbortPackageWaitTimeout();
-                        return;
-                    }
-
-                    cancellationToken.ThrowIfCancellationRequested();
-                    var remaining = deadline - DateTime.UtcNow;
-                    if (remaining <= TimeSpan.Zero)
-                    {
-                        AbortPackageWaitTimeout();
-                        return;
-                    }
-                    var found = getFoundCount();
-                    var line1 = found == 0
-                        ? $"Waiting for {totalDeps} {(totalDeps == 1 ? "package" : "packages")}..."
-                        : $"Found {found} of {totalDeps} {(totalDeps == 1 ? "package" : "packages")}";
-                    var totalSec = (int)remaining.TotalSeconds;
-                    var mm = totalSec / 60;
-                    var ss = totalSec % 60;
-                    levelProgress?.Invoke($"{line1}\n{mm:D2}:{ss:D2}");
-
-                    await ciRunWatch.TickAsync(pushedRepos, links, linkedToken);
-
-                    if ((DateTime.UtcNow - lastPollUtc).TotalSeconds >= 2)
-                    {
-                        lastPollUtc = DateTime.UtcNow;
-                        int[] toCheck;
-                        lock (foundLock)
-                        {
-                            toCheck = Enumerable.Range(0, totalDeps).Where(i => !foundByIndex[i]).ToArray();
-                        }
-                        if (toCheck.Length > 0)
-                        {
-                            var prevFound = getFoundCount();
-                            foreach (var chunk in toCheck.Chunk(_maxConcurrent))
-                            {
-                                await Task.WhenAll(chunk.Select(async i =>
-                                {
-                                    var req = requiredForLevel[i];
-                                    connectorByIdForLevel.TryGetValue(req.MatchedConnectorId!.Value, out var connector);
-                                    if (connector == null)
-                                    {
-                                        _logger.LogWarning("[PushOrchestrator {RunId}] Push wait: package {PackageId} {Version} has no connector (MatchedConnectorId={ConnectorId}).", runId, req.PackageId, req.Version, req.MatchedConnectorId);
-                                        return;
-                                    }
-                                    var exists = await _nuGetService.PackageVersionExistsAsync(connector, req.PackageId, req.Version, linkedToken);
-                                    _logger.LogInformation("[PushOrchestrator {RunId}] Push wait: checking {PackageId} {Version} in registry {ConnectorName} (Id={ConnectorId}) -> {Result}",
-                                        runId, req.PackageId, req.Version, connector.ConnectorName, connector.ConnectorId, exists ? "found" : "not found");
-                                    if (exists)
-                                    {
-                                        lock (foundLock)
-                                            foundByIndex[i] = true;
-                                    }
-                                }));
-                            }
-                            var nowFound = getFoundCount();
-                            if (nowFound > prevFound)
-                            {
-                                var stillWaiting = totalDeps - nowFound;
-                                if (stillWaiting > 0)
-                                    deadline = DateTime.UtcNow + TimeSpan.FromMinutes(stillWaiting * minutesPerDep);
-                            }
-                            if (nowFound >= totalDeps)
-                                _logger.LogInformation("[PushOrchestrator {RunId}] Push wait: all {Total} package(s) found for level {Level}, proceeding.", runId, totalDeps, level);
-                        }
-                    }
-
-                    if (getFoundCount() >= totalDeps)
-                        break;
-                    await Task.Delay(TimeSpan.FromSeconds(1), linkedToken);
-                }
-                }
-                catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
-                {
-                    AbortPackageWaitTimeout();
-                    return;
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    _logger.LogError(ex, "[PushOrchestrator {RunId}] Push wait: level {Level} failed.", runId, level);
-                    onLevelError?.Invoke(level, ex.Message);
-                    return;
-                }
-            }
-
-            levelProgress?.Invoke($"Pushing {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")}...");
-            IReadOnlyList<(int RepoId, string Error)> levelFailures;
-            try
-            {
-                levelFailures = await PushReposAsync(
-                    workspace,
-                    contextId,
-                    reposAtLevel,
-                    bearerByRepoId,
-                    levelProgress,
-                    onRepoError,
-                    onAppSideComplete: level == lastLevel ? null : onAppSideComplete,
-                    refreshVersionAfterPush: true,
-                    cancellationToken);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogError(ex, "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: push failed.", runId, workspaceId, level);
-                onLevelError?.Invoke(level, ex.Message);
+            if (!await PushLevelAsync(run, level, reposAtLevel, level == lastLevel, cancellationToken))
                 return;
-            }
-            await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, contextId, reposAtLevel, cancellationToken);
-            if (levelFailures.Count > 0)
-            {
-                _logger.LogWarning(
-                    "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: aborting synchronized push after {FailedCount} repository failure(s).",
-                    runId, workspaceId, level, levelFailures.Count);
-                return;
-            }
-
-            if (restorePackages)
-            {
-                levelProgress?.Invoke("Restoring packages...");
-                try
-                {
-                    var restoreFailed = syncedRepoIds is { Count: > 0 }
-                        ? await RestoreUpdatedReposAtLevelAsync(workspaceId, workspace.Name, workspaceRoot, workspaceRepositoryName, reposAtLevel, syncedRepoIds, onRepoError, cancellationToken)
-                        : await TryRestoreReposAtLevelAsync(workspaceId, workspace.Name, workspaceRoot, workspaceRepositoryName, reposAtLevel, onRepoError, cancellationToken);
-                    if (restoreFailed)
-                        return;
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    _logger.LogError(ex, "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: restore failed.", runId, workspaceId, level);
-                    onLevelError?.Invoke(level, ex.Message);
-                    return;
-                }
-            }
-
-            pushedRepos.AddRange(reposAtLevel);
-
-            _logger.LogInformation(
-                "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: completed. Pushed {PushedCount} repo(s).",
-                runId, workspaceId, level, reposAtLevel.Count);
         }
 
         await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, contextId, payload, cancellationToken);
 
         _logger.LogInformation(
             "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: RunPushAsync finished. TotalPushed={TotalPushed}",
-            runId, workspaceId, pushedRepos.Count);
+            runId, workspaceId, run.PushedRepos.Count);
+    }
+
+    /// <summary>
+    /// Everything one synchronized push needs to push a level. <see cref="RunPushAsync"/> and the push lane both
+    /// build one and hand levels to <see cref="PushLevelAsync"/>, so a level is waited for, pushed and restored the
+    /// same way however it was reached.
+    /// </summary>
+    private sealed record SynchronizedPushRun(
+        Workspace Workspace,
+        WorkspaceFeatureContextId ContextId,
+        string? WorkspaceRoot,
+        string? WorkspaceRepositoryName,
+        IReadOnlyList<WorkspaceRepositoryLink> Links,
+        IReadOnlyDictionary<int, string?> BearerByRepoId,
+        IWorkspaceCiProvider CiProvider,
+        bool RestorePackages,
+        IReadOnlySet<int>? SyncedRepoIds,
+        bool RestoreOnlySyncedRepos,
+        string? RunId,
+        Action<string>? OnProgressMessage,
+        Action<int, string>? OnRepoError,
+        Action<int, string>? OnLevelError,
+        Action? OnAppSideComplete)
+    {
+        /// <summary>Repositories pushed by the levels already finished; the CI watch reads it while the next level waits.</summary>
+        public List<PushRepoPayload> PushedRepos { get; } = [];
+    }
+
+    /// <summary>
+    /// Waits for the level's required packages, pushes <paramref name="reposAtLevel"/>, records their commit counts and
+    /// restores them. Returns false when the level failed or timed out (already reported through the run's callbacks),
+    /// which stops the synchronized push; true when the next level may start.
+    /// </summary>
+    private async Task<bool> PushLevelAsync(
+        SynchronizedPushRun run,
+        int level,
+        IReadOnlyList<PushRepoPayload> reposAtLevel,
+        bool isLastLevel,
+        CancellationToken cancellationToken)
+    {
+        var workspace = run.Workspace;
+        var workspaceId = workspace.WorkspaceId;
+        var contextId = run.ContextId;
+        var workspaceRoot = run.WorkspaceRoot;
+        var workspaceRepositoryName = run.WorkspaceRepositoryName;
+        var links = run.Links;
+        var bearerByRepoId = run.BearerByRepoId;
+        var ciProvider = run.CiProvider;
+        var syncedRepoIds = run.SyncedRepoIds;
+        var restorePackages = run.RestorePackages;
+        var runId = run.RunId;
+        var onRepoError = run.OnRepoError;
+        var onLevelError = run.OnLevelError;
+        var pushedRepos = run.PushedRepos;
+        var onProgressMessage = run.OnProgressMessage;
+        var levelProgress = onProgressMessage == null ? (Action<string>?)null : msg => onProgressMessage($"{msg}\nLevel {level}");
+
+        _logger.LogInformation(
+            "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: starting. RepoIds=[{RepoIds}]",
+            runId, workspaceId, level, string.Join(",", reposAtLevel.Select(r => r.RepoId)));
+
+        var requiredForLevel = reposAtLevel
+            .SelectMany(r => r.RequiredPackages)
+            .DistinctBy(r => (r.PackageId, r.Version, r.MatchedConnectorId))
+            .Where(r => r.MatchedConnectorId.HasValue)
+            .ToList();
+        var totalDeps = requiredForLevel.Count;
+
+        if (totalDeps > 0)
+        {
+            _logger.LogInformation("[PushOrchestrator {RunId}] Push wait: level {Level}, waiting for {Count} package(s): {Packages}",
+                runId,
+                level,
+                totalDeps,
+                string.Join(", ", requiredForLevel.Select(r => r.PackageId + "@" + r.Version + " (connector " + r.MatchedConnectorId + ")")));
+
+            var minutesPerDep = Math.Max(0.1, workspaceOptions.Value.PushWaitDependencyTimeoutMinutesPerDependency);
+            var timeoutMinutes = totalDeps * minutesPerDep;
+            var totalTimeout = TimeSpan.FromMinutes(timeoutMinutes);
+            using var timeoutCts = new CancellationTokenSource(totalTimeout);
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+            var linkedToken = linkedCts.Token;
+            var deadline = DateTime.UtcNow + totalTimeout;
+            var foundByIndex = new bool[totalDeps];
+            var foundLock = new object();
+            var ciRunWatch = ciProvider.CreatePushRunWatch(_overlayCommandTerminalService);
+            int getFoundCount()
+            {
+                lock (foundLock) { return foundByIndex.Count(x => x); }
+            }
+            var lastPollUtc = DateTime.MinValue;
+
+            // Prefetch all connectors for this level once to avoid concurrent DbContext reads in the polling loop
+            var connectorByIdForLevel = new Dictionary<int, Connector?>();
+            foreach (var cid in requiredForLevel.Select(r => r.MatchedConnectorId!.Value).Distinct())
+                connectorByIdForLevel[cid] = await _connectorRepository!.GetByIdAsync(cid);
+
+            void AbortPackageWaitTimeout()
+            {
+                _logger.LogWarning("[PushOrchestrator {RunId}] Push wait: timed out after {TotalMinutes:F1} min. Found {Found} of {Total}.", runId, totalTimeout.TotalMinutes, getFoundCount(), totalDeps);
+                PackageWaitTimeout.Report(level, onLevelError, getFoundCount(), totalDeps, totalTimeout);
+            }
+
+            try
+            {
+                while (getFoundCount() < totalDeps)
+                {
+                if (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+                {
+                    AbortPackageWaitTimeout();
+                    return false;
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+                var remaining = deadline - DateTime.UtcNow;
+                if (remaining <= TimeSpan.Zero)
+                {
+                    AbortPackageWaitTimeout();
+                    return false;
+                }
+                var found = getFoundCount();
+                var line1 = found == 0
+                    ? $"Waiting for {totalDeps} {(totalDeps == 1 ? "package" : "packages")}..."
+                    : $"Found {found} of {totalDeps} {(totalDeps == 1 ? "package" : "packages")}";
+                var totalSec = (int)remaining.TotalSeconds;
+                var mm = totalSec / 60;
+                var ss = totalSec % 60;
+                levelProgress?.Invoke($"{line1}\n{mm:D2}:{ss:D2}");
+
+                await ciRunWatch.TickAsync(pushedRepos, links, linkedToken);
+
+                if ((DateTime.UtcNow - lastPollUtc).TotalSeconds >= 2)
+                {
+                    lastPollUtc = DateTime.UtcNow;
+                    int[] toCheck;
+                    lock (foundLock)
+                    {
+                        toCheck = Enumerable.Range(0, totalDeps).Where(i => !foundByIndex[i]).ToArray();
+                    }
+                    if (toCheck.Length > 0)
+                    {
+                        var prevFound = getFoundCount();
+                        foreach (var chunk in toCheck.Chunk(_maxConcurrent))
+                        {
+                            await Task.WhenAll(chunk.Select(async i =>
+                            {
+                                var req = requiredForLevel[i];
+                                connectorByIdForLevel.TryGetValue(req.MatchedConnectorId!.Value, out var connector);
+                                if (connector == null)
+                                {
+                                    _logger.LogWarning("[PushOrchestrator {RunId}] Push wait: package {PackageId} {Version} has no connector (MatchedConnectorId={ConnectorId}).", runId, req.PackageId, req.Version, req.MatchedConnectorId);
+                                    return;
+                                }
+                                var exists = await _nuGetService.PackageVersionExistsAsync(connector, req.PackageId, req.Version, linkedToken);
+                                _logger.LogInformation("[PushOrchestrator {RunId}] Push wait: checking {PackageId} {Version} in registry {ConnectorName} (Id={ConnectorId}) -> {Result}",
+                                    runId, req.PackageId, req.Version, connector.ConnectorName, connector.ConnectorId, exists ? "found" : "not found");
+                                if (exists)
+                                {
+                                    lock (foundLock)
+                                        foundByIndex[i] = true;
+                                }
+                            }));
+                        }
+                        var nowFound = getFoundCount();
+                        if (nowFound > prevFound)
+                        {
+                            var stillWaiting = totalDeps - nowFound;
+                            if (stillWaiting > 0)
+                                deadline = DateTime.UtcNow + TimeSpan.FromMinutes(stillWaiting * minutesPerDep);
+                        }
+                        if (nowFound >= totalDeps)
+                            _logger.LogInformation("[PushOrchestrator {RunId}] Push wait: all {Total} package(s) found for level {Level}, proceeding.", runId, totalDeps, level);
+                    }
+                }
+
+                if (getFoundCount() >= totalDeps)
+                    break;
+                await Task.Delay(TimeSpan.FromSeconds(1), linkedToken);
+            }
+            }
+            catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+            {
+                AbortPackageWaitTimeout();
+                return false;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex, "[PushOrchestrator {RunId}] Push wait: level {Level} failed.", runId, level);
+                onLevelError?.Invoke(level, ex.Message);
+                return false;
+            }
+        }
+
+        levelProgress?.Invoke($"Pushing {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")}...");
+        IReadOnlyList<(int RepoId, string Error)> levelFailures;
+        try
+        {
+            levelFailures = await PushReposAsync(
+                workspace,
+                contextId,
+                reposAtLevel,
+                bearerByRepoId,
+                levelProgress,
+                onRepoError,
+                onAppSideComplete: isLastLevel ? null : run.OnAppSideComplete,
+                refreshVersionAfterPush: true,
+                cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: push failed.", runId, workspaceId, level);
+            onLevelError?.Invoke(level, ex.Message);
+            return false;
+        }
+        await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, contextId, reposAtLevel, cancellationToken);
+        if (levelFailures.Count > 0)
+        {
+            _logger.LogWarning(
+                "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: aborting synchronized push after {FailedCount} repository failure(s).",
+                runId, workspaceId, level, levelFailures.Count);
+            return false;
+        }
+
+        if (restorePackages)
+        {
+            levelProgress?.Invoke("Restoring packages...");
+            try
+            {
+                var restoreFailed = run.RestoreOnlySyncedRepos || syncedRepoIds is { Count: > 0 }
+                    ? await RestoreUpdatedReposAtLevelAsync(workspaceId, workspace.Name, workspaceRoot, workspaceRepositoryName, reposAtLevel, syncedRepoIds ?? new HashSet<int>(), onRepoError, cancellationToken)
+                    : await TryRestoreReposAtLevelAsync(workspaceId, workspace.Name, workspaceRoot, workspaceRepositoryName, reposAtLevel, onRepoError, cancellationToken);
+                if (restoreFailed)
+                    return false;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex, "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: restore failed.", runId, workspaceId, level);
+                onLevelError?.Invoke(level, ex.Message);
+                return false;
+            }
+        }
+
+        pushedRepos.AddRange(reposAtLevel);
+
+        _logger.LogInformation(
+            "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: completed. Pushed {PushedCount} repo(s).",
+            runId, workspaceId, level, reposAtLevel.Count);
+
+        return true;
+    }
+
+    /// <summary>
+    /// Whether <see cref="RunPushLaneAsync"/> can run alongside an update for this context: the registries must be
+    /// reachable and every package a repository (up to <paramref name="maxLevel"/>) requires must already be matched
+    /// to a registry. Syncs the registries first, exactly as the sequential push does before it checks the same
+    /// mappings. Matching is by package id only, so the answer does not change when the update bumps versions.
+    /// When false nothing has been changed, and the caller should run the sequential update-then-push instead.
+    /// </summary>
+    public async Task<bool> CanRunPushLaneAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        int? maxLevel,
+        CancellationToken cancellationToken)
+    {
+        if (_nuGetService == null || _connectorRepository == null)
+            return false;
+
+        async Task<IReadOnlyList<PushRepoPayload>> LoadPayloadAsync()
+        {
+            var all = await _workspaceDependencyService.GetPushPlanPayloadAsync(workspaceId, contextId.Value, cancellationToken);
+            return maxLevel.HasValue ? all.Where(p => (p.DependencyLevel ?? 0) <= maxLevel.Value).ToList() : all;
+        }
+
+        var payload = await LoadPayloadAsync();
+        var requiredPackageIds = payload
+            .SelectMany(p => p.RequiredPackages)
+            .Select(r => r.PackageId?.Trim())
+            .Where(id => !string.IsNullOrEmpty(id))
+            .Cast<string>()
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (requiredPackageIds.Count > 0 && _packageRegistrySyncService != null)
+        {
+            await _packageRegistrySyncService.SyncRegistriesForPackageIdsAsync(workspaceId, requiredPackageIds, cancellationToken);
+            payload = await LoadPayloadAsync();
+        }
+
+        return payload.All(p => p.RequiredPackages.All(r => r.MatchedConnectorId.HasValue));
+    }
+
+    /// <summary>
+    /// The push half of a pipelined update-and-push. Reads each dependency level the update finishes from
+    /// <paramref name="completedLevels"/> and pushes it as soon as it arrives, so a level's packages are building
+    /// while the update is still committing higher levels. Per level it re-reads the push plan (a level's required
+    /// package versions are only final once the update has committed it), pushes the repositories of that level that
+    /// have unpushed commits or no upstream, waits for the packages the next levels need, and restores the repositories
+    /// the update rewrote. Reports failures through the callbacks and then stops pushing, never throwing for them;
+    /// levels the update has not finished (or never will, after a failure) are simply never pushed.
+    /// Returns the number of repositories pushed.
+    /// </summary>
+    public async Task<int> RunPushLaneAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        ChannelReader<DependencyLevelCompletion> completedLevels,
+        Action<string>? onProgressMessage = null,
+        Action<int, string>? onRepoError = null,
+        Action<int, string>? onLevelError = null,
+        bool restorePackages = true,
+        string? runId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_workerBridge.IsWorkerConnected)
+            throw new InvalidOperationException("Worker not connected. Start the GrayMoon Worker to push.");
+
+        var workspace = await _workspaceRepository.GetByIdAsync(workspaceId)
+            ?? throw new InvalidOperationException($"Workspace {workspaceId} not found.");
+
+        var workerArgs = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var configuredRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        await _workspaceService.CreateDirectoryAsync(workspace.Name, configuredRoot, cancellationToken);
+
+        var links = await _dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Include(wr => wr.Repository)
+            .ThenInclude(r => r!.Connector)
+            .Where(wr => wr.WorkspaceId == workspaceId)
+            .ToListAsync(cancellationToken);
+        var bearerByRepoId = links
+            .Where(wr => wr.Repository != null)
+            .ToDictionary(
+                wr => wr.RepositoryId,
+                wr => ConnectorHelpers.UnprotectToken(wr.Repository!.Connector?.UserToken));
+        var tagPinnedRepoIds = links
+            .Where(wr => !string.IsNullOrWhiteSpace(wr.CheckedOutTag))
+            .Select(wr => wr.RepositoryId)
+            .ToHashSet();
+        var ciProvider = _ciProviderResolver == null
+            ? NoCiProvider.Instance
+            : await _ciProviderResolver.GetForWorkspaceAsync(workspaceId, cancellationToken);
+
+        // Grows as the update reports levels; restore only touches repositories whose csproj the update rewrote.
+        var syncedRepoIds = new HashSet<int>();
+        var run = new SynchronizedPushRun(
+            workspace,
+            contextId,
+            workerArgs.WorkspaceRoot,
+            workerArgs.WorkspaceRepositoryName,
+            links,
+            bearerByRepoId,
+            ciProvider,
+            restorePackages,
+            syncedRepoIds,
+            RestoreOnlySyncedRepos: true,
+            runId,
+            onProgressMessage,
+            onRepoError,
+            onLevelError,
+            OnAppSideComplete: null);
+
+        _logger.LogInformation("[PushOrchestrator {RunId}] Workspace {WorkspaceId}: push lane starting.", runId, workspaceId);
+        await foreach (var done in completedLevels.ReadAllAsync(cancellationToken))
+        {
+            syncedRepoIds.UnionWith(done.SyncedRepoIds);
+
+            var payload = await _workspaceDependencyService.GetPushPlanPayloadAsync(workspaceId, contextId.Value, cancellationToken);
+            var needingPush = await _workspaceRepository.GetRepositoryIdsNeedingPushAsync(workspaceId, contextId.Value, done.RepoIds, cancellationToken);
+            var reposAtLevel = payload
+                .Where(p => done.RepoIds.Contains(p.RepoId)
+                    && !tagPinnedRepoIds.Contains(p.RepoId)
+                    && (needingPush.Contains(p.RepoId) || done.CommittedRepoIds.Contains(p.RepoId)))
+                .ToList();
+            _logger.LogInformation(
+                "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: push lane received Level {Level}: {PushCount} of {RepoCount} repo(s) to push: [{RepoIds}]",
+                runId, workspaceId, done.Level, reposAtLevel.Count, done.RepoIds.Count, string.Join(",", reposAtLevel.Select(r => r.RepoId)));
+            if (reposAtLevel.Count == 0)
+                continue;
+
+            var unmatchedPackages = reposAtLevel
+                .SelectMany(p => p.RequiredPackages)
+                .Where(r => !r.MatchedConnectorId.HasValue)
+                .DistinctBy(r => (r.PackageId, r.Version))
+                .Count();
+            if (unmatchedPackages > 0)
+            {
+                _logger.LogWarning("[PushOrchestrator {RunId}] Push lane: Level {Level} has {Count} required package mapping(s) with no registry.", runId, done.Level, unmatchedPackages);
+                onLevelError?.Invoke(done.Level, $"Synchronized push could not continue: {unmatchedPackages} required package mapping(s) have no registry. Check the NuGet connector configuration and token.");
+                return run.PushedRepos.Count;
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!await PushLevelAsync(run, done.Level, reposAtLevel, isLastLevel: false, cancellationToken))
+                return run.PushedRepos.Count;
+        }
+
+        if (run.PushedRepos.Count > 0)
+            await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, contextId, run.PushedRepos, cancellationToken);
+
+        _logger.LogInformation(
+            "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: push lane finished. TotalPushed={TotalPushed}",
+            runId, workspaceId, run.PushedRepos.Count);
+        return run.PushedRepos.Count;
     }
 
     /// <summary>Pushed a single repository's current branch with upstream (-u). Used when the user clicks the "not-upstreamed" badge.</summary>

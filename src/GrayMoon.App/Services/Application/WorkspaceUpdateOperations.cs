@@ -5,6 +5,7 @@ namespace GrayMoon.App.Services.Application;
 
 public sealed class WorkspaceUpdateOperations(
     WorkspaceUpdateHandler updateHandler,
+    UpdateAndPushOrchestrator updateAndPushOrchestrator,
     WorkspaceGitService workspaceGitService) : IWorkspaceUpdateOperations
 {
     public Task<(IReadOnlyList<SyncDependenciesRepoPayload> Payload, bool IsMultiLevel)> GetUpdatePlanAsync(
@@ -38,6 +39,31 @@ public sealed class WorkspaceUpdateOperations(
             includeDepsInCommitMessage: includeDepsInCommitMessage,
             maxLevel: maxLevel,
             runId: runId);
+
+    public Task<UpdateAndPushResult> UpdateAndPushAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        CancellationToken cancellationToken,
+        Action<string> reportOverlay,
+        Action<int, string> setRepositoryError,
+        Action<int, string> setLevelError,
+        string? commitMessage = null,
+        bool includeDepsInCommitMessage = true,
+        int? maxLevel = null,
+        bool restorePackages = true,
+        string? runId = null)
+        => updateAndPushOrchestrator.RunAsync(
+            workspaceId,
+            contextId,
+            cancellationToken,
+            reportOverlay,
+            setRepositoryError,
+            setLevelError,
+            commitMessage,
+            includeDepsInCommitMessage,
+            maxLevel,
+            restorePackages,
+            runId);
 
     public Task<int> RestorePackagesAsync(
         int workspaceId,

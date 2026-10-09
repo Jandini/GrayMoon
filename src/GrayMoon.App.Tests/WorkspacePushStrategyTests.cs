@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Channels;
 using GrayMoon.Abstractions.Notifications;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
@@ -289,6 +290,157 @@ public sealed class WorkspacePushStrategyTests
         Assert.Equal(JsonValueKind.Null, calls[1].GetProperty("capabilities").ValueKind);
     }
 
+    [Fact]
+    public async Task Push_lane_pushes_level_one_as_soon_as_it_arrives_then_level_two_after_its_package()
+    {
+        var nuget = new RecordingNuGetHandler { PublishedVersions = ["0.9.0"] };
+        await using var ctx = await CreateContextAsync(nuget);
+        await ctx.UseDotNetDependencyProfileAsync();
+        var graph = await SeedDependencyGraphAsync(ctx, matchConnector: true);
+        RespondPushCommands(ctx);
+        var channel = Channel.CreateUnbounded<DependencyLevelCompletion>();
+
+        var lane = RunPushLaneAsync(ctx, channel.Reader);
+
+        // Level 1 had no update commit of its own (the push-pending commit predates the run) and is still pushed.
+        channel.Writer.TryWrite(new DependencyLevelCompletion(1, Ids(graph.ProducerId), Ids(), Ids()));
+        await WaitUntilAsync(() => PushCalls(ctx).Count == 1);
+        Assert.Equal(graph.ProducerId, Assert.Single(PushCalls(ctx)).GetProperty("repositoryId").GetInt32());
+        Assert.False(lane.IsCompleted);
+
+        channel.Writer.TryWrite(new DependencyLevelCompletion(2, Ids(graph.ConsumerId), Ids(graph.ConsumerId), Ids(graph.ConsumerId)));
+        channel.Writer.TryComplete();
+        var pushed = await lane.WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.Equal(2, pushed.Count);
+        Assert.Equal(new[] { graph.ProducerId, graph.ConsumerId }, PushCalls(ctx).Select(c => c.GetProperty("repositoryId").GetInt32()).ToList());
+        Assert.Empty(pushed.RepoErrors);
+        Assert.Empty(pushed.LevelErrors);
+        var restore = Assert.Single(ctx.WorkerBridge.Calls, c => c.Command == "DotnetRestore");
+        Assert.Equal(ConsumerName, Args(restore.Args).GetProperty("repositoryName").GetString());
+    }
+
+    [Fact]
+    public async Task Push_lane_skips_a_level_with_nothing_to_push()
+    {
+        await using var ctx = await CreateContextAsync(new RecordingNuGetHandler { PublishedVersions = ["0.9.0"] });
+        await ctx.UseDotNetDependencyProfileAsync();
+        var graph = await SeedDependencyGraphAsync(ctx, matchConnector: true);
+        RespondPushCommands(ctx);
+        var channel = Channel.CreateUnbounded<DependencyLevelCompletion>();
+
+        // A level the update walked without committing anything, whose repositories have no outgoing commits.
+        await using (var db = await ctx.Resolve<IDbContextFactory<AppDbContext>>().CreateDbContextAsync())
+        {
+            var link = await db.WorkspaceRepositories.SingleAsync(l => l.RepositoryId == graph.ConsumerId);
+            link.OutgoingCommits = 0;
+            await db.SaveChangesAsync();
+        }
+        channel.Writer.TryWrite(new DependencyLevelCompletion(2, Ids(graph.ConsumerId), Ids(), Ids()));
+        channel.Writer.TryComplete();
+
+        var pushed = await RunPushLaneAsync(ctx, channel.Reader).WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.Equal(0, pushed.Count);
+        Assert.Empty(PushCalls(ctx));
+    }
+
+    [Fact]
+    public async Task Push_lane_reports_a_level_error_and_stops_when_a_required_package_has_no_registry()
+    {
+        await using var ctx = await CreateContextAsync(new RecordingNuGetHandler());
+        await ctx.UseDotNetDependencyProfileAsync();
+        var graph = await SeedDependencyGraphAsync(ctx, matchConnector: false);
+        RespondPushCommands(ctx);
+        var channel = Channel.CreateUnbounded<DependencyLevelCompletion>();
+        channel.Writer.TryWrite(new DependencyLevelCompletion(1, Ids(graph.ProducerId), Ids(), Ids()));
+        channel.Writer.TryWrite(new DependencyLevelCompletion(2, Ids(graph.ConsumerId), Ids(graph.ConsumerId), Ids(graph.ConsumerId)));
+        channel.Writer.TryComplete();
+
+        var pushed = await RunPushLaneAsync(ctx, channel.Reader).WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.Equal(new[] { graph.ProducerId }, PushCalls(ctx).Select(c => c.GetProperty("repositoryId").GetInt32()).ToList());
+        Assert.Equal(1, pushed.Count);
+        Assert.Contains(2, pushed.LevelErrors.Keys);
+    }
+
+    [Fact]
+    public async Task Push_lane_is_possible_only_when_every_required_package_can_be_matched_to_a_registry()
+    {
+        await using (var published = await CreateContextAsync(new RecordingNuGetHandler { PublishedVersions = ["0.9.0"] }))
+        {
+            await published.UseDotNetDependencyProfileAsync();
+            await SeedDependencyGraphAsync(published, matchConnector: false);
+            Assert.True(await CanRunPushLaneAsync(published));
+        }
+
+        await using var unpublished = await CreateContextAsync(new RecordingNuGetHandler());
+        await unpublished.UseDotNetDependencyProfileAsync();
+        await SeedDependencyGraphAsync(unpublished, matchConnector: false);
+        Assert.False(await CanRunPushLaneAsync(unpublished));
+    }
+
+    [Fact]
+    public async Task Update_and_push_falls_back_without_touching_anything_when_the_push_lane_is_not_possible()
+    {
+        await using var ctx = await CreateContextAsync(new RecordingNuGetHandler());
+        await ctx.UseDotNetDependencyProfileAsync();
+        await SeedDependencyGraphAsync(ctx, matchConnector: false);
+        RespondPushCommands(ctx);
+        var special = await ctx.GetSpecialContextIdAsync();
+        var overlay = new ConcurrentQueue<string>();
+
+        UpdateAndPushResult result;
+        await using (var scope = ctx.CreateScope())
+        {
+            result = await scope.ServiceProvider.GetRequiredService<UpdateAndPushOrchestrator>().RunAsync(
+                ctx.WorkspaceId, special, CancellationToken.None, overlay.Enqueue, (_, _) => { }, (_, _) => { });
+        }
+
+        Assert.False(result.Pipelined);
+        Assert.Empty(overlay);
+        Assert.Empty(PushCalls(ctx));
+        Assert.DoesNotContain(ctx.WorkerBridge.Calls, c => c.Command is "SyncRepositoryDependencies" or "RefreshRepositoryProjects");
+    }
+
+    private sealed record LaneResult(int Count, IReadOnlyDictionary<int, string> RepoErrors, IReadOnlyDictionary<int, string> LevelErrors);
+
+    private static HashSet<int> Ids(params int[] ids) => ids.ToHashSet();
+
+    private static async Task<LaneResult> RunPushLaneAsync(SyncStateTestContext ctx, ChannelReader<DependencyLevelCompletion> levels)
+    {
+        var special = await ctx.GetSpecialContextIdAsync();
+        var repoErrors = new ConcurrentDictionary<int, string>();
+        var levelErrors = new ConcurrentDictionary<int, string>();
+        await using var scope = ctx.CreateScope();
+        var count = await scope.ServiceProvider.GetRequiredService<WorkspacePushService>().RunPushLaneAsync(
+            ctx.WorkspaceId,
+            special,
+            levels,
+            onProgressMessage: null,
+            onRepoError: (id, message) => repoErrors[id] = message,
+            onLevelError: (level, message) => levelErrors[level] = message);
+        return new LaneResult(count, repoErrors, levelErrors);
+    }
+
+    private static async Task<bool> CanRunPushLaneAsync(SyncStateTestContext ctx)
+    {
+        var special = await ctx.GetSpecialContextIdAsync();
+        await using var scope = ctx.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<WorkspacePushService>()
+            .CanRunPushLaneAsync(ctx.WorkspaceId, special, maxLevel: null, CancellationToken.None);
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(15);
+        while (!condition())
+        {
+            Assert.True(DateTime.UtcNow < deadline, "Timed out waiting for the condition.");
+            await Task.Delay(25);
+        }
+    }
+
     private static Task<SyncStateTestContext> CreateContextAsync(RecordingNuGetHandler nuget)
         => SyncStateTestContext.CreateAsync(configureServices: services =>
         {
@@ -304,6 +456,7 @@ public sealed class WorkspacePushStrategyTests
             services.AddScoped<IWorkspacePushOperations, WorkspacePushOperations>();
             services.AddScoped<WorkspaceUndoPushHandler>();
             services.AddScoped<DependencyUpdateOrchestrator>();
+            services.AddScoped<UpdateAndPushOrchestrator>();
             services.AddScoped<IGitChangesWorkerClient, GitChangesWorkerClient>();
         });
 
