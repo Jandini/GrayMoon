@@ -10,16 +10,21 @@
     <div class="workspace-repos-title-row">
         <h2 class="workspace-repos-title">Changes</h2>
         <div class="text-muted mb-0 workspace-repos-subtitle git-changes-header__summary">
-            <WorkspaceSubtitleName Name="@WorkspaceName" />
-            @if (View == null || View.Repositories.Count == 0)
+            <span class="git-changes-header__lead">
+                <WorkspaceSubtitleName Name="@WorkspaceName" />
+                @if (View == null || View.Repositories.Count == 0)
+                {
+                    <span class="git-changes-header__summary-item">No changed repositories.</span>
+                }
+                else
+                {
+                    <span class="git-changes-header__summary-item">
+                        @ChangedRepoCount of @RepoCount @RepoCountWord
+                    </span>
+                }
+            </span>
+            @if (View != null && View.Repositories.Count > 0)
             {
-                <span class="git-changes-header__summary-item">No changed repositories.</span>
-            }
-            else
-            {
-                <span class="git-changes-header__summary-item">
-                    @ChangedRepoCount of @RepoCount @RepoCountWord
-                </span>
                 <span class="git-changes-header__summary-item @(StagedCount > 0 ? "git-changes-header__summary-item--active" : null)">
                     <i class="bi bi-pencil-square git-changes-header__summary-icon" aria-hidden="true"></i>
                     @StagedCount staged

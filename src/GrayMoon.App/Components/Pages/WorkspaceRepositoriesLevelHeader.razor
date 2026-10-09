@@ -20,7 +20,7 @@
                   tabindex="0"
                   aria-haspopup="true"
                   aria-label="Level actions">
-                <span class="dependency-level-count-num">@DisplayRepositoryCount</span> @(DisplayRepositoryCount == 1 ? "repository" : "repositories")<i class="bi bi-chevron-down dependency-level-count-caret @(HasActionablePr ? "dependency-level-count-caret--pr-pending" : "")" aria-hidden="true"></i>
+                <span class="dependency-level-count-num">@DisplayRepositoryCount</span> @(DisplayRepositoryCount == 1 ? "repository" : "repositories")<i class="bi bi-chevron-down dependency-level-count-caret" aria-hidden="true"></i>
                 <div class="gm-menu-panel level-actions-menu">
                     <div class="gm-menu-title">@Title</div>
                     <div class="gm-menu-items @(ActionsDisabled ? "gm-menu-items--disabled" : "")">
@@ -119,8 +119,6 @@
     [Parameter] public bool HasSyncCommits { get; set; }
 
     private string Title => TitleText ?? (LevelKey == null ? "No dependencies" : $"Level {LevelKey}");
-
-    private bool HasActionablePr => HasCreatablePr || HasMergedPr || HasSyncCommits;
 
     private int DisplayRepositoryCount => RepositoryCount > 0 ? RepositoryCount : (Group?.Count() ?? 0);
 

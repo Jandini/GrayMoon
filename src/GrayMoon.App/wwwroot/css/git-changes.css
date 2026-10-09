@@ -17,9 +17,10 @@
     gap: 1.1rem;
 }
 
-/* Flex gap already spaces summary items; don't stack margin from the shared subtitle name rule. */
-.git-changes-header__summary .workspace-subtitle-name {
-    margin-inline-end: 0;
+/* Name and repository count use the same inline subtitle spacing as other
+   workspace pages (shared 0.5em margin). Flex gap still separates later items. */
+.git-changes-header__lead {
+    white-space: nowrap;
 }
 
 .git-changes-header__summary .git-changes-tree__status {

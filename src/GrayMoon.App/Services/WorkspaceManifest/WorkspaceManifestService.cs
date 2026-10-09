@@ -95,10 +95,6 @@ public sealed class WorkspaceManifestService(
 
             var manifest = await BuildFromDatabaseAsync(workspaceId, cancellationToken);
             var content = Serialize(manifest);
-            var existing = await WorkspaceRepositoryFileAccess.ReadAsync(
-                workerBridge, args, WorkspaceRepositoryFileAccess.ManifestFilePath, cancellationToken);
-            if (existing.Found)
-                content = WorkspaceManifestRecentTools.Preserve(content, existing.Content);
             return await WorkspaceRepositoryFileAccess.WriteAsync(
                 workerBridge, args, WorkspaceRepositoryFileAccess.ManifestFilePath, content, cancellationToken);
         }
