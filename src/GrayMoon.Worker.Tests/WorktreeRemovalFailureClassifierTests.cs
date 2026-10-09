@@ -36,17 +36,4 @@ public sealed class WorktreeRemovalFailureClassifierTests
     {
         Assert.Equal(WorktreeRemovalFailureKind.None, WorktreeRemovalFailureClassifier.Classify(null, null));
     }
-
-    [Theory]
-    [InlineData(WorktreeRemovalFailureKind.PathInUse, true)]
-    [InlineData(WorktreeRemovalFailureKind.AccessDenied, true)]
-    [InlineData(WorktreeRemovalFailureKind.None, false)]
-    [InlineData(WorktreeRemovalFailureKind.GitRefusal, false)]
-    [InlineData(WorktreeRemovalFailureKind.UncommittedChanges, false)]
-    [InlineData(WorktreeRemovalFailureKind.WorktreeLocked, false)]
-    [InlineData(WorktreeRemovalFailureKind.Unknown, false)]
-    public void Only_in_use_and_access_denied_warrant_lock_inspection(WorktreeRemovalFailureKind kind, bool expected)
-    {
-        Assert.Equal(expected, WorktreeRemovalFailureClassifier.WarrantsLockInspection(kind));
-    }
 }

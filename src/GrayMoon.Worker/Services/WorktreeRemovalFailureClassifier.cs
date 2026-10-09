@@ -1,6 +1,6 @@
 namespace GrayMoon.Worker.Services;
 
-/// <summary>Why a worktree removal did not finish. Only <see cref="PathInUse"/> and <see cref="AccessDenied"/> warrant lock inspection.</summary>
+/// <summary>Why a worktree removal did not finish, reported to the App as <c>failureKind</c>.</summary>
 public enum WorktreeRemovalFailureKind
 {
     /// <summary>No failure.</summary>
@@ -92,10 +92,6 @@ public static class WorktreeRemovalFailureClassifier
 
         return WorktreeRemovalFailureKind.Unknown;
     }
-
-    /// <summary>True when looking for blocking processes can explain the failure.</summary>
-    public static bool WarrantsLockInspection(WorktreeRemovalFailureKind kind) =>
-        kind is WorktreeRemovalFailureKind.PathInUse or WorktreeRemovalFailureKind.AccessDenied;
 
     private static bool ContainsAny(string text, string[] markers)
     {

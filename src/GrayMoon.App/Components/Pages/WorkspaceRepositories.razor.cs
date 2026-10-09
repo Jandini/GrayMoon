@@ -36,6 +36,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     [Inject] private IWorkspaceFeatureOperations FeatureOperations { get; set; } = default!;
     [Inject] private WorkspaceContextNavigationService ContextNavigation { get; set; } = default!;
     [Inject] private IWorkspaceCapabilitiesResolver CapabilitiesResolver { get; set; } = default!;
+    [Inject] private IFeatureFolderCleanupService FeatureFolderCleanup { get; set; } = default!;
 
     /// <summary>Keeps modal deep-links on the Feature currently being viewed (Workspace URLs stay bare).</summary>
     private string BuildContextScopedUrl(string relativePathWithoutQuery)
@@ -424,6 +425,8 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
             }
 
             _loadedWorkspaceId = WorkspaceId;
+            // Silent background cleanup of folders left by earlier Remove Feature runs (throttled per Workspace).
+            FeatureFolderCleanup.RequestSweep(WorkspaceId);
             errorMessage = null;
             hasLoadedOnce = false;
             // Drop the previous workspace name so the selector shows a placeholder until the new
@@ -510,7 +513,9 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         _fetchRepositoriesCts?.Cancel();
         _fetchRepositoriesCts?.Dispose();
         _queryLoader.Dispose();
-        _reloadGate.Dispose();
+        // _reloadGate is deliberately not disposed: a load or refresh still in flight when the page is
+        // torn down (navigation, circuit crash) must still be able to Wait/Release it. SemaphoreSlim
+        // holds nothing unmanaged unless AvailableWaitHandle is used.
         _virtualScrollDotNetRef?.Dispose();
         _virtualScrollDotNetRef = null;
     }

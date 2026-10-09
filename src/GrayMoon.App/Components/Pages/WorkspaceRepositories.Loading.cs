@@ -64,6 +64,10 @@ public sealed partial class WorkspaceRepositories
             await WriteScrollTopAsync(0);
         }
 
+        if (_disposed)
+        {
+            return;
+        }
         await _reloadGate.WaitAsync();
         var generation = 0;
         try

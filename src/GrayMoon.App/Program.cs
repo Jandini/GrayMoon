@@ -142,6 +142,9 @@ try
     builder.Services.AddScoped<IWorkspaceFeatureOperations, WorkspaceFeatureOperations>();
     builder.Services.AddSingleton<IWorkspaceFeatureReconciler, WorkspaceFeatureReconciler>();
     builder.Services.AddHostedService(sp => (WorkspaceFeatureReconciler)sp.GetRequiredService<IWorkspaceFeatureReconciler>());
+    builder.Services.AddSingleton<FeatureFolderCleanupService>();
+    builder.Services.AddSingleton<IFeatureFolderCleanupService>(sp => sp.GetRequiredService<FeatureFolderCleanupService>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<FeatureFolderCleanupService>());
     builder.Services.AddScoped<WorkspaceContextNavigationService>();
     builder.Services.AddScoped<IWorkspaceExternalWorktreeOperations, WorkspaceExternalWorktreeOperations>();
     builder.Services.AddScoped<IWorkspaceNativeLaunchService, WorkspaceNativeLaunchService>();

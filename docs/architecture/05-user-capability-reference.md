@@ -899,6 +899,8 @@ delete the local branch even if it has unpushed commits
 
 Removal runs `git worktree remove` and deletes the local Feature branch per repository, then refreshes the special Workspace context without checking out, switching branch, or pulling. Any failure leaves the Feature in NeedsRepair with its metadata kept.
 
+GrayMoon never looks for or ends the programs using a Feature. When files are still in use, the Feature is removed anyway and its folder is left with a `GRAYMOON-PENDING-DELETE.md` marker (readable by a person or an AI agent working there); the dialog shows this as information, not a warning. The folder is deleted silently later: when the Worker connects (every GrayMoon start), when the Workspace is opened (at most every 15 minutes), or before a new Feature reuses the name. Only marked folders under the Workspace's managed Feature storage root are deleted, never one that holds a Git repository, a still-registered worktree, or a Feature that exists.
+
 ### Branch ownership
 
 Switch Branch marks branches that are checked out by a Feature or another worktree, and refuses to delete a Feature-owned branch (use Remove Feature instead).
@@ -920,6 +922,7 @@ WorkspaceService.ResolveFeatureStorageRootPathAsync
 WorkspaceBranchOccupancyService
 IWorkspaceExternalWorktreeOperations
 Worker GetHeadCommits / CreateGitWorktree / RemoveGitWorktree / ListGitWorktrees
+FeatureFolderCleanupService -> Worker CleanupFeatureFolder / SweepPendingFeatureFolders (FeatureFolderCleaner)
 ```
 
 ---

@@ -32,7 +32,7 @@ public sealed class RemoveWorktreeResidueTests : IDisposable
         _worktrees = new GitWorktreeService(runner, _reader, NullLogger<GitWorktreeService>.Instance);
         _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, _reader, new LibGit2SharpGitIgnoreService());
         _create = new CreateGitWorktreeCommand(_git, _worktrees);
-        _remove = new RemoveGitWorktreeCommand(_worktrees, new UnsupportedFileLockInspector(), NullLogger<RemoveGitWorktreeCommand>.Instance);
+        _remove = new RemoveGitWorktreeCommand(_worktrees);
     }
 
     public void Dispose()
