@@ -235,16 +235,17 @@
                                     {
                                         <div class="btn-group git-diff-chrome__group" role="group" aria-label="Markdown preview mode">
                                             <button type="button"
-                                                    class="btn btn-sm text-nowrap @(_mdPreviewMode == MarkdownProsePreviewMode.Changes ? "btn-secondary" : "btn-outline-secondary")"
+                                                    class="btn btn-sm text-nowrap @(EffectiveMdPreviewMode == MarkdownProsePreviewMode.Changes ? "btn-secondary" : "btn-outline-secondary")"
                                                     title="Rendered document with insertions and deletions highlighted"
+                                                    disabled="@IsMdChangesDisabled"
                                                     @onclick="() => SetMdPreviewModeAsync(MarkdownProsePreviewMode.Changes)">Changes</button>
                                             <button type="button"
-                                                    class="btn btn-sm text-nowrap @(_mdPreviewMode == MarkdownProsePreviewMode.After ? "btn-secondary" : "btn-outline-secondary")"
+                                                    class="btn btn-sm text-nowrap @(EffectiveMdPreviewMode == MarkdownProsePreviewMode.After ? "btn-secondary" : "btn-outline-secondary")"
                                                     title="Rendered result after changes"
                                                     disabled="@IsMdAfterDisabled"
                                                     @onclick="() => SetMdPreviewModeAsync(MarkdownProsePreviewMode.After)">After</button>
                                             <button type="button"
-                                                    class="btn btn-sm text-nowrap @(_mdPreviewMode == MarkdownProsePreviewMode.Before ? "btn-secondary" : "btn-outline-secondary")"
+                                                    class="btn btn-sm text-nowrap @(EffectiveMdPreviewMode == MarkdownProsePreviewMode.Before ? "btn-secondary" : "btn-outline-secondary")"
                                                     title="Rendered document before changes"
                                                     disabled="@IsMdBeforeDisabled"
                                                     @onclick="() => SetMdPreviewModeAsync(MarkdownProsePreviewMode.Before)">Before</button>
