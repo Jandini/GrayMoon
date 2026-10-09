@@ -4,6 +4,7 @@ using GrayMoon.App.Data;
 using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
+using GrayMoon.App.Services.Workspaces;
 using GrayMoon.App.Services.WorkspaceManifest;
 using GrayMoon.Application.Features;
 using Microsoft.AspNetCore.SignalR;
@@ -55,7 +56,8 @@ public sealed class SyncCommandHandler(
         {
             SyncStatus = SyncStatusWrite.Derive,
             ErrorMessageForcesInSync = true,
-            ReconcilePullRequest = true,
+            // A just-created Feature worktree is on a new local branch: it has no pull request to find.
+            ReconcilePullRequest = !n.FreshWorktree,
         });
 
         var branchWriter = scope.ServiceProvider.GetRequiredService<RepositoryBranchWriter>();
@@ -88,7 +90,12 @@ public sealed class SyncCommandHandler(
 
         var depsSw = Stopwatch.StartNew();
         var recomputeScope = scope.ServiceProvider.GetRequiredService<WorkspaceStateRecomputeScope>();
-        await recomputeScope.RecomputeAsync(n.WorkspaceId, contextId.Value);
+        // Create Feature releases a sync per repository at once: share one recompute instead of running N in a row.
+        var coalescer = scope.ServiceProvider.GetService<SyncRecomputeCoalescer>();
+        if (coalescer is null)
+            await recomputeScope.RecomputeAsync(n.WorkspaceId, contextId.Value);
+        else
+            await coalescer.RunAsync($"{n.WorkspaceId}:{contextId.Value.Value}", () => recomputeScope.RecomputeAsync(n.WorkspaceId, contextId.Value));
         logger.LogDebug(
             "SyncCommand dependency stats persisted in {ElapsedMs}ms for workspace={WorkspaceId}, repo={RepositoryId}",
             depsSw.ElapsedMilliseconds, n.WorkspaceId, n.RepositoryId);

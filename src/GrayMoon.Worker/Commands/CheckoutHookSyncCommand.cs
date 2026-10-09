@@ -71,6 +71,8 @@ public sealed class CheckoutHookSyncCommand(
             GitVersionNonNormalize = true,
             // Fresh worktree: projects come from the Feature seed, and with no fetch there is nothing to prune.
             IncludeProjects = !fresh,
+            // The Feature seed already holds the creation-time counts (0 ahead, 0 behind, no upstream).
+            IncludeCommitCounts = !fresh,
             // Remote branches let the app prune deleted ones; the full branch/tag lists are the Sync flow's job.
             IncludeRemoteBranchesOnly = !fresh,
             DefaultBranchOriginRef = defaultRef,
@@ -109,6 +111,7 @@ public sealed class CheckoutHookSyncCommand(
                 DefaultBranchBehind = state.DefaultBranchBehind,
                 DefaultBranchAhead = state.DefaultBranchAhead,
                 Projects = state.Projects,
+                FreshWorktree = fresh,
                 ErrorMessage = fetchError,
                 // Include remote branches when fetch succeeded so the app can prune deleted remote branches from the DB
                 RemoteBranches = remoteBranches,
