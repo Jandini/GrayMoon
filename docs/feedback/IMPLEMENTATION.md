@@ -21,6 +21,8 @@ Order of work: 1 -> 2 -> 3. Each item is committed and pushed to `feedback` when
 
 Status: **implemented - awaiting user commit / manual test** (2026-10-08)
 
+**Superseded (2026-10-09):** lock inspection, Kill and the blocker lists were removed. Remove Feature now leaves a folder that is still in use marked pending deletion and cleans it up later in the background; see `docs/worktree/GrayMoon-Worktree-Features-Remove-Pending-Cleanup.md`.
+
 ### Analysis
 
 - Remove Feature: `WorkspaceFeatureOperations.RemoveFeatureCoreAsync` (App) sends `RemoveGitWorktree` per repository.
@@ -190,6 +192,8 @@ In the current workspace these folders are now listed in the root `.gitignore`, 
 
 Status: **implemented - awaiting user commit / manual test** (2026-10-08)
 
+**Superseded (2026-10-09):** lock inspection, Kill and the blocker lists were removed. Remove Feature now leaves a folder that is still in use marked pending deletion and cleans it up later in the background; see `docs/worktree/GrayMoon-Worktree-Features-Remove-Pending-Cleanup.md`.
+
 Source: [graymoon-restore-workspace-and-worker-version-lock.md](graymoon-restore-workspace-and-worker-version-lock.md). The review against the code is its section 0 and the full implementation record (decisions, changes, tests, known limits, manual test gates) is its section 20; this entry only summarizes.
 
 - Restore validates `.graymoon.json` read-only through the GitHub connector before anything is created, shows a preview and what is missing on this computer, refuses non-empty folders, revalidates after the clone and rolls a failed restore back (database and, when provably owned, the root folder via the new `DiscardWorkspaceRoot` Worker command). "Restored without definition" is gone.
@@ -202,6 +206,8 @@ Source: [graymoon-restore-workspace-and-worker-version-lock.md](graymoon-restore
 ## 5. IMPROVEMENT - Restore Workspace dialog UX
 
 Status: **implemented - awaiting user commit / manual test** (2026-10-08)
+
+**Superseded (2026-10-09):** lock inspection, Kill and the blocker lists were removed. Remove Feature now leaves a folder that is still in use marked pending deletion and cleans it up later in the background; see `docs/worktree/GrayMoon-Worktree-Features-Remove-Pending-Cleanup.md`.
 
 Source: [graymoon-restore-workspace-dialog-ux-improvements.md](graymoon-restore-workspace-dialog-ux-improvements.md).
 
@@ -238,6 +244,8 @@ Source: [graymoon-restore-workspace-dialog-ux-improvements.md](graymoon-restore-
 ## 6. IMPROVEMENT - Add Workspace and Restore Workspace repository picker
 
 Status: **implemented - awaiting user commit / manual test** (2026-10-08)
+
+**Superseded (2026-10-09):** lock inspection, Kill and the blocker lists were removed. Remove Feature now leaves a folder that is still in use marked pending deletion and cleans it up later in the background; see `docs/worktree/GrayMoon-Worktree-Features-Remove-Pending-Cleanup.md`.
 
 Source: [graymoon-workspace-dialogs-repository-picker-ux-prompt.md](graymoon-workspace-dialogs-repository-picker-ux-prompt.md).
 

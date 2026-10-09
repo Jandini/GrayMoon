@@ -115,17 +115,7 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<ILocalGitSnapshotReader, LibGit2SharpLocalGitSnapshotReader>();
         builder.Services.AddSingleton<IGitService, GitService>();
         builder.Services.AddSingleton<IGitWorktreeService, GitWorktreeService>();
-        if (OperatingSystem.IsWindows())
-        {
-            builder.Services.AddSingleton<WindowsFileLockInspector>();
-            builder.Services.AddSingleton<LockScanChildProcess>();
-            builder.Services.AddSingleton<IFileLockInspector, WindowsHandleLockInspector>();
-        }
-        else
-        {
-            builder.Services.AddSingleton<IFileLockInspector, UnsupportedFileLockInspector>();
-        }
-        builder.Services.AddSingleton<IProcessTerminator, ProcessTerminator>();
+        builder.Services.AddSingleton<FeatureFolderCleaner>();
         builder.Services.AddSingleton<GitRemoteIntegrateService>();
         builder.Services.AddSingleton<IWorkerSecretProvider, WorkerSecretProvider>();
         builder.Services.AddSingleton<IWorkerTokenProvider, WorkerTokenProvider>();
@@ -196,8 +186,8 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<ICommandHandler<CreateGitWorktreeRequest, CreateGitWorktreeResponse>, CreateGitWorktreeCommand>();
         builder.Services.AddSingleton<ICommandHandler<RemoveGitWorktreeRequest, RemoveGitWorktreeResponse>, RemoveGitWorktreeCommand>();
         builder.Services.AddSingleton<ICommandHandler<InspectWorktreeRequest, InspectWorktreeResponse>, InspectWorktreeCommand>();
-        builder.Services.AddSingleton<ICommandHandler<InspectPathLocksRequest, InspectPathLocksResponse>, InspectPathLocksCommand>();
-        builder.Services.AddSingleton<ICommandHandler<TerminateBlockingProcessesRequest, TerminateBlockingProcessesResponse>, TerminateBlockingProcessesCommand>();
+        builder.Services.AddSingleton<ICommandHandler<CleanupFeatureFolderRequest, CleanupFeatureFolderResponse>, CleanupFeatureFolderCommand>();
+        builder.Services.AddSingleton<ICommandHandler<SweepPendingFeatureFoldersRequest, SweepPendingFeatureFoldersResponse>, SweepPendingFeatureFoldersCommand>();
         builder.Services.AddSingleton<ICommandHandler<GetGitVersionAtDefaultTipRequest, GetGitVersionAtDefaultTipResponse>, GetGitVersionAtDefaultTipCommand>();
         builder.Services.AddSingleton<ICommandHandler<AttachWorkspaceRepositoryRequest, AttachWorkspaceRepositoryResponse>, AttachWorkspaceRepositoryCommand>();
         builder.Services.AddSingleton<ICommandHandler<DiscardWorkspaceRootRequest, DiscardWorkspaceRootResponse>, DiscardWorkspaceRootCommand>();

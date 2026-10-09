@@ -1,5 +1,7 @@
 # NEW FEATURE - Show Processes Blocking Feature Removal
 
+> **Superseded (2026-10-09):** this feature was removed. Remove Feature no longer inspects or ends processes; a folder still in use is marked pending deletion and cleaned up later in the background. See `docs/worktree/GrayMoon-Worktree-Features-Remove-Pending-Cleanup.md`.
+
 ## Classification
 
 **NEW FEATURE**

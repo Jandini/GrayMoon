@@ -717,7 +717,7 @@ A Feature runs the same flow in isolated worktrees:
 8. Remove Feature ("-" in the selector or Feature menu -> Remove Feature)
 ```
 
-Remove Feature analyzes every worktree first. If anything would be lost (uncommitted changes, unpushed commits), the user must explicitly consent before GrayMoon runs `git worktree remove` and deletes the local branch. Remote branches are not deleted. The main Workspace checkouts are refreshed but never switched or pulled.
+Remove Feature analyzes every worktree first. If anything would be lost (uncommitted changes, unpushed commits), the user must explicitly consent before GrayMoon runs `git worktree remove` and deletes the local branch. Remote branches are not deleted. The main Workspace checkouts are refreshed but never switched or pulled. If some files are still in use, the Feature is removed anyway and its folder is marked pending deletion and cleaned up later in the background, without asking the user.
 
 Constraints:
 

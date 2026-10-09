@@ -207,14 +207,15 @@ public sealed class WorkspaceFeatureWorkspaceRepositoryTests
         var resolver = scope.ServiceProvider.GetRequiredService<IWorkspaceContextPathResolver>();
         var featureRoot = await resolver.GetContextRootAsync(created.ContextId!.Value);
 
-        var commands = ctx.WorkerBridge.Calls.Select(c => c.Command).ToList();
+        // Create first finishes any folder a removed Feature of the same name left pending deletion.
+        var commands = ctx.WorkerBridge.Calls.Select(c => c.Command).Where(c => c != WorkerHubMethods.CleanupFeatureFolder).ToList();
         Assert.Equal(WorkerHubMethods.GetHeadCommits, commands[0]);
         var createCalls = ctx.WorkerBridge.Calls.Where(c => c.Command == WorkerHubMethods.CreateGitWorktree).ToList();
         Assert.Equal(2, createCalls.Count);
         Assert.Equal(
             new[] { featureRoot + @"\graymoon-api", featureRoot + @"\graymoon-web" },
             createCalls.Select(c => WorktreePath(c.Args)).OrderBy(p => p, StringComparer.Ordinal).ToArray());
-        var headArgs = JsonSerializer.SerializeToElement(ctx.WorkerBridge.Calls[0].Args);
+        var headArgs = JsonSerializer.SerializeToElement(ctx.WorkerBridge.Calls.First(c => c.Command == WorkerHubMethods.GetHeadCommits).Args);
         Assert.Equal(JsonValueKind.Null, headArgs.GetProperty("workspaceRepositoryName").ValueKind);
 
         ctx.WorkerBridge.Calls.Clear();

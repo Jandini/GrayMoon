@@ -39,19 +39,4 @@ public sealed class RemoveGitWorktreeResponse
     /// </summary>
     [JsonPropertyName("failureKind")]
     public string? FailureKind { get; set; }
-
-    /// <summary>
-    /// Processes keeping the worktree folder in use. Only looked up when the removal failed because the folder is in use or
-    /// access was denied, or when files were left behind; null when no lookup ran (a clean removal never pays for one).
-    /// </summary>
-    [JsonPropertyName("blockingProcesses")]
-    public List<BlockingProcessResponse>? BlockingProcesses { get; set; }
-
-    /// <summary>True when <see cref="BlockingProcesses"/> may miss some blockers (see the lock inspector's diagnostic).</summary>
-    [JsonPropertyName("blockersMayBeIncomplete")]
-    public bool BlockersMayBeIncomplete { get; set; }
-
-    /// <summary>Short explanation for an incomplete or failed blocker lookup; null when there is nothing to add.</summary>
-    [JsonPropertyName("blockersDiagnostic")]
-    public string? BlockersDiagnostic { get; set; }
 }

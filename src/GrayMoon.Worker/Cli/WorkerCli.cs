@@ -40,14 +40,6 @@ internal static class WorkerCli
         startCommand.SetAction((_, ct) => StartCommandHandler.StartAsync(ct));
         root.Subcommands.Add(startCommand);
 
-        // Internal: the isolated lock scan child process started by the running Worker (LockScanChildProcess).
-        var inspectLocksCommand = new Command(LockScanProtocol.Verb, "Internal: list the processes using the given folders (JSON on stdin).")
-        {
-            Hidden = true,
-        };
-        inspectLocksCommand.SetAction((_, ct) => InspectLocksCommandHandler.RunAsync(ct));
-        root.Subcommands.Add(inspectLocksCommand);
-
         return root;
     }
 

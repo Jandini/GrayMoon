@@ -471,7 +471,7 @@ public sealed class GitWorktreeService(GitProcessRunner runner, IGitRepositoryRe
     }
 
     /// <summary>Counts files under <paramref name="folderPath"/> (never entering a reparse point) and samples up to 5 relative paths. No deletion.</summary>
-    private static (int Count, List<string> Sample) ScanResidueFiles(string folderPath)
+    internal static (int Count, List<string> Sample) ScanResidueFiles(string folderPath)
     {
         var count = 0;
         var sample = new List<string>();
@@ -517,8 +517,9 @@ public sealed class GitWorktreeService(GitProcessRunner runner, IGitRepositoryRe
     /// times (200, 400, 800, 1600, 3200 ms) on <see cref="IOException"/> or
     /// <see cref="UnauthorizedAccessException"/> (for example a file still open in another program).
     /// Leaves whatever it could not delete in place; the caller reports that as residue.
+    /// <paramref name="retry"/> false tries each entry once, for a caller that will run again later anyway.
     /// </summary>
-    internal static async Task DeleteFolderRecursivelyWithRetryAsync(string folderPath, CancellationToken ct)
+    internal static async Task DeleteFolderRecursivelyWithRetryAsync(string folderPath, CancellationToken ct, bool retry = true)
     {
         List<FileSystemInfo> entries;
         try
@@ -535,15 +536,16 @@ public sealed class GitWorktreeService(GitProcessRunner runner, IGitRepositoryRe
             ct.ThrowIfCancellationRequested();
             var isReparsePoint = entry.Attributes.HasFlag(FileAttributes.ReparsePoint);
             if (entry is DirectoryInfo && !isReparsePoint)
-                await DeleteFolderRecursivelyWithRetryAsync(entry.FullName, ct);
+                await DeleteFolderRecursivelyWithRetryAsync(entry.FullName, ct, retry);
 
-            await DeleteResidueEntryWithRetryAsync(entry, ct);
+            await DeleteResidueEntryWithRetryAsync(entry, retry, ct);
         }
     }
 
-    private static async Task DeleteResidueEntryWithRetryAsync(FileSystemInfo entry, CancellationToken ct)
+    private static async Task DeleteResidueEntryWithRetryAsync(FileSystemInfo entry, bool retry, CancellationToken ct)
     {
-        for (var attempt = 0; attempt <= ResidueDeleteRetryDelaysMs.Length; attempt++)
+        var maxAttempt = retry ? ResidueDeleteRetryDelaysMs.Length : 0;
+        for (var attempt = 0; attempt <= maxAttempt; attempt++)
         {
             ct.ThrowIfCancellationRequested();
             try
@@ -565,7 +567,7 @@ public sealed class GitWorktreeService(GitProcessRunner runner, IGitRepositoryRe
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                if (attempt == ResidueDeleteRetryDelaysMs.Length)
+                if (attempt == maxAttempt)
                     return;
                 await Task.Delay(ResidueDeleteRetryDelaysMs[attempt], ct);
             }

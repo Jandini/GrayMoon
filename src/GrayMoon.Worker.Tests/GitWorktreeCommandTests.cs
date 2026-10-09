@@ -27,7 +27,7 @@ public sealed class GitWorktreeCommandTests : IDisposable
         _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, _reader, new LibGit2SharpGitIgnoreService());
         _list = new ListGitWorktreesCommand(_worktrees);
         _create = new CreateGitWorktreeCommand(_git, _worktrees);
-        _remove = new RemoveGitWorktreeCommand(_worktrees, new UnsupportedFileLockInspector(), NullLogger<RemoveGitWorktreeCommand>.Instance);
+        _remove = new RemoveGitWorktreeCommand(_worktrees);
     }
 
     public void Dispose()

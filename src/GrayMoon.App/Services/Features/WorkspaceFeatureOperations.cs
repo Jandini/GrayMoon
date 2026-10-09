@@ -113,6 +113,17 @@ public sealed class WorkspaceFeatureOperations(
         await EnsureManagedFeatureStorageRootAsync(workspace, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
 
+        // A Feature removed earlier under this name may have left its folder marked pending deletion; finish that first.
+        // Only a marked folder is touched, so a folder the user made there by hand still fails below as before.
+        var pendingFolder = await CleanupFeatureFolderForNameAsync(workspaceId, name, onlyIfMarked: true, cancellationToken);
+        if (pendingFolder is not null)
+        {
+            return FailCreate(
+                "FeatureFolderPendingDeletion",
+                $"A previous Feature named '{name}' is still being cleaned up because some of its files are in use. "
+                + $"Close the programs using {pendingFolder} or choose another name.");
+        }
+
         var links = await db.WorkspaceRepositories
             .AsNoTracking()
             .Include(l => l.Repository)
@@ -741,7 +752,6 @@ public sealed class WorkspaceFeatureOperations(
         var repositoryIds = links.Select(l => l.RepositoryId).Distinct().ToList();
 
         var errorsByWrId = new ConcurrentDictionary<int, string>();
-        var blockersByWrId = new ConcurrentDictionary<int, RemoveFeatureRepositoryBlockers>();
         var reportByWrId = new ConcurrentDictionary<int, RemoveFeatureRepositoryReport>();
         var removeCompleted = 0;
         var removeTotal = rows.Count;
@@ -819,21 +829,6 @@ public sealed class WorkspaceFeatureOperations(
                         errorsByWrId[row.WorkspaceRepositoryId] = string.IsNullOrWhiteSpace(response.Error)
                             ? $"Failed to remove worktree {row.WorktreePath}."
                             : response.Error;
-
-                        // The Worker looks up blocking processes only when the failure is "in use" or "access denied";
-                        // an old Worker never sends them, which leaves today's plain error.
-                        var failed = WorkerResponseJson.DeserializeWorkerResponse<RemoveGitWorktreeResult>(response.Data);
-                        if (failed?.BlockingProcesses is not null)
-                        {
-                            blockersByWrId[row.WorkspaceRepositoryId] = new RemoveFeatureRepositoryBlockers(
-                                row.WorkspaceRepositoryId,
-                                repoName,
-                                row.WorktreePath,
-                                ToBlockingProcesses(failed.BlockingProcesses),
-                                failed.BlockersMayBeIncomplete,
-                                failed.BlockersDiagnostic);
-                        }
-
                         return;
                     }
 
@@ -1019,21 +1014,7 @@ public sealed class WorkspaceFeatureOperations(
                         worktreeResult?.ResidueMessage,
                         keptBranchName,
                         remoteOutcome,
-                        remoteMessage)
-                    {
-                        BlockingProcesses = worktreeResult?.BlockingProcesses is { } blockers ? ToBlockingProcesses(blockers) : null,
-                        BlockersMayBeIncomplete = worktreeResult?.BlockersMayBeIncomplete ?? false,
-                        BlockersDiagnostic = worktreeResult?.BlockersDiagnostic,
-                        // Retry re-runs the Worker's guarded cleanup, which only deletes with both Feature storage
-                        // paths; the root worktree is never cleaned by GrayMoon, so it gets no retry target.
-                        ResidueTarget = residueRemaining
-                            && !isRootRow
-                            && !string.IsNullOrWhiteSpace(mainPath)
-                            && !string.IsNullOrWhiteSpace(featureRootPath)
-                            && !string.IsNullOrWhiteSpace(featureStorageRoot)
-                                ? new RemoveFeatureResidueTarget(mainPath, row.WorktreePath, featureRootPath, featureStorageRoot)
-                                : null,
-                    };
+                        remoteMessage);
                     logger.FeatureRepositoryDone("Remove", info.WorkspaceId, info.FeatureName, repoName, "WorktreeRemoved");
                 }
                 finally
@@ -1083,13 +1064,14 @@ public sealed class WorkspaceFeatureOperations(
             feature.LastError = firstError;
             feature.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(cancellationToken);
-            return OperationResult.Fail(firstError) with
-            {
-                RemoveFeatureBlockers = blockersByWrId.IsEmpty
-                    ? null
-                    : blockersByWrId.Values.OrderBy(b => b.RepositoryName, StringComparer.OrdinalIgnoreCase).ToList()
-            };
+            return OperationResult.Fail(firstError);
         }
+
+        // Every worktree is unregistered now. Anything still on disk (a file or folder some program has open) is deleted
+        // here if it has let go, or marked pending deletion for the background cleanup; Remove itself never waits on it.
+        var pendingDeletionFolder = rootRow != null || reportByWrId.Values.Any(r => r.ResidueRemaining)
+            ? await CleanupFeatureFolderForNameAsync(info.WorkspaceId, info.FeatureName, onlyIfMarked: false, cancellationToken)
+            : null;
 
         // Refresh special Workspace snapshot before dropping Feature rows so the grid is not stale
         // after navigation back to Workspace. ParentBranchName / SourceBranchName is provenance only
@@ -1135,7 +1117,47 @@ public sealed class WorkspaceFeatureOperations(
             .Where(entry => entry is not null)
             .Select(entry => entry!)
             .ToList();
-        return OperationResult.Ok() with { RemoveFeatureReport = report };
+        return OperationResult.Ok() with
+        {
+            RemoveFeatureReport = report,
+            RemoveFeaturePendingDeletionFolder = pendingDeletionFolder,
+        };
+    }
+
+    /// <summary>
+    /// Deletes the folder of a Feature that no longer has worktrees (<c>{ManagedFeatureStorageRoot}\{featureName}</c>), or
+    /// has the Worker mark it pending deletion while something still holds it. With <paramref name="onlyIfMarked"/>, only a
+    /// folder already marked pending deletion is touched. Returns the folder when it was left marked; null when it is gone,
+    /// was not ours to touch, the Workspace has no managed storage root, or the Worker could not be asked.
+    /// </summary>
+    private async Task<string?> CleanupFeatureFolderForNameAsync(
+        int workspaceId,
+        string? featureName,
+        bool onlyIfMarked,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(featureName))
+            return null;
+
+        string? storageRoot;
+        string workspaceName;
+        await using (var db = await dbContextFactory.CreateDbContextAsync(cancellationToken))
+        {
+            var workspace = await db.Workspaces.AsNoTracking()
+                .Where(w => w.WorkspaceId == workspaceId)
+                .Select(w => new { w.Name, w.ManagedFeatureStorageRoot })
+                .FirstOrDefaultAsync(cancellationToken);
+            storageRoot = workspace?.ManagedFeatureStorageRoot;
+            workspaceName = workspace?.Name ?? "";
+        }
+
+        // Never touch the legacy drive-root location; GrayMoon only cleans folders under its managed storage root.
+        if (string.IsNullOrWhiteSpace(storageRoot) || WorkerPath.IsLegacyWindowsDriveRootGraymoonPath(storageRoot))
+            return null;
+
+        var featureRootPath = WorkerPath.Combine(storageRoot, featureName);
+        var outcome = await CleanupFeatureFolderAsync(storageRoot, featureRootPath, workspaceName, featureName, onlyIfMarked, cancellationToken);
+        return outcome == CleanupOutcomePendingDeletion ? featureRootPath : null;
     }
 
     /// <summary>
@@ -1150,303 +1172,70 @@ public sealed class WorkspaceFeatureOperations(
         public List<string>? ResidueSampleFiles { get; set; }
         public string? ResidueMessage { get; set; }
         public string? FailureKind { get; set; }
-        public List<BlockingProcessWire>? BlockingProcesses { get; set; }
-        public bool BlockersMayBeIncomplete { get; set; }
-        public string? BlockersDiagnostic { get; set; }
     }
 
-    /// <summary>App-side shape of the Worker's BlockingProcessResponse.</summary>
-    private sealed class BlockingProcessWire
+    /// <summary>App-side shape of the Worker's CleanupFeatureFolder response.</summary>
+    private sealed class CleanupFeatureFolderResult
     {
-        public int ProcessId { get; set; }
-        public string? ProcessName { get; set; }
-        public string? ExecutablePath { get; set; }
-        public string? ServiceName { get; set; }
-        public string? Kind { get; set; }
-        public string? Reason { get; set; }
-        public DateTime? StartTimeUtc { get; set; }
-        public bool CanTerminate { get; set; }
-        public string? ProtectedReason { get; set; }
-    }
-
-    /// <summary>App-side shape of the Worker's TerminateBlockingProcesses response.</summary>
-    private sealed class TerminateBlockingProcessesWorkerResponse
-    {
-        public bool Success { get; set; }
-        public string? ErrorMessage { get; set; }
-        public List<TerminateProcessOutcomeWire>? Outcomes { get; set; }
-        public List<InspectPathLocksWorkerResult>? Results { get; set; }
-    }
-
-    private sealed class TerminateProcessOutcomeWire
-    {
-        public int ProcessId { get; set; }
-        public string? ProcessName { get; set; }
         public string? Outcome { get; set; }
+        public int RemainingFileCount { get; set; }
+        public string? Message { get; set; }
     }
 
-    /// <summary>App-side shape of the Worker's InspectPathLocks response.</summary>
-    private sealed class InspectPathLocksWorkerResponse
-    {
-        public bool Success { get; set; }
-        public List<InspectPathLocksWorkerResult>? Results { get; set; }
-    }
-
-    private sealed class InspectPathLocksWorkerResult
-    {
-        public string? Path { get; set; }
-        public bool Exists { get; set; }
-        public List<BlockingProcessWire>? BlockingProcesses { get; set; }
-        public bool MayBeIncomplete { get; set; }
-        public string? Diagnostic { get; set; }
-    }
-
-    private static IReadOnlyList<RemoveFeatureBlockingProcess> ToBlockingProcesses(IEnumerable<BlockingProcessWire> processes) =>
-        processes
-            .Select(p => new RemoveFeatureBlockingProcess(p.ProcessId, p.ProcessName, p.ExecutablePath, p.ServiceName, p.Kind, p.Reason)
-            {
-                StartTimeUtc = p.StartTimeUtc,
-                CanTerminate = p.CanTerminate,
-                ProtectedReason = p.ProtectedReason,
-            })
-            .ToList();
-
-    private const string BlockerLookupUnavailable =
-        "Could not find out which programs are using the folder. Make sure the Worker is running and up to date.";
+    private const string CleanupOutcomeRemoved = "Removed";
+    private const string CleanupOutcomePendingDeletion = "PendingDeletion";
 
     /// <summary>
-    /// Upper bound on one blocker lookup round trip. The Worker stops its own scan after a few seconds; this only guards against
-    /// a Worker that never answers, so the dialog can always fall back to "could not check" and Continue.
+    /// Asks the Worker to delete a Feature's leftover folder, or mark it pending deletion when files are still in use.
+    /// Returns the Worker's outcome name, or null when the Worker could not be asked (logged; never thrown).
     /// </summary>
-    private static readonly TimeSpan BlockerLookupTimeout = TimeSpan.FromSeconds(30);
-
-    /// <summary>Upper bound on a kill round trip (two lookups plus up to a few seconds per process to exit).</summary>
-    private static readonly TimeSpan TerminateBlockersTimeout = TimeSpan.FromSeconds(90);
-
-    public async Task<IReadOnlyList<RemoveFeatureRepositoryBlockers>> InspectRemoveFeatureBlockersAsync(
-        IReadOnlyList<RemoveFeatureRepositoryBlockers> targets,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(targets);
-        if (targets.Count == 0)
-            return [];
-
-        var response = await SendWithTimeoutAsync(
-            WorkerHubMethods.InspectPathLocks,
-            new { paths = targets.Select(t => t.WorktreePath).ToList() },
-            BlockerLookupTimeout,
-            cancellationToken);
-        var parsed = response is { Success: true }
-            ? WorkerResponseJson.DeserializeWorkerResponse<InspectPathLocksWorkerResponse>(response.Data)
-            : null;
-        if (parsed?.Results is null || parsed.Results.Count != targets.Count)
-        {
-            logger.LogWarning("InspectPathLocks failed: {Error}", FeatureOperationLog.Redact(response?.Error ?? "timed out"));
-            return LookupFailed(targets);
-        }
-
-        return ApplyLockResults(targets, parsed.Results);
-    }
-
-    public async Task<IReadOnlyList<RemoveFeatureRepositoryBlockers>> InspectFeatureBlockersAsync(
-        WorkspaceFeatureContextId featureContextId,
-        CancellationToken cancellationToken = default)
-    {
-        var targets = await LoadFeatureBlockerTargetsAsync(featureContextId, cancellationToken);
-        return await InspectRemoveFeatureBlockersAsync(targets, cancellationToken);
-    }
-
-    public async Task<RemoveFeatureTerminateResult> TerminateFeatureBlockersAsync(
-        WorkspaceFeatureContextId featureContextId,
-        IReadOnlyList<RemoveFeatureProcessSelection> selections,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(selections);
-        var targets = await LoadFeatureBlockerTargetsAsync(featureContextId, cancellationToken);
-        return await TerminateBlockersAsync(targets, selections, cancellationToken);
-    }
-
-    public Task<RemoveFeatureTerminateResult> TerminateLeftoverBlockersAsync(
-        IReadOnlyList<RemoveFeatureRepositoryReport> report,
-        IReadOnlyList<RemoveFeatureProcessSelection> selections,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(report);
-        ArgumentNullException.ThrowIfNull(selections);
-        var targets = report
-            .Where(r => r.ResidueRemaining && r.ResidueTarget is not null)
-            .Select(r => new RemoveFeatureRepositoryBlockers(
-                r.WorkspaceRepositoryId, r.RepositoryName, r.ResidueTarget!.WorktreePath, [], false, null))
-            .ToList();
-        return TerminateBlockersAsync(targets, selections, cancellationToken);
-    }
-
-    /// <summary>The worktree folders of a Feature that are not removed yet, from the database (never from the caller).</summary>
-    private async Task<IReadOnlyList<RemoveFeatureRepositoryBlockers>> LoadFeatureBlockerTargetsAsync(
-        WorkspaceFeatureContextId featureContextId,
+    private async Task<string?> CleanupFeatureFolderAsync(
+        string featureStorageRoot,
+        string featureRootPath,
+        string workspaceName,
+        string featureName,
+        bool onlyIfMarked,
         CancellationToken cancellationToken)
     {
-        var info = await contextResolver.GetRequiredAsync(featureContextId, cancellationToken: cancellationToken);
-        if (info.IsSpecialWorkspace)
-            return [];
-
-        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var rows = await db.WorkspaceFeatureRepositories
-            .AsNoTracking()
-            .Include(r => r.WorkspaceRepository)!.ThenInclude(l => l!.Repository)
-            .Where(r => r.WorkspaceFeatureContextId == featureContextId.Value
-                && r.State != WorkspaceFeatureRepositoryState.Removed
-                && r.WorktreePath != "")
-            .ToListAsync(cancellationToken);
-
-        return rows
-            .Select(r => new RemoveFeatureRepositoryBlockers(
-                r.WorkspaceRepositoryId,
-                r.WorkspaceRepository?.Repository?.RepositoryName ?? "",
-                r.WorktreePath,
-                [],
-                false,
-                null))
-            .OrderBy(t => t.RepositoryName, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-    }
-
-    private async Task<RemoveFeatureTerminateResult> TerminateBlockersAsync(
-        IReadOnlyList<RemoveFeatureRepositoryBlockers> targets,
-        IReadOnlyList<RemoveFeatureProcessSelection> selections,
-        CancellationToken cancellationToken)
-    {
-        if (targets.Count == 0)
-            return new RemoveFeatureTerminateResult([], [], "There are no Feature folders left to check.");
-        if (selections.Count == 0)
-            return new RemoveFeatureTerminateResult([], targets, "Select at least one program to end.");
-
-        var response = await SendWithTimeoutAsync(
-            WorkerHubMethods.TerminateBlockingProcesses,
-            new
-            {
-                paths = targets.Select(t => t.WorktreePath).ToList(),
-                processes = selections.Select(s => new { processId = s.ProcessId, startTimeUtc = s.StartTimeUtc }).ToList(),
-            },
-            TerminateBlockersTimeout,
-            cancellationToken);
-        var parsed = response is not null
-            ? WorkerResponseJson.DeserializeWorkerResponse<TerminateBlockingProcessesWorkerResponse>(response.Data)
-            : null;
-        if (response is not { Success: true } || parsed is not { Success: true } || parsed.Results is null || parsed.Results.Count != targets.Count)
-        {
-            var error = parsed?.ErrorMessage ?? response?.Error ?? "Ending the programs took too long.";
-            logger.LogWarning("TerminateBlockingProcesses failed: {Error}", FeatureOperationLog.Redact(error));
-            return new RemoveFeatureTerminateResult([], LookupFailed(targets), $"GrayMoon could not end the programs. {error}");
-        }
-
-        var outcomes = (parsed.Outcomes ?? [])
-            .Select(o => new RemoveFeatureProcessOutcome(o.ProcessId, o.ProcessName, o.Outcome ?? RemoveFeatureProcessOutcome.Failed))
-            .ToList();
-        logger.LogInformation(
-            "Ended blocking processes for Remove Feature: {Outcomes}",
-            string.Join(", ", outcomes.Select(o => $"{o.ProcessId}={o.Outcome}")));
-        return new RemoveFeatureTerminateResult(outcomes, ApplyLockResults(targets, parsed.Results), null);
-    }
-
-    /// <summary>Null when <paramref name="timeout"/> passed first (the caller's own cancellation still throws).</summary>
-    private async Task<WorkerCommandResponse?> SendWithTimeoutAsync(
-        string command,
-        object args,
-        TimeSpan timeout,
-        CancellationToken cancellationToken)
-    {
-        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutSource.CancelAfter(timeout);
         try
         {
-            return await workerBridge.SendCommandAsync(command, args, timeoutSource.Token);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            logger.LogWarning("{Command} did not answer within {TimeoutSeconds}s", command, (int)timeout.TotalSeconds);
-            return null;
-        }
-    }
-
-    private static IReadOnlyList<RemoveFeatureRepositoryBlockers> LookupFailed(IReadOnlyList<RemoveFeatureRepositoryBlockers> targets) =>
-        targets
-            // Keeps the last known list: a failed refresh says it may be incomplete rather than claiming nothing is there.
-            .Select(t => t with { MayBeIncomplete = true, Diagnostic = BlockerLookupUnavailable, LookupFailed = true })
-            .ToList();
-
-    private static IReadOnlyList<RemoveFeatureRepositoryBlockers> ApplyLockResults(
-        IReadOnlyList<RemoveFeatureRepositoryBlockers> targets,
-        IReadOnlyList<InspectPathLocksWorkerResult> results) =>
-        targets
-            .Select((t, i) =>
-            {
-                var r = results[i];
-                return t with
-                {
-                    Processes = r.Exists && r.BlockingProcesses is { } blockers ? ToBlockingProcesses(blockers) : [],
-                    MayBeIncomplete = r.Exists && r.MayBeIncomplete,
-                    Diagnostic = r.Exists ? r.Diagnostic : null,
-                    PathExists = r.Exists,
-                    LookupFailed = false,
-                };
-            })
-            .ToList();
-
-    public async Task<IReadOnlyList<RemoveFeatureRepositoryReport>> RetryRemoveFeatureResidueAsync(
-        IReadOnlyList<RemoveFeatureRepositoryReport> report,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(report);
-        var updated = new List<RemoveFeatureRepositoryReport>(report.Count);
-        foreach (var entry in report)
-        {
-            if (entry.ResidueTarget is not { } target || !entry.ResidueRemaining)
-            {
-                updated.Add(entry);
-                continue;
-            }
-
-            // The worktree is already unregistered, so the Worker goes straight to its guarded residue cleanup.
             var response = await workerBridge.SendCommandAsync(
-                WorkerHubMethods.RemoveGitWorktree,
+                WorkerHubMethods.CleanupFeatureFolder,
                 new
                 {
-                    mainRepositoryPath = target.MainRepositoryPath,
-                    worktreePath = target.WorktreePath,
-                    force = false,
-                    featureRootPath = target.FeatureRootPath,
-                    featureStorageRoot = target.FeatureStorageRoot,
-                    unlock = false
+                    featureStorageRoot,
+                    featureRootPath,
+                    workspaceName,
+                    featureName,
+                    retry = true,
+                    onlyIfMarked
                 },
                 cancellationToken);
-            var result = WorkerResponseJson.DeserializeWorkerResponse<RemoveGitWorktreeResult>(response.Data);
-            if (!response.Success || result is null)
+            var result = response.Success
+                ? WorkerResponseJson.DeserializeWorkerResponse<CleanupFeatureFolderResult>(response.Data)
+                : null;
+            if (result?.Outcome is null)
             {
                 logger.LogWarning(
-                    "Retry of leftover cleanup failed for {Repository}: {Error}",
-                    entry.RepositoryName, FeatureOperationLog.Redact(response.Error));
-                updated.Add(entry with
-                {
-                    ResidueMessage = string.IsNullOrWhiteSpace(response.Error) ? entry.ResidueMessage : response.Error,
-                });
-                continue;
+                    "CleanupFeatureFolder failed for {FeatureRootPath}: {Error}",
+                    featureRootPath, FeatureOperationLog.Redact(response.Error));
+                return null;
             }
 
-            updated.Add(entry with
+            if (result.Outcome != CleanupOutcomeRemoved)
             {
-                ResidueRemaining = result.ResidueRemaining,
-                ResidueFileCount = result.ResidueFileCount,
-                ResidueSampleFiles = result.ResidueSampleFiles,
-                ResidueMessage = result.ResidueMessage,
-                BlockingProcesses = result.BlockingProcesses is { } blockers ? ToBlockingProcesses(blockers) : null,
-                BlockersMayBeIncomplete = result.BlockersMayBeIncomplete,
-                BlockersDiagnostic = result.BlockersDiagnostic,
-                ResidueTarget = result.ResidueRemaining ? target : null,
-            });
-        }
+                logger.LogInformation(
+                    "Feature folder {FeatureRootPath} left behind: {Outcome} ({Count} file(s)). {Message}",
+                    featureRootPath, result.Outcome, result.RemainingFileCount, result.Message);
+            }
 
-        return updated;
+            return result.Outcome;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "CleanupFeatureFolder failed for {FeatureRootPath}", featureRootPath);
+            return null;
+        }
     }
 
     /// <summary>

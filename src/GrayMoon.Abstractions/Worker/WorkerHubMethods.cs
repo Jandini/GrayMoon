@@ -56,11 +56,11 @@ public static class WorkerHubMethods
     /// <summary>App → Worker: report everything removal needs to know about one worktree, checked live (read-only).</summary>
     public const string InspectWorktree = "InspectWorktree";
 
-    /// <summary>App → Worker: list the local processes keeping each given path in use (read-only lock diagnostics).</summary>
-    public const string InspectPathLocks = "InspectPathLocks";
+    /// <summary>App → Worker: delete a removed Feature's leftover folder, or mark it pending deletion when files are still in use.</summary>
+    public const string CleanupFeatureFolder = "CleanupFeatureFolder";
 
-    /// <summary>App → Worker: end the blocking processes the user selected in Remove Feature; the Worker re-checks each one first.</summary>
-    public const string TerminateBlockingProcesses = "TerminateBlockingProcesses";
+    /// <summary>App → Worker: delete every Feature folder marked pending deletion under one Feature storage root (background cleanup).</summary>
+    public const string SweepPendingFeatureFolders = "SweepPendingFeatureFolders";
 
     /// <summary>App → Worker: attach a remote repository to the Workspace root as its working tree (clone into an empty root, or init + fetch + checkout in a non-empty one).</summary>
     public const string AttachWorkspaceRepository = "AttachWorkspaceRepository";

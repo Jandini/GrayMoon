@@ -184,8 +184,9 @@ public sealed class RemoveFeatureModalCheckboxTests
     }
 
     [Fact]
-    public void HasReportWarnings_true_for_residue_or_kept_branch_name()
+    public void Leftover_files_are_not_a_warning_but_a_kept_branch_name_is()
     {
+        // Leftover files only mark the folder pending deletion (information, cleaned up later), never a warning.
         IReadOnlyList<RemoveFeatureRepositoryReport> residue =
         [
             new(1, "repo", WorktreeRemoved: true, RemoveFeatureBranchOutcome.Deleted, null,
@@ -197,8 +198,10 @@ public sealed class RemoveFeatureModalCheckboxTests
                 ResidueRemaining: false, ResidueFileCount: 0, null, null, KeptBranchName: "side")
         ];
 
-        Assert.True(RemoveFeatureModal.HasReportWarnings(residue));
+        Assert.False(RemoveFeatureModal.HasReportWarnings(residue));
+        Assert.Empty(RemoveFeatureModal.BuildReportWarnings(residue));
         Assert.True(RemoveFeatureModal.HasReportWarnings(keptBranch));
+        Assert.Single(RemoveFeatureModal.BuildReportWarnings(keptBranch));
     }
 
     [Fact]

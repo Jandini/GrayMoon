@@ -22,55 +22,6 @@ public interface IWorkspaceFeatureOperations
         IProgress<OperationProgress>? progress = null,
         CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Looks up, through the Worker, which local processes keep each of <paramref name="targets"/> in use ("Refresh blockers"
-    /// in the Remove Feature dialog). Read-only. A folder that no longer exists comes back with no processes. Never throws for
-    /// a Worker problem; the entries then carry <see cref="RemoveFeatureRepositoryBlockers.MayBeIncomplete"/> and a diagnostic.
-    /// </summary>
-    Task<IReadOnlyList<RemoveFeatureRepositoryBlockers>> InspectRemoveFeatureBlockersAsync(
-        IReadOnlyList<RemoveFeatureRepositoryBlockers> targets,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Looks up which local processes are using the worktree folders of a Feature that has not been removed yet (the check the
-    /// Remove Feature dialog runs before removal). Folders come from the database, never from the caller. Read-only. Never
-    /// throws for a Worker problem or a lookup that took too long; the entries then carry
-    /// <see cref="RemoveFeatureRepositoryBlockers.LookupFailed"/>.
-    /// </summary>
-    Task<IReadOnlyList<RemoveFeatureRepositoryBlockers>> InspectFeatureBlockersAsync(
-        WorkspaceFeatureContextId featureContextId,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Ends the processes the user selected in the Remove Feature dialog ("Kill and remove") for a Feature that still exists.
-    /// The folders are resolved from the database; the Worker re-checks every selected process (still holding a folder, same
-    /// start time, not protected) before ending it, and returns what still blocks each folder afterwards.
-    /// </summary>
-    Task<RemoveFeatureTerminateResult> TerminateFeatureBlockersAsync(
-        WorkspaceFeatureContextId featureContextId,
-        IReadOnlyList<RemoveFeatureProcessSelection> selections,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Same as <see cref="TerminateFeatureBlockersAsync"/> for an already removed Feature's leftover folders ("Kill and
-    /// retry" in the removal report): the folders are the report's <see cref="RemoveFeatureRepositoryReport.ResidueTarget"/>
-    /// paths, which the App built from its own database at remove time.
-    /// </summary>
-    Task<RemoveFeatureTerminateResult> TerminateLeftoverBlockersAsync(
-        IReadOnlyList<RemoveFeatureRepositoryReport> report,
-        IReadOnlyList<RemoveFeatureProcessSelection> selections,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// After a Remove Feature that left files behind, asks the Worker again to delete the leftovers of every report entry
-    /// that has a <see cref="RemoveFeatureRepositoryReport.ResidueTarget"/> (the same guarded cleanup Remove uses), and
-    /// returns the report with each such entry's residue and blocker fields refreshed. Entries without a target are
-    /// returned unchanged.
-    /// </summary>
-    Task<IReadOnlyList<RemoveFeatureRepositoryReport>> RetryRemoveFeatureResidueAsync(
-        IReadOnlyList<RemoveFeatureRepositoryReport> report,
-        CancellationToken cancellationToken = default);
-
     Task<IReadOnlyList<WorkspaceFeatureContextInfo>> ListFeaturesAsync(
         int workspaceId,
         CancellationToken cancellationToken = default);

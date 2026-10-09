@@ -120,10 +120,10 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid RemoveGitWorktree args"),
             WorkerHubMethods.InspectWorktree => JsonSerializer.Deserialize<InspectWorktreeRequest>(json, options)
                 ?? throw new ArgumentException("Invalid InspectWorktree args"),
-            WorkerHubMethods.InspectPathLocks => JsonSerializer.Deserialize<InspectPathLocksRequest>(json, options)
-                ?? throw new ArgumentException("Invalid InspectPathLocks args"),
-            WorkerHubMethods.TerminateBlockingProcesses => JsonSerializer.Deserialize<TerminateBlockingProcessesRequest>(json, options)
-                ?? throw new ArgumentException("Invalid TerminateBlockingProcesses args"),
+            WorkerHubMethods.CleanupFeatureFolder => JsonSerializer.Deserialize<CleanupFeatureFolderRequest>(json, options)
+                ?? throw new ArgumentException("Invalid CleanupFeatureFolder args"),
+            WorkerHubMethods.SweepPendingFeatureFolders => JsonSerializer.Deserialize<SweepPendingFeatureFoldersRequest>(json, options)
+                ?? throw new ArgumentException("Invalid SweepPendingFeatureFolders args"),
             WorkerHubMethods.AttachWorkspaceRepository => JsonSerializer.Deserialize<AttachWorkspaceRepositoryRequest>(json, options)
                 ?? throw new ArgumentException("Invalid AttachWorkspaceRepository args"),
             WorkerHubMethods.DiscardWorkspaceRoot => JsonSerializer.Deserialize<DiscardWorkspaceRootRequest>(json, options)
