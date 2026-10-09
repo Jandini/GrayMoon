@@ -72,8 +72,40 @@
     overflow: hidden;
 }
 
-.workspace-feature-selector__add + .workspace-feature-selector__add {
+.workspace-feature-selector__add + .workspace-feature-selector__add,
+.workspace-feature-selector__add + .workspace-feature-selector__tool,
+.workspace-feature-selector__tool + .workspace-feature-selector__tool {
     border-left: 1px solid var(--border-input);
+}
+
+.workspace-feature-selector__tool {
+    position: relative;
+    display: flex;
+    flex: 0 0 auto;
+    align-self: stretch;
+}
+
+.workspace-feature-selector__tool:hover {
+    z-index: 4;
+}
+
+/* Our tooltip, not the browser title, so it can be removed before the folder menu opens. */
+.workspace-feature-selector__tool-hint {
+    position: absolute;
+    top: calc(100% + 0.35rem);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1064;
+    padding: 0.15rem 0.45rem;
+    border: 1px solid var(--border-color, #6c757d);
+    border-radius: 0.25rem;
+    background: var(--bg-card, #252526);
+    color: var(--text-primary);
+    font-size: 0.75rem;
+    line-height: 1.3;
+    white-space: nowrap;
+    pointer-events: none;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
 }
 
 .workspace-feature-selector__tool-icon {
@@ -291,7 +323,8 @@
     font-size: 0.7rem;
 }
 
-.workspace-feature-selector__menu .branch-menu-divider {
+.workspace-feature-selector__menu .branch-menu-divider,
+.workspace-feature-selector__dir-menu .branch-menu-divider {
     border-top-color: var(--border-color, #6c757d);
     opacity: 0.9;
     margin: 0.25rem 0;
@@ -331,16 +364,78 @@
 }
 
 .workspace-feature-selector__flyout:hover > .workspace-feature-selector__submenu,
-.workspace-feature-selector__flyout:focus-within > .workspace-feature-selector__submenu {
+.workspace-feature-selector__flyout:has(:focus-visible) > .workspace-feature-selector__submenu {
     display: block;
+}
+
+/* Open in list. Wider than the label alone so the pin and chevron have their own slots. */
+.workspace-feature-selector__open-in-menu {
+    width: max-content;
+    min-width: 13rem;
 }
 
 .workspace-feature-selector__launch-row {
     position: relative;
+    display: flex;
+    align-items: stretch;
+}
+
+/* Pin sits on the right, immediately before the chevron. A click must not focus it:
+   focus would keep the row painted after the pointer leaves. */
+.workspace-feature-selector__pin {
+    position: absolute;
+    top: 0;
+    right: 1.75rem;
+    z-index: 1;
+    width: 1.5rem;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    line-height: 1;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.workspace-feature-selector__launch-row:not(:has(.workspace-feature-selector__repo-flyout)) > .workspace-feature-selector__pin {
+    right: 0;
+}
+
+.workspace-feature-selector__launch-row:hover > .workspace-feature-selector__pin,
+.workspace-feature-selector__launch-row:has(:focus-visible) > .workspace-feature-selector__pin {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.workspace-feature-selector__pin:hover,
+.workspace-feature-selector__pin:focus-visible {
+    color: var(--text-primary);
+    background-color: var(--bg-active);
+}
+
+.workspace-feature-selector__launch-row > .workspace-feature-selector__launch-item {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+}
+
+.workspace-feature-selector__launch-row:hover > .workspace-feature-selector__launch-item,
+.workspace-feature-selector__launch-row:has(:focus-visible) > .workspace-feature-selector__launch-item {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
 }
 
 .workspace-feature-selector__launch-item {
-    padding-right: 2rem;
+    padding-right: 3.4rem;
+}
+
+.workspace-feature-selector__launch-row:not(:has(.workspace-feature-selector__repo-flyout)) > .workspace-feature-selector__launch-item {
+    padding-right: 1.75rem;
 }
 
 .workspace-feature-selector__launch-item,
@@ -394,7 +489,7 @@
 }
 
 .workspace-feature-selector__launch-row:hover > .workspace-feature-selector__repo-flyout,
-.workspace-feature-selector__launch-row:focus-within > .workspace-feature-selector__repo-flyout {
+.workspace-feature-selector__launch-row:has(:focus-visible) > .workspace-feature-selector__repo-flyout {
     opacity: 1;
     pointer-events: auto;
 }
@@ -409,12 +504,9 @@
 }
 
 /* As wide as the longest repository name. A fixed max-width ellipsized long folder
-   names, and rows that share a prefix were then hard to tell apart. */
-.workspace-feature-selector__repo-submenu {
-    display: none;
-    position: absolute;
-    left: 100%;
-    top: 0;
+   names, and rows that share a prefix were then hard to tell apart.
+   Shared by the Open in flyout and the recent-tool button menu. */
+.workspace-feature-selector__dir-menu {
     margin: 0;
     width: max-content;
     min-width: 11rem;
@@ -423,49 +515,65 @@
     max-height: calc(8 * 2rem);
     overflow-x: hidden;
     overflow-y: auto;
-    /* Reserve the scrollbar so it does not cover the end of the longest name. */
-    scrollbar-gutter: stable;
+    /* No scrollbar-gutter. A stable gutter is an empty strip beside a max-content
+       menu, so the row highlight stops short of the right edge. When the list
+       actually scrolls, the scrollbar is laid out outside that content width. */
     z-index: 1062;
 }
 
-.workspace-feature-selector__repo-submenu .dropdown-item {
-    width: max-content;
-    min-width: 100%;
+.workspace-feature-selector__dir-menu .dropdown-item {
+    width: 100%;
+    box-sizing: border-box;
+    white-space: nowrap;
     overflow: visible;
     text-overflow: clip;
+}
+
+.workspace-feature-selector__repo-submenu {
+    display: none;
+    position: absolute;
+    left: 100%;
+    top: 0;
+}
+
+/* Recent-tool button menu. The component adds it after the pointer has rested for 1s. */
+.workspace-feature-selector__tool-menu {
+    position: absolute;
+    top: calc(100% - 1px);
+    left: 0;
 }
 
 /* Gray, auto-width scrollbars for menus that scroll (matches tree / table scrollbars). */
 .workspace-feature-selector__menu,
 .workspace-feature-selector__ws-features-submenu,
-.workspace-feature-selector__repo-submenu {
+.workspace-feature-selector__dir-menu {
     scrollbar-width: auto;
     scrollbar-color: #5a5a5a var(--bg-card, #252526);
 }
 
 .workspace-feature-selector__menu::-webkit-scrollbar,
 .workspace-feature-selector__ws-features-submenu::-webkit-scrollbar,
-.workspace-feature-selector__repo-submenu::-webkit-scrollbar {
+.workspace-feature-selector__dir-menu::-webkit-scrollbar {
     width: 8px;
     height: 8px;
 }
 
 .workspace-feature-selector__menu::-webkit-scrollbar-track,
 .workspace-feature-selector__ws-features-submenu::-webkit-scrollbar-track,
-.workspace-feature-selector__repo-submenu::-webkit-scrollbar-track {
+.workspace-feature-selector__dir-menu::-webkit-scrollbar-track {
     background: var(--bg-card, #252526);
 }
 
 .workspace-feature-selector__menu::-webkit-scrollbar-thumb,
 .workspace-feature-selector__ws-features-submenu::-webkit-scrollbar-thumb,
-.workspace-feature-selector__repo-submenu::-webkit-scrollbar-thumb {
+.workspace-feature-selector__dir-menu::-webkit-scrollbar-thumb {
     background: #5a5a5a;
     border-radius: 4px;
 }
 
 .workspace-feature-selector__menu::-webkit-scrollbar-thumb:hover,
 .workspace-feature-selector__ws-features-submenu::-webkit-scrollbar-thumb:hover,
-.workspace-feature-selector__repo-submenu::-webkit-scrollbar-thumb:hover {
+.workspace-feature-selector__dir-menu::-webkit-scrollbar-thumb:hover {
     background: #6a6a6a;
 }
 

@@ -38,6 +38,7 @@ public static partial class Migrations
         (4, "Workspace profile columns", dbContext => MigrateWorkspaceProfileColumnsAsync(dbContext)),
         (5, "Workspace repository role", dbContext => MigrateWorkspaceRepositoryRoleAsync(dbContext)),
         (6, "Workspace manifest drift column", dbContext => MigrateWorkspaceManifestDriftColumnAsync(dbContext)),
+        (7, "Workspace recent Open-in tools", dbContext => MigrateWorkspaceOpenInRecentToolsAsync(dbContext)),
     };
 
     public static async Task RunAllAsync(AppDbContext dbContext, ILogger? logger = null)
@@ -485,6 +486,28 @@ public static partial class Migrations
             await conn.OpenAsync();
 
         await AddNullableTextColumnIfMissingAsync(conn, "Workspaces", "ManifestDriftDetectedAt");
+    }
+
+    /// <summary>
+    /// Recent Open-in tools for the feature-selector bar. Strict step 7. Idempotent.
+    /// </summary>
+    public static async Task MigrateWorkspaceOpenInRecentToolsAsync(AppDbContext dbContext, ILogger? logger = null)
+    {
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != ConnectionState.Open)
+            await conn.OpenAsync();
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            CREATE TABLE IF NOT EXISTS "WorkspaceOpenInRecentTools" (
+                "WorkspaceId" INTEGER NOT NULL,
+                "ToolId" TEXT NOT NULL,
+                "Position" INTEGER NOT NULL,
+                CONSTRAINT "PK_WorkspaceOpenInRecentTools" PRIMARY KEY ("WorkspaceId", "ToolId"),
+                CONSTRAINT "FK_WorkspaceOpenInRecentTools_Workspaces_WorkspaceId" FOREIGN KEY ("WorkspaceId") REFERENCES "Workspaces" ("WorkspaceId") ON DELETE CASCADE
+            );
+            """;
+        await cmd.ExecuteNonQueryAsync();
     }
 
     /// <summary>

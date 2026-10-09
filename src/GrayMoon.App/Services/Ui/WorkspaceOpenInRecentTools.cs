@@ -1,38 +1,45 @@
 using GrayMoon.App.Components.Features;
-using GrayMoon.App.Services.Worker;
-using GrayMoon.App.Services.WorkspaceManifest;
-using GrayMoon.Application.Features;
+using GrayMoon.App.Data;
+using GrayMoon.App.Models;
+using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Services.Ui;
 
 /// <summary>
-/// Recent Open-in tools for one Workspace. Persisted in <c>.graymoon.json</c> only when that
-/// Workspace has a Workspace repository and the file is already there. Otherwise the list lasts
-/// for this circuit.
+/// Open-in tools the user has placed on the bar for one Workspace, stored in the workspace database.
+/// The feature selector paints from <see cref="TryGetCached"/> so a later page can show the
+/// buttons with New Feature, then reads the database when this circuit has not loaded that Workspace.
 /// </summary>
-public sealed class WorkspaceOpenInRecentTools(
-    IWorkerBridge workerBridge,
-    IWorkspaceContextPathResolver pathResolver,
-    IWorkspaceFeatureContextResolver contextResolver,
-    ILogger<WorkspaceOpenInRecentTools> logger)
+public sealed class WorkspaceOpenInRecentTools(IDbContextFactory<AppDbContext> dbContextFactory)
 {
     private readonly Dictionary<int, IReadOnlyList<string>> _session = new();
 
     public async Task<IReadOnlyList<string>> GetAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
-        var stored = await TryReadStoredAsync(workspaceId, cancellationToken);
-        if (stored is not null)
+        if (workspaceId <= 0)
+            return [];
+
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var stored = await db.WorkspaceOpenInRecentTools.AsNoTracking()
+            .Where(t => t.WorkspaceId == workspaceId)
+            .OrderBy(t => t.Position)
+            .ThenBy(t => t.ToolId)
+            .Select(t => t.ToolId)
+            .ToListAsync(cancellationToken);
+
+        var tools = new List<string>(stored.Count);
+        foreach (var toolId in stored)
         {
-            _session[workspaceId] = stored;
-            return stored;
+            if (FeatureOpenInTools.IsRemembered(toolId) && !tools.Contains(toolId))
+                tools.Add(toolId);
         }
 
-        return _session.TryGetValue(workspaceId, out var session) ? session : [];
+        _session[workspaceId] = tools;
+        return tools;
     }
 
     /// <summary>
-    /// The list already known for this circuit, with no worker read. The feature selector uses
-    /// this so a later page can paint the buttons with New Feature instead of after the file read.
+    /// The list already known for this circuit, with no database read.
     /// </summary>
     public bool TryGetCached(int workspaceId, out IReadOnlyList<string> tools)
     {
@@ -53,84 +60,61 @@ public sealed class WorkspaceOpenInRecentTools(
     {
         var current = await GetAsync(workspaceId, cancellationToken);
         var next = FeatureOpenInTools.RecordUse(current, toolId);
-        _session[workspaceId] = next;
-        if (!Same(current, next))
-            await TryWriteAsync(workspaceId, next, cancellationToken);
+        if (ReferenceEquals(next, current))
+            return current;
+
+        await SaveAsync(workspaceId, next, cancellationToken);
         return next;
     }
 
-    private async Task<IReadOnlyList<string>?> TryReadStoredAsync(int workspaceId, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<string>> RemoveAsync(
+        int workspaceId,
+        string toolId,
+        CancellationToken cancellationToken = default)
     {
-        try
-        {
-            var args = await GetArgsAsync(workspaceId, cancellationToken);
-            if (args?.WorkspaceRepositoryName is null)
-                return null;
+        var current = await GetAsync(workspaceId, cancellationToken);
+        var next = FeatureOpenInTools.Remove(current, toolId);
+        if (ReferenceEquals(next, current))
+            return current;
 
-            var read = await WorkspaceRepositoryFileAccess.ReadAsync(
-                workerBridge, args, WorkspaceRepositoryFileAccess.ManifestFilePath, cancellationToken);
-            if (read.Error is not null || !read.Found)
-                return null;
-
-            return WorkspaceManifestRecentTools.Read(read.Content);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            logger.LogWarning(ex, "Could not read recent Open-in tools. WorkspaceId={WorkspaceId}", workspaceId);
-            return null;
-        }
+        await SaveAsync(workspaceId, next, cancellationToken);
+        return next;
     }
 
-    private async Task TryWriteAsync(int workspaceId, IReadOnlyList<string> tools, CancellationToken cancellationToken)
+    private async Task SaveAsync(int workspaceId, IReadOnlyList<string> tools, CancellationToken cancellationToken)
     {
-        if (tools.Count == 0)
-            return;
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var existing = await db.WorkspaceOpenInRecentTools
+            .Where(t => t.WorkspaceId == workspaceId)
+            .ToListAsync(cancellationToken);
 
-        try
+        var keep = new HashSet<string>(tools, StringComparer.Ordinal);
+        foreach (var row in existing)
         {
-            var args = await GetArgsAsync(workspaceId, cancellationToken);
-            if (args?.WorkspaceRepositoryName is null)
-                return;
-
-            var read = await WorkspaceRepositoryFileAccess.ReadAsync(
-                workerBridge, args, WorkspaceRepositoryFileAccess.ManifestFilePath, cancellationToken);
-            if (read.Error is not null || !read.Found || read.Content is null)
-                return;
-
-            var updated = WorkspaceManifestRecentTools.Apply(read.Content, tools);
-            if (updated is null)
-                return;
-
-            var result = await WorkspaceRepositoryFileAccess.WriteAsync(
-                workerBridge, args, WorkspaceRepositoryFileAccess.ManifestFilePath, updated, cancellationToken);
-            if (!result.Success)
-                logger.LogWarning("Could not save recent Open-in tools. WorkspaceId={WorkspaceId} Error={Error}", workspaceId, result.Error);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            logger.LogWarning(ex, "Could not save recent Open-in tools. WorkspaceId={WorkspaceId}", workspaceId);
-        }
-    }
-
-    private async Task<WorkerWorkspaceArgs?> GetArgsAsync(int workspaceId, CancellationToken cancellationToken)
-    {
-        if (workspaceId <= 0)
-            return null;
-
-        var contextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
-        return await pathResolver.GetWorkerArgsAsync(contextId, cancellationToken);
-    }
-
-    private static bool Same(IReadOnlyList<string> left, IReadOnlyList<string> right)
-    {
-        if (left.Count != right.Count)
-            return false;
-        for (var i = 0; i < left.Count; i++)
-        {
-            if (!string.Equals(left[i], right[i], StringComparison.Ordinal))
-                return false;
+            if (!keep.Contains(row.ToolId))
+                db.WorkspaceOpenInRecentTools.Remove(row);
         }
 
-        return true;
+        for (var i = 0; i < tools.Count; i++)
+        {
+            var toolId = tools[i];
+            var row = existing.FirstOrDefault(r => string.Equals(r.ToolId, toolId, StringComparison.Ordinal));
+            if (row is null)
+            {
+                db.WorkspaceOpenInRecentTools.Add(new WorkspaceOpenInRecentTool
+                {
+                    WorkspaceId = workspaceId,
+                    ToolId = toolId,
+                    Position = i,
+                });
+            }
+            else
+            {
+                row.Position = i;
+            }
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        _session[workspaceId] = tools.ToList();
     }
 }
