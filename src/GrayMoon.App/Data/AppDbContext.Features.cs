@@ -112,6 +112,17 @@ public partial class AppDbContext
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
+        modelBuilder.Entity<WorkspaceOpenInRecentTool>(entity =>
+        {
+            entity.ToTable("WorkspaceOpenInRecentTools");
+            entity.HasKey(t => new { t.WorkspaceId, t.ToolId });
+            entity.Property(t => t.ToolId).HasMaxLength(32);
+            entity.HasOne(t => t.Workspace)
+                .WithMany()
+                .HasForeignKey(t => t.WorkspaceId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<WorkspaceRepositoryContextPullRequest>(entity =>
         {
             entity.ToTable("WorkspaceRepositoryContextPullRequests");

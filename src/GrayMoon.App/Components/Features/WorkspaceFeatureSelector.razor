@@ -55,22 +55,49 @@
         @foreach (var toolId in VisibleOpenInTools)
         {
             var id = toolId;
-            <button type="button"
-                    class="workspace-feature-selector__add"
-                    disabled="@Disabled"
-                    title="@FeatureOpenInTools.Title(id)"
-                    aria-label="@FeatureOpenInTools.Title(id)"
-                    @onclick="() => LaunchAsync(FeatureOpenInTools.LaunchMethod(id))"
-                    @onclick:stopPropagation>
-                @if (FeatureOpenInTools.IconImageSrc(id) is string iconSrc)
+            <div class="workspace-feature-selector__tool"
+                 @onmouseenter="() => OnToolPointerEnter(id)"
+                 @onmouseleave="CloseToolMenu">
+                <button type="button"
+                        class="workspace-feature-selector__add"
+                        disabled="@Disabled"
+                        title="@ToolButtonTitle(id)"
+                        aria-label="@FeatureOpenInTools.Title(id)"
+                        aria-haspopup="menu"
+                        @onclick="() => LaunchAsync(FeatureOpenInTools.LaunchMethod(id))"
+                        @onclick:stopPropagation>
+                    @if (FeatureOpenInTools.IconImageSrc(id) is string iconSrc)
+                    {
+                        <img src="@iconSrc" alt="" class="workspace-feature-selector__tool-icon" aria-hidden="true" />
+                    }
+                    else
+                    {
+                        <i class="bi @FeatureOpenInTools.IconClass(id) workspace-feature-selector__launch-icon workspace-feature-selector__launch-icon--glyph" aria-hidden="true"></i>
+                    }
+                </button>
+                @if (!Disabled && _openToolMenuId == id)
                 {
-                    <img src="@iconSrc" alt="" class="workspace-feature-selector__tool-icon" aria-hidden="true" />
+                    <ul class="dropdown-menu show shadow workspace-feature-selector__dir-menu workspace-feature-selector__tool-menu"
+                        role="menu">
+                        <li>
+                            <button type="button"
+                                    class="dropdown-item workspace-feature-selector__repo-item"
+                                    role="menuitem"
+                                    title="Remove from the bar"
+                                    @onclick="() => RemoveRecentToolAsync(id)"
+                                    @onclick:stopPropagation>
+                                <i class="bi bi-arrow-counterclockwise workspace-feature-selector__launch-icon workspace-feature-selector__remove-icon" aria-hidden="true"></i>
+                                <span>Remove</span>
+                            </button>
+                        </li>
+                        @if (_repositories.Count > 0)
+                        {
+                            <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                            @RepositoryMenuItems(FeatureOpenInTools.LaunchMethod(id))
+                        }
+                    </ul>
                 }
-                else
-                {
-                    <i class="bi @FeatureOpenInTools.IconClass(id) workspace-feature-selector__launch-icon workspace-feature-selector__launch-icon--glyph" aria-hidden="true"></i>
-                }
-            </button>
+            </div>
         }
     }
     @if (_open)
@@ -228,6 +255,11 @@
 
     private readonly List<WorkspaceFeatureContextInfo> _options = [];
     private readonly List<NativeLaunchRepositoryPath> _repositories = [];
+    private int? _launchRepositoriesContextId;
+    private bool _launchRepositoriesLoading;
+    private string? _openToolMenuId;
+    private string? _toolHintHiddenId;
+    private CancellationTokenSource? _toolMenuCts;
     private readonly List<WorkspaceCatalogItem> _recentSwitchWorkspaces = [];
     private readonly List<WorkspaceCatalogItem> _otherSwitchWorkspaces = [];
     private readonly Dictionary<int, List<WorkspaceFeatureContextInfo>> _featuresByWorkspace = new();
@@ -332,6 +364,25 @@
         </li>
     };
 
+    private RenderFragment RepositoryMenuItems(string method) => __builder =>
+    {
+        foreach (var repo in _repositories)
+        {
+            var repoPath = repo.Path;
+            <li>
+                <button type="button"
+                        class="dropdown-item workspace-feature-selector__repo-item"
+                        role="menuitem"
+                        title="@repoPath"
+                        @onclick="() => LaunchAsync(method, repoPath)"
+                        @onclick:stopPropagation>
+                    <i class="bi bi-folder-fill workspace-feature-selector__launch-icon workspace-feature-selector__launch-icon--folder" aria-hidden="true"></i>
+                    <span class="workspace-feature-selector__repo-name">@repo.RepositoryName</span>
+                </button>
+            </li>
+        }
+    };
+
     private RenderFragment LaunchToolItem(string method, string label, string? imageSrc = null, string? iconClass = null) => __builder =>
     {
         <li class="workspace-feature-selector__launch-row">
@@ -356,21 +407,8 @@
                     <span class="workspace-feature-selector__repo-chevron" aria-hidden="true">
                         <i class="bi bi-chevron-right"></i>
                     </span>
-                    <ul class="dropdown-menu show shadow workspace-feature-selector__repo-submenu" role="menu">
-                        @foreach (var repo in _repositories)
-                        {
-                            var repoPath = repo.Path;
-                            <li>
-                                <button type="button"
-                                        class="dropdown-item workspace-feature-selector__repo-item"
-                                        role="menuitem"
-                                        title="@repoPath"
-                                        @onclick="() => LaunchAsync(method, repoPath)">
-                                    <i class="bi bi-folder-fill workspace-feature-selector__launch-icon workspace-feature-selector__launch-icon--folder" aria-hidden="true"></i>
-                                    <span class="workspace-feature-selector__repo-name">@repo.RepositoryName</span>
-                                </button>
-                            </li>
-                        }
+                    <ul class="dropdown-menu show shadow workspace-feature-selector__dir-menu workspace-feature-selector__repo-submenu" role="menu">
+                        @RepositoryMenuItems(method)
                     </ul>
                 </div>
             }
@@ -461,6 +499,12 @@
         }
 
         await EnsureRecentOpenInToolsAsync(WorkspaceId);
+
+        if (_launchRepositoriesContextId is int loaded && loaded != SelectedContextId?.Value)
+        {
+            _repositories.Clear();
+            _launchRepositoriesContextId = null;
+        }
     }
 
     private async Task EnsureRecentOpenInToolsAsync(int workspaceId)
@@ -560,6 +604,7 @@
 
     public async ValueTask DisposeAsync()
     {
+        CloseToolMenu();
         if (_toolAvailabilitySubscribed && _toolAvailabilityRef is not null)
         {
             try
@@ -759,26 +804,132 @@
         return $"/workspaces/{targetWorkspaceId}{suffix}{qs}";
     }
 
-    private async Task RefreshLaunchRepositoriesAsync()
+    private void OnToolPointerEnter(string toolId)
     {
-        _repositories.Clear();
-        if (SelectedContextId is null)
+        if (Disabled)
             return;
 
+        _ = EnsureLaunchRepositoriesAsync();
+        if (_openToolMenuId == toolId || _toolMenuCts is not null)
+            return;
+
+        var cts = new CancellationTokenSource();
+        _toolMenuCts = cts;
+        _ = OpenToolMenuAfterDelayAsync(toolId, cts.Token);
+    }
+
+    private async Task OpenToolMenuAfterDelayAsync(string toolId, CancellationToken cancellationToken)
+    {
         try
         {
-            var paths = await NativeLaunch.ResolveContextLaunchPathsAsync(SelectedContextId.Value);
-            if (paths is null)
+            await Task.Delay(TimeSpan.FromMilliseconds(750), cancellationToken);
+            await InvokeAsync(() =>
+            {
+                if (cancellationToken.IsCancellationRequested)
+                    return;
+                // Drop the native tooltip before the menu, or the two sit on top of each other.
+                _toolHintHiddenId = toolId;
+                StateHasChanged();
+            });
+            await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken);
+            await InvokeAsync(() =>
+            {
+                if (cancellationToken.IsCancellationRequested)
+                    return;
+                _openToolMenuId = toolId;
+                StateHasChanged();
+            });
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    private void CloseToolMenu()
+    {
+        if (_toolMenuCts is not null)
+        {
+            _toolMenuCts.Cancel();
+            _toolMenuCts.Dispose();
+            _toolMenuCts = null;
+        }
+
+        _openToolMenuId = null;
+        _toolHintHiddenId = null;
+    }
+
+    /// <summary>Null while the menu is about to open, so the browser tooltip is already gone.</summary>
+    private string? ToolButtonTitle(string toolId) =>
+        _toolHintHiddenId == toolId ? null : FeatureOpenInTools.Title(toolId);
+
+    private Task EnsureLaunchRepositoriesAsync()
+    {
+        if (!_desktopAvailable || SelectedContextId is not { } contextId)
+            return Task.CompletedTask;
+        if (_launchRepositoriesLoading || _launchRepositoriesContextId == contextId.Value)
+            return Task.CompletedTask;
+        return RefreshLaunchRepositoriesAsync();
+    }
+
+    private async Task RefreshLaunchRepositoriesAsync()
+    {
+        if (_launchRepositoriesLoading)
+            return;
+
+        _launchRepositoriesLoading = true;
+        var requested = SelectedContextId;
+        try
+        {
+            _repositories.Clear();
+            if (requested is null || !_desktopAvailable)
+            {
+                _launchRepositoriesContextId = null;
+                return;
+            }
+
+            var paths = await NativeLaunch.ResolveContextLaunchPathsAsync(requested.Value);
+            if (SelectedContextId?.Value != requested.Value)
                 return;
 
-            _repositories.AddRange(paths.Repositories
-                .Where(r => !string.IsNullOrWhiteSpace(r.Path))
-                .OrderBy(r => r.RepositoryName, StringComparer.OrdinalIgnoreCase));
+            _repositories.Clear();
+            if (paths is not null)
+            {
+                _repositories.AddRange(paths.Repositories
+                    .Where(r => !string.IsNullOrWhiteSpace(r.Path))
+                    .OrderBy(r => r.RepositoryName, StringComparer.OrdinalIgnoreCase));
+            }
+
+            _launchRepositoriesContextId = requested.Value;
         }
         catch
         {
-            // Desktop bridge / path resolution optional.
+            _launchRepositoriesContextId = null;
         }
+        finally
+        {
+            _launchRepositoriesLoading = false;
+        }
+
+        if (_openToolMenuId is not null)
+        {
+            try
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        }
+    }
+
+    private async Task RemoveRecentToolAsync(string toolId)
+    {
+        CloseToolMenu();
+        _recentOpenInTools = (await OpenInRecentTools.RemoveAsync(WorkspaceId, toolId)).ToList();
+        _recentOpenInWorkspaceId = WorkspaceId;
     }
 
     private async Task LoadRecentOpenInToolsAsync(int workspaceId)
@@ -836,6 +987,7 @@
 
     private async Task LaunchAsync(string method, string? repositoryPath = null)
     {
+        CloseToolMenu();
         await RememberOpenInToolAsync(method);
 
         string? path = repositoryPath;

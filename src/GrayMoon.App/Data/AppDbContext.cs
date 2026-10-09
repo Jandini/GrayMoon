@@ -27,6 +27,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
     public DbSet<WorkspaceFeatureRepository> WorkspaceFeatureRepositories => Set<WorkspaceFeatureRepository>();
     public DbSet<WorkspaceRepositoryContextState> WorkspaceRepositoryContextStates => Set<WorkspaceRepositoryContextState>();
     public DbSet<WorkspaceSelectedFeatureContext> WorkspaceSelectedFeatureContexts => Set<WorkspaceSelectedFeatureContext>();
+    public DbSet<WorkspaceOpenInRecentTool> WorkspaceOpenInRecentTools => Set<WorkspaceOpenInRecentTool>();
     public DbSet<WorkspaceRepositoryContextPullRequest> WorkspaceRepositoryContextPullRequests => Set<WorkspaceRepositoryContextPullRequest>();
     public DbSet<WorkspaceRepositoryContextAction> WorkspaceRepositoryContextActions => Set<WorkspaceRepositoryContextAction>();
     public DbSet<WorkspaceGitContextRepositoryStatus> WorkspaceGitContextRepositoryStatuses => Set<WorkspaceGitContextRepositoryStatus>();

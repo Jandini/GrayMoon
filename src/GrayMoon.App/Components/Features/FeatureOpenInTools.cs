@@ -105,6 +105,31 @@ internal static class FeatureOpenInTools
     }
 
     /// <summary>
+    /// Drops one remembered tool. The others stay in order. An unknown id leaves the list unchanged.
+    /// </summary>
+    public static IReadOnlyList<string> Remove(IReadOnlyList<string> recent, string toolId)
+    {
+        if (!IsRemembered(toolId))
+            return recent;
+
+        var next = new List<string>(recent.Count);
+        var removed = false;
+        foreach (var existing in recent)
+        {
+            if (!removed && string.Equals(existing, toolId, StringComparison.Ordinal))
+            {
+                removed = true;
+                continue;
+            }
+
+            if (IsRemembered(existing))
+                next.Add(existing);
+        }
+
+        return removed ? next : recent;
+    }
+
+    /// <summary>
     /// Tools from <paramref name="recent"/> that can be launched. Being listed is not enough:
     /// Cursor, Claude CLI, VS Code, and Visual Studio are omitted unless installed.
     /// Terminal and Explorer stay, because Desktop can always open them.

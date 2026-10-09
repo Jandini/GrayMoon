@@ -1,8 +1,10 @@
+using GrayMoon.App;
 using GrayMoon.App.Components.Features;
+using GrayMoon.App.Data;
+using GrayMoon.App.Models;
 using GrayMoon.App.Services.Ui;
-using GrayMoon.App.Services.WorkspaceManifest;
-using GrayMoon.Application.WorkspaceManifest;
-using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Tests;
 
@@ -48,108 +50,147 @@ public sealed class FeatureOpenInToolsTests
             [FeatureOpenInTools.Explorer, FeatureOpenInTools.VsCode, FeatureOpenInTools.Terminal],
             buttons);
     }
-}
-
-public sealed class WorkspaceManifestRecentToolsTests
-{
-    [Fact]
-    public void Apply_keeps_the_definition_and_appends_recent_tools()
-    {
-        var definition = WorkspaceManifestSerializer.Serialize(new WorkspaceManifest(
-            1,
-            new WorkspaceManifestWorkspace("AVR", new WorkspaceManifestProfile("basic", "none", "none")),
-            [],
-            []));
-
-        var updated = WorkspaceManifestRecentTools.Apply(definition, [FeatureOpenInTools.Cursor, "not-a-tool", FeatureOpenInTools.Cursor]);
-
-        Assert.NotNull(updated);
-        Assert.Equal([FeatureOpenInTools.Cursor], WorkspaceManifestRecentTools.Read(updated));
-        Assert.True(WorkspaceManifestSerializer.TryParse(updated!, out var parsed, out var error), error);
-        Assert.Equal("AVR", parsed!.Workspace.Name);
-        Assert.Equal(definition, WorkspaceManifestSerializer.Serialize(parsed));
-    }
 
     [Fact]
-    public void Apply_returns_null_for_content_that_is_not_a_definition()
+    public void Remove_drops_one_tool_and_keeps_the_rest_in_order()
     {
-        Assert.Null(WorkspaceManifestRecentTools.Apply("not json", [FeatureOpenInTools.Cursor]));
-        Assert.Null(WorkspaceManifestRecentTools.Apply(null, [FeatureOpenInTools.Cursor]));
-    }
+        var recent = new[]
+        {
+            FeatureOpenInTools.Cursor,
+            FeatureOpenInTools.Terminal,
+            FeatureOpenInTools.Explorer,
+        };
 
-    [Fact]
-    public void Preserve_copies_recent_tools_onto_a_rewritten_definition()
-    {
-        var definition = WorkspaceManifestSerializer.Serialize(new WorkspaceManifest(
-            1,
-            new WorkspaceManifestWorkspace("AVR", new WorkspaceManifestProfile("basic", "none", "none")),
-            [],
-            []));
-        var existing = WorkspaceManifestRecentTools.Apply(definition, [FeatureOpenInTools.VisualStudio]);
+        var removed = FeatureOpenInTools.Remove(recent, FeatureOpenInTools.Terminal);
+        var missing = FeatureOpenInTools.Remove(removed, FeatureOpenInTools.VsCode);
+        var unknown = FeatureOpenInTools.Remove(recent, "not-a-tool");
 
-        var preserved = WorkspaceManifestRecentTools.Preserve(definition, existing);
-
-        Assert.Equal([FeatureOpenInTools.VisualStudio], WorkspaceManifestRecentTools.Read(preserved));
-        Assert.Equal(definition, WorkspaceManifestRecentTools.Preserve(definition, definition));
+        Assert.Equal([FeatureOpenInTools.Cursor, FeatureOpenInTools.Explorer], removed);
+        Assert.Same(removed, missing);
+        Assert.Same(recent, unknown);
     }
 }
 
-public sealed class WorkspaceOpenInRecentToolsTests
+public sealed class WorkspaceOpenInRecentToolsDbTests
 {
     [Fact]
-    public async Task Record_patches_existing_manifest_and_does_not_create_one()
+    public async Task Record_appends_and_a_new_circuit_reads_the_same_order()
     {
-        await using var fixture = await ManifestTestFixture.CreateAsync();
-        var workspace = await fixture.SeedWorkspaceWithRootRepositoryAsync();
-        var manifest = fixture.CreateService();
-        var definition = manifest.Serialize(await manifest.BuildFromDatabaseAsync(workspace.WorkspaceId));
-        fixture.Bridge.RespondWithFile(definition);
-        var recent = CreateRecent(fixture);
+        await using var db = await RecentToolsDb.CreateAsync();
+        var workspaceId = await db.SeedWorkspaceAsync();
+        var first = db.CreateService();
 
-        var tools = await recent.RecordAsync(workspace.WorkspaceId, FeatureOpenInTools.Cursor);
+        var tools = await first.RecordAsync(workspaceId, FeatureOpenInTools.Cursor);
+        tools = await first.RecordAsync(workspaceId, FeatureOpenInTools.Terminal);
+        var again = await first.RecordAsync(workspaceId, FeatureOpenInTools.Cursor);
+        var ignored = await first.RecordAsync(workspaceId, "not-a-tool");
 
-        Assert.Equal([FeatureOpenInTools.Cursor], tools);
-        var write = Assert.Single(fixture.Bridge.Sent, sent => sent.Command == "WriteRepositoryFile");
-        var content = ManifestTestFixture.ToJson(write.Args).GetProperty("content").GetString();
-        Assert.Equal([FeatureOpenInTools.Cursor], WorkspaceManifestRecentTools.Read(content));
-        Assert.True(WorkspaceManifestSerializer.TryParse(content!, out _, out var error), error);
+        Assert.Equal([FeatureOpenInTools.Cursor, FeatureOpenInTools.Terminal], tools);
+        Assert.Equal(tools, again);
+        Assert.Equal(tools, ignored);
+        Assert.True(first.TryGetCached(workspaceId, out var cached));
+        Assert.Equal(tools, cached);
+        await using (var ctx = db.CreateContext())
+            Assert.Equal(2, await ctx.WorkspaceOpenInRecentTools.CountAsync());
+
+        var second = db.CreateService();
+        Assert.Equal([FeatureOpenInTools.Cursor, FeatureOpenInTools.Terminal], await second.GetAsync(workspaceId));
     }
 
     [Fact]
-    public async Task Record_without_workspace_repository_stays_in_memory()
+    public async Task Remove_deletes_one_tool_and_deleting_the_workspace_clears_the_rest()
     {
-        await using var fixture = await ManifestTestFixture.CreateAsync();
-        var workspace = await fixture.AddWorkspaceAsync("plain");
-        var recent = CreateRecent(fixture);
+        await using var db = await RecentToolsDb.CreateAsync();
+        var workspaceId = await db.SeedWorkspaceAsync();
+        var recent = db.CreateService();
+        await recent.RecordAsync(workspaceId, FeatureOpenInTools.Explorer);
+        await recent.RecordAsync(workspaceId, FeatureOpenInTools.VsCode);
 
-        var tools = await recent.RecordAsync(workspace.WorkspaceId, FeatureOpenInTools.ClaudeCli);
+        var left = await recent.RemoveAsync(workspaceId, FeatureOpenInTools.Explorer);
 
-        Assert.Equal([FeatureOpenInTools.ClaudeCli], tools);
-        Assert.DoesNotContain(fixture.Bridge.Sent, sent => sent.Command == "WriteRepositoryFile");
-        Assert.Equal([FeatureOpenInTools.ClaudeCli], await recent.GetAsync(workspace.WorkspaceId));
-        Assert.True(recent.TryGetCached(workspace.WorkspaceId, out var cached));
-        Assert.Equal([FeatureOpenInTools.ClaudeCli], cached);
+        Assert.Equal([FeatureOpenInTools.VsCode], left);
+        Assert.Equal([FeatureOpenInTools.VsCode], await db.CreateService().GetAsync(workspaceId));
+
+        await using (var ctx = db.CreateContext())
+        {
+            var workspace = await ctx.Workspaces.SingleAsync();
+            ctx.Workspaces.Remove(workspace);
+            await ctx.SaveChangesAsync();
+            Assert.Empty(await ctx.WorkspaceOpenInRecentTools.ToListAsync());
+        }
     }
 
     [Fact]
-    public async Task Record_does_not_create_a_missing_manifest()
+    public async Task Strict_step_7_creates_the_recent_tools_table_once()
     {
-        await using var fixture = await ManifestTestFixture.CreateAsync();
-        var workspace = await fixture.SeedWorkspaceWithRootRepositoryAsync();
-        fixture.Bridge.Handler = (command, _) => command == "GetFileContents"
-            ? new GrayMoon.Abstractions.Worker.WorkerCommandResponse(true, new { errorMessage = "File not found: .graymoon.json" }, null)
-            : new GrayMoon.Abstractions.Worker.WorkerCommandResponse(true, new { success = true }, null);
-        var recent = CreateRecent(fixture);
+        await using var db = await RecentToolsDb.CreateAsync();
+        await using var ctx = db.CreateContext();
+        await ctx.Database.OpenConnectionAsync();
+        var conn = ctx.Database.GetDbConnection();
+        await using (var drop = conn.CreateCommand())
+        {
+            drop.CommandText = "DROP TABLE \"WorkspaceOpenInRecentTools\";";
+            await drop.ExecuteNonQueryAsync();
+        }
 
-        var tools = await recent.RecordAsync(workspace.WorkspaceId, FeatureOpenInTools.VsCode);
+        var step = Migrations.StrictSteps.Single(s => s.Version == 7);
+        Assert.Contains(Migrations.StrictSteps, s => s.Version == 6);
+        await step.Action(ctx);
+        await step.Action(ctx);
 
-        Assert.Equal([FeatureOpenInTools.VsCode], tools);
-        Assert.DoesNotContain(fixture.Bridge.Sent, sent => sent.Command == "WriteRepositoryFile");
+        await using var check = conn.CreateCommand();
+        check.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'WorkspaceOpenInRecentTools'";
+        Assert.Equal(1, Convert.ToInt32(await check.ExecuteScalarAsync()));
     }
 
-    private static WorkspaceOpenInRecentTools CreateRecent(ManifestTestFixture fixture) => new(
-        fixture.Bridge,
-        new FakeWorkspacePathResolver(fixture.Factory),
-        new FakeFeatureContextResolver(),
-        NullLogger<WorkspaceOpenInRecentTools>.Instance);
+    private sealed class RecentToolsDb : IAsyncDisposable
+    {
+        private readonly SqliteConnection _connection;
+        private readonly DbContextOptions<AppDbContext> _options;
+
+        private RecentToolsDb(SqliteConnection connection, DbContextOptions<AppDbContext> options)
+        {
+            _connection = connection;
+            _options = options;
+        }
+
+        public static async Task<RecentToolsDb> CreateAsync()
+        {
+            var connection = new SqliteConnection("Data Source=:memory:");
+            await connection.OpenAsync();
+            await using (var pragma = connection.CreateCommand())
+            {
+                pragma.CommandText = "PRAGMA foreign_keys = ON;";
+                await pragma.ExecuteNonQueryAsync();
+            }
+
+            var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
+            await using (var db = new AppDbContext(options))
+                await db.Database.EnsureCreatedAsync();
+            return new RecentToolsDb(connection, options);
+        }
+
+        public WorkspaceOpenInRecentTools CreateService() => new(new Factory(_options));
+
+        public AppDbContext CreateContext() => new(_options);
+
+        public async Task<int> SeedWorkspaceAsync()
+        {
+            await using var db = CreateContext();
+            var workspace = new Workspace { Name = "ws" };
+            db.Workspaces.Add(workspace);
+            await db.SaveChangesAsync();
+            return workspace.WorkspaceId;
+        }
+
+        public async ValueTask DisposeAsync() => await _connection.DisposeAsync();
+
+        private sealed class Factory(DbContextOptions<AppDbContext> options) : IDbContextFactory<AppDbContext>
+        {
+            public AppDbContext CreateDbContext() => new(options);
+
+            public Task<AppDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default) =>
+                Task.FromResult(CreateDbContext());
+        }
+    }
 }

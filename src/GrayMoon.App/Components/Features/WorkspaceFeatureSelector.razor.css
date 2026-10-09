@@ -72,8 +72,21 @@
     overflow: hidden;
 }
 
-.workspace-feature-selector__add + .workspace-feature-selector__add {
+.workspace-feature-selector__add + .workspace-feature-selector__add,
+.workspace-feature-selector__add + .workspace-feature-selector__tool,
+.workspace-feature-selector__tool + .workspace-feature-selector__tool {
     border-left: 1px solid var(--border-input);
+}
+
+.workspace-feature-selector__tool {
+    position: relative;
+    display: flex;
+    flex: 0 0 auto;
+    align-self: stretch;
+}
+
+.workspace-feature-selector__tool:hover {
+    z-index: 4;
 }
 
 .workspace-feature-selector__tool-icon {
@@ -291,7 +304,8 @@
     font-size: 0.7rem;
 }
 
-.workspace-feature-selector__menu .branch-menu-divider {
+.workspace-feature-selector__menu .branch-menu-divider,
+.workspace-feature-selector__dir-menu .branch-menu-divider {
     border-top-color: var(--border-color, #6c757d);
     opacity: 0.9;
     margin: 0.25rem 0;
@@ -361,6 +375,11 @@
     object-fit: contain;
 }
 
+.workspace-feature-selector__remove-icon {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
 .workspace-feature-selector__launch-icon--glyph {
     font-size: 1.05rem;
     line-height: 1;
@@ -409,12 +428,9 @@
 }
 
 /* As wide as the longest repository name. A fixed max-width ellipsized long folder
-   names, and rows that share a prefix were then hard to tell apart. */
-.workspace-feature-selector__repo-submenu {
-    display: none;
-    position: absolute;
-    left: 100%;
-    top: 0;
+   names, and rows that share a prefix were then hard to tell apart.
+   Shared by the Open in flyout and the recent-tool button menu. */
+.workspace-feature-selector__dir-menu {
     margin: 0;
     width: max-content;
     min-width: 11rem;
@@ -429,44 +445,59 @@
     z-index: 1062;
 }
 
-.workspace-feature-selector__repo-submenu .dropdown-item {
+.workspace-feature-selector__dir-menu .dropdown-item {
     width: 100%;
     box-sizing: border-box;
+    white-space: nowrap;
     overflow: visible;
     text-overflow: clip;
+}
+
+.workspace-feature-selector__repo-submenu {
+    display: none;
+    position: absolute;
+    left: 100%;
+    top: 0;
+}
+
+/* Recent-tool button menu. The component adds it after the pointer has rested for 1s. */
+.workspace-feature-selector__tool-menu {
+    position: absolute;
+    top: calc(100% - 1px);
+    left: 0;
 }
 
 /* Gray, auto-width scrollbars for menus that scroll (matches tree / table scrollbars). */
 .workspace-feature-selector__menu,
 .workspace-feature-selector__ws-features-submenu,
-.workspace-feature-selector__repo-submenu {
+.workspace-feature-selector__dir-menu {
     scrollbar-width: auto;
     scrollbar-color: #5a5a5a var(--bg-card, #252526);
 }
 
 .workspace-feature-selector__menu::-webkit-scrollbar,
 .workspace-feature-selector__ws-features-submenu::-webkit-scrollbar,
-.workspace-feature-selector__repo-submenu::-webkit-scrollbar {
+.workspace-feature-selector__dir-menu::-webkit-scrollbar {
     width: 8px;
     height: 8px;
 }
 
 .workspace-feature-selector__menu::-webkit-scrollbar-track,
 .workspace-feature-selector__ws-features-submenu::-webkit-scrollbar-track,
-.workspace-feature-selector__repo-submenu::-webkit-scrollbar-track {
+.workspace-feature-selector__dir-menu::-webkit-scrollbar-track {
     background: var(--bg-card, #252526);
 }
 
 .workspace-feature-selector__menu::-webkit-scrollbar-thumb,
 .workspace-feature-selector__ws-features-submenu::-webkit-scrollbar-thumb,
-.workspace-feature-selector__repo-submenu::-webkit-scrollbar-thumb {
+.workspace-feature-selector__dir-menu::-webkit-scrollbar-thumb {
     background: #5a5a5a;
     border-radius: 4px;
 }
 
 .workspace-feature-selector__menu::-webkit-scrollbar-thumb:hover,
 .workspace-feature-selector__ws-features-submenu::-webkit-scrollbar-thumb:hover,
-.workspace-feature-selector__repo-submenu::-webkit-scrollbar-thumb:hover {
+.workspace-feature-selector__dir-menu::-webkit-scrollbar-thumb:hover {
     background: #6a6a6a;
 }
 
