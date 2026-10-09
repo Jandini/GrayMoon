@@ -129,6 +129,13 @@ public sealed class DependencyUpdateOrchestrator(
             // Re-fetch per level: RefreshRepositoryVersionsAsync updates OutOfDateFileRepos in the DB
             // after each level commits, so re-reading here ensures newly out-of-date files at higher
             // levels are not skipped.
+            // The per-repo checks that ran inside RefreshRepositoryVersionsAsync coalesce onto whichever check was already
+            // in flight, which may have read versions before the other repos of the previous level were persisted. Force
+            // one authoritative check so a repo whose only pending work is version files (e.g. a high level with no
+            // csproj work) is not skipped here on a stale OutOfDateFileRepos flag.
+            if (level > levelRepoIds[0].Level)
+                await fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, contextId, cancellationToken, forceFresh: true);
+
             var freshWorkspace = await workspaceRepository.GetByIdAsync(workspaceId);
             var outOfDateFileRepoIds = (freshWorkspace?.Repositories ?? (ICollection<WorkspaceRepositoryLink>)[])
                 .Where(l => (l.OutOfDateFileRepos ?? 0) > 0)
