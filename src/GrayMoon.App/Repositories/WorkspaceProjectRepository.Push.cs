@@ -20,7 +20,7 @@ public sealed partial class WorkspaceProjectRepository
         var links = await dbContext.WorkspaceRepositories
             .AsNoTracking()
             .Where(wr => wr.WorkspaceId == workspaceId)
-            .Select(wr => new { wr.RepositoryId, wr.WorkspaceRepositoryId, wr.GitVersion, wr.DependencyLevel })
+            .Select(wr => new { wr.RepositoryId, wr.WorkspaceRepositoryId, wr.GitVersion, wr.DependencyLevel, wr.Role })
             .ToListAsync(cancellationToken);
 
         var states = await dbContext.WorkspaceRepositoryContextStates
@@ -51,6 +51,16 @@ public sealed partial class WorkspaceProjectRepository
                 levelByRepo[link.RepositoryId] = null;
             }
         }
+
+        // The Workspace-role repository has no projects and no persisted level (it is outside the dependency graph), but it
+        // records the state of every source repository, so every level-by-level walk (update, push) must reach it last.
+        // Without this it reads as level 0 and runs first, before the source repositories it depends on are updated or pushed.
+        var sourceLevels = links.Where(l => l.Role != WorkspaceRepositoryRole.Workspace && levelByRepo.GetValueOrDefault(l.RepositoryId).HasValue)
+            .Select(l => levelByRepo[l.RepositoryId]!.Value)
+            .ToList();
+        var workspaceRepoLevel = (sourceLevels.Count > 0 ? sourceLevels.Max() : 0) + 1;
+        foreach (var link in links.Where(l => l.Role == WorkspaceRepositoryRole.Workspace))
+            levelByRepo[link.RepositoryId] = workspaceRepoLevel;
 
         return (versionByRepo, levelByRepo);
     }

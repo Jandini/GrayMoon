@@ -72,7 +72,7 @@ public sealed class GitStatusRefreshCoordinator : IDisposable, IGitChangesRefres
         if (includeLineStats && result.Success && result.Snapshot != null && result.Snapshot.Insertions is null)
         {
             var version = _snapshotCache.NextVersion(repoPath);
-            var filled = await _gitChangesService.GetStatusAsync(repoPath, version, cancellationToken, includeLineStats: true);
+            var filled = await GetStatusGuardedAsync(repoPath, version, cancellationToken, includeLineStats: true);
             if (filled.Success && filled.Snapshot != null)
             {
                 _snapshotCache.SetLatest(repoPath, filled.Snapshot);
@@ -82,6 +82,27 @@ public sealed class GitStatusRefreshCoordinator : IDisposable, IGitChangesRefres
         }
 
         return result;
+    }
+
+    private static GitChangeStatusResult PathUnderRemovalResult() => new()
+    {
+        Success = false,
+        ErrorCode = "PathUnderRemoval",
+        ErrorMessage = "Repository folder is being removed.",
+    };
+
+    /// <summary>A scan of a folder that is being removed is refused or evicted by the access broker; that is an expected
+    /// outcome, not a git failure, so it becomes a typed result instead of an exception.</summary>
+    private async Task<GitChangeStatusResult> GetStatusGuardedAsync(string repoPath, long version, CancellationToken cancellationToken, bool includeLineStats)
+    {
+        try
+        {
+            return await _gitChangesService.GetStatusAsync(repoPath, version, cancellationToken, includeLineStats);
+        }
+        catch (PathUnderRemovalException)
+        {
+            return PathUnderRemovalResult();
+        }
     }
 
     public RepositoryRefreshState GetState(string repoPath) => GetOrAddTracker(repoPath).State;
@@ -214,8 +235,12 @@ public sealed class GitStatusRefreshCoordinator : IDisposable, IGitChangesRefres
                 try
                 {
                     var version = _snapshotCache.NextVersion(repoPath);
-                    result = await _gitChangesService.GetStatusAsync(repoPath, version, cancellationToken, includeLineStats);
-                    if (result.Success && result.Snapshot != null)
+                    result = await GetStatusGuardedAsync(repoPath, version, cancellationToken, includeLineStats);
+                    if (result.ErrorCode == "PathUnderRemoval")
+                    {
+                        _logger.LogDebug("Git status scan skipped for {RepoPath}: folder is being removed", repoPath);
+                    }
+                    else if (result.Success && result.Snapshot != null)
                     {
                         _snapshotCache.SetLatest(repoPath, result.Snapshot);
                         SnapshotReady?.Invoke(repoPath, result.Snapshot);

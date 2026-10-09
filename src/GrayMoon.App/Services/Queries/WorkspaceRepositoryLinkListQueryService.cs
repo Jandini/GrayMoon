@@ -679,7 +679,8 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
             FeatureBaseCommitSha: x.featureRepo != null ? x.featureRepo.BaseCommitSha : null,
             ParentBranchName: x.featureRepo != null ? x.featureRepo.ParentBranchName : null,
             FeaturePinnedTag: x.featureRepo != null ? x.featureRepo.PinnedTag : null,
-            Role: x.wr.Role));
+            Role: x.wr.Role,
+            GitVersionPending: x.state != null ? x.state.GitVersionPending : null));
     }
 
     private static WorkspaceRepositoryLinkListCursor ToCursor(WorkspaceRepositoryLinkListItemDto dto) =>

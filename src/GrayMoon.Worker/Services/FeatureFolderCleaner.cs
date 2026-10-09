@@ -1,3 +1,4 @@
+using GrayMoon.Worker.Abstractions;
 using Microsoft.Extensions.Logging;
 
 namespace GrayMoon.Worker.Services;
@@ -22,7 +23,7 @@ public sealed record FeatureFolderCleanupResult(FeatureFolderCleanupOutcome Outc
 /// inspects a process. Only ever deletes a direct child of the Feature storage root that holds no Git repository and no
 /// still-registered worktree.
 /// </summary>
-public sealed class FeatureFolderCleaner(ILogger<FeatureFolderCleaner> logger)
+public sealed class FeatureFolderCleaner(ILogger<FeatureFolderCleaner> logger, IRepositoryAccess access)
 {
     private const string FeaturesFolderName = "features";
 
@@ -63,8 +64,23 @@ public sealed class FeatureFolderCleaner(ILogger<FeatureFolderCleaner> logger)
         if (requireMarker && (existingMarker == null || !MarkerNames(existingMarker, root)))
             return new FeatureFolderCleanupResult(FeatureFolderCleanupOutcome.NotMarked);
 
-        await GitWorktreeService.DeleteFolderRecursivelyWithRetryAsync(root, ct, retry);
-        TryDeleteEmptyFolder(root);
+        // The Worker's own handles (watchers, git processes) never block this delete; the marker is for foreign programs.
+        IRepositoryExclusiveScope? removalScope = null;
+        try
+        {
+            removalScope = await access.AcquireExclusiveAsync([root], ct);
+        }
+        catch (RepositoryAccessException ex)
+        {
+            logger.LogError(ex, "Could not release the Worker's own handles on {FeatureRootPath}; leaving it marked.", root);
+        }
+
+        using var scope = removalScope;
+        if (scope != null)
+        {
+            await GitWorktreeService.DeleteFolderRecursivelyWithRetryAsync(root, ct, retry);
+            TryDeleteEmptyFolder(root);
+        }
 
         if (!Directory.Exists(root))
         {

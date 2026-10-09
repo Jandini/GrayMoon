@@ -97,6 +97,18 @@ public sealed record DependencyUpdateRunResult(bool Success, IReadOnlySet<int> S
     public bool ShouldChainPush(bool pushRequested) => pushRequested && Success;
 }
 
+/// <summary>
+/// Outcome of a pipelined Update and Push. When <see cref="Pipelined"/> is false nothing ran (the push lane was not
+/// possible) and the caller runs the sequential update-then-push. Otherwise <see cref="Update"/> and <see cref="Push"/>
+/// are the outcomes of the two lanes, whose errors were also reported live through the callbacks.
+/// </summary>
+public sealed record UpdateAndPushResult(bool Pipelined, DependencyUpdateRunResult Update, OperationResult? Push, int PushedRepoCount = 0)
+{
+    public static UpdateAndPushResult NotPipelined { get; } = new(false, DependencyUpdateRunResult.Ok(), null);
+
+    public bool Success => Update.Success && (Push?.Success ?? true);
+}
+
 public static class OperationProgressExtensions
 {
     public static void Report(

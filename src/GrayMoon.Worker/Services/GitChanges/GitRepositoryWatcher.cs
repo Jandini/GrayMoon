@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using GrayMoon.Worker.Abstractions;
+using Microsoft.Extensions.Logging;
 
 namespace GrayMoon.Worker.Services.GitChanges;
 
@@ -9,7 +10,7 @@ namespace GrayMoon.Worker.Services.GitChanges;
 /// <see cref="Observed"/> with a UTC receipt timestamp for coverage metadata; <c>.git</c> metadata only
 /// invalidates and is not recorded as a normal file observation.
 /// </summary>
-public sealed class GitRepositoryWatcher : IDisposable
+public sealed class GitRepositoryWatcher : IDisposable, IReleasable, IRepositoryAccessObserver
 {
     private static readonly string[] RelevantGitMetadataNames =
     [
@@ -21,6 +22,11 @@ public sealed class GitRepositoryWatcher : IDisposable
     private FileSystemWatcher? _workTreeWatcher;
     private FileSystemWatcher? _gitDirWatcher;
     private bool _disposed;
+
+    // Removals in progress strictly beneath this repository (it is an ancestor of a folder being deleted). While any is
+    // open, events are ignored instead of reported or restarting the watcher mid-delete; one full refresh follows.
+    private int _pausedBy;
+    private volatile bool _missedWhilePaused;
 
     // Immediate child directories that are themselves Git working trees (nested repository or submodule).
     // A nested .git is a physical boundary, so events below such a directory never belong to this repository.
@@ -129,6 +135,12 @@ public sealed class GitRepositoryWatcher : IDisposable
 
     private void HandleWorkTreeEvent(FileSystemEventArgs e, GitRepositoryObservedChangeKind kind, string? oldPath)
     {
+        if (Volatile.Read(ref _pausedBy) > 0)
+        {
+            _missedWhilePaused = true;
+            return;
+        }
+
         if (kind != GitRepositoryObservedChangeKind.Changed && AffectsNestedRepoSet(e.FullPath))
         {
             RefreshNestedRepoRoots();
@@ -224,6 +236,12 @@ public sealed class GitRepositoryWatcher : IDisposable
 
     private void OnGitMetadataEvent(object sender, FileSystemEventArgs e)
     {
+        if (Volatile.Read(ref _pausedBy) > 0)
+        {
+            _missedWhilePaused = true;
+            return;
+        }
+
         var name = Path.GetFileName(e.FullPath);
         var parentDirectoryName = Path.GetFileName(Path.GetDirectoryName(e.FullPath) ?? string.Empty);
 
@@ -242,6 +260,18 @@ public sealed class GitRepositoryWatcher : IDisposable
 
     private void OnError(object sender, ErrorEventArgs e)
     {
+        if (_disposed)
+        {
+            return;
+        }
+
+        if (Volatile.Read(ref _pausedBy) > 0)
+        {
+            // A delete beneath this folder overflows the buffer by design. Keep the watcher; resume reports it.
+            _missedWhilePaused = true;
+            return;
+        }
+
         _logger.LogWarning(e.GetException(), "Git repository watcher overflow/failure for {RepoPath}; recreating watcher", _repoPath);
         DisposeWatchers();
         Overflowed?.Invoke();
@@ -249,6 +279,27 @@ public sealed class GitRepositoryWatcher : IDisposable
         if (!_disposed)
         {
             Start();
+        }
+    }
+
+    /// <inheritdoc />
+    public void Release() => Dispose();
+
+    /// <inheritdoc />
+    public void ClaimBeneathStarted() => Interlocked.Increment(ref _pausedBy);
+
+    /// <inheritdoc />
+    public void ClaimBeneathEnded()
+    {
+        if (Interlocked.Decrement(ref _pausedBy) > 0 || _disposed)
+        {
+            return;
+        }
+
+        if (_missedWhilePaused)
+        {
+            _missedWhilePaused = false;
+            Overflowed?.Invoke();
         }
     }
 

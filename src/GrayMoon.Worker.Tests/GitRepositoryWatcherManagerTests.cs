@@ -26,7 +26,7 @@ public sealed class GitRepositoryWatcherManagerTests : IDisposable
         new(fake, new GitChangesSnapshotCache(), Options.Create(options), NullLogger<GitStatusRefreshCoordinator>.Instance);
 
     private static GitRepositoryWatcherManager CreateManager(GitStatusRefreshCoordinator coordinator, GitChangesOptions options) =>
-        new(coordinator, new GitChangesSnapshotCache(), new GitChangesRepositoryRegistry(), Options.Create(options), NullLoggerFactory.Instance, NullLogger<GitRepositoryWatcherManager>.Instance);
+        new(coordinator, new GitChangesSnapshotCache(), new GitChangesRepositoryRegistry(), Options.Create(options), NullLoggerFactory.Instance, NullLogger<GitRepositoryWatcherManager>.Instance, new GrayMoon.Worker.Services.RepositoryAccess(NullLogger<GrayMoon.Worker.Services.RepositoryAccess>.Instance));
 
     [Fact]
     public void Acquiring_sets_coverage_started_at()

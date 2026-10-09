@@ -14,10 +14,18 @@ namespace GrayMoon.Worker.Services;
 /// residue-cleanup safety guards. Local repository facts come from <see cref="IGitRepositoryReader"/>;
 /// worktree add/remove stay on the git CLI.
 /// </summary>
-public sealed class GitWorktreeService(GitProcessRunner runner, IGitRepositoryReader reader, ILogger<GitWorktreeService> logger) : IGitWorktreeService
+public sealed class GitWorktreeService(
+    GitProcessRunner runner,
+    IGitRepositoryReader reader,
+    ILogger<GitWorktreeService> logger,
+    IRepositoryAccess access) : IGitWorktreeService
 {
     private static readonly char[] PathSeparators = [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar];
     private static readonly int[] ResidueDeleteRetryDelaysMs = [200, 400, 800, 1600, 3200];
+
+    // Upper bound for the whole residue walk. The per-entry retries multiply across a folder full of locked files
+    // (about 6 s each), which would otherwise hang the Remove dialog for minutes; what is left is reported as residue.
+    private static readonly TimeSpan ResidueCleanupBudget = TimeSpan.FromSeconds(15);
 
     public async Task<(bool Success, IReadOnlyList<GitWorktreeInfo> Worktrees, string? ErrorCode, string? ErrorMessage)> ListWorktreesAsync(
         string mainRepositoryPath,
@@ -232,6 +240,22 @@ public sealed class GitWorktreeService(GitProcessRunner runner, IGitRepositoryRe
             return (false, false, "InvalidWorktreePath", ex.Message, WorktreeResidueResult.None);
         }
 
+        // Removal always wins over the Worker's own handles: watchers on this folder are released, git processes and other
+        // holders inside it are cancelled (and killed if they ignore that), and nothing new may start there until this
+        // method ends. Programs the Worker did not start are never touched; they are the residue cleanup's problem.
+        IRepositoryExclusiveScope removalScope;
+        try
+        {
+            removalScope = await access.AcquireExclusiveAsync([canonicalWorktreePath], ct);
+        }
+        catch (RepositoryAccessException ex)
+        {
+            logger.LogError(ex, "Could not release the Worker's own handles on {WorktreePath}", canonicalWorktreePath);
+            return (false, false, "ReleaseFailed", ex.Message, WorktreeResidueResult.None);
+        }
+
+        using var releaseScope = removalScope;
+
         var (listOk, worktrees, listCode, listError) = await ListWorktreesAsync(mainRepositoryPath, ct);
         if (!listOk)
             return (false, false, listCode, listError, WorktreeResidueResult.None);
@@ -348,7 +372,18 @@ public sealed class GitWorktreeService(GitProcessRunner runner, IGitRepositoryRe
             return new WorktreeResidueResult(true, skippedCount, skippedSample, guardFailure);
         }
 
-        await DeleteFolderRecursivelyWithRetryAsync(worktreePath, ct);
+        using (var budget = CancellationTokenSource.CreateLinkedTokenSource(ct))
+        {
+            budget.CancelAfter(ResidueCleanupBudget);
+            try
+            {
+                await DeleteFolderRecursivelyWithRetryAsync(worktreePath, budget.Token);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                logger.LogWarning("Worktree residue cleanup for {WorktreePath} stopped after {Seconds}s; reporting what is left.", worktreePath, ResidueCleanupBudget.TotalSeconds);
+            }
+        }
 
         if (Directory.Exists(worktreePath))
         {

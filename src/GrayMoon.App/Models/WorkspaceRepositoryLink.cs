@@ -38,13 +38,19 @@ public class WorkspaceRepositoryLink
     [NotMapped]
     public bool IsOnTag => !string.IsNullOrWhiteSpace(CheckedOutTag);
 
+    /// <summary>Feature context only: the Feature's own GitVersion has not been computed yet, so the version is not-yet-known rather than unresolved.</summary>
+    [NotMapped]
+    public bool? GitVersionPending { get; set; }
+
     /// <summary>
     /// True when the repository has been synced (it has a branch or a tag) yet has no GitVersion, which means
-    /// GitVersion could not compute one. A repository that has not been synced has neither, so this stays false.
+    /// GitVersion could not compute one. A repository that has not been synced has neither, so this stays false,
+    /// and so does a Feature repository whose GitVersion is still pending.
     /// </summary>
     [NotMapped]
     public bool IsVersionUnresolved =>
-        string.IsNullOrWhiteSpace(GitVersion)
+        GitVersionPending != true
+        && string.IsNullOrWhiteSpace(GitVersion)
         && (!string.IsNullOrWhiteSpace(BranchName) || IsOnTag);
 
     /// <summary>True when the repository is on a tag and at least one newer tag exists (i.e. the checked-out tag is not the most recently created). Null when unknown or not on a tag. Updated when tags are fetched during checkout sync.</summary>

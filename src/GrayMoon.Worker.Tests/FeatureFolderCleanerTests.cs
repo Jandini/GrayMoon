@@ -14,7 +14,7 @@ public sealed class FeatureFolderCleanerTests : IDisposable
 {
     private readonly string _temp = Directory.CreateTempSubdirectory("graymoon-ffc-").FullName;
     private readonly string _storageRoot;
-    private readonly FeatureFolderCleaner _cleaner = new(NullLogger<FeatureFolderCleaner>.Instance);
+    private readonly FeatureFolderCleaner _cleaner = new(NullLogger<FeatureFolderCleaner>.Instance, new GrayMoon.Worker.Services.RepositoryAccess(NullLogger<GrayMoon.Worker.Services.RepositoryAccess>.Instance));
 
     public FeatureFolderCleanerTests()
     {

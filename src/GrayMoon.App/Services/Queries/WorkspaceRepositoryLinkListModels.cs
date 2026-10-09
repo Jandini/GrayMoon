@@ -57,7 +57,9 @@ public sealed record WorkspaceRepositoryLinkListItemDto(
     /// <summary>Tag the Feature repository is pinned to when viewing a Feature; null for Workspace or an unpinned repository.</summary>
     string? FeaturePinnedTag = null,
     /// <summary>Role of the repository in this Workspace (shared across contexts); the Workspace-role row sorts first and is never in a level group.</summary>
-    WorkspaceRepositoryRole Role = WorkspaceRepositoryRole.Source);
+    WorkspaceRepositoryRole Role = WorkspaceRepositoryRole.Source,
+    /// <summary>True while a Feature seed has not yet had its own GitVersion computed; the Version cell stays empty until it arrives.</summary>
+    bool? GitVersionPending = null);
 
 public sealed record WorkspaceRepositoryLinkListPageResult(
     IReadOnlyList<WorkspaceRepositoryLinkListItemDto> Items,

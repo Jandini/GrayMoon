@@ -115,7 +115,7 @@
                             Create PR
                         </button>
                     </li>
-                    @if (Presentation.ShowBulkMergeInHeaderMenu)
+                    @if (Presentation.ShowBulkMergeInHeaderMenu || IsFeatureContext)
                     {
                         <li>
                             <button class="dropdown-item text-nowrap" type="button"
@@ -473,7 +473,7 @@
     [Parameter] public EventCallback OnShowSwitchBranch { get; set; }
     [Parameter] public EventCallback OnNewPullRequest { get; set; }
     [Parameter] public EventCallback OnReturnToDefault { get; set; }
-    /// <summary>Bulk merge across every repository; only offered when <see cref="GrayMoon.App.Components.Pages.WorkspaceGridPresentation.ShowBulkMergeInHeaderMenu"/>.</summary>
+    /// <summary>Bulk merge across every repository; offered in a flat grid (<see cref="GrayMoon.App.Components.Pages.WorkspaceGridPresentation.ShowBulkMergeInHeaderMenu"/>) and always in a Feature context.</summary>
     [Parameter] public EventCallback OnMergePullRequests { get; set; }
     [Parameter] public EventCallback OnUpdate { get; set; }
     [Parameter] public EventCallback OnUpdateFiles { get; set; }

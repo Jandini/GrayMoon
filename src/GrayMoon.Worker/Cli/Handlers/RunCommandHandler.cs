@@ -110,7 +110,10 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<DiffJobQueue>();
         builder.Services.AddSingleton<IDiffJobQueue>(sp => sp.GetRequiredService<DiffJobQueue>());
         builder.Services.AddSingleton<CommandJobCancellationRegistry>();
-        builder.Services.AddSingleton<ICommandLineService, CommandLineService>();
+        builder.Services.AddSingleton<IRepositoryAccess, RepositoryAccess>();
+        builder.Services.AddSingleton<CommandLineService>();
+        builder.Services.AddSingleton<ICommandLineService>(sp => new RepositoryAccessCommandLineService(
+            sp.GetRequiredService<CommandLineService>(), sp.GetRequiredService<IRepositoryAccess>()));
         builder.Services.AddSingleton<GitProcessRunner>();
         builder.Services.AddSingleton<IGitRepositoryReader, GitCliRepositoryReader>();
         builder.Services.AddSingleton<ILocalGitSnapshotReader, LibGit2SharpLocalGitSnapshotReader>();

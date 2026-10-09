@@ -24,6 +24,25 @@ public interface IWorkspaceUpdateOperations
         int? maxLevel = null,
         string? runId = null);
 
+    /// <summary>
+    /// Update and Push as a pipeline: each dependency level is pushed (and its packages awaited) while the levels above
+    /// it are still being updated. <paramref name="reportOverlay"/> receives one message carrying both lanes. Returns
+    /// <see cref="UpdateAndPushResult.NotPipelined"/> without changing anything when the push lane cannot run (required
+    /// package mappings missing, registries unreachable); the caller then runs <see cref="UpdateAsync"/> and the push.
+    /// </summary>
+    Task<UpdateAndPushResult> UpdateAndPushAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        CancellationToken cancellationToken,
+        Action<string> reportOverlay,
+        Action<int, string> setRepositoryError,
+        Action<int, string> setLevelError,
+        string? commitMessage = null,
+        bool includeDepsInCommitMessage = true,
+        int? maxLevel = null,
+        bool restorePackages = true,
+        string? runId = null);
+
     Task<int> RestorePackagesAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
