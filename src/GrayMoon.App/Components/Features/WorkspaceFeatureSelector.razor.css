@@ -423,14 +423,15 @@
     max-height: calc(8 * 2rem);
     overflow-x: hidden;
     overflow-y: auto;
-    /* Reserve the scrollbar so it does not cover the end of the longest name. */
-    scrollbar-gutter: stable;
+    /* No scrollbar-gutter. A stable gutter is an empty strip beside a max-content
+       menu, so the row highlight stops short of the right edge. When the list
+       actually scrolls, the scrollbar is laid out outside that content width. */
     z-index: 1062;
 }
 
 .workspace-feature-selector__repo-submenu .dropdown-item {
-    width: max-content;
-    min-width: 100%;
+    width: 100%;
+    box-sizing: border-box;
     overflow: visible;
     text-overflow: clip;
 }
