@@ -61,14 +61,15 @@ public abstract class JobBackgroundService(
         await foreach (var envelope in jobQueue.ReadAllAsync(stoppingToken))
         {
             var requestId = envelope.CommandJob?.RequestId;
+            var queueWaitMs = (long)Stopwatch.GetElapsedTime(envelope.EnqueuedTimestamp).TotalMilliseconds;
             try
             {
                 if (envelope.Kind == JobKind.Notify && envelope.NotifyJob != null)
                 {
                     var nsw = Stopwatch.StartNew();
                     await notifySyncHandler.ExecuteAsync(envelope.NotifyJob, stoppingToken);
-                    logger.LogInformation("NotifySync completed for repo={RepoId} workspace={WorkspaceId} in {ElapsedMs}ms",
-                        envelope.NotifyJob.RepositoryId, envelope.NotifyJob.WorkspaceId, nsw.ElapsedMilliseconds);
+                    logger.LogInformation("NotifySync completed for repo={RepoId} workspace={WorkspaceId} hook={HookKind} in {ElapsedMs}ms (queued {QueueWaitMs}ms)",
+                        envelope.NotifyJob.RepositoryId, envelope.NotifyJob.WorkspaceId, envelope.NotifyJob.HookKind, nsw.ElapsedMilliseconds, queueWaitMs);
                 }
                 else if (envelope.Kind == JobKind.Command && envelope.CommandJob != null)
                 {
@@ -91,7 +92,7 @@ public abstract class JobBackgroundService(
                     }
                     else
                     {
-                        await ProcessCommandAsync(job, linked.Token);
+                        await ProcessCommandAsync(job, queueWaitMs, linked.Token);
                     }
                 }
             }
@@ -147,7 +148,7 @@ public abstract class JobBackgroundService(
         }
     }
 
-    private async Task ProcessCommandAsync(ICommandJob job, CancellationToken ct)
+    private async Task ProcessCommandAsync(ICommandJob job, long queueWaitMs, CancellationToken ct)
     {
         var sw = Stopwatch.StartNew();
         object? result;
@@ -193,7 +194,7 @@ public abstract class JobBackgroundService(
 
         sw.Stop();
         var (success, error) = GetCommandSuccessAndError(result);
-        logger.LogInformation("ResponseCommand {RequestId} completed ({Command}) in {ElapsedMs}ms", job.RequestId, job.Command, sw.ElapsedMilliseconds);
+        logger.LogInformation("ResponseCommand {RequestId} completed ({Command}) in {ElapsedMs}ms (queued {QueueWaitMs}ms)", job.RequestId, job.Command, sw.ElapsedMilliseconds, queueWaitMs);
         logger.LogTrace("ResponseCommand {RequestId} response content: {@ResponseBody}", job.RequestId, result);
         await SendResponseAsync(job.RequestId, job.Command, new WorkerCommandResponse(success, result, error), ct);
     }

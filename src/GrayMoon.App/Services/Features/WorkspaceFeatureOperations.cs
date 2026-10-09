@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using GrayMoon.Abstractions.Worker;
@@ -102,6 +103,7 @@ public sealed class WorkspaceFeatureOperations(
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken)
     {
+        var stageStart = Stopwatch.GetTimestamp();
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var normalizedName = name.ToLowerInvariant();
         if (await db.WorkspaceFeatures.AnyAsync(f => f.WorkspaceId == workspaceId && f.Name.ToLower() == normalizedName, cancellationToken))
@@ -141,7 +143,11 @@ public sealed class WorkspaceFeatureOperations(
 
         var workspaceRepositoryName = links
             .FirstOrDefault(l => l.Role == WorkspaceRepositoryRole.Workspace)?.Repository?.RepositoryName;
+        stageStart = logger.FeatureStageFinished("Create", workspaceId, name, "PreFlight", stageStart, $"Repositories={repoNames.Count}");
         var snapshot = await GetHeadSnapshotAsync(workspace, repoNames, workspaceRepositoryName, name, cancellationToken);
+        stageStart = logger.FeatureStageFinished(
+            "Create", workspaceId, name, "HeadSnapshot", stageStart,
+            $"Repositories={repoNames.Count} Resolved={snapshot.Commits.Count} Collisions={snapshot.BranchCollisions.Count}");
         if (snapshot.Commits.Count != repoNames.Count)
             return FailCreate("HeadCommitsIncomplete", "Could not resolve HEAD for every Workspace repository.");
 
@@ -258,6 +264,8 @@ public sealed class WorkspaceFeatureOperations(
             }
         }
 
+        stageStart = logger.FeatureStageFinished("Create", workspaceId, name, "IntentTransaction", stageStart);
+
         // From here on, the Feature + context + Pending rows already committed above are real DB state -
         // any exception (including the user pressing the overlay's Abort button, which cancels
         // cancellationToken) must not leave LifecycleState stuck at Creating forever with no way for the
@@ -275,12 +283,17 @@ public sealed class WorkspaceFeatureOperations(
             var sourceRows = pendingRows.Where(r => r != rootRow).ToList();
             Func<WorkspaceFeatureRepository, Task> createRowAsync = async row =>
             {
+                var queuedAt = Stopwatch.GetTimestamp();
                 await gate.WaitAsync(cancellationToken);
+                var rowStartedAt = Stopwatch.GetTimestamp();
+                var gateWaitMs = FeatureOperationLog.ElapsedMs(queuedAt);
                 try
                 {
                     var link = links.First(l => l.WorkspaceRepositoryId == row.WorkspaceRepositoryId);
                     var mainPath = await pathResolver.GetRepositoryPathAsync(
                         specialContextId, link.WorkspaceRepositoryId, cancellationToken);
+                    var pathMs = FeatureOperationLog.ElapsedMs(rowStartedAt);
+                    var workerStartedAt = Stopwatch.GetTimestamp();
                     var response = await workerBridge.SendCommandAsync(
                         WorkerHubMethods.CreateGitWorktree,
                         new
@@ -296,6 +309,8 @@ public sealed class WorkspaceFeatureOperations(
                             capabilities
                         },
                         cancellationToken);
+                    var workerMs = FeatureOperationLog.ElapsedMs(workerStartedAt);
+                    var dbStartedAt = Stopwatch.GetTimestamp();
 
                     await using var writeDb = await dbContextFactory.CreateDbContextAsync(cancellationToken);
                     var tracked = await writeDb.WorkspaceFeatureRepositories
@@ -329,6 +344,12 @@ public sealed class WorkspaceFeatureOperations(
                     }
 
                     await writeDb.SaveChangesAsync(cancellationToken);
+                    logger.FeatureRepositoryTiming(
+                        "Create", workspaceId, name, link.Repository?.RepositoryName,
+                        gateWaitMs, pathMs, workerMs,
+                        FeatureOperationLog.ElapsedMs(dbStartedAt),
+                        FeatureOperationLog.ElapsedMs(queuedAt),
+                        tracked.State.ToString());
                 }
                 finally
                 {
@@ -345,8 +366,12 @@ public sealed class WorkspaceFeatureOperations(
             // inside it. A root failure leaves every Source row Pending and skips the fan-out.
             if (rootRow != null)
                 await createRowAsync(rootRow);
+            stageStart = logger.FeatureStageFinished("Create", workspaceId, name, "RootWorktree", stageStart, rootRow == null ? "NoRoot" : "Root");
             if (anyFailure == 0)
                 await Task.WhenAll(sourceRows.Select(createRowAsync));
+            stageStart = logger.FeatureStageFinished(
+                "Create", workspaceId, name, "SourceWorktrees", stageStart,
+                $"Sources={sourceRows.Count} MaxParallel={MaxParallel} Failed={anyFailure}");
 
             await using (var finalizeDb = await dbContextFactory.CreateDbContextAsync(cancellationToken))
             {
@@ -370,6 +395,7 @@ public sealed class WorkspaceFeatureOperations(
 
                 progress?.Report(new OperationProgress("Seeding Feature projections..."));
                 await SeedInitialFeatureProjectionsAsync(finalizeDb, workspaceId, contextId, name, cancellationToken);
+                stageStart = logger.FeatureStageFinished("Create", workspaceId, name, "SeedProjections", stageStart);
 
                 trackedFeature.LifecycleState = WorkspaceFeatureLifecycleState.Ready;
                 trackedFeature.LastError = null;
