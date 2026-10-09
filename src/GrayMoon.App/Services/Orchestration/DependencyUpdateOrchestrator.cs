@@ -37,6 +37,11 @@ public sealed class DependencyUpdateOrchestrator(
     /// <param name="includeDepsInCommitMessage">When true, the list of updated packages is appended to the commit message body.</param>
     /// <param name="maxLevel">Optional. When set, only repositories at or below this dependency level are processed; higher levels are skipped.</param>
     /// <param name="runId">Optional caller-supplied correlation id included in every log line for this run so it can be filtered from application logs.</param>
+    /// <param name="onLevelCompleted">
+    /// Optional. Raised once after each dependency level has been fully updated and committed - including levels with
+    /// nothing to update, whose repositories may still hold unpushed commits - and never for a level that failed. A
+    /// push running alongside the update uses it to start pushing the lowest levels while higher ones are still updating.
+    /// </param>
     public async Task<DependencyUpdateRunResult> RunAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
@@ -49,7 +54,8 @@ public sealed class DependencyUpdateOrchestrator(
         string? commitMessage = null,
         bool includeDepsInCommitMessage = true,
         int? maxLevel = null,
-        string? runId = null)
+        string? runId = null,
+        Func<DependencyLevelCompletion, Task>? onLevelCompleted = null)
     {
         // Non-null empty set means the caller determined no repos need work.
         if (repoIdsToUpdate is { Count: 0 })
@@ -118,14 +124,13 @@ public sealed class DependencyUpdateOrchestrator(
             runId, workspaceId, levelRepoIds.Count,
             string.Join(", ", levelRepoIds.Select(l => $"L{l.Level}={l.RepoIds.Count} repo(s)")));
 
-        foreach (var (level, repoIds) in levelRepoIds)
+        // What the level being walked committed or synced, so the hand-off below can describe it. Reset per level.
+        var levelCommittedRepoIds = new HashSet<int>();
+        var levelSyncedRepoIds = new HashSet<int>();
+
+        // Walks one level. Every early exit is a plain return: the caller tells success from failure by hadError.
+        async Task WalkLevelAsync(int level, IReadOnlySet<int> repoIds)
         {
-            if (hadError)
-                break;
-
-            if (repoIds.Count == 0)
-                continue;
-
             // Re-fetch per level: RefreshRepositoryVersionsAsync updates OutOfDateFileRepos in the DB
             // after each level commits, so re-reading here ensures newly out-of-date files at higher
             // levels are not skipped.
@@ -136,11 +141,8 @@ public sealed class DependencyUpdateOrchestrator(
             if (level > levelRepoIds[0].Level)
                 await fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, contextId, cancellationToken, forceFresh: true);
 
-            var freshWorkspace = await workspaceRepository.GetByIdAsync(workspaceId);
-            var outOfDateFileRepoIds = (freshWorkspace?.Repositories ?? (ICollection<WorkspaceRepositoryLink>)[])
-                .Where(l => (l.OutOfDateFileRepos ?? 0) > 0)
-                .Select(l => l.RepositoryId)
-                .ToHashSet();
+            // Context-scoped: a Feature persists the out-of-date count only on its context state, not on the shared link.
+            var outOfDateFileRepoIds = await workspaceRepository.GetRepositoryIdsWithOutOfDateFilesAsync(workspaceId, contextId.Value, cancellationToken);
 
             // Csproj sync stays scoped to the caller's selection (or all repos at this level when null).
             var csprojScope = repoIdsToUpdate != null
@@ -167,7 +169,7 @@ public sealed class DependencyUpdateOrchestrator(
             if (!hasFileWork && csprojScope.Count == 0)
             {
                 logger.LogInformation("[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: skipped (no file work, empty csproj scope).", runId, workspaceId, level);
-                continue;
+                return;
             }
 
             Action<string> levelProgress = msg => setProgress($"{msg}\nLevel {level}");
@@ -190,9 +192,10 @@ public sealed class DependencyUpdateOrchestrator(
             if (!vfOk)
             {
                 hadError = true;
-                break;
+                return;
             }
 
+            levelCommittedRepoIds.UnionWith(vfCommittedRepoIds);
             logger.LogInformation(
                 "[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: version-file commit result: {CommittedCount} repo(s) committed: [{CommittedIds}]",
                 runId, workspaceId, level, vfCommittedRepoIds.Count, string.Join(",", vfCommittedRepoIds));
@@ -203,11 +206,11 @@ public sealed class DependencyUpdateOrchestrator(
                 && !await RefreshRepositoryVersionsAsync(vfCommittedRepoIds, workspaceId, contextId, cancellationToken, levelProgress, onAppSideComplete, OnRepoError))
             {
                 hadError = true;
-                break;
+                return;
             }
 
             if (csprojScope.Count == 0)
-                continue;
+                return;
 
             var (payload, _) = await workspaceGitService.GetUpdatePlanAsync(workspaceId, contextId, csprojScope, cancellationToken);
             var reposAtLevel = payload
@@ -219,7 +222,7 @@ public sealed class DependencyUpdateOrchestrator(
                 runId, workspaceId, level, reposAtLevel.Count, csprojScope.Count, string.Join(",", reposAtLevel.Select(r => r.RepoId)));
 
             if (reposAtLevel.Count == 0)
-                continue;
+                return;
 
             levelProgress($"Updating {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")}...");
             var syncedRepoIds = await workspaceGitService.SyncDependenciesAsync(
@@ -230,17 +233,18 @@ public sealed class DependencyUpdateOrchestrator(
                 repoIdsToSync: csprojScope,
                 cancellationToken);
             allSyncedRepoIds.UnionWith(syncedRepoIds);
+            levelSyncedRepoIds.UnionWith(syncedRepoIds);
 
             logger.LogInformation(
                 "[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: SyncDependenciesAsync synced {SyncedCount} of {AttemptedCount} repo(s): [{SyncedIds}]",
                 runId, workspaceId, level, syncedRepoIds.Count, reposAtLevel.Count, string.Join(",", syncedRepoIds));
 
             if (hadError)
-                break;
+                return;
 
             var reposToCommit = reposAtLevel.Where(r => syncedRepoIds.Contains(r.RepoId)).ToList();
             if (reposToCommit.Count == 0)
-                continue;
+                return;
 
             levelProgress("Committing...");
             var commitResults = await workspaceGitService.CommitDependencyUpdatesAsync(
@@ -264,22 +268,45 @@ public sealed class DependencyUpdateOrchestrator(
             foreach (var (repoId, errMsg) in classified.Errors)
                 OnRepoError(repoId, errMsg);
             var csprojCommittedRepoIds = classified.CommittedRepoIds;
+            levelCommittedRepoIds.UnionWith(csprojCommittedRepoIds);
 
             logger.LogInformation(
                 "[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: committed csproj changes for {CommittedCount} repo(s): [{CommittedIds}]",
                 runId, workspaceId, level, csprojCommittedRepoIds.Count, string.Join(",", csprojCommittedRepoIds));
 
             if (hadError)
-                break;
+                return;
 
             if (csprojCommittedRepoIds.Count > 0
                 && !await RefreshRepositoryVersionsAsync(csprojCommittedRepoIds, workspaceId, contextId, cancellationToken, levelProgress, onAppSideComplete, OnRepoError))
             {
                 hadError = true;
-                break;
+                return;
             }
 
             logger.LogInformation("[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: completed.", runId, workspaceId, level);
+        }
+
+        foreach (var (level, repoIds) in levelRepoIds)
+        {
+            if (hadError)
+                break;
+
+            if (repoIds.Count == 0)
+                continue;
+
+            levelCommittedRepoIds.Clear();
+            levelSyncedRepoIds.Clear();
+            await WalkLevelAsync(level, repoIds);
+            if (hadError)
+                break;
+
+            if (onLevelCompleted != null)
+                await onLevelCompleted(new DependencyLevelCompletion(
+                    level,
+                    repoIds,
+                    levelCommittedRepoIds.ToHashSet(),
+                    levelSyncedRepoIds.ToHashSet()));
         }
 
         // Finalize: broadcast so grid refreshes, then run one file-version check for the whole update.
@@ -324,10 +351,7 @@ public sealed class DependencyUpdateOrchestrator(
             .Where(link => link.Repository != null && string.IsNullOrWhiteSpace(link.CheckedOutTag))
             .Select(link => link.RepositoryId)
             .ToHashSet();
-        var outOfDateFileRepoIds = workspace.Repositories
-            .Where(l => (l.OutOfDateFileRepos ?? 0) > 0)
-            .Select(l => l.RepositoryId)
-            .ToHashSet();
+        var outOfDateFileRepoIds = await workspaceRepository.GetRepositoryIdsWithOutOfDateFilesAsync(workspaceId, contextId.Value, cancellationToken);
 
         logger.LogInformation(
             "[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: version-file update only. Repos={RepoCount}, WithOutOfDateFiles={FileRepoCount}",

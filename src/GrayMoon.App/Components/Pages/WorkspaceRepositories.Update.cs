@@ -262,6 +262,9 @@ public sealed partial class WorkspaceRepositories
             var runId = Guid.NewGuid().ToString("N")[..8];
             Logger.LogInformation("[PushUpdated {RunId}] Level-Only Update & Push starting for workspace {WorkspaceId}, up to level {Level}", runId, WorkspaceId, level);
 
+            if (await TryRunPipelinedUpdateAndPushAsync(job, ct, runId, commitMessage, includeDepsInCommitMessage, level, restorePackages, $"Up to Level {level} updated. Nothing to push."))
+                return;
+
             // Phase 1: update repos needing work up to the target level.
             // Do not pre-filter by a snapshot of repos already flagged as out of date: a level-1/2
             // commit made during this run can only mark higher levels (up to and including the
@@ -367,6 +370,9 @@ public sealed partial class WorkspaceRepositories
             var runId = Guid.NewGuid().ToString("N")[..8];
             Logger.LogInformation("[PushUpdated {RunId}] Update & Push starting for workspace {WorkspaceId}", runId, WorkspaceId);
 
+            if (await TryRunPipelinedUpdateAndPushAsync(job, ct, runId, commitMessage, includeDepsInCommitMessage, maxLevel: null, restorePackages, "Update complete. Nothing to push."))
+                return;
+
             // Phase 1: update - fresh scope so DbContext does not compete with circuit page loads.
             // Do not pre-filter by a snapshot of repos already flagged as out of date: a lower-level
             // commit made during this run only marks higher levels out of date once refreshed, which
@@ -456,6 +462,83 @@ public sealed partial class WorkspaceRepositories
         });
 
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Runs Update and Push as two lanes (see <see cref="IWorkspaceUpdateOperations.UpdateAndPushAsync"/>): each level is
+    /// pushed while the levels above it are still being updated, and the overlay shows one line per lane. Returns false,
+    /// having changed nothing, when the push lane cannot run (required package mappings missing); the caller then runs
+    /// the sequential update-then-push, which owns the "continue with normal push?" confirmation.
+    /// </summary>
+    private async Task<bool> TryRunPipelinedUpdateAndPushAsync(
+        BackgroundJobHandle job,
+        CancellationToken ct,
+        string runId,
+        string? commitMessage,
+        bool includeDepsInCommitMessage,
+        int? maxLevel,
+        bool restorePackages,
+        string nothingToPushMessage)
+    {
+        var ran = false;
+        try
+        {
+            var result = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, UpdateAndPushResult>(
+                svc => svc.UpdateAndPushAsync(
+                    WorkspaceId, RequireSelectedContextId(),
+                    ct,
+                    job.ReportProgress,
+                    (repoId, msg) => SafeInvoke(() => SetRepositoryError(repoId, msg)),
+                    (errorLevel, msg) => SafeInvoke(() => SetLevelError(errorLevel, msg)),
+                    commitMessage: commitMessage,
+                    includeDepsInCommitMessage: includeDepsInCommitMessage,
+                    maxLevel: maxLevel,
+                    restorePackages: restorePackages,
+                    runId: runId));
+            if (!result.Pipelined)
+                return false;
+
+            ran = true;
+
+            await ReloadWorkspaceDataFromFreshScopeAsync();
+            _ = InvokeAsync(() => { if (!_disposed) { ApplySyncStateFromLoadedItems(); StateHasChanged(); } });
+
+            if (result.Update.Success)
+            {
+                // Errors the push lane reported while the update was still running must survive this clean-up.
+                var pushFailedRepoIds = result.Push?.RepoErrors?.Keys.ToHashSet() ?? new HashSet<int>();
+                SafeInvoke(() => ClearRepositoryErrorsFor(result.Update.SyncedRepoIds.Where(id => !pushFailedRepoIds.Contains(id)).ToHashSet()));
+                if (result.Push?.Success != false && result.PushedRepoCount == 0)
+                    SafeInvoke(() => ToastService.Show(nothingToPushMessage));
+            }
+
+            Logger.LogInformation("[PushUpdated {RunId}] Pipelined Update & Push completed for workspace {WorkspaceId}. Success={Success}", runId, WorkspaceId, result.Success);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            await ReloadWorkspaceDataAfterCancelAsync();
+            SafeInvoke(() => ToastService.Show("Push cancelled."));
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Pipelined Update & Push failed for workspace {WorkspaceId}", WorkspaceId);
+            SafeInvoke(() => SetLevelError(0, ex.Message));
+            throw;
+        }
+        finally
+        {
+            if (ran)
+            {
+                _pendingRefreshAfterJob = false;
+                await InvokeAsync(async () =>
+                {
+                    if (_disposed) return;
+                    await RefreshFromSync();
+                });
+            }
+        }
     }
 
     private sealed record UpdateModalState

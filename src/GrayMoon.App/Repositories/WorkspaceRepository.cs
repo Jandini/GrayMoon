@@ -347,6 +347,56 @@ public sealed class WorkspaceRepository(
     }
 
     /// <summary>
+    /// Repo ids with at least one out-of-date file-version token in <paramref name="workspaceFeatureContextId"/>.
+    /// A Feature context persists the count only on its <see cref="WorkspaceRepositoryContextState"/> (the shared
+    /// <see cref="WorkspaceRepositoryLink"/> column is written for the special Workspace only), so a Feature reads
+    /// the state row and never falls back to the link; the special Workspace falls back to the link when no state
+    /// row exists yet.
+    /// </summary>
+    public async Task<IReadOnlySet<int>> GetRepositoryIdsWithOutOfDateFilesAsync(
+        int workspaceId,
+        int workspaceFeatureContextId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        var isSpecialWorkspace = await db.WorkspaceFeatureContexts
+            .AsNoTracking()
+            .Where(c => c.WorkspaceFeatureContextId == workspaceFeatureContextId)
+            .Select(c => c.Kind == WorkspaceFeatureContextKind.Workspace)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var links = await db.WorkspaceRepositories
+            .AsNoTracking()
+            .Where(wr => wr.WorkspaceId == workspaceId)
+            .Select(wr => new { wr.WorkspaceRepositoryId, wr.RepositoryId, wr.OutOfDateFileRepos })
+            .ToListAsync(cancellationToken);
+
+        var states = await db.WorkspaceRepositoryContextStates
+            .AsNoTracking()
+            .Where(s => s.WorkspaceFeatureContextId == workspaceFeatureContextId)
+            .Select(s => new { s.WorkspaceRepositoryId, s.OutOfDateFileRepos })
+            .ToListAsync(cancellationToken);
+        var stateByLinkId = states.ToDictionary(s => s.WorkspaceRepositoryId);
+
+        var result = new HashSet<int>();
+        foreach (var link in links)
+        {
+            int? outOfDate;
+            if (stateByLinkId.TryGetValue(link.WorkspaceRepositoryId, out var state))
+                outOfDate = state.OutOfDateFileRepos;
+            else if (isSpecialWorkspace)
+                outOfDate = link.OutOfDateFileRepos;
+            else
+                continue;
+
+            if ((outOfDate ?? 0) > 0)
+                result.Add(link.RepositoryId);
+        }
+        return result;
+    }
+
+    /// <summary>
     /// Repo ids that "need a push" scoped to <paramref name="workspaceFeatureContextId"/>, used only to decide
     /// whether the Workspace Action notification panel should show the synchronized-push modal (not which repos
     /// actually get pushed). Same fallback rule as <see cref="GetRepositoryIdsNeedingPushAsync"/>: a repo's

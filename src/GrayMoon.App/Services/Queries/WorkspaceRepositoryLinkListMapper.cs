@@ -34,6 +34,7 @@ internal static class WorkspaceRepositoryLinkListMapper
             ParentBranchName = dto.ParentBranchName,
             FeaturePinnedTag = dto.FeaturePinnedTag,
             Role = dto.Role,
+            GitVersionPending = dto.GitVersionPending,
             Repository = new Repository
             {
                 RepositoryId = dto.RepositoryId,
