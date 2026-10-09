@@ -18,11 +18,13 @@ public sealed partial class WorkspaceGitChanges
 
         string root;
         string folderName;
+        string? workspaceRepositoryName;
         try
         {
             var workerArgs = await PathResolver.GetWorkerArgsAsync(_selectedContextId.Value);
             root = workerArgs.WorkspaceRoot;
             folderName = workerArgs.WorkspaceFolderName;
+            workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
         }
         catch (Exception)
         {
@@ -38,7 +40,7 @@ public sealed partial class WorkspaceGitChanges
 
         if (row.Kind == GitChangesTreeRowKind.File)
         {
-            var path = BuildAbsoluteFilePath(root, folderName, row.RepositoryName!, row.FilePath!);
+            var path = BuildAbsoluteFilePath(root, folderName, row.RepositoryName!, workspaceRepositoryName, row.FilePath!);
             await CopyToClipboardAsync(path, "Path copied to the clipboard");
             return;
         }
@@ -50,7 +52,7 @@ public sealed partial class WorkspaceGitChanges
             return;
         }
 
-        var text = string.Join('\n', entries.Select(e => BuildAbsoluteFilePath(root, folderName, e.RepositoryName, e.Path)));
+        var text = string.Join('\n', entries.Select(e => BuildAbsoluteFilePath(root, folderName, e.RepositoryName, workspaceRepositoryName, e.Path)));
         await CopyToClipboardAsync(text, $"{entries.Count} path{(entries.Count == 1 ? string.Empty : "s")} copied to the clipboard");
     }
 
@@ -141,11 +143,25 @@ public sealed partial class WorkspaceGitChanges
     /// <summary>Builds an absolute path with backslashes always, regardless of the App container's OS -
     /// GrayMoon workspaces only ever exist on Windows machines (the Worker's host), and the App itself
     /// never touches the local filesystem so <see cref="Path.Combine"/> (which would use the container's
-    /// separator) must not be used here.</summary>
-    private static string BuildAbsoluteFilePath(string root, string workspaceName, string repositoryName, string relativePath)
+    /// separator) must not be used here. A Workspace-role repository's working tree is the workspace
+    /// folder itself, so its name is not a child directory.</summary>
+    internal static string BuildAbsoluteFilePath(
+        string root,
+        string workspaceName,
+        string repositoryName,
+        string? workspaceRepositoryName,
+        string relativePath)
     {
         var normalizedRoot = root.TrimEnd('\\', '/');
         var normalizedRelative = relativePath.Replace('/', '\\');
-        return $"{normalizedRoot}\\{workspaceName}\\{repositoryName}\\{normalizedRelative}";
+        var workspacePath = $"{normalizedRoot}\\{workspaceName}";
+        if (IsWorkspaceRepository(repositoryName, workspaceRepositoryName))
+            return $"{workspacePath}\\{normalizedRelative}";
+
+        return $"{workspacePath}\\{repositoryName}\\{normalizedRelative}";
     }
+
+    private static bool IsWorkspaceRepository(string repositoryName, string? workspaceRepositoryName)
+        => !string.IsNullOrWhiteSpace(workspaceRepositoryName)
+           && string.Equals(repositoryName, workspaceRepositoryName, StringComparison.OrdinalIgnoreCase);
 }
