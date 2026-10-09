@@ -16,6 +16,12 @@ public sealed class RepositorySyncNotification
     /// keeping a stale one. Workers that predate this field send false, which keeps the old behaviour.
     /// </summary>
     public bool GitVersionFailed { get; init; }
+    /// <summary>
+    /// True for the sync of a worktree Create Feature has just made at its base commit. The Feature branch is new and
+    /// local, so it cannot have a pull request yet and its counts are the seeded zeros; the app skips the pull request
+    /// lookup for it. Workers that predate this field send false.
+    /// </summary>
+    public bool FreshWorktree { get; init; }
     /// <summary>Tag the repository is currently checked out at (detached HEAD on a tag). Null when on a branch.</summary>
     public string? Tag { get; init; }
     public int? OutgoingCommits { get; init; }

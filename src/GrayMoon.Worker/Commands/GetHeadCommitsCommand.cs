@@ -42,9 +42,13 @@ public sealed class GetHeadCommitsCommand(IGitRepositoryReader reader, ILogger<G
         var tags = new System.Collections.Concurrent.ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var collisions = new System.Collections.Concurrent.ConcurrentDictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         using var semaphore = new SemaphoreSlim(DefaultMaxConcurrent);
+        var totalStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
+        var slowestMs = 0L;
+        string? slowestRepo = null;
         await Task.WhenAll(names.Select(async repoName =>
         {
             await semaphore.WaitAsync(cancellationToken);
+            var repoStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
             try
             {
                 var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repoName, request.WorkspaceRepositoryName);
@@ -73,9 +77,23 @@ public sealed class GetHeadCommitsCommand(IGitRepositoryReader reader, ILogger<G
             }
             finally
             {
+                var repoMs = (long)System.Diagnostics.Stopwatch.GetElapsedTime(repoStartedAt).TotalMilliseconds;
+                lock (semaphore)
+                {
+                    if (repoMs > slowestMs)
+                    {
+                        slowestMs = repoMs;
+                        slowestRepo = repoName;
+                    }
+                }
+
                 semaphore.Release();
             }
         }));
+
+        logger.LogInformation(
+            "GetHeadCommits timing. Repositories={Count} MaxConcurrent={MaxConcurrent} TotalMs={TotalMs} SlowestRepository={SlowestRepository} SlowestMs={SlowestMs}",
+            names.Count, DefaultMaxConcurrent, (long)System.Diagnostics.Stopwatch.GetElapsedTime(totalStartedAt).TotalMilliseconds, slowestRepo, slowestMs);
 
         return new GetHeadCommitsResponse
         {

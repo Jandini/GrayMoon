@@ -20,6 +20,7 @@
         : repo.RepositoryName;
     var depCount = Link.Dependencies ?? 0;
     var unmatchedDeps = Link.UnmatchedDeps ?? 0;
+    var depsPending = Link.UnmatchedDeps is null && (Link.Dependencies ?? 0) > 0;
     var fileMismatchRepos = Link.OutOfDateFileRepos ?? 0;
     var totalWithFiles = depCount + (Link.HasSelfFileVersionToken == true ? 1 : 0);
     var unmatchedWithFiles = unmatchedDeps + fileMismatchRepos;
@@ -176,6 +177,13 @@
                                       @onclick="HandleCustomDependenciesClick"
                                       @onclick:preventDefault
                                       @onkeydown="HandleCustomDependenciesKeydown">0</span>
+                            </span>
+                        }
+                        else if (depsPending)
+                        {
+                            <span class="dependency-badge-link">
+                                <span class="badge build-dep-badge build-dep-badge-none"
+                                      title="Version comparison pending: waiting for this Feature's versions.">? of @totalWithFiles</span>
                             </span>
                         }
                         else if (unmatchedWithFiles == 0)

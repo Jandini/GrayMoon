@@ -69,9 +69,11 @@ public sealed class GitWorktreeService(GitProcessRunner runner, IGitRepositoryRe
             return (false, null, false, "InvalidWorktreePath", ex.Message);
         }
 
+        var timingStartedAt = Stopwatch.GetTimestamp();
         var (listOk, worktrees, listCode, listError) = await ListWorktreesAsync(mainRepositoryPath, ct);
         if (!listOk)
             return (false, null, false, listCode, listError);
+        var preListMs = (long)Stopwatch.GetElapsedTime(timingStartedAt).TotalMilliseconds;
 
         var existingAtPath = GitWorktreeOccupancy.FindByPath(worktrees, canonicalWorktreePath);
         if (existingAtPath != null)
@@ -121,18 +123,22 @@ public sealed class GitWorktreeService(GitProcessRunner runner, IGitRepositoryRe
         }
 
         // Feature worktrees live deeper than Workspace checkouts; allow paths over 260 characters on Windows.
+        var longPathsStartedAt = Stopwatch.GetTimestamp();
         await EnsureLongPathsAsync(mainRepositoryPath, ct);
+        var longPathsMs = (long)Stopwatch.GetElapsedTime(longPathsStartedAt).TotalMilliseconds;
 
         // Offline-safe: start from local commit SHA; never --force for normal creation.
         string[] addArgs = detach
             ? ["worktree", "add", "--detach", canonicalWorktreePath, baseCommitSha]
             : ["worktree", "add", "-b", branchName!, canonicalWorktreePath, baseCommitSha];
+        var addStartedAt = Stopwatch.GetTimestamp();
         var (exitCode, stdout, stderr) = await runner.RunAsync(
             "git",
             addArgs,
             mainRepositoryPath,
             null,
             ct);
+        var addMs = (long)Stopwatch.GetElapsedTime(addStartedAt).TotalMilliseconds;
 
         if (exitCode != 0)
         {
@@ -143,9 +149,11 @@ public sealed class GitWorktreeService(GitProcessRunner runner, IGitRepositoryRe
             return (false, null, false, "GitFailed", error);
         }
 
+        var verifyStartedAt = Stopwatch.GetTimestamp();
         var (verifyOk, after, verifyCode, verifyError) = await ListWorktreesAsync(mainRepositoryPath, ct);
         if (!verifyOk)
             return (false, null, false, verifyCode, verifyError);
+        var verifyMs = (long)Stopwatch.GetElapsedTime(verifyStartedAt).TotalMilliseconds;
 
         var created = GitWorktreeOccupancy.FindByPath(after, canonicalWorktreePath)
             ?? GitWorktreeOccupancy.FindByBranch(after, branchName);
@@ -156,8 +164,8 @@ public sealed class GitWorktreeService(GitProcessRunner runner, IGitRepositoryRe
         }
 
         logger.LogInformation(
-            "Git worktree created for {RepoPath}. Branch={Branch}, Path={WorktreePath}, Head={Head}",
-            mainRepositoryPath, created.BranchName, created.WorktreePath, created.HeadSha);
+            "Git worktree created for {RepoPath}. Branch={Branch}, Path={WorktreePath}, Head={Head}. PreListMs={PreListMs} LongPathsMs={LongPathsMs} AddMs={AddMs} VerifyListMs={VerifyListMs}",
+            mainRepositoryPath, created.BranchName, created.WorktreePath, created.HeadSha, preListMs, longPathsMs, addMs, verifyMs);
         return (true, created, false, null, null);
     }
 

@@ -4,6 +4,8 @@ using GrayMoon.App.Data;
 using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
+using GrayMoon.App.Services.Features;
+using GrayMoon.App.Services.Workspaces;
 using GrayMoon.App.Services.WorkspaceManifest;
 using GrayMoon.Application.Features;
 using Microsoft.AspNetCore.SignalR;
@@ -49,13 +51,36 @@ public sealed class SyncCommandHandler(
             .GetRequiredService<IWorkspaceFeatureContextResolver>()
             .GetRequiredAsync(contextId.Value, n.WorkspaceId);
 
+        // A Feature that is still being created or repaired owns its projections until the seed has finished: the
+        // Worker releases its deferred checkout syncs as soon as the worktrees exist, which is before the seed. Applying
+        // such a sync afterwards keeps the Feature's own GitVersion (the seed never writes it) and runs the recompute on
+        // the finished graph. This runs on the sync queue, never on a hub invocation, so it cannot stall worker responses.
+        var coordinator = scope.ServiceProvider.GetService<FeatureFinalizationCoordinator>();
+        if (coordinator is not null && !contextInfo.IsSpecialWorkspace && coordinator.IsFinalizing(contextId.Value.Value))
+        {
+            logger.LogInformation(
+                "SyncCommand: holding sync for workspace {WorkspaceId} context {ContextId} repo {RepositoryId} until Feature finalization completes",
+                n.WorkspaceId, contextId.Value.Value, n.RepositoryId);
+            try
+            {
+                await coordinator.WaitForFinalizationAsync(contextId.Value.Value);
+            }
+            catch (TimeoutException)
+            {
+                logger.LogWarning(
+                    "SyncCommand: Feature finalization of context {ContextId} did not finish in time; applying the sync anyway",
+                    contextId.Value.Value);
+            }
+        }
+
         var stateWriter = scope.ServiceProvider.GetRequiredService<WorkspaceRepositoryStateWriter>();
         var snapshot = n.State ?? BuildSnapshotFromFlatNotification(n);
         await stateWriter.ApplyAsync(contextId.Value, n.WorkspaceId, n.RepositoryId, snapshot, new RepositoryStateWriteOptions
         {
             SyncStatus = SyncStatusWrite.Derive,
             ErrorMessageForcesInSync = true,
-            ReconcilePullRequest = true,
+            // A just-created Feature worktree is on a new local branch: it has no pull request to find.
+            ReconcilePullRequest = !n.FreshWorktree,
         });
 
         var branchWriter = scope.ServiceProvider.GetRequiredService<RepositoryBranchWriter>();
@@ -88,7 +113,12 @@ public sealed class SyncCommandHandler(
 
         var depsSw = Stopwatch.StartNew();
         var recomputeScope = scope.ServiceProvider.GetRequiredService<WorkspaceStateRecomputeScope>();
-        await recomputeScope.RecomputeAsync(n.WorkspaceId, contextId.Value);
+        // Create Feature releases a sync per repository at once: share one recompute instead of running N in a row.
+        var coalescer = scope.ServiceProvider.GetService<SyncRecomputeCoalescer>();
+        if (coalescer is null)
+            await recomputeScope.RecomputeAsync(n.WorkspaceId, contextId.Value);
+        else
+            await coalescer.RunAsync($"{n.WorkspaceId}:{contextId.Value.Value}", () => recomputeScope.RecomputeAsync(n.WorkspaceId, contextId.Value));
         logger.LogDebug(
             "SyncCommand dependency stats persisted in {ElapsedMs}ms for workspace={WorkspaceId}, repo={RepositoryId}",
             depsSw.ElapsedMilliseconds, n.WorkspaceId, n.RepositoryId);

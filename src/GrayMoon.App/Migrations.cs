@@ -39,6 +39,7 @@ public static partial class Migrations
         (5, "Workspace repository role", dbContext => MigrateWorkspaceRepositoryRoleAsync(dbContext)),
         (6, "Workspace manifest drift column", dbContext => MigrateWorkspaceManifestDriftColumnAsync(dbContext)),
         (7, "Workspace recent Open-in tools", dbContext => MigrateWorkspaceOpenInRecentToolsAsync(dbContext)),
+        (8, "Feature context state GitVersionPending", dbContext => MigrateContextStateGitVersionPendingAsync(dbContext)),
     };
 
     public static async Task RunAllAsync(AppDbContext dbContext, ILogger? logger = null)

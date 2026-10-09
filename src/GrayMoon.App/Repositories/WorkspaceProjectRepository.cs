@@ -10,7 +10,8 @@ public sealed partial class WorkspaceProjectRepository(
     AppDbContext dbContext,
     WorkspaceFileVersionConfigRepository versionConfigRepository,
     WorkspaceRepositoryCustomDependencyRepository customDependencyRepository,
-    ILogger<WorkspaceProjectRepository> logger)
+    ILogger<WorkspaceProjectRepository> logger,
+    GrayMoon.App.Services.Features.FeatureFinalizationCoordinator? finalizationCoordinator = null)
 {
     /// <summary>Gets projects that have a PackageId (NuGet packages) for repositories linked to the given workspace, across every Feature context. Prefer the context-scoped overload for anything the user views while a Feature is selected.</summary>
     public async Task<List<WorkspaceProject>> GetPackagesByWorkspaceIdAsync(int workspaceId, CancellationToken cancellationToken = default)

@@ -3,6 +3,7 @@ using System.Text.Json;
 using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Jobs;
 using GrayMoon.Worker.Models;
+using GrayMoon.Worker.Services;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -11,6 +12,7 @@ namespace GrayMoon.Worker.Hosted;
 
 public sealed class HookListenerHostedService(
     IJobQueue jobQueue,
+    IWorktreeCreateHookDeferral hookDeferral,
     IOptions<WorkerOptions> options,
     ILogger<HookListenerHostedService> logger) : IHostedService, IAsyncDisposable
 {
@@ -94,6 +96,13 @@ public sealed class HookListenerHostedService(
                 RepositoryPath = payload.RepositoryPath,
                 HookKind = hookKind.Value
             };
+            if (hookDeferral.TryDefer(notifyJob))
+            {
+                context.Response.StatusCode = 202;
+                context.Response.Close();
+                return;
+            }
+
             var envelope = JobEnvelope.Notify(notifyJob);
             await jobQueue.EnqueueAsync(envelope, ct);
             logger.LogDebug("Enqueued {HookKind} hook: workspace={WorkspaceId}, repo={RepoId}", hookKind, payload.WorkspaceId, payload.RepositoryId);

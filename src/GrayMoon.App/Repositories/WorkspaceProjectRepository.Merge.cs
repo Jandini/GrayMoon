@@ -23,10 +23,12 @@ public sealed partial class WorkspaceProjectRepository
         int workspaceFeatureContextId,
         CancellationToken cancellationToken = default)
     {
+        using var projectionGate = await AcquireProjectionGateAsync(workspaceFeatureContextId, cancellationToken);
+
         // Generated (virtual/inferred) package rows are owned by SyncGeneratedPackageDependenciesAsync, not by
         // this per-repo sync reconciliation - a real repo's own project scan must never delete a generated
         // package row it happens to "produce" (it has no physical .csproj producing it, so it never appears here).
-        var existing = await dbContext.WorkspaceProjects
+        var existing =await dbContext.WorkspaceProjects
             .Where(p =>
                 p.WorkspaceId == workspaceId
                 && p.RepositoryId == repositoryId
@@ -63,6 +65,8 @@ public sealed partial class WorkspaceProjectRepository
         CancellationToken cancellationToken = default)
     {
         if (repoProjects == null || repoProjects.Count == 0) return;
+
+        using var projectionGate = await AcquireProjectionGateAsync(workspaceFeatureContextId, cancellationToken);
 
         var repoIds = repoProjects.Select(r => r.RepositoryId).ToHashSet();
         var existingAll = await dbContext.WorkspaceProjects
@@ -143,6 +147,18 @@ public sealed partial class WorkspaceProjectRepository
         return (toRemove.Count, byName.Count);
     }
 
+    /// <summary>Serializes project/edge writers of one context with the Feature seed (see <see cref="GrayMoon.App.Services.Features.FeatureFinalizationCoordinator"/>). No-op without a coordinator.</summary>
+    private async Task<IDisposable> AcquireProjectionGateAsync(int workspaceFeatureContextId, CancellationToken cancellationToken) =>
+        finalizationCoordinator is null
+            ? NoopScope.Instance
+            : await finalizationCoordinator.AcquireProjectionAsync(workspaceFeatureContextId, cancellationToken);
+
+    private sealed class NoopScope : IDisposable
+    {
+        public static readonly NoopScope Instance = new();
+        public void Dispose() { }
+    }
+
     private async Task<int> ResolveSpecialWorkspaceContextIdAsync(int workspaceId, CancellationToken cancellationToken)
     {
         var existing = await dbContext.WorkspaceFeatureContexts
@@ -188,6 +204,8 @@ public sealed partial class WorkspaceProjectRepository
         bool persistDependencyLevel = true,
         CancellationToken cancellationToken = default)
     {
+        using var projectionGate = await AcquireProjectionGateAsync(workspaceFeatureContextId, cancellationToken);
+
         var workspaceProjects = await dbContext.WorkspaceProjects
             .AsNoTracking()
             .Where(p => p.WorkspaceId == workspaceId && p.WorkspaceFeatureContextId == workspaceFeatureContextId)

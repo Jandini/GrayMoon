@@ -117,6 +117,7 @@ public static partial class Migrations
                 "HeadCommit" TEXT NULL,
                 "HasNewerTag" INTEGER NULL,
                 "GitVersion" TEXT NULL,
+                "GitVersionPending" INTEGER NULL,
                 "Projects" INTEGER NULL,
                 "OutgoingCommits" INTEGER NULL,
                 "IncomingCommits" INTEGER NULL,
@@ -586,6 +587,23 @@ public static partial class Migrations
         }
 
         await dbContext.SaveChangesAsync();
+    }
+
+    /// <summary>Adds the nullable GitVersionPending flag a Feature seed uses to mark versions not yet computed for the Feature's own checkout.</summary>
+    public static async Task MigrateContextStateGitVersionPendingAsync(AppDbContext dbContext, ILogger? logger = null)
+    {
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync();
+
+        await using var checkCmd = conn.CreateCommand();
+        checkCmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceRepositoryContextStates') WHERE name = 'GitVersionPending'";
+        if (Convert.ToInt32(await checkCmd.ExecuteScalarAsync()) > 0)
+            return;
+
+        await using var alterCmd = conn.CreateCommand();
+        alterCmd.CommandText = "ALTER TABLE WorkspaceRepositoryContextStates ADD COLUMN GitVersionPending INTEGER NULL";
+        await alterCmd.ExecuteNonQueryAsync();
     }
 
     private static async Task AddNullableTextColumnIfMissingAsync(DbConnection conn, string tableName, string columnName)

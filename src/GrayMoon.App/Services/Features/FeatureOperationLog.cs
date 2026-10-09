@@ -38,6 +38,42 @@ internal static partial class FeatureOperationLog
             operation, workspaceId, featureId, contextId, featureName, durationMs, outcome, Redact(error));
     }
 
+    /// <summary>
+    /// Timing line for one stage of a Feature operation (support / performance analysis). Returns the current
+    /// timestamp so the next stage can start from it: <c>t = logger.FeatureStageFinished(..., t)</c>.
+    /// </summary>
+    public static long FeatureStageFinished(
+        this ILogger logger, string operation, int workspaceId, string? featureName, string stage, long startedTimestamp, string? detail = null)
+    {
+        var durationMs = (long)Stopwatch.GetElapsedTime(startedTimestamp).TotalMilliseconds;
+        logger.LogInformation(
+            "Feature {Operation} timing. WorkspaceId={WorkspaceId} FeatureName={FeatureName} Stage={Stage} DurationMs={DurationMs} Detail={Detail}",
+            operation, workspaceId, featureName, stage, durationMs, detail);
+        return Stopwatch.GetTimestamp();
+    }
+
+    /// <summary>Per-repository timing line for Feature Create: where one repository's time went.</summary>
+    public static void FeatureRepositoryTiming(
+        this ILogger logger,
+        string operation,
+        int workspaceId,
+        string? featureName,
+        string? repository,
+        long gateWaitMs,
+        long pathMs,
+        long workerMs,
+        long dbMs,
+        long totalMs,
+        string outcome)
+    {
+        logger.LogInformation(
+            "Feature {Operation} repository timing. WorkspaceId={WorkspaceId} FeatureName={FeatureName} Repository={Repository} GateWaitMs={GateWaitMs} PathMs={PathMs} WorkerRoundTripMs={WorkerRoundTripMs} DbMs={DbMs} TotalMs={TotalMs} Outcome={Outcome}",
+            operation, workspaceId, featureName, repository, gateWaitMs, pathMs, workerMs, dbMs, totalMs, outcome);
+    }
+
+    public static long ElapsedMs(long startedTimestamp)
+        => (long)Stopwatch.GetElapsedTime(startedTimestamp).TotalMilliseconds;
+
     public static void FeatureRepositoryFailed(
         this ILogger logger, string operation, int workspaceId, string? featureName, string? repository, string? error)
     {

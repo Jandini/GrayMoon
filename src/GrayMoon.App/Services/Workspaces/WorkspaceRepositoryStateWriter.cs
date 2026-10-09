@@ -147,6 +147,8 @@ public sealed class WorkspaceRepositoryStateWriter(
         if (snapshot.GitVersionProbed)
         {
             state.GitVersion = Blank(snapshot.GitVersion) ? null : snapshot.GitVersion;
+            // A probe result, even a failed one (null version = unresolved), ends the Feature seed's pending state.
+            state.GitVersionPending = false;
             if (isSpecialWorkspace)
                 wr.GitVersion = state.GitVersion;
         }

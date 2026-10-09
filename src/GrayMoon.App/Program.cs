@@ -168,6 +168,8 @@ try
     builder.Services.AddScoped<RepositoryBranchWriter>();
     builder.Services.AddScoped<WorkspaceRepositoryStateWriter>();
     builder.Services.AddScoped<WorkspaceStateRecomputeScope>();
+    builder.Services.AddSingleton<SyncRecomputeCoalescer>();
+    builder.Services.AddSingleton<FeatureFinalizationCoordinator>();
     builder.Services.AddScoped<WorkspaceActionRepository>();
     builder.Services.AddScoped<WorkspaceActionService>();
     builder.Services.AddScoped<GitHubActionsCiProvider>();
