@@ -64,7 +64,8 @@ public sealed class GetWorkspaceRepositoriesCommandTests : IDisposable
 
     private sealed class RecordingCommandLineService(ICommandLineService inner) : ICommandLineService
     {
-        public List<RecordedCall> Calls { get; } = [];
+        private readonly System.Collections.Concurrent.ConcurrentQueue<RecordedCall> _calls = new();
+        public IReadOnlyCollection<RecordedCall> Calls => _calls;
 
         public Task<CommandLineResult> RunAsync(
             string fileName,
@@ -76,7 +77,7 @@ public sealed class GetWorkspaceRepositoriesCommandTests : IDisposable
             bool mirrorFailureOutputAsStderr = false,
             TimeSpan? timeout = null)
         {
-            Calls.Add(new RecordedCall(fileName, arguments, workingDirectory));
+            _calls.Enqueue(new RecordedCall(fileName, arguments, workingDirectory));
             return inner.RunAsync(fileName, arguments, workingDirectory, stdin, cancellationToken, streamStderrAsStdout, mirrorFailureOutputAsStderr, timeout);
         }
 
@@ -90,7 +91,7 @@ public sealed class GetWorkspaceRepositoriesCommandTests : IDisposable
             bool mirrorFailureOutputAsStderr = false,
             TimeSpan? timeout = null)
         {
-            Calls.Add(new RecordedCall(fileName, string.Join(' ', arguments), workingDirectory));
+            _calls.Enqueue(new RecordedCall(fileName, string.Join(' ', arguments), workingDirectory));
             return inner.RunAsync(fileName, arguments, workingDirectory, stdinBytes, cancellationToken, streamStderrAsStdout, mirrorFailureOutputAsStderr, timeout);
         }
 
