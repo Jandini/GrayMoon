@@ -45,9 +45,13 @@
                         @if (!string.IsNullOrEmpty(_pendingDeletionFolder))
                         {
                             @* Information only: the background cleanup deletes the folder later, nothing for the user to do. *@
-                            <div class="gm-callout gm-callout--info @(ReportWarnings.Count > 0 ? "mt-3" : "") mb-0" role="status">
-                                <div>@(ReportWarnings.Count > 0 ? PendingDeletionText : $"Feature removed. {PendingDeletionText}")</div>
-                                <div class="text-muted small text-break mt-1">@_pendingDeletionFolder</div>
+                            <div class="@(ReportWarnings.Count > 0 ? "mt-3" : null)" role="status">
+                                @if (ReportWarnings.Count == 0)
+                                {
+                                    <p class="mb-2">Feature removed.</p>
+                                }
+                                <p class="mb-1">@PendingDeletionText</p>
+                                <p class="text-muted small text-break mb-0">@_pendingDeletionFolder</p>
                             </div>
                         }
                     }
