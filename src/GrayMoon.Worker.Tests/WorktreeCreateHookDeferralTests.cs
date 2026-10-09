@@ -85,4 +85,22 @@ public sealed class WorktreeCreateHookDeferralTests
             await Task.Delay(20);
         Assert.Equal(1, queue.Count);
     }
+
+    [Fact]
+    public async Task Released_checkout_is_marked_as_a_fresh_worktree()
+    {
+        var queue = new RecordingQueue();
+        using var sut = Create(queue);
+        var scope = sut.BeginCreate(Path1);
+
+        Assert.True(sut.TryDefer(Job(Path1, NotifyHookKind.Checkout)));
+        scope.Dispose();
+
+        for (var i = 0; i < 100 && queue.Count == 0; i++)
+            await Task.Delay(20);
+
+        var released = Assert.IsType<NotifySyncJob>(Assert.Single(queue.Jobs).NotifyJob);
+        Assert.True(released.FreshWorktree);
+        Assert.Equal(NotifyHookKind.Checkout, released.HookKind);
+    }
 }

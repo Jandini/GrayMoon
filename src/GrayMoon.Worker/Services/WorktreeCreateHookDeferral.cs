@@ -31,7 +31,7 @@ public sealed class WorktreeCreateHookDeferral(IJobQueue jobQueue, ILogger<Workt
     : IWorktreeCreateHookDeferral, IDisposable
 {
     /// <summary>No create running for this long, and the held syncs are released.</summary>
-    internal static readonly TimeSpan QuietPeriod = TimeSpan.FromSeconds(2);
+    internal static readonly TimeSpan QuietPeriod = TimeSpan.FromMilliseconds(500);
 
     private readonly object _gate = new();
     private readonly Dictionary<string, int> _active = new(PathComparer);
@@ -68,7 +68,14 @@ public sealed class WorktreeCreateHookDeferral(IJobQueue jobQueue, ILogger<Workt
                 return false;
 
             // One held sync per worktree is enough: it reads the repository's state when it finally runs.
-            _deferred[key] = job;
+            _deferred[key] = new NotifySyncJob
+            {
+                RepositoryId = job.RepositoryId,
+                WorkspaceId = job.WorkspaceId,
+                RepositoryPath = job.RepositoryPath,
+                HookKind = job.HookKind,
+                FreshWorktree = true
+            };
         }
 
         logger.LogDebug("Checkout sync held back while its worktree is being created: {RepoPath}", job.RepositoryPath);

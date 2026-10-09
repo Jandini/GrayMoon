@@ -2,6 +2,7 @@ using GrayMoon.Worker.Services;
 using GrayMoon.Abstractions.Worker;
 using GrayMoon.Abstractions.Notifications;
 using GrayMoon.Worker.Abstractions;
+using GrayMoon.Worker.Jobs;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
 
@@ -29,6 +30,8 @@ public sealed class CheckoutHookSyncCommand(
             return;
         }
 
+        var fresh = payload is NotifySyncJob { FreshWorktree: true };
+
         // There is no app request to carry capabilities on this path, so they are resolved here.
         var capabilities = await capabilityProvider.GetAsync(payload.WorkspaceId, cancellationToken);
 
@@ -42,7 +45,8 @@ public sealed class CheckoutHookSyncCommand(
         var currentBranchForFetch = await reader.GetCurrentBranchNameAsync(payload.RepositoryPath, cancellationToken) ?? "-";
 
         // Minimal fetch: only current branch and default branch, not all branches/tags.
-        string? token = await tokenProvider.GetTokenForRepositoryAsync(payload.RepositoryId, cancellationToken);
+        // A fresh Feature worktree has nothing new to fetch: skip the network call and its token lookup.
+        string? token = fresh ? null : await tokenProvider.GetTokenForRepositoryAsync(payload.RepositoryId, cancellationToken);
         string? fetchError = null;
         if (token == null)
         {
@@ -65,9 +69,10 @@ public sealed class CheckoutHookSyncCommand(
         {
             IncludeGitVersion = true,
             GitVersionNonNormalize = true,
-            IncludeProjects = true,
+            // Fresh worktree: projects come from the Feature seed, and with no fetch there is nothing to prune.
+            IncludeProjects = !fresh,
             // Remote branches let the app prune deleted ones; the full branch/tag lists are the Sync flow's job.
-            IncludeRemoteBranchesOnly = true,
+            IncludeRemoteBranchesOnly = !fresh,
             DefaultBranchOriginRef = defaultRef,
             ErrorMessage = fetchError,
             Capabilities = capabilities
@@ -85,7 +90,7 @@ public sealed class CheckoutHookSyncCommand(
 
         var version = state.GitVersion ?? "-";
         var branch = state.BranchName ?? "-";
-        var remoteBranches = fetchError == null ? state.RemoteBranches : null;
+        var remoteBranches = fetchError == null && !fresh ? state.RemoteBranches : null;
 
         var connection = hubProvider.Connection;
         if (connection?.State == HubConnectionState.Connected)
