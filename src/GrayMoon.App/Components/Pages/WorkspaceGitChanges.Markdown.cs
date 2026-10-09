@@ -45,22 +45,69 @@ public sealed partial class WorkspaceGitChanges
         && RendersInMonaco(_selectedDiff.State)
         && (!IsMarkdownFile
             || _mdSurface == MdSurface.Source
-            || _mdPreviewMode == MarkdownProsePreviewMode.Changes);
+            || EffectiveMdPreviewMode == MarkdownProsePreviewMode.Changes);
+
+    /// <summary>
+    /// Status letter A: staged add or untracked. The tree shows both as "A", and neither has a previous version.
+    /// </summary>
+    private bool IsAddedStatus
+    {
+        get
+        {
+            if (_selectedRow is not { Kind: GitChangesTreeRowKind.File } row)
+            {
+                return false;
+            }
+
+            var kind = row.IsStagedSection ? row.IndexChange : row.WorktreeChange;
+            return kind is GitChangeKind.Added or GitChangeKind.Untracked;
+        }
+    }
+
+    private bool IsMdChangesDisabled => IsAddedStatus;
 
     private bool IsMdBeforeDisabled =>
-        _selectedDiff?.State is GitDiffContentState.NewFile
+        IsAddedStatus
+        || _selectedDiff?.State is GitDiffContentState.NewFile
         || string.IsNullOrEmpty(_selectedDiff?.OriginalContent);
 
     private bool IsMdAfterDisabled =>
-        _selectedDiff?.State is GitDiffContentState.DeletedFile
-        || string.IsNullOrEmpty(_selectedDiff?.ModifiedContent);
+        !IsAddedStatus
+        && (_selectedDiff?.State is GitDiffContentState.DeletedFile
+            || string.IsNullOrEmpty(_selectedDiff?.ModifiedContent));
+
+    /// <summary>
+    /// Preview mode actually rendered. Added files always show After without overwriting the saved preference.
+    /// </summary>
+    private MarkdownProsePreviewMode EffectiveMdPreviewMode
+    {
+        get
+        {
+            if (IsAddedStatus)
+            {
+                return MarkdownProsePreviewMode.After;
+            }
+
+            if (_mdPreviewMode == MarkdownProsePreviewMode.Before && IsMdBeforeDisabled)
+            {
+                return MarkdownProsePreviewMode.Changes;
+            }
+
+            if (_mdPreviewMode == MarkdownProsePreviewMode.After && IsMdAfterDisabled)
+            {
+                return MarkdownProsePreviewMode.Changes;
+            }
+
+            return _mdPreviewMode;
+        }
+    }
 
     private string MarkdownSideLabel =>
         _selectedRow == null
             ? string.Empty
             : _selectedRow.IsStagedSection
-                ? (_mdPreviewMode == MarkdownProsePreviewMode.Before ? "(HEAD)" : "(Index)")
-                : (_mdPreviewMode == MarkdownProsePreviewMode.Before ? "(Index)" : "(Working Tree)");
+                ? (EffectiveMdPreviewMode == MarkdownProsePreviewMode.Before ? "(HEAD)" : "(Index)")
+                : (EffectiveMdPreviewMode == MarkdownProsePreviewMode.Before ? "(Index)" : "(Working Tree)");
 
     private static bool IsMarkdownPath(string path)
     {
@@ -137,6 +184,12 @@ public sealed partial class WorkspaceGitChanges
 
     private void CoerceMdPreviewModeForDocument()
     {
+        // Added files render After via EffectiveMdPreviewMode and keep the saved mode for the next file.
+        if (IsAddedStatus)
+        {
+            return;
+        }
+
         if (_mdPreviewMode == MarkdownProsePreviewMode.Before && IsMdBeforeDisabled)
         {
             _mdPreviewMode = MarkdownProsePreviewMode.Changes;
@@ -172,6 +225,11 @@ public sealed partial class WorkspaceGitChanges
 
     private async Task SetMdPreviewModeAsync(MarkdownProsePreviewMode mode)
     {
+        if (mode == MarkdownProsePreviewMode.Changes && IsMdChangesDisabled)
+        {
+            return;
+        }
+
         if (mode == MarkdownProsePreviewMode.Before && IsMdBeforeDisabled)
         {
             return;
@@ -213,7 +271,7 @@ public sealed partial class WorkspaceGitChanges
             var result = MarkdownProseDiffService.Render(
                 _selectedDiff.OriginalContent,
                 _selectedDiff.ModifiedContent,
-                _mdPreviewMode);
+                EffectiveMdPreviewMode);
 
             if (result.TooLarge)
             {
