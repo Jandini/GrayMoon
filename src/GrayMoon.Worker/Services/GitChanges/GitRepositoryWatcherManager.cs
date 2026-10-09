@@ -23,7 +23,8 @@ public sealed class GitRepositoryWatcherManager(
     GitChangesRepositoryRegistry repositoryRegistry,
     IOptions<GitChangesOptions> options,
     ILoggerFactory loggerFactory,
-    ILogger<GitRepositoryWatcherManager> logger) : IDisposable
+    ILogger<GitRepositoryWatcherManager> logger,
+    RepositoryPathGate? pathGate = null) : IDisposable
 {
     private readonly GitChangesOptions _options = options.Value;
     private readonly ConcurrentDictionary<string, WatcherEntry> _entries = new(StringComparer.OrdinalIgnoreCase);
@@ -32,11 +33,42 @@ public sealed class GitRepositoryWatcherManager(
 
     public IDisposable Acquire(string repoPath)
     {
+        // A folder that is about to be deleted must not get a watcher: its handle would block the delete.
+        if (pathGate?.IsBlocked(repoPath) == true)
+        {
+            return NullLease.Instance;
+        }
+
         var key = GitChangesSnapshotCache.NormalizeKey(repoPath);
         var entry = _entries.GetOrAdd(key, _ => CreateEntry(repoPath));
         entry.CancelIdleDisposal();
         Interlocked.Increment(ref entry.LeaseCount);
         return new Lease(this, key);
+    }
+
+    /// <summary>
+    /// Immediately disposes every watcher whose repository is one of <paramref name="roots"/> or lies beneath one,
+    /// and prunes the matching coordinator/cache/registry entries, so the OS no longer holds those folders open.
+    /// Returns the number of watchers disposed.
+    /// </summary>
+    public int ReleaseUnder(IReadOnlyCollection<string> roots)
+    {
+        var released = 0;
+        foreach (var key in _entries.Keys)
+        {
+            if (!RepositoryPathGate.IsUnder(key, roots) || !_entries.TryRemove(key, out var entry))
+            {
+                continue;
+            }
+
+            entry.Dispose();
+            refreshCoordinator.RemoveTracker(key);
+            snapshotCache.Remove(key);
+            repositoryRegistry.Remove(key);
+            released++;
+        }
+
+        return released;
     }
 
     /// <summary>Returns coverage for a currently tracked (or still-known) watcher entry, if any.</summary>
@@ -158,6 +190,15 @@ public sealed class GitRepositoryWatcherManager(
             _idleTimer?.Dispose();
             Coverage.MarkEnded(DateTimeOffset.UtcNow);
             watcher.Dispose();
+        }
+    }
+
+    private sealed class NullLease : IDisposable
+    {
+        public static readonly NullLease Instance = new();
+
+        public void Dispose()
+        {
         }
     }
 

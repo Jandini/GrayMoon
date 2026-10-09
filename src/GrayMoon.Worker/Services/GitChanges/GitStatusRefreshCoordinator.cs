@@ -30,6 +30,7 @@ public sealed class GitStatusRefreshCoordinator : IDisposable, IGitChangesRefres
     private readonly GitChangesSnapshotCache _snapshotCache;
     private readonly GitChangesOptions _options;
     private readonly ILogger<GitStatusRefreshCoordinator> _logger;
+    private readonly RepositoryPathGate? _pathGate;
     private readonly SemaphoreSlim _statusScanGate;
     private readonly ConcurrentDictionary<string, RepositoryRefreshTracker> _trackers = new(StringComparer.OrdinalIgnoreCase);
     private bool _disposed;
@@ -38,8 +39,10 @@ public sealed class GitStatusRefreshCoordinator : IDisposable, IGitChangesRefres
         IRepositoryGitChangesService gitChangesService,
         GitChangesSnapshotCache snapshotCache,
         IOptions<GitChangesOptions> options,
-        ILogger<GitStatusRefreshCoordinator> logger)
+        ILogger<GitStatusRefreshCoordinator> logger,
+        RepositoryPathGate? pathGate = null)
     {
+        _pathGate = pathGate;
         _gitChangesService = gitChangesService;
         _snapshotCache = snapshotCache;
         _options = options.Value;
@@ -53,7 +56,7 @@ public sealed class GitStatusRefreshCoordinator : IDisposable, IGitChangesRefres
     /// <summary>Marks a repository dirty from a watcher event and schedules a debounced scan. Fire-and-forget.</summary>
     public void MarkDirty(string repoPath)
     {
-        if (_disposed)
+        if (_disposed || _pathGate?.IsBlocked(repoPath) == true)
         {
             return;
         }
@@ -66,6 +69,11 @@ public sealed class GitStatusRefreshCoordinator : IDisposable, IGitChangesRefres
     /// timer but still coalesces with a scan that is already in flight for the same repository.</summary>
     public async Task<GitChangeStatusResult> RefreshNowAsync(string repoPath, CancellationToken cancellationToken, bool includeLineStats = false)
     {
+        if (_pathGate?.IsBlocked(repoPath) == true)
+        {
+            return PathReleasedResult();
+        }
+
         var tracker = GetOrAddTracker(repoPath);
         tracker.NoteManualRefresh();
         var result = await RunScanAsync(repoPath, tracker, cancellationToken, includeLineStats);
@@ -82,6 +90,33 @@ public sealed class GitStatusRefreshCoordinator : IDisposable, IGitChangesRefres
         }
 
         return result;
+    }
+
+    private static GitChangeStatusResult PathReleasedResult() => new()
+    {
+        Success = false,
+        ErrorCode = "PathReleased",
+        ErrorMessage = "Repository folder is being removed.",
+    };
+
+    /// <summary>
+    /// Waits until no scan is running for any repository at or beneath <paramref name="roots"/> (a running scan's
+    /// git process pins its working directory), giving up after <paramref name="timeout"/>.
+    /// </summary>
+    public async Task DrainScansUnderAsync(IReadOnlyCollection<string> roots, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        var started = Stopwatch.GetTimestamp();
+        while (_trackers.Any(t => RepositoryPathGate.IsUnder(t.Key, roots)
+                                  && t.Value.State is RepositoryRefreshState.Refreshing or RepositoryRefreshState.RefreshingAndDirty))
+        {
+            if (Stopwatch.GetElapsedTime(started) > timeout)
+            {
+                _logger.LogWarning("Timed out waiting for git status scans to finish under {Roots}", string.Join("; ", roots));
+                return;
+            }
+
+            await Task.Delay(50, cancellationToken);
+        }
     }
 
     public RepositoryRefreshState GetState(string repoPath) => GetOrAddTracker(repoPath).State;
@@ -214,8 +249,15 @@ public sealed class GitStatusRefreshCoordinator : IDisposable, IGitChangesRefres
                 try
                 {
                     var version = _snapshotCache.NextVersion(repoPath);
-                    result = await _gitChangesService.GetStatusAsync(repoPath, version, cancellationToken, includeLineStats);
-                    if (result.Success && result.Snapshot != null)
+                    // The folder is being deleted: a git process started here would pin it as its working directory.
+                    result = _pathGate?.IsBlocked(repoPath) == true
+                        ? PathReleasedResult()
+                        : await _gitChangesService.GetStatusAsync(repoPath, version, cancellationToken, includeLineStats);
+                    if (result.ErrorCode == "PathReleased")
+                    {
+                        // Not a failure worth logging; the removal that blocked this path owns the outcome.
+                    }
+                    else if (result.Success && result.Snapshot != null)
                     {
                         _snapshotCache.SetLatest(repoPath, result.Snapshot);
                         SnapshotReady?.Invoke(repoPath, result.Snapshot);

@@ -141,7 +141,9 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<GitChangesRepositoryRegistry>();
         builder.Services.AddSingleton<GitStatusRefreshCoordinator>();
         builder.Services.AddSingleton<IGitChangesRefreshSuppressor>(sp => sp.GetRequiredService<GitStatusRefreshCoordinator>());
+        builder.Services.AddSingleton<RepositoryPathGate>();
         builder.Services.AddSingleton<GitRepositoryWatcherManager>();
+        builder.Services.AddSingleton<IRepositoryPathReleaser, RepositoryPathReleaser>();
         builder.Services.AddHostedService<GitChangesSnapshotPublisher>();
 
         builder.Services.AddSingleton<ICommandHandler<SyncRepositoryRequest, SyncRepositoryResponse>, SyncRepositoryCommand>();
