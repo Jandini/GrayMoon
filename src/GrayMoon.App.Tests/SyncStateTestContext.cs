@@ -98,6 +98,7 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddScoped<IWorkspaceFeatureOperations, WorkspaceFeatureOperations>();
         services.AddScoped<IWorkspaceExternalWorktreeOperations, WorkspaceExternalWorktreeOperations>();
         services.AddSingleton<WorkerConnectionTracker>();
+        services.AddSingleton<FeatureFinalizationCoordinator>();
         services.AddSingleton<IWorkspaceFeatureReconciler, WorkspaceFeatureReconciler>();
         services.AddSingleton<IWorkspaceOperationRunner, WorkspaceOperationRunner>();
         services.AddSingleton<IWorkspaceOperationLock>(sp => (IWorkspaceOperationLock)sp.GetRequiredService<IWorkspaceOperationRunner>());

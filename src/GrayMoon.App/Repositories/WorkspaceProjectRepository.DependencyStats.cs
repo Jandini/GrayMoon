@@ -65,9 +65,18 @@ public sealed partial class WorkspaceProjectRepository
             .AsNoTracking()
             .Where(s => s.WorkspaceFeatureContextId == workspaceFeatureContextId
                 && links.Select(l => l.WorkspaceRepositoryId).Contains(s.WorkspaceRepositoryId))
-            .Select(s => new { s.WorkspaceRepositoryId, s.GitVersion })
+            .Select(s => new { s.WorkspaceRepositoryId, s.GitVersion, s.GitVersionPending })
             .ToListAsync(cancellationToken);
         var contextVersionByLink = contextVersionByLinkId.ToDictionary(x => x.WorkspaceRepositoryId, x => x.GitVersion);
+
+        // A Feature row whose own GitVersion has not been computed yet cannot be compared against: its edges are
+        // pending, never matched or mismatched. The special Workspace context never carries the flag.
+        var pendingRepoIds = isSpecialWorkspace
+            ? new HashSet<int>()
+            : links
+                .Where(l => contextVersionByLinkId.Any(s => s.WorkspaceRepositoryId == l.WorkspaceRepositoryId && s.GitVersionPending == true))
+                .Select(l => l.RepositoryId)
+                .ToHashSet();
 
         var versionByRepo = links.ToDictionary(
             x => x.RepositoryId,
@@ -134,11 +143,17 @@ public sealed partial class WorkspaceProjectRepository
 
         var unmatchedCountByRepo = repoIdsInWorkspace.ToDictionary(id => id, _ => 0);
         var unmatchedRepoEdges = new HashSet<(int DepRepoId, int RefRepoId)>();
+        var pendingDependentRepoIds = new HashSet<int>();
         foreach (var (depId, refId, version) in uniqueEdges)
         {
             if (!byProject.TryGetValue(depId, out var depProj) || !byProject.TryGetValue(refId, out var refProj)) continue;
             if (depProj.RepositoryId == refProj.RepositoryId) continue;
             if (!repoIdsInWorkspace.Contains(depProj.RepositoryId) || !repoIdsInWorkspace.Contains(refProj.RepositoryId)) continue;
+            if (pendingRepoIds.Contains(refProj.RepositoryId))
+            {
+                pendingDependentRepoIds.Add(depProj.RepositoryId);
+                continue;
+            }
             var refRepoVersion = versionByRepo.GetValueOrDefault(refProj.RepositoryId);
             var depVersion = version?.Trim() ?? "";
             var refVersion = refRepoVersion?.Trim() ?? "";
@@ -164,7 +179,10 @@ public sealed partial class WorkspaceProjectRepository
         {
             var level = dependencyLevelForRepo(link.RepositoryId);
             var deps = depCountByRepo.GetValueOrDefault(link.RepositoryId, 0);
-            var unmatched = unmatchedCountByRepo.GetValueOrDefault(link.RepositoryId, 0);
+            // null = pending: the version-derived comparison for this repository is not known yet.
+            int? unmatched = pendingDependentRepoIds.Contains(link.RepositoryId)
+                ? null
+                : unmatchedCountByRepo.GetValueOrDefault(link.RepositoryId, 0);
 
             if (!stateByLinkId.TryGetValue(link.WorkspaceRepositoryId, out var state))
             {

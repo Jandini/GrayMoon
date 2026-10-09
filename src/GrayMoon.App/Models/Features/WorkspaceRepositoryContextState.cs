@@ -34,6 +34,9 @@ public sealed class WorkspaceRepositoryContextState
     [MaxLength(100)]
     public string? GitVersion { get; set; }
 
+    /// <summary>True while a Feature context row has no GitVersion computed for its own checkout yet (set by the Feature seed, cleared by the first GitVersion probe result). Null or false means the stored GitVersion, or its absence, is a probe result.</summary>
+    public bool? GitVersionPending { get; set; }
+
     public int? Projects { get; set; }
     public int? OutgoingCommits { get; set; }
     public int? IncomingCommits { get; set; }

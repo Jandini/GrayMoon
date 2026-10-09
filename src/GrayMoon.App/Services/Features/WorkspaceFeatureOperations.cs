@@ -35,7 +35,8 @@ public sealed class WorkspaceFeatureOperations(
     IWorkspaceGitChangesMonitoringPause gitChangesMonitoringPause,
     IWorkspaceCapabilitiesResolver capabilitiesResolver,
     IOptions<WorkspaceOptions> workspaceOptions,
-    ILogger<WorkspaceFeatureOperations> logger) : IWorkspaceFeatureOperations
+    ILogger<WorkspaceFeatureOperations> logger,
+    FeatureFinalizationCoordinator? finalizationCoordinator = null) : IWorkspaceFeatureOperations
 {
     private int MaxParallel => Math.Max(1, workspaceOptions.Value.MaxParallelOperations);
 
@@ -272,6 +273,11 @@ public sealed class WorkspaceFeatureOperations(
         // Feature selector to open or remove it. Treat it exactly like a partial per-repo failure: mark
         // NeedsRepair and hand back a NeedsRepair result so CreateFeatureModal opens Status and repair
         // (Retry re-attempts the still-Pending repos; Roll back/Remove clean up).
+        //
+        // The Worker releases its deferred checkout syncs shortly after the last worktree exists, before the seed
+        // below has run. Armed from here to the end of the method (including the failure write), the barrier keeps
+        // those syncs from racing the seed; it is in memory only, so it cannot outlive a crash.
+        using var finalizationBarrier = finalizationCoordinator?.Arm(contextId.Value);
         try
         {
             var anyFailure = 0;
@@ -1556,7 +1562,25 @@ public sealed class WorkspaceFeatureOperations(
     /// task cancellation produces, for when the user presses the overlay's Abort button mid Repair/Roll back.
     /// </summary>
     private static string DescribeOperationFailure(Exception ex, string actionVerb) =>
-        ex is OperationCanceledException ? $"{actionVerb} was cancelled." : ex.Message;
+        ex is OperationCanceledException ? $"{actionVerb} was cancelled." : DescribeFailureMessage(ex);
+
+    /// <summary>
+    /// EF wraps the useful cause ("UNIQUE constraint failed: ...") behind "An error occurred while saving the entity
+    /// changes", so surface the innermost message of a save failure instead of the generic wrapper.
+    /// </summary>
+    internal static string DescribeFailureMessage(Exception ex)
+    {
+        if (ex is not DbUpdateException)
+            return ex.Message;
+
+        var inner = ex;
+        while (inner.InnerException is not null)
+            inner = inner.InnerException;
+
+        return ReferenceEquals(inner, ex) || string.IsNullOrWhiteSpace(inner.Message)
+            ? ex.Message
+            : $"{ex.Message} {inner.Message}";
+    }
 
     public async Task<RepairFeatureResult> RepairFeatureAsync(
         WorkspaceFeatureContextId featureContextId,
@@ -1703,6 +1727,9 @@ public sealed class WorkspaceFeatureOperations(
         var featureName = info.FeatureName
             ?? throw new InvalidOperationException("Feature has no name.");
         var specialContextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(info.WorkspaceId, cancellationToken);
+
+        // Same barrier as Create: syncs the Worker releases for retried worktrees wait for the seed below.
+        using var finalizationBarrier = finalizationCoordinator?.Arm(featureContextId.Value);
 
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var rows = await db.WorkspaceFeatureRepositories
@@ -2106,13 +2133,22 @@ public sealed class WorkspaceFeatureOperations(
         return new RollbackFeatureResult(true, null, results);
     }
 
+    private sealed class ProjectKeyComparer : IEqualityComparer<(int RepositoryId, string Name)>
+    {
+        public bool Equals((int RepositoryId, string Name) x, (int RepositoryId, string Name) y) =>
+            x.RepositoryId == y.RepositoryId && string.Equals(x.Name, y.Name, StringComparison.OrdinalIgnoreCase);
+
+        public int GetHashCode((int RepositoryId, string Name) key) =>
+            HashCode.Combine(key.RepositoryId, StringComparer.OrdinalIgnoreCase.GetHashCode(key.Name));
+    }
+
     private sealed class ListWorktreesWorkerResponse
     {
         [JsonPropertyName("worktrees")]
         public List<GitWorktreeInfo>? Worktrees { get; set; }
     }
 
-    private async Task SeedInitialFeatureProjectionsAsync(
+    internal async Task SeedInitialFeatureProjectionsAsync(
         AppDbContext db,
         int workspaceId,
         WorkspaceFeatureContextId contextId,
@@ -2154,19 +2190,26 @@ public sealed class WorkspaceFeatureOperations(
             var onTag = pinnedTag != null;
             if (existingStates.TryGetValue(link.WorkspaceRepositoryId, out var existing))
             {
+                // The row already exists: a Sync or an earlier (interrupted) seed wrote it. Only structure is
+                // reconciled here. GitVersion, SyncStatus and the commit counts belong to whoever probed them -
+                // the Workspace's values describe another branch, and a retry must not undo a user's commits.
                 existing.BranchName = onTag ? null : featureBranch;
                 existing.CheckedOutTag = pinnedTag;
-                existing.HeadCommit = baseSha ?? src?.HeadCommit;
+                existing.HeadCommit ??= baseSha ?? src?.HeadCommit;
                 existing.HasNewerTag = onTag ? src?.HasNewerTag ?? link.HasNewerTag : null;
-                existing.GitVersion = src?.GitVersion ?? link.GitVersion;
                 existing.Projects = src?.Projects ?? link.Projects;
                 existing.RepositoryType = src?.RepositoryType ?? link.RepositoryType;
-                existing.OutgoingCommits = onTag ? null : 0;
-                existing.IncomingCommits = onTag ? null : src?.IncomingCommits ?? link.IncomingCommits;
-                existing.DefaultBranchBehindCommits = onTag ? null : 0;
-                existing.DefaultBranchAheadCommits = onTag ? null : 0;
-                existing.BranchHasUpstream = onTag ? null : false;
-                existing.SyncStatus = link.SyncStatus;
+                if (!onTag)
+                {
+                    existing.OutgoingCommits ??= 0;
+                    existing.IncomingCommits ??= src?.IncomingCommits ?? link.IncomingCommits;
+                    existing.DefaultBranchBehindCommits ??= 0;
+                    existing.DefaultBranchAheadCommits ??= 0;
+                    existing.BranchHasUpstream ??= false;
+                }
+                // A row that never got a probe result (null flag) still has no Feature version: mark it pending.
+                if (existing.GitVersionPending is null && existing.GitVersion is null)
+                    existing.GitVersionPending = true;
                 existing.DependencyLevel = src?.DependencyLevel ?? link.DependencyLevel;
                 existing.Dependencies = src?.Dependencies ?? link.Dependencies;
                 existing.UnmatchedDeps = src?.UnmatchedDeps ?? link.UnmatchedDeps;
@@ -2188,7 +2231,10 @@ public sealed class WorkspaceFeatureOperations(
                 // (ahead of Feature parent), not DefaultBranchAhead vs main.
                 HeadCommit = baseSha ?? src?.HeadCommit,
                 HasNewerTag = onTag ? src?.HasNewerTag ?? link.HasNewerTag : null,
-                GitVersion = src?.GitVersion ?? link.GitVersion,
+                // The Workspace's version describes its own branch, not this Feature's: leave it unset and pending
+                // until the deferred fresh-worktree GitVersion arrives, so no comparison is ever shown as validated.
+                GitVersion = null,
+                GitVersionPending = true,
                 Projects = src?.Projects ?? link.Projects,
                 RepositoryType = src?.RepositoryType ?? link.RepositoryType,
                 OutgoingCommits = onTag ? null : 0,
@@ -2220,50 +2266,14 @@ public sealed class WorkspaceFeatureOperations(
         var generatedSpecialIds = specialProjects.Where(p => p.IsGenerated).Select(p => p.ProjectId).ToHashSet();
         var realSpecialProjects = specialProjects.Where(p => !p.IsGenerated).ToList();
 
-        var existingFeatureProjects = await db.WorkspaceProjects
-            .Where(p => p.WorkspaceId == workspaceId
-                        && p.WorkspaceFeatureContextId == contextId.Value
-                        && !p.IsGenerated)
-            .ToListAsync(cancellationToken);
-        var existingByRepoAndName = new Dictionary<(int RepositoryId, string Name), WorkspaceProject>();
-        foreach (var p in existingFeatureProjects)
-        {
-            var key = (p.RepositoryId, p.ProjectName.Trim().ToLowerInvariant());
-            existingByRepoAndName.TryAdd(key, p);
-        }
+        // Every other writer of this context's projects and edges (Sync merges) takes the same gate, so the
+        // lookup-then-insert below cannot race them on the unique (context, repository, name) index.
+        using var projectionGate = finalizationCoordinator is null
+            ? null
+            : await finalizationCoordinator.AcquireProjectionAsync(contextId.Value, cancellationToken);
 
-        // projectIdMap: special real ProjectId -> Feature-context project (cloned or Sync-preexisting).
-        var projectIdMap = new Dictionary<int, WorkspaceProject>();
-        foreach (var src in realSpecialProjects)
-        {
-            var key = (src.RepositoryId, src.ProjectName.Trim().ToLowerInvariant());
-            if (existingByRepoAndName.TryGetValue(key, out var existing))
-            {
-                existing.ProjectType = src.ProjectType;
-                existing.ProjectFilePath = src.ProjectFilePath;
-                existing.TargetFramework = src.TargetFramework;
-                existing.PackageId = src.PackageId;
-                projectIdMap[src.ProjectId] = existing;
-                continue;
-            }
-
-            var clone = new WorkspaceProject
-            {
-                WorkspaceId = workspaceId,
-                WorkspaceFeatureContextId = contextId.Value,
-                RepositoryId = src.RepositoryId,
-                ProjectName = src.ProjectName,
-                ProjectType = src.ProjectType,
-                ProjectFilePath = src.ProjectFilePath,
-                TargetFramework = src.TargetFramework,
-                PackageId = src.PackageId,
-                IsGenerated = false
-            };
-            db.WorkspaceProjects.Add(clone);
-            projectIdMap[src.ProjectId] = clone;
-        }
-
-        // Drop any Feature-scoped generated copies Sync/legacy seed may have written.
+        // Drop any Feature-scoped generated copies Sync/legacy seed may have written. Saved on its own, before any
+        // insert, because the unique index ignores IsGenerated: a stale generated row must be gone first.
         var featureScopedGenerated = await db.WorkspaceProjects
             .Where(p => p.WorkspaceId == workspaceId
                         && p.WorkspaceFeatureContextId == contextId.Value
@@ -2278,9 +2288,82 @@ public sealed class WorkspaceFeatureOperations(
             if (orphanEdges.Count > 0)
                 db.ProjectDependencies.RemoveRange(orphanEdges);
             db.WorkspaceProjects.RemoveRange(featureScopedGenerated);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        // Same identity as WorkspaceProjectRepository's merge: trimmed name, ordinal-ignore-case. The database index
+        // is stricter (exact name), so two rows this key treats as one can never violate it.
+        var existingFeatureProjects = await db.WorkspaceProjects
+            .Where(p => p.WorkspaceId == workspaceId
+                        && p.WorkspaceFeatureContextId == contextId.Value
+                        && !p.IsGenerated)
+            .OrderBy(p => p.ProjectId)
+            .ToListAsync(cancellationToken);
+        var projectKeyComparer = new ProjectKeyComparer();
+        var featureProjectsByKey = new Dictionary<(int RepositoryId, string Name), WorkspaceProject>(projectKeyComparer);
+        foreach (var p in existingFeatureProjects)
+            featureProjectsByKey.TryAdd((p.RepositoryId, p.ProjectName.Trim()), p);
+
+        // projectIdMap: special real ProjectId -> Feature-context project (cloned or Sync-preexisting).
+        // Sources are visited in a fixed order, so when two sources share one identity the first always wins and the
+        // others map onto the same Feature project (their edges collapse into its edges).
+        var projectIdMap = new Dictionary<int, WorkspaceProject>();
+        var inserted = 0;
+        var updated = 0;
+        var collisions = 0;
+        foreach (var src in realSpecialProjects
+                     .OrderBy(p => p.RepositoryId)
+                     .ThenBy(p => p.ProjectName.Trim(), StringComparer.OrdinalIgnoreCase)
+                     .ThenBy(p => p.ProjectName, StringComparer.Ordinal)
+                     .ThenBy(p => p.ProjectId))
+        {
+            var name = src.ProjectName.Trim();
+            var key = (src.RepositoryId, name);
+            if (featureProjectsByKey.TryGetValue(key, out var existing))
+            {
+                var isNewThisRun = db.Entry(existing).State == EntityState.Added;
+                if (isNewThisRun)
+                {
+                    collisions++;
+                    logger.LogWarning(
+                        "Feature {ContextId}: source projects '{First}' and '{Second}' in repository {RepositoryId} share one project identity; both map to one Feature project.",
+                        contextId.Value, existing.ProjectName, src.ProjectName, src.RepositoryId);
+                }
+                else
+                {
+                    updated++;
+                }
+
+                existing.ProjectType = src.ProjectType;
+                existing.ProjectFilePath = src.ProjectFilePath;
+                existing.TargetFramework = src.TargetFramework;
+                existing.PackageId = src.PackageId;
+                projectIdMap[src.ProjectId] = existing;
+                continue;
+            }
+
+            var clone = new WorkspaceProject
+            {
+                WorkspaceId = workspaceId,
+                WorkspaceFeatureContextId = contextId.Value,
+                RepositoryId = src.RepositoryId,
+                ProjectName = name,
+                ProjectType = src.ProjectType,
+                ProjectFilePath = src.ProjectFilePath,
+                TargetFramework = src.TargetFramework,
+                PackageId = src.PackageId,
+                IsGenerated = false
+            };
+            db.WorkspaceProjects.Add(clone);
+            featureProjectsByKey[key] = clone;
+            projectIdMap[src.ProjectId] = clone;
+            inserted++;
         }
 
         await db.SaveChangesAsync(cancellationToken);
+        logger.LogInformation(
+            "Feature {ContextId}: projection seed projects Workspace={WorkspaceId} Inserted={Inserted} Updated={Updated} Collisions={Collisions} Source=Seed",
+            contextId.Value, workspaceId, inserted, updated, collisions);
 
         if (projectIdMap.Count > 0)
         {
