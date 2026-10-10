@@ -40,11 +40,23 @@ public sealed class WorkspaceBranchHandler(
         IProgress<OperationProgress>? progress = null,
         bool syncState = false,
         CancellationToken cancellationToken = default)
+        => (await CreateBranchesWithOutcomeAsync(
+            workspaceId, contextId, newBranchName, baseBranch, repositoryIds, progress, syncState, cancellationToken)).ErrorsByRepositoryId;
+
+    public async Task<BranchCreationOutcome> CreateBranchesWithOutcomeAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        string newBranchName,
+        string baseBranch,
+        IReadOnlySet<int>? repositoryIds,
+        IProgress<OperationProgress>? progress = null,
+        bool syncState = false,
+        CancellationToken cancellationToken = default)
     {
         await using var scope = serviceScopeFactory.CreateAsyncScope();
         var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
 
-        return await workspaceGitService.CreateBranchesAsync(
+        return await workspaceGitService.CreateBranchesWithOutcomeAsync(
             workspaceId,
             contextId,
             newBranchName,

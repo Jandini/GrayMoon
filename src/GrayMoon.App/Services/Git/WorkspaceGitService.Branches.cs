@@ -102,6 +102,19 @@ public sealed partial class WorkspaceGitService
         IReadOnlySet<int>? repositoryIds = null,
         bool syncState = false,
         CancellationToken cancellationToken = default)
+        => (await CreateBranchesWithOutcomeAsync(
+            workspaceId, contextId, newBranchName, baseBranch, onProgress, repositoryIds, syncState, cancellationToken)).ErrorsByRepositoryId;
+
+    /// <summary>Same as <see cref="CreateBranchesAsync"/>, reporting which repositories were attempted and the branch each successful one reports checked out, so a caller can tell an unreported outcome from a success.</summary>
+    public async Task<BranchCreationOutcome> CreateBranchesWithOutcomeAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        string newBranchName,
+        string baseBranch,
+        Action<int, int>? onProgress = null,
+        IReadOnlySet<int>? repositoryIds = null,
+        bool syncState = false,
+        CancellationToken cancellationToken = default)
     {
         if (!_workerBridge.IsWorkerConnected)
             throw new InvalidOperationException("Worker not connected. Start the GrayMoon Worker to create branches.");
@@ -119,10 +132,11 @@ public sealed partial class WorkspaceGitService
             links = links.Where(wr => repositoryIds.Contains(wr.RepositoryId)).ToList();
 
         if (links.Count == 0)
-            return new Dictionary<int, string>();
+            return BranchCreationOutcome.Empty;
 
         var errors = new ConcurrentDictionary<int, string>();
         var branchNameByRepoId = new ConcurrentDictionary<int, string>();
+        var checkedOutBranchByRepoId = new ConcurrentDictionary<int, string?>();
         var syncResponseByRepoId = new ConcurrentDictionary<int, CreateBranchResponse>();
         var useDefaultBase = string.Equals(baseBranch, "__default__", StringComparison.OrdinalIgnoreCase);
         var completedCount = 0;
@@ -191,6 +205,7 @@ public sealed partial class WorkspaceGitService
                     // WorkspaceRepositoryContextState, not unconditionally on the shared link). Applied
                     // via WorkspaceRepositoryStateWriter in a sequential pass below.
                     branchNameByRepoId[wr.RepositoryId] = createResponse?.Branch ?? newBranchName;
+                    checkedOutBranchByRepoId[wr.RepositoryId] = createResponse?.CurrentBranch;
                     if (syncState && createResponse != null)
                         syncResponseByRepoId[wr.RepositoryId] = createResponse;
                 }
@@ -256,7 +271,10 @@ public sealed partial class WorkspaceGitService
         }
 
         _hubContext?.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
-        return errors;
+        return new BranchCreationOutcome(
+            links.Select(l => l.RepositoryId).ToHashSet(),
+            new Dictionary<int, string?>(checkedOutBranchByRepoId),
+            new Dictionary<int, string>(errors));
     }
 
     /// <summary>Ensures a local branch is present in RepositoryBranches for the given workspace repository. Adds it if missing; does not remove other branches.</summary>
