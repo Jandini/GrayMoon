@@ -82,13 +82,38 @@
  * Title row: use same baseline alignment as app.css .workspace-repos-header .workspace-repos-title-row
  * (do not override with flex-end - that sat the subtitle lower than the h2 text).
  * Workflow count stays in <p> like WorkspaceRepositories; status chips are siblings so they don't stretch the subtitle.
+ * The row stays one line (same idea as the Changes header). workspace-actions-header-fit.js shortens the
+ * refresh status to "1 of 3" and hides chips that do not fit, instead of wrapping them.
  */
+.workspace-actions-header .workspace-repos-title-row {
+    flex-wrap: nowrap;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.workspace-actions-header .workspace-repos-title-row .workspace-repos-title {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
 .workspace-actions-header .workspace-repos-subtitle.workspace-actions__subtitle {
-    white-space: normal;
+    white-space: nowrap;
     overflow: visible;
     text-overflow: clip;
     flex: 0 0 auto;
+    min-width: auto;
+}
+
+/* Last resort after chips are hidden: ellipsize the workspace name rather than wrapping. */
+.workspace-actions-header .workspace-repos-subtitle.workspace-actions__subtitle.is-ellipsis {
+    flex: 0 1 auto;
     min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.workspace-actions-header .is-collapsed {
+    display: none;
 }
 
 .workspace-actions-header .workspace-actions__filters,
@@ -120,8 +145,54 @@
 .workspace-actions-header .workspace-actions__filters {
     /* Horizontal gap between chips matches the vertical gap between the title row and the actions row
        below it (app.css .workspace-repos-header-actions margin-top: 0.5rem). The markup no longer
-       carries bootstrap's gap-1 utility, since it is !important and would win over this value. */
+       carries bootstrap's gap-1 utility, since it is !important and would win over this value.
+       nowrap: a chip that does not fit is hidden whole, not wrapped under the title. */
+    flex-wrap: nowrap;
     gap: 0.5rem;
+}
+
+/* Refresh progress stays on the title row. The long sentence is the default; the fit script
+   switches to the short "1 of 3" span when the row would overflow. Do not shrink or ellipsize
+   either string — the abort control stays with whichever text is showing. */
+.workspace-actions-header .git-changes-header__scan-indicator.workspace-actions__refresh-status {
+    flex: 0 0 auto;
+    max-width: none;
+    min-width: max-content;
+}
+
+.workspace-actions-header .workspace-actions__refresh-status-short {
+    display: none;
+}
+
+.workspace-actions-header .workspace-actions__refresh-status.is-short .workspace-actions__refresh-status-long {
+    display: none;
+}
+
+.workspace-actions-header .workspace-actions__refresh-status.is-short .workspace-actions__refresh-status-short {
+    display: inline;
+}
+
+.workspace-actions-header .workspace-actions__refresh-status > .workspace-actions__refresh-status-long,
+.workspace-actions-header .workspace-actions__refresh-status > .workspace-actions__refresh-status-short {
+    overflow: visible;
+    text-overflow: clip;
+    flex: 0 0 auto;
+    min-width: max-content;
+}
+
+/* Toolbar: the search field shrinks. Refresh (and Re-run) stay one line and are not crushed. */
+.workspace-actions-header .workspace-repos-header-actions {
+    flex-wrap: nowrap;
+    min-width: 0;
+}
+
+.workspace-actions-header .workspace-repos-header-actions .btn {
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.workspace-actions-header .workspace-repos-header-actions .btn-group {
+    flex-shrink: 0;
 }
 
 .gha-status-chip {
