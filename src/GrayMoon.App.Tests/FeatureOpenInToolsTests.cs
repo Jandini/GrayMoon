@@ -35,6 +35,14 @@ public sealed class FeatureOpenInToolsTests
     }
 
     [Fact]
+    public void Every_open_in_tool_announces_that_it_is_starting()
+    {
+        Assert.Equal(
+            FeatureOpenInTools.All.Select(t => $"Starting {t.Label}..."),
+            FeatureOpenInTools.All.Select(FeatureOpenInTools.StartToastMessage));
+    }
+
+    [Fact]
     public void Codex_cli_is_shown_only_when_installed()
     {
         string[] recent = [FeatureOpenInTools.CodexCli, FeatureOpenInTools.Terminal];

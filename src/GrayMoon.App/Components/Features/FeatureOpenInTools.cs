@@ -67,6 +67,11 @@ internal static class FeatureOpenInTools
         !tool.RequiresInstall || installed.Contains(tool.Id);
 
     /// <summary>
+    /// Toast shown when an Open-in tool is launched, so the click is visible while it starts.
+    /// </summary>
+    public static string StartToastMessage(OpenInTool tool) => $"Starting {tool.Label}...";
+
+    /// <summary>
     /// Adds a tool after the ones already on the row. A tool that is already there stays where it is.
     /// </summary>
     public static IReadOnlyList<string> RecordUse(IReadOnlyList<string> recent, string toolId)

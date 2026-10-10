@@ -131,6 +131,14 @@
     cursor: not-allowed;
 }
 
+/* A starting tool is disabled. Bootstrap turns off pointer events on a disabled menu
+   item, so the pointer has to live on the row or the cursor falls back to default. */
+.workspace-feature-selector__add.is-starting:disabled,
+.workspace-feature-selector__launch-row:has(> .workspace-feature-selector__launch-item:disabled),
+li:has(> .workspace-feature-selector__repo-item:disabled) {
+    cursor: pointer;
+}
+
 .workspace-feature-selector__add:disabled img {
     opacity: 0.45;
 }

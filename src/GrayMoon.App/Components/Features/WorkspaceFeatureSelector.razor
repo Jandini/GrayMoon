@@ -12,6 +12,7 @@
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
 @inject IConfiguration Configuration
+@inject IToastService ToastService
 
 <div class="btn-group position-relative workspace-feature-selector">
     <button type="button"
@@ -59,8 +60,8 @@
                  @onmouseenter="() => OnToolPointerEnter(tool.Id)"
                  @onmouseleave="CloseToolMenu">
                 <button type="button"
-                        class="workspace-feature-selector__add"
-                        disabled="@Disabled"
+                        class="workspace-feature-selector__add@(IsToolLaunchLocked(tool.Id) ? " is-starting" : "")"
+                        disabled="@(Disabled || IsToolLaunchLocked(tool.Id))"
                         aria-label="@tool.Title"
                         aria-haspopup="menu"
                         @onclick="() => LaunchAsync(tool)"
@@ -78,7 +79,7 @@
                 {
                     <span class="workspace-feature-selector__tool-hint" role="tooltip">@tool.Title</span>
                 }
-                @if (!Disabled && _openToolMenuId == tool.Id && _repositories.Count > 0)
+                @if (!Disabled && !IsToolLaunchLocked(tool.Id) && _openToolMenuId == tool.Id && _repositories.Count > 0)
                 {
                     <ul class="dropdown-menu show shadow workspace-feature-selector__dir-menu workspace-feature-selector__tool-menu"
                         role="menu">
@@ -259,6 +260,10 @@
     private bool _switchWorkspacesLoaded;
     private int? _lastKnownSelectedValue;
     private IReadOnlySet<string> _installedTools = new HashSet<string>();
+    private string? _startLockedToolId;
+    private string? _startToastMessage;
+    private bool _startLaunchInFlight;
+    private bool _disposed;
 
     /// <summary>
     /// Desktop only. A button is shown when the tool is listed in <c>.graymoon.json</c> and it is
@@ -348,6 +353,7 @@
                 <button type="button"
                         class="dropdown-item workspace-feature-selector__repo-item"
                         role="menuitem"
+                        disabled="@IsToolLaunchLocked(tool.Id)"
                         @onclick="() => LaunchAsync(tool, repoPath)"
                         @onclick:stopPropagation>
                     <i class="bi bi-folder-fill workspace-feature-selector__launch-icon workspace-feature-selector__launch-icon--folder" aria-hidden="true"></i>
@@ -364,6 +370,7 @@
             <button type="button"
                     class="dropdown-item workspace-feature-selector__launch-item"
                     role="menuitem"
+                    disabled="@IsToolLaunchLocked(tool.Id)"
                     @onclick="() => LaunchAsync(tool)">
                 @if (!string.IsNullOrEmpty(tool.IconImageSrc))
                 {
@@ -435,7 +442,11 @@
         await base.SetParametersAsync(ParameterView.Empty);
     }
 
-    protected override void OnInitialized() => ApplyDesktopOpenInState();
+    protected override void OnInitialized()
+    {
+        ApplyDesktopOpenInState();
+        ToastService.OnShow += OnToastChanged;
+    }
 
     private void ApplyDesktopOpenInState()
     {
@@ -567,6 +578,8 @@
 
     public async ValueTask DisposeAsync()
     {
+        _disposed = true;
+        ToastService.OnShow -= OnToastChanged;
         CloseToolMenu();
         if (_toolAvailabilitySubscribed && _toolAvailabilityRef is not null)
         {
@@ -769,7 +782,7 @@
 
     private void OnToolPointerEnter(string toolId)
     {
-        if (Disabled)
+        if (Disabled || IsToolLaunchLocked(toolId))
             return;
 
         _ = EnsureLaunchRepositoriesAsync();
@@ -970,32 +983,101 @@
         }
     }
 
+    private bool IsToolLaunchLocked(string toolId) =>
+        string.Equals(_startLockedToolId, toolId, StringComparison.Ordinal);
+
     private async Task LaunchAsync(OpenInTool tool, string? repositoryPath = null)
     {
         CloseToolMenu();
 
-        string? path = repositoryPath;
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            var contextId = await ResolveLaunchContextAsync();
-            if (contextId is null)
-                return;
+        if (IsToolLaunchLocked(tool.Id))
+            return;
 
-            var paths = await NativeLaunch.ResolveContextLaunchPathsAsync(contextId.Value);
-            if (paths is null || string.IsNullOrWhiteSpace(paths.ContextRoot))
-                return;
-            path = paths.ContextRoot;
-        }
+        // The button stays disabled for as long as this toast is on screen.
+        var startMessage = FeatureOpenInTools.StartToastMessage(tool);
+        _startLockedToolId = tool.Id;
+        _startToastMessage = startMessage;
+        _startLaunchInFlight = true;
+        ToastService.Show(startMessage);
 
+        var launched = false;
         try
         {
-            await JS.InvokeAsync<bool>("graymoonDesktop.post", tool.DesktopCommand, new { path });
+            string? path = repositoryPath;
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                var contextId = await ResolveLaunchContextAsync();
+                if (contextId is null)
+                    return;
+
+                var paths = await NativeLaunch.ResolveContextLaunchPathsAsync(contextId.Value);
+                if (paths is null || string.IsNullOrWhiteSpace(paths.ContextRoot))
+                    return;
+                path = paths.ContextRoot;
+            }
+
+            try
+            {
+                await JS.InvokeAsync<bool>("graymoonDesktop.post", tool.DesktopCommand, new { path });
+                launched = true;
+            }
+            catch
+            {
+                // Desktop bridge optional.
+            }
         }
-        catch
+        finally
         {
-            // Desktop bridge optional.
+            CloseDropdown();
+            _startLaunchInFlight = false;
+            ReleaseStartLock(hideToast: !launched);
         }
-        CloseDropdown();
+    }
+
+    /// <summary>
+    /// Keeps the clicked tool button disabled while its starting toast is on screen.
+    /// A launch that never posted hides that toast and unlocks the button.
+    /// </summary>
+    private void ReleaseStartLock(bool hideToast)
+    {
+        if (_startLaunchInFlight)
+            return;
+
+        var message = _startToastMessage;
+        var toastStillOurs = message is not null
+            && ToastService.IsVisible
+            && string.Equals(ToastService.Message, message, StringComparison.Ordinal);
+
+        if (!hideToast && toastStillOurs)
+            return;
+
+        _startLockedToolId = null;
+        _startToastMessage = null;
+        if (hideToast && toastStillOurs)
+            ToastService.Hide();
+    }
+
+    private void OnToastChanged()
+    {
+        if (_disposed || _startToastMessage is null)
+            return;
+
+        if (ToastService.IsVisible
+            && string.Equals(ToastService.Message, _startToastMessage, StringComparison.Ordinal))
+            return;
+
+        _startToastMessage = null;
+        if (_startLaunchInFlight)
+            return;
+
+        _startLockedToolId = null;
+        try
+        {
+            _ = InvokeAsync(StateHasChanged);
+        }
+        catch (ObjectDisposedException)
+        {
+        }
     }
 
     private async Task ReloadAsync()
