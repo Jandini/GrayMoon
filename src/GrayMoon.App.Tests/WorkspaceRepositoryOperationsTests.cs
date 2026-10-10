@@ -836,6 +836,20 @@ internal sealed class RecordingManifestService(IWorkspaceManifestService? inner 
 
     public Task<WorkspaceManifestDrift> DetectDriftAsync(int workspaceId, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
+
+    public bool CodeGraphEnabled { get; set; }
+
+    public Task<bool> IsCodeGraphEnabledAsync(int workspaceId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(CodeGraphEnabled);
+
+    public Task<GrayMoon.Application.OperationResult> WriteCodeGraphConfigAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId? contextId = null,
+        CancellationToken cancellationToken = default)
+    {
+        Calls.Add("codegraph");
+        return Task.FromResult(GrayMoon.Application.OperationResult.Ok());
+    }
 }
 
 internal sealed class RecordingGitChangesScanner(List<int> repositoryIds) : IGitChangesWorkspaceScanner

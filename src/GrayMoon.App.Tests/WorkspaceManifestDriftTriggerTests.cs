@@ -170,5 +170,11 @@ public sealed class WorkspaceManifestDriftTriggerTests
 
         public Task<OperationResult> WriteManagedGitIgnoreAsync(int workspaceId, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+
+        public Task<bool> IsCodeGraphEnabledAsync(int workspaceId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<OperationResult> WriteCodeGraphConfigAsync(int workspaceId, GrayMoon.Application.Features.WorkspaceFeatureContextId? contextId = null, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 }

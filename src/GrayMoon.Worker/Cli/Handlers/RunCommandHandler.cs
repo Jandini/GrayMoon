@@ -197,6 +197,9 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<ICommandHandler<AttachWorkspaceRepositoryRequest, AttachWorkspaceRepositoryResponse>, AttachWorkspaceRepositoryCommand>();
         builder.Services.AddSingleton<ICommandHandler<DiscardWorkspaceRootRequest, DiscardWorkspaceRootResponse>, DiscardWorkspaceRootCommand>();
         builder.Services.AddSingleton<ICommandHandler<WriteRepositoryFileRequest, WriteRepositoryFileResponse>, WriteRepositoryFileCommand>();
+        builder.Services.AddSingleton<CodeGraphCli>();
+        builder.Services.AddSingleton<ICommandHandler<InitCodeGraphRequest, InitCodeGraphResponse>, InitCodeGraphCommand>();
+        builder.Services.AddSingleton<ICommandHandler<UninitCodeGraphRequest, UninitCodeGraphResponse>, UninitCodeGraphCommand>();
         builder.Services.AddSingleton<CheckoutHookSyncCommand>();
         builder.Services.AddSingleton<CommitHookSyncCommand>();
         builder.Services.AddSingleton<MergeHookSyncCommand>();

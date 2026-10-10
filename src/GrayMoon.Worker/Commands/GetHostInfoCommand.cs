@@ -2,17 +2,19 @@ using GrayMoon.Abstractions.Worker;
 using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Jobs.Requests;
 using GrayMoon.Worker.Jobs.Response;
+using GrayMoon.Worker.Services;
 using GrayMoon.Common;
 
 namespace GrayMoon.Worker.Commands;
 
-public sealed class GetHostInfoCommand(ICommandLineService commandLine) : ICommandHandler<GetHostInfoRequest, GetHostInfoResponse>
+public sealed class GetHostInfoCommand(ICommandLineService commandLine, CodeGraphCli codeGraph) : ICommandHandler<GetHostInfoRequest, GetHostInfoResponse>
 {
     public async Task<GetHostInfoResponse> ExecuteAsync(GetHostInfoRequest request, CancellationToken cancellationToken = default)
     {
         var dotnetVersion = await GetVersionAsync("dotnet", "--version", null, cancellationToken);
         var gitVersion = await GetVersionAsync("git", "--version", null, cancellationToken);
         var gitVersionToolVersion = await GetVersionAsync("dotnet", "gitversion version", null, cancellationToken);
+        var codeGraphVersion = await codeGraph.GetVersionAsync(cancellationToken);
 
         var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         if (string.IsNullOrWhiteSpace(userProfile))
@@ -25,6 +27,7 @@ public sealed class GetHostInfoCommand(ICommandLineService commandLine) : IComma
             DotnetVersion = dotnetVersion,
             GitVersion = gitVersion,
             GitVersionToolVersion = gitVersionToolVersion,
+            CodeGraphVersion = codeGraphVersion,
             UserProfilePath = userProfile,
         };
     }
