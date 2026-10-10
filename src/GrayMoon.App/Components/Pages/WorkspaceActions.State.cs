@@ -154,6 +154,12 @@ public sealed partial class WorkspaceActions
             ? $"Refreshing {_refreshCompleted} of {_refreshTotal} repositories..."
             : "Refreshing repositories...";
 
+    /// <summary>Compact progress ("1 of 3") shown when the title row is too narrow for <see cref="RefreshStatusText"/>.</summary>
+    internal string RefreshStatusShortText =>
+        _refreshTotal > 0
+            ? $"{_refreshCompleted} of {_refreshTotal}"
+            : "";
+
     internal bool HasSearchFilter => !string.IsNullOrWhiteSpace(searchTerm);
 
     /// <summary>Workflow table rows visible with current status filters (before text search).</summary>

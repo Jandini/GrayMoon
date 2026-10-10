@@ -20,21 +20,21 @@
                         {
                             var wfSuffix = HasSearchFilter ? " found" : "";
                             var wfCount = HasSearchFilter ? FilteredWorkflowLineCount : VisibleWorkflowLineCount;
-                            <span>@($"{wfCount} {(wfCount == 1 ? "workflow" : "workflows")}{wfSuffix}")</span>
+                            <span class="workspace-actions__workflow-count">@($"{wfCount} {(wfCount == 1 ? "workflow" : "workflows")}{wfSuffix}")</span>
                         }
                         else if (!isLoading && workspace != null)
                         {
-                            <span>0 workflows</span>
+                            <span class="workspace-actions__workflow-count">0 workflows</span>
                         }
                         else if (isLoading)
                         {
-                            <span>&nbsp;</span>
+                            <span class="workspace-actions__workflow-count">&nbsp;</span>
                         }
                     </p>
                     @if (!isLoading && rows.Count > 0 && (ErrorCount > 0 || FailedCount > 0 || AbortedCount > 0 || RunningCount > 0 || SuccessCount > 0 || NoneCount > 0))
                     {
                         <span class="workspace-actions__filter-sep text-muted" aria-hidden="true">|</span>
-                        <span class="workspace-actions__filters d-inline-flex align-items-center flex-wrap" role="toolbar" aria-label="Filter workflows by status">
+                        <span class="workspace-actions__filters d-inline-flex align-items-center" role="toolbar" aria-label="Filter workflows by status">
                             @if (ErrorCount > 0)
                             {
                                 <button type="button"
@@ -119,9 +119,13 @@
                     <span class="workspace-repos-title-spacer"></span>
                     @if (isRefreshing)
                     {
-                        <div class="git-changes-header__scan-indicator">
-                            <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                            <span>@RefreshStatusText</span>
+                        <div class="git-changes-header__scan-indicator workspace-actions__refresh-status"
+                             role="status"
+                             title="@RefreshStatusText"
+                             aria-label="@RefreshStatusText">
+                            <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                            <span class="workspace-actions__refresh-status-long">@RefreshStatusText</span>
+                            <span class="workspace-actions__refresh-status-short" aria-hidden="true">@RefreshStatusShortText</span>
                             <button type="button"
                                     class="btn btn-link btn-sm git-changes-header__scan-abort"
                                     title="Abort refresh"
@@ -132,7 +136,7 @@
                         </div>
                     }
                 </div>
-                <div class="d-flex gap-2 align-items-center workspace-repos-header-actions flex-wrap">
+                <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
                     <WorkspaceContextBar WorkspaceId="WorkspaceId"
                                          WorkspaceName="@(workspace?.Name)"
                                          SelectedContextId="_selectedContextId"
@@ -147,8 +151,8 @@
                     </WorkspaceContextBar>
                     @if (HasFailedRows)
                     {
-                        <div class="btn-group position-relative">
-                            <button class="btn btn-danger"
+                        <div class="btn-group position-relative flex-shrink-0">
+                            <button class="btn btn-danger text-nowrap"
                                     @onclick="RerunAllFailedAsync"
                                     @onclick:stopPropagation
                                     disabled="@(isRerunningAll || isRefreshing || isLoading)">
@@ -201,7 +205,7 @@
                             }
                         </div>
                     }
-                    <button class="btn btn-outline-secondary"
+                    <button class="btn btn-outline-secondary text-nowrap flex-shrink-0"
                             @onclick="RefreshAllAsync"
                             disabled="@(isRefreshing || isLoading || workspace == null)">
                         Refresh

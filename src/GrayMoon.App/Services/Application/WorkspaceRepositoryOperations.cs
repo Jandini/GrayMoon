@@ -408,6 +408,8 @@ public sealed class WorkspaceRepositoryOperations(
             return false;
 
         var database = await manifestService.BuildFromDatabaseAsync(workspaceId, cancellationToken);
+        if (manifestService.TryParse(fileContent, out var fileManifest, out _) && fileManifest is not null)
+            database = WorkspaceRepositoryTagPins.CopyOnto(database, fileManifest);
         var canonical = manifestService.Serialize(database with
         {
             Workspace = database.Workspace with { Name = plan.Manifest.Workspace.Name },

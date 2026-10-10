@@ -72,13 +72,6 @@
     display: block !important;
 }
 
-/* Render "Configure application settings" as a tight subtitle directly under the page title
-   instead of a normally-spaced paragraph. */
-.settings-page__subtitle {
-    margin-top: 0.25rem;
-    font-size: 0.875rem;
-}
-
 .settings-page .settings-page__card {
     flex: none !important;
     min-height: 0 !important;

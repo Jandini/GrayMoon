@@ -2,10 +2,10 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using GrayMoon.Common.Git;
 using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Models;
 using GrayMoon.Worker.Services.GitChanges;
-using GrayMoon.Common.Git;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using static GrayMoon.Worker.Services.GitCliOutput;
@@ -761,6 +761,30 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         }
 
         logger.LogInformation("Git checkout tag completed for {RepoPath}. Tag={Tag}", repoPath, name);
+        return (true, null);
+    }
+
+    public async Task<(bool Success, string? ErrorMessage)> CheckoutCommitAsync(string repoPath, string commit, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || !WorkspaceDefinitionTagPin.IsFullCommitHash(commit))
+            return (false, "Invalid repository path or commit hash");
+
+        var sha = commit.Trim().ToLowerInvariant();
+        if (!await reader.RefExistsAsync(repoPath, $"{sha}^{{commit}}", ct))
+            return (false, $"Commit '{sha}' does not exist in the repository.");
+
+        var (exitCode, stdout, stderr) = await runner.RunAsync("git", $"-c advice.detachedHead=false checkout --detach {sha}", repoPath, ct);
+        if (exitCode != 0)
+        {
+            logger.LogError("Git checkout commit failed for {RepoPath}. Commit={Commit}, ExitCode={ExitCode}", repoPath, sha, exitCode);
+            return (false, CombineOutput(stdout, stderr));
+        }
+
+        var head = await reader.GetHeadCommitAsync(repoPath, ct);
+        if (!string.Equals(head, sha, StringComparison.OrdinalIgnoreCase))
+            return (false, $"Checkout of commit '{sha}' left HEAD at '{head ?? "(none)"}'.");
+
+        logger.LogInformation("Git checkout commit completed for {RepoPath}. Commit={Commit}", repoPath, sha);
         return (true, null);
     }
 

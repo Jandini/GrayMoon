@@ -12,6 +12,7 @@ using GrayMoon.App.Services.Worker;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using GrayMoon.Application.Features;
+using GrayMoon.Application.WorkspaceManifest;
 using GrayMoon.Application.Workspaces;
 using GrayMoon.App.Services.WorkspaceManifest;
 
@@ -43,6 +44,8 @@ public sealed partial class WorkspaceGitService
         var workspaceRoot = workerArgs.WorkspaceRoot;
         var workspaceFolderName = workerArgs.WorkspaceFolderName;
         var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
+        var applyRepositoryTagPin = !string.IsNullOrWhiteSpace(workspaceRepositoryName)
+            && (await _contextResolver.GetRequiredAsync(contextId, workspaceId, cancellationToken)).IsSpecialWorkspace;
 
         var repos = workspace.Repositories
             .Select(link => link.Repository)
@@ -91,7 +94,8 @@ public sealed partial class WorkspaceGitService
                     workspaceRoot,
                     workspaceRepositoryName,
                     divergenceBaseBranch,
-                    capabilities
+                    capabilities,
+                    applyRepositoryTagPin
                 };
                 var response = await _workerBridge.SendCommandAsync("SyncRepository", args, cancellationToken);
                 var info = ParseSyncRepositoryResponse(response);
@@ -143,6 +147,9 @@ public sealed partial class WorkspaceGitService
             contextId,
             cancellationToken);
 
+        if (applyRepositoryTagPin)
+            await RecordCheckedOutTagPinsAsync(workspace, results, cancellationToken);
+
         _logger.LogDebug("Sync completed for workspace {WorkspaceName}", workspace.Name);
         return results.ToDictionary(r => r.RepositoryId, r => r.info);
     }
@@ -170,6 +177,41 @@ public sealed partial class WorkspaceGitService
             _logger.LogWarning(ex, "Could not schedule Workspace definition drift detection. WorkspaceId={WorkspaceId}", workspaceId);
         }
     }
+    /// <summary>
+    /// Repositories already checked out on a tag get that tag and its full commit hash written into
+    /// <c>.graymoon.json</c>. The file is not committed.
+    /// </summary>
+    private async Task RecordCheckedOutTagPinsAsync(
+        Workspace workspace,
+        IEnumerable<(int RepositoryId, RepoGitVersionInfo Info)> results,
+        CancellationToken cancellationToken)
+    {
+        var pins = new List<WorkspaceRepositoryTagPinChange>();
+        foreach (var (repositoryId, info) in results)
+        {
+            if (string.IsNullOrWhiteSpace(info.Tag) || !string.IsNullOrWhiteSpace(info.ErrorMessage))
+                continue;
+
+            var link = workspace.Repositories.FirstOrDefault(l =>
+                l.RepositoryId == repositoryId && l.Role == WorkspaceRepositoryRole.Source);
+            if (link?.Repository is null)
+                continue;
+
+            if (!GrayMoon.Common.Git.WorkspaceDefinitionTagPin.IsFullCommitHash(info.Commit))
+                throw new InvalidOperationException(
+                    $"Repository '{link.Repository.RepositoryName}' is on tag '{info.Tag}', but the sync did not report its full commit hash.");
+
+            pins.Add(new WorkspaceRepositoryTagPinChange(link.Repository.CloneUrl, info.Tag, info.Commit));
+        }
+
+        if (pins.Count == 0)
+            return;
+
+        var recorded = await _manifestService.SetRepositoryTagPinsAsync(workspace.WorkspaceId, pins, cancellationToken);
+        if (!recorded.Success)
+            throw new InvalidOperationException(recorded.Error ?? "Could not record repository tags in the Workspace definition.");
+    }
+
     /// <summary>Refreshes version for a single repo and persists. Returns (success, errorMessage) for caller to report and optionally stop workflow.</summary>
     public async Task<(bool Success, string? ErrorMessage)> SyncSingleRepositoryAsync(int repositoryId, int workspaceId, WorkspaceFeatureContextId contextId, CancellationToken cancellationToken = default)
     {

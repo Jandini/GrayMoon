@@ -9,7 +9,9 @@ using GrayMoon.App.Repositories;
 using GrayMoon.App.Services.Features;
 using GrayMoon.App.Services.WorkspaceManifest;
 using GrayMoon.Application.Features;
+using GrayMoon.Application.WorkspaceManifest;
 using GrayMoon.Application.Workspaces;
+using GrayMoon.Common.Git;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
@@ -30,6 +32,7 @@ public sealed class WorkspaceBranchOperations(
     IWorkspaceContextPathResolver pathResolver,
     IFeatureBranchGuard featureBranchGuard,
     IWorkspaceCapabilitiesResolver capabilitiesResolver,
+    IWorkspaceManifestService manifestService,
     IServiceScopeFactory scopeFactory,
     ILogger<WorkspaceBranchOperations> logger) : IWorkspaceBranchOperations
 {
@@ -355,6 +358,11 @@ public sealed class WorkspaceBranchOperations(
 
                 await UpdateFeaturePinnedTagAsync(contextId, wr.WorkspaceRepositoryId, checkedOutTag, cancellationToken);
 
+                var pinError = await SetRepositoryTagPinAsync(
+                    workspaceId, contextId, wr, repo, workspaceRepositoryName, checkedOutTag, tagCheckout?.Commit, cancellationToken);
+                if (pinError is not null)
+                    return BranchHttpOutcome.Ok(new CheckoutBranchApiResult(false, pinError));
+
                 await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
 
                 await TriggerManifestDriftCheckAsync(wr, workspaceId, contextId, cancellationToken);
@@ -393,6 +401,14 @@ public sealed class WorkspaceBranchOperations(
                     BranchName = localBranchName,
                     IdentityProbed = true,
                 }, new RepositoryStateWriteOptions { ReconcilePullRequest = true });
+            }
+
+            if (!string.IsNullOrWhiteSpace(wr.CheckedOutTag))
+            {
+                var pinError = await ClearRepositoryTagPinAsync(
+                    workspaceId, contextId, wr, repo, workspaceRepositoryName, cancellationToken);
+                if (pinError is not null)
+                    return BranchHttpOutcome.Ok(new CheckoutBranchApiResult(false, pinError));
             }
 
             await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
@@ -671,6 +687,14 @@ public sealed class WorkspaceBranchOperations(
                 await dbContext.SaveChangesAsync(cancellationToken);
             }
 
+            if (!string.IsNullOrWhiteSpace(wr.CheckedOutTag))
+            {
+                var pinError = await ClearRepositoryTagPinAsync(
+                    workspaceId, contextId, wr, repo, workspaceRepositoryName, cancellationToken);
+                if (pinError is not null)
+                    return BranchHttpOutcome.Ok(new CreateBranchApiResult { Success = false, Error = pinError });
+            }
+
             await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
 
             return BranchHttpOutcome.Ok(new CreateBranchApiResult { Success = true });
@@ -913,6 +937,67 @@ public sealed class WorkspaceBranchOperations(
             .Where(w => w.WorkspaceRepositoryId == workspaceRepositoryId)
             .Select(w => w.BranchName)
             .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Records the tag and its full commit on the source repository entry. Skipped unless this is the special
+    /// Workspace context of a Workspace that has a Workspace repository. The file is not committed.
+    /// </summary>
+    private async Task<string?> SetRepositoryTagPinAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        WorkspaceRepositoryLink link,
+        Repository repository,
+        string? workspaceRepositoryName,
+        string tag,
+        string? commit,
+        CancellationToken cancellationToken)
+    {
+        if (!await ShouldRecordRepositoryTagPinAsync(workspaceId, contextId, link, workspaceRepositoryName, cancellationToken))
+            return null;
+
+        if (!WorkspaceDefinitionTagPin.IsFullCommitHash(commit))
+            return $"Repository '{repository.RepositoryName}' was checked out on tag '{tag}', but the full commit hash could not be read.";
+
+        var recorded = await manifestService.SetRepositoryTagPinsAsync(
+            workspaceId,
+            [new WorkspaceRepositoryTagPinChange(repository.CloneUrl, tag, commit)],
+            cancellationToken);
+        return recorded.Success ? null : recorded.Error ?? "Could not record the tag in the Workspace definition.";
+    }
+
+    /// <summary>
+    /// Clears the tag pin when the user leaves a tag through the app. Skipped for the same workspaces that do not record pins.
+    /// </summary>
+    private async Task<string?> ClearRepositoryTagPinAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        WorkspaceRepositoryLink link,
+        Repository repository,
+        string? workspaceRepositoryName,
+        CancellationToken cancellationToken)
+    {
+        if (!await ShouldRecordRepositoryTagPinAsync(workspaceId, contextId, link, workspaceRepositoryName, cancellationToken))
+            return null;
+
+        var recorded = await manifestService.SetRepositoryTagPinsAsync(
+            workspaceId,
+            [new WorkspaceRepositoryTagPinChange(repository.CloneUrl, null, null)],
+            cancellationToken);
+        return recorded.Success ? null : recorded.Error ?? "Could not clear the tag in the Workspace definition.";
+    }
+
+    private async Task<bool> ShouldRecordRepositoryTagPinAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        WorkspaceRepositoryLink link,
+        string? workspaceRepositoryName,
+        CancellationToken cancellationToken)
+    {
+        if (link.Role != WorkspaceRepositoryRole.Source || string.IsNullOrWhiteSpace(workspaceRepositoryName))
+            return false;
+
+        return (await contextResolver.GetRequiredAsync(contextId, workspaceId, cancellationToken)).IsSpecialWorkspace;
     }
 
     private async Task<(BranchHttpOutcome? Error, Workspace? Workspace, Repository? Repo, WorkspaceRepositoryLink? Link)> TryResolveLinkedRepoAsync(

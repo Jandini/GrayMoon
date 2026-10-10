@@ -20,6 +20,10 @@ public sealed class SyncRepositoryResponse
     [JsonPropertyName("tag")]
     public string? Tag { get; set; }
 
+    /// <summary>Full commit hash of HEAD when <see cref="Tag"/> is set.</summary>
+    [JsonPropertyName("commit")]
+    public string? Commit { get; set; }
+
     [JsonPropertyName("projects")]
     public IReadOnlyList<CsProjFileInfo>? Projects { get; set; }
 

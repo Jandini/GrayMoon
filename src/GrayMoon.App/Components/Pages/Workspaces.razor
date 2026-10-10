@@ -246,7 +246,7 @@
     <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
          @onkeydown="HandleDeleteModalKeyDown"
          @ref="_deleteModalElement">
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">Remove Workspace</h5>
@@ -255,14 +255,23 @@
                 <div class="modal-body">
                     <p class="mb-2">Remove workspace <strong>@workspaceToDelete?.Name</strong>?</p>
                     <p class="mb-0 text-muted">Only the GrayMoon workspace will be removed. Repositories on disk will stay untouched.</p>
-                    @if (deleteBlockedMessage != null)
+                    @if (deleteRequiresFeatureAcknowledgement)
                     {
-                        <div class="alert alert-warning mt-3 mb-0" role="alert">@deleteBlockedMessage</div>
+                        <div class="workspace-remove-features-frame mt-3 mb-0" role="status">
+                            <p class="mb-2">Removing this workspace loses track of its Features. Folders on disk are left in place.</p>
+                            <div class="form-check mb-0">
+                                <input class="form-check-input" type="checkbox" id="acknowledge-remove-workspace-features"
+                                       @bind="acknowledgeFeatureLoss" disabled="@isDeleting" />
+                                <label class="form-check-label text-break" for="acknowledge-remove-workspace-features">
+                                    @FeatureLossAcknowledgementLabel
+                                </label>
+                            </div>
+                        </div>
                     }
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" @onclick="CloseDeleteModal">Cancel</button>
-                    <button type="button" class="btn btn-danger" data-default-action @onclick="DeleteWorkspaceAsync" disabled="@(isDeleting || deleteBlockedMessage != null)">
+                    <button type="button" class="btn btn-danger" data-default-action @onclick="DeleteWorkspaceAsync" disabled="@DeleteConfirmDisabled">
                         @if (isDeleting)
                         {
                             <span class="spinner-border spinner-border-sm me-2"></span>
@@ -356,7 +365,20 @@
     private HashSet<int> editorSourceRepositoryIds = new();
     private RestoreWorkspaceModal? _restoreModal;
     private const string WorkspaceRepositoryFeaturesExistMessage = "Rename and root changes are not possible while Features exist. Remove Features first.";
-    private string? deleteBlockedMessage;
+    private bool deleteFeatureCheckPending;
+    private bool deleteRequiresFeatureAcknowledgement;
+    private bool acknowledgeFeatureLoss;
+    private string? featureStorageRootForDelete;
+
+    private bool DeleteConfirmDisabled =>
+        isDeleting
+        || deleteFeatureCheckPending
+        || (deleteRequiresFeatureAcknowledgement && !acknowledgeFeatureLoss);
+
+    private string FeatureLossAcknowledgementLabel =>
+        string.IsNullOrWhiteSpace(featureStorageRootForDelete)
+            ? "I am aware of the existing features for this workspace. I want to remove this workspace."
+            : $"I am aware of the existing features in {featureStorageRootForDelete}. I want to remove this workspace.";
     private HashSet<int> editingWorkspaceRepositoryIds = new();
     private WorkspaceModel? workspaceToDelete;
     private HashSet<int> selectedRepositoryIds = new();
@@ -747,22 +769,52 @@
     private async Task ShowDeleteModal(WorkspaceModel workspace)
     {
         workspaceToDelete = workspace;
-        deleteBlockedMessage = null;
+        deleteRequiresFeatureAcknowledgement = false;
+        acknowledgeFeatureLoss = false;
+        featureStorageRootForDelete = null;
+        deleteFeatureCheckPending = true;
         showDeleteModal = true;
 
-        // A Workspace that still has Features cannot be deleted; say so up front instead of after Remove.
-        var features = await FeatureOperations.ListFeaturesAsync(workspace.WorkspaceId);
-        if (features.Count > 0 && workspaceToDelete == workspace)
+        try
         {
-            deleteBlockedMessage = WorkspaceRepository.WorkspaceDeleteBlockedByFeaturesMessage;
+            var features = await FeatureOperations.ListFeaturesAsync(workspace.WorkspaceId);
+            if (!showDeleteModal || workspaceToDelete != workspace)
+                return;
+
+            if (features.Count > 0)
+            {
+                deleteRequiresFeatureAcknowledgement = true;
+                featureStorageRootForDelete = await ResolveFeatureStorageRootForDeleteAsync(workspace);
+            }
         }
+        finally
+        {
+            if (workspaceToDelete == workspace)
+                deleteFeatureCheckPending = false;
+        }
+    }
+
+    private async Task<string?> ResolveFeatureStorageRootForDeleteAsync(WorkspaceModel workspace)
+    {
+        var header = await WorkspaceRepository.GetHeaderAsync(workspace.WorkspaceId);
+        if (!string.IsNullOrWhiteSpace(header?.ManagedFeatureStorageRoot))
+            return header.ManagedFeatureStorageRoot;
+
+        var storageRoot = await WorkspaceService.ResolveFeatureStorageRootPathAsync();
+        if (string.IsNullOrWhiteSpace(storageRoot))
+            return null;
+
+        return WorkerPath.Combine(storageRoot, workspace.Name, "features");
     }
 
     private void CloseDeleteModal()
     {
         showDeleteModal = false;
         workspaceToDelete = null;
-        deleteBlockedMessage = null;
+        deleteRequiresFeatureAcknowledgement = false;
+        acknowledgeFeatureLoss = false;
+        featureStorageRootForDelete = null;
+        deleteFeatureCheckPending = false;
     }
 
     private async Task HandleDeleteModalKeyDown(KeyboardEventArgs e)
@@ -771,7 +823,7 @@
         {
             CloseDeleteModal();
         }
-        else if (ModalKeyboard.IsPlainEnter(e))
+        else if (ModalKeyboard.IsPlainEnter(e) && !DeleteConfirmDisabled)
         {
             await DeleteWorkspaceAsync();
         }
@@ -779,23 +831,34 @@
 
     private async Task DeleteWorkspaceAsync()
     {
-        if (workspaceToDelete == null || deleteBlockedMessage != null)
-        {
+        var workspace = workspaceToDelete;
+        if (workspace == null || isDeleting || deleteFeatureCheckPending)
             return;
+
+        if (!deleteRequiresFeatureAcknowledgement)
+        {
+            var features = await FeatureOperations.ListFeaturesAsync(workspace.WorkspaceId);
+            if (workspaceToDelete != workspace)
+                return;
+
+            if (features.Count > 0)
+            {
+                deleteRequiresFeatureAcknowledgement = true;
+                featureStorageRootForDelete = await ResolveFeatureStorageRootForDeleteAsync(workspace);
+                return;
+            }
         }
+
+        if (workspaceToDelete != workspace || (deleteRequiresFeatureAcknowledgement && !acknowledgeFeatureLoss))
+            return;
 
         try
         {
             isDeleting = true;
-            Logger.LogInformation("User deleted workspace {WorkspaceName}", workspaceToDelete.Name);
-            await WorkspaceRepository.DeleteAsync(workspaceToDelete.WorkspaceId);
+            Logger.LogInformation("User deleted workspace {WorkspaceName}", workspace.Name);
+            await WorkspaceRepository.DeleteAsync(workspace.WorkspaceId);
             CloseDeleteModal();
             await LoadWorkspacesAsync();
-        }
-        catch (InvalidOperationException ex) when (ex.Message == WorkspaceRepository.WorkspaceDeleteBlockedByFeaturesMessage)
-        {
-            // A Feature was created after the dialog opened; keep the dialog open and explain.
-            deleteBlockedMessage = ex.Message;
         }
         catch (Exception ex)
         {

@@ -85,6 +85,12 @@
     align-self: stretch;
 }
 
+/* Applied by workspace-feature-selector-fit.js when this button would paint over the
+   header actions beside the context bar. The whole button goes, not a clipped sliver. */
+.workspace-feature-selector__tool.is-collapsed {
+    display: none;
+}
+
 .workspace-feature-selector__tool:hover {
     z-index: 4;
 }

@@ -931,16 +931,24 @@
     line-height: 1.5;
     padding: 0.35rem 0.75rem;
     margin: 0;
-    white-space: pre-line;
-    overflow-wrap: break-word;
-    word-break: break-word;
     color: #d4d4d4;
     background: rgba(248, 113, 113, 0.22);
     box-shadow: inset 3px 0 0 #f87171;
 }
 
+::deep .repo-error-line {
+    white-space: pre-line;
+    overflow-wrap: break-word;
+    word-break: break-word;
+}
+
 .page-error-callout {
     margin-top: 0.5rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    overflow-wrap: normal;
+    word-break: normal;
 }
 
 /* "This Feature needs attention." banner - same look as .page-error-callout (dark tinted strip with an
@@ -953,12 +961,106 @@
     line-height: 1.5;
     padding: 0.35rem 0.75rem;
     margin: 0.5rem 0 0;
-    white-space: pre-line;
-    overflow-wrap: break-word;
-    word-break: break-word;
     color: #d4d4d4;
     background: rgba(245, 158, 11, 0.18);
     box-shadow: inset 3px 0 0 #f59e0b;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Actions sit on the right and fill the strip, so the callout itself has no padding. */
+.manifest-drift-callout {
+    display: flex;
+    align-items: stretch;
+    padding: 0;
+    text-overflow: clip;
+}
+
+.manifest-drift-callout > span {
+    flex: 1 1 auto;
+    align-self: center;
+    min-width: 0;
+    padding: 0.35rem 0.75rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+button.manifest-drift-action {
+    display: inline-flex;
+    align-items: center;
+    align-self: stretch;
+    margin: 0;
+    padding: 0 0.85rem;
+    border: 0;
+    box-shadow: none;
+    font: inherit;
+    line-height: inherit;
+    text-decoration: none;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+button.manifest-drift-write,
+button.manifest-drift-write:hover,
+button.manifest-drift-write:focus,
+button.manifest-drift-write:active,
+button.manifest-drift-write:disabled {
+    background-color: #ffc107;
+    color: #1a1400;
+    text-decoration: none;
+}
+
+button.manifest-drift-write:hover:not(:disabled),
+button.manifest-drift-write:focus-visible:not(:disabled) {
+    background-color: #ffd54a;
+    color: #1a1400;
+}
+
+button.manifest-drift-dismiss,
+button.manifest-drift-dismiss:hover,
+button.manifest-drift-dismiss:focus,
+button.manifest-drift-dismiss:active,
+button.manifest-drift-dismiss:disabled {
+    background-color: #141414;
+    color: #f2f2f2;
+    text-decoration: none;
+}
+
+button.manifest-drift-dismiss:hover:not(:disabled),
+button.manifest-drift-dismiss:focus-visible:not(:disabled) {
+    background-color: #222222;
+    color: #ffffff;
+}
+
+button.manifest-drift-action:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.52);
+}
+
+button.manifest-drift-action:disabled {
+    opacity: 0.55;
+    cursor: default;
+}
+
+/* The card's top radius moves onto whichever callout is first, including error callouts.
+   Later callouts in the stack stay square and sit flush under the first. */
+.grid-page-header > .page-callout {
+    border-top-left-radius: 0.25rem;
+    border-top-right-radius: 0.25rem;
+}
+
+.grid-page-header > .page-callout ~ .page-callout {
+    margin-top: 0;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+}
+
+.grid-page-header:has(> .page-callout) + .grid-page-body > .page-card {
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
 }
 
 /* Combined metrics column (divergence, PR, deps, commits, status) */

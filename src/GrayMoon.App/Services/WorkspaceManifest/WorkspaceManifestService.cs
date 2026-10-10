@@ -18,6 +18,7 @@ using WorkspaceManifestDrift = GrayMoon.Application.WorkspaceManifest.WorkspaceM
 using WorkspaceManifestProfile = GrayMoon.Application.WorkspaceManifest.WorkspaceManifestProfile;
 using WorkspaceManifestRepository = GrayMoon.Application.WorkspaceManifest.WorkspaceManifestRepository;
 using WorkspaceManifestWorkspace = GrayMoon.Application.WorkspaceManifest.WorkspaceManifestWorkspace;
+using WorkspaceRepositoryTagPinChange = GrayMoon.Application.WorkspaceManifest.WorkspaceRepositoryTagPinChange;
 
 /// <summary>
 /// Builds, writes and compares the Workspace definition (<c>.graymoon.json</c>) and the managed <c>.gitignore</c>
@@ -94,6 +95,16 @@ public sealed class WorkspaceManifestService(
                 return new OperationResult(true, NoWorkspaceRepositoryMessage);
 
             var manifest = await BuildFromDatabaseAsync(workspaceId, cancellationToken);
+            var read = await WorkspaceRepositoryFileAccess.ReadAsync(
+                workerBridge, args, WorkspaceRepositoryFileAccess.ManifestFilePath, cancellationToken);
+            if (read.Error is not null)
+                return OperationResult.Fail($"Could not read the Workspace definition: {read.Error}");
+            if (read.Found
+                && !string.IsNullOrWhiteSpace(read.Content)
+                && TryParse(read.Content, out var existing, out _)
+                && existing is not null)
+                manifest = WorkspaceRepositoryTagPins.CopyOnto(manifest, existing);
+
             var content = Serialize(manifest);
             return await WorkspaceRepositoryFileAccess.WriteAsync(
                 workerBridge, args, WorkspaceRepositoryFileAccess.ManifestFilePath, content, cancellationToken);
@@ -101,6 +112,46 @@ public sealed class WorkspaceManifestService(
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogWarning(ex, "Writing the Workspace definition failed. WorkspaceId={WorkspaceId}", workspaceId);
+            return OperationResult.Fail(ex.Message);
+        }
+    }
+
+    public async Task<OperationResult> SetRepositoryTagPinsAsync(
+        int workspaceId,
+        IReadOnlyList<WorkspaceRepositoryTagPinChange> changes,
+        CancellationToken cancellationToken = default)
+    {
+        if (changes.Count == 0)
+            return OperationResult.Ok();
+
+        try
+        {
+            var (_, args) = await GetSpecialContextArgsAsync(workspaceId, cancellationToken);
+            if (args.WorkspaceRepositoryName is null)
+                return new OperationResult(true, NoWorkspaceRepositoryMessage);
+
+            var read = await WorkspaceRepositoryFileAccess.ReadAsync(
+                workerBridge, args, WorkspaceRepositoryFileAccess.ManifestFilePath, cancellationToken);
+            if (read.Error is not null)
+                return OperationResult.Fail(read.Error);
+            if (!read.Found || string.IsNullOrWhiteSpace(read.Content))
+                return OperationResult.Fail("The Workspace definition was not found.");
+            if (!TryParse(read.Content, out var manifest, out var parseError) || manifest is null)
+                return OperationResult.Fail(parseError ?? "The Workspace definition could not be read.");
+            if (!WorkspaceRepositoryTagPins.TryApply(manifest, changes, out var updated, out var applyError))
+                return OperationResult.Fail(applyError ?? "The repository tag could not be recorded.");
+
+            var content = Serialize(updated);
+            if (string.Equals(content, read.Content.Replace("\r\n", "\n"), StringComparison.Ordinal))
+                return OperationResult.Ok();
+
+            // The file is updated in the working tree only. The user commits the Workspace repository.
+            return await WorkspaceRepositoryFileAccess.WriteAsync(
+                workerBridge, args, WorkspaceRepositoryFileAccess.ManifestFilePath, content, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Recording repository tag pins failed. WorkspaceId={WorkspaceId}", workspaceId);
             return OperationResult.Fail(ex.Message);
         }
     }

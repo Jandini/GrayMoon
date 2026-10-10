@@ -10,6 +10,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using WorkspaceManifestConnector = GrayMoon.Application.WorkspaceManifest.WorkspaceManifestConnector;
 using WorkspaceManifestRepository = GrayMoon.Application.WorkspaceManifest.WorkspaceManifestRepository;
+using WorkspaceRepositoryTagPinChange = GrayMoon.Application.WorkspaceManifest.WorkspaceRepositoryTagPinChange;
 
 namespace GrayMoon.App.Tests;
 
@@ -82,6 +83,123 @@ public sealed class WorkspaceManifestServiceTests
 
         var expected = service.Serialize(await service.BuildFromDatabaseAsync(workspace.WorkspaceId));
         Assert.Equal(expected, args.GetProperty("content").GetString());
+    }
+
+    [Fact]
+    public async Task Write_manifest_keeps_tag_pins_already_in_the_file()
+    {
+        const string sha = "0123456789abcdef0123456789abcdef01234567";
+        await using var fixture = await ManifestTestFixture.CreateAsync();
+        var workspace = await fixture.SeedWorkspaceWithRootRepositoryAsync();
+        var service = fixture.CreateService();
+        var databaseManifest = await service.BuildFromDatabaseAsync(workspace.WorkspaceId);
+        var pinned = databaseManifest with
+        {
+            Repositories = databaseManifest.Repositories
+                .Select(repository => repository.Name == "Api" ? repository with { Tag = "v1.0.0", Commit = sha } : repository)
+                .ToList()
+        };
+        fixture.Bridge.RespondWithFile(service.Serialize(pinned));
+
+        var result = await service.WriteAuthoritativeManifestAsync(workspace.WorkspaceId);
+
+        Assert.True(result.Success, result.Error);
+        var written = ManifestTestFixture.ToJson(
+            Assert.Single(fixture.Bridge.Sent, sent => sent.Command == "WriteRepositoryFile").Args);
+        var content = written.GetProperty("content").GetString();
+        Assert.Contains("\"tag\": \"v1.0.0\"", content);
+        Assert.Contains($"\"commit\": \"{sha}\"", content);
+    }
+
+    [Fact]
+    public async Task Set_tag_pin_writes_the_tag_and_full_commit_and_a_repeat_does_not_write_again()
+    {
+        const string sha = "0123456789abcdef0123456789abcdef01234567";
+        await using var fixture = await ManifestTestFixture.CreateAsync();
+        var workspace = await fixture.SeedWorkspaceWithRootRepositoryAsync();
+        var service = fixture.CreateService();
+        fixture.Bridge.RespondWithFile(service.Serialize(await service.BuildFromDatabaseAsync(workspace.WorkspaceId)));
+        var change = new WorkspaceRepositoryTagPinChange("https://github.com/acme/Api.git", "v1.0.0", sha);
+
+        var result = await service.SetRepositoryTagPinsAsync(workspace.WorkspaceId, [change]);
+
+        Assert.True(result.Success, result.Error);
+        var written = ManifestTestFixture.ToJson(
+            Assert.Single(fixture.Bridge.Sent, sent => sent.Command == "WriteRepositoryFile").Args);
+        var content = written.GetProperty("content").GetString()!;
+        Assert.Contains("\"tag\": \"v1.0.0\"", content);
+        Assert.Contains($"\"commit\": \"{sha}\"", content);
+        Assert.Equal("Api", service.TryParse(content, out var parsed, out var error) ? parsed!.Repositories.Single(r => r.Tag != null).Name : null);
+        Assert.True(string.IsNullOrEmpty(error));
+
+        fixture.Bridge.Sent.Clear();
+        fixture.Bridge.RespondWithFile(content);
+        var repeat = await service.SetRepositoryTagPinsAsync(workspace.WorkspaceId, [change]);
+
+        Assert.True(repeat.Success, repeat.Error);
+        Assert.DoesNotContain(fixture.Bridge.Sent, sent => sent.Command == "WriteRepositoryFile");
+    }
+
+    [Fact]
+    public async Task Set_tag_pin_clear_removes_the_tag_and_commit()
+    {
+        const string sha = "0123456789abcdef0123456789abcdef01234567";
+        await using var fixture = await ManifestTestFixture.CreateAsync();
+        var workspace = await fixture.SeedWorkspaceWithRootRepositoryAsync();
+        var service = fixture.CreateService();
+        var pinned = (await service.BuildFromDatabaseAsync(workspace.WorkspaceId)) with
+        {
+            Repositories = (await service.BuildFromDatabaseAsync(workspace.WorkspaceId)).Repositories
+                .Select(repository => repository.Name == "Api" ? repository with { Tag = "v1.0.0", Commit = sha } : repository)
+                .ToList()
+        };
+        fixture.Bridge.RespondWithFile(service.Serialize(pinned));
+
+        var result = await service.SetRepositoryTagPinsAsync(
+            workspace.WorkspaceId,
+            [new WorkspaceRepositoryTagPinChange("https://github.com/acme/Api.git", null, null)]);
+
+        Assert.True(result.Success, result.Error);
+        var content = ManifestTestFixture.ToJson(
+            Assert.Single(fixture.Bridge.Sent, sent => sent.Command == "WriteRepositoryFile").Args)
+            .GetProperty("content").GetString();
+        Assert.DoesNotContain("\"tag\"", content);
+        Assert.DoesNotContain("\"commit\"", content);
+    }
+
+    [Fact]
+    public async Task Set_tag_pin_fails_when_the_repository_is_not_in_the_file_and_does_not_write()
+    {
+        await using var fixture = await ManifestTestFixture.CreateAsync();
+        var workspace = await fixture.SeedWorkspaceWithRootRepositoryAsync();
+        var service = fixture.CreateService();
+        fixture.Bridge.RespondWithFile(service.Serialize(await service.BuildFromDatabaseAsync(workspace.WorkspaceId)));
+
+        var result = await service.SetRepositoryTagPinsAsync(
+            workspace.WorkspaceId,
+            [new WorkspaceRepositoryTagPinChange(
+                "https://github.com/acme/Missing.git",
+                "v1.0.0",
+                "0123456789abcdef0123456789abcdef01234567")]);
+
+        Assert.False(result.Success);
+        Assert.Contains("Missing.git", result.Error);
+        Assert.DoesNotContain(fixture.Bridge.Sent, sent => sent.Command == "WriteRepositoryFile");
+    }
+
+    [Fact]
+    public async Task Set_tag_pin_is_noop_without_workspace_repository()
+    {
+        await using var fixture = await ManifestTestFixture.CreateAsync();
+        var workspace = await fixture.AddWorkspaceAsync("ws");
+
+        var result = await fixture.CreateService().SetRepositoryTagPinsAsync(
+            workspace.WorkspaceId,
+            [new WorkspaceRepositoryTagPinChange("https://github.com/acme/Api.git", "v1.0.0", "0123456789abcdef0123456789abcdef01234567")]);
+
+        Assert.True(result.Success);
+        Assert.Equal("No Workspace repository", result.Error);
+        Assert.Empty(fixture.Bridge.Sent);
     }
 
     [Fact]

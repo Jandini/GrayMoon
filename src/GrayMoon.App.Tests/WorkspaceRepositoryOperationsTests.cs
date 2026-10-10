@@ -828,6 +828,12 @@ internal sealed class RecordingManifestService(IWorkspaceManifestService? inner 
         return Task.FromResult(GitIgnoreResult);
     }
 
+    public Task<GrayMoon.Application.OperationResult> SetRepositoryTagPinsAsync(
+        int workspaceId,
+        IReadOnlyList<GrayMoon.Application.WorkspaceManifest.WorkspaceRepositoryTagPinChange> changes,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+
     public Task<WorkspaceManifestDrift> DetectDriftAsync(int workspaceId, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
 }

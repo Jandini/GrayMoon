@@ -39,7 +39,7 @@ public sealed partial class WorkspaceGitService
         if (!response.Success || response.Data == null)
             return new RepoGitVersionInfo { Version = "-", Branch = "-", ErrorMessage = response.Error ?? "Sync failed" };
 
-        var (version, branch, tag, gitVersionError, gitFetchError, commandSucceeded) = GetVersionBranch(response.Data);
+        var (version, branch, tag, gitVersionError, gitFetchError, commandSucceeded, commit) = GetVersionBranch(response.Data);
         var projectsCount = GetProjects(response.Data);
         var projectsDetail = GetProjectsDetail(response.Data);
         var (outgoingCommits, incomingCommits, defaultBehind, defaultAhead) = GetCommitCounts(response.Data);
@@ -60,6 +60,7 @@ public sealed partial class WorkspaceGitService
             Version = version,
             Branch = branch,
             Tag = resolvedTag,
+            Commit = commit,
             Tags = tags,
             Projects = projectsCount,
             ProjectsDetail = projectsDetail,
@@ -105,7 +106,7 @@ public sealed partial class WorkspaceGitService
         if (!response.Success || response.Data == null)
             return new RepoGitVersionInfo { Version = "-", Branch = "-" };
 
-        var (version, branch, tag, gitVersionError, gitFetchError, _) = GetVersionBranch(response.Data);
+        var (version, branch, tag, gitVersionError, gitFetchError, _, commit) = GetVersionBranch(response.Data);
         var (outgoingCommits, incomingCommits, defaultBehind, defaultAhead) = GetCommitCounts(response.Data);
         var (hasUpstream, remoteBranches, localBranches) = GetRefreshBranchesAndUpstream(response.Data);
         var combinedError = CombineRepoErrors(gitFetchError, gitVersionError);
@@ -115,6 +116,7 @@ public sealed partial class WorkspaceGitService
             Version = version,
             Branch = branch,
             Tag = tag,
+            Commit = commit,
             OutgoingCommits = outgoingCommits,
             IncomingCommits = incomingCommits,
             DefaultBranchBehindCommits = defaultBehind,
@@ -162,12 +164,16 @@ public sealed partial class WorkspaceGitService
         return (r?.HasUpstream, remote?.Count > 0 ? remote : null, local?.Count > 0 ? local : null);
     }
 
-    private static (string version, string branch, string? tag, string? gitVersionError, string? gitFetchError, bool commandSucceeded) GetVersionBranch(object data)
+    private static (string version, string branch, string? tag, string? gitVersionError, string? gitFetchError, bool commandSucceeded, string? commit) GetVersionBranch(object data)
     {
         var r = WorkerResponseJson.DeserializeWorkerResponse<WorkerVersionBranchResponse>(data);
         // Commands that do not report their own result are treated as successful, which is what they were before.
         var commandSucceeded = r?.Success ?? true;
-        return (r?.Version ?? "-", r?.Branch ?? "-", string.IsNullOrWhiteSpace(r?.Tag) ? null : r!.Tag, r?.GitVersionError, r?.GitFetchError, commandSucceeded);
+        var tag = string.IsNullOrWhiteSpace(r?.Tag) ? null : r!.Tag;
+        var commit = GrayMoon.Common.Git.WorkspaceDefinitionTagPin.IsFullCommitHash(r?.Commit)
+            ? r!.Commit!.Trim().ToLowerInvariant()
+            : null;
+        return (r?.Version ?? "-", r?.Branch ?? "-", tag, r?.GitVersionError, r?.GitFetchError, commandSucceeded, commit);
     }
 
     private static string? CombineRepoErrors(string? fetchError, string? versionError)

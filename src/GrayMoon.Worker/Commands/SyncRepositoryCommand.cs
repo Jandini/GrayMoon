@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using GrayMoon.Common.Git;
 using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Jobs.Requests;
 using GrayMoon.Worker.Jobs.Response;
@@ -78,11 +79,15 @@ public sealed class SyncRepositoryCommand(
 
         Directory.CreateDirectory(workspacePath);
 
+        var clonedNow = false;
         if (!Directory.Exists(repoPath) && !string.IsNullOrWhiteSpace(cloneUrl))
         {
             var ok = await git.CloneAsync(workspacePath, cloneUrl, bearerToken, cancellationToken);
             if (ok)
+            {
                 await git.AddSafeDirectoryAsync(repoPath, cancellationToken);
+                clonedNow = Directory.Exists(repoPath);
+            }
         }
 
         var version = "-";
@@ -127,6 +132,21 @@ public sealed class SyncRepositoryCommand(
                     GitVersionError = versionError,
                     GitFetchError = fetchError
                 };
+            }
+
+            if (clonedNow && request.ApplyRepositoryTagPin)
+            {
+                var pinError = await CheckoutPinnedCommitAsync(workspacePath, repoPath, cloneUrl, cancellationToken);
+                if (pinError is not null)
+                {
+                    return new SyncRepositoryResponse
+                    {
+                        Success = false,
+                        ErrorMessage = pinError,
+                        Version = version,
+                        Branch = branch
+                    };
+                }
             }
 
             // Three things overlap from here. The version provider (GitVersion) holds the write lock for its
@@ -179,8 +199,23 @@ public sealed class SyncRepositoryCommand(
             branch = GitVersionBranch.Choose(versionResult.Result, gitBranch) ?? "-";
 
             // Detect tag/detached HEAD; if on a tag we don't have a real branch so wipe the version branch echo.
+            string? headCommit = null;
             if (refs.CurrentTag != null)
+            {
                 branch = "-";
+                headCommit = await reader.GetHeadCommitAsync(repoPath, cancellationToken);
+                if (!WorkspaceDefinitionTagPin.TryNormalize(refs.CurrentTag, headCommit, repositoryName, out _, out headCommit, out var pinError))
+                {
+                    return new SyncRepositoryResponse
+                    {
+                        Success = false,
+                        ErrorMessage = pinError,
+                        Version = version,
+                        Branch = branch,
+                        Tag = refs.CurrentTag
+                    };
+                }
+            }
 
             // The default branch is known by now; if it came out of a missing or dangling origin/HEAD, repoint
             // that before the counts below are taken against it.
@@ -254,6 +289,7 @@ public sealed class SyncRepositoryCommand(
                 Version = version,
                 Branch = branch,
                 Tag = refs.CurrentTag,
+                Commit = headCommit,
                 Tags = refs.Tags,
                 Projects = projects,
                 OutgoingCommits = outgoingCommits,
@@ -281,6 +317,59 @@ public sealed class SyncRepositoryCommand(
             GitVersionError = versionError,
             GitFetchError = fetchError
         };
+    }
+
+    /// <summary>
+    /// A repository just cloned into a Workspace that has a Workspace repository is checked out to the commit
+    /// recorded for it when that entry is on a tag. A missing definition file means there is no pin. An invalid
+    /// pin or a missing commit fails the sync and removes the clone so the next sync tries again.
+    /// </summary>
+    private async Task<string?> CheckoutPinnedCommitAsync(string workspacePath, string repoPath, string? cloneUrl, CancellationToken cancellationToken)
+    {
+        var manifestPath = Path.Combine(workspacePath, ".graymoon.json");
+        var definition = File.Exists(manifestPath)
+            ? await File.ReadAllTextAsync(manifestPath, cancellationToken)
+            : null;
+        var (commit, error) = WorkspaceDefinitionTagPin.ReadCommit(definition, cloneUrl);
+        if (error is not null)
+        {
+            RemoveFailedClone(workspacePath, repoPath);
+            return error;
+        }
+
+        if (commit is null)
+            return null;
+
+        var (success, checkoutError) = await git.CheckoutCommitAsync(repoPath, commit, cancellationToken);
+        if (success)
+            return null;
+
+        RemoveFailedClone(workspacePath, repoPath);
+        return checkoutError ?? $"Commit '{commit}' could not be checked out.";
+    }
+
+    private void RemoveFailedClone(string workspacePath, string repoPath)
+    {
+        var clone = Path.GetFullPath(repoPath);
+        var workspace = Path.GetFullPath(workspacePath);
+        if (string.Equals(clone, workspace, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        try
+        {
+            if (!Directory.Exists(clone))
+                return;
+
+            // Git writes object files read-only, which makes Directory.Delete fail on Windows and would leave
+            // the clone in place. The next sync would then see the folder and would not retry the pin.
+            foreach (var file in Directory.EnumerateFiles(clone, "*", SearchOption.AllDirectories))
+                File.SetAttributes(file, FileAttributes.Normal);
+            Directory.Delete(clone, recursive: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger?.LogWarning(ex, "Could not remove the clone after a tag commit checkout failed. Path={RepoPath}", clone);
+        }
     }
 
     /// <summary>
