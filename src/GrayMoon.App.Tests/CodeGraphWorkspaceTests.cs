@@ -31,6 +31,14 @@ public sealed class CodeGraphWorkspaceTests
     }
 
     [Fact]
+    public void Config_file_with_crlf_line_endings_is_rewritten_byte_identical()
+    {
+        const string existing = "{\r\n  \"include\": [\r\n    \"Api/\"\r\n  ]\r\n}\r\n";
+
+        Assert.Equal(existing, CodeGraphConfigFile.Apply(existing, ["Api"]));
+    }
+
+    [Fact]
     public void Config_file_that_is_not_json_is_never_overwritten()
     {
         Assert.Null(CodeGraphConfigFile.Apply("{ not json", ["Api"]));

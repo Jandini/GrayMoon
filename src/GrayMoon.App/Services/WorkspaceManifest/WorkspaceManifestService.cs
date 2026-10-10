@@ -173,7 +173,12 @@ public sealed class WorkspaceManifestService(
                 return OperationResult.Fail(read.Error);
 
             var manifest = await BuildFromDatabaseAsync(workspaceId, cancellationToken);
-            var content = ManagedGitIgnoreSection.Apply(read.Content, manifest.Repositories.Select(r => r.Name));
+            // CodeGraph's data folder is never committed: otherwise `codegraph uninit` (which deletes it) leaves
+            // tracked files deleted and git refuses to remove the Feature worktree.
+            var content = ManagedGitIgnoreSection.Apply(
+                read.Content,
+                manifest.Repositories.Select(r => r.Name),
+                await IsCodeGraphEnabledAsync(workspaceId, cancellationToken));
             return await WorkspaceRepositoryFileAccess.WriteAsync(
                 workerBridge, args, WorkspaceRepositoryFileAccess.GitIgnoreFilePath, content, cancellationToken);
         }

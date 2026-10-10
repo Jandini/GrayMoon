@@ -7,7 +7,7 @@ namespace GrayMoon.App.Services.WorkspaceManifest;
 /// Maintains <c>codegraph.json</c> in the Workspace repository. The source repositories are git-ignored there (see
 /// <see cref="ManagedGitIgnoreSection"/>) and CodeGraph skips git-ignored folders, so <c>include</c> lists each of them
 /// (<c>Name/</c>). GrayMoon owns <c>include</c>; every other property is kept as it is. Output is 2-space indented
-/// with LF line endings and a trailing newline.
+/// with a trailing newline; LF line endings, unless the existing file already uses CRLF, which is kept.
 /// </summary>
 public static class CodeGraphConfigFile
 {
@@ -47,8 +47,13 @@ public static class CodeGraphConfigFile
             .FirstOrDefault(k => string.Equals(k, IncludePropertyName, StringComparison.OrdinalIgnoreCase));
         root[existingKey ?? IncludePropertyName] = include;
 
-        var json = root.ToJsonString(WriteOptions).Replace("\r\n", "\n", StringComparison.Ordinal);
-        return json + "\n";
+        var json = root.ToJsonString(WriteOptions).Replace("\r\n", "\n", StringComparison.Ordinal) + "\n";
+
+        // An existing file that uses CRLF keeps it, so a rewrite with the same content is byte-identical and git
+        // sees no change. New files and LF files get LF.
+        return existingContent is not null && existingContent.Contains("\r\n", StringComparison.Ordinal)
+            ? json.Replace("\n", "\r\n", StringComparison.Ordinal)
+            : json;
     }
 
     private static JsonObject? TryParseObject(string content)

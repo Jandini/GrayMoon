@@ -11,11 +11,14 @@ public static class ManagedGitIgnoreSection
     public const string StartMarker = "# <graymoon-repositories>";
     public const string EndMarker = "# </graymoon-repositories>";
 
-    public static string Apply(string? existingContent, IEnumerable<string> sourceRepositoryNames)
+    /// <summary>The CodeGraph data folder, ignored as a whole when CodeGraph is on (index, database and its own .gitignore).</summary>
+    public const string CodeGraphEntry = "/.codegraph/";
+
+    public static string Apply(string? existingContent, IEnumerable<string> sourceRepositoryNames, bool ignoreCodeGraph = false)
     {
         ArgumentNullException.ThrowIfNull(sourceRepositoryNames);
 
-        var section = BuildSection(sourceRepositoryNames);
+        var section = BuildSection(sourceRepositoryNames, ignoreCodeGraph);
         var content = existingContent ?? string.Empty;
 
         var start = FindMarkerAtLineStart(content, StartMarker, 0);
@@ -41,7 +44,7 @@ public static class ManagedGitIgnoreSection
         return sb.ToString();
     }
 
-    private static string BuildSection(IEnumerable<string> names)
+    private static string BuildSection(IEnumerable<string> names, bool ignoreCodeGraph)
     {
         var sb = new StringBuilder();
         sb.Append(StartMarker).Append('\n');
@@ -53,6 +56,9 @@ public static class ManagedGitIgnoreSection
         {
             sb.Append('/').Append(name).Append("/\n");
         }
+
+        if (ignoreCodeGraph)
+            sb.Append(CodeGraphEntry).Append('\n');
 
         sb.Append(EndMarker);
         return sb.ToString();

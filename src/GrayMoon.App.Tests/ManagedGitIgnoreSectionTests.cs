@@ -16,6 +16,18 @@ public sealed class ManagedGitIgnoreSectionTests
     }
 
     [Fact]
+    public void Ignores_the_codegraph_folder_only_when_codegraph_is_on()
+    {
+        const string withCodeGraph =
+            "# <graymoon-repositories>\n/Avr.Api/\n/.codegraph/\n# </graymoon-repositories>\n";
+
+        Assert.Equal(withCodeGraph, ManagedGitIgnoreSection.Apply(null, ["Avr.Api"], ignoreCodeGraph: true));
+        Assert.DoesNotContain(".codegraph", ManagedGitIgnoreSection.Apply(null, ["Avr.Api"]));
+        Assert.Equal(withCodeGraph, ManagedGitIgnoreSection.Apply(
+            ManagedGitIgnoreSection.Apply(null, ["Avr.Api"]), ["Avr.Api"], ignoreCodeGraph: true));
+    }
+
+    [Fact]
     public void Appends_section_after_blank_line_to_non_empty_file()
     {
         Assert.Equal("bin/\n\n" + Section, ManagedGitIgnoreSection.Apply("bin/\n", ["Avr.Api", "Avr.Web"]));
