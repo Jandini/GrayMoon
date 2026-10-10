@@ -1,3 +1,5 @@
+using GrayMoon.App.Components.Features;
+
 namespace GrayMoon.App.Services.Ui;
 
 /// <summary>
@@ -8,11 +10,23 @@ namespace GrayMoon.App.Services.Ui;
 internal static class InstalledOpenInTools
 {
     private static readonly object Gate = new();
-    private static Snapshot? _cached;
+    private static IReadOnlySet<string>? _cached;
 
-    internal readonly record struct Snapshot(bool Cursor, bool VsCode, bool VisualStudio, bool ClaudeCli);
+    /// <summary>
+    /// One check per <see cref="FeatureOpenInTools.All"/> tool that needs an install, keyed by tool id.
+    /// A CLI counts as installed only when it is on PATH, because Desktop launches it by name.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, Func<bool>> Checks = new Dictionary<string, Func<bool>>(StringComparer.Ordinal)
+    {
+        [FeatureOpenInTools.Cursor] = () => IsOnPath("cursor.cmd", "cursor.exe") || ExistsUnderLocalAppData(@"Programs\cursor\Cursor.exe"),
+        [FeatureOpenInTools.ClaudeCli] = () => IsOnPath("claude.cmd", "claude.exe", "claude.ps1"),
+        [FeatureOpenInTools.CodexCli] = () => IsOnPath("codex.cmd", "codex.exe", "codex.ps1"),
+        [FeatureOpenInTools.VsCode] = () => IsOnPath("code.cmd", "code.exe") || ExistsUnderLocalAppData(@"Programs\Microsoft VS Code\Code.exe"),
+        [FeatureOpenInTools.VisualStudio] = FindVisualStudio,
+    };
 
-    public static Snapshot Detect()
+    /// <summary>Ids of the installed tools. Detected once per process.</summary>
+    public static IReadOnlySet<string> Detect()
     {
         lock (Gate)
         {
@@ -20,13 +34,19 @@ internal static class InstalledOpenInTools
         }
     }
 
-    private static Snapshot DetectCore() => new(
-        Cursor: IsOnPath("cursor.cmd") || IsOnPath("cursor.exe") || ExistsUnderLocalAppData(@"Programs\cursor\Cursor.exe"),
-        VsCode: IsOnPath("code.cmd") || IsOnPath("code.exe") || ExistsUnderLocalAppData(@"Programs\Microsoft VS Code\Code.exe"),
-        VisualStudio: FindVisualStudio(),
-        ClaudeCli: IsOnPath("claude.cmd") || IsOnPath("claude.exe") || IsOnPath("claude.ps1"));
+    private static HashSet<string> DetectCore()
+    {
+        var installed = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (toolId, check) in Checks)
+        {
+            if (check())
+                installed.Add(toolId);
+        }
 
-    private static bool IsOnPath(string fileName)
+        return installed;
+    }
+
+    private static bool IsOnPath(params string[] fileNames)
     {
         try
         {
@@ -35,9 +55,11 @@ internal static class InstalledOpenInTools
             {
                 if (string.IsNullOrWhiteSpace(dir))
                     continue;
-                var candidate = Path.Combine(dir.Trim().Trim('"'), fileName);
-                if (File.Exists(candidate))
-                    return true;
+                foreach (var fileName in fileNames)
+                {
+                    if (File.Exists(Path.Combine(dir.Trim().Trim('"'), fileName)))
+                        return true;
+                }
             }
         }
         catch

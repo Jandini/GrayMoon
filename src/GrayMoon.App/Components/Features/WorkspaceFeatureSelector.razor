@@ -52,37 +52,37 @@
     }
     @if (_desktopAvailable)
     {
-        @foreach (var toolId in VisibleOpenInTools)
+        @foreach (var openInTool in VisibleOpenInTools)
         {
-            var id = toolId;
+            var tool = openInTool;
             <div class="workspace-feature-selector__tool"
-                 @onmouseenter="() => OnToolPointerEnter(id)"
+                 @onmouseenter="() => OnToolPointerEnter(tool.Id)"
                  @onmouseleave="CloseToolMenu">
                 <button type="button"
                         class="workspace-feature-selector__add"
                         disabled="@Disabled"
-                        aria-label="@FeatureOpenInTools.Title(id)"
+                        aria-label="@tool.Title"
                         aria-haspopup="menu"
-                        @onclick="() => LaunchAsync(FeatureOpenInTools.LaunchMethod(id))"
+                        @onclick="() => LaunchAsync(tool)"
                         @onclick:stopPropagation>
-                    @if (FeatureOpenInTools.IconImageSrc(id) is string iconSrc)
+                    @if (tool.IconImageSrc is string iconSrc)
                     {
                         <img src="@iconSrc" alt="" class="workspace-feature-selector__tool-icon" aria-hidden="true" />
                     }
                     else
                     {
-                        <i class="bi @FeatureOpenInTools.IconClass(id) workspace-feature-selector__launch-icon workspace-feature-selector__launch-icon--glyph" aria-hidden="true"></i>
+                        <i class="bi @tool.IconClass workspace-feature-selector__launch-icon workspace-feature-selector__launch-icon--glyph" aria-hidden="true"></i>
                     }
                 </button>
-                @if (_toolHintId == id)
+                @if (_toolHintId == tool.Id)
                 {
-                    <span class="workspace-feature-selector__tool-hint" role="tooltip">@FeatureOpenInTools.Title(id)</span>
+                    <span class="workspace-feature-selector__tool-hint" role="tooltip">@tool.Title</span>
                 }
-                @if (!Disabled && _openToolMenuId == id && _repositories.Count > 0)
+                @if (!Disabled && _openToolMenuId == tool.Id && _repositories.Count > 0)
                 {
                     <ul class="dropdown-menu show shadow workspace-feature-selector__dir-menu workspace-feature-selector__tool-menu"
                         role="menu">
-                        @RepositoryMenuItems(FeatureOpenInTools.LaunchMethod(id))
+                        @RepositoryMenuItems(tool)
                     </ul>
                 }
             </div>
@@ -202,28 +202,21 @@
                         <i class="bi bi-chevron-right" aria-hidden="true"></i>
                     </button>
                     <ul class="dropdown-menu show shadow workspace-feature-selector__submenu workspace-feature-selector__open-in-menu" role="menu">
-                        @if (_toolAvailability?.Cursor == true)
-                        {
-                            @LaunchToolItem("openInCursor", "Cursor", imageSrc: "icons/cursor.svg")
+                        @{
+                            var installedTools = FeatureOpenInTools.All.Where(t => t.RequiresInstall && _installedTools.Contains(t.Id)).ToList();
                         }
-                        @if (_toolAvailability?.ClaudeCli == true)
+                        @foreach (var tool in installedTools)
                         {
-                            @LaunchToolItem("openInClaudeCli", "Claude CLI", imageSrc: "icons/claude.svg")
+                            @LaunchToolItem(tool)
                         }
-                        @if (_toolAvailability?.VsCode == true)
-                        {
-                            @LaunchToolItem("openInVsCode", "VS Code", imageSrc: "icons/visualstudiocode.svg")
-                        }
-                        @if (_toolAvailability?.VisualStudio == true)
-                        {
-                            @LaunchToolItem("openInVisualStudio", "Visual Studio", imageSrc: "icons/visualstudio.svg")
-                        }
-                        @if (HasAnyIdeAvailable)
+                        @if (installedTools.Count > 0)
                         {
                             <li><hr class="dropdown-divider branch-menu-divider" /></li>
                         }
-                        @LaunchToolItem("openInTerminal", "Terminal", iconClass: "bi-terminal")
-                        @LaunchToolItem("showInExplorer", "Explorer", iconClass: "bi-folder2-open")
+                        @foreach (var tool in FeatureOpenInTools.All.Where(t => !t.RequiresInstall))
+                        {
+                            @LaunchToolItem(tool)
+                        }
                     </ul>
                 </li>
             }
@@ -265,23 +258,15 @@
     private List<string> _recentOpenInTools = [];
     private bool _switchWorkspacesLoaded;
     private int? _lastKnownSelectedValue;
-    private ToolAvailabilityDto? _toolAvailability;
-
-    private bool HasAnyIdeAvailable =>
-        _toolAvailability is { } t && (t.Cursor || t.ClaudeCli || t.VsCode || t.VisualStudio);
+    private IReadOnlySet<string> _installedTools = new HashSet<string>();
 
     /// <summary>
     /// Desktop only. A button is shown when the tool is listed in <c>.graymoon.json</c> and it is
     /// installed, most recent first. In desktop mode that is known before the first paint, so the
     /// buttons show up with New Feature. Terminal and Explorer are always available on Desktop.
     /// </summary>
-    private IReadOnlyList<string> VisibleOpenInTools =>
-        FeatureOpenInTools.VisibleButtons(
-            _recentOpenInTools,
-            _toolAvailability?.Cursor == true,
-            _toolAvailability?.ClaudeCli == true,
-            _toolAvailability?.VsCode == true,
-            _toolAvailability?.VisualStudio == true);
+    private IReadOnlyList<OpenInTool> VisibleOpenInTools =>
+        FeatureOpenInTools.VisibleButtons(_recentOpenInTools, _installedTools);
 
     private RenderFragment SwitchWorkspaceRow(WorkspaceCatalogItem ws) => __builder =>
     {
@@ -354,7 +339,7 @@
         </li>
     };
 
-    private RenderFragment RepositoryMenuItems(string method) => __builder =>
+    private RenderFragment RepositoryMenuItems(OpenInTool tool) => __builder =>
     {
         foreach (var repo in _repositories)
         {
@@ -363,7 +348,7 @@
                 <button type="button"
                         class="dropdown-item workspace-feature-selector__repo-item"
                         role="menuitem"
-                        @onclick="() => LaunchAsync(method, repoPath)"
+                        @onclick="() => LaunchAsync(tool, repoPath)"
                         @onclick:stopPropagation>
                     <i class="bi bi-folder-fill workspace-feature-selector__launch-icon workspace-feature-selector__launch-icon--folder" aria-hidden="true"></i>
                     <span class="workspace-feature-selector__repo-name">@repo.RepositoryName</span>
@@ -372,37 +357,32 @@
         }
     };
 
-    private RenderFragment LaunchToolItem(string method, string label, string? imageSrc = null, string? iconClass = null) => __builder =>
+    private RenderFragment LaunchToolItem(OpenInTool tool) => __builder =>
     {
-        var toolId = FeatureOpenInTools.FromLaunchMethod(method);
-        var pinned = toolId is not null && IsPinned(toolId);
+        var pinned = IsPinned(tool.Id);
         <li class="workspace-feature-selector__launch-row">
             <button type="button"
                     class="dropdown-item workspace-feature-selector__launch-item"
                     role="menuitem"
-                    @onclick="() => LaunchAsync(method)">
-                @if (!string.IsNullOrEmpty(imageSrc))
+                    @onclick="() => LaunchAsync(tool)">
+                @if (!string.IsNullOrEmpty(tool.IconImageSrc))
                 {
-                    <img src="@imageSrc" alt="" class="workspace-feature-selector__launch-icon" aria-hidden="true" />
+                    <img src="@tool.IconImageSrc" alt="" class="workspace-feature-selector__launch-icon" aria-hidden="true" />
                 }
-                else if (!string.IsNullOrEmpty(iconClass))
+                else if (!string.IsNullOrEmpty(tool.IconClass))
                 {
-                    <i class="bi @iconClass workspace-feature-selector__launch-icon workspace-feature-selector__launch-icon--glyph" aria-hidden="true"></i>
+                    <i class="bi @tool.IconClass workspace-feature-selector__launch-icon workspace-feature-selector__launch-icon--glyph" aria-hidden="true"></i>
                 }
-                <span>@label</span>
+                <span>@tool.Label</span>
             </button>
-            @if (toolId is not null)
-            {
-                var pinId = toolId;
-                <button type="button"
-                        class="workspace-feature-selector__pin"
-                        aria-label="@(pinned ? $"Remove {label} from the bar" : $"Add {label} to the bar")"
-                        @onmousedown:preventDefault="true"
-                        @onclick="() => TogglePinnedToolAsync(pinId)"
-                        @onclick:stopPropagation>
-                    <i class="bi @(pinned ? "bi-dash-lg" : "bi-plus-lg")" aria-hidden="true"></i>
-                </button>
-            }
+            <button type="button"
+                    class="workspace-feature-selector__pin"
+                    aria-label="@(pinned ? $"Remove {tool.Label} from the bar" : $"Add {tool.Label} to the bar")"
+                    @onmousedown:preventDefault="true"
+                    @onclick="() => TogglePinnedToolAsync(tool.Id)"
+                    @onclick:stopPropagation>
+                <i class="bi @(pinned ? "bi-dash-lg" : "bi-plus-lg")" aria-hidden="true"></i>
+            </button>
             @if (_repositories.Count > 0)
             {
                 <div class="workspace-feature-selector__repo-flyout">
@@ -410,20 +390,12 @@
                         <i class="bi bi-chevron-right"></i>
                     </span>
                     <ul class="dropdown-menu show shadow workspace-feature-selector__dir-menu workspace-feature-selector__repo-submenu" role="menu">
-                        @RepositoryMenuItems(method)
+                        @RepositoryMenuItems(tool)
                     </ul>
                 </div>
             }
         </li>
     };
-
-    private sealed class ToolAvailabilityDto
-    {
-        public bool Cursor { get; set; }
-        public bool VsCode { get; set; }
-        public bool VisualStudio { get; set; }
-        public bool ClaudeCli { get; set; }
-    }
 
     private bool ShowLabelPlaceholder
     {
@@ -472,14 +444,7 @@
 
         // GrayMoon.Desktop launches this process with --desktop, on the same machine as the
         // WebView, so installed tools are known before the first paint.
-        var installed = InstalledOpenInTools.Detect();
-        _toolAvailability = new ToolAvailabilityDto
-        {
-            Cursor = installed.Cursor,
-            VsCode = installed.VsCode,
-            VisualStudio = installed.VisualStudio,
-            ClaudeCli = installed.ClaudeCli,
-        };
+        _installedTools = InstalledOpenInTools.Detect();
         _desktopAvailable = true;
     }
 
@@ -563,14 +528,10 @@
 
     private string OpenInRenderSignature()
     {
-        var tools = _toolAvailability;
         return string.Join('\u001f',
             _desktopAvailable ? "1" : "0",
-            tools?.Cursor == true ? "1" : "0",
-            tools?.ClaudeCli == true ? "1" : "0",
-            tools?.VsCode == true ? "1" : "0",
-            tools?.VisualStudio == true ? "1" : "0",
-            string.Join(',', VisibleOpenInTools));
+            string.Join(',', _installedTools.Order(StringComparer.Ordinal)),
+            string.Join(',', VisibleOpenInTools.Select(t => t.Id)));
     }
 
     private async Task SubscribeToolAvailabilityAsync()
@@ -628,9 +589,9 @@
             // GrayMoon.Desktop pushes tool detection results shortly after navigation (see
             // MainWindow.NotifyToolAvailability). Null means that message has not arrived yet;
             // keep the snapshot already used for the first paint.
-            var next = await JS.InvokeAsync<ToolAvailabilityDto?>("eval", "window.graymoonDesktop && window.graymoonDesktop.getToolAvailability && window.graymoonDesktop.getToolAvailability()");
+            var next = await JS.InvokeAsync<Dictionary<string, bool>?>("eval", "window.graymoonDesktop && window.graymoonDesktop.getToolAvailability && window.graymoonDesktop.getToolAvailability()");
             if (next is not null)
-                _toolAvailability = next;
+                _installedTools = next.Where(kv => kv.Value).Select(kv => kv.Key).ToHashSet(StringComparer.Ordinal);
         }
         catch
         {
@@ -1009,7 +970,7 @@
         }
     }
 
-    private async Task LaunchAsync(string method, string? repositoryPath = null)
+    private async Task LaunchAsync(OpenInTool tool, string? repositoryPath = null)
     {
         CloseToolMenu();
 
@@ -1028,7 +989,7 @@
 
         try
         {
-            await JS.InvokeAsync<bool>($"graymoonDesktop.{method}", path);
+            await JS.InvokeAsync<bool>("graymoonDesktop.post", tool.DesktopCommand, new { path });
         }
         catch
         {
