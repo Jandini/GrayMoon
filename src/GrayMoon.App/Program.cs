@@ -113,6 +113,7 @@ try
     builder.Services.AddScoped<NavbarCollapseService>();
     builder.Services.AddSingleton<DesktopTopBarState>();
     builder.Services.AddSingleton<WorkerConnectionTracker>();
+    builder.Services.AddSingleton<WorkerUpgradeStartupPrompt>();
     builder.Services.AddScoped<HostPrerequisiteInstallService>();
     builder.Services.AddScoped<HostPrerequisiteRequirementsProvider>();
     builder.Services.AddScoped<WorkerInstallService>();
