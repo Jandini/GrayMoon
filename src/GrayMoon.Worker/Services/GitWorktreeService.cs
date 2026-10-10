@@ -18,8 +18,14 @@ public sealed class GitWorktreeService(
     GitProcessRunner runner,
     IGitRepositoryReader reader,
     ILogger<GitWorktreeService> logger,
-    IRepositoryAccess access) : IGitWorktreeService
+    IRepositoryAccess access,
+    IRepositoryConfigurationInitializer? configuration = null) : IGitWorktreeService
 {
+    // Windows core.longpaths policy. Normally set when a repository is cloned, attached or first synced; this is the
+    // first-use fallback for repositories (and Features) from before that, and costs a lookup once it has succeeded.
+    private readonly IRepositoryConfigurationInitializer _configuration =
+        configuration ?? new RepositoryConfigurationInitializer(access);
+
     private static readonly char[] PathSeparators = [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar];
     private static readonly int[] ResidueDeleteRetryDelaysMs = [200, 400, 800, 1600, 3200];
 
@@ -132,7 +138,7 @@ public sealed class GitWorktreeService(
 
         // Feature worktrees live deeper than Workspace checkouts; allow paths over 260 characters on Windows.
         var longPathsStartedAt = Stopwatch.GetTimestamp();
-        await EnsureLongPathsAsync(mainRepositoryPath, ct);
+        _configuration.EnsureWindowsLongPaths(mainRepositoryPath, ct);
         var longPathsMs = (long)Stopwatch.GetElapsedTime(longPathsStartedAt).TotalMilliseconds;
 
         // Offline-safe: start from local commit SHA; never --force for normal creation.
@@ -177,45 +183,6 @@ public sealed class GitWorktreeService(
         return (true, created, false, null, null);
     }
 
-    /// <summary>
-    /// On Windows, makes sure <c>core.longpaths</c> is <c>true</c> for the repository (which every linked
-    /// worktree shares), so Feature worktrees with deep trees (for example <c>node_modules</c>) can be
-    /// checked out, used and removed past the 260-character limit. The value is written to the repository's
-    /// own config (not global, not per-worktree) and only when it is not already <c>true</c> there, so it is
-    /// written at most once. Does nothing on other operating systems. Never throws: a failure is logged and
-    /// the caller carries on.
-    /// </summary>
-    internal async Task EnsureLongPathsAsync(string repositoryPath, CancellationToken ct)
-    {
-        if (!OperatingSystem.IsWindows())
-            return;
-
-        try
-        {
-            var (getExit, getOut, _) = await runner.RunAsync(
-                "git", ["config", "--local", "--get", "core.longpaths"], repositoryPath, null, ct, GitLockIntent.Read);
-            if (getExit == 0 && string.Equals(getOut?.Trim(), "true", StringComparison.OrdinalIgnoreCase))
-                return;
-
-            var (setExit, setOut, setErr) = await runner.RunAsync(
-                "git", ["config", "--local", "core.longpaths", "true"], repositoryPath, null, ct);
-            if (setExit != 0)
-            {
-                logger.LogWarning(
-                    "Could not set core.longpaths for {RepoPath}; very long paths in Feature worktrees may fail. {Error}",
-                    repositoryPath, CombineOutput(setOut, setErr));
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Could not set core.longpaths for {RepoPath}", repositoryPath);
-        }
-    }
-
     public async Task<(bool Success, bool AlreadyRemoved, string? ErrorCode, string? ErrorMessage, WorktreeResidueResult Residue)> RemoveWorktreeAsync(
         string mainRepositoryPath,
         string worktreePath,
@@ -239,6 +206,10 @@ public sealed class GitWorktreeService(
         {
             return (false, false, "InvalidWorktreePath", ex.Message, WorktreeResidueResult.None);
         }
+
+        // Also covers Features created before long-path support was added. Done before the exclusive claim below (the
+        // config write takes its own short lease on the main repository and must not run while a claim covers it).
+        _configuration.EnsureWindowsLongPaths(mainRepositoryPath, ct);
 
         // Removal always wins over the Worker's own handles: watchers on this folder are released, git processes and other
         // holders inside it are cancelled (and killed if they ignore that), and nothing new may start there until this
@@ -291,9 +262,6 @@ public sealed class GitWorktreeService(
                     canonicalWorktreePath, CombineOutput(unlockStdout, unlockStderr));
             }
         }
-
-        // Also covers Features created before long-path support was added.
-        await EnsureLongPathsAsync(mainRepositoryPath, ct);
 
         var args = force
             ? new[] { "worktree", "remove", "--force", canonicalWorktreePath }

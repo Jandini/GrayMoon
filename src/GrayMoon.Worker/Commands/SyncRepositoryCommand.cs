@@ -28,7 +28,8 @@ public sealed class SyncRepositoryCommand(
     ICsProjFileService csProjFileService,
     IRepositoryVersionProviderFactory versionProviderFactory,
     ILogger<SyncRepositoryCommand>? logger = null,
-    IGitChangesRefreshSuppressor? refreshSuppressor = null) : ICommandHandler<SyncRepositoryRequest, SyncRepositoryResponse>
+    IGitChangesRefreshSuppressor? refreshSuppressor = null,
+    IRepositoryConfigurationInitializer? configuration = null) : ICommandHandler<SyncRepositoryRequest, SyncRepositoryResponse>
 {
     /// <summary>Where the read lane's answers came from.</summary>
     private enum RefsSource
@@ -108,6 +109,10 @@ public sealed class SyncRepositoryCommand(
 
             var totalStart = Stopwatch.GetTimestamp();
             await git.AddSafeDirectoryAsync(repoPath, cancellationToken);
+
+            // Onboarding seam for clone, restore and every existing (including pre-existing) repository: the Windows
+            // long-path policy is applied once per process and path, before any pinned checkout or Feature work.
+            configuration?.EnsureWindowsLongPaths(repoPath, cancellationToken);
 
             // The fetch has to complete before the version provider and before any ref read: GitVersion is
             // invoked with /nofetch, and the ref reads below must see the fetched refs. A failed fetch starts

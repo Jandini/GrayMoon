@@ -26,6 +26,46 @@ public sealed class AttachWorkspaceRepositoryCommandTests : IDisposable
         var reader = new GitCliRepositoryReader(runner, NullLogger<GitCliRepositoryReader>.Instance);
         var git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, reader, new LibGit2SharpGitIgnoreService());
         _command = new AttachWorkspaceRepositoryCommand(git, reader);
+        NewConfiguredCommand = () => new AttachWorkspaceRepositoryCommand(git, reader,
+            new RepositoryConfigurationInitializer(null, NullLogger<RepositoryConfigurationInitializer>.Instance, isWindows: true));
+        _configuredCommand = NewConfiguredCommand();
+    }
+
+    private readonly AttachWorkspaceRepositoryCommand _configuredCommand;
+
+    // A new command has a new initializer: what a Worker start looks like.
+    private readonly Func<AttachWorkspaceRepositoryCommand> NewConfiguredCommand;
+
+    [Fact]
+    public async Task Cloned_initialized_and_existing_roots_get_the_local_long_paths_policy()
+    {
+        var remote = CreateRemote(withCommit: true);
+
+        // Empty root: cloned in place.
+        var cloned = await _configuredCommand.ExecuteAsync(NewRequest(remote));
+        Assert.True(cloned.Success, cloned.ErrorMessage);
+        Assert.Equal("true", RunGit(RootPath, "config", "--local", "--get", "core.longpaths").Stdout.Trim());
+
+        // Existing repository from before the policy: reconciled on the first attach after a Worker start.
+        Assert.Equal(0, RunGit(RootPath, "config", "--local", "--unset-all", "core.longpaths").ExitCode);
+        var again = await NewConfiguredCommand().ExecuteAsync(NewRequest(remote));
+        Assert.True(again.Success, again.ErrorMessage);
+        Assert.Equal("true", RunGit(RootPath, "config", "--local", "--get", "core.longpaths").Stdout.Trim());
+    }
+
+    [Fact]
+    public async Task A_non_empty_root_is_configured_before_its_default_branch_checkout()
+    {
+        var remote = CreateRemote(withCommit: true);
+        Directory.CreateDirectory(RootPath);
+        File.WriteAllText(Path.Combine(RootPath, "notes.txt"), "keep me\n");
+
+        var response = await _configuredCommand.ExecuteAsync(NewRequest(remote));
+
+        Assert.True(response.Success, response.ErrorMessage);
+        Assert.Equal("true", RunGit(RootPath, "config", "--local", "--get", "core.longpaths").Stdout.Trim());
+        Assert.Single(RunGit(RootPath, "config", "--local", "--get-all", "core.longpaths").Stdout
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries));
     }
 
     public void Dispose()

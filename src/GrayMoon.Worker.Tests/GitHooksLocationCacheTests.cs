@@ -68,7 +68,7 @@ public sealed class GitHooksLocationCacheTests : IDisposable
         var outside = Directory.CreateDirectory(Path.Combine(_root, "outside-hooks")).FullName;
         await GitAsync(repo, $"config core.hooksPath \"{outside.Replace('\\', '/')}\"");
 
-        Assert.Equal(2, await InstallCountingAsync(repo)); // rev-parse + config --get
+        Assert.Equal(1, await InstallCountingAsync(repo)); // rev-parse; the config value is read in-process
         Assert.Equal(0, await InstallCountingAsync(repo));
         Assert.Empty(Directory.GetFiles(outside));
 
@@ -84,12 +84,12 @@ public sealed class GitHooksLocationCacheTests : IDisposable
         var repo = await InitAsync("repo");
         await GitAsync(repo, "config core.hooksPath .githooks");
 
-        Assert.Equal(2, await InstallCountingAsync(repo));
+        Assert.Equal(1, await InstallCountingAsync(repo)); // rev-parse only; core.hooksPath is read in-process
         Assert.Equal(0, await InstallCountingAsync(repo));
         Assert.False(Directory.Exists(Path.Combine(repo, ".githooks")));
 
         await GitAsync(repo, "config core.hooksPath .other");
-        Assert.Equal(2, await InstallCountingAsync(repo));
+        Assert.Equal(1, await InstallCountingAsync(repo)); // rev-parse only; core.hooksPath is read in-process
         Assert.Equal(0, await InstallCountingAsync(repo));
     }
 
@@ -141,7 +141,7 @@ public sealed class GitHooksLocationCacheTests : IDisposable
         // The included file is where the hooks path can then come from, and it is honoured on the next call.
         var outside = Directory.CreateDirectory(Path.Combine(_root, "included-hooks")).FullName;
         await File.WriteAllTextAsync(extra, $"[core]\n\thooksPath = {outside.Replace('\\', '/')}\n");
-        Assert.Equal(2, await InstallCountingAsync(repo));
+        Assert.Equal(1, await InstallCountingAsync(repo)); // rev-parse only; core.hooksPath is read in-process
         Assert.Empty(Directory.GetFiles(outside));
     }
 

@@ -114,6 +114,7 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<CommandLineService>();
         builder.Services.AddSingleton<ICommandLineService>(sp => new RepositoryAccessCommandLineService(
             sp.GetRequiredService<CommandLineService>(), sp.GetRequiredService<IRepositoryAccess>()));
+        builder.Services.AddSingleton<IRepositoryConfigurationInitializer, RepositoryConfigurationInitializer>();
         builder.Services.AddSingleton<GitProcessRunner>();
         builder.Services.AddSingleton<IGitRepositoryReader, GitCliRepositoryReader>();
         builder.Services.AddSingleton<ILocalGitSnapshotReader, LibGit2SharpLocalGitSnapshotReader>();

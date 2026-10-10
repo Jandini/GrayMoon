@@ -12,7 +12,10 @@ namespace GrayMoon.Worker.Commands;
 /// checked out on the remote default branch (or left on an unborn <c>main</c> when the remote is empty). A root that
 /// already has a matching origin is left alone. Never writes <c>.graymoon.json</c> or <c>.gitignore</c> and never commits.
 /// </summary>
-public sealed class AttachWorkspaceRepositoryCommand(IGitService git, IGitRepositoryReader reader)
+public sealed class AttachWorkspaceRepositoryCommand(
+    IGitService git,
+    IGitRepositoryReader reader,
+    IRepositoryConfigurationInitializer? configuration = null)
     : ICommandHandler<AttachWorkspaceRepositoryRequest, AttachWorkspaceRepositoryResponse>
 {
     private const string FallbackUnbornBranch = "main";
@@ -79,6 +82,9 @@ public sealed class AttachWorkspaceRepositoryCommand(IGitService git, IGitReposi
         if (!initOk)
             return Fail(initError ?? "Git init failed.");
 
+        // The default-branch checkout below can need paths over 260 characters on Windows.
+        configuration?.EnsureWindowsLongPaths(path, cancellationToken);
+
         var (remoteOk, remoteError) = await git.AddRemoteAsync(path, "origin", cloneUrl, cancellationToken);
         if (!remoteOk)
             return Fail(remoteError ?? "Git remote add failed.");
@@ -125,6 +131,7 @@ public sealed class AttachWorkspaceRepositoryCommand(IGitService git, IGitReposi
     private async Task FinishAsync(AttachWorkspaceRepositoryRequest request, string path, CancellationToken cancellationToken)
     {
         await git.AddSafeDirectoryAsync(path, cancellationToken);
+        configuration?.EnsureWindowsLongPaths(path, cancellationToken);
         await git.WriteSyncHooksAsync(path, request.WorkspaceId, request.RepositoryId, cancellationToken);
     }
 
