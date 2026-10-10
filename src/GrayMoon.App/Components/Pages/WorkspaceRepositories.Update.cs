@@ -500,17 +500,7 @@ public sealed partial class WorkspaceRepositories
 
             ran = true;
 
-            await ReloadWorkspaceDataFromFreshScopeAsync();
-            _ = InvokeAsync(() => { if (!_disposed) { ApplySyncStateFromLoadedItems(); StateHasChanged(); } });
-
-            if (result.Update.Success)
-            {
-                // Errors the push lane reported while the update was still running must survive this clean-up.
-                var pushFailedRepoIds = result.Push?.RepoErrors?.Keys.ToHashSet() ?? new HashSet<int>();
-                SafeInvoke(() => ClearRepositoryErrorsFor(result.Update.SyncedRepoIds.Where(id => !pushFailedRepoIds.Contains(id)).ToHashSet()));
-                if (result.Push?.Success != false && result.PushedRepoCount == 0)
-                    SafeInvoke(() => ToastService.Show(nothingToPushMessage));
-            }
+            await ApplyPipelinedUpdateAndPushResultAsync(result, nothingToPushMessage);
 
             Logger.LogInformation("[PushUpdated {RunId}] Pipelined Update & Push completed for workspace {WorkspaceId}. Success={Success}", runId, WorkspaceId, result.Success);
             return true;
@@ -530,15 +520,34 @@ public sealed partial class WorkspaceRepositories
         finally
         {
             if (ran)
-            {
-                _pendingRefreshAfterJob = false;
-                await InvokeAsync(async () =>
-                {
-                    if (_disposed) return;
-                    await RefreshFromSync();
-                });
-            }
+                await RefreshAfterPipelinedRunAsync();
         }
+    }
+
+    /// <summary>Reloads the grid after a pipelined Update and Push and clears the errors of repositories it updated cleanly.</summary>
+    private async Task ApplyPipelinedUpdateAndPushResultAsync(UpdateAndPushResult result, string nothingToPushMessage)
+    {
+        await ReloadWorkspaceDataFromFreshScopeAsync();
+        _ = InvokeAsync(() => { if (!_disposed) { ApplySyncStateFromLoadedItems(); StateHasChanged(); } });
+
+        if (result.Update.Success)
+        {
+            // Errors the push lane reported while the update was still running must survive this clean-up.
+            var pushFailedRepoIds = result.Push?.RepoErrors?.Keys.ToHashSet() ?? new HashSet<int>();
+            SafeInvoke(() => ClearRepositoryErrorsFor(result.Update.SyncedRepoIds.Where(id => !pushFailedRepoIds.Contains(id)).ToHashSet()));
+            if (result.Push?.Success != false && result.PushedRepoCount == 0)
+                SafeInvoke(() => ToastService.Show(nothingToPushMessage));
+        }
+    }
+
+    private async Task RefreshAfterPipelinedRunAsync()
+    {
+        _pendingRefreshAfterJob = false;
+        await InvokeAsync(async () =>
+        {
+            if (_disposed) return;
+            await RefreshFromSync();
+        });
     }
 
     private sealed record UpdateModalState

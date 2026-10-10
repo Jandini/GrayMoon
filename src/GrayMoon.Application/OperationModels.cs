@@ -109,6 +109,30 @@ public sealed record UpdateAndPushResult(bool Pipelined, DependencyUpdateRunResu
     public bool Success => Update.Success && (Push?.Success ?? true);
 }
 
+/// <summary>
+/// Outcome of Prepare Workspace. When <see cref="BranchesCreated"/> is false the branch stage did not succeed in every
+/// targeted repository (<see cref="BranchErrors"/> names them) and nothing after it ran: no dependency update, commit,
+/// push plan or push. Branches already created stay on disk. Otherwise <see cref="Update"/> is the sequential dependency
+/// update and <see cref="Pipeline"/> the two-lane Update and Push, whichever ran. <see cref="PushPending"/> asks the
+/// caller to run the established push (Push Only, or Update and Push when the two-lane pipeline was not possible).
+/// </summary>
+public sealed record PrepareWorkspaceResult(
+    bool BranchesCreated,
+    IReadOnlyDictionary<int, string> BranchErrors,
+    DependencyUpdateRunResult? Update = null,
+    UpdateAndPushResult? Pipeline = null,
+    bool PushPending = false)
+{
+    public const string BranchesStoppedMessage =
+        "Prepare Workspace stopped: branches could not be created in all selected repositories. No dependency updates or pushes were started.";
+
+    public static PrepareWorkspaceResult BranchesFailed(IReadOnlyDictionary<int, string> branchErrors) => new(false, branchErrors);
+
+    public bool Success => BranchesCreated && (Update?.Success ?? true) && (Pipeline?.Success ?? true);
+
+    public IReadOnlySet<int> SyncedRepoIds => Pipeline?.Update.SyncedRepoIds ?? Update?.SyncedRepoIds ?? new HashSet<int>();
+}
+
 public static class OperationProgressExtensions
 {
     public static void Report(

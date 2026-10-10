@@ -4,13 +4,14 @@ namespace GrayMoon.App.Services.Application;
 
 public sealed class WorkspacePreparationOperations(PrepareWorkspaceOrchestrator orchestrator) : IWorkspacePreparationOperations
 {
-    public Task<DependencyUpdateRunResult> PrepareAsync(
+    public Task<PrepareWorkspaceResult> PrepareAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         string newBranchName,
         string baseBranch,
         IReadOnlySet<int>? repositoryIds,
         bool updateDependencies,
+        bool pushChanges,
         string? commitMessage,
         IProgress<OperationProgress>? progress,
         Action<int, string> setRepositoryError,
@@ -23,6 +24,7 @@ public sealed class WorkspacePreparationOperations(PrepareWorkspaceOrchestrator 
             baseBranch,
             repositoryIds,
             updateDependencies,
+            pushChanges,
             commitMessage,
             progress,
             setRepositoryError,

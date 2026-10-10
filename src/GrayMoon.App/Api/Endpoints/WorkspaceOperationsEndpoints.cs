@@ -149,22 +149,40 @@ public static class WorkspaceOperationsEndpoints
         return WorkspaceCommandHttp.RunExclusiveAsync(runner, workspaceId, "Creating branches...", async (progress, ct) =>
         {
             var contextId = await SpecialContextAsync(workspaceId, contextResolver, ct);
-            var created = await operations.PrepareAsync(
+            var prepared = await operations.PrepareAsync(
                 workspaceId,
                 contextId,
                 body.NewBranchName.Trim(),
                 body.BaseBranch ?? "__default__",
                 body.RepositoryIds?.ToHashSet(),
                 body.UpdateDependencies,
+                body.PushChanges,
                 body.CommitMessage,
                 progress,
                 (_, _) => { },
                 (_, _) => { },
                 ct);
 
-            if (!created.ShouldChainPush(body.PushChanges))
+            if (!prepared.BranchesCreated)
             {
-                return created.Success
+                return Results.BadRequest(new
+                {
+                    success = false,
+                    error = PrepareWorkspaceResult.BranchesStoppedMessage,
+                    branchErrors = prepared.BranchErrors,
+                });
+            }
+
+            if (prepared.Pipeline is { } pipeline)
+            {
+                return pipeline.Success
+                    ? Results.Ok(new { success = true, pushed = pipeline.PushedRepoCount > 0 })
+                    : Results.BadRequest(new { success = false, error = pipeline.Update.Success ? "Push failed." : "Update failed.", push = pipeline.Push });
+            }
+
+            if (!prepared.PushPending)
+            {
+                return prepared.Success
                     ? Results.Ok(new { success = true, pushed = false })
                     : Results.BadRequest(new { success = false, error = "Update failed." });
             }

@@ -206,6 +206,7 @@ try
     builder.Services.AddScoped<GrayMoon.App.Services.WorkspaceManifest.IRemoteWorkspaceManifestReader, GrayMoon.App.Services.WorkspaceManifest.GitHubRemoteWorkspaceManifestReader>();
     builder.Services.AddScoped<IWorkspaceRepositoryOperations, GrayMoon.App.Services.Application.WorkspaceRepositoryOperations>();
     builder.Services.AddScoped<WorkspaceBranchHandler>();
+    builder.Services.AddScoped<IPrepareWorkspacePhases, PrepareWorkspacePhases>();
     builder.Services.AddScoped<PrepareWorkspaceOrchestrator>();
     builder.Services.AddSingleton<IWorkspaceOperationRunner, WorkspaceOperationRunner>();
     builder.Services.AddSingleton<IWorkspaceOperationLock>(sp => (IWorkspaceOperationLock)sp.GetRequiredService<IWorkspaceOperationRunner>());
