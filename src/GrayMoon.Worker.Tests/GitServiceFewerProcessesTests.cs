@@ -698,7 +698,7 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
     // ---------------------------------------------------------------- hooks
 
     [Fact]
-    public async Task Installing_hooks_takes_one_git_call_normally_and_two_when_hooks_path_points_outside()
+    public async Task Installing_hooks_takes_one_git_call_whether_or_not_hooks_path_points_outside()
     {
         var repo = await CloneAsync(await SeedOriginAsync("main"));
 
@@ -716,7 +716,7 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
         var outside = Directory.CreateDirectory(Path.Combine(_root, "outside-hooks")).FullName;
         await GitAsync(repo, $"config core.hooksPath \"{outside.Replace('\\', '/')}\"");
         var (_, configuredOutside) = await CountingAsync(async () => { await _git.WriteSyncHooksAsync(repo, 1, 2, CancellationToken.None); return 0; });
-        Assert.Equal(2, configuredOutside);
+        Assert.Equal(1, configuredOutside); // the core.hooksPath text is read in-process
         Assert.Empty(Directory.GetFiles(outside));
     }
 

@@ -13,7 +13,7 @@ namespace GrayMoon.Worker.Services;
 /// (ref snapshot, commit-count probes, local-ref default-branch resolution) exactly as they were in
 /// <see cref="GitService"/>. Never mutates repository state and never contacts a remote.
 /// </summary>
-public sealed class GitCliRepositoryReader(GitProcessRunner runner, ILogger<GitCliRepositoryReader> logger) : IGitRepositoryReader
+public sealed class GitCliRepositoryReader(GitProcessRunner runner, ILogger<GitCliRepositoryReader> logger, IRepositoryAccess? access = null) : IGitRepositoryReader
 {
     private static readonly Regex TrackAheadRegex = new(@"ahead (\d+)", RegexOptions.Compiled);
     private static readonly Regex TrackBehindRegex = new(@"behind (\d+)", RegexOptions.Compiled);
@@ -101,6 +101,16 @@ public sealed class GitCliRepositoryReader(GitProcessRunner runner, ILogger<GitC
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
             return null;
+
+        // In-process read of the raw effective value (the same one "git config --get" prints: no url.*.insteadOf
+        // expansion). Native git remains the fallback where libgit2 cannot be shown to agree; see LibGit2SharpConfigReader.
+        var inProcess = LibGit2SharpConfigReader.TryGetString(repoPath, "remote.origin.url", access, ct);
+        if (inProcess.Handled)
+        {
+            if (inProcess.Value is null)
+                logger.LogDebug("No remote.origin.url is configured for {RepoPath}.", repoPath);
+            return inProcess.Value?.Trim();
+        }
 
         var (exitCode, stdout, stderr) = await runner.RunAsync("git", "config --get remote.origin.url", repoPath, ct);
         if (exitCode != 0)

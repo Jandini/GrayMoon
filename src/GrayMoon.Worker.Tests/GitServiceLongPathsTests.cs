@@ -17,6 +17,7 @@ public sealed class GitServiceLongPathsTests : IDisposable
 {
     private readonly string _root = Directory.CreateTempSubdirectory("graymoon-lp-").FullName;
     private readonly GitService _git;
+    private readonly GitProcessRunner _runner;
     private GitCliRepositoryReader _reader = null!;
     private GitWorktreeService _worktrees = null!;
     private readonly CreateGitWorktreeCommand _create;
@@ -25,7 +26,7 @@ public sealed class GitServiceLongPathsTests : IDisposable
     public GitServiceLongPathsTests()
     {
         var commandLine = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
-        var runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
+        var runner = _runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
         _reader = new GitCliRepositoryReader(runner, NullLogger<GitCliRepositoryReader>.Instance);
         _worktrees = new GitWorktreeService(runner, _reader, NullLogger<GitWorktreeService>.Instance, new GrayMoon.Worker.Services.RepositoryAccess(NullLogger<GrayMoon.Worker.Services.RepositoryAccess>.Instance));
         _git = new GitService(Options.Create(new WorkerOptions()), NullLogger<GitService>.Instance, runner, _reader, new LibGit2SharpGitIgnoreService());
@@ -138,11 +139,15 @@ public sealed class GitServiceLongPathsTests : IDisposable
         });
         Assert.True(created.Success, created.ErrorMessage);
 
-        // Simulate a Feature made by an older build: no local setting.
+        // Simulate a Feature made by an older build: no local setting. The setting is applied once per Worker process
+        // and path, so a new service instance stands for the Worker start that happens after an upgrade.
         await RunGitAsync(main, "config --local --unset-all core.longpaths", allowFailure: true);
         Assert.Null(await GetLocalLongPathsAsync(main));
 
-        var removed = await _remove.ExecuteAsync(new RemoveGitWorktreeRequest
+        var afterUpgrade = new RemoveGitWorktreeCommand(new GitWorktreeService(
+            _runner, _reader, NullLogger<GitWorktreeService>.Instance,
+            new GrayMoon.Worker.Services.RepositoryAccess(NullLogger<GrayMoon.Worker.Services.RepositoryAccess>.Instance)));
+        var removed = await afterUpgrade.ExecuteAsync(new RemoveGitWorktreeRequest
         {
             MainRepositoryPath = main,
             WorktreePath = worktreePath,
@@ -155,6 +160,45 @@ public sealed class GitServiceLongPathsTests : IDisposable
             Assert.Equal("true", value);
         else
             Assert.Null(value);
+    }
+
+    [Fact]
+    public async Task Repeated_Feature_create_and_remove_spawn_no_git_config_process_and_share_the_setting()
+    {
+        var counting = new CountingCommandLine(new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions())));
+        var runner = new GitProcessRunner(counting, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
+        var reader = new GitCliRepositoryReader(runner, NullLogger<GitCliRepositoryReader>.Instance);
+        var worktrees = new GitWorktreeService(runner, reader, NullLogger<GitWorktreeService>.Instance,
+            new GrayMoon.Worker.Services.RepositoryAccess(NullLogger<GrayMoon.Worker.Services.RepositoryAccess>.Instance));
+        var create = new CreateGitWorktreeCommand(_git, worktrees);
+        var remove = new RemoveGitWorktreeCommand(worktrees);
+
+        var main = await CreateRepoAsync("main5");
+        var head = await reader.GetHeadCommitAsync(main, CancellationToken.None);
+        counting.Calls.Clear();
+
+        string? firstPath = null;
+        foreach (var name in new[] { "one", "two", "three" })
+        {
+            var path = Path.Combine(_root, "features", name, "main5");
+            firstPath ??= path;
+            var created = await create.ExecuteAsync(new CreateGitWorktreeRequest
+            {
+                MainRepositoryPath = main, WorktreePath = path, BranchName = "lp-" + name, BaseCommitSha = head,
+            });
+            Assert.True(created.Success, created.ErrorMessage);
+        }
+
+        var removed = await remove.ExecuteAsync(new RemoveGitWorktreeRequest { MainRepositoryPath = main, WorktreePath = firstPath!, Force = true });
+        Assert.True(removed.Success, removed.ErrorMessage);
+
+        Assert.DoesNotContain(counting.Calls, c => c.Contains("config", StringComparison.Ordinal) && !c.StartsWith("worktree", StringComparison.Ordinal));
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Equal("true", await GetLocalLongPathsAsync(main));
+            Assert.Equal("true", await GetLocalLongPathsAsync(Path.Combine(_root, "features", "two", "main5"))); // shared with the source
+            Assert.Single((await RunGitOutputAsync(main, "config --local --get-all core.longpaths")).Split('\n', StringSplitOptions.RemoveEmptyEntries));
+        }
     }
 
     // ---- helpers ------------------------------------------------------------------------------------

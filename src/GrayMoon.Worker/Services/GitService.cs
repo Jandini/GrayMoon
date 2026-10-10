@@ -12,12 +12,17 @@ using static GrayMoon.Worker.Services.GitCliOutput;
 
 namespace GrayMoon.Worker.Services;
 
-public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitService> logger, GitProcessRunner runner, IGitRepositoryReader reader, IGitIgnoreService ignore) : IGitService
+public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitService> logger, GitProcessRunner runner, IGitRepositoryReader reader, IGitIgnoreService ignore, IRepositoryAccess? access = null) : IGitService
 {
     private readonly int _listenPort = options.Value.ListenPort;
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _safeRepoCache = new(StringComparer.OrdinalIgnoreCase);
     private static string? _emptyHooksPath;
+
+    // The clone's own checkout must already allow paths over 260 characters on Windows, before any repository config
+    // exists to say so. Command-scoped (-c): nothing is written to global or system config; the persistent local
+    // setting is written afterwards by IRepositoryConfigurationInitializer.
+    private static string CloneLongPathsPrefix => OperatingSystem.IsWindows() ? "-c core.longpaths=true " : "";
 
 
     public async Task<bool> CloneAsync(string workingDir, string cloneUrl, string? bearerToken, CancellationToken ct)
@@ -30,7 +35,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         if (!Directory.Exists(workingDir))
             Directory.CreateDirectory(workingDir);
 
-        var args = $"clone \"{cloneUrl}\"";
+        var args = $"{CloneLongPathsPrefix}clone \"{cloneUrl}\"";
         var sw = Stopwatch.StartNew();
         var (exitCode, stdout, stderr) = await runner.RunRemoteAsync(GitRemoteOperation.Clone, args, workingDir, bearerToken, ct);
         sw.Stop();
@@ -59,13 +64,21 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
 
         var pathForGit = fullPath.Replace('\\', '/');
 
-        var (isSafe, _) = await CheckRepoSafeAsync(repoPath, pathForGit, ct);
+        var (isSafe, isDubiousOwnership) = await CheckRepoSafeAsync(repoPath, pathForGit, ct);
         logger.LogDebug("Git repo safety check: {Path} -> {Result}", pathForGit, isSafe ? "safe" : "not safe");
 
         if (isSafe)
         {
             _safeRepoCache.TryAdd(fullPath, 0);
             logger.LogDebug("Repository already safe, skipping safe.directory update: {Path}", pathForGit);
+            return;
+        }
+
+        // Trust is only extended for the one failure it fixes. Any other failure (not a repository, corrupt, git
+        // missing, ...) is left for the operation that follows to report, and is not cached so it is probed again.
+        if (!isDubiousOwnership)
+        {
+            logger.LogWarning("Git could not use {Path}, but not because of dubious ownership; safe.directory was not changed.", pathForGit);
             return;
         }
 
@@ -949,7 +962,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         if (!Directory.Exists(targetDir))
             Directory.CreateDirectory(targetDir);
 
-        var args = $"clone \"{cloneUrl}\" .";
+        var args = $"{CloneLongPathsPrefix}clone \"{cloneUrl}\" .";
         var sw = Stopwatch.StartNew();
         var (exitCode, stdout, stderr) = await runner.RunRemoteAsync(GitRemoteOperation.Clone, args, targetDir, bearerToken, ct);
         sw.Stop();
@@ -1266,9 +1279,22 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         if (IsPathInside(hooksDir, commonDir))
             return new GitHooksLocation(hooksDir, null);
 
-        var (configExit, configOut, _) = await runner.RunAsync(
-            "git", ["config", "--get", "core.hooksPath"], repoPath, null, ct, GitLockIntent.Read);
-        var configured = configExit == 0 ? configOut?.Trim() : null;
+        // Only this read of the setting's text (to name it in the warning) is in-process. Where is it not shown to
+        // match native git (environment-redirected config, per-worktree config, a repository libgit2 cannot open),
+        // the original "git config --get" runs. Which directory git executes hooks from is always decided above.
+        string? configured;
+        var inProcess = LibGit2SharpConfigReader.TryGetString(repoPath, "core.hooksPath", access, ct);
+        if (inProcess.Handled)
+        {
+            configured = inProcess.Value?.Trim();
+        }
+        else
+        {
+            var (configExit, configOut, _) = await runner.RunAsync(
+                "git", ["config", "--get", "core.hooksPath"], repoPath, null, ct, GitLockIntent.Read);
+            configured = configExit == 0 ? configOut?.Trim() : null;
+        }
+
         return string.IsNullOrEmpty(configured)
             ? new GitHooksLocation(hooksDir, null)
             : new GitHooksLocation(hooksDir, configured);
