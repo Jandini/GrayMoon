@@ -13,9 +13,38 @@ public sealed class FeatureOpenInToolsTests
     [Fact]
     public void Visible_buttons_are_empty_until_a_tool_is_added()
     {
-        var buttons = FeatureOpenInTools.VisibleButtons([], cursor: true, claudeCli: true, vsCode: true, visualStudio: true);
+        var everything = FeatureOpenInTools.All.Select(t => t.Id).ToHashSet();
+        var buttons = FeatureOpenInTools.VisibleButtons([], everything);
 
         Assert.Empty(buttons);
+    }
+
+    [Fact]
+    public void Every_tool_that_needs_an_install_has_an_install_check()
+    {
+        var needsInstall = FeatureOpenInTools.All.Where(t => t.RequiresInstall).Select(t => t.Id).Order();
+
+        Assert.Equal(needsInstall, InstalledOpenInTools.Checks.Keys.Order());
+    }
+
+    [Fact]
+    public void Tool_ids_and_desktop_commands_are_unique()
+    {
+        Assert.Equal(FeatureOpenInTools.All.Count, FeatureOpenInTools.All.Select(t => t.Id).Distinct().Count());
+        Assert.Equal(FeatureOpenInTools.All.Count, FeatureOpenInTools.All.Select(t => t.DesktopCommand).Distinct().Count());
+    }
+
+    [Fact]
+    public void Codex_cli_is_shown_only_when_installed()
+    {
+        string[] recent = [FeatureOpenInTools.CodexCli, FeatureOpenInTools.Terminal];
+
+        var missing = FeatureOpenInTools.VisibleButtons(recent, new HashSet<string>());
+        var installed = FeatureOpenInTools.VisibleButtons(recent, new HashSet<string> { FeatureOpenInTools.CodexCli });
+
+        Assert.Equal([FeatureOpenInTools.Terminal], missing.Select(t => t.Id));
+        Assert.Equal([FeatureOpenInTools.CodexCli, FeatureOpenInTools.Terminal], installed.Select(t => t.Id));
+        Assert.Equal("OpenInCodexCli", installed[0].DesktopCommand);
     }
 
     [Fact]
@@ -44,11 +73,12 @@ public sealed class FeatureOpenInToolsTests
             FeatureOpenInTools.Cursor,
             FeatureOpenInTools.Terminal,
         };
-        var buttons = FeatureOpenInTools.VisibleButtons(recent, cursor: false, claudeCli: true, vsCode: true, visualStudio: false);
+        var installed = new HashSet<string> { FeatureOpenInTools.ClaudeCli, FeatureOpenInTools.VsCode };
+        var buttons = FeatureOpenInTools.VisibleButtons(recent, installed);
 
         Assert.Equal(
             [FeatureOpenInTools.Explorer, FeatureOpenInTools.VsCode, FeatureOpenInTools.Terminal],
-            buttons);
+            buttons.Select(t => t.Id));
     }
 
     [Fact]

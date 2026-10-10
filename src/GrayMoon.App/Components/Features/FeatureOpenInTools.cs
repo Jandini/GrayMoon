@@ -1,82 +1,70 @@
 namespace GrayMoon.App.Components.Features;
 
 /// <summary>
+/// One Open-in tool. <see cref="Id"/> is stored in the workspace database and is also the key in
+/// GrayMoon.Desktop's tool-availability message. <see cref="DesktopCommand"/> is the WebView2
+/// message GrayMoon.Desktop handles to launch it.
+/// </summary>
+internal sealed record OpenInTool(
+    string Id,
+    string Label,
+    string DesktopCommand,
+    bool RequiresInstall,
+    string? IconImageSrc = null,
+    string? IconClass = null)
+{
+    public string Title => "Open in " + Label;
+}
+
+/// <summary>
 /// Open-in tools for the feature picker. A tool appears on the button row only when the user
 /// adds it, and it stays in that slot until they remove it. Using a tool does not add it.
 /// Terminal and Explorer are pinned the same way as the IDEs.
 /// </summary>
+/// <remarks>
+/// To add a tool: add it to <see cref="All"/>, add its install check to
+/// <c>InstalledOpenInTools</c>, add the icon under <c>wwwroot/icons</c>, and teach
+/// GrayMoon.Desktop the same id and command (its <c>OpenInToolCatalog</c> and
+/// <c>ToolAvailabilityService</c>).
+/// </remarks>
 internal static class FeatureOpenInTools
 {
     public const string Cursor = "cursor";
     public const string ClaudeCli = "claudeCli";
+    public const string CodexCli = "codexCli";
     public const string VsCode = "vsCode";
     public const string VisualStudio = "visualStudio";
     public const string Terminal = "terminal";
     public const string Explorer = "explorer";
 
-    private static readonly HashSet<string> RememberedTools = new(StringComparer.Ordinal)
-    {
-        Cursor,
-        ClaudeCli,
-        VsCode,
-        VisualStudio,
-        Terminal,
-        Explorer,
-    };
+    /// <summary>
+    /// Every tool, in Open in... menu order. Tools that need an install come first; the menu
+    /// shows only the installed ones. Terminal and Explorer are always there on Desktop.
+    /// </summary>
+    public static readonly IReadOnlyList<OpenInTool> All =
+    [
+        new(Cursor, "Cursor", "OpenInCursor", RequiresInstall: true, IconImageSrc: "icons/cursor.svg"),
+        new(ClaudeCli, "Claude CLI", "OpenInClaudeCli", RequiresInstall: true, IconImageSrc: "icons/claude.svg"),
+        new(CodexCli, "Codex CLI", "OpenInCodexCli", RequiresInstall: true, IconImageSrc: "icons/codex.svg"),
+        new(VsCode, "VS Code", "OpenInVsCode", RequiresInstall: true, IconImageSrc: "icons/visualstudiocode.svg"),
+        new(VisualStudio, "Visual Studio", "OpenInVisualStudio", RequiresInstall: true, IconImageSrc: "icons/visualstudio.svg"),
+        new(Terminal, "Terminal", "OpenInTerminal", RequiresInstall: false, IconClass: "bi-terminal"),
+        new(Explorer, "Explorer", "ShowInExplorer", RequiresInstall: false, IconClass: "bi-folder2-open"),
+    ];
 
-    public static bool IsRemembered(string? toolId) =>
-        toolId is not null && RememberedTools.Contains(toolId);
+    private static readonly Dictionary<string, OpenInTool> ById =
+        All.ToDictionary(t => t.Id, StringComparer.Ordinal);
 
-    public static string? FromLaunchMethod(string method) => method switch
-    {
-        "openInCursor" => Cursor,
-        "openInClaudeCli" => ClaudeCli,
-        "openInVsCode" => VsCode,
-        "openInVisualStudio" => VisualStudio,
-        "openInTerminal" => Terminal,
-        "showInExplorer" => Explorer,
-        _ => null,
-    };
+    public static OpenInTool? Find(string? toolId) =>
+        toolId is not null && ById.TryGetValue(toolId, out var tool) ? tool : null;
 
-    public static string LaunchMethod(string toolId) => toolId switch
-    {
-        Cursor => "openInCursor",
-        ClaudeCli => "openInClaudeCli",
-        VsCode => "openInVsCode",
-        VisualStudio => "openInVisualStudio",
-        Terminal => "openInTerminal",
-        Explorer => "showInExplorer",
-        _ => throw new ArgumentOutOfRangeException(nameof(toolId), toolId, "Unknown open-in tool."),
-    };
+    public static bool IsRemembered(string? toolId) => Find(toolId) is not null;
 
-    public static string Label(string toolId) => toolId switch
-    {
-        Cursor => "Cursor",
-        ClaudeCli => "Claude CLI",
-        VsCode => "VS Code",
-        VisualStudio => "Visual Studio",
-        Terminal => "Terminal",
-        Explorer => "Explorer",
-        _ => toolId,
-    };
-
-    public static string Title(string toolId) => "Open in " + Label(toolId);
-
-    public static string? IconImageSrc(string toolId) => toolId switch
-    {
-        Cursor => "icons/cursor.svg",
-        ClaudeCli => "icons/claude.svg",
-        VsCode => "icons/visualstudiocode.svg",
-        VisualStudio => "icons/visualstudio.svg",
-        _ => null,
-    };
-
-    public static string IconClass(string toolId) => toolId switch
-    {
-        Terminal => "bi-terminal",
-        Explorer => "bi-folder2-open",
-        _ => "bi-box",
-    };
+    /// <summary>
+    /// Whether the tool can be launched: it needs no install, or it is in <paramref name="installed"/>.
+    /// </summary>
+    public static bool IsAvailable(OpenInTool tool, IReadOnlySet<string> installed) =>
+        !tool.RequiresInstall || installed.Contains(tool.Id);
 
     /// <summary>
     /// Adds a tool after the ones already on the row. A tool that is already there stays where it is.
@@ -130,34 +118,18 @@ internal static class FeatureOpenInTools
 
     /// <summary>
     /// Tools from <paramref name="recent"/> that can be launched. Being listed is not enough:
-    /// Cursor, Claude CLI, VS Code, and Visual Studio are omitted unless installed.
+    /// a tool that needs an install is omitted unless it is in <paramref name="installed"/>.
     /// Terminal and Explorer stay, because Desktop can always open them.
     /// </summary>
-    public static IReadOnlyList<string> VisibleButtons(
-        IReadOnlyList<string> recent,
-        bool cursor,
-        bool claudeCli,
-        bool vsCode,
-        bool visualStudio)
+    public static IReadOnlyList<OpenInTool> VisibleButtons(IReadOnlyList<string> recent, IReadOnlySet<string> installed)
     {
-        var buttons = new List<string>();
+        var buttons = new List<OpenInTool>();
         foreach (var toolId in recent)
         {
-            if (IsAvailable(toolId, cursor, claudeCli, vsCode, visualStudio) && !buttons.Contains(toolId))
-                buttons.Add(toolId);
+            if (Find(toolId) is { } tool && IsAvailable(tool, installed) && !buttons.Contains(tool))
+                buttons.Add(tool);
         }
 
         return buttons;
     }
-
-    private static bool IsAvailable(string toolId, bool cursor, bool claudeCli, bool vsCode, bool visualStudio) =>
-        toolId switch
-        {
-            Cursor => cursor,
-            ClaudeCli => claudeCli,
-            VsCode => vsCode,
-            VisualStudio => visualStudio,
-            Terminal or Explorer => true,
-            _ => false,
-        };
 }
