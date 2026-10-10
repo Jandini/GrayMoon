@@ -122,7 +122,8 @@ public static class WorkspaceManifestSerializer
                     .Where(c => c is not null)
                     .Select(c => new WorkspaceManifestConnector(c.Type ?? string.Empty, c.Url ?? string.Empty))
                     .ToList(),
-                repositories);
+                repositories,
+                parsed.CodeGraph);
             return true;
         }
         catch (JsonException ex)

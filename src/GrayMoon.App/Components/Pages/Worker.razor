@@ -123,6 +123,8 @@
                                         <span>@PrerequisiteCell(hostInfo.GitVersion, HostPrerequisiteInstallCommands.Git)</span>
                                         <span class="text-muted">@PrerequisiteLabel(HostPrerequisiteIds.GitVersion)</span>
                                         <span>@PrerequisiteCell(hostInfo.GitVersionToolVersion, HostPrerequisiteInstallCommands.GitVersion)</span>
+                                        <span class="text-muted" title="Optional. Features get their own CodeGraph index when the Workspace definition has &quot;codegraph&quot;: true.">CodeGraph</span>
+                                        <span>@VersionBadge(hostInfo.CodeGraphVersion)</span>
                                     </div>
                                     <p class="small text-muted mt-3 mb-0">@HostPrerequisiteState.Note(CurrentHostVersions, hostRequirements)</p>
                                 }
@@ -171,7 +173,7 @@
 @code {
     private const string WorkerDotnet10RuntimeUrl = "https://aka.ms/dotnet-core-applaunch?framework=Microsoft.NETCore.App&framework_version=10.0.0&arch=x64&rid=win-x64&os=win10";
 
-    private sealed record HostInfoDto(string? DotnetVersion, string? GitVersion, string? GitVersionToolVersion);
+    private sealed record HostInfoDto(string? DotnetVersion, string? GitVersion, string? GitVersionToolVersion, string? CodeGraphVersion = null);
 
     private string installCommand = string.Empty;
     private string uninstallCommand = string.Empty;

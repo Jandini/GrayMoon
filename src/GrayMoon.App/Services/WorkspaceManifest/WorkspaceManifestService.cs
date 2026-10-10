@@ -103,7 +103,10 @@ public sealed class WorkspaceManifestService(
                 && !string.IsNullOrWhiteSpace(read.Content)
                 && TryParse(read.Content, out var existing, out _)
                 && existing is not null)
+            {
                 manifest = WorkspaceRepositoryTagPins.CopyOnto(manifest, existing);
+                manifest = manifest with { CodeGraph = existing.CodeGraph };
+            }
 
             var content = Serialize(manifest);
             return await WorkspaceRepositoryFileAccess.WriteAsync(
@@ -177,6 +180,60 @@ public sealed class WorkspaceManifestService(
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogWarning(ex, "Writing the managed .gitignore section failed. WorkspaceId={WorkspaceId}", workspaceId);
+            return OperationResult.Fail(ex.Message);
+        }
+    }
+
+    public async Task<bool> IsCodeGraphEnabledAsync(int workspaceId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var (_, args) = await GetSpecialContextArgsAsync(workspaceId, cancellationToken);
+            if (args.WorkspaceRepositoryName is null)
+                return false;
+
+            var read = await WorkspaceRepositoryFileAccess.ReadAsync(
+                workerBridge, args, WorkspaceRepositoryFileAccess.ManifestFilePath, cancellationToken);
+            return read.Found
+                && TryParse(read.Content ?? string.Empty, out var manifest, out _)
+                && manifest?.CodeGraph == true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Reading the codegraph setting failed. WorkspaceId={WorkspaceId}", workspaceId);
+            return false;
+        }
+    }
+
+    public async Task<OperationResult> WriteCodeGraphConfigAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId? contextId = null,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var targetContextId = contextId
+                ?? await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+            var args = await pathResolver.GetWorkerArgsAsync(targetContextId, cancellationToken);
+            if (args.WorkspaceRepositoryName is null)
+                return new OperationResult(true, NoWorkspaceRepositoryMessage);
+
+            var read = await WorkspaceRepositoryFileAccess.ReadAsync(
+                workerBridge, args, CodeGraphConfigFile.FilePath, cancellationToken);
+            if (read.Error is not null)
+                return OperationResult.Fail(read.Error);
+
+            var manifest = await BuildFromDatabaseAsync(workspaceId, cancellationToken);
+            var content = CodeGraphConfigFile.Apply(read.Content, manifest.Repositories.Select(r => r.Name));
+            if (content is null)
+                return OperationResult.Fail($"{CodeGraphConfigFile.FilePath} is not a valid JSON object; fix it by hand.");
+
+            return await WorkspaceRepositoryFileAccess.WriteAsync(
+                workerBridge, args, CodeGraphConfigFile.FilePath, content, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Writing codegraph.json failed. WorkspaceId={WorkspaceId}", workspaceId);
             return OperationResult.Fail(ex.Message);
         }
     }
@@ -405,7 +462,8 @@ internal static class WorkspaceRepositoryFileAccess
 public static class WorkspaceManifestHooks
 {
     /// <summary>
-    /// Regenerates the managed <c>.gitignore</c> section and then the Workspace definition. Does nothing when the
+    /// Regenerates the managed <c>.gitignore</c> section, then the Workspace definition, then <c>codegraph.json</c> when the
+    /// definition has <c>"codegraph": true</c>. Does nothing when the
     /// Workspace has no Workspace repository. Never throws; returns the first failure message for the caller to
     /// show as a toast, or null when everything was written (or there was nothing to write).
     /// </summary>
@@ -423,6 +481,13 @@ public static class WorkspaceManifestHooks
             var manifest = await manifestService.WriteAuthoritativeManifestAsync(workspaceId, cancellationToken);
             if (!manifest.Success)
                 return $"Could not write the Workspace definition: {manifest.Error}";
+
+            if (await manifestService.IsCodeGraphEnabledAsync(workspaceId, cancellationToken))
+            {
+                var codeGraph = await manifestService.WriteCodeGraphConfigAsync(workspaceId, cancellationToken: cancellationToken);
+                if (!codeGraph.Success)
+                    return $"Could not update codegraph.json in the Workspace repository: {codeGraph.Error}";
+            }
 
             return null;
         }

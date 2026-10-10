@@ -130,6 +130,10 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid DiscardWorkspaceRoot args"),
             WorkerHubMethods.WriteRepositoryFile => JsonSerializer.Deserialize<WriteRepositoryFileRequest>(json, options)
                 ?? throw new ArgumentException("Invalid WriteRepositoryFile args"),
+            WorkerHubMethods.InitCodeGraph => JsonSerializer.Deserialize<InitCodeGraphRequest>(json, options)
+                ?? throw new ArgumentException("Invalid InitCodeGraph args"),
+            WorkerHubMethods.UninitCodeGraph => JsonSerializer.Deserialize<UninitCodeGraphRequest>(json, options)
+                ?? throw new ArgumentException("Invalid UninitCodeGraph args"),
             _ => throw new NotSupportedException($"Unknown command: {command}")
         };
     }

@@ -36,7 +36,8 @@ public sealed class WorkspaceFeatureOperations(
     IWorkspaceCapabilitiesResolver capabilitiesResolver,
     IOptions<WorkspaceOptions> workspaceOptions,
     ILogger<WorkspaceFeatureOperations> logger,
-    FeatureFinalizationCoordinator? finalizationCoordinator = null) : IWorkspaceFeatureOperations
+    FeatureFinalizationCoordinator? finalizationCoordinator = null,
+    FeatureCodeGraphService? codeGraph = null) : IWorkspaceFeatureOperations
 {
     private int MaxParallel => Math.Max(1, workspaceOptions.Value.MaxParallelOperations);
 
@@ -410,6 +411,7 @@ public sealed class WorkspaceFeatureOperations(
             }
 
             await selectedContextService.SetSelectedAsync(workspaceId, contextId, cancellationToken);
+            await InitializeCodeGraphAsync(workspaceId, contextId, progress, cancellationToken);
             progress?.Report(new OperationProgress($"Feature '{name}' is ready."));
             return new CreateFeatureResult
             {
@@ -773,6 +775,9 @@ public sealed class WorkspaceFeatureOperations(
         foreach (var row in rows)
             row.State = WorkspaceFeatureRepositoryState.Removing;
         await db.SaveChangesAsync(cancellationToken);
+
+        // Before any worktree goes: CodeGraph's index (and a build still running) must not hold the Feature root.
+        await UninitializeCodeGraphAsync(info.WorkspaceId, featureContextId, progress, cancellationToken);
 
         var wrIds = rows.Select(r => r.WorkspaceRepositoryId).ToList();
         var links = await db.WorkspaceRepositories
@@ -1190,6 +1195,53 @@ public sealed class WorkspaceFeatureOperations(
         var featureRootPath = WorkerPath.Combine(storageRoot, featureName);
         var outcome = await CleanupFeatureFolderAsync(storageRoot, featureRootPath, workspaceName, featureName, onlyIfMarked, cancellationToken);
         return outcome == CleanupOutcomePendingDeletion ? featureRootPath : null;
+    }
+
+    /// <summary>
+    /// Asks the Worker to start a CodeGraph index for a Feature that just became Ready, when the Workspace definition
+    /// turns CodeGraph on and the Workspace root has an index. Optional: never throws, never fails the operation; the
+    /// Feature is already Ready, so not even an Abort here may turn it into a failure.
+    /// </summary>
+    private async Task InitializeCodeGraphAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId featureContextId,
+        IProgress<OperationProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        if (codeGraph is null)
+            return;
+
+        try
+        {
+            await codeGraph.InitializeAsync(workspaceId, featureContextId, progress, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "CodeGraph init failed. WorkspaceId={WorkspaceId} ContextId={ContextId}", workspaceId, featureContextId.Value);
+        }
+    }
+
+    /// <summary>
+    /// Removes the Feature root's CodeGraph index before its worktrees are removed. A failure is logged only: the Feature
+    /// folder goes anyway, and a file still held open leaves it pending deletion like any other.
+    /// </summary>
+    private async Task UninitializeCodeGraphAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId featureContextId,
+        IProgress<OperationProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        if (codeGraph is null)
+            return;
+
+        try
+        {
+            await codeGraph.UninitializeAsync(workspaceId, featureContextId, progress, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "CodeGraph uninit failed. WorkspaceId={WorkspaceId} ContextId={ContextId}", workspaceId, featureContextId.Value);
+        }
     }
 
     /// <summary>
@@ -1875,6 +1927,7 @@ public sealed class WorkspaceFeatureOperations(
         feature.LastError = null;
         feature.UpdatedAt = DateTime.UtcNow;
         await finalizeDb.SaveChangesAsync(cancellationToken);
+        await InitializeCodeGraphAsync(info.WorkspaceId, featureContextId, progress, cancellationToken);
         return new RepairFeatureResult(true, null, ordered);
     }
 
@@ -1945,6 +1998,7 @@ public sealed class WorkspaceFeatureOperations(
         var featureName = info.FeatureName ?? "";
         var specialContextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(info.WorkspaceId, cancellationToken);
         using var monitoringPause = gitChangesMonitoringPause.Pause(featureContextId.Value);
+        await UninitializeCodeGraphAsync(info.WorkspaceId, featureContextId, progress, cancellationToken);
 
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var rows = await db.WorkspaceFeatureRepositories

@@ -139,6 +139,7 @@ try
     builder.Services.AddScoped<IWorkspaceContextPathResolver, WorkspaceContextPathResolver>();
     builder.Services.AddScoped<IWorkspaceSelectedFeatureContextService, WorkspaceSelectedFeatureContextService>();
     builder.Services.AddScoped<IWorkspaceHookContextAttributor, WorkspaceHookContextAttributor>();
+    builder.Services.AddScoped<FeatureCodeGraphService>();
     builder.Services.AddScoped<IWorkspaceFeatureOperations, WorkspaceFeatureOperations>();
     builder.Services.AddSingleton<IWorkspaceFeatureReconciler, WorkspaceFeatureReconciler>();
     builder.Services.AddHostedService(sp => (WorkspaceFeatureReconciler)sp.GetRequiredService<IWorkspaceFeatureReconciler>());

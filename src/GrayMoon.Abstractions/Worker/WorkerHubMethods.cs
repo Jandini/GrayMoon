@@ -70,4 +70,10 @@ public static class WorkerHubMethods
 
     /// <summary>App → Worker: write one text file inside a repository working tree (atomic, UTF-8 without BOM, optionally only when the content changed).</summary>
     public const string WriteRepositoryFile = "WriteRepositoryFile";
+
+    /// <summary>App → Worker: start building a CodeGraph index in a Feature root when the Workspace root has one (the index builds in the background on the Worker).</summary>
+    public const string InitCodeGraph = "InitCodeGraph";
+
+    /// <summary>App → Worker: remove the CodeGraph index from a Feature root (<c>codegraph uninit</c>), stopping an index build still running there.</summary>
+    public const string UninitCodeGraph = "UninitCodeGraph";
 }
