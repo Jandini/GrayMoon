@@ -61,16 +61,13 @@ window.renderCytoscapeGraph = function (containerId, nodes, edges, roots) {
                 }
             },
             {
-                /* NuGet packages - squat hexagon (almost square, mild side chamfers) */
+                /* NuGet packages - rounded card, same teal as before */
                 selector: 'node[nodeType = "package"]',
                 style: {
-                    'shape': 'polygon',
-                    'shape-polygon-points': '-0.92 -1  0.92 -1  1 0  0.92 1  -0.92 1  -1 0',
+                    'shape': 'round-rectangle',
                     'background-color': '#16353f',
                     'border-color': '#38bdf8',
-                    'color': '#bae6fd',
-                    'width': 148,
-                    'height': 44
+                    'color': '#bae6fd'
                 }
             },
             {
