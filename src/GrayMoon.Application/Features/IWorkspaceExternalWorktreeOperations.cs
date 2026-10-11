@@ -49,6 +49,14 @@ public interface IWorkspaceNativeLaunchService
     Task<NativeLaunchPaths?> ResolveContextLaunchPathsAsync(
         WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The context folder only. Opening a tool uses this so the launch does not wait
+    /// for every repository path.
+    /// </summary>
+    Task<string?> ResolveContextRootAsync(
+        WorkspaceFeatureContextId contextId,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class NativeLaunchPaths

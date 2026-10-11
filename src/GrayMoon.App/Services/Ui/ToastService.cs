@@ -6,18 +6,21 @@ public sealed class ToastService : IToastService
     private string? _message;
     private bool _isVisible;
     private bool _isError;
+    private long _shownId;
 
     public event Action? OnShow;
 
     public string? Message => _message;
     public bool IsVisible => _isVisible;
     public bool IsError => _isError;
+    public long ShownId => _shownId;
 
     public void Show(string message)
     {
         _message = message;
         _isVisible = true;
         _isError = false;
+        _shownId++;
         OnShow?.Invoke();
     }
 
@@ -26,6 +29,7 @@ public sealed class ToastService : IToastService
         _message = message;
         _isVisible = true;
         _isError = true;
+        _shownId++;
         OnShow?.Invoke();
     }
 

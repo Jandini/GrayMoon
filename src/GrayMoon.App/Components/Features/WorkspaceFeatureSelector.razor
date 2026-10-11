@@ -239,6 +239,8 @@
     private readonly List<WorkspaceFeatureContextInfo> _options = [];
     private readonly List<NativeLaunchRepositoryPath> _repositories = [];
     private int? _launchRepositoriesContextId;
+    private int? _cachedLaunchRootContextId;
+    private string? _cachedLaunchRoot;
     private bool _launchRepositoriesLoading;
     private string? _hoveredToolId;
     private string? _toolHintId;
@@ -261,9 +263,7 @@
     private bool _switchWorkspacesLoaded;
     private int? _lastKnownSelectedValue;
     private IReadOnlySet<string> _installedTools = new HashSet<string>();
-    private string? _startLockedToolId;
-    private string? _startToastMessage;
-    private bool _startLaunchInFlight;
+    private OpenInToolLaunch? _launch;
     private bool _disposed;
 
     /// <summary>
@@ -485,6 +485,9 @@
             _repositories.Clear();
             _launchRepositoriesContextId = null;
         }
+
+        if (_cachedLaunchRootContextId is int cachedRoot && cachedRoot != SelectedContextId?.Value)
+            ClearCachedLaunchRoot();
     }
 
     private async Task EnsureRecentOpenInToolsAsync(int workspaceId)
@@ -907,6 +910,7 @@
             if (requested is null || !_desktopAvailable)
             {
                 _launchRepositoriesContextId = null;
+                ClearCachedLaunchRoot();
                 return;
             }
 
@@ -920,13 +924,17 @@
                 _repositories.AddRange(paths.Repositories
                     .Where(r => !string.IsNullOrWhiteSpace(r.Path))
                     .OrderBy(r => r.RepositoryName, StringComparer.OrdinalIgnoreCase));
+                RememberLaunchRoot(requested.Value, paths.ContextRoot);
             }
+            else
+                ClearCachedLaunchRoot();
 
             _launchRepositoriesContextId = requested.Value;
         }
         catch
         {
             _launchRepositoriesContextId = null;
+            ClearCachedLaunchRoot();
         }
         finally
         {
@@ -987,7 +995,8 @@
     }
 
     private bool IsToolLaunchLocked(string toolId) =>
-        string.Equals(_startLockedToolId, toolId, StringComparison.Ordinal);
+        _launch is { IsButtonDisabled: true } launch
+        && string.Equals(launch.ToolId, toolId, StringComparison.Ordinal);
 
     private async Task LaunchAsync(OpenInTool tool, string? repositoryPath = null)
     {
@@ -996,91 +1005,163 @@
         if (IsToolLaunchLocked(tool.Id))
             return;
 
-        // The button stays disabled for as long as this toast is on screen.
-        var startMessage = FeatureOpenInTools.StartToastMessage(tool);
-        _startLockedToolId = tool.Id;
-        _startToastMessage = startMessage;
-        _startLaunchInFlight = true;
-        ToastService.Show(startMessage);
+        // Disabled from this assignment. The toast below does not start the tool.
+        var launch = OpenInToolLaunch.Begin(tool.Id);
+        _launch = launch;
 
-        var launched = false;
+        var posted = false;
         try
         {
-            string? path = repositoryPath;
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                var contextId = await ResolveLaunchContextAsync();
-                if (contextId is null)
-                    return;
+            // Start the folder lookup or the desktop post before the toast is shown.
+            // Neither call waits for the toast to close.
+            var knownPath = KnownLaunchPath(repositoryPath);
+            var resolveRoot = string.IsNullOrWhiteSpace(knownPath)
+                ? ResolveContextRootForLaunchAsync()
+                : null;
+            var post = string.IsNullOrWhiteSpace(knownPath)
+                ? null
+                : PostToolAsync(tool, knownPath);
 
-                var paths = await NativeLaunch.ResolveContextLaunchPathsAsync(contextId.Value);
-                if (paths is null || string.IsNullOrWhiteSpace(paths.ContextRoot))
-                    return;
-                path = paths.ContextRoot;
+            ToastService.Show(FeatureOpenInTools.StartToastMessage(tool));
+            launch.NoteFeedback(ToastService.ShownId);
+
+            if (post is null && resolveRoot is not null)
+            {
+                var path = await resolveRoot;
+                if (!string.IsNullOrWhiteSpace(path) && ReferenceEquals(_launch, launch))
+                    post = PostToolAsync(tool, path);
             }
 
-            try
+            if (post is not null)
             {
-                await JS.InvokeAsync<bool>("graymoonDesktop.post", tool.DesktopCommand, new { path });
-                launched = true;
+                var ok = await post;
+                posted = ok && ReferenceEquals(_launch, launch);
             }
-            catch
-            {
-                // Desktop bridge optional.
-            }
+        }
+        catch (Exception ex) when (IsDesktopBridgeFailure(ex))
+        {
+            posted = false;
         }
         finally
         {
             CloseDropdown();
-            _startLaunchInFlight = false;
-            ReleaseStartLock(hideToast: !launched);
+            if (!_disposed && ReferenceEquals(_launch, launch))
+            {
+                launch.FinishAttempt();
+                if (!posted)
+                    DismissFeedback(launch);
+            }
         }
     }
 
-    /// <summary>
-    /// Keeps the clicked tool button disabled while its starting toast is on screen.
-    /// A launch that never posted hides that toast and unlocks the button.
-    /// </summary>
-    private void ReleaseStartLock(bool hideToast)
+    private string? KnownLaunchPath(string? repositoryPath)
     {
-        if (_startLaunchInFlight)
+        if (!string.IsNullOrWhiteSpace(repositoryPath))
+            return repositoryPath;
+
+        if (SelectedContextId is { } selected
+            && _cachedLaunchRootContextId == selected.Value
+            && !string.IsNullOrWhiteSpace(_cachedLaunchRoot))
+            return _cachedLaunchRoot;
+
+        return null;
+    }
+
+    private async Task<string?> ResolveContextRootForLaunchAsync()
+    {
+        try
+        {
+            var contextId = await ResolveLaunchContextAsync();
+            if (contextId is null)
+                return null;
+
+            var root = await NativeLaunch.ResolveContextRootAsync(contextId.Value);
+            if (string.IsNullOrWhiteSpace(root))
+                return null;
+
+            if (SelectedContextId?.Value == contextId.Value.Value)
+                RememberLaunchRoot(contextId.Value.Value, root);
+
+            return root;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return null;
+        }
+    }
+
+    private Task<bool> PostToolAsync(OpenInTool tool, string path) =>
+        JS.InvokeAsync<bool>("graymoonDesktop.post", tool.DesktopCommand, new { path }).AsTask();
+
+    private static bool IsDesktopBridgeFailure(Exception ex) =>
+        ex is JSDisconnectedException
+            or JSException
+            or InvalidOperationException
+            or ObjectDisposedException
+            or TaskCanceledException;
+
+    private void RememberLaunchRoot(int contextId, string? root)
+    {
+        if (string.IsNullOrWhiteSpace(root))
+        {
+            ClearCachedLaunchRoot();
             return;
+        }
 
-        var message = _startToastMessage;
-        var toastStillOurs = message is not null
-            && ToastService.IsVisible
-            && string.Equals(ToastService.Message, message, StringComparison.Ordinal);
+        _cachedLaunchRootContextId = contextId;
+        _cachedLaunchRoot = root;
+    }
 
-        if (!hideToast && toastStillOurs)
-            return;
+    private void ClearCachedLaunchRoot()
+    {
+        _cachedLaunchRootContextId = null;
+        _cachedLaunchRoot = null;
+    }
 
-        _startLockedToolId = null;
-        _startToastMessage = null;
-        if (hideToast && toastStillOurs)
+    /// <summary>
+    /// A launch that never posted drops its feedback toast. Hiding that toast enables the button.
+    /// </summary>
+    private void DismissFeedback(OpenInToolLaunch launch)
+    {
+        if (launch.IsFeedbackShowing(ToastService.ShownId, ToastService.IsVisible))
+        {
             ToastService.Hide();
+            return;
+        }
+
+        launch.EndFeedback();
     }
 
     private void OnToastChanged()
     {
-        if (_disposed || _startToastMessage is null)
+        if (_disposed)
             return;
 
-        if (ToastService.IsVisible
-            && string.Equals(ToastService.Message, _startToastMessage, StringComparison.Ordinal))
-            return;
-
-        _startToastMessage = null;
-        if (_startLaunchInFlight)
-            return;
-
-        _startLockedToolId = null;
         try
         {
-            _ = InvokeAsync(StateHasChanged);
+            _ = InvokeAsync(ApplyToastFeedback);
         }
-        catch (ObjectDisposedException)
+        catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException)
         {
         }
+    }
+
+    /// <summary>
+    /// Enables the button when this click's toast is no longer showing.
+    /// It never posts a desktop command.
+    /// </summary>
+    private void ApplyToastFeedback()
+    {
+        if (_disposed || _launch is not { IsButtonDisabled: true } launch)
+            return;
+
+        if (launch.FeedbackId == 0 || launch.IsFeedbackShowing(ToastService.ShownId, ToastService.IsVisible))
+            return;
+
+        var wasDisabled = launch.IsButtonDisabled;
+        launch.EndFeedback();
+        if (wasDisabled && !launch.IsButtonDisabled)
+            StateHasChanged();
     }
 
     /// <summary>
