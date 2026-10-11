@@ -25,6 +25,9 @@ public sealed class UninitCodeGraphCommand(CodeGraphCli codeGraph)
         if (executable is null)
             return new UninitCodeGraphResponse { Outcome = "NotInstalled", Message = "CodeGraph is not installed on the Worker host." };
 
+        if (!await codeGraph.WaitForLockReleaseAsync(root, cancellationToken))
+            return new UninitCodeGraphResponse { Outcome = "Failed", Message = "CodeGraph is still busy (codegraph.lock exists)." };
+
         var result = await codeGraph.UninitAsync(executable, root, cancellationToken);
         if (result.ExitCode == 0)
             return new UninitCodeGraphResponse { Outcome = "Removed" };

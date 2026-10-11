@@ -19,6 +19,9 @@ public sealed class CodeGraphCli(
 {
     internal const string DataFolderName = ".codegraph";
     internal const string DatabaseFileName = "codegraph.db";
+    internal const string LockFileName = "codegraph.lock";
+    private static readonly TimeSpan LockWaitTimeout = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan LockPollInterval = TimeSpan.FromMilliseconds(500);
 
     private static readonly TimeSpan VersionTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan InitTimeout = TimeSpan.FromHours(1);
@@ -160,6 +163,32 @@ public sealed class CodeGraphCli(
         catch (TimeoutException)
         {
             logger.LogWarning("CodeGraph index build in {Root} did not stop within {Seconds}s", root, StopInitTimeout.TotalSeconds);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Waits until CodeGraph removes <c>.codegraph/codegraph.lock</c>, which it holds while it works; uninit fails
+    /// while the lock exists. Returns false when the lock was still there after <paramref name="timeout"/>.
+    /// </summary>
+    public async Task<bool> WaitForLockReleaseAsync(string root, CancellationToken cancellationToken, TimeSpan? timeout = null)
+    {
+        var lockPath = Path.Combine(root, DataFolderName, LockFileName);
+        if (!File.Exists(lockPath))
+            return true;
+
+        logger.LogInformation("Waiting for CodeGraph to release {LockPath}", lockPath);
+        var deadline = DateTime.UtcNow + (timeout ?? LockWaitTimeout);
+        while (File.Exists(lockPath))
+        {
+            if (DateTime.UtcNow >= deadline)
+            {
+                logger.LogWarning("CodeGraph lock {LockPath} was not released in time", lockPath);
+                return false;
+            }
+
+            await Task.Delay(LockPollInterval, cancellationToken);
         }
 
         return true;

@@ -634,103 +634,19 @@ public sealed class WorkspaceFeatureOperations(
         if (info.IsSpecialWorkspace)
             return OperationResult.Fail("Cannot remove the special Workspace context.");
 
-        // Start the structural overlay immediately so the confirmation dialog does not sit idle while
-        // analyze (or auth validation) runs. Prefer the plan already shown in the dialog when present.
-        var tcs = new TaskCompletionSource<OperationResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var overlayKey = WorkspaceJobKeys.RepositoriesOverlayKey(info.WorkspaceId);
-        var started = operationLock.TryStartStructural(
-            info.WorkspaceId,
-            "remove-feature",
-            overlayKey,
-            "Removing feature...",
-            async (op, ct) =>
-            {
-                try
-                {
-                    using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, cancellationToken);
-                    var overlayProgress = BindOverlayProgress(op, progress);
-
-                    var plan = options.AnalyzedPlan is { Success: true } preAnalyzed
-                        ? preAnalyzed
-                        : await AnalyzeRemoveFeatureAsync(featureContextId, linked.Token);
-                    if (!plan.Success)
-                    {
-                        tcs.TrySetResult(OperationResult.Fail(plan.Error ?? "Analyze failed."));
-                        return;
-                    }
-
-                    // Unknown disk state (Worker unreachable, or InspectWorktree failed) can hide real dirty work,
-                    // so Remove is refused here regardless of discard/force authorization - see A2 rule.
-                    if (plan.Repositories.Any(r => r.WorktreeStatusUnknown))
-                    {
-                        tcs.TrySetResult(OperationResult.Fail(
-                            "Could not check one or more repositories. Make sure the Worker is running, then try again."));
-                        return;
-                    }
-
-                    // D3: require each authorization only when that risk is actually present (same rules as the
-                    // Remove dialog checkboxes). Classification / PR-unknown / null outgoing / NeedsRepair alone
-                    // make IsAutomaticallySafe false but do not need discard/force/unlock - Remove stays allowed
-                    // (A3, I1). The old "any not-safe plan needs some authorization flag" gate rejected those
-                    // cases even when the dialog correctly enabled Remove with no checkboxes shown.
-                    var needsDiscard = plan.Repositories.Any(r =>
-                        r.HasUncommittedChanges || r.HasStagedChanges || r.HasConflicts);
-                    var needsForce = plan.Repositories.Any(r =>
-                        (r.EffectiveAheadOfDefault ?? 0) > 0 && r.PullRequestMerged != true);
-                    var needsUnlock = plan.Repositories.Any(r => r.IsLocked);
-
-                    if (needsDiscard && !options.AllowDiscardUncommitted)
-                    {
-                        tcs.TrySetResult(OperationResult.Fail(
-                            "This Feature has uncommitted changes; authorize discarding them explicitly."));
-                        return;
-                    }
-
-                    if (needsForce && !options.AllowForceDeleteLocalBranches)
-                    {
-                        tcs.TrySetResult(OperationResult.Fail(
-                            "This Feature has local branches with commits not in the default branch; authorize force-deleting them explicitly."));
-                        return;
-                    }
-
-                    if (needsUnlock && !options.AllowUnlockWorktrees)
-                    {
-                        tcs.TrySetResult(OperationResult.Fail(
-                            "This Feature has locked worktrees; authorize unlocking them explicitly."));
-                        return;
-                    }
-
-                    var outcome = await RemoveFeatureCoreAsync(
-                        featureContextId, info, options, plan, overlayProgress, linked.Token);
-                    tcs.TrySetResult(outcome);
-                }
-                catch (Exception ex)
-                {
-                    logger.LogWarning(ex, "Feature Remove threw. WorkspaceId={WorkspaceId} FeatureName={FeatureName}", info.WorkspaceId, info.FeatureName);
-                    tcs.TrySetResult(OperationResult.Fail(ex.Message));
-                    throw;
-                }
-            },
-            out var operation);
-
-        if (!started)
-        {
-            logger.LogInformation(
-                "Feature Remove refused because the Workspace is busy. WorkspaceId={WorkspaceId} FeatureName={FeatureName}",
-                info.WorkspaceId, info.FeatureName);
-            return OperationResult.Fail("A Workspace structural operation is already running.");
-        }
-
         var startedAt = logger.FeatureOperationStarted(
             "Remove", info.WorkspaceId, info.WorkspaceFeatureId, featureContextId.Value, info.FeatureName);
         try
         {
-            var removed = await tcs.Task.WaitAsync(cancellationToken);
-            await operation.WhenCompleted;
+            // Everything but the final Workspace refresh runs under this Feature's own lock with no overlay, so
+            // other Features and the page stay usable. A caller that queues the removal waits for a free slot first.
+            var phaseOne = await RunRemovalPhaseOneAsync(featureContextId, info, options, progress, cancellationToken);
+            var outcome = phaseOne.Failure
+                ?? await RunRemovalFinalizeAsync(featureContextId, info, phaseOne, progress, cancellationToken);
             logger.FeatureOperationFinished(
                 "Remove", info.WorkspaceId, info.WorkspaceFeatureId, featureContextId.Value, info.FeatureName, startedAt,
-                removed.Success ? "Succeeded" : "Failed", removed.Error);
-            return removed;
+                outcome.Success ? "Succeeded" : "Failed", outcome.Error);
+            return outcome;
         }
         catch (OperationCanceledException)
         {
@@ -740,7 +656,106 @@ public sealed class WorkspaceFeatureOperations(
         }
     }
 
-    private async Task<OperationResult> RemoveFeatureCoreAsync(
+    /// <summary>
+    /// Validates the plan and removes the worktrees and branches. Deliberately takes no Workspace operation lock: a
+    /// removal running in the background must never stop Sync or any other operation from starting.
+    /// </summary>
+    private async Task<RemovalPhaseOne> RunRemovalPhaseOneAsync(
+        WorkspaceFeatureContextId featureContextId,
+        WorkspaceFeatureContextInfo info,
+        RemoveFeatureOptions options,
+        IProgress<OperationProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var plan = options.AnalyzedPlan is { Success: true } preAnalyzed
+                ? preAnalyzed
+                : await AnalyzeRemoveFeatureAsync(featureContextId, cancellationToken);
+            if (!plan.Success)
+                return RemovalPhaseOne.Failed(OperationResult.Fail(plan.Error ?? "Analyze failed."));
+
+            // Unknown disk state (Worker unreachable, or InspectWorktree failed) can hide real dirty work,
+            // so Remove is refused here regardless of discard/force authorization - see A2 rule.
+            if (plan.Repositories.Any(r => r.WorktreeStatusUnknown))
+                return RemovalPhaseOne.Failed(OperationResult.Fail(
+                    "Could not check one or more repositories. Make sure the Worker is running, then try again."));
+
+            // D3: require each authorization only when that risk is actually present (same rules as the
+            // Remove dialog checkboxes). Classification / PR-unknown / null outgoing / NeedsRepair alone
+            // make IsAutomaticallySafe false but do not need discard/force/unlock - Remove stays allowed
+            // (A3, I1).
+            var needsDiscard = plan.Repositories.Any(r =>
+                r.HasUncommittedChanges || r.HasStagedChanges || r.HasConflicts);
+            var needsForce = plan.Repositories.Any(r =>
+                (r.EffectiveAheadOfDefault ?? 0) > 0 && r.PullRequestMerged != true);
+            var needsUnlock = plan.Repositories.Any(r => r.IsLocked);
+
+            if (needsDiscard && !options.AllowDiscardUncommitted)
+                return RemovalPhaseOne.Failed(OperationResult.Fail(
+                    "This Feature has uncommitted changes; authorize discarding them explicitly."));
+            if (needsForce && !options.AllowForceDeleteLocalBranches)
+                return RemovalPhaseOne.Failed(OperationResult.Fail(
+                    "This Feature has local branches with commits not in the default branch; authorize force-deleting them explicitly."));
+            if (needsUnlock && !options.AllowUnlockWorktrees)
+                return RemovalPhaseOne.Failed(OperationResult.Fail(
+                    "This Feature has locked worktrees; authorize unlocking them explicitly."));
+
+            return await RemoveFeatureCoreAsync(featureContextId, info, options, plan, progress, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Feature Remove threw. WorkspaceId={WorkspaceId} FeatureName={FeatureName}", info.WorkspaceId, info.FeatureName);
+            return RemovalPhaseOne.Failed(OperationResult.Fail(ex.Message));
+        }
+    }
+
+    /// <summary>
+    /// Refreshes the Workspace state and drops the Feature's rows under the page's loading overlay. Starts as soon as
+    /// the Workspace is idle; it waits for a running operation instead of interrupting it.
+    /// </summary>
+    private async Task<OperationResult> RunRemovalFinalizeAsync(
+        WorkspaceFeatureContextId featureContextId,
+        WorkspaceFeatureContextInfo info,
+        RemovalPhaseOne phaseOne,
+        IProgress<OperationProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        var tcs = new TaskCompletionSource<OperationResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        IWorkspaceLockedOperation operation;
+        // Wait for whatever else is running (Sync, ...) to finish: this never interrupts it, and the removal is already
+        // done by now, so the refresh always runs, under the page overlay.
+        while (!operationLock.TryStartStructural(
+                   info.WorkspaceId,
+                   "remove-feature",
+                   WorkspaceJobKeys.RepositoriesOverlayKey(info.WorkspaceId),
+                   "Refreshing workspace state...",
+                   async (op, ct) =>
+                   {
+                       try
+                       {
+                           using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, cancellationToken);
+                           tcs.TrySetResult(await FinalizeFeatureRemovalAsync(
+                               featureContextId, info, phaseOne, BindOverlayProgress(op, progress), linked.Token));
+                       }
+                       catch (Exception ex)
+                       {
+                           logger.LogWarning(ex, "Feature Remove finalize threw. WorkspaceId={WorkspaceId} FeatureName={FeatureName}", info.WorkspaceId, info.FeatureName);
+                           tcs.TrySetResult(OperationResult.Fail(ex.Message));
+                           throw;
+                       }
+                   },
+                   out operation))
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken);
+        }
+
+        var result = await tcs.Task.WaitAsync(cancellationToken);
+        await operation.WhenCompleted;
+        return result;
+    }
+
+    private async Task<RemovalPhaseOne> RemoveFeatureCoreAsync(
         WorkspaceFeatureContextId featureContextId,
         WorkspaceFeatureContextInfo info,
         RemoveFeatureOptions options,
@@ -1101,7 +1116,7 @@ public sealed class WorkspaceFeatureOperations(
             feature.LastError = firstError;
             feature.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(cancellationToken);
-            return OperationResult.Fail(firstError);
+            return RemovalPhaseOne.Failed(OperationResult.Fail(firstError));
         }
 
         // Every worktree is unregistered now. Anything still on disk (a file or folder some program has open) is deleted
@@ -1110,34 +1125,50 @@ public sealed class WorkspaceFeatureOperations(
             ? await CleanupFeatureFolderForNameAsync(info.WorkspaceId, info.FeatureName, onlyIfMarked: false, cancellationToken)
             : null;
 
-        // Refresh special Workspace snapshot before dropping Feature rows so the grid is not stale
-        // after navigation back to Workspace. ParentBranchName / SourceBranchName is provenance only
-        // and must never drive a checkout or return-to-default here.
+        var report = rows
+            .Select(r => reportByWrId.TryGetValue(r.WorkspaceRepositoryId, out var entry) ? entry : null)
+            .Where(entry => entry is not null)
+            .Select(entry => entry!)
+            .ToList();
+        return new RemovalPhaseOne(null, report, pendingDeletionFolder, repositoryIds, specialContextId);
+    }
+
+    /// <summary>
+    /// Last step of Remove Feature, under the Workspace overlay: refresh the special Workspace snapshot so the grid is not
+    /// stale after navigation back to Workspace (ParentBranchName / SourceBranchName is provenance only and must never
+    /// drive a checkout or return-to-default here), then drop the Feature's rows.
+    /// </summary>
+    private async Task<OperationResult> FinalizeFeatureRemovalAsync(
+        WorkspaceFeatureContextId featureContextId,
+        WorkspaceFeatureContextInfo info,
+        RemovalPhaseOne phaseOne,
+        IProgress<OperationProgress>? progress,
+        CancellationToken cancellationToken)
+    {
         await RefreshWorkspaceStateAfterFeatureRemoveAsync(
             info.WorkspaceId,
-            specialContextId,
-            repositoryIds,
+            phaseOne.SpecialContextId,
+            phaseOne.RepositoryIds,
             progress,
             cancellationToken);
 
         var selected = await selectedContextService.GetSelectedAsync(info.WorkspaceId, cancellationToken);
         if (selected?.Value == featureContextId.Value)
-            await selectedContextService.SetSelectedAsync(info.WorkspaceId, specialContextId, cancellationToken);
+            await selectedContextService.SetSelectedAsync(info.WorkspaceId, phaseOne.SpecialContextId, cancellationToken);
+
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
 
         // Deletes every row for this context, including any already-Removed row from an earlier
-        // partial remove that was excluded from `rows` above - the whole Feature is gone now.
+        // partial remove - the whole Feature is gone now. Nothing is tracked by this DbContext, so removing
+        // the context below cannot cascade-delete these rows a second time.
         await db.WorkspaceFeatureRepositories
             .Where(r => r.WorkspaceFeatureContextId == featureContextId.Value)
             .ExecuteDeleteAsync(cancellationToken);
 
-        // ExecuteDeleteAsync bypasses the change tracker, so `rows` (still tracked as Unchanged
-        // children of `context`) must be detached here. Otherwise removing `context` below makes EF
-        // cascade-delete these already-gone rows again, and that second delete affects 0 rows.
-        foreach (var row in rows)
-            db.Entry(row).State = EntityState.Detached;
-
         var context = await db.WorkspaceFeatureContexts
             .FirstAsync(c => c.WorkspaceFeatureContextId == featureContextId.Value, cancellationToken);
+        var feature = await db.WorkspaceFeatures
+            .FirstAsync(f => f.WorkspaceFeatureId == info.WorkspaceFeatureId, cancellationToken);
 
         // Feature-context-scoped data (WorkspaceProjects, their dependencies, file-line statuses) is
         // owned solely by this context and must be dropped with it. Never run this for the special
@@ -1149,16 +1180,23 @@ public sealed class WorkspaceFeatureOperations(
         db.WorkspaceFeatures.Remove(feature);
         await db.SaveChangesAsync(cancellationToken);
 
-        var report = rows
-            .Select(r => reportByWrId.TryGetValue(r.WorkspaceRepositoryId, out var entry) ? entry : null)
-            .Where(entry => entry is not null)
-            .Select(entry => entry!)
-            .ToList();
         return OperationResult.Ok() with
         {
-            RemoveFeatureReport = report,
-            RemoveFeaturePendingDeletionFolder = pendingDeletionFolder,
+            RemoveFeatureReport = phaseOne.Report,
+            RemoveFeaturePendingDeletionFolder = phaseOne.PendingDeletionFolder,
         };
+    }
+
+    /// <summary>What the background part of Remove Feature leaves for <see cref="FinalizeFeatureRemovalAsync"/>.</summary>
+    private sealed record RemovalPhaseOne(
+        OperationResult? Failure,
+        IReadOnlyList<RemoveFeatureRepositoryReport> Report,
+        string? PendingDeletionFolder,
+        IReadOnlyList<int> RepositoryIds,
+        WorkspaceFeatureContextId SpecialContextId)
+    {
+        public static RemovalPhaseOne Failed(OperationResult failure) =>
+            new(failure, [], null, [], default);
     }
 
     /// <summary>

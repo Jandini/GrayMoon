@@ -1,9 +1,10 @@
 @using GrayMoon.Application
 @using GrayMoon.Application.Features
 @inject IWorkspaceFeatureOperations FeatureOperations
+@inject IFeatureRemovalQueue RemovalQueue
 @inject ILogger<RemoveFeatureModal> Logger
 
-@if (IsVisible && !_removing)
+@if (IsVisible)
 {
     <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: 1085;"
          @onkeydown="HandleKeyDown"
@@ -212,8 +213,8 @@
         </div>
     </div>
 }
-@* While _removing, the dialog is hidden and the page-level BackgroundJobOverlay (driven by the
-   "remove-feature" structural operation) covers the page with its own "Removing feature..." message. *@
+@* Remove hands the work to IFeatureRemovalQueue and closes the dialog; only the final Workspace refresh covers the
+   page, through the page-level BackgroundJobOverlay. *@
 
 @code {
     [Parameter] public bool IsVisible { get; set; }
@@ -242,7 +243,6 @@
         "Some files were still in use, so part of the Feature folder was left behind. "
         + "It is marked for deletion and GrayMoon will remove it automatically later.";
     private bool _analyzing;
-    private bool _removing;
     private bool _allowDiscard;
     private bool _allowForce;
     private bool _allowUnlock;
@@ -707,7 +707,7 @@
         // After a successful remove the Feature context is gone. Never re-analyze while showing the
         // warnings report (or while the structural overlay is covering the page) - that would surface
         // "WorkspaceFeatureContext N was not found" next to the removal outcome.
-        if (_removing || _report is not null)
+        if (_report is not null)
             return;
 
         // Page already ran analyze under LoadingOverlay; show that plan immediately (no in-dialog check).
@@ -800,17 +800,18 @@
         }
     }
 
+    /// <summary>
+    /// Hands the removal to the background queue and closes the dialog at once. The outcome (success, warnings or
+    /// failure) arrives later as a toast.
+    /// </summary>
     private async Task RemoveAsync()
     {
         if (FeatureContextId is null)
             return;
-        _removing = true;
         _error = null;
-        _report = null;
-        _pendingDeletionFolder = null;
         try
         {
-            var result = await FeatureOperations.RemoveFeatureAsync(
+            var queued = await RemovalQueue.TryEnqueueAsync(
                 FeatureContextId.Value,
                 new RemoveFeatureOptions
                 {
@@ -821,41 +822,19 @@
                     DeleteRemoteBranches = _deleteRemoteBranches,
                     AnalyzedPlan = _plan
                 });
-            if (!result.Success)
+            if (!queued)
             {
-                // Hard failure: error only - never pair with a green/success report.
-                _report = null;
-                _error = result.Error ?? "Remove Feature failed.";
-                await RefreshPlanAsync();
-                await OnRemoveFailed.InvokeAsync();
+                _error = "This Feature is already being removed.";
                 return;
             }
 
-            var report = result.RemoveFeatureReport ?? [];
-            if (!HasReportWarnings(report) && string.IsNullOrEmpty(result.RemoveFeaturePendingDeletionFolder))
-            {
-                // Clean success: close immediately; page shows a toast via OnRemoved.
-                ResetDialogState();
-                await OnRemoved.InvokeAsync();
-                return;
-            }
-
-            // Success with warnings to acknowledge, or a folder left for later cleanup (information only).
-            _plan = null;
-            _analyzedFor = null;
-            _error = null;
-            _report = report;
-            _pendingDeletionFolder = result.RemoveFeaturePendingDeletionFolder;
+            ResetDialogState();
+            await OnRemoved.InvokeAsync();
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Remove Feature failed");
-            _report = null;
+            Logger.LogError(ex, "Remove Feature could not be queued");
             _error = ex.Message;
-        }
-        finally
-        {
-            _removing = false;
         }
     }
 
