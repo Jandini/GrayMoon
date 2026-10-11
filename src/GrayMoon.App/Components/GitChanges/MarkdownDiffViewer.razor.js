@@ -634,6 +634,570 @@ function attachBrokenImageFallbacks(root) {
     }
 }
 
+const FIND_MARK = 'markdown-find-match';
+const FIND_MARK_CURRENT = 'markdown-find-match--current';
+const FIND_SKIP_SELECTOR = 'script, style, textarea, input, title, desc, .mermaid-panzoom-controls, .markdown-find-widget';
+const FIND_TYPE_DELAY_MS = 400;
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+let findKeyListener = null;
+
+function escapeRegExp(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function buildFindRegex(query, matchCase, wholeWord, useRegex) {
+    if (!query) {
+        return { regex: null, error: false };
+    }
+
+    let source = query;
+    if (useRegex) {
+        try {
+            // Validate before wrapping so a bad pattern surfaces as Invalid, not a throw.
+            new RegExp(query);
+        } catch {
+            return { regex: null, error: true };
+        }
+    } else {
+        source = escapeRegExp(query);
+    }
+
+    if (wholeWord) {
+        source = `\\b(?:${source})\\b`;
+    }
+
+    try {
+        return { regex: new RegExp(source, matchCase ? 'g' : 'gi'), error: false };
+    } catch {
+        return { regex: null, error: true };
+    }
+}
+
+function isSvgTextContext(node) {
+    const parent = node.parentElement;
+    return !!parent && parent.namespaceURI === SVG_NS;
+}
+
+function createFindHighlight(text, inSvg) {
+    if (inSvg) {
+        const tspan = document.createElementNS(SVG_NS, 'tspan');
+        tspan.setAttribute('class', FIND_MARK);
+        tspan.textContent = text;
+        return tspan;
+    }
+
+    const mark = document.createElement('mark');
+    mark.className = FIND_MARK;
+    mark.textContent = text;
+    return mark;
+}
+
+function unwrapFindMarks(root) {
+    const marks = root.querySelectorAll(`mark.${FIND_MARK}, tspan.${FIND_MARK}`);
+    for (const mark of marks) {
+        const parent = mark.parentNode;
+        if (!parent) {
+            continue;
+        }
+
+        while (mark.firstChild) {
+            parent.insertBefore(mark.firstChild, mark);
+        }
+
+        parent.removeChild(mark);
+        parent.normalize();
+    }
+}
+
+function collectFindTextNodes(root) {
+    const nodes = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+            if (!node.nodeValue) {
+                return NodeFilter.FILTER_REJECT;
+            }
+
+            const parent = node.parentElement;
+            if (!parent || parent.closest(FIND_SKIP_SELECTOR)) {
+                return NodeFilter.FILTER_REJECT;
+            }
+
+            return NodeFilter.FILTER_ACCEPT;
+        },
+    });
+
+    let node;
+    while ((node = walker.nextNode())) {
+        nodes.push(node);
+    }
+
+    return nodes;
+}
+
+function highlightFindMatches(root, regex) {
+    unwrapFindMarks(root);
+    const marks = [];
+    const textNodes = collectFindTextNodes(root);
+
+    for (const node of textNodes) {
+        const text = node.nodeValue;
+        regex.lastIndex = 0;
+        const matches = [];
+        let match;
+        while ((match = regex.exec(text)) !== null) {
+            if (!match[0]) {
+                if (regex.lastIndex === match.index) {
+                    regex.lastIndex += 1;
+                }
+                continue;
+            }
+
+            matches.push({ start: match.index, end: match.index + match[0].length });
+            if (regex.lastIndex === match.index) {
+                regex.lastIndex += 1;
+            }
+        }
+
+        if (matches.length === 0) {
+            continue;
+        }
+
+        const inSvg = isSvgTextContext(node);
+        const frag = document.createDocumentFragment();
+        let last = 0;
+        for (const range of matches) {
+            if (range.start > last) {
+                frag.appendChild(document.createTextNode(text.slice(last, range.start)));
+            }
+
+            const mark = createFindHighlight(text.slice(range.start, range.end), inSvg);
+            frag.appendChild(mark);
+            marks.push(mark);
+            last = range.end;
+        }
+
+        if (last < text.length) {
+            frag.appendChild(document.createTextNode(text.slice(last)));
+        }
+
+        node.parentNode.replaceChild(frag, node);
+    }
+
+    return marks;
+}
+
+function selectedPreviewText(entry) {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) {
+        return '';
+    }
+
+    const anchor = selection.anchorNode;
+    if (!anchor || !entry.el.contains(anchor)) {
+        return '';
+    }
+
+    return (selection.toString() || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+}
+
+function isPreviewSurfaceVisible(entry) {
+    if (!entry?.el?.isConnected) {
+        return false;
+    }
+
+    const container = entry.el.closest('.git-diff-markdown-container');
+    if (container) {
+        if (container.style.display === 'none') {
+            return false;
+        }
+
+        const style = window.getComputedStyle(container);
+        if (style.display === 'none' || style.visibility === 'hidden') {
+            return false;
+        }
+    }
+
+    const host = entry.wrap || entry.el;
+    return host.getClientRects().length > 0;
+}
+
+function visibleFindEntry() {
+    for (const entry of viewers.values()) {
+        if (isPreviewSurfaceVisible(entry)) {
+            return entry;
+        }
+    }
+
+    return null;
+}
+
+function updateFindUi(entry) {
+    if (!entry.widget) {
+        return;
+    }
+
+    const matches = entry.findMarks || [];
+    const label = entry.widget.querySelector('.markdown-find-widget__matches');
+    if (label) {
+        if (entry.findError) {
+            label.textContent = 'Invalid';
+            label.classList.add('is-error');
+        } else if (!entry.findQuery) {
+            label.textContent = '';
+            label.classList.remove('is-error');
+        } else if (matches.length === 0) {
+            label.textContent = 'No results';
+            label.classList.add('is-error');
+        } else {
+            label.textContent = `${entry.findIndex + 1} of ${matches.length}`;
+            label.classList.remove('is-error');
+        }
+    }
+
+    if (entry.findInput) {
+        entry.findInput.classList.toggle('is-error', !!entry.findError);
+        if (entry.findInput.value !== entry.findQuery) {
+            entry.findInput.value = entry.findQuery;
+        }
+    }
+
+    entry.widget.classList.toggle('is-no-results', !!entry.findQuery && !entry.findError && matches.length === 0);
+    for (const btn of entry.widget.querySelectorAll('[data-opt]')) {
+        const on = btn.dataset.opt === 'case' ? entry.findMatchCase
+            : btn.dataset.opt === 'word' ? entry.findWholeWord
+                : entry.findRegex;
+        btn.classList.toggle('is-active', on);
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+}
+
+function revealFindMatch(entry, index, { smooth = true } = {}) {
+    const marks = entry.findMarks || [];
+    for (let i = 0; i < marks.length; i++) {
+        marks[i].classList.toggle(FIND_MARK_CURRENT, i === index);
+    }
+
+    const current = marks[index];
+    if (!current) {
+        return;
+    }
+
+    try {
+        current.scrollIntoView({ block: 'center', behavior: smooth ? 'smooth' : 'auto' });
+    } catch {
+        /* ignore - preview must stay usable even if a match node is odd */
+    }
+}
+
+function cancelFindDebounce(entry) {
+    if (entry.findDebounce) {
+        clearTimeout(entry.findDebounce);
+        entry.findDebounce = null;
+    }
+}
+
+function scheduleFind(entry) {
+    cancelFindDebounce(entry);
+    entry.findDebounce = window.setTimeout(() => {
+        entry.findDebounce = null;
+        applyFind(entry, { reveal: true, smooth: false });
+    }, FIND_TYPE_DELAY_MS);
+}
+
+function applyFind(entry, { reveal = true, smooth = true } = {}) {
+    cancelFindDebounce(entry);
+    if (!entry.findOpen) {
+        unwrapFindMarks(entry.el);
+        entry.findMarks = [];
+        entry.findIndex = -1;
+        updateFindUi(entry);
+        return;
+    }
+
+    const { regex, error } = buildFindRegex(
+        entry.findQuery,
+        entry.findMatchCase,
+        entry.findWholeWord,
+        entry.findRegex);
+    entry.findError = error;
+    entry.findMarks = !error && regex ? highlightFindMatches(entry.el, regex) : [];
+    entry.findIndex = entry.findMarks.length > 0 ? 0 : -1;
+    updateFindUi(entry);
+    if (reveal && entry.findIndex >= 0) {
+        revealFindMatch(entry, entry.findIndex, { smooth });
+    }
+}
+
+function findStep(entry, delta) {
+    if (entry.findDebounce) {
+        applyFind(entry, { reveal: false });
+    }
+
+    const marks = entry.findMarks || [];
+    if (marks.length === 0) {
+        return;
+    }
+
+    const next = (entry.findIndex + delta + marks.length) % marks.length;
+    entry.findIndex = next;
+    updateFindUi(entry);
+    revealFindMatch(entry, next);
+}
+
+function findNext(entry) {
+    findStep(entry, 1);
+}
+
+function findPrevious(entry) {
+    findStep(entry, -1);
+}
+
+function closeFind(entry) {
+    cancelFindDebounce(entry);
+    entry.findOpen = false;
+    unwrapFindMarks(entry.el);
+    entry.findMarks = [];
+    entry.findIndex = -1;
+    if (entry.widget) {
+        entry.widget.hidden = true;
+    }
+
+    updateFindUi(entry);
+    try {
+        entry.el.focus({ preventScroll: true });
+    } catch {
+        /* ignore */
+    }
+}
+
+function openFind(entry, { seedFromSelection = true } = {}) {
+    ensureFindWidget(entry);
+    if (seedFromSelection) {
+        const seeded = selectedPreviewText(entry);
+        if (seeded) {
+            entry.findQuery = seeded;
+        }
+    }
+
+    entry.findOpen = true;
+    entry.widget.hidden = false;
+    applyFind(entry, { reveal: true });
+    requestAnimationFrame(() => {
+        entry.findInput?.focus();
+        entry.findInput?.select();
+    });
+}
+
+function bindFindWidget(entry, widget) {
+    widget.addEventListener('input', (e) => {
+        if (e.target === entry.findInput) {
+            entry.findQuery = entry.findInput.value;
+            scheduleFind(entry);
+        }
+    });
+
+    widget.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const pending = !!entry.findDebounce;
+            if (pending) {
+                applyFind(entry, { reveal: true, smooth: false });
+                return;
+            }
+
+            if (e.shiftKey) {
+                findPrevious(entry);
+            } else {
+                findNext(entry);
+            }
+            return;
+        }
+
+        if (e.altKey && !e.ctrlKey && !e.metaKey) {
+            const key = e.key.toLowerCase();
+            if (key === 'c') {
+                e.preventDefault();
+                entry.findMatchCase = !entry.findMatchCase;
+                applyFind(entry, { reveal: true });
+            } else if (key === 'w') {
+                e.preventDefault();
+                entry.findWholeWord = !entry.findWholeWord;
+                applyFind(entry, { reveal: true });
+            } else if (key === 'r') {
+                e.preventDefault();
+                entry.findRegex = !entry.findRegex;
+                applyFind(entry, { reveal: true });
+            }
+        }
+    });
+
+    widget.addEventListener('click', (e) => {
+        const btn = e.target.closest('button');
+        if (!btn || !widget.contains(btn)) {
+            return;
+        }
+
+        if (btn.dataset.nav === 'next') {
+            findNext(entry);
+            return;
+        }
+
+        if (btn.dataset.nav === 'prev') {
+            findPrevious(entry);
+            return;
+        }
+
+        if (btn.dataset.act === 'close') {
+            closeFind(entry);
+            return;
+        }
+
+        if (btn.dataset.opt === 'case') {
+            entry.findMatchCase = !entry.findMatchCase;
+            applyFind(entry, { reveal: true });
+        } else if (btn.dataset.opt === 'word') {
+            entry.findWholeWord = !entry.findWholeWord;
+            applyFind(entry, { reveal: true });
+        } else if (btn.dataset.opt === 'regex') {
+            entry.findRegex = !entry.findRegex;
+            applyFind(entry, { reveal: true });
+        }
+    });
+}
+
+function ensureFindWidget(entry) {
+    if (entry.widget?.isConnected) {
+        return entry.widget;
+    }
+
+    const wrap = entry.el.closest('.markdown-diff-viewer-wrap') || entry.el.parentElement;
+    entry.wrap = wrap;
+    const widget = document.createElement('div');
+    widget.className = 'markdown-find-widget';
+    widget.hidden = !entry.findOpen;
+    widget.setAttribute('role', 'search');
+    widget.setAttribute('aria-label', 'Find');
+    widget.innerHTML = `
+        <div class="markdown-find-widget__row">
+            <div class="markdown-find-widget__input-wrap">
+                <input type="text" class="markdown-find-widget__input" placeholder="Find" aria-label="Find" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
+                <span class="markdown-find-widget__matches" aria-live="polite"></span>
+            </div>
+            <button type="button" class="markdown-find-widget__opt" data-opt="case" title="Match Case (Alt+C)" aria-label="Match Case" aria-pressed="false">Aa</button>
+            <button type="button" class="markdown-find-widget__opt" data-opt="word" title="Match Whole Word (Alt+W)" aria-label="Match Whole Word" aria-pressed="false">ab</button>
+            <button type="button" class="markdown-find-widget__opt" data-opt="regex" title="Use Regular Expression (Alt+R)" aria-label="Use Regular Expression" aria-pressed="false">.*</button>
+            <button type="button" class="markdown-find-widget__nav" data-nav="prev" title="Previous Match (Shift+Enter)" aria-label="Previous Match"><i class="bi bi-chevron-up" aria-hidden="true"></i></button>
+            <button type="button" class="markdown-find-widget__nav" data-nav="next" title="Next Match (Enter)" aria-label="Next Match"><i class="bi bi-chevron-down" aria-hidden="true"></i></button>
+            <button type="button" class="markdown-find-widget__close" data-act="close" title="Close (Escape)" aria-label="Close"><i class="bi bi-x" aria-hidden="true"></i></button>
+        </div>`;
+    wrap.appendChild(widget);
+    entry.widget = widget;
+    entry.findInput = widget.querySelector('.markdown-find-widget__input');
+    bindFindWidget(entry, widget);
+    updateFindUi(entry);
+    return widget;
+}
+
+function refreshFindAfterContent(entry) {
+    if (!entry.findOpen) {
+        entry.findMarks = [];
+        entry.findIndex = -1;
+        return;
+    }
+
+    ensureFindWidget(entry);
+    applyFind(entry, { reveal: true });
+}
+
+function isFindTargetInPreview(target, entry) {
+    if (!target || typeof target.closest !== 'function') {
+        return false;
+    }
+
+    if (target.closest('.markdown-diff-viewer-wrap') || target.closest('.git-diff-markdown-container')) {
+        return true;
+    }
+
+    return !!(entry && target.closest('.git-diff-chrome') && isPreviewSurfaceVisible(entry));
+}
+
+function onFindDocumentKeydown(e) {
+    const entry = visibleFindEntry();
+    if (!entry) {
+        return;
+    }
+
+    if (document.getElementById('gm-mermaid-lightbox') || document.querySelector('.modal.show')) {
+        return;
+    }
+
+    const target = e.target;
+    const inFind = !!(target && typeof target.closest === 'function' && target.closest('.markdown-find-widget'));
+    const inPreview = inFind || isFindTargetInPreview(target, entry);
+    const inOtherField = !!(target && typeof target.closest === 'function'
+        && target.closest('textarea, input, select, [contenteditable="true"]')
+        && !inFind);
+
+    if (e.key === 'Escape' && entry.findOpen) {
+        e.preventDefault();
+        e.stopPropagation();
+        closeFind(entry);
+        return;
+    }
+
+    const modifier = e.ctrlKey || e.metaKey;
+    if (modifier && !e.altKey && !e.shiftKey && (e.key === 'f' || e.key === 'F')) {
+        if (inOtherField || (!inPreview && !entry.findOpen)) {
+            return;
+        }
+
+        e.preventDefault();
+        e.stopPropagation();
+        openFind(entry, { seedFromSelection: true });
+        return;
+    }
+
+    if (e.key === 'F3') {
+        if (inOtherField || (!inPreview && !entry.findOpen)) {
+            return;
+        }
+
+        if (!entry.findOpen && !entry.findQuery) {
+            return;
+        }
+
+        e.preventDefault();
+        if (!entry.findOpen) {
+            openFind(entry, { seedFromSelection: false });
+        }
+
+        if (e.shiftKey) {
+            findPrevious(entry);
+        } else {
+            findNext(entry);
+        }
+    }
+}
+
+function ensureFindKeyListener() {
+    if (findKeyListener) {
+        return;
+    }
+
+    findKeyListener = onFindDocumentKeydown;
+    document.addEventListener('keydown', findKeyListener, true);
+}
+
+function releaseFindKeyListener() {
+    if (!findKeyListener) {
+        return;
+    }
+
+    document.removeEventListener('keydown', findKeyListener, true);
+    findKeyListener = null;
+}
+
 export async function init(elementId) {
     const el = document.getElementById(elementId);
     if (!el) {
@@ -644,10 +1208,25 @@ export async function init(elementId) {
         return true;
     }
 
-    viewers.set(elementId, {
+    const entry = {
         el,
         changeIndex: -1,
-    });
+        findOpen: false,
+        findQuery: '',
+        findMatchCase: false,
+        findWholeWord: false,
+        findRegex: false,
+        findError: false,
+        findIndex: -1,
+        findMarks: [],
+        findDebounce: null,
+        widget: null,
+        findInput: null,
+        wrap: null,
+    };
+    viewers.set(elementId, entry);
+    ensureFindWidget(entry);
+    ensureFindKeyListener();
     return true;
 }
 
@@ -665,10 +1244,12 @@ export async function setHtml(elementId, html) {
 
     if (!html || !html.trim()) {
         entry.el.innerHTML = '<p class="markdown-diff-empty text-muted">Nothing to preview.</p>';
+        refreshFindAfterContent(entry);
         return;
     }
 
     await renderMermaidIn(entry.el);
+    refreshFindAfterContent(entry);
 }
 
 export function clear(elementId) {
@@ -678,8 +1259,13 @@ export function clear(elementId) {
     }
 
     closeMermaidLightbox();
+    cancelFindDebounce(entry);
+    unwrapFindMarks(entry.el);
     entry.el.innerHTML = '';
     entry.changeIndex = -1;
+    entry.findMarks = [];
+    entry.findIndex = -1;
+    updateFindUi(entry);
 }
 
 export function goToNextChange(elementId) {
@@ -731,6 +1317,12 @@ export function dispose(elementId) {
     }
 
     closeMermaidLightbox();
+    cancelFindDebounce(entry);
+    unwrapFindMarks(entry.el);
+    entry.widget?.remove();
     entry.el.innerHTML = '';
     viewers.delete(elementId);
+    if (viewers.size === 0) {
+        releaseFindKeyListener();
+    }
 }
