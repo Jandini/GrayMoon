@@ -16,6 +16,7 @@ public sealed partial class WorkspaceRepositories
     [Inject] private MergePullRequestReturnToDefaultPreferenceService ReturnToDefaultPreferenceService { get; set; } = default!;
 
     private BulkMergePullRequestsModalState _bulkMergeModal = new();
+    private string? _bulkReturnReconciliationError;
 
     /// <summary>Bound to the same singleton the single-PR dialog's own "Return to default branch" checkbox uses, so the two remember one shared last choice.</summary>
     private bool BulkMergeReturnToDefault
@@ -323,9 +324,9 @@ public sealed partial class WorkspaceRepositories
 
     /// <summary>
     /// Merges <paramref name="rowsToMerge"/> via the plural IWorkspacePullRequestOperations.MergeManyAsync, then
-    /// syncs to default (one repo at a time) whichever of those succeed - plus, unconditionally,
+    /// returns to default (one bounded batch) whichever of those succeed - plus, unconditionally,
     /// <paramref name="rowsToReturnOnly"/> (rows whose merge already succeeded on an earlier run and only need
-    /// their sync step retried, regardless of the live "return to default" checkbox state). Hides the dialog for
+    /// their return step retried, regardless of the live "return to default" checkbox state). Hides the dialog for
     /// the run so BackgroundJobOverlay's LoadingOverlay (with terminal) is the only UI; on full success a toast
     /// closes the flow, and on any failure the dialog reopens as the completed-run summary.
     /// Reused for the primary "Merge N pull requests" button, "Retry failed (n)", and a single row's retry icon.
@@ -335,6 +336,8 @@ public sealed partial class WorkspaceRepositories
         var touchedRows = rowsToMerge.Concat(rowsToReturnOnly).ToList();
         if (touchedRows.Count == 0 || IsJobRunning || !_bulkMergeModal.IsVisible)
             return;
+
+        _bulkReturnReconciliationError = null;
 
         foreach (var row in rowsToMerge)
         {
@@ -422,11 +425,28 @@ public sealed partial class WorkspaceRepositories
                         .ToList();
                 }
 
-                if (rowsToReturnOnly.Count > 0)
-                    await RunBulkReturnToDefaultAsync(rowsToReturnOnly, job, ct);
+                if (rowsToReturnOnly.Count > 0 || (returnToDefault && succeededFromMerge.Count > 0))
+                {
+                    var returnRows = new List<BulkMergePrRow>(rowsToReturnOnly.Count + succeededFromMerge.Count);
+                    var seenRepositoryIds = new HashSet<int>();
+                    foreach (var row in rowsToReturnOnly)
+                    {
+                        if (seenRepositoryIds.Add(row.RepositoryId))
+                            returnRows.Add(row);
+                    }
 
-                if (returnToDefault && succeededFromMerge.Count > 0)
-                    await RunBulkReturnToDefaultAsync(succeededFromMerge, job, ct);
+                    if (returnToDefault)
+                    {
+                        foreach (var row in succeededFromMerge)
+                        {
+                            if (seenRepositoryIds.Add(row.RepositoryId))
+                                returnRows.Add(row);
+                        }
+                    }
+
+                    if (returnRows.Count > 0)
+                        await RunBulkReturnToDefaultAsync(returnRows, job, ct);
+                }
 
                 await InvokeAsync(async () =>
                 {
@@ -450,51 +470,58 @@ public sealed partial class WorkspaceRepositories
     }
 
     /// <summary>
-    /// Calls ReturnToDefaultAsync once per successfully-merged row, never once for the whole set -
-    /// ReturnToDefaultAsync aborts its entire call on first failure with no per-repo attribution.
-    /// Sequential on purpose: each unattended sync recomputes workspace-wide stats at the end, and
-    /// running those in parallel races SQLite plus the recompute. Overlay progress goes through the
-    /// standard page-job terminal.
+    /// Returns every distinct repository in one batch. Each repository keeps its own success or failure.
+    /// Workspace recompute runs once after the batch, not once per repository.
     /// </summary>
     private async Task RunBulkReturnToDefaultAsync(IReadOnlyList<BulkMergePrRow> succeededRows, BackgroundJobHandle job, CancellationToken ct)
     {
-        SafeInvoke(() =>
+        await InvokeAsync(() =>
         {
+            if (_disposed)
+                return;
             foreach (var row in succeededRows)
                 row.Status = BulkMergeRowStatus.ReturningToDefault;
+            StateHasChanged();
         });
 
-        var progress = job.ToOperationProgress();
-        foreach (var row in succeededRows)
+        UnattendedReturnToDefaultBatchResult batch;
+        try
         {
-            ct.ThrowIfCancellationRequested();
-
-            UnattendedReturnToDefaultResult syncResult;
-            try
+            batch = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, UnattendedReturnToDefaultBatchResult>(
+                svc => svc.ReturnToDefaultBatchAsync(
+                    WorkspaceId,
+                    RequireSelectedContextId(),
+                    succeededRows.Select(row => row.RepositoryId).ToList(),
+                    job.ToOperationProgress(),
+                    ct));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            await InvokeAsync(() =>
             {
-                syncResult = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, UnattendedReturnToDefaultResult>(
-                    svc => svc.ReturnToDefaultAsync(WorkspaceId, RequireSelectedContextId(), [row.RepositoryId], progress, ct));
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                syncResult = new UnattendedReturnToDefaultResult(false, ex.Message);
-            }
-
-            SafeInvoke(() =>
-            {
-                if (syncResult.Completed)
-                {
-                    row.Status = BulkMergeRowStatus.ReturnedToDefault;
-                    ClearRepositoryError(row.RepositoryId);
-                }
-                else
+                if (_disposed)
+                    return;
+                foreach (var row in succeededRows.Where(row => row.Status == BulkMergeRowStatus.ReturningToDefault))
                 {
                     row.Status = BulkMergeRowStatus.ReturnFailed;
-                    row.ErrorMessage = syncResult.AbortReason;
-                    SetRepositoryError(row.RepositoryId, syncResult.AbortReason ?? "Failed to return to default branch.");
+                    row.ErrorMessage = ex.Message;
+                    SetRepositoryError(row.RepositoryId, ex.Message);
                 }
+                StateHasChanged();
             });
+            return;
         }
+
+        await InvokeAsync(() =>
+        {
+            if (_disposed)
+                return;
+            BulkMergeReturnStatus.Apply(succeededRows, batch.Results, ClearRepositoryError, SetRepositoryError);
+            _bulkReturnReconciliationError = batch.ReconciliationSucceeded ? null : batch.ReconciliationError;
+            StateHasChanged();
+        });
+
+        ct.ThrowIfCancellationRequested();
     }
 
     /// <summary>
@@ -506,34 +533,27 @@ public sealed partial class WorkspaceRepositories
     /// </summary>
     private void FinishBulkMergeRun(IReadOnlyList<BulkMergePrRow> touchedRows)
     {
-        foreach (var row in touchedRows)
-        {
-            if (row.Status == BulkMergeRowStatus.Merging)
-            {
-                row.Status = BulkMergeRowStatus.Skipped;
-            }
-            else if (row.Status == BulkMergeRowStatus.ReturningToDefault)
-            {
-                row.Status = BulkMergeRowStatus.ReturnFailed;
-                row.ErrorMessage = "Return to default branch was cancelled.";
-            }
-        }
+        BulkMergeRunFinalizer.FinalizeInterruptedRows(touchedRows);
 
         _bulkMergeModal.IsRunning = false;
         _bulkMergeModal.HasRun = true;
 
-        var failedCount = touchedRows.Count(r => r.Status == BulkMergeRowStatus.Failed);
-        var returnFailedCount = touchedRows.Count(r => r.Status == BulkMergeRowStatus.ReturnFailed);
-        var skippedCount = touchedRows.Count(r => r.Status == BulkMergeRowStatus.Skipped);
-        var succeededCount = touchedRows.Count(r =>
-            r.Status is BulkMergeRowStatus.Merged or BulkMergeRowStatus.ReturnedToDefault);
-
-        if (failedCount == 0 && returnFailedCount == 0 && skippedCount == 0)
+        var counts = BulkMergeRunFinalizer.Count(touchedRows);
+        if (counts.Failed == 0 && counts.ReturnFailed == 0 && counts.Skipped == 0)
         {
             _bulkMergeModal.IsVisible = false;
-            ToastService.Show(succeededCount == 1
-                ? "1 pull request merged successfully."
-                : $"{succeededCount} pull requests merged successfully.");
+            if (!string.IsNullOrWhiteSpace(_bulkReturnReconciliationError))
+            {
+                ToastService.ShowError(counts.Succeeded == 1
+                    ? "The repository returned to the default branch, but refreshing the workspace failed."
+                    : "Repositories returned to the default branch, but refreshing the workspace failed.");
+            }
+            else
+            {
+                ToastService.Show(counts.Succeeded == 1
+                    ? "1 pull request merged successfully."
+                    : $"{counts.Succeeded} pull requests merged successfully.");
+            }
             return;
         }
 
@@ -541,29 +561,24 @@ public sealed partial class WorkspaceRepositories
         // PageJobOptions.CancelToast, so only real merge/return failures get a red toast here.
         _bulkMergeModal.IsVisible = true;
 
-        const string cancelledReturnMessage = "Return to default branch was cancelled.";
-        var realReturnFailedCount = touchedRows.Count(r =>
-            r.Status == BulkMergeRowStatus.ReturnFailed &&
-            !string.Equals(r.ErrorMessage, cancelledReturnMessage, StringComparison.Ordinal));
-
-        if (failedCount == 0 && realReturnFailedCount == 0)
+        if (counts.Failed == 0 && counts.RealReturnFailed == 0)
             return;
 
-        if (failedCount > 0 && realReturnFailedCount > 0)
+        if (counts.Failed > 0 && counts.RealReturnFailed > 0)
         {
             ToastService.ShowError("Bulk merge finished with failures.");
         }
-        else if (failedCount > 0)
+        else if (counts.Failed > 0)
         {
-            ToastService.ShowError(failedCount == 1
+            ToastService.ShowError(counts.Failed == 1
                 ? "1 pull request failed to merge."
-                : $"{failedCount} pull requests failed to merge.");
+                : $"{counts.Failed} pull requests failed to merge.");
         }
         else
         {
-            ToastService.ShowError(realReturnFailedCount == 1
+            ToastService.ShowError(counts.RealReturnFailed == 1
                 ? "1 pull request merged, but return to default failed."
-                : $"{realReturnFailedCount} pull requests merged, but return to default failed.");
+                : $"{counts.RealReturnFailed} pull requests merged, but return to default failed.");
         }
     }
 

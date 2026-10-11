@@ -5,6 +5,42 @@ namespace GrayMoon.Application;
 
 public sealed record UnattendedReturnToDefaultResult(bool Completed, string? AbortReason);
 
+/// <summary>Why one repository in an unattended return batch did not finish. <see cref="None"/> when it completed.</summary>
+public enum UnattendedReturnFailureStage
+{
+    None = 0,
+    Fetch,
+    PullRequestRefresh,
+    Eligibility,
+    Execution,
+    Cancelled
+}
+
+/// <summary>
+/// One repository's outcome from <see cref="IWorkspaceSyncOperations.ReturnToDefaultBatchAsync"/>.
+/// <see cref="MutationCompleted"/> stays true when Git finished even if the later workspace refresh fails.
+/// </summary>
+public sealed record UnattendedReturnToDefaultRepositoryResult(
+    int RepositoryId,
+    bool Completed,
+    string? AbortReason,
+    UnattendedReturnFailureStage FailureStage,
+    bool MutationAttempted,
+    bool MutationCompleted);
+
+/// <summary>
+/// Per-repository unattended return results plus the single workspace reconciliation that follows the batch.
+/// <see cref="ReconciliationSucceeded"/> is true when reconciliation was not needed.
+/// </summary>
+public sealed record UnattendedReturnToDefaultBatchResult(
+    IReadOnlyList<UnattendedReturnToDefaultRepositoryResult> Results,
+    bool ReconciliationAttempted,
+    bool ReconciliationSucceeded,
+    string? ReconciliationError)
+{
+    public const string CancelledMessage = "Return to default branch was cancelled.";
+}
+
 /// <summary>Per-repository facts for a Return-to-Default safety decision. Describes state and consequences, not UI.</summary>
 public sealed record ReturnToDefaultRepositoryPlan(
     int RepositoryId,
@@ -94,6 +130,18 @@ public interface IWorkspaceSyncOperations
     /// Aborts the batch on the first blocking condition or execution failure.
     /// </summary>
     Task<UnattendedReturnToDefaultResult> ReturnToDefaultAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        IReadOnlyList<int> repositoryIds,
+        IProgress<OperationProgress>? progress,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Unattended Return to Default for a bulk follow-up. Each distinct repository is planned and executed
+    /// on its own, bounded by the workspace parallel limit. One repository's blocker or failure does not
+    /// stop the others. Workspace recompute and broadcast run once after every admitted mutation has settled.
+    /// </summary>
+    Task<UnattendedReturnToDefaultBatchResult> ReturnToDefaultBatchAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         IReadOnlyList<int> repositoryIds,

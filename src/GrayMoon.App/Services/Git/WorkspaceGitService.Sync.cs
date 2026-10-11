@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using GrayMoon.Abstractions.Worker;
 using GrayMoon.Abstractions.Exceptions;
 using GrayMoon.Abstractions.Notifications;
@@ -75,11 +76,28 @@ public sealed partial class WorkspaceGitService
 
         var completedCount = 0;
         var totalCount = repos.Count;
+        var activeCount = 0;
+        var maxActive = new int[1];
+        var fanOutStart = Stopwatch.GetTimestamp();
         using var semaphore = new SemaphoreSlim(_maxConcurrent);
 
         var syncTasks = repos.Select(async repo =>
         {
             await semaphore.WaitAsync(cancellationToken);
+            var operationId = Guid.NewGuid().ToString("N");
+            var repoStart = Stopwatch.GetTimestamp();
+            var nowActive = Interlocked.Increment(ref activeCount);
+            int snapshot;
+            do
+            {
+                snapshot = Volatile.Read(ref maxActive[0]);
+                if (nowActive <= snapshot)
+                    break;
+            }
+            while (Interlocked.CompareExchange(ref maxActive[0], nowActive, snapshot) != snapshot);
+            _logger.LogDebug(
+                "SyncRepository dispatch WorkspaceId={WorkspaceId} ContextId={ContextId} RepositoryId={RepositoryId} OperationId={OperationId} Stage={Stage} ActiveCount={ActiveCount}",
+                workspaceId, contextId.Value, repo.RepositoryId, operationId, "dispatch", nowActive);
             try
             {
                 divergenceByRepoId.TryGetValue(repo.RepositoryId, out var divergenceBaseBranch);
@@ -99,6 +117,10 @@ public sealed partial class WorkspaceGitService
                 };
                 var response = await _workerBridge.SendCommandAsync("SyncRepository", args, cancellationToken);
                 var info = ParseSyncRepositoryResponse(response);
+                _logger.LogDebug(
+                    "SyncRepository response WorkspaceId={WorkspaceId} ContextId={ContextId} RepositoryId={RepositoryId} OperationId={OperationId} Stage={Stage} ElapsedMs={ElapsedMs} ActiveCount={ActiveCount}",
+                    workspaceId, contextId.Value, repo.RepositoryId, operationId, "response",
+                    (long)Stopwatch.GetElapsedTime(repoStart).TotalMilliseconds, nowActive);
                 var count = Interlocked.Increment(ref completedCount);
                 onProgress?.Invoke(count, totalCount, repo.RepositoryId, info);
                 if (count == totalCount)
@@ -107,13 +129,23 @@ public sealed partial class WorkspaceGitService
             }
             finally
             {
+                Interlocked.Decrement(ref activeCount);
                 semaphore.Release();
             }
         });
 
         var results = await Task.WhenAll(syncTasks);
+        _logger.LogInformation(
+            "SyncRepository fan-out settled WorkspaceId={WorkspaceId} ContextId={ContextId} RepositoryCount={RepositoryCount} MaxActive={MaxActive} ElapsedMs={ElapsedMs} Stage={Stage}",
+            workspaceId, contextId.Value, totalCount, maxActive[0],
+            (long)Stopwatch.GetElapsedTime(fanOutStart).TotalMilliseconds, "fan-out");
 
+        var persistStart = Stopwatch.GetTimestamp();
         await PersistVersionsAsync(workspaceId, contextId, results, persistDependencyLevel: !skipDependencyLevelPersistence, cancellationToken);
+        _logger.LogDebug(
+            "Sync persist settled WorkspaceId={WorkspaceId} ContextId={ContextId} RepositoryCount={RepositoryCount} Stage={Stage} ElapsedMs={ElapsedMs}",
+            workspaceId, contextId.Value, totalCount, "persist",
+            (long)Stopwatch.GetElapsedTime(persistStart).TotalMilliseconds);
 
         await ApplyDefaultTipVersionsForMergedFeatureReposAsync(workspaceId, contextId, cancellationToken);
 
