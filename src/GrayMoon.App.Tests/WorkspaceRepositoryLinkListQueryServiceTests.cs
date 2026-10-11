@@ -199,15 +199,36 @@ public class WorkspaceRepositoryLinkListQueryServiceTests
             var changedOnly = links[1];
             var mixed = links[2];
 
-            ctx.DbContext.WorkspaceGitChangeEntries.AddRange(
-                Entry(stagedOnly.WorkspaceRepositoryId, "src/a.cs", GitChangeKind.Modified, GitChangeKind.None),
-                Entry(stagedOnly.WorkspaceRepositoryId, "src/b.cs", GitChangeKind.Added, GitChangeKind.None),
-                Entry(stagedOnly.WorkspaceRepositoryId, "src/c.cs", GitChangeKind.Modified, GitChangeKind.None),
-                Entry(changedOnly.WorkspaceRepositoryId, "src/d.cs", GitChangeKind.None, GitChangeKind.Modified),
-                Entry(changedOnly.WorkspaceRepositoryId, "src/e.cs", GitChangeKind.None, GitChangeKind.Untracked),
-                Entry(mixed.WorkspaceRepositoryId, "src/both.cs", GitChangeKind.Modified, GitChangeKind.Modified),
-                Entry(mixed.WorkspaceRepositoryId, "src/staged.cs", GitChangeKind.Added, GitChangeKind.None),
-                Entry(mixed.WorkspaceRepositoryId, "src/changed.cs", GitChangeKind.None, GitChangeKind.Modified));
+            var context = new WorkspaceFeatureContext
+            {
+                WorkspaceId = workspaceId,
+                Kind = WorkspaceFeatureContextKind.Workspace,
+                CreatedAt = DateTime.UtcNow,
+                IsInSync = true,
+            };
+            ctx.DbContext.WorkspaceFeatureContexts.Add(context);
+            await ctx.DbContext.SaveChangesAsync();
+
+            WorkspaceGitContextChangeEntry ContextEntry(int workspaceRepositoryId, string path, GitChangeKind index, GitChangeKind worktree) =>
+                new()
+                {
+                    WorkspaceFeatureContextId = context.WorkspaceFeatureContextId,
+                    WorkspaceRepositoryId = workspaceRepositoryId,
+                    Path = path,
+                    IndexChange = index,
+                    WorktreeChange = worktree,
+                    IsTracked = worktree != GitChangeKind.Untracked,
+                };
+
+            ctx.DbContext.WorkspaceGitContextChangeEntries.AddRange(
+                ContextEntry(stagedOnly.WorkspaceRepositoryId, "src/a.cs", GitChangeKind.Modified, GitChangeKind.None),
+                ContextEntry(stagedOnly.WorkspaceRepositoryId, "src/b.cs", GitChangeKind.Added, GitChangeKind.None),
+                ContextEntry(stagedOnly.WorkspaceRepositoryId, "src/c.cs", GitChangeKind.Modified, GitChangeKind.None),
+                ContextEntry(changedOnly.WorkspaceRepositoryId, "src/d.cs", GitChangeKind.None, GitChangeKind.Modified),
+                ContextEntry(changedOnly.WorkspaceRepositoryId, "src/e.cs", GitChangeKind.None, GitChangeKind.Untracked),
+                ContextEntry(mixed.WorkspaceRepositoryId, "src/both.cs", GitChangeKind.Modified, GitChangeKind.Modified),
+                ContextEntry(mixed.WorkspaceRepositoryId, "src/staged.cs", GitChangeKind.Added, GitChangeKind.None),
+                ContextEntry(mixed.WorkspaceRepositoryId, "src/changed.cs", GitChangeKind.None, GitChangeKind.Modified));
             await ctx.DbContext.SaveChangesAsync();
 
             var stagedSnapshot = await ctx.WorkspaceRepoLinkQuery.GetSnapshotAsync(workspaceId, stagedOnly.RepositoryId);

@@ -240,10 +240,6 @@ public sealed partial class WorkspaceGitChanges
                 }
             }
 
-            // The write queue processes on a background worker; give it a moment before the job's
-            // final reload so the page reflects the just-persisted state rather than racing the write.
-            await Task.Delay(150, ct);
-
             // Runs inside the same job/terminal as the commit above - the overlay is never hidden and
             // re-shown between the two phases. Only repositories that committed successfully are pushed;
             // a simple parallel push (no dependency-level ordering, no NuGet registry wait) since this
@@ -332,7 +328,6 @@ public sealed partial class WorkspaceGitChanges
             });
 
             await Task.WhenAll(tasks);
-            await Task.Delay(150, ct);
         });
     }
 }

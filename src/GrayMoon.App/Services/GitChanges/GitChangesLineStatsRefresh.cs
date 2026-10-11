@@ -22,7 +22,7 @@ public interface IGitChangesLineStatsRefresh
     /// Fills +/- for one repository after a porcelain-only snapshot. Debounced so a burst of
     /// watcher events becomes one numstat. No-op when nobody is subscribed.
     /// </summary>
-    void RequestRepository(int workspaceId, int repositoryId);
+    void RequestRepository(int workspaceId, int repositoryId, WorkspaceFeatureContextId? contextId = null);
 }
 
 public sealed class GitChangesLineStatsRefresh(
@@ -65,7 +65,7 @@ public sealed class GitChangesLineStatsRefresh(
         _ = RunWorkspaceAsync(workspaceId);
     }
 
-    public void RequestRepository(int workspaceId, int repositoryId)
+    public void RequestRepository(int workspaceId, int repositoryId, WorkspaceFeatureContextId? contextId = null)
     {
         if (!IsInterested(workspaceId))
         {
@@ -80,7 +80,7 @@ public sealed class GitChangesLineStatsRefresh(
             }
         }
 
-        var key = new RepoKey(workspaceId, repositoryId);
+        var key = new RepoKey(workspaceId, repositoryId, contextId?.Value);
         var cts = new CancellationTokenSource();
         if (_repoDebounce.TryRemove(key, out var previous))
         {
@@ -139,15 +139,27 @@ public sealed class GitChangesLineStatsRefresh(
 
             await using var scope = scopeFactory.CreateAsyncScope();
             var contextResolver = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureContextResolver>();
-            var contexts = await contextResolver.ListForWorkspaceAsync(key.WorkspaceId, cts.Token);
-            foreach (var ctx in contexts)
+            if (key.ContextId is int attributedContextId)
             {
                 await scanner.ScanWorkspaceAsync(
                     key.WorkspaceId,
-                    ctx.ContextId,
+                    new WorkspaceFeatureContextId(attributedContextId),
                     cts.Token,
                     includeLineStats: true,
                     repositoryId: key.RepositoryId);
+            }
+            else
+            {
+                var contexts = await contextResolver.ListForWorkspaceAsync(key.WorkspaceId, cts.Token);
+                foreach (var ctx in contexts)
+                {
+                    await scanner.ScanWorkspaceAsync(
+                        key.WorkspaceId,
+                        ctx.ContextId,
+                        cts.Token,
+                        includeLineStats: true,
+                        repositoryId: key.RepositoryId);
+                }
             }
         }
         catch (OperationCanceledException)
@@ -238,7 +250,7 @@ public sealed class GitChangesLineStatsRefresh(
         }
     }
 
-    private readonly record struct RepoKey(int WorkspaceId, int RepositoryId);
+    private readonly record struct RepoKey(int WorkspaceId, int RepositoryId, int? ContextId);
 
     private sealed class Lease(GitChangesLineStatsRefresh owner, int workspaceId) : IDisposable
     {

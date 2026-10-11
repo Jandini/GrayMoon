@@ -213,8 +213,6 @@ public sealed partial class WorkspaceGitChanges
             // reload:false - StartPageJob's own ReloadOnSuccess does the final LoadAsync() once this job
             // body returns, same as the repository-scoped Stage/Unstage job.
             await PersistMutationResultAsync(workspaceRepositoryId, resolved.Value.RepositoryId, result.Success, result.Snapshot, result.ErrorMessage, reload: false);
-
-            await Task.Delay(150, ct);
         });
 
         return Task.CompletedTask;
@@ -299,7 +297,6 @@ public sealed partial class WorkspaceGitChanges
             });
 
             await Task.WhenAll(tasks);
-            await Task.Delay(150, ct);
         });
     }
 
@@ -395,8 +392,6 @@ public sealed partial class WorkspaceGitChanges
             await Task.WhenAll(tasks);
 
             SafeInvoke(ClearMultiSelection);
-
-            await Task.Delay(150, ct);
         });
     }
 

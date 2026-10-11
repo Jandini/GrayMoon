@@ -53,6 +53,32 @@ public class GitChangesSnapshotPushHandlerTests
     }
 
     [Fact]
+    public async Task Context_only_writes_skip_legacy_tables()
+    {
+        await using var ctx = await GitChangesTestDbContext.CreateAsync();
+        var hubContext = new FakeHubContext<WorkspaceSyncHub>();
+        var handler = GitChangesPushHandlerTestFactory.Create(
+            ctx,
+            hubContext,
+            options: new GitChangesOptions { WriteLegacyGitChangesTables = false });
+
+        await handler.HandleAsync(new GitChangesSnapshotNotification
+        {
+            WorkspaceId = ctx.WorkspaceId,
+            RepositoryId = ctx.RepositoryId,
+            Snapshot = MakeSnapshot(1, MakeEntry("file.txt")),
+        }, CancellationToken.None);
+
+        Assert.Empty(ctx.DbContext.WorkspaceGitRepositoryStatuses);
+        Assert.Empty(ctx.DbContext.WorkspaceGitChangeEntries);
+        var status = Assert.Single(ctx.DbContext.WorkspaceGitContextRepositoryStatuses);
+        Assert.Equal(1, status.SnapshotVersion);
+        Assert.Single(ctx.DbContext.WorkspaceGitContextChangeEntries);
+        Assert.DoesNotContain(hubContext.ClientsImpl.AllProxy.Sent, s => s.Method == "GitChangesUpdated");
+        Assert.Contains(hubContext.ClientsImpl.AllProxy.Sent, s => s.Method == "ContextGitChangesUpdated");
+    }
+
+    [Fact]
     public async Task Newer_snapshot_replaces_status_and_entries()
     {
         await using var ctx = await GitChangesTestDbContext.CreateAsync();
@@ -454,7 +480,7 @@ public class GitChangesSnapshotPushHandlerTests
         {
         }
 
-        public void RequestRepository(int workspaceId, int repositoryId)
+        public void RequestRepository(int workspaceId, int repositoryId, WorkspaceFeatureContextId? contextId = null)
         {
             LastWorkspaceId = workspaceId;
             LastRepositoryId = repositoryId;

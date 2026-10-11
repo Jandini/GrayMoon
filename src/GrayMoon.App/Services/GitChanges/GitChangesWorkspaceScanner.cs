@@ -13,8 +13,8 @@ public sealed record GitChangesWorkspaceScanProgress(string RepositoryName, bool
 /// The single Git Changes status-scan routine for one workspace, shared by the periodic background
 /// sweep, the on-open warm-up scan, the manual Refresh button, and silent +/- fill-in. Calls
 /// <c>GetGitChangeStatus</c> for every repository in the workspace (or one repository) with bounded
-/// parallelism, and pushes each successful result through the write queue or immediately when
-/// line stats were requested.
+/// parallelism, and pushes each successful result through the single-reader write queue.
+/// Line-stats and immediate persists wait on that queue so the caller still observes the write.
 /// </summary>
 public interface IGitChangesWorkspaceScanner
 {
@@ -53,7 +53,6 @@ public sealed class GitChangesWorkspaceScanner(
         var pathResolver = scope.ServiceProvider.GetRequiredService<IWorkspaceContextPathResolver>();
         var workerClient = scope.ServiceProvider.GetRequiredService<IGitChangesWorkerClient>();
         var writeQueue = scope.ServiceProvider.GetRequiredService<WorkspaceGitChangesWriteQueue>();
-        var pushHandler = scope.ServiceProvider.GetRequiredService<GitChangesSnapshotPushHandler>();
 
         var linksQuery = dbContext.WorkspaceRepositories
             .Where(l => l.WorkspaceId == workspaceId);
@@ -129,17 +128,12 @@ public sealed class GitChangesWorkspaceScanner(
                         Snapshot = result.Snapshot,
                     };
 
-                    // Refresh / warm-up and post-sync scans persist immediately so the nav dot and
-                    // repository badges update without opening Changes. Watcher and background sweeps
-                    // stay on the write queue.
+                    // Every snapshot persist goes through the single-reader queue. Immediate and
+                    // line-stats scans wait so the caller still sees the write when this method returns.
                     if (includeLineStats || persistImmediately)
-                    {
-                        await pushHandler.HandleAsync(notification, cancellationToken);
-                    }
+                        await writeQueue.EnqueueAndWaitAsync(notification, cancellationToken);
                     else
-                    {
                         writeQueue.Enqueue(notification);
-                    }
                 }
                 else if (!result.Success)
                 {

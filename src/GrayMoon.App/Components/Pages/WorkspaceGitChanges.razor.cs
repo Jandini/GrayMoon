@@ -29,7 +29,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     [Inject] private IWorkspaceGitChangesReadService ReadService { get; set; } = default!;
     [Inject] private IWorkspaceGitChangesOperations GitChangesOperations { get; set; } = default!;
     [Inject] private IGitChangesWorkerClient WorkerClient { get; set; } = default!;
-    [Inject] private GitChangesSnapshotPushHandler SnapshotPushHandler { get; set; } = default!;
+    [Inject] private WorkspaceGitChangesWriteQueue GitChangesWriteQueue { get; set; } = default!;
     [Inject] private IDbContextFactory<AppDbContext> DbContextFactory { get; set; } = default!;
     [Inject] private WorkspaceService WorkspaceService { get; set; } = default!;
     [Inject] private IWorkspaceContextPathResolver PathResolver { get; set; } = default!;
@@ -644,9 +644,6 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
                 // InvokeAsync) does the final LoadAsync() once this job body returns; calling LoadAsync's
                 // StateHasChanged directly from here would run off the Blazor circuit's sync context.
                 await PersistMutationResultAsync(workspaceRepositoryId, resolved.Value.RepositoryId, result.Success, result.Snapshot, result.ErrorMessage, reload: false);
-
-                // Give the write queue a moment to flush before the job's own reload runs.
-                await Task.Delay(150, ct);
             });
 
         return Task.CompletedTask;
@@ -729,7 +726,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             }
         }
 
-        await SnapshotPushHandler.HandleAsync(new GitChangesSnapshotNotification
+        await GitChangesWriteQueue.EnqueueAndWaitAsync(new GitChangesSnapshotNotification
         {
             WorkspaceId = WorkspaceId,
             RepositoryId = repositoryId,

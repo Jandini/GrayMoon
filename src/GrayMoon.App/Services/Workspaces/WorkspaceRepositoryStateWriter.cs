@@ -127,69 +127,8 @@ public sealed class WorkspaceRepositoryStateWriter(
             dbContext.WorkspaceRepositoryContextStates.Add(state);
         }
 
-        var previousBranch = state.BranchName;
+        var previousBranch = StageTracked(context, wr, state, snapshot, options);
         var isSpecialWorkspace = context.Kind == WorkspaceFeatureContextKind.Workspace;
-
-        ApplyIdentity(state, snapshot);
-        if (isSpecialWorkspace && snapshot.IdentityProbed)
-        {
-            MirrorIdentityToLink(wr, state);
-            if (!string.IsNullOrWhiteSpace(state.CheckedOutTag))
-            {
-                wr.BranchHasUpstream = null;
-                wr.OutgoingCommits = null;
-                wr.IncomingCommits = null;
-                wr.DefaultBranchBehindCommits = null;
-                wr.DefaultBranchAheadCommits = null;
-            }
-        }
-
-        if (snapshot.GitVersionProbed)
-        {
-            state.GitVersion = Blank(snapshot.GitVersion) ? null : snapshot.GitVersion;
-            // A probe result, even a failed one (null version = unresolved), ends the Feature seed's pending state.
-            state.GitVersionPending = false;
-            if (isSpecialWorkspace)
-                wr.GitVersion = state.GitVersion;
-        }
-
-        var onTag = !string.IsNullOrWhiteSpace(state.CheckedOutTag);
-        if (!onTag)
-        {
-            if (snapshot.CommitCountsProbed)
-            {
-                state.OutgoingCommits = snapshot.OutgoingCommits;
-                state.IncomingCommits = snapshot.IncomingCommits;
-                if (snapshot.DefaultBranchBehind.HasValue || snapshot.DefaultBranchAhead.HasValue)
-                {
-                    state.DefaultBranchBehindCommits = snapshot.DefaultBranchBehind;
-                    state.DefaultBranchAheadCommits = snapshot.DefaultBranchAhead;
-                }
-
-                if (isSpecialWorkspace)
-                {
-                    wr.OutgoingCommits = state.OutgoingCommits;
-                    wr.IncomingCommits = state.IncomingCommits;
-                    wr.DefaultBranchBehindCommits = state.DefaultBranchBehindCommits;
-                    wr.DefaultBranchAheadCommits = state.DefaultBranchAheadCommits;
-                }
-            }
-
-            if (snapshot.UpstreamProbed)
-            {
-                state.BranchHasUpstream = snapshot.HasUpstream;
-                if (isSpecialWorkspace)
-                    wr.BranchHasUpstream = state.BranchHasUpstream;
-            }
-        }
-
-        // Default branch name is repository/ref metadata shared across contexts - keep on the link.
-        if (!Blank(snapshot.DefaultBranchName))
-            wr.DefaultBranchName = snapshot.DefaultBranchName;
-
-        ApplySyncStatus(state, snapshot, options, wr.DefaultBranchName);
-        if (isSpecialWorkspace)
-            wr.SyncStatus = state.SyncStatus;
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -410,6 +349,194 @@ public sealed class WorkspaceRepositoryStateWriter(
                     .Select(pr => new SyncPackageReference(pr.Name.Trim(), pr.Version ?? ""))
                     .ToList()))
             .ToList();
+    }
+
+    /// <summary>
+    /// Applies every snapshot on this writer's context, then one <see cref="AppDbContext.SaveChangesAsync"/>
+    /// (or the project-row batch save, which flushes the same context). Does not merge dependency edges;
+    /// callers that already have the full graph call <c>MergeWorkspaceProjectDependenciesAsync</c> once after.
+    /// </summary>
+    public async Task ApplyBatchAsync(
+        WorkspaceFeatureContextId contextId,
+        int workspaceId,
+        IReadOnlyList<(int RepositoryId, RepositoryStateSnapshot Snapshot)> items,
+        RepositoryStateWriteOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (items.Count == 0)
+            return;
+
+        options ??= new RepositoryStateWriteOptions();
+
+        var context = await dbContext.WorkspaceFeatureContexts
+            .FirstOrDefaultAsync(c => c.WorkspaceFeatureContextId == contextId.Value, cancellationToken);
+        if (context is null || context.WorkspaceId != workspaceId)
+        {
+            logger.LogWarning(
+                "State write skipped: context {ContextId} missing or not in workspace {WorkspaceId}",
+                contextId.Value, workspaceId);
+            return;
+        }
+
+        var repoIds = items.Select(i => i.RepositoryId).Distinct().ToList();
+        var links = await dbContext.WorkspaceRepositories
+            .Where(x => x.WorkspaceId == workspaceId && repoIds.Contains(x.RepositoryId))
+            .ToListAsync(cancellationToken);
+        var linkByRepo = links.ToDictionary(l => l.RepositoryId);
+        var wrlIds = links.Select(l => l.WorkspaceRepositoryId).ToList();
+        var states = await dbContext.WorkspaceRepositoryContextStates
+            .Where(s => s.WorkspaceFeatureContextId == contextId.Value && wrlIds.Contains(s.WorkspaceRepositoryId))
+            .ToListAsync(cancellationToken);
+        var stateByWrl = states.ToDictionary(s => s.WorkspaceRepositoryId);
+        var discoversProjects = (await capabilitiesResolver.GetAsync(workspaceId, cancellationToken)).DiscoversDotNetProjects;
+        var isSpecialWorkspace = context.Kind == WorkspaceFeatureContextKind.Workspace;
+        var staged = new List<(WorkspaceRepositoryLink Wr, WorkspaceRepositoryContextState State, string? PreviousBranch)>();
+        var projectBatch = new List<(int RepositoryId, IReadOnlyList<SyncProjectInfo> Projects)>();
+
+        foreach (var (repositoryId, snapshot) in items)
+        {
+            if (!linkByRepo.TryGetValue(repositoryId, out var wr))
+            {
+                logger.LogWarning("State write skipped: workspace {WorkspaceId} repository {RepositoryId} not linked", workspaceId, repositoryId);
+                continue;
+            }
+
+            if (!stateByWrl.TryGetValue(wr.WorkspaceRepositoryId, out var state))
+            {
+                state = new WorkspaceRepositoryContextState
+                {
+                    WorkspaceFeatureContextId = contextId.Value,
+                    WorkspaceRepositoryId = wr.WorkspaceRepositoryId,
+                    SyncStatus = RepoSyncStatus.NeedsSync
+                };
+                dbContext.WorkspaceRepositoryContextStates.Add(state);
+                stateByWrl[wr.WorkspaceRepositoryId] = state;
+            }
+
+            var previousBranch = StageTracked(context, wr, state, snapshot, options);
+            staged.Add((wr, state, previousBranch));
+
+            if (snapshot.BranchesProbed)
+            {
+                await branchWriter.PersistAsync(
+                    wr.WorkspaceRepositoryId,
+                    snapshot.LocalBranches,
+                    snapshot.RemoteBranches,
+                    snapshot.DefaultBranchName ?? wr.DefaultBranchName,
+                    snapshot.Tags,
+                    snapshot.CheckedOutTag,
+                    cancellationToken,
+                    save: false);
+            }
+
+            if (snapshot.ProjectsProbed && discoversProjects)
+            {
+                var projects = ToSyncProjects(snapshot.Projects);
+                projectBatch.Add((repositoryId, projects));
+                state.Projects = projects.Count;
+                state.RepositoryType = ComputeRepositoryType(projects);
+                if (isSpecialWorkspace)
+                {
+                    wr.Projects = state.Projects;
+                    wr.RepositoryType = state.RepositoryType;
+                }
+            }
+        }
+
+        if (projectBatch.Count > 0)
+        {
+            // The batch merge saves this context, including the staged checkout rows and branch refs.
+            await workspaceProjectRepository.MergeWorkspaceProjectsBatchAsync(
+                workspaceId, projectBatch, contextId.Value, cancellationToken);
+        }
+        else
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        if (options.ReconcilePullRequest)
+        {
+            foreach (var (wr, state, previousBranch) in staged)
+            {
+                await ReconcilePullRequestAsync(
+                    contextId, workspaceId, wr.RepositoryId, wr, state, previousBranch, isSpecialWorkspace, cancellationToken);
+            }
+        }
+    }
+
+    /// <summary>Mutates the tracked context state and, for the special Workspace, the link. Does not save.</summary>
+    private static string? StageTracked(
+        WorkspaceFeatureContext context,
+        WorkspaceRepositoryLink wr,
+        WorkspaceRepositoryContextState state,
+        RepositoryStateSnapshot snapshot,
+        RepositoryStateWriteOptions options)
+    {
+        var previousBranch = state.BranchName;
+        var isSpecialWorkspace = context.Kind == WorkspaceFeatureContextKind.Workspace;
+
+        ApplyIdentity(state, snapshot);
+        if (isSpecialWorkspace && snapshot.IdentityProbed)
+        {
+            MirrorIdentityToLink(wr, state);
+            if (!string.IsNullOrWhiteSpace(state.CheckedOutTag))
+            {
+                wr.BranchHasUpstream = null;
+                wr.OutgoingCommits = null;
+                wr.IncomingCommits = null;
+                wr.DefaultBranchBehindCommits = null;
+                wr.DefaultBranchAheadCommits = null;
+            }
+        }
+
+        if (snapshot.GitVersionProbed)
+        {
+            state.GitVersion = Blank(snapshot.GitVersion) ? null : snapshot.GitVersion;
+            // A probe result, even a failed one (null version = unresolved), ends the Feature seed's pending state.
+            state.GitVersionPending = false;
+            if (isSpecialWorkspace)
+                wr.GitVersion = state.GitVersion;
+        }
+
+        var onTag = !string.IsNullOrWhiteSpace(state.CheckedOutTag);
+        if (!onTag)
+        {
+            if (snapshot.CommitCountsProbed)
+            {
+                state.OutgoingCommits = snapshot.OutgoingCommits;
+                state.IncomingCommits = snapshot.IncomingCommits;
+                if (snapshot.DefaultBranchBehind.HasValue || snapshot.DefaultBranchAhead.HasValue)
+                {
+                    state.DefaultBranchBehindCommits = snapshot.DefaultBranchBehind;
+                    state.DefaultBranchAheadCommits = snapshot.DefaultBranchAhead;
+                }
+
+                if (isSpecialWorkspace)
+                {
+                    wr.OutgoingCommits = state.OutgoingCommits;
+                    wr.IncomingCommits = state.IncomingCommits;
+                    wr.DefaultBranchBehindCommits = state.DefaultBranchBehindCommits;
+                    wr.DefaultBranchAheadCommits = state.DefaultBranchAheadCommits;
+                }
+            }
+
+            if (snapshot.UpstreamProbed)
+            {
+                state.BranchHasUpstream = snapshot.HasUpstream;
+                if (isSpecialWorkspace)
+                    wr.BranchHasUpstream = state.BranchHasUpstream;
+            }
+        }
+
+        // Default branch name is repository/ref metadata shared across contexts - keep on the link.
+        if (!Blank(snapshot.DefaultBranchName))
+            wr.DefaultBranchName = snapshot.DefaultBranchName;
+
+        ApplySyncStatus(state, snapshot, options, wr.DefaultBranchName);
+        if (isSpecialWorkspace)
+            wr.SyncStatus = state.SyncStatus;
+
+        return previousBranch;
     }
 
     private static bool Blank(string? value) => string.IsNullOrWhiteSpace(value);

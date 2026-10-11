@@ -262,13 +262,11 @@ public sealed partial class WorkspaceGitService
         }
 
         // Persist the new branch for each repo where creation succeeded (so it appears in branch lists without a manual refresh)
-        foreach (var (repositoryId, branchName) in branchNameByRepoId)
-        {
-            if (branchName != newBranchName)
-                continue;
-            var wr = links.First(l => l.RepositoryId == repositoryId);
-            await EnsureLocalBranchPersistedAsync(wr.WorkspaceRepositoryId, newBranchName, cancellationToken);
-        }
+        var createdBranches = branchNameByRepoId
+            .Where(pair => pair.Value == newBranchName)
+            .Select(pair => (links.First(l => l.RepositoryId == pair.Key).WorkspaceRepositoryId, newBranchName))
+            .ToList();
+        await EnsureLocalBranchesPersistedAsync(createdBranches, cancellationToken);
 
         _hubContext?.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
         return new BranchCreationOutcome(
@@ -278,20 +276,44 @@ public sealed partial class WorkspaceGitService
     }
 
     /// <summary>Ensures a local branch is present in RepositoryBranches for the given workspace repository. Adds it if missing; does not remove other branches.</summary>
-    public async Task EnsureLocalBranchPersistedAsync(int workspaceRepositoryId, string branchName, CancellationToken cancellationToken = default)
+    public Task EnsureLocalBranchPersistedAsync(int workspaceRepositoryId, string branchName, CancellationToken cancellationToken = default)
+        => EnsureLocalBranchesPersistedAsync([(workspaceRepositoryId, branchName)], cancellationToken);
+
+    /// <summary>Adds every missing local branch in one query and one save.</summary>
+    public async Task EnsureLocalBranchesPersistedAsync(
+        IReadOnlyList<(int WorkspaceRepositoryId, string BranchName)> branches,
+        CancellationToken cancellationToken = default)
     {
-        var exists = await _dbContext.RepositoryBranches
-            .AnyAsync(rb => rb.WorkspaceRepositoryId == workspaceRepositoryId && rb.BranchName == branchName && !rb.IsRemote, cancellationToken);
-        if (exists)
+        var wanted = branches
+            .Where(b => !string.IsNullOrWhiteSpace(b.BranchName))
+            .Select(b => (b.WorkspaceRepositoryId, BranchName: b.BranchName.Trim()))
+            .Distinct()
+            .ToList();
+        if (wanted.Count == 0)
             return;
-        _dbContext.RepositoryBranches.Add(new RepositoryBranch
-        {
-            WorkspaceRepositoryId = workspaceRepositoryId,
-            BranchName = branchName,
-            IsRemote = false,
-            LastSeenAt = DateTime.UtcNow,
-            IsDefault = false
-        });
+
+        var wrlIds = wanted.Select(b => b.WorkspaceRepositoryId).Distinct().ToList();
+        var existing = await _dbContext.RepositoryBranches
+            .Where(rb => wrlIds.Contains(rb.WorkspaceRepositoryId) && !rb.IsRemote)
+            .Select(rb => new { rb.WorkspaceRepositoryId, rb.BranchName })
+            .ToListAsync(cancellationToken);
+        var existingSet = existing.Select(rb => (rb.WorkspaceRepositoryId, rb.BranchName)).ToHashSet();
+        var now = DateTime.UtcNow;
+        var toAdd = wanted
+            .Where(b => !existingSet.Contains((b.WorkspaceRepositoryId, b.BranchName)))
+            .Select(b => new RepositoryBranch
+            {
+                WorkspaceRepositoryId = b.WorkspaceRepositoryId,
+                BranchName = b.BranchName,
+                IsRemote = false,
+                LastSeenAt = now,
+                IsDefault = false
+            })
+            .ToList();
+        if (toAdd.Count == 0)
+            return;
+
+        _dbContext.RepositoryBranches.AddRange(toAdd);
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
 

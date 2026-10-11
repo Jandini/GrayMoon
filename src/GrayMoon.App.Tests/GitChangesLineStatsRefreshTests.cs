@@ -183,7 +183,7 @@ internal sealed class NoopGitChangesLineStatsRefresh : IGitChangesLineStatsRefre
     {
     }
 
-    public void RequestRepository(int workspaceId, int repositoryId)
+    public void RequestRepository(int workspaceId, int repositoryId, GrayMoon.Application.Features.WorkspaceFeatureContextId? contextId = null)
     {
     }
 

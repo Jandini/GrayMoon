@@ -2,7 +2,6 @@ using System.Collections.Concurrent;
 using System.Threading.Channels;
 using GrayMoon.App.Models;
 using GrayMoon.Application.Features;
-using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services.Worker;
 
@@ -12,11 +11,15 @@ namespace GrayMoon.App.Services.Worker;
 public sealed class SyncBackgroundService(
     IServiceScopeFactory scopeFactory,
     ILogger<SyncBackgroundService> logger,
-    IConfiguration configuration,
-    IOptions<WorkspaceOptions> workspaceOptions) : BackgroundService
+    IConfiguration configuration) : BackgroundService
 {
-    private readonly int _maxConcurrency = configuration.GetValue<int?>("Sync:MaxConcurrency")
-        ?? Math.Max(1, workspaceOptions.Value.MaxParallelOperations);
+    /// <summary>
+    /// Writers against the App SQLite file. Git work inside each worker stays parallel.
+    /// Explicit <c>Sync:MaxConcurrency</c> still overrides this.
+    /// </summary>
+    public const int DefaultMaxConcurrency = 4;
+
+    private readonly int _maxConcurrency = Math.Max(1, configuration.GetValue<int?>("Sync:MaxConcurrency") ?? DefaultMaxConcurrency);
     private readonly bool _enableDeduplication = configuration.GetValue<bool?>("Sync:EnableDeduplication") ?? true;
     private readonly Channel<SyncRequestItem> _channel = Channel.CreateUnbounded<SyncRequestItem>(new UnboundedChannelOptions
     {

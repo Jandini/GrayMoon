@@ -41,4 +41,10 @@ public sealed class GitChangesOptions
     /// Worker-side watcher leases would idle out anyway. Default 8.
     /// </summary>
     public int WorkspaceActivityGraceMinutes { get; init; } = 8;
+
+    /// <summary>
+    /// When false (the cutover default), Git Changes snapshots are written only to the context tables.
+    /// Set true to also write the legacy special-Workspace tables. Rollback is turning this back on.
+    /// </summary>
+    public bool WriteLegacyGitChangesTables { get; init; }
 }

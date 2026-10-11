@@ -1112,7 +1112,7 @@ public sealed class WorkspacePushService(
         }
     }
 
-    private async Task UpdateCommitCountsAndUpstreamAfterPushAsync(int workspaceId, WorkspaceFeatureContextId contextId, IReadOnlyList<PushRepoPayload> repos, CancellationToken cancellationToken)
+    internal async Task UpdateCommitCountsAndUpstreamAfterPushAsync(int workspaceId, WorkspaceFeatureContextId contextId, IReadOnlyList<PushRepoPayload> repos, CancellationToken cancellationToken)
     {
         if (repos.Count == 0) return;
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
@@ -1123,29 +1123,46 @@ public sealed class WorkspacePushService(
             .Where(wr => wr.WorkspaceId == workspaceId && repoIds.Contains(wr.RepositoryId))
             .ToListAsync(cancellationToken);
 
-        // Persist the remote branch for each pushed repo so it appears in Remotes without calling refresh branches
+        // Persist the remote branch for each pushed repo so it appears in Remotes without calling refresh branches.
         var now = DateTime.UtcNow;
-        foreach (var wr in links)
+        var remoteCandidates = links
+            .Where(wr => string.IsNullOrWhiteSpace(wr.CheckedOutTag) && !string.IsNullOrWhiteSpace(wr.BranchName))
+            .Select(wr => (
+                Link: wr,
+                RemoteBranchName: wr.BranchName!.StartsWith("origin/", StringComparison.OrdinalIgnoreCase)
+                    ? wr.BranchName!
+                    : "origin/" + wr.BranchName))
+            .ToList();
+        if (remoteCandidates.Count > 0)
         {
-            if (!string.IsNullOrWhiteSpace(wr.CheckedOutTag))
-                continue;
-            if (string.IsNullOrWhiteSpace(wr.BranchName))
-                continue;
-            var remoteBranchName = wr.BranchName.StartsWith("origin/", StringComparison.OrdinalIgnoreCase) ? wr.BranchName : "origin/" + wr.BranchName;
-            var exists = await _dbContext.RepositoryBranches
-                .AnyAsync(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && rb.IsRemote && rb.BranchName == remoteBranchName, cancellationToken);
-            if (!exists)
+            var wrlIds = remoteCandidates.Select(c => c.Link.WorkspaceRepositoryId).ToList();
+            var existingRemotes = await _dbContext.RepositoryBranches
+                .Where(rb => wrlIds.Contains(rb.WorkspaceRepositoryId) && rb.IsRemote)
+                .Select(rb => new { rb.WorkspaceRepositoryId, rb.BranchName })
+                .ToListAsync(cancellationToken);
+            var existingRemoteSet = existingRemotes
+                .Select(rb => (rb.WorkspaceRepositoryId, rb.BranchName))
+                .ToHashSet();
+            var toAdd = new List<RepositoryBranch>();
+            foreach (var (link, remoteBranchName) in remoteCandidates)
             {
-                _dbContext.RepositoryBranches.Add(new RepositoryBranch
+                if (!existingRemoteSet.Contains((link.WorkspaceRepositoryId, remoteBranchName)))
                 {
-                    WorkspaceRepositoryId = wr.WorkspaceRepositoryId,
-                    BranchName = remoteBranchName,
-                    IsRemote = true,
-                    LastSeenAt = now,
-                    IsDefault = false
-                });
+                    toAdd.Add(new RepositoryBranch
+                    {
+                        WorkspaceRepositoryId = link.WorkspaceRepositoryId,
+                        BranchName = remoteBranchName,
+                        IsRemote = true,
+                        LastSeenAt = now,
+                        IsDefault = false
+                    });
+                }
+
+                link.BranchHasUpstream = true;
             }
-            wr.BranchHasUpstream = true;
+
+            if (toAdd.Count > 0)
+                _dbContext.RepositoryBranches.AddRange(toAdd);
         }
 
         var workerArgs = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
@@ -1183,10 +1200,10 @@ public sealed class WorkspacePushService(
 
         // A failed or missing response leaves the persisted counts alone: nothing is marked probed, so the
         // writer has nothing to replace. Overwriting them with nulls would blank the badges after a
-        // transient worker hiccup.
-        foreach (var r in results.Where(r => r.Data != null))
-        {
-            await _stateWriter.ApplyAsync(contextId, workspaceId, r.RepoId, new RepositoryStateSnapshot
+        // transient worker hiccup. Pending remote-branch rows flush with this one save.
+        var snapshots = results
+            .Where(r => r.Data != null)
+            .Select(r => (r.RepoId, new RepositoryStateSnapshot
             {
                 OutgoingCommits = r.Data!.OutgoingCommits,
                 IncomingCommits = r.Data.IncomingCommits,
@@ -1195,7 +1212,15 @@ public sealed class WorkspacePushService(
                 HasUpstream = r.Data.HasUpstream,
                 CommitCountsProbed = true,
                 UpstreamProbed = r.Data.HasUpstream.HasValue,
-            }, cancellationToken: cancellationToken);
+            }))
+            .ToList();
+        if (snapshots.Count > 0)
+        {
+            await _stateWriter.ApplyBatchAsync(contextId, workspaceId, snapshots, cancellationToken: cancellationToken);
+        }
+        else
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
         }
 
         await _recomputeScope.CompleteAsync(workspaceId, contextId, cancellationToken);

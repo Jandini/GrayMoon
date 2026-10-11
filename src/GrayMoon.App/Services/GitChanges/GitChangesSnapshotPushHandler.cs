@@ -5,13 +5,14 @@ using GrayMoon.Application.Features;
 using GrayMoon.Common.Git;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services.GitChanges;
 
 /// <summary>
 /// Persists a Worker-pushed Git Changes snapshot (rejecting versions older than or equal to what is
-/// already persisted), then broadcasts. Dual-writes context projection tables; legacy tables remain
-/// authoritative for the special Workspace during cutover.
+/// already persisted), then broadcasts. Context tables are always written. Legacy special-Workspace
+/// tables are written only when <see cref="GitChangesOptions.WriteLegacyGitChangesTables"/> is on.
 /// </summary>
 public sealed class GitChangesSnapshotPushHandler(
     IDbContextFactory<AppDbContext> dbContextFactory,
@@ -20,7 +21,8 @@ public sealed class GitChangesSnapshotPushHandler(
     IGitChangesLineStatsRefresh lineStatsRefresh,
     IWorkspaceHookContextAttributor attributor,
     IWorkspaceFeatureContextResolver contextResolver,
-    IWorkspaceGitChangesNotifier notifier)
+    IWorkspaceGitChangesNotifier notifier,
+    IOptions<GitChangesOptions> gitChangesOptions)
 {
     public async Task HandleAsync(GitChangesSnapshotNotification notification, CancellationToken cancellationToken)
     {
@@ -70,9 +72,11 @@ public sealed class GitChangesSnapshotPushHandler(
             return;
         }
 
-        // Legacy table version gate only for special Workspace dual-write.
+        var writeLegacy = gitChangesOptions.Value.WriteLegacyGitChangesTables && contextInfo.IsSpecialWorkspace;
+
+        // Legacy table version gate only while dual-write is on for the special Workspace.
         WorkspaceGitRepositoryStatus? existingLegacy = null;
-        if (contextInfo.IsSpecialWorkspace)
+        if (writeLegacy)
         {
             existingLegacy = await db.WorkspaceGitRepositoryStatuses
                 .FirstOrDefaultAsync(s => s.WorkspaceRepositoryId == workspaceRepository.WorkspaceRepositoryId, cancellationToken);
@@ -103,7 +107,7 @@ public sealed class GitChangesSnapshotPushHandler(
 
         ApplyStatus(existingContext, snapshot, stagedCount, changedCount, conflictCount);
 
-        if (contextInfo.IsSpecialWorkspace)
+        if (writeLegacy)
         {
             if (existingLegacy == null)
             {
@@ -117,14 +121,12 @@ public sealed class GitChangesSnapshotPushHandler(
             ApplyLegacyStatus(existingLegacy, snapshot, stagedCount, changedCount, conflictCount);
         }
 
-        await db.SaveChangesAsync(cancellationToken);
-
         await db.WorkspaceGitContextChangeEntries
             .Where(e => e.WorkspaceFeatureContextId == contextId.Value.Value
                         && e.WorkspaceRepositoryId == workspaceRepository.WorkspaceRepositoryId)
             .ExecuteDeleteAsync(cancellationToken);
 
-        if (contextInfo.IsSpecialWorkspace)
+        if (writeLegacy)
         {
             await db.WorkspaceGitChangeEntries
                 .Where(e => e.WorkspaceRepositoryId == workspaceRepository.WorkspaceRepositoryId)
@@ -146,7 +148,7 @@ public sealed class GitChangesSnapshotPushHandler(
                 IsSubmodule = c.IsSubmodule,
             }));
 
-            if (contextInfo.IsSpecialWorkspace)
+            if (writeLegacy)
             {
                 db.WorkspaceGitChangeEntries.AddRange(snapshot.Changes.Select(c => new WorkspaceGitChangeEntry
                 {
@@ -160,10 +162,9 @@ public sealed class GitChangesSnapshotPushHandler(
                     IsSubmodule = c.IsSubmodule,
                 }));
             }
-
-            await db.SaveChangesAsync(cancellationToken);
         }
 
+        await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
         notifier.Publish(notification.WorkspaceId, contextId.Value.Value);
@@ -175,7 +176,7 @@ public sealed class GitChangesSnapshotPushHandler(
             notification.RepositoryId,
             cancellationToken: cancellationToken);
 
-        if (contextInfo.IsSpecialWorkspace)
+        if (writeLegacy)
         {
             await hubContext.Clients.All.SendAsync(
                 "GitChangesUpdated",
@@ -188,7 +189,7 @@ public sealed class GitChangesSnapshotPushHandler(
             && !snapshot.Deletions.HasValue
             && (changedCount > 0 || stagedCount > 0))
         {
-            lineStatsRefresh.RequestRepository(notification.WorkspaceId, notification.RepositoryId);
+            lineStatsRefresh.RequestRepository(notification.WorkspaceId, notification.RepositoryId, contextId.Value);
         }
 
         logger.LogDebug(
