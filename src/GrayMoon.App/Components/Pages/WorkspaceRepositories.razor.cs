@@ -332,8 +332,9 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     }
 
     /// <summary>
-    /// The user confirmed Remove Feature. The departure service already queued the work and persisted
-    /// Workspace; open that view and refresh it now, regardless of the Feature's state.
+    /// The user confirmed Remove Feature. Departure already queued the background removal, started the
+    /// Workspace status refresh, and persisted Workspace. Open that view now. The refresh does not
+    /// wait for removal.
     /// </summary>
     private async Task OnFeatureRemovalConfirmedAsync(FeatureRemovalLeave leave)
     {
@@ -349,7 +350,8 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     }
 
     /// <summary>
-    /// Background removal finished: refresh the Workspace already on screen. Navigation happened at confirm.
+    /// Background removal finished. Reload the grid so the Feature drops out of the selector.
+    /// This is not the Workspace status refresh; that already started when the user left for the Workspace.
     /// </summary>
     private void OnFeatureRemovalCompleted(FeatureRemovalCompleted completed)
     {

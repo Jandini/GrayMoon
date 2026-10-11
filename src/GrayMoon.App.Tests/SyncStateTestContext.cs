@@ -109,6 +109,7 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddSingleton<IWorkspaceFeatureReconciler, WorkspaceFeatureReconciler>();
         services.AddSingleton<IWorkspaceOperationRunner, WorkspaceOperationRunner>();
         services.AddSingleton<IWorkspaceOperationLock>(sp => (IWorkspaceOperationLock)sp.GetRequiredService<IWorkspaceOperationRunner>());
+        services.AddSingleton<IWorkspaceCheckoutRefresh, WorkspaceCheckoutRefresh>();
         services.AddScoped<GitHubService>();
         services.AddScoped<GitHubPullRequestService>();
         services.AddScoped<GitHubPullRequestMergeService>();

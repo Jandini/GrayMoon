@@ -147,6 +147,7 @@ try
     builder.Services.AddSingleton<FeatureRemovalQueue>();
     builder.Services.AddSingleton<IFeatureRemovalQueue>(sp => sp.GetRequiredService<FeatureRemovalQueue>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<FeatureRemovalQueue>());
+    builder.Services.AddSingleton<IWorkspaceCheckoutRefresh, WorkspaceCheckoutRefresh>();
     builder.Services.AddScoped<IFeatureRemovalDeparture, FeatureRemovalDeparture>();
     builder.Services.AddSingleton<FeatureFolderCleanupService>();
     builder.Services.AddSingleton<IFeatureFolderCleanupService>(sp => sp.GetRequiredService<FeatureFolderCleanupService>());

@@ -8,8 +8,9 @@ namespace GrayMoon.Application.Features;
 public interface IFeatureRemovalDeparture
 {
     /// <summary>
-    /// Queues the removal, persists Workspace as the selected context, and returns the Workspace
-    /// view the page must open and refresh now. Does not inspect Feature state. Returns
+    /// Queues the removal, persists Workspace as the selected context, starts a Workspace status
+    /// refresh that does not wait for removal, and returns the Workspace view the page must open now.
+    /// Does not inspect Feature state. Returns
     /// <see cref="FeatureRemovalLeave.AlreadyQueued"/> when this Feature is already being removed.
     /// </summary>
     Task<FeatureRemovalLeave> ConfirmAsync(

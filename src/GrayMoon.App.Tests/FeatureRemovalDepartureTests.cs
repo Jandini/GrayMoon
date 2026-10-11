@@ -11,7 +11,8 @@ public sealed class FeatureRemovalDepartureTests
         var feature = new WorkspaceFeatureContextId(42);
         var queue = new FakeQueue();
         var selected = new FakeSelected();
-        var service = new FeatureRemovalDeparture(queue, new FakeResolver(), selected);
+        var refresh = new FakeRefresh();
+        var service = new FeatureRemovalDeparture(queue, new FakeResolver(), selected, refresh);
 
         var leave = await service.ConfirmAsync(
             feature,
@@ -24,6 +25,7 @@ public sealed class FeatureRemovalDepartureTests
         Assert.True(leave.Workspace.IsSpecialWorkspace);
         Assert.Equal([feature], queue.Enqueued);
         Assert.Equal([(19, 33)], selected.SetCalls);
+        Assert.Equal([(19, 33)], refresh.Started);
         Assert.Equal("http://localhost/workspaces/19/repositories?q=repo:api", Uri.UnescapeDataString(leave.Path));
     }
 
@@ -33,7 +35,8 @@ public sealed class FeatureRemovalDepartureTests
         var feature = new WorkspaceFeatureContextId(42);
         var resolver = new FakeResolver { FeatureLifecycle = "NeedsRepair" };
         var selected = new FakeSelected();
-        var service = new FeatureRemovalDeparture(new FakeQueue(), resolver, selected);
+        var refresh = new FakeRefresh();
+        var service = new FeatureRemovalDeparture(new FakeQueue(), resolver, selected, refresh);
 
         var leave = await service.ConfirmAsync(
             feature,
@@ -45,13 +48,15 @@ public sealed class FeatureRemovalDepartureTests
         Assert.Equal(33, leave.Workspace!.ContextId.Value);
         Assert.Equal("http://localhost/workspaces/19/repositories", leave.Path);
         Assert.Equal([(19, 33)], selected.SetCalls);
+        Assert.Equal([(19, 33)], refresh.Started);
     }
 
     [Fact]
     public async Task Confirm_when_already_on_workspace_still_persists_and_returns_the_workspace_path()
     {
         var selected = new FakeSelected();
-        var service = new FeatureRemovalDeparture(new FakeQueue(), new FakeResolver(), selected);
+        var refresh = new FakeRefresh();
+        var service = new FeatureRemovalDeparture(new FakeQueue(), new FakeResolver(), selected, refresh);
 
         var leave = await service.ConfirmAsync(
             new WorkspaceFeatureContextId(42),
@@ -60,6 +65,7 @@ public sealed class FeatureRemovalDepartureTests
 
         Assert.True(leave.Started);
         Assert.Equal([(19, 33)], selected.SetCalls);
+        Assert.Equal([(19, 33)], refresh.Started);
         Assert.Equal("http://localhost/workspaces/19/repositories", leave.Path);
     }
 
@@ -67,10 +73,12 @@ public sealed class FeatureRemovalDepartureTests
     public async Task Confirm_already_queued_does_not_change_selection_or_path()
     {
         var selected = new FakeSelected();
+        var refresh = new FakeRefresh();
         var service = new FeatureRemovalDeparture(
             new FakeQueue { EnqueueResult = false },
             new FakeResolver(),
-            selected);
+            selected,
+            refresh);
 
         var leave = await service.ConfirmAsync(
             new WorkspaceFeatureContextId(42),
@@ -82,6 +90,7 @@ public sealed class FeatureRemovalDepartureTests
         Assert.Null(leave.Workspace);
         Assert.Empty(leave.Path);
         Assert.Empty(selected.SetCalls);
+        Assert.Empty(refresh.Started);
     }
 
     [Fact]
@@ -89,7 +98,8 @@ public sealed class FeatureRemovalDepartureTests
     {
         var selected = new FakeSelected();
         var queue = new FakeQueue();
-        var service = new FeatureRemovalDeparture(queue, new FakeResolver(), selected);
+        var refresh = new FakeRefresh();
+        var service = new FeatureRemovalDeparture(queue, new FakeResolver(), selected, refresh);
 
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.ConfirmAsync(
@@ -100,6 +110,7 @@ public sealed class FeatureRemovalDepartureTests
         Assert.Equal("Cannot remove the special Workspace context.", error.Message);
         Assert.Empty(queue.Enqueued);
         Assert.Empty(selected.SetCalls);
+        Assert.Empty(refresh.Started);
     }
 
     [Theory]
@@ -110,6 +121,17 @@ public sealed class FeatureRemovalDepartureTests
     public void WorkspacePath_strips_context_and_keeps_other_query(string currentUri, string expected)
     {
         Assert.Equal(expected, Uri.UnescapeDataString(FeatureRemovalDeparture.WorkspacePath(currentUri)));
+    }
+
+    private sealed class FakeRefresh : IWorkspaceCheckoutRefresh
+    {
+        public List<(int WorkspaceId, int ContextId)> Started { get; } = [];
+
+        public void Start(int workspaceId, WorkspaceFeatureContextId contextId)
+            => Started.Add((workspaceId, contextId.Value));
+
+        public Task RunAsync(int workspaceId, WorkspaceFeatureContextId contextId, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 
     private sealed class FakeQueue : IFeatureRemovalQueue
