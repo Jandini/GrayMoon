@@ -638,11 +638,12 @@ public sealed class WorkspaceFeatureOperations(
             "Remove", info.WorkspaceId, info.WorkspaceFeatureId, featureContextId.Value, info.FeatureName);
         try
         {
-            // Everything but the final Workspace refresh runs under this Feature's own lock with no overlay, so
-            // other Features and the page stay usable. A caller that queues the removal waits for a free slot first.
+            // The whole removal, including dropping the Feature's rows, takes no Workspace lock and does not
+            // refresh the Workspace. That refresh starts when the user leaves for the Workspace and must not
+            // wait for this background job. A caller that queues the removal waits for a free slot first.
             var phaseOne = await RunRemovalPhaseOneAsync(featureContextId, info, options, progress, cancellationToken);
             var outcome = phaseOne.Failure
-                ?? await RunRemovalFinalizeAsync(featureContextId, info, phaseOne, progress, cancellationToken);
+                ?? await FinalizeFeatureRemovalAsync(featureContextId, info, phaseOne, cancellationToken);
             logger.FeatureOperationFinished(
                 "Remove", info.WorkspaceId, info.WorkspaceFeatureId, featureContextId.Value, info.FeatureName, startedAt,
                 outcome.Success ? "Succeeded" : "Failed", outcome.Error);
@@ -710,51 +711,6 @@ public sealed class WorkspaceFeatureOperations(
         }
     }
 
-    /// <summary>
-    /// Refreshes the Workspace state and drops the Feature's rows under the page's loading overlay. Starts as soon as
-    /// the Workspace is idle; it waits for a running operation instead of interrupting it.
-    /// </summary>
-    private async Task<OperationResult> RunRemovalFinalizeAsync(
-        WorkspaceFeatureContextId featureContextId,
-        WorkspaceFeatureContextInfo info,
-        RemovalPhaseOne phaseOne,
-        IProgress<OperationProgress>? progress,
-        CancellationToken cancellationToken)
-    {
-        var tcs = new TaskCompletionSource<OperationResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-        IWorkspaceLockedOperation operation;
-        // Wait for whatever else is running (Sync, ...) to finish: this never interrupts it, and the removal is already
-        // done by now, so the refresh always runs, under the page overlay.
-        while (!operationLock.TryStartStructural(
-                   info.WorkspaceId,
-                   "remove-feature",
-                   WorkspaceJobKeys.RepositoriesOverlayKey(info.WorkspaceId),
-                   "Refreshing workspace state...",
-                   async (op, ct) =>
-                   {
-                       try
-                       {
-                           using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, cancellationToken);
-                           tcs.TrySetResult(await FinalizeFeatureRemovalAsync(
-                               featureContextId, info, phaseOne, BindOverlayProgress(op, progress), linked.Token));
-                       }
-                       catch (Exception ex)
-                       {
-                           logger.LogWarning(ex, "Feature Remove finalize threw. WorkspaceId={WorkspaceId} FeatureName={FeatureName}", info.WorkspaceId, info.FeatureName);
-                           tcs.TrySetResult(OperationResult.Fail(ex.Message));
-                           throw;
-                       }
-                   },
-                   out operation))
-        {
-            await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken);
-        }
-
-        var result = await tcs.Task.WaitAsync(cancellationToken);
-        await operation.WhenCompleted;
-        return result;
-    }
-
     private async Task<RemovalPhaseOne> RemoveFeatureCoreAsync(
         WorkspaceFeatureContextId featureContextId,
         WorkspaceFeatureContextInfo info,
@@ -801,7 +757,6 @@ public sealed class WorkspaceFeatureOperations(
             .Where(l => wrIds.Contains(l.WorkspaceRepositoryId))
             .ToListAsync(cancellationToken);
         var linkByWrId = links.ToDictionary(l => l.WorkspaceRepositoryId);
-        var repositoryIds = links.Select(l => l.RepositoryId).Distinct().ToList();
 
         var errorsByWrId = new ConcurrentDictionary<int, string>();
         var reportByWrId = new ConcurrentDictionary<int, RemoveFeatureRepositoryReport>();
@@ -1093,8 +1048,7 @@ public sealed class WorkspaceFeatureOperations(
         if (!errorsByWrId.IsEmpty)
         {
             // Worker work ran in parallel; apply EF updates sequentially (DbContext is not thread-safe).
-            // Do not continue into Workspace refresh or report success: the UI would navigate back while
-            // the Feature still owns failed worktrees. Keep metadata for retry (§27.8).
+            // Do not report success: the Feature still owns failed worktrees. Keep metadata for retry (§27.8).
             // A failed row stays Removing with its error in LastError (D2 step 0): row-level NeedsRepair
             // is reserved for the sync-time "worktree missing" case, not a failed Remove.
             foreach (var row in rows)
@@ -1130,28 +1084,20 @@ public sealed class WorkspaceFeatureOperations(
             .Where(entry => entry is not null)
             .Select(entry => entry!)
             .ToList();
-        return new RemovalPhaseOne(null, report, pendingDeletionFolder, repositoryIds, specialContextId);
+        return new RemovalPhaseOne(null, report, pendingDeletionFolder, specialContextId);
     }
 
     /// <summary>
-    /// Last step of Remove Feature, under the Workspace overlay: refresh the special Workspace snapshot so the grid is not
-    /// stale after navigation back to Workspace (ParentBranchName / SourceBranchName is provenance only and must never
-    /// drive a checkout or return-to-default here), then drop the Feature's rows.
+    /// Drops the Feature's rows after its worktrees are gone. Does not refresh the Workspace and does not
+    /// take the Workspace lock: the status refresh is a separate operation started when the user leaves.
+    /// ParentBranchName / SourceBranchName is provenance only and must never drive a checkout here.
     /// </summary>
     private async Task<OperationResult> FinalizeFeatureRemovalAsync(
         WorkspaceFeatureContextId featureContextId,
         WorkspaceFeatureContextInfo info,
         RemovalPhaseOne phaseOne,
-        IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken)
     {
-        await RefreshWorkspaceStateAfterFeatureRemoveAsync(
-            info.WorkspaceId,
-            phaseOne.SpecialContextId,
-            phaseOne.RepositoryIds,
-            progress,
-            cancellationToken);
-
         var selected = await selectedContextService.GetSelectedAsync(info.WorkspaceId, cancellationToken);
         if (selected?.Value == featureContextId.Value)
             await selectedContextService.SetSelectedAsync(info.WorkspaceId, phaseOne.SpecialContextId, cancellationToken);
@@ -1192,11 +1138,10 @@ public sealed class WorkspaceFeatureOperations(
         OperationResult? Failure,
         IReadOnlyList<RemoveFeatureRepositoryReport> Report,
         string? PendingDeletionFolder,
-        IReadOnlyList<int> RepositoryIds,
         WorkspaceFeatureContextId SpecialContextId)
     {
         public static RemovalPhaseOne Failed(OperationResult failure) =>
-            new(failure, [], null, [], default);
+            new(failure, [], null, default);
     }
 
     /// <summary>
@@ -1392,42 +1337,6 @@ public sealed class WorkspaceFeatureOperations(
             .ExecuteDeleteAsync(cancellationToken);
     }
 
-    /// <summary>
-    /// After Feature worktrees are gone, observe and persist the special Workspace checkout that
-    /// already exists. Never checkout, switch branch, pull, or restore <c>ParentBranchName</c>.
-    /// Refresh failure is logged only - Feature Git resources were already removed successfully.
-    /// </summary>
-    private async Task RefreshWorkspaceStateAfterFeatureRemoveAsync(
-        int workspaceId,
-        WorkspaceFeatureContextId specialContextId,
-        IReadOnlyList<int> repositoryIds,
-        IProgress<OperationProgress>? progress,
-        CancellationToken cancellationToken)
-    {
-        // Always runs, whether or not the Feature had changes. With no repository rows to name (an earlier partial remove
-        // already dropped them), the whole Workspace is refreshed: an empty id list means "every repository" to Sync.
-        progress?.Report(new OperationProgress("Refreshing Workspace repository status..."));
-
-        try
-        {
-            await using var scope = scopeFactory.CreateAsyncScope();
-            var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-            await git.SyncAsync(
-                workspaceId,
-                specialContextId,
-                repositoryIds: repositoryIds,
-                cancellationToken: cancellationToken);
-            await git.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, specialContextId, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(
-                ex,
-                "Non-mutating Workspace status refresh after Remove Feature failed for workspace {WorkspaceId}. Feature resources were already removed; a later Sync can recover.",
-                workspaceId);
-        }
-    }
-
     private async Task<FeatureWorktreeLiveStatus> ProbeFeatureWorktreeLiveStatusAsync(
         string? featureWorkspaceRoot,
         string? featureWorkspaceFolder,
@@ -1528,16 +1437,33 @@ public sealed class WorkspaceFeatureOperations(
         && plans.All(p =>
             !p.WorktreeStatusUnknown
             && p.LiveStatusEstablished
-            // The branch Remove actually deletes is the Feature branch, not whatever is checked out
-            // right now (09 SB-2); EffectiveOutgoingCommits reads the Feature branch's own count for a
-            // non-pinned repo. A null count (Worker unreachable, no upstream, or an older Worker) is
-            // unknown, never treated as zero commits pending.
-            && p.EffectiveOutgoingCommits == 0
+            && HasNothingUnpushed(p)
             && !p.HasUncommittedChanges
             && !p.HasStagedChanges
             && !p.HasConflicts
             // A locked worktree (D5) must be explained and unlocked with consent, never removed silently.
             && !p.IsLocked);
+
+    /// <summary>
+    /// Nothing unpushed to lose. A zero ahead-of-upstream count is that.
+    /// The branch Remove deletes is the Feature branch (09 SB-2). A null ahead count is unknown
+    /// when an upstream exists or upstream itself is unknown (older Worker), and stays unsafe.
+    /// A branch that was never pushed has no upstream: the Worker reports that as false with a
+    /// null ahead count, which means there is no remote to lose. That is safe when the branch is
+    /// also not ahead of the default branch.
+    /// </summary>
+    private static bool HasNothingUnpushed(RemoveFeatureRepositoryPlan plan)
+    {
+        if (plan.EffectiveOutgoingCommits is > 0)
+            return false;
+        if (plan.EffectiveOutgoingCommits == 0)
+            return true;
+
+        var upstreamKnownAbsent = plan.FeatureBranchName is null
+            ? !plan.HasUpstream
+            : plan.FeatureBranchHasUpstream == false;
+        return upstreamKnownAbsent && plan.EffectiveAheadOfDefault == 0;
+    }
 
     /// <summary>
     /// Disk facts for one Feature worktree, from the Worker's InspectWorktree command. The App never

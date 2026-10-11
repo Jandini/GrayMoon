@@ -103,7 +103,7 @@ public sealed class FeatureRemovalQueue(
 
     private void Announce(QueuedRemoval removal, OperationResult result)
     {
-        // Subscribers first (the page refreshes the Workspace already opened at confirm); the toast never delays them.
+        // Subscribers first (the feature list drops the finished Feature); the toast never delays them.
         try
         {
             Completed?.Invoke(new FeatureRemovalCompleted(

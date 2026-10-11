@@ -37,7 +37,6 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     [Inject] private WorkspaceContextNavigationService ContextNavigation { get; set; } = default!;
     [Inject] private IWorkspaceCapabilitiesResolver CapabilitiesResolver { get; set; } = default!;
     [Inject] private IFeatureFolderCleanupService FeatureFolderCleanup { get; set; } = default!;
-    [Inject] private IFeatureRemovalQueue RemovalQueue { get; set; } = default!;
 
     /// <summary>Keeps modal deep-links on the Feature currently being viewed (Workspace URLs stay bare).</summary>
     private string BuildContextScopedUrl(string relativePathWithoutQuery)
@@ -64,7 +63,6 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     {
         WorkerQueueStateService.OnQueueStateChanged(OnQueueStateChanged);
         JobService.Changed += OnJobServiceChanged;
-        RemovalQueue.Completed += OnFeatureRemovalCompleted;
     }
 
     private async Task ResolveSelectedContextAsync()
@@ -332,8 +330,9 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     }
 
     /// <summary>
-    /// The user confirmed Remove Feature. The departure service already queued the work and persisted
-    /// Workspace; open that view and refresh it now, regardless of the Feature's state.
+    /// The user confirmed Remove Feature. Departure already queued the background removal, started the
+    /// Workspace status refresh, and persisted Workspace. Open that view now. The refresh does not
+    /// wait for removal.
     /// </summary>
     private async Task OnFeatureRemovalConfirmedAsync(FeatureRemovalLeave leave)
     {
@@ -346,32 +345,6 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
 
         NavigationManager.NavigateTo(leave.Path, replace: true);
         await OnSelectedContextChangedAsync(leave.Workspace!.ContextId);
-    }
-
-    /// <summary>
-    /// Background removal finished: refresh the Workspace already on screen. Navigation happened at confirm.
-    /// </summary>
-    private void OnFeatureRemovalCompleted(FeatureRemovalCompleted completed)
-    {
-        if (_disposed || completed.WorkspaceId != WorkspaceId)
-            return;
-
-        _ = InvokeAsync(async () =>
-        {
-            if (_disposed)
-                return;
-
-            try
-            {
-                await LoadWorkspaceAsync();
-                ApplySyncStateFromLoadedItems();
-                StateHasChanged();
-            }
-            catch (Exception ex)
-            {
-                Logger.LogWarning(ex, "Refreshing the Workspace after Feature removal failed.");
-            }
-        });
     }
 
     /// <summary>Reads the saved tbody scroll offset for the current WorkspaceId from sessionStorage, consumed by the next ResetAndLoadFromTopAsync(restoreScroll: true) call. Best-effort: malformed or missing storage falls back to no restore (top of grid), matching current behavior.</summary>
@@ -513,7 +486,6 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         CancelBackgroundWork();
         WorkerQueueStateService.RemoveQueueStateChanged(OnQueueStateChanged);
         JobService.Changed -= OnJobServiceChanged;
-        RemovalQueue.Completed -= OnFeatureRemovalCompleted;
         lock (_refreshDebounceLock)
         {
             _refreshDebounceCts?.Cancel();

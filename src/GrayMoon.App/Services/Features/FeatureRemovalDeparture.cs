@@ -4,13 +4,15 @@ using Microsoft.AspNetCore.WebUtilities;
 namespace GrayMoon.App.Services.Features;
 
 /// <summary>
-/// Confirm-time leave for Remove Feature. Queues the background removal, then always
-/// persists and returns the Workspace view. Feature lifecycle is not consulted.
+/// Confirm-time leave for Remove Feature. Queues the background removal, starts a Workspace
+/// status refresh that does not wait for that removal, then persists and returns the Workspace view.
+/// Feature lifecycle is not consulted.
 /// </summary>
 public sealed class FeatureRemovalDeparture(
     IFeatureRemovalQueue queue,
     IWorkspaceFeatureContextResolver contextResolver,
-    IWorkspaceSelectedFeatureContextService selectedContextService) : IFeatureRemovalDeparture
+    IWorkspaceSelectedFeatureContextService selectedContextService,
+    IWorkspaceCheckoutRefresh checkoutRefresh) : IFeatureRemovalDeparture
 {
     public async Task<FeatureRemovalLeave> ConfirmAsync(
         WorkspaceFeatureContextId featureContextId,
@@ -29,6 +31,7 @@ public sealed class FeatureRemovalDeparture(
         var specialId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
         var workspace = await contextResolver.GetRequiredAsync(specialId, workspaceId, cancellationToken);
         await selectedContextService.SetSelectedAsync(workspaceId, specialId, cancellationToken);
+        checkoutRefresh.Start(workspaceId, specialId);
         return FeatureRemovalLeave.ToWorkspace(workspace, WorkspacePath(currentUri));
     }
 
