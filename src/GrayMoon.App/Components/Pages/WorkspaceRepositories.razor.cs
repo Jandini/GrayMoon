@@ -37,6 +37,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     [Inject] private WorkspaceContextNavigationService ContextNavigation { get; set; } = default!;
     [Inject] private IWorkspaceCapabilitiesResolver CapabilitiesResolver { get; set; } = default!;
     [Inject] private IFeatureFolderCleanupService FeatureFolderCleanup { get; set; } = default!;
+    [Inject] private IFeatureRemovalQueue RemovalQueue { get; set; } = default!;
 
     /// <summary>Keeps modal deep-links on the Feature currently being viewed (Workspace URLs stay bare).</summary>
     private string BuildContextScopedUrl(string relativePathWithoutQuery)
@@ -63,6 +64,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     {
         WorkerQueueStateService.OnQueueStateChanged(OnQueueStateChanged);
         JobService.Changed += OnJobServiceChanged;
+        RemovalQueue.Completed += OnFeatureRemovalCompleted;
     }
 
     private async Task ResolveSelectedContextAsync()
@@ -329,39 +331,47 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         StateHasChanged();
     }
 
-    private async Task OnFeatureRemovedAsync()
+    /// <summary>
+    /// The user confirmed Remove Feature. The departure service already queued the work and persisted
+    /// Workspace; open that view and refresh it now, regardless of the Feature's state.
+    /// </summary>
+    private async Task OnFeatureRemovalConfirmedAsync(FeatureRemovalLeave leave)
     {
         _removeFeatureModalVisible = false;
-
-        // Only force a navigation away from the current view when the Feature that was just removed is the
-        // one being viewed (e.g. removed via the "Feature" button's own "Remove Feature" menu item, or via the
-        // "-" icon on the currently-selected row in the context-switcher dropdown). Removing a *different*
-        // Feature from that dropdown's "-" icon shouldn't kick the user out of whatever context they're
-        // currently viewing.
-        var removedCurrentContext = _removeFeatureContextId is { } removedId
-            && _selectedContextId is { } selectedId
-            && removedId.Value == selectedId.Value;
         _removeFeatureContextId = null;
         _removeFeaturePlan = null;
+        _featureStatusPanelVisible = false;
+        _featureStatusContextId = null;
+        ToastService.Show("Removing feature...");
 
-        if (removedCurrentContext)
+        NavigationManager.NavigateTo(leave.Path, replace: true);
+        await OnSelectedContextChangedAsync(leave.Workspace!.ContextId);
+    }
+
+    /// <summary>
+    /// Background removal finished: refresh the Workspace already on screen. Navigation happened at confirm.
+    /// </summary>
+    private void OnFeatureRemovalCompleted(FeatureRemovalCompleted completed)
+    {
+        if (_disposed || completed.WorkspaceId != WorkspaceId)
+            return;
+
+        _ = InvokeAsync(async () =>
         {
+            if (_disposed)
+                return;
+
             try
             {
-                var special = await FeatureContextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(WorkspaceId);
-                await SelectedFeatureContextService.SetSelectedAsync(WorkspaceId, special);
-                await OnSelectedContextChangedAsync(special);
-                var path = new Uri(NavigationManager.Uri).GetLeftPart(UriPartial.Path);
-                NavigationManager.NavigateTo(path, replace: true);
+                await LoadWorkspaceAsync();
+                ApplySyncStateFromLoadedItems();
+                StateHasChanged();
             }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("was not found", StringComparison.Ordinal))
+            catch (Exception ex)
             {
-                // The Feature context is already gone after a successful remove; a follow-up load that
-                // still targets it must not surface as a remove-dialog error.
-                Logger.LogDebug(ex, "Post-remove navigation ignored expected missing Feature context.");
+                Logger.LogWarning(ex, "Refreshing the Workspace after Feature removal failed.");
             }
-        }
-        ToastService.Show("Feature removed.");
+        });
     }
 
     /// <summary>Reads the saved tbody scroll offset for the current WorkspaceId from sessionStorage, consumed by the next ResetAndLoadFromTopAsync(restoreScroll: true) call. Best-effort: malformed or missing storage falls back to no restore (top of grid), matching current behavior.</summary>
@@ -503,6 +513,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         CancelBackgroundWork();
         WorkerQueueStateService.RemoveQueueStateChanged(OnQueueStateChanged);
         JobService.Changed -= OnJobServiceChanged;
+        RemovalQueue.Completed -= OnFeatureRemovalCompleted;
         lock (_refreshDebounceLock)
         {
             _refreshDebounceCts?.Cancel();

@@ -1,9 +1,11 @@
 @using GrayMoon.Application
 @using GrayMoon.Application.Features
 @inject IWorkspaceFeatureOperations FeatureOperations
+@inject IFeatureRemovalDeparture Departure
+@inject NavigationManager Navigation
 @inject ILogger<RemoveFeatureModal> Logger
 
-@if (IsVisible && !_removing)
+@if (IsVisible)
 {
     <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: 1085;"
          @onkeydown="HandleKeyDown"
@@ -19,43 +21,14 @@
                             <span class="modal-title__secondary text-muted fw-normal fs-6" title="@_featureName">@_featureName</span>
                         }
                     </h5>
-                    <button type="button" class="btn-close" aria-label="Close" @onclick="@(_report is null ? Cancel : Done)" disabled="@_analyzing"></button>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="Cancel" disabled="@_analyzing"></button>
                 </div>
                 <div class="modal-body">
                     @if (!string.IsNullOrEmpty(_error))
                     {
                         <div class="gm-callout gm-callout--error mb-3" role="alert">@_error</div>
                     }
-                    @if (_report is not null && string.IsNullOrEmpty(_error))
-                    {
-                        @if (ReportWarnings.Count > 0)
-                        {
-                            <div class="gm-callout gm-callout--warning mb-3" role="alert">
-                                Feature removed with warnings.
-                            </div>
-                            <ul class="list-unstyled mb-0">
-                                @foreach (var warning in ReportWarnings)
-                                {
-                                    <li class="mb-2">
-                                        <div class="text-muted small">@warning</div>
-                                    </li>
-                                }
-                            </ul>
-                        }
-                        @if (!string.IsNullOrEmpty(_pendingDeletionFolder))
-                        {
-                            @* Information only: the background cleanup deletes the folder later, nothing for the user to do. *@
-                            <div class="@(ReportWarnings.Count > 0 ? "mt-3" : null)" role="status">
-                                @if (ReportWarnings.Count == 0)
-                                {
-                                    <p class="mb-2">Feature removed.</p>
-                                }
-                                <p class="mb-1">@PendingDeletionText</p>
-                                <p class="text-muted small text-break mb-0">@_pendingDeletionFolder</p>
-                            </div>
-                        }
-                    }
-                    else if (_plan is null)
+                    @if (_plan is null)
                     {
                         @* Fallback only: normal open preloads the plan via the page LoadingOverlay. *@
                         @if (string.IsNullOrEmpty(_error))
@@ -195,25 +168,17 @@
                     }
                 </div>
                 <div class="modal-footer">
-                    @if (_report is not null)
-                    {
-                        <button type="button" class="btn btn-primary text-nowrap" data-default-action @onclick="Done">Done</button>
-                    }
-                    else
-                    {
-                        <button type="button" class="btn btn-outline-secondary text-nowrap" @onclick="Cancel" disabled="@_analyzing">Cancel</button>
-                        <button type="button" class="@RemoveCtaClass text-nowrap" data-default-action @onclick="RemoveAsync"
-                                disabled="@(_analyzing || _plan is null || !CanRemove(AnyRepoStatusUnknown, ShowDiscardCheckbox, _allowDiscard, ShowForceCheckbox, _allowForce, ShowUnlockCheckbox, _allowUnlock))">
-                            Remove Feature
-                        </button>
-                    }
+                    <button type="button" class="btn btn-outline-secondary text-nowrap" @onclick="Cancel" disabled="@_analyzing">Cancel</button>
+                    <button type="button" class="@RemoveCtaClass text-nowrap" data-default-action @onclick="RemoveAsync"
+                            disabled="@(_analyzing || _plan is null || !CanRemove(AnyRepoStatusUnknown, ShowDiscardCheckbox, _allowDiscard, ShowForceCheckbox, _allowForce, ShowUnlockCheckbox, _allowUnlock))">
+                        Remove Feature
+                    </button>
                 </div>
             </div>
         </div>
     </div>
 }
-@* While _removing, the dialog is hidden and the page-level BackgroundJobOverlay (driven by the
-   "remove-feature" structural operation) covers the page with its own "Removing feature..." message. *@
+@* Confirm queues the background removal and leaves for the Workspace immediately via IFeatureRemovalDeparture. *@
 
 @code {
     [Parameter] public bool IsVisible { get; set; }
@@ -224,25 +189,16 @@
     /// </summary>
     [Parameter] public RemoveFeaturePlan? InitialPlan { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
-    [Parameter] public EventCallback OnRemoved { get; set; }
-    /// <summary>
-    /// Raised when Remove ended in failure. A failed Remove can already have changed the Feature (worktrees gone, lifecycle
-    /// NeedsRepair), so the page must re-read it instead of keeping the grid it showed before the attempt.
-    /// </summary>
-    [Parameter] public EventCallback OnRemoveFailed { get; set; }
+    [Parameter] public EventCallback<FeatureRemovalLeave> OnRemoved { get; set; }
 
     private ElementReference _modalElement;
     private RemoveFeaturePlan? _plan;
-    private IReadOnlyList<RemoveFeatureRepositoryReport>? _report;
-    /// <summary>The removed Feature's folder when files in use kept it on disk; it is marked and cleaned up later.</summary>
-    private string? _pendingDeletionFolder;
     private string? _error;
 
     internal const string PendingDeletionText =
         "Some files were still in use, so part of the Feature folder was left behind. "
         + "It is marked for deletion and GrayMoon will remove it automatically later.";
     private bool _analyzing;
-    private bool _removing;
     private bool _allowDiscard;
     private bool _allowForce;
     private bool _allowUnlock;
@@ -279,8 +235,6 @@
 
         return false;
     }
-
-    private IReadOnlyList<string> ReportWarnings => BuildReportWarnings(_report);
 
     /// <summary>One line per repository whose branch was kept or could not be deleted. Leftover files never add a line.</summary>
     internal static IReadOnlyList<string> BuildReportWarnings(IReadOnlyList<RemoveFeatureRepositoryReport>? report)
@@ -704,12 +658,6 @@
         if (_featureNameLoadedFor != FeatureContextId.Value.Value)
             _ = LoadFeatureNameAsync(FeatureContextId.Value);
 
-        // After a successful remove the Feature context is gone. Never re-analyze while showing the
-        // warnings report (or while the structural overlay is covering the page) - that would surface
-        // "WorkspaceFeatureContext N was not found" next to the removal outcome.
-        if (_removing || _report is not null)
-            return;
-
         // Page already ran analyze under LoadingOverlay; show that plan immediately (no in-dialog check).
         if (InitialPlan is not null
             && _appliedInitialPlanFor != FeatureContextId.Value.Value)
@@ -761,8 +709,6 @@
     {
         _plan = plan;
         _analyzedFor = FeatureContextId?.Value;
-        _report = null;
-        _pendingDeletionFolder = null;
         _allowDiscard = false;
         _allowForce = false;
         _allowUnlock = false;
@@ -800,17 +746,18 @@
         }
     }
 
+    /// <summary>
+    /// Confirms removal: the departure service queues the work and returns the Workspace view to
+    /// open now. The outcome (success, warnings or failure) arrives later as a toast.
+    /// </summary>
     private async Task RemoveAsync()
     {
         if (FeatureContextId is null)
             return;
-        _removing = true;
         _error = null;
-        _report = null;
-        _pendingDeletionFolder = null;
         try
         {
-            var result = await FeatureOperations.RemoveFeatureAsync(
+            var leave = await Departure.ConfirmAsync(
                 FeatureContextId.Value,
                 new RemoveFeatureOptions
                 {
@@ -820,42 +767,21 @@
                     DeleteLocalBranches = _deleteLocalBranches,
                     DeleteRemoteBranches = _deleteRemoteBranches,
                     AnalyzedPlan = _plan
-                });
-            if (!result.Success)
+                },
+                Navigation.Uri);
+            if (!leave.Started)
             {
-                // Hard failure: error only - never pair with a green/success report.
-                _report = null;
-                _error = result.Error ?? "Remove Feature failed.";
-                await RefreshPlanAsync();
-                await OnRemoveFailed.InvokeAsync();
+                _error = leave.Error;
                 return;
             }
 
-            var report = result.RemoveFeatureReport ?? [];
-            if (!HasReportWarnings(report) && string.IsNullOrEmpty(result.RemoveFeaturePendingDeletionFolder))
-            {
-                // Clean success: close immediately; page shows a toast via OnRemoved.
-                ResetDialogState();
-                await OnRemoved.InvokeAsync();
-                return;
-            }
-
-            // Success with warnings to acknowledge, or a folder left for later cleanup (information only).
-            _plan = null;
-            _analyzedFor = null;
-            _error = null;
-            _report = report;
-            _pendingDeletionFolder = result.RemoveFeaturePendingDeletionFolder;
+            ResetDialogState();
+            await OnRemoved.InvokeAsync(leave);
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Remove Feature failed");
-            _report = null;
+            Logger.LogError(ex, "Remove Feature could not be confirmed");
             _error = ex.Message;
-        }
-        finally
-        {
-            _removing = false;
         }
     }
 
@@ -866,8 +792,6 @@
         _appliedInitialPlanFor = null;
         _featureName = null;
         _featureNameLoadedFor = null;
-        _report = null;
-        _pendingDeletionFolder = null;
         _allowDiscard = false;
         _allowForce = false;
         _allowUnlock = false;
@@ -882,21 +806,12 @@
         return OnCancel.InvokeAsync();
     }
 
-    private async Task Done()
-    {
-        ResetDialogState();
-        await OnRemoved.InvokeAsync();
-    }
-
-    /// <summary>Esc closes/acknowledges (while not analyzing/removing); Ctrl/Cmd+Enter is handled globally by modal-default-action.js via data-default-action.</summary>
-    private async Task HandleKeyDown(KeyboardEventArgs e)
+    /// <summary>Esc closes (while not analyzing); Ctrl/Cmd+Enter is handled globally by modal-default-action.js via data-default-action.</summary>
+    private Task HandleKeyDown(KeyboardEventArgs e)
     {
         if (e.Key != "Escape" || _analyzing)
-            return;
+            return Task.CompletedTask;
 
-        if (_report is not null)
-            await Done();
-        else
-            await Cancel();
+        return Cancel();
     }
 }

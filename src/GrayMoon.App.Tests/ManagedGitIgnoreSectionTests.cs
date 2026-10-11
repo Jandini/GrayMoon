@@ -38,12 +38,12 @@ public sealed class ManagedGitIgnoreSectionTests
     [Fact]
     public void Replaces_existing_section_and_preserves_outside_lines()
     {
-        var existing = "bin/\r\nobj/\r\n\r\n# <graymoon-repositories>\n/Old/\n# </graymoon-repositories>\r\n\r\n*.user\r\n";
+        var existing = "bin/\r\nobj/\r\n\r\n# <graymoon-repositories>\r\n/Old/\r\n# </graymoon-repositories>\r\n\r\n*.user\r\n";
 
         var result = ManagedGitIgnoreSection.Apply(existing, ["Avr.Api", "Avr.Web"]);
 
         Assert.Equal(
-            "bin/\r\nobj/\r\n\r\n# <graymoon-repositories>\n/Avr.Api/\n/Avr.Web/\n# </graymoon-repositories>\r\n\r\n*.user\r\n",
+            "bin/\r\nobj/\r\n\r\n# <graymoon-repositories>\r\n/Avr.Api/\r\n/Avr.Web/\r\n# </graymoon-repositories>\r\n\r\n*.user\r\n",
             result);
     }
 
@@ -58,10 +58,20 @@ public sealed class ManagedGitIgnoreSectionTests
     }
 
     [Fact]
-    public void Output_uses_lf()
+    public void New_and_lf_files_use_lf()
     {
         Assert.DoesNotContain('\r', ManagedGitIgnoreSection.Apply(null, ["Avr.Api"]));
         Assert.DoesNotContain('\r', ManagedGitIgnoreSection.Apply("bin/\n", ["Avr.Api"]));
+    }
+
+    [Fact]
+    public void Crlf_file_keeps_crlf()
+    {
+        var result = ManagedGitIgnoreSection.Apply("bin/\r\n", ["Avr.Api"], ignoreCodeGraph: true);
+
+        Assert.Equal(
+            "bin/\r\n\r\n# <graymoon-repositories>\r\n/Avr.Api/\r\n/.codegraph/\r\n# </graymoon-repositories>\r\n",
+            result);
     }
 
     [Fact]

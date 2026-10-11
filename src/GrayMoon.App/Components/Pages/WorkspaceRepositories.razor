@@ -24,7 +24,6 @@
                                     OnSelectedContextChanged="OnSelectedContextChangedAsync"
                                     OnRequestRemoveFeature="OnRequestRemoveFeatureFromSelectorAsync"
                                     OnRemoveFeature="OnRemoveFeatureAsync"
-                                    OnShowFeatureStatus="() => OpenFeatureStatusPanel()"
                                     RepositoriesCount="@(_headerState?.TotalCount ?? 0)"
                                     CountReady="@(hasLoadedOnce && !isInitialLoading)"
                                     HasFilter="@HasSearchFilter"
@@ -75,8 +74,7 @@
                             FeatureContextId="_removeFeatureContextId"
                             InitialPlan="_removeFeaturePlan"
                             OnCancel="OnRemoveFeatureCancelAsync"
-                            OnRemoved="OnFeatureRemovedAsync"
-                            OnRemoveFailed="OnFeatureStatusChangedAsync" />
+                            OnRemoved="OnFeatureRemovalConfirmedAsync" />
         <FeatureStatusPanel IsVisible="_featureStatusPanelVisible"
                             FeatureContextId="_featureStatusContextId"
                             OnClose="OnFeatureStatusCloseAsync"
@@ -85,16 +83,21 @@
                             OnChanged="OnFeatureStatusChangedAsync" />
         @if (_isReadOnlyContext)
         {
-            <div class="page-warning-callout page-callout" role="status" title="This Feature needs attention. Use Repair to continue.">This Feature needs attention. Use Repair to continue.</div>
+            <div class="page-warning-callout page-callout-with-actions page-callout" role="status">
+                <span title="This Feature needs attention. Use Repair to continue.">This Feature needs attention. Use Repair to continue.</span>
+                <button type="button" class="page-callout-action page-callout-action--primary"
+                        disabled="@IsJobRunning"
+                        @onclick="() => OpenFeatureStatusPanel()">Repair</button>
+            </div>
         }
         @if (ShowManifestDriftBanner)
         {
-            <div class="page-warning-callout manifest-drift-callout page-callout" role="alert">
+            <div class="page-warning-callout page-callout-with-actions page-callout" role="alert">
                 <span title="Workspace definition on disk differs from this Workspace.">Workspace definition on disk differs from this Workspace.</span>
-                <button type="button" class="manifest-drift-action manifest-drift-write"
+                <button type="button" class="page-callout-action page-callout-action--primary"
                         disabled="@_isResolvingManifestDrift"
                         @onclick="WriteWorkspaceDefinitionToDiskAsync">Write Workspace definition to disk</button>
-                <button type="button" class="manifest-drift-action manifest-drift-dismiss"
+                <button type="button" class="page-callout-action page-callout-action--secondary"
                         disabled="@_isResolvingManifestDrift"
                         @onclick="DismissManifestDriftAsync">Dismiss</button>
             </div>

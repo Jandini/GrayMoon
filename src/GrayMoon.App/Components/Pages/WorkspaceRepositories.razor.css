@@ -951,10 +951,9 @@
     word-break: normal;
 }
 
-/* "This Feature needs attention." banner - same look as .page-error-callout (dark tinted strip with an
-   inset accent bar) but amber instead of red, since it's a warning rather than a hard error. No old-fashioned
-   bordered Bootstrap alert box - and no button here, since the header's "Repair" button (replacing Sync while
-   the Feature needs repair) is now the single, clearly visible way to open the status-and-repair dialog. */
+/* Warning callouts - same look as .page-error-callout (dark tinted strip with an inset accent bar)
+   but amber instead of red. Feature attention and Workspace definition drift both put their action
+   on the strip itself (Repair, Write / Dismiss). Sync stays Sync. */
 .page-warning-callout {
     font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
     font-size: 0.8rem;
@@ -970,14 +969,14 @@
 }
 
 /* Actions sit on the right and fill the strip, so the callout itself has no padding. */
-.manifest-drift-callout {
+.page-callout-with-actions {
     display: flex;
     align-items: stretch;
     padding: 0;
     text-overflow: clip;
 }
 
-.manifest-drift-callout > span {
+.page-callout-with-actions > span {
     flex: 1 1 auto;
     align-self: center;
     min-width: 0;
@@ -987,7 +986,7 @@
     white-space: nowrap;
 }
 
-button.manifest-drift-action {
+button.page-callout-action {
     display: inline-flex;
     align-items: center;
     align-self: stretch;
@@ -1003,44 +1002,44 @@ button.manifest-drift-action {
     flex-shrink: 0;
 }
 
-button.manifest-drift-write,
-button.manifest-drift-write:hover,
-button.manifest-drift-write:focus,
-button.manifest-drift-write:active,
-button.manifest-drift-write:disabled {
+button.page-callout-action--primary,
+button.page-callout-action--primary:hover,
+button.page-callout-action--primary:focus,
+button.page-callout-action--primary:active,
+button.page-callout-action--primary:disabled {
     background-color: #ffc107;
     color: #1a1400;
     text-decoration: none;
 }
 
-button.manifest-drift-write:hover:not(:disabled),
-button.manifest-drift-write:focus-visible:not(:disabled) {
+button.page-callout-action--primary:hover:not(:disabled),
+button.page-callout-action--primary:focus-visible:not(:disabled) {
     background-color: #ffd54a;
     color: #1a1400;
 }
 
-button.manifest-drift-dismiss,
-button.manifest-drift-dismiss:hover,
-button.manifest-drift-dismiss:focus,
-button.manifest-drift-dismiss:active,
-button.manifest-drift-dismiss:disabled {
+button.page-callout-action--secondary,
+button.page-callout-action--secondary:hover,
+button.page-callout-action--secondary:focus,
+button.page-callout-action--secondary:active,
+button.page-callout-action--secondary:disabled {
     background-color: #141414;
     color: #f2f2f2;
     text-decoration: none;
 }
 
-button.manifest-drift-dismiss:hover:not(:disabled),
-button.manifest-drift-dismiss:focus-visible:not(:disabled) {
+button.page-callout-action--secondary:hover:not(:disabled),
+button.page-callout-action--secondary:focus-visible:not(:disabled) {
     background-color: #222222;
     color: #ffffff;
 }
 
-button.manifest-drift-action:focus-visible {
+button.page-callout-action:focus-visible {
     outline: none;
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.52);
 }
 
-button.manifest-drift-action:disabled {
+button.page-callout-action:disabled {
     opacity: 0.55;
     cursor: default;
 }

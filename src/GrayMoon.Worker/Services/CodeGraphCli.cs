@@ -19,6 +19,9 @@ public sealed class CodeGraphCli(
 {
     internal const string DataFolderName = ".codegraph";
     internal const string DatabaseFileName = "codegraph.db";
+    internal const string LockFileName = "codegraph.lock";
+    private static readonly TimeSpan LockWaitTimeout = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan LockPollInterval = TimeSpan.FromMilliseconds(500);
 
     private static readonly TimeSpan VersionTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan InitTimeout = TimeSpan.FromHours(1);
@@ -163,6 +166,74 @@ public sealed class CodeGraphCli(
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Waits until CodeGraph removes <c>.codegraph/codegraph.lock</c>, which it holds while it works; uninit fails
+    /// while the lock exists. Returns false when the lock was still there after <paramref name="timeout"/>.
+    /// </summary>
+    public async Task<bool> WaitForLockReleaseAsync(string root, CancellationToken cancellationToken, TimeSpan? timeout = null)
+    {
+        var lockPath = Path.Combine(root, DataFolderName, LockFileName);
+        if (!File.Exists(lockPath))
+            return true;
+
+        logger.LogInformation("Waiting for CodeGraph to release {LockPath}", lockPath);
+        var deadline = DateTime.UtcNow + (timeout ?? LockWaitTimeout);
+        while (File.Exists(lockPath))
+        {
+            if (IsLockStale(lockPath))
+            {
+                // The process that wrote it is gone (e.g. its build was stopped), so nothing will ever remove it.
+                logger.LogInformation("Removing stale CodeGraph lock {LockPath}", lockPath);
+                try { File.Delete(lockPath); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    logger.LogDebug(ex, "Could not delete stale CodeGraph lock {LockPath}", lockPath);
+                    return true;
+                }
+
+                continue;
+            }
+
+            if (DateTime.UtcNow >= deadline)
+            {
+                logger.LogWarning("CodeGraph lock {LockPath} was not released in time", lockPath);
+                return false;
+            }
+
+            await Task.Delay(LockPollInterval, cancellationToken);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// True when the lock file names a process id (CodeGraph writes its own) that is no longer running. A lock that
+    /// cannot be read, or names no process, is treated as held.
+    /// </summary>
+    internal static bool IsLockStale(string lockPath)
+    {
+        try
+        {
+            var text = File.ReadAllText(lockPath).Trim();
+            if (!int.TryParse(text, out var pid) || pid <= 0)
+                return false;
+
+            try
+            {
+                using var process = System.Diagnostics.Process.GetProcessById(pid);
+                return process.HasExited;
+            }
+            catch (ArgumentException)
+            {
+                return true;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return false;
+        }
     }
 
     /// <summary>Runs <c>codegraph uninit -f</c>, which deletes <c>.codegraph</c> in <paramref name="root"/>.</summary>
