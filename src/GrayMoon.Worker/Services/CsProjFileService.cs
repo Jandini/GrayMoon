@@ -26,7 +26,7 @@ public sealed class CsProjFileService(ICsProjFileParser parser, IGitIgnoreServic
                 cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
-                    var parsed = await parser.ParseAsync(path, cancellationToken);
+                    var parsed = await parser.ParseAsync(path, cancellationToken, repoPath);
                     if (parsed != null)
                         return new CsProjFileInfo
                         {

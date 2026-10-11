@@ -212,13 +212,7 @@ public sealed partial class WorkspaceProjectRepository
             .ToListAsync(cancellationToken);
         if (workspaceProjects.Count == 0) return;
 
-        var packageNameToProjectId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        foreach (var p in workspaceProjects)
-        {
-            var key = !string.IsNullOrWhiteSpace(p.PackageId) ? p.PackageId!.Trim() : p.ProjectName.Trim();
-            if (!string.IsNullOrEmpty(key) && !packageNameToProjectId.ContainsKey(key))
-                packageNameToProjectId[key] = p.ProjectId;
-        }
+        var packageNameToProjectId = IndexPackageTargets(workspaceProjects);
 
         var dependentProjectIds = new HashSet<int>();
         var edges = new List<(int DependentProjectId, int ReferencedProjectId, string? Version)>();
@@ -306,13 +300,7 @@ public sealed partial class WorkspaceProjectRepository
             .GroupBy(p => (p.RepositoryId, ProjectPath: p.ProjectFilePath.Trim().ToLowerInvariant()))
             .ToDictionary(g => g.Key, g => g.First().ProjectId);
 
-        var packageNameToProjectId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        foreach (var p in projects)
-        {
-            var key = !string.IsNullOrWhiteSpace(p.PackageId) ? p.PackageId!.Trim() : p.ProjectName.Trim();
-            if (!string.IsNullOrEmpty(key) && !packageNameToProjectId.ContainsKey(key))
-                packageNameToProjectId[key] = p.ProjectId;
-        }
+        var packageNameToProjectId = IndexPackageTargets(projects);
 
         var projectIds = projects.Select(p => p.ProjectId).ToHashSet();
         var depRows = await dbContext.ProjectDependencies
@@ -348,5 +336,24 @@ public sealed partial class WorkspaceProjectRepository
             await dbContext.SaveChangesAsync(cancellationToken);
 
         logger.LogDebug("UpdateProjectDependencyVersions: WorkspaceId={WorkspaceId}, Updated={Count}", workspaceId, updated);
+    }
+
+    /// <summary>
+    /// Package references match a workspace package only by <see cref="WorkspaceProject.PackageId"/>.
+    /// Project name is not a fallback: a project that stopped being packable keeps its name and must not stay a target.
+    /// </summary>
+    private static Dictionary<string, int> IndexPackageTargets(IEnumerable<WorkspaceProject> projects)
+    {
+        var packageNameToProjectId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var project in projects)
+        {
+            if (string.IsNullOrWhiteSpace(project.PackageId))
+                continue;
+            var key = project.PackageId.Trim();
+            if (key.Length > 0)
+                packageNameToProjectId.TryAdd(key, project.ProjectId);
+        }
+
+        return packageNameToProjectId;
     }
 }

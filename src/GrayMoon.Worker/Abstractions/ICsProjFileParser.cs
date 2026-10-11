@@ -6,7 +6,8 @@ namespace GrayMoon.Worker.Abstractions;
 public interface ICsProjFileParser
 {
     /// <summary>Parses an SDK-style .csproj file and returns project type, target framework, name, and package references; returns null if the file is missing or invalid.</summary>
-    Task<CsProjFileInfo?> ParseAsync(string csprojPath, CancellationToken cancellationToken = default);
+    /// <param name="repositoryRoot">Directory that <c>Directory.Build.props</c>, <c>Directory.Build.targets</c>, and imports must not leave. When null, the nearest parent directory that contains a <c>.git</c> entry is used, or the project directory when there is none.</param>
+    Task<CsProjFileInfo?> ParseAsync(string csprojPath, CancellationToken cancellationToken = default, string? repositoryRoot = null);
 
     /// <summary>Updates only the Version of PackageReference elements whose Include matches a key in <paramref name="packageIdToNewVersion"/>. Does not change any other content in the .csproj file.</summary>
     /// <returns>True if the file was modified.</returns>

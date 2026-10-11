@@ -28,7 +28,7 @@ public sealed class CsProjFileParser : ICsProjFileParser
         @"(<Version\s*>)[^<]*(</Version\s*>)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    public Task<CsProjFileInfo?> ParseAsync(string csprojPath, CancellationToken cancellationToken = default)
+    public Task<CsProjFileInfo?> ParseAsync(string csprojPath, CancellationToken cancellationToken = default, string? repositoryRoot = null)
     {
         if (string.IsNullOrWhiteSpace(csprojPath) || !File.Exists(csprojPath))
             return Task.FromResult<CsProjFileInfo?>(null);
@@ -38,13 +38,38 @@ public sealed class CsProjFileParser : ICsProjFileParser
         try
         {
             var doc = XDocument.Load(csprojPath);
-            var result = ParseCsProjDocument(doc, csprojPath);
+            var root = ResolveRepositoryRoot(csprojPath, repositoryRoot);
+            var packaging = ProjectPackagingResolver.Resolve(csprojPath, root);
+            var result = ParseCsProjDocument(doc, csprojPath, packaging);
             return Task.FromResult(result);
         }
         catch
         {
             return Task.FromResult<CsProjFileInfo?>(null);
         }
+    }
+
+    /// <summary>The directory props and targets must not leave. An explicit root wins. Otherwise the nearest parent that contains a .git entry, or the project directory.</summary>
+    private static string ResolveRepositoryRoot(string csprojPath, string? repositoryRoot)
+    {
+        if (!string.IsNullOrWhiteSpace(repositoryRoot))
+            return Path.GetFullPath(repositoryRoot);
+
+        var dir = Path.GetDirectoryName(Path.GetFullPath(csprojPath));
+        var current = dir;
+        while (!string.IsNullOrEmpty(current))
+        {
+            var git = Path.Combine(current, ".git");
+            if (Directory.Exists(git) || File.Exists(git))
+                return current;
+
+            var parent = Path.GetDirectoryName(current);
+            if (string.IsNullOrEmpty(parent) || parent == current)
+                break;
+            current = parent;
+        }
+
+        return dir ?? Path.GetFullPath(csprojPath);
     }
 
     public async Task<bool> UpdateAsync(string csprojPath, IReadOnlyDictionary<string, string> packageIdToNewVersion, CancellationToken cancellationToken = default)
@@ -144,7 +169,7 @@ public sealed class CsProjFileParser : ICsProjFileParser
         return null;
     }
 
-    private static CsProjFileInfo? ParseCsProjDocument(XDocument doc, string csprojPath)
+    private static CsProjFileInfo? ParseCsProjDocument(XDocument doc, string csprojPath, ProjectPackagingResolver.PackagingProperties packaging)
     {
         var root = doc.Root;
         if (root == null)
@@ -162,16 +187,16 @@ public sealed class CsProjFileParser : ICsProjFileParser
         var outputType = GetFirstPropertyValue("OutputType");
         var targetFramework = GetFirstPropertyValue("TargetFramework");
         var targetFrameworks = GetFirstPropertyValue("TargetFrameworks");
-        var packageId = GetFirstPropertyValue("PackageId");
+        // Name stays tied to the project file itself so a cleared package id does not rename the row.
+        var localPackageId = GetFirstPropertyValue("PackageId");
         var assemblyName = GetFirstPropertyValue("AssemblyName");
-        var isPackable = GetFirstPropertyValue("IsPackable");
 
         var framework = !string.IsNullOrWhiteSpace(targetFramework)
             ? targetFramework
             : targetFrameworks ?? "";
 
-        var name = !string.IsNullOrWhiteSpace(packageId)
-            ? packageId
+        var name = !string.IsNullOrWhiteSpace(localPackageId)
+            ? localPackageId
             : !string.IsNullOrWhiteSpace(assemblyName)
                 ? assemblyName
                 : Path.GetFileNameWithoutExtension(csprojPath) ?? "";
@@ -189,10 +214,10 @@ public sealed class CsProjFileParser : ICsProjFileParser
             .Select(t => new NuGetPackageReference { Name = t.Include!, Version = t.Version })
             .ToList();
 
-        var projectType = ResolveProjectType(sdk, outputType, packageRefs, packageId, isPackable);
-        // For Package type: use explicit PackageId from csproj if present, otherwise use project name
+        var projectType = ResolveProjectType(sdk, outputType, packageRefs, packaging.PackageId, packaging.IsPackable);
+        // For Package type: use the effective PackageId when present, otherwise the project name.
         var resultPackageId = projectType == ProjectType.Package
-            ? (!string.IsNullOrWhiteSpace(packageId) ? packageId : name)
+            ? (!string.IsNullOrWhiteSpace(packaging.PackageId) ? packaging.PackageId : name)
             : null;
 
         return new CsProjFileInfo
@@ -210,7 +235,7 @@ public sealed class CsProjFileParser : ICsProjFileParser
         string? outputType,
         IReadOnlyList<NuGetPackageReference> packageRefs,
         string? packageId,
-        string? isPackable)
+        bool? isPackable)
     {
         if (string.Equals(outputType, "Exe", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(outputType, "WinExe", StringComparison.OrdinalIgnoreCase))
@@ -228,18 +253,17 @@ public sealed class CsProjFileParser : ICsProjFileParser
         if (!string.IsNullOrWhiteSpace(sdk) && sdk.StartsWith("Microsoft.NET.Sdk.Web", StringComparison.OrdinalIgnoreCase))
             return ProjectType.Service;
 
-        // Library: if packable or has PackageId then it's a Package, else Library
         var isPackage = IsPackagedAsNuGet(packageId, isPackable);
         return isPackage ? ProjectType.Package : ProjectType.Library;
     }
 
-    /// <summary>True when the project is packable or has PackageId (NuGet package intent).</summary>
-    private static bool IsPackagedAsNuGet(string? packageId, string? isPackable)
+    /// <summary>Explicit IsPackable false is a library. Otherwise true, or an unset value with a PackageId, is a package.</summary>
+    private static bool IsPackagedAsNuGet(string? packageId, bool? isPackable)
     {
-        if (!string.IsNullOrWhiteSpace(packageId))
+        if (isPackable == false)
+            return false;
+        if (isPackable == true)
             return true;
-        if (string.Equals(isPackable, "true", StringComparison.OrdinalIgnoreCase))
-            return true;
-        return false;
+        return !string.IsNullOrWhiteSpace(packageId);
     }
 }
