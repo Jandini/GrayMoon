@@ -165,8 +165,17 @@ public sealed class WorkerConnectionTracker
     {
         RaiseIfChanged(() =>
         {
+            _workerVersions.TryGetValue(connectionId, out var previous);
             _workerVersions[connectionId] = workerSemVer;
-            return ApplyConnectionState();
+            if (ApplyConnectionState())
+                return true;
+
+            // OnWorkerConnected reports Online before this version arrives, and a matching
+            // version does not change that state. Listeners still need the report: the
+            // startup upgrade dialog treats Online without a confirmed match as undecided.
+            return _state == WorkerConnectionState.Online
+                && !WorkerVersionPolicy.AreSameProductVersion(previous, _appSemVer)
+                && WorkerVersionPolicy.AreSameProductVersion(workerSemVer, _appSemVer);
         });
     }
 
