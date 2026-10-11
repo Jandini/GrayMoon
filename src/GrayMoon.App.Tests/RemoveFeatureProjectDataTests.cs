@@ -49,11 +49,8 @@ public sealed class RemoveFeatureProjectDataTests
     };
 
     /// <summary>
-    /// Worker responses for the post-remove Workspace status refresh (RefreshWorkspaceStateAfterFeatureRemoveAsync).
-    /// This refresh independently reconciles the special Workspace context's own WorkspaceProjects and
-    /// WorkspaceFileLineStatuses from live Worker data - behaviour that exists before B1 and is already
-    /// covered by RemoveFeatureWorkspaceRefreshTests. These responses report an empty project/file set
-    /// (nothing configured in this fixture) so that refresh is not itself under test here.
+    /// Worker responses for removing a Feature. Removal no longer refreshes the Workspace, so the
+    /// Sync and file-version responses are not part of this test.
     /// </summary>
     private static void RespondCleanRemoval(SyncStateTestContext ctx)
     {

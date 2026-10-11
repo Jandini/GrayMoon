@@ -2,6 +2,7 @@ using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Components.Features;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
+using GrayMoon.App.Services.Features;
 using GrayMoon.App.Services.GitHub;
 using GrayMoon.Application.Features;
 using GrayMoon.Common.Git;
@@ -12,7 +13,8 @@ namespace GrayMoon.App.Tests;
 
 /// <summary>
 /// Feature removal must leave the normal Workspace checkout untouched: no return-to-default,
-/// no checkout of ParentBranchName, and only a non-mutating status refresh of the current branch.
+/// no checkout of ParentBranchName, and no Workspace status refresh. That refresh is a separate
+/// operation and does not run as part of background removal.
 /// </summary>
 public sealed class RemoveFeatureWorkspaceRefreshTests
 {
@@ -147,9 +149,9 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
     }
 
     [Fact]
-    public async Task Remove_keeps_Workspace_on_non_default_branch_and_Syncs_current_state()
+    public async Task Remove_keeps_Workspace_on_non_default_branch_and_does_not_refresh_it()
     {
-        // A: Workspace on topic-A, default main - removal must not return to default.
+        // A: Workspace on topic-A, default main - removal must not return to default or refresh.
         await using var ctx = await SyncStateTestContext.CreateAsync();
         var featureContextId = await SeedRemovableFeatureAsync(ctx, parentBranchName: "topic-A");
 
@@ -179,6 +181,38 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
             });
 
         Assert.True(result.Success, result.Error);
+        Assert.DoesNotContain(ctx.WorkerBridge.Calls, c => c.Command == "SyncRepository");
+        AssertNoWorkspaceMutationCommands(ctx.WorkerBridge);
+
+        var link = await ctx.ReadLinkAsync();
+        Assert.Equal("topic-A", link.BranchName);
+        Assert.Equal(0, link.IncomingCommits);
+        Assert.False(link.BranchHasUpstream);
+
+        await AssertFeatureGoneAsync(ctx, featureContextId);
+    }
+
+    [Fact]
+    public async Task Workspace_refresh_syncs_the_current_branch_without_checkout()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await ctx.MutateLinkAsync(link =>
+        {
+            link.BranchName = "topic-A";
+            link.DefaultBranchName = "main";
+            link.OutgoingCommits = 0;
+            link.IncomingCommits = 0;
+            link.BranchHasUpstream = false;
+        });
+
+        ctx.WorkerBridge.Respond("SyncRepository", SyncResponse(branch: "topic-A", incoming: 3));
+        ctx.WorkerBridge.Respond("CheckFileVersions", new { success = true, files = Array.Empty<object>() });
+
+        var special = await ctx.GetSpecialContextIdAsync();
+        await using var scope = ctx.CreateScope();
+        var refresh = scope.ServiceProvider.GetRequiredService<IWorkspaceCheckoutRefresh>();
+        await refresh.RunAsync(ctx.WorkspaceId, special);
+
         Assert.Contains(ctx.WorkerBridge.Calls, c => c.Command == "SyncRepository");
         AssertNoWorkspaceMutationCommands(ctx.WorkerBridge);
 
@@ -186,8 +220,6 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
         Assert.Equal("topic-A", link.BranchName);
         Assert.Equal(3, link.IncomingCommits);
         Assert.True(link.BranchHasUpstream);
-
-        await AssertFeatureGoneAsync(ctx, featureContextId);
     }
 
     [Fact]
@@ -279,9 +311,9 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
     }
 
     [Fact]
-    public async Task Remove_when_Workspace_already_on_default_still_Syncs_without_ReturnToDefault()
+    public async Task Remove_when_Workspace_already_on_default_does_not_refresh_or_return_to_default()
     {
-        // D: Already on default - ordinary non-mutating Sync, no special default-branch path.
+        // D: Already on default - removal neither refreshes nor takes a special default-branch path.
         await using var ctx = await SyncStateTestContext.CreateAsync();
         var featureContextId = await SeedRemovableFeatureAsync(ctx, parentBranchName: "main");
 
@@ -311,13 +343,13 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
             });
 
         Assert.True(result.Success, result.Error);
-        Assert.Contains(ctx.WorkerBridge.Calls, c => c.Command == "SyncRepository");
+        Assert.DoesNotContain(ctx.WorkerBridge.Calls, c => c.Command == "SyncRepository");
         AssertNoWorkspaceMutationCommands(ctx.WorkerBridge);
 
         var link = await ctx.ReadLinkAsync();
         Assert.Equal("main", link.BranchName);
-        Assert.Equal(5, link.IncomingCommits);
-        Assert.True(link.BranchHasUpstream);
+        Assert.Equal(0, link.IncomingCommits);
+        Assert.False(link.BranchHasUpstream);
 
         await AssertFeatureGoneAsync(ctx, featureContextId);
     }
@@ -384,7 +416,7 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
         Assert.True(result.Success, result.Error);
         Assert.Equal(2, ctx.WorkerBridge.Calls.Count(c => c.Command == WorkerHubMethods.RemoveGitWorktree));
         Assert.Equal(2, ctx.WorkerBridge.Calls.Count(c => c.Command == "DeleteBranch"));
-        Assert.Contains(ctx.WorkerBridge.Calls, c => c.Command == "SyncRepository");
+        Assert.DoesNotContain(ctx.WorkerBridge.Calls, c => c.Command == "SyncRepository");
         AssertNoWorkspaceMutationCommands(ctx.WorkerBridge);
         await AssertFeatureGoneAsync(ctx, featureContextId);
     }
@@ -700,6 +732,50 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
         var repo = Assert.Single(plan.Repositories);
         Assert.Null(repo.PullRequestNumber);
         Assert.True(string.IsNullOrWhiteSpace(repo.PullRequestState));
+    }
+
+    [Fact]
+    public async Task Analyze_never_pushed_clean_Feature_is_automatically_safe()
+    {
+        // Never pushed: the Worker reports no upstream and a null ahead-of-upstream count.
+        // That null means "no remote", not an unknown count, so a clean finished Feature is safe
+        // and the Remove button is green.
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var worktreePath = @"C:\gm-test-root\.graymoon\test-ws\features\feat-refresh\graymoon-api";
+        var featureContextId = await SeedRemovableFeatureAsync(ctx);
+        await using (var scope = ctx.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var row = await db.WorkspaceFeatureRepositories.SingleAsync(r => r.WorkspaceFeatureContextId == featureContextId.Value);
+            row.WorktreePath = worktreePath;
+            db.WorkspaceRepositoryContextStates.Add(new WorkspaceRepositoryContextState
+            {
+                WorkspaceFeatureContextId = featureContextId.Value,
+                WorkspaceRepositoryId = ctx.WorkspaceRepositoryId,
+                BranchName = "feat-refresh",
+                OutgoingCommits = 0,
+                BranchHasUpstream = false,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        ctx.WorkerBridge.Respond(
+            WorkerHubMethods.InspectWorktree,
+            CleanInspectWorktree(hasUpstream: false, aheadOfUpstream: null, aheadOfDefault: 0));
+        ctx.WorkerBridge.Respond("GetGitChangeStatus", CleanGitChangeStatus());
+
+        await using var read = ctx.CreateScope();
+        var ops = read.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var plan = await ops.AnalyzeRemoveFeatureAsync(featureContextId);
+
+        Assert.True(plan.Success, plan.Error);
+        Assert.Equal(RemoveFeatureClassification.Completed, plan.Classification);
+        Assert.True(plan.IsAutomaticallySafe);
+        Assert.False(RemoveFeatureModal.RemoveCtaIsDestructive(plan));
+        var repo = Assert.Single(plan.Repositories);
+        Assert.False(repo.FeatureBranchHasUpstream);
+        Assert.Null(repo.EffectiveOutgoingCommits);
+        Assert.Equal(0, repo.EffectiveAheadOfDefault);
     }
 
     [Fact]
