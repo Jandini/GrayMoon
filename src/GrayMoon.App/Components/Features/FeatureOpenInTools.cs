@@ -67,7 +67,8 @@ internal static class FeatureOpenInTools
         !tool.RequiresInstall || installed.Contains(tool.Id);
 
     /// <summary>
-    /// Toast shown when an Open-in tool is launched, so the click is visible while it starts.
+    /// Feedback toast for an Open-in click. Showing it does not start the tool.
+    /// The button enables again when this toast closes.
     /// </summary>
     public static string StartToastMessage(OpenInTool tool) => $"Starting {tool.Label}...";
 

@@ -39,4 +39,12 @@ public sealed class WorkspaceNativeLaunchService(
 
         return new NativeLaunchPaths { ContextRoot = root, Repositories = repos };
     }
+
+    public async Task<string?> ResolveContextRootAsync(
+        WorkspaceFeatureContextId contextId,
+        CancellationToken cancellationToken = default)
+    {
+        var root = await pathResolver.GetContextRootAsync(contextId, cancellationToken);
+        return string.IsNullOrWhiteSpace(root) ? null : root;
+    }
 }

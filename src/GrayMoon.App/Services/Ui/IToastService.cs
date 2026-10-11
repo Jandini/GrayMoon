@@ -21,6 +21,13 @@ public interface IToastService
     /// <summary>Whether the current toast represents an error.</summary>
     bool IsError { get; }
 
+    /// <summary>
+    /// Id of the toast last passed to <see cref="Show"/> or <see cref="ShowError"/>.
+    /// Each show gets a new id, including when the text is unchanged.
+    /// <see cref="Hide"/> leaves the id in place. Zero before the first show.
+    /// </summary>
+    long ShownId { get; }
+
     /// <summary>Hide the current toast.</summary>
     void Hide();
 }
