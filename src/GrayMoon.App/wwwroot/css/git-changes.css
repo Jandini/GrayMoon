@@ -883,6 +883,7 @@
 }
 
 .markdown-diff-viewer-wrap {
+    position: relative;
     display: flex;
     flex-direction: column;
     height: 100%;
@@ -1378,4 +1379,133 @@ body.gm-mermaid-lightbox-open {
     padding: 0.75rem;
     overflow: auto;
     white-space: pre-wrap;
+}
+
+/* Monaco-like Find overlay for rendered markdown Preview. */
+.markdown-find-widget {
+    position: absolute;
+    top: 0.2rem;
+    right: 0.55rem;
+    z-index: 8;
+    box-sizing: border-box;
+    min-width: 22.5rem;
+    max-width: calc(100% - 1.1rem);
+    padding: 0.28rem 0.3rem;
+    background: #252526;
+    border: 1px solid #454545;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.36);
+}
+
+.markdown-find-widget__row {
+    display: flex;
+    align-items: center;
+    gap: 0.12rem;
+}
+
+.markdown-find-widget__input-wrap {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.markdown-find-widget__input {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    height: 1.65rem;
+    padding: 0 4.6rem 0 0.45rem;
+    border: 1px solid #3c3c3c;
+    background: #3c3c3c;
+    color: #cccccc;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    outline: none;
+}
+
+.markdown-find-widget__input:focus {
+    border-color: #007acc;
+}
+
+.markdown-find-widget__input.is-error,
+.markdown-find-widget.is-no-results .markdown-find-widget__input {
+    outline: 1px solid #be1100;
+    outline-offset: -1px;
+}
+
+.markdown-find-widget__matches {
+    position: absolute;
+    top: 50%;
+    right: 0.4rem;
+    transform: translateY(-50%);
+    color: #a0a0a0;
+    font-size: 0.7rem;
+    pointer-events: none;
+    white-space: nowrap;
+}
+
+.markdown-find-widget__matches.is-error {
+    color: #f48771;
+}
+
+.markdown-find-widget__opt,
+.markdown-find-widget__nav,
+.markdown-find-widget__close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 1.55rem;
+    height: 1.55rem;
+    padding: 0;
+    border: 1px solid transparent;
+    background: transparent;
+    color: #cccccc;
+    font-size: 0.72rem;
+    font-family: inherit;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.markdown-find-widget__opt:hover,
+.markdown-find-widget__nav:hover,
+.markdown-find-widget__close:hover {
+    background: #2a2d2e;
+}
+
+.markdown-find-widget__opt.is-active {
+    background: #0e639c;
+    color: #fff;
+}
+
+.markdown-find-widget__close {
+    font-size: 1rem;
+}
+
+.markdown-body mark.markdown-find-match {
+    background: rgba(234, 192, 80, 0.38);
+    color: inherit;
+    padding: 0;
+    border-radius: 0;
+}
+
+.markdown-body mark.markdown-find-match--current {
+    background: rgba(234, 192, 80, 0.82);
+    outline: 1px solid #e8c36a;
+    outline-offset: 0;
+}
+
+.markdown-body tspan.markdown-find-match,
+.markdown-body text.markdown-find-match {
+    fill: #3a2f08;
+    paint-order: stroke fill;
+    stroke: rgba(234, 192, 80, 0.9);
+    stroke-width: 4px;
+    stroke-linejoin: round;
+}
+
+.markdown-body tspan.markdown-find-match--current,
+.markdown-body text.markdown-find-match--current {
+    fill: #1e1e1e;
+    stroke: #e8c36a;
+    stroke-width: 6px;
 }

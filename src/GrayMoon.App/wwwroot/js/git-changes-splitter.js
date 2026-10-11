@@ -145,8 +145,12 @@
             if (e.key !== 'Escape' || e.repeat) {
                 return;
             }
-            // Mermaid lightbox and Bootstrap dialogs own Escape first.
+            // Mermaid lightbox, markdown Find, and Bootstrap dialogs own Escape first.
             if (document.getElementById('gm-mermaid-lightbox')) {
+                return;
+            }
+            const findWidget = document.querySelector('.markdown-find-widget:not([hidden])');
+            if (findWidget && findWidget.getClientRects().length > 0) {
                 return;
             }
             if (document.querySelector('.modal.show')) {
