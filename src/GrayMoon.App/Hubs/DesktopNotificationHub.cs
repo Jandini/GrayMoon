@@ -35,6 +35,7 @@ public sealed class DesktopNotificationHub(
     DesktopTopBarState topBarState,
     AppSettingRepository appSettingRepository,
     WorkerUpgradeStartupPrompt workerUpgradeStartupPrompt,
+    WorkerConnectionTracker workerConnectionTracker,
     IWorkerBridge workerBridge) : Hub
 {
     public override async Task OnConnectedAsync()
@@ -79,7 +80,8 @@ public sealed class DesktopNotificationHub(
 
     /// <summary>
     /// Called by GrayMoon.Desktop when the user accepts the startup Worker upgrade dialog.
-    /// Starts the same Worker self-update the Worker page runs.
+    /// Starts the same Worker self-update the Worker page runs. The dialog does not stay open
+    /// for this call: the install continues after the Worker process is replaced.
     /// </summary>
     public async Task UpgradeWorker()
     {
@@ -89,7 +91,15 @@ public sealed class DesktopNotificationHub(
 
         var installUrl = $"{http.Request.Scheme}://{http.Request.Host}/api/worker/install";
         var response = await workerBridge.SendCommandAsync(WorkerHubMethods.SelfUpdate, new { installUrl });
-        if (!response.Success)
-            throw new HubException(string.IsNullOrWhiteSpace(response.Error) ? "Worker update failed." : response.Error);
+        if (response.Success)
+            return;
+
+        // The install script stops the Worker before ResponseCommand can be sent. That failed
+        // round-trip is the update running, and the in-progress flag is left set so the tray
+        // reports installing instead of an unexpected offline.
+        if (workerConnectionTracker.IsSelfUpdateInProgress)
+            return;
+
+        throw new HubException(string.IsNullOrWhiteSpace(response.Error) ? "Worker update failed." : response.Error);
     }
 }
