@@ -330,6 +330,7 @@ file sealed class SqliteBusyTimeoutInterceptor : DbConnectionInterceptor
 public sealed class FakeWorkerBridge : IWorkerBridge
 {
     private readonly Dictionary<string, Func<object, WorkerCommandResponse>> _handlers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Func<object, CancellationToken, Task<WorkerCommandResponse>>> _asyncHandlers = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _callsLock = new();
 
     public bool IsWorkerConnected { get; set; } = true;
@@ -341,12 +342,17 @@ public sealed class FakeWorkerBridge : IWorkerBridge
     public void Respond(string command, Func<object, WorkerCommandResponse> handler)
         => _handlers[command] = handler;
 
-    public Task<WorkerCommandResponse> SendCommandAsync(string command, object args, CancellationToken cancellationToken = default)
+    public void RespondAsync(string command, Func<object, CancellationToken, Task<WorkerCommandResponse>> handler)
+        => _asyncHandlers[command] = handler;
+
+    public async Task<WorkerCommandResponse> SendCommandAsync(string command, object args, CancellationToken cancellationToken = default)
     {
         lock (_callsLock)
             Calls.Add((command, args));
+        if (_asyncHandlers.TryGetValue(command, out var asyncHandler))
+            return await asyncHandler(args, cancellationToken);
         if (_handlers.TryGetValue(command, out var handler))
-            return Task.FromResult(handler(args));
-        return Task.FromResult(new WorkerCommandResponse(false, null, $"No canned response for '{command}'."));
+            return handler(args);
+        return new WorkerCommandResponse(false, null, $"No canned response for '{command}'.");
     }
 }

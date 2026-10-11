@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services.GitChanges;
 using GrayMoon.App.Services.Queries;
@@ -11,7 +12,7 @@ namespace GrayMoon.App.Services.Orchestration;
 /// Handles sync operations (git status, version, branch, commit counts) for workspace repositories.
 /// Stateless; all state is provided via callbacks.
 /// </summary>
-public sealed class WorkspaceSyncHandler(
+public sealed partial class WorkspaceSyncHandler(
     ILogger<WorkspaceSyncHandler> logger,
     IServiceScopeFactory serviceScopeFactory,
     IOptions<WorkspaceOptions> workspaceOptions)
@@ -74,6 +75,7 @@ public sealed class WorkspaceSyncHandler(
         IReadOnlyList<int>? repositoryIds,
         CancellationToken cancellationToken)
     {
+        var started = Stopwatch.GetTimestamp();
         try
         {
             await using var scope = serviceScopeFactory.CreateAsyncScope();
@@ -107,6 +109,16 @@ public sealed class WorkspaceSyncHandler(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Git Changes refresh after sync failed for workspace {WorkspaceId}", workspaceId);
+        }
+        finally
+        {
+            logger.LogDebug(
+                "Git Changes refresh after sync finished WorkspaceId={WorkspaceId} ContextId={ContextId} RepositoryCount={RepositoryCount} Stage={Stage} ElapsedMs={ElapsedMs}",
+                workspaceId,
+                contextId.Value,
+                repositoryIds?.Count ?? 0,
+                "git-changes",
+                (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
         }
     }
 
@@ -341,6 +353,7 @@ public sealed class WorkspaceSyncHandler(
     /// <summary>
     /// Unattended Return to Default: analyze, require automatic eligibility, then execute with
     /// documented unattended options. Aborts the whole batch on the first blocker or failure.
+    /// Bulk merge uses <see cref="ReturnToDefaultUnattendedBatchAsync"/>, which keeps per-repository outcomes.
     /// </summary>
     public async Task<UnattendedReturnToDefaultResult> ReturnToDefaultUnattendedAsync(
         int workspaceId,

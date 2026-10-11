@@ -58,6 +58,14 @@ public sealed class WorkspaceSyncOperations(
         CancellationToken cancellationToken)
         => syncHandler.ReturnToDefaultUnattendedAsync(workspaceId, contextId, repositoryIds, progress, cancellationToken);
 
+    public Task<UnattendedReturnToDefaultBatchResult> ReturnToDefaultBatchAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        IReadOnlyList<int> repositoryIds,
+        IProgress<OperationProgress>? progress,
+        CancellationToken cancellationToken)
+        => syncHandler.ReturnToDefaultUnattendedBatchAsync(workspaceId, contextId, repositoryIds, progress, cancellationToken);
+
     public async Task<OperationResult> PullAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,

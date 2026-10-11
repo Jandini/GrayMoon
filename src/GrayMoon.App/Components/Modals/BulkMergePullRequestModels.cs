@@ -71,3 +71,77 @@ public sealed class BulkMergePrRow
     public BulkMergeRowStatus Status { get; set; } = BulkMergeRowStatus.LoadingSnapshot;
     public string? ErrorMessage { get; set; }
 }
+
+/// <summary>
+/// Applies one unattended return batch onto bulk-merge rows. Cancelled repositories that were not mutated
+/// stay <see cref="BulkMergeRowStatus.ReturningToDefault"/> so the run finalizer can mark them cancelled.
+/// </summary>
+internal static class BulkMergeReturnStatus
+{
+    public static void Apply(
+        IReadOnlyList<BulkMergePrRow> rows,
+        IReadOnlyList<UnattendedReturnToDefaultRepositoryResult> results,
+        Action<int> clearRepositoryError,
+        Action<int, string> setRepositoryError)
+    {
+        var byId = new Dictionary<int, UnattendedReturnToDefaultRepositoryResult>(results.Count);
+        foreach (var result in results)
+            byId[result.RepositoryId] = result;
+
+        foreach (var row in rows)
+        {
+            if (!byId.TryGetValue(row.RepositoryId, out var result))
+                continue;
+
+            if (result.Completed)
+            {
+                row.Status = BulkMergeRowStatus.ReturnedToDefault;
+                row.ErrorMessage = null;
+                clearRepositoryError(row.RepositoryId);
+                continue;
+            }
+
+            if (result.FailureStage == UnattendedReturnFailureStage.Cancelled && !result.MutationCompleted)
+                continue;
+
+            row.Status = BulkMergeRowStatus.ReturnFailed;
+            row.ErrorMessage = result.AbortReason ?? "Failed to return to default branch.";
+            setRepositoryError(row.RepositoryId, row.ErrorMessage);
+        }
+    }
+}
+
+/// <summary>Terminal-row updates and counts for a finished bulk-merge run, including Abort.</summary>
+internal static class BulkMergeRunFinalizer
+{
+    public static void FinalizeInterruptedRows(IEnumerable<BulkMergePrRow> rows)
+    {
+        foreach (var row in rows)
+        {
+            if (row.Status == BulkMergeRowStatus.Merging)
+            {
+                row.Status = BulkMergeRowStatus.Skipped;
+            }
+            else if (row.Status == BulkMergeRowStatus.ReturningToDefault)
+            {
+                row.Status = BulkMergeRowStatus.ReturnFailed;
+                row.ErrorMessage = UnattendedReturnToDefaultBatchResult.CancelledMessage;
+            }
+        }
+    }
+
+    public readonly record struct Counts(int Failed, int ReturnFailed, int Skipped, int Succeeded, int RealReturnFailed);
+
+    public static Counts Count(IEnumerable<BulkMergePrRow> rows)
+    {
+        var list = rows as IReadOnlyList<BulkMergePrRow> ?? rows.ToList();
+        return new Counts(
+            list.Count(row => row.Status == BulkMergeRowStatus.Failed),
+            list.Count(row => row.Status == BulkMergeRowStatus.ReturnFailed),
+            list.Count(row => row.Status == BulkMergeRowStatus.Skipped),
+            list.Count(row => row.Status is BulkMergeRowStatus.Merged or BulkMergeRowStatus.ReturnedToDefault),
+            list.Count(row =>
+                row.Status == BulkMergeRowStatus.ReturnFailed &&
+                !string.Equals(row.ErrorMessage, UnattendedReturnToDefaultBatchResult.CancelledMessage, StringComparison.Ordinal)));
+    }
+}
