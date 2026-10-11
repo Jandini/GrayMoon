@@ -56,7 +56,8 @@ public sealed class WorkspaceStateRecomputeScope(
         {
             try
             {
-                await fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, contextId, cancellationToken);
+                await fileVersionService.CheckAndPersistFileVersionStatusAsync(
+                    workspaceId, contextId, cancellationToken, deferDependencyRecompute: true);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

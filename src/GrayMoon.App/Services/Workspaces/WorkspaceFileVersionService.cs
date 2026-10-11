@@ -487,7 +487,8 @@ public sealed class WorkspaceFileVersionService(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken = default,
-        bool forceFresh = false)
+        bool forceFresh = false,
+        bool deferDependencyRecompute = false)
     {
         var key = CheckKey(workspaceId, contextId.Value);
         var gate = CheckLocks.GetOrAdd(key, _ => new object());
@@ -524,7 +525,7 @@ public sealed class WorkspaceFileVersionService(
             }
             else
             {
-                checkTask = CheckAndPersistFileVersionStatusCoreAsync(workspaceId, contextId, cancellationToken);
+                checkTask = CheckAndPersistFileVersionStatusCoreAsync(workspaceId, contextId, cancellationToken, deferDependencyRecompute);
                 InFlightChecks[key] = checkTask;
             }
         }
@@ -551,7 +552,8 @@ public sealed class WorkspaceFileVersionService(
     private async Task CheckAndPersistFileVersionStatusCoreAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool deferDependencyRecompute = false)
     {
         var sw = Stopwatch.StartNew();
         logger.LogDebug("CheckAndPersist starting for workspace {WorkspaceId} context {ContextId}", workspaceId, contextId.Value);
@@ -565,7 +567,9 @@ public sealed class WorkspaceFileVersionService(
         var contextInfo = await contextResolver.GetRequiredAsync(contextId, workspaceId, cancellationToken);
         var capabilities = await capabilitiesResolver.GetAsync(workspaceId, cancellationToken);
 
-        if (await SyncGeneratedPackageDependenciesAsync(workspaceId, contextId, cancellationToken) && capabilities.UsesDependencyGraph)
+        if (await SyncGeneratedPackageDependenciesAsync(workspaceId, contextId, cancellationToken)
+            && capabilities.UsesDependencyGraph
+            && !deferDependencyRecompute)
             await workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, contextId.Value, cancellationToken);
 
         var configs = await versionConfigRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
@@ -670,6 +674,9 @@ public sealed class WorkspaceFileVersionService(
             var repoOutOfDateTokens = new Dictionary<int, HashSet<string>>();
             var newStatuses = new List<WorkspaceFileLineStatus>();
             var seenStaleTokens = new Dictionary<int, HashSet<string>>();
+            var fileStates = await dbContext.WorkspaceFileContextStates
+                .Where(s => s.WorkspaceFeatureContextId == contextId.Value)
+                .ToDictionaryAsync(s => s.FileId, cancellationToken);
 
             foreach (var fileResult in result.Files)
             {
@@ -686,11 +693,7 @@ public sealed class WorkspaceFileVersionService(
                     // context's own WorkspaceFileContextState row, get-or-create. Only mirror onto the shared
                     // WorkspaceFile.IsMissingOnDisk when this context is the special Workspace - a Feature's
                     // file-missing check must never overwrite the Workspace's own flag (or another Feature's).
-                    var state = await dbContext.WorkspaceFileContextStates
-                        .FirstOrDefaultAsync(
-                            s => s.WorkspaceFeatureContextId == contextId.Value && s.FileId == trackedFile.FileId,
-                            cancellationToken);
-                    if (state is null)
+                    if (!fileStates.TryGetValue(trackedFile.FileId, out var state))
                     {
                         state = new WorkspaceFileContextState
                         {
@@ -698,6 +701,7 @@ public sealed class WorkspaceFileVersionService(
                             FileId = trackedFile.FileId
                         };
                         dbContext.WorkspaceFileContextStates.Add(state);
+                        fileStates[trackedFile.FileId] = state;
                     }
                     var wasMissingForContext = state.IsMissingOnDisk == true;
                     state.IsMissingOnDisk = isMissing ? true : null;
@@ -760,7 +764,7 @@ public sealed class WorkspaceFileVersionService(
             await ApplyFileConfigLinkCountersAsync(
                 workspaceId, contextId, contextInfo.IsSpecialWorkspace, configs, nameToRepoId, repoOutOfDateTokens, cancellationToken);
 
-            if (missingFlagChanged && capabilities.UsesDependencyGraph)
+            if (missingFlagChanged && capabilities.UsesDependencyGraph && !deferDependencyRecompute)
                 await workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, contextId.Value, cancellationToken);
 
             await hubContext.Clients.All.SendAsync("ContextSynced", workspaceId, contextId.Value, cancellationToken);

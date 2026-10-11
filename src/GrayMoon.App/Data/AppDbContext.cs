@@ -404,6 +404,8 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
             entity.Property(s => s.StatusId).ValueGeneratedOnAdd();
             entity.HasIndex(s => new { s.WorkspaceFeatureContextId, s.RepositoryId, s.FilePath, s.TokenName }).IsUnique()
                 .HasDatabaseName("IX_WorkspaceFileLineStatuses_Context_Repo_Path_Token");
+            entity.HasIndex(s => new { s.WorkspaceId, s.WorkspaceFeatureContextId, s.RepositoryId })
+                .HasDatabaseName("IX_WorkspaceFileLineStatuses_Workspace_Context_Repo");
             entity.Property(s => s.FilePath).IsRequired().HasMaxLength(2000);
             entity.Property(s => s.FileName).IsRequired().HasMaxLength(260);
             entity.Property(s => s.TokenName).IsRequired().HasMaxLength(260);

@@ -98,7 +98,7 @@ public sealed class WorkspaceTopBarService : IWorkspaceTopBarService, IDisposabl
         if (_cachedWorkspaceId == workspaceId && _workspaceDisplayName is not null)
             return;
 
-        var workspace = await _workspaceRepository.GetByIdAsync(workspaceId.Value).ConfigureAwait(false);
+        var workspace = await _workspaceRepository.GetHeaderAsync(workspaceId.Value).ConfigureAwait(false);
         if (generation != Volatile.Read(ref _refreshGeneration))
             return;
 

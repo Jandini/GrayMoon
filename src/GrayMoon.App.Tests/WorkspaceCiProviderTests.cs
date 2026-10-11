@@ -275,7 +275,7 @@ public sealed class WorkspaceCiProviderTests
                 _memoryCache,
                 NullLogger<GitHubActionsService>.Instance);
             var gitHubActionsProvider = new GitHubActionsCiProvider(
-                new WorkspaceActionService(new WorkspaceActionRepository(dbContext, NullLogger<WorkspaceActionRepository>.Instance), gitHubActions),
+                new WorkspaceActionService(new WorkspaceActionRepository(new TestDbContextFactory(new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options), NullLogger<WorkspaceActionRepository>.Instance), gitHubActions),
                 gitHubActions,
                 new GhaWorkflowLiveFeedService(
                     GitHub,
@@ -416,6 +416,9 @@ public sealed class WorkspaceCiProviderTests
         private sealed class TestDbContextFactory(DbContextOptions<AppDbContext> options) : IDbContextFactory<AppDbContext>
         {
             public AppDbContext CreateDbContext() => new(options);
+
+            public Task<AppDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default)
+                => Task.FromResult(CreateDbContext());
         }
     }
 }

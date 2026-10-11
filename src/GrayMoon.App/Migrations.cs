@@ -40,6 +40,7 @@ public static partial class Migrations
         (6, "Workspace manifest drift column", dbContext => MigrateWorkspaceManifestDriftColumnAsync(dbContext)),
         (7, "Workspace recent Open-in tools", dbContext => MigrateWorkspaceOpenInRecentToolsAsync(dbContext)),
         (8, "Feature context state GitVersionPending", dbContext => MigrateContextStateGitVersionPendingAsync(dbContext)),
+        (9, "SQLite read indexes", dbContext => MigrateSqliteReadIndexesAsync(dbContext)),
     };
 
     public static async Task RunAllAsync(AppDbContext dbContext, ILogger? logger = null)
@@ -509,6 +510,28 @@ public static partial class Migrations
             );
             """;
         await cmd.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>
+    /// Additive read indexes. Strict step 9. Idempotent. Does not change unique constraints or collation.
+    /// </summary>
+    public static async Task MigrateSqliteReadIndexesAsync(AppDbContext dbContext, ILogger? logger = null)
+    {
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != ConnectionState.Open)
+            await conn.OpenAsync();
+
+        foreach (var sql in new[]
+        {
+            """CREATE INDEX IF NOT EXISTS "IX_WorkspaceFeatureContexts_WorkspaceId" ON "WorkspaceFeatureContexts" ("WorkspaceId")""",
+            """CREATE INDEX IF NOT EXISTS "IX_WorkspaceFileLineStatuses_Workspace_Context_Repo" ON "WorkspaceFileLineStatuses" ("WorkspaceId", "WorkspaceFeatureContextId", "RepositoryId")""",
+            """CREATE INDEX IF NOT EXISTS "IX_WorkspaceFeatureRepositories_WorkspaceRepositoryId" ON "WorkspaceFeatureRepositories" ("WorkspaceRepositoryId")""",
+        })
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = sql;
+            await cmd.ExecuteNonQueryAsync();
+        }
     }
 
     /// <summary>

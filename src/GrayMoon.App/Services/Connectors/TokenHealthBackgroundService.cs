@@ -9,6 +9,7 @@ namespace GrayMoon.App.Services.Connectors;
 /// Background task that runs on startup to validate connector tokens (decrypt + remote check)
 /// and set Connector.IsHealthy / Connector.LastError accordingly.
 /// Uses the same TestConnectionAsync flow as the Connectors page.
+/// HTTP checks run in parallel. Each check uses its own scope. Results are written on one thread.
 /// </summary>
 public sealed class TokenHealthBackgroundService(
     IServiceScopeFactory scopeFactory,
@@ -23,98 +24,41 @@ public sealed class TokenHealthBackgroundService(
 
         try
         {
-            await using var scope = scopeFactory.CreateAsyncScope();
-            var services = scope.ServiceProvider;
-            var dbContext = services.GetRequiredService<AppDbContext>();
-            var serviceFactory = services.GetRequiredService<ConnectorServiceFactory>();
+            List<int> connectorIds;
+            await using (var listScope = scopeFactory.CreateAsyncScope())
+            {
+                var dbContext = listScope.ServiceProvider.GetRequiredService<AppDbContext>();
+                connectorIds = await dbContext.Connectors
+                    .AsNoTracking()
+                    .Select(c => c.ConnectorId)
+                    .ToListAsync(stoppingToken);
+            }
 
-            var connectors = await dbContext.Connectors.ToListAsync(stoppingToken);
-            if (connectors.Count == 0)
+            if (connectorIds.Count == 0)
             {
                 logger.LogInformation("TokenHealthBackgroundService: no connectors found.");
                 return;
             }
 
             using var semaphore = new SemaphoreSlim(_maxParallel, _maxParallel);
-            var tasks = connectors.Select(async connector =>
+            var tasks = connectorIds.Select(id => CheckOneAsync(id, semaphore, stoppingToken));
+            var results = await Task.WhenAll(tasks);
+
+            await using var persistScope = scopeFactory.CreateAsyncScope();
+            var persistDb = persistScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var connectors = await persistDb.Connectors
+                .Where(c => connectorIds.Contains(c.ConnectorId))
+                .ToListAsync(stoppingToken);
+            var byId = connectors.ToDictionary(c => c.ConnectorId);
+            foreach (var result in results)
             {
-                await semaphore.WaitAsync(stoppingToken);
-                try
-                {
-                    if (stoppingToken.IsCancellationRequested)
-                        return;
+                if (!byId.TryGetValue(result.ConnectorId, out var connector))
+                    continue;
+                connector.IsHealthy = result.IsHealthy;
+                connector.LastError = result.LastError;
+            }
 
-                    // Default assumptions
-                    connector.IsHealthy = false;
-
-                    if (!connector.IsActive)
-                    {
-                        connector.LastError = "Connector is inactive.";
-                        return;
-                    }
-
-                    var requiresToken = ConnectorHelpers.RequiresToken(connector.ConnectorType, connector.ApiBaseUrl);
-                    if (!requiresToken)
-                    {
-                        connector.IsHealthy = true;
-                        connector.LastError = null;
-                        return;
-                    }
-
-                    string? plainToken;
-                    try
-                    {
-                        plainToken = ConnectorHelpers.UnprotectToken(connector.UserToken);
-                    }
-                    catch (Exception)
-                    {
-                        // Tampered ciphertext, or a key that can no longer decrypt it (F1 R-F1a #6):
-                        // report it through the normal health UI instead of throwing.
-                        connector.IsHealthy = false;
-                        connector.LastError = "Token needs to be re-entered.";
-                        return;
-                    }
-
-                    if (string.IsNullOrWhiteSpace(plainToken))
-                    {
-                        connector.IsHealthy = false;
-                        connector.LastError = "Token is required but missing or empty.";
-                        return;
-                    }
-
-                    // Use the same connector-service pattern as the Connectors page.
-                    // GitHubService/NuGetService will handle decrypted token usage.
-                    var svc = serviceFactory.GetService(connector.ConnectorType);
-                    var result = await svc.TestConnectionAsync(connector);
-
-                    connector.IsHealthy = result.Success;
-                    connector.LastError = result.Success ? null : (result.ErrorMessage ?? "Remote service rejected the token. Update the connector token.");
-                    if (result.Success)
-                    {
-                        logger.LogDebug("Token health check succeeded for connector {ConnectorId} ({ConnectorName}).",
-                            connector.ConnectorId, connector.ConnectorName);
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    connector.IsHealthy = false;
-                    connector.LastError = $"Token health check failed: {ex.Message}";
-                    logger.LogWarning(ex, "Token health check failed for connector {ConnectorId} ({ConnectorName})",
-                        connector.ConnectorId, connector.ConnectorName);
-                }
-                finally
-                {
-                    semaphore.Release();
-                }
-            }).ToList();
-
-            await Task.WhenAll(tasks);
-
-            await dbContext.SaveChangesAsync(stoppingToken);
+            await persistDb.SaveChangesAsync(stoppingToken);
             logger.LogInformation("TokenHealthBackgroundService completed token health check for {Count} connector(s).",
                 connectors.Count);
         }
@@ -127,6 +71,70 @@ public sealed class TokenHealthBackgroundService(
             logger.LogError(ex, "TokenHealthBackgroundService encountered an error while checking tokens.");
         }
     }
+
+    private async Task<ConnectorHealthResult> CheckOneAsync(int connectorId, SemaphoreSlim semaphore, CancellationToken stoppingToken)
+    {
+        await semaphore.WaitAsync(stoppingToken);
+        try
+        {
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var connector = await dbContext.Connectors
+                .AsNoTracking()
+                .FirstOrDefaultAsync(c => c.ConnectorId == connectorId, stoppingToken);
+            if (connector == null)
+                return new ConnectorHealthResult(connectorId, false, "Connector was removed.");
+
+            if (!connector.IsActive)
+                return new ConnectorHealthResult(connectorId, false, "Connector is inactive.");
+
+            var requiresToken = ConnectorHelpers.RequiresToken(connector.ConnectorType, connector.ApiBaseUrl);
+            if (!requiresToken)
+                return new ConnectorHealthResult(connectorId, true, null);
+
+            string? plainToken;
+            try
+            {
+                plainToken = ConnectorHelpers.UnprotectToken(connector.UserToken);
+            }
+            catch (Exception)
+            {
+                // Tampered ciphertext, or a key that can no longer decrypt it (F1 R-F1a #6):
+                // report it through the normal health UI instead of throwing.
+                return new ConnectorHealthResult(connectorId, false, "Token needs to be re-entered.");
+            }
+
+            if (string.IsNullOrWhiteSpace(plainToken))
+                return new ConnectorHealthResult(connectorId, false, "Token is required but missing or empty.");
+
+            var serviceFactory = scope.ServiceProvider.GetRequiredService<ConnectorServiceFactory>();
+            var svc = serviceFactory.GetService(connector.ConnectorType);
+            var result = await svc.TestConnectionAsync(connector);
+            if (result.Success)
+            {
+                logger.LogDebug("Token health check succeeded for connector {ConnectorId} ({ConnectorName}).",
+                    connector.ConnectorId, connector.ConnectorName);
+            }
+
+            return new ConnectorHealthResult(
+                connectorId,
+                result.Success,
+                result.Success ? null : (result.ErrorMessage ?? "Remote service rejected the token. Update the connector token."));
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Token health check failed for connector {ConnectorId}", connectorId);
+            return new ConnectorHealthResult(connectorId, false, $"Token health check failed: {ex.Message}");
+        }
+        finally
+        {
+            semaphore.Release();
+        }
+    }
+
+    private readonly record struct ConnectorHealthResult(int ConnectorId, bool IsHealthy, string? LastError);
 }
-
-

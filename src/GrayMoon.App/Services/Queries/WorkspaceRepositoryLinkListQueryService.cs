@@ -69,187 +69,202 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
         var linkQuery = db.WorkspaceRepositories.AsNoTracking()
             .Where(wr => wr.WorkspaceId == workspaceId);
 
-        var totalCount = await linkQuery.CountAsync(cancellationToken);
-
         if (isSpecialWorkspace || contextId is null)
         {
-            var hasUnmatchedDependenciesLegacy = usesDependencyGraph && await linkQuery.AnyAsync(
-                wr => (wr.CheckedOutTag == null || wr.CheckedOutTag == string.Empty)
-                    && ((wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0),
-                cancellationToken);
-
-            var hasOutOfDateFilesLegacy = !usesDependencyGraph && await linkQuery.AnyAsync(
-                wr => (wr.CheckedOutTag == null || wr.CheckedOutTag == string.Empty)
-                    && (wr.OutOfDateFileRepos ?? 0) > 0,
-                cancellationToken);
-
-            var isPushRecommendedLegacy = await linkQuery.AnyAsync(
-                wr => (wr.CheckedOutTag == null || wr.CheckedOutTag == string.Empty)
-                    && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false),
-                cancellationToken);
-
-            var hasIncomingCommitsLegacy = await linkQuery.AnyAsync(
-                wr => (wr.CheckedOutTag == null || wr.CheckedOutTag == string.Empty)
-                    && (wr.IncomingCommits ?? 0) > 0,
-                cancellationToken);
-
-            var hasTaggedReposLegacy = await linkQuery.AnyAsync(
-                wr => wr.CheckedOutTag != null && wr.CheckedOutTag != string.Empty,
-                cancellationToken);
-
-            var isOutOfSyncLegacy = await linkQuery.AnyAsync(
-                wr => wr.SyncStatus != RepoSyncStatus.InSync,
-                cancellationToken);
-
-            int? lowestLevelNeedingWorkLegacy = null;
-            if (usesDependencyGraph)
+            if (!usesDependencyGraph)
             {
-                var lowestLevelsLegacy = await linkQuery
-                    .Where(wr => (wr.CheckedOutTag == null || wr.CheckedOutTag == string.Empty)
-                        && ((wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0)
-                        && wr.DependencyLevel != null)
-                    .Select(wr => wr.DependencyLevel!.Value)
-                    .OrderBy(level => level)
-                    .Take(1)
-                    .ToListAsync(cancellationToken);
-                lowestLevelNeedingWorkLegacy = lowestLevelsLegacy.Count > 0 ? lowestLevelsLegacy[0] : null;
+                var basic = await linkQuery
+                    .GroupBy(_ => 1)
+                    .Select(g => new
+                    {
+                        Total = g.Count(),
+                        OutOfDateFiles = g.Count(wr => (wr.CheckedOutTag == null || wr.CheckedOutTag == string.Empty)
+                            && (wr.OutOfDateFileRepos ?? 0) > 0),
+                        Push = g.Count(wr => (wr.CheckedOutTag == null || wr.CheckedOutTag == string.Empty)
+                            && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false)),
+                        Incoming = g.Count(wr => (wr.CheckedOutTag == null || wr.CheckedOutTag == string.Empty)
+                            && (wr.IncomingCommits ?? 0) > 0),
+                        Tagged = g.Count(wr => wr.CheckedOutTag != null && wr.CheckedOutTag != string.Empty),
+                        OutOfSync = g.Count(wr => wr.SyncStatus != RepoSyncStatus.InSync),
+                        CreatablePr = g.Count(wr => (wr.CheckedOutTag == null || wr.CheckedOutTag == string.Empty)
+                            && (wr.DefaultBranchAheadCommits ?? 0) > 0
+                            && (wr.PullRequest == null
+                                || (wr.PullRequest.MergedAt == null
+                                    && wr.PullRequest.State != "open"
+                                    && wr.PullRequest.State != "closed"))),
+                        OpenPr = g.Count(wr => wr.PullRequest != null
+                            && wr.PullRequest.PullRequestNumber != null
+                            && wr.PullRequest.State == "open"),
+                    })
+                    .FirstOrDefaultAsync(cancellationToken);
+
+                return new WorkspaceRepositoryHeaderStateDto(
+                    basic?.Total ?? 0,
+                    false,
+                    (basic?.Push ?? 0) > 0,
+                    (basic?.Incoming ?? 0) > 0,
+                    (basic?.Tagged ?? 0) > 0,
+                    (basic?.OutOfSync ?? 0) > 0,
+                    null,
+                    (basic?.CreatablePr ?? 0) > 0,
+                    (basic?.OpenPr ?? 0) > 0,
+                    HasOutOfDateFiles: (basic?.OutOfDateFiles ?? 0) > 0);
             }
 
-            // Same eligibility as PRBadge.ShowsCreateBadge once PR state is persisted: ahead of default,
-            // not on a tag, and no open/merged/closed pull request.
-            var hasCreatablePrLegacy = await linkQuery.AnyAsync(
-                wr => (wr.CheckedOutTag == null || wr.CheckedOutTag == string.Empty)
-                    && (wr.DefaultBranchAheadCommits ?? 0) > 0
-                    && (wr.PullRequest == null
-                        || (wr.PullRequest.MergedAt == null
-                            && wr.PullRequest.State != "open"
-                            && wr.PullRequest.State != "closed")),
-                cancellationToken);
-
-            var hasOpenPrLegacy = await linkQuery.AnyAsync(
-                wr => wr.PullRequest != null
-                    && wr.PullRequest.PullRequestNumber != null
-                    && wr.PullRequest.State == "open",
-                cancellationToken);
+            var legacy = await linkQuery
+                .GroupBy(_ => 1)
+                .Select(g => new
+                {
+                    Total = g.Count(),
+                    Unmatched = g.Count(wr => (wr.CheckedOutTag == null || wr.CheckedOutTag == string.Empty)
+                        && ((wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0)),
+                    Push = g.Count(wr => (wr.CheckedOutTag == null || wr.CheckedOutTag == string.Empty)
+                        && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false)),
+                    Incoming = g.Count(wr => (wr.CheckedOutTag == null || wr.CheckedOutTag == string.Empty)
+                        && (wr.IncomingCommits ?? 0) > 0),
+                    Tagged = g.Count(wr => wr.CheckedOutTag != null && wr.CheckedOutTag != string.Empty),
+                    OutOfSync = g.Count(wr => wr.SyncStatus != RepoSyncStatus.InSync),
+                    Lowest = g.Min(wr => (wr.CheckedOutTag == null || wr.CheckedOutTag == string.Empty)
+                        && ((wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0)
+                        ? wr.DependencyLevel
+                        : null),
+                    CreatablePr = g.Count(wr => (wr.CheckedOutTag == null || wr.CheckedOutTag == string.Empty)
+                        && (wr.DefaultBranchAheadCommits ?? 0) > 0
+                        && (wr.PullRequest == null
+                            || (wr.PullRequest.MergedAt == null
+                                && wr.PullRequest.State != "open"
+                                && wr.PullRequest.State != "closed"))),
+                    OpenPr = g.Count(wr => wr.PullRequest != null
+                        && wr.PullRequest.PullRequestNumber != null
+                        && wr.PullRequest.State == "open"),
+                })
+                .FirstOrDefaultAsync(cancellationToken);
 
             return new WorkspaceRepositoryHeaderStateDto(
-                totalCount,
-                hasUnmatchedDependenciesLegacy,
-                isPushRecommendedLegacy,
-                hasIncomingCommitsLegacy,
-                hasTaggedReposLegacy,
-                isOutOfSyncLegacy,
-                lowestLevelNeedingWorkLegacy,
-                hasCreatablePrLegacy,
-                hasOpenPrLegacy,
-                HasOutOfDateFiles: hasOutOfDateFilesLegacy);
+                legacy?.Total ?? 0,
+                (legacy?.Unmatched ?? 0) > 0,
+                (legacy?.Push ?? 0) > 0,
+                (legacy?.Incoming ?? 0) > 0,
+                (legacy?.Tagged ?? 0) > 0,
+                (legacy?.OutOfSync ?? 0) > 0,
+                legacy?.Lowest,
+                (legacy?.CreatablePr ?? 0) > 0,
+                (legacy?.OpenPr ?? 0) > 0);
         }
 
         var cid = contextId.Value.Value;
-        var stateQuery =
+        var joined =
             from wr in linkQuery
             join s in db.WorkspaceRepositoryContextStates.AsNoTracking().Where(s => s.WorkspaceFeatureContextId == cid)
                 on wr.WorkspaceRepositoryId equals s.WorkspaceRepositoryId into states
             from state in states.DefaultIfEmpty()
-            select new { wr, state };
+            join pr in db.WorkspaceRepositoryContextPullRequests.AsNoTracking().Where(p => p.WorkspaceFeatureContextId == cid)
+                on wr.WorkspaceRepositoryId equals pr.WorkspaceRepositoryId into prs
+            from pr in prs.DefaultIfEmpty()
+            select new { wr, state, pr };
 
-        var hasUnmatchedDependencies = usesDependencyGraph && await stateQuery.AnyAsync(
-            x => (x.state == null || string.IsNullOrEmpty(x.state.CheckedOutTag))
-                && x.state != null
-                && ((x.state.UnmatchedDeps ?? 0) > 0 || (x.state.OutOfDateFileRepos ?? 0) > 0),
-            cancellationToken);
-
-        var hasOutOfDateFiles = !usesDependencyGraph && await stateQuery.AnyAsync(
-            x => x.state != null
-                && string.IsNullOrEmpty(x.state.CheckedOutTag)
-                && (x.state.OutOfDateFileRepos ?? 0) > 0,
-            cancellationToken);
-
-        var isPushRecommended = await stateQuery.AnyAsync(
-            x => x.state != null
-                && string.IsNullOrEmpty(x.state.CheckedOutTag)
-                && ((x.state.OutgoingCommits ?? 0) > 0 || x.state.BranchHasUpstream == false),
-            cancellationToken);
-
-        var hasIncomingCommits = await stateQuery.AnyAsync(
-            x => x.state != null
-                && string.IsNullOrEmpty(x.state.CheckedOutTag)
-                && (x.state.IncomingCommits ?? 0) > 0,
-            cancellationToken);
-
-        var hasTaggedRepos = await stateQuery.AnyAsync(
-            x => x.state != null && !string.IsNullOrEmpty(x.state.CheckedOutTag),
-            cancellationToken);
-
-        var isOutOfSync = await stateQuery.AnyAsync(
-            x => x.state == null || x.state.SyncStatus != RepoSyncStatus.InSync,
-            cancellationToken);
-
-        int? lowestLevelNeedingWork = null;
-        if (usesDependencyGraph)
+        if (!usesDependencyGraph)
         {
-            var lowestLevels = await stateQuery
-                .Where(x => x.state != null
-                    && string.IsNullOrEmpty(x.state.CheckedOutTag)
-                    && ((x.state.UnmatchedDeps ?? 0) > 0 || (x.state.OutOfDateFileRepos ?? 0) > 0)
-                    && x.state.DependencyLevel != null)
-                .Select(x => x.state!.DependencyLevel!.Value)
-                .OrderBy(level => level)
-                .Take(1)
-                .ToListAsync(cancellationToken);
-            lowestLevelNeedingWork = lowestLevels.Count > 0 ? lowestLevels[0] : null;
+            var basicFeature = await joined
+                .GroupBy(_ => 1)
+                .Select(g => new
+                {
+                    Total = g.Count(),
+                    OutOfDateFiles = g.Count(x => x.state != null
+                        && string.IsNullOrEmpty(x.state.CheckedOutTag)
+                        && (x.state.OutOfDateFileRepos ?? 0) > 0),
+                    Push = g.Count(x => x.state != null
+                        && string.IsNullOrEmpty(x.state.CheckedOutTag)
+                        && ((x.state.OutgoingCommits ?? 0) > 0 || x.state.BranchHasUpstream == false)),
+                    Incoming = g.Count(x => x.state != null
+                        && string.IsNullOrEmpty(x.state.CheckedOutTag)
+                        && (x.state.IncomingCommits ?? 0) > 0),
+                    Tagged = g.Count(x => x.state != null && !string.IsNullOrEmpty(x.state.CheckedOutTag)),
+                    OutOfSync = g.Count(x => x.state == null || x.state.SyncStatus != RepoSyncStatus.InSync),
+                    CreatablePr = g.Count(x => x.state != null
+                        && string.IsNullOrEmpty(x.state.CheckedOutTag)
+                        && (x.pr == null || (x.pr.MergedAt == null && x.pr.State != "open" && x.pr.State != "closed"))
+                        && (
+                            (x.state.DefaultBranchAheadCommits ?? 0) > 0
+                            || db.WorkspaceFeatureRepositories.Any(fr =>
+                                fr.WorkspaceFeatureContextId == cid
+                                && fr.WorkspaceRepositoryId == x.wr.WorkspaceRepositoryId
+                                && fr.BaseCommitSha != null
+                                && x.state.HeadCommit != null
+                                && fr.BaseCommitSha != x.state.HeadCommit))),
+                    OpenPr = g.Count(x => x.pr != null && x.pr.PullRequestNumber != null && x.pr.State == "open"),
+                    AnyPr = g.Count(x => x.pr != null && x.pr.PullRequestNumber != null),
+                })
+                .FirstOrDefaultAsync(cancellationToken);
+
+            var basicOpen = (basicFeature?.OpenPr ?? 0) > 0;
+            var basicCreatable = (basicFeature?.CreatablePr ?? 0) > 0;
+            return new WorkspaceRepositoryHeaderStateDto(
+                basicFeature?.Total ?? 0,
+                false,
+                (basicFeature?.Push ?? 0) > 0,
+                (basicFeature?.Incoming ?? 0) > 0,
+                (basicFeature?.Tagged ?? 0) > 0,
+                (basicFeature?.OutOfSync ?? 0) > 0,
+                null,
+                basicCreatable,
+                basicOpen,
+                (basicFeature?.AnyPr ?? 0) > 0 && !basicOpen && !basicCreatable,
+                (basicFeature?.OutOfDateFiles ?? 0) > 0);
         }
 
-        var prQuery =
-            from x in stateQuery
-            join pr in db.WorkspaceRepositoryContextPullRequests.AsNoTracking().Where(p => p.WorkspaceFeatureContextId == cid)
-                on x.wr.WorkspaceRepositoryId equals pr.WorkspaceRepositoryId into prs
-            from pr in prs.DefaultIfEmpty()
-            select new { x.state, pr };
+        var feature = await joined
+            .GroupBy(_ => 1)
+            .Select(g => new
+            {
+                Total = g.Count(),
+                Unmatched = g.Count(x => (x.state == null || string.IsNullOrEmpty(x.state.CheckedOutTag))
+                    && x.state != null
+                    && ((x.state.UnmatchedDeps ?? 0) > 0 || (x.state.OutOfDateFileRepos ?? 0) > 0)),
+                Push = g.Count(x => x.state != null
+                    && string.IsNullOrEmpty(x.state.CheckedOutTag)
+                    && ((x.state.OutgoingCommits ?? 0) > 0 || x.state.BranchHasUpstream == false)),
+                Incoming = g.Count(x => x.state != null
+                    && string.IsNullOrEmpty(x.state.CheckedOutTag)
+                    && (x.state.IncomingCommits ?? 0) > 0),
+                Tagged = g.Count(x => x.state != null && !string.IsNullOrEmpty(x.state.CheckedOutTag)),
+                OutOfSync = g.Count(x => x.state == null || x.state.SyncStatus != RepoSyncStatus.InSync),
+                Lowest = g.Min(x => x.state != null
+                    && string.IsNullOrEmpty(x.state.CheckedOutTag)
+                    && ((x.state.UnmatchedDeps ?? 0) > 0 || (x.state.OutOfDateFileRepos ?? 0) > 0)
+                    ? x.state.DependencyLevel
+                    : null),
+                CreatablePr = g.Count(x => x.state != null
+                    && string.IsNullOrEmpty(x.state.CheckedOutTag)
+                    && (x.pr == null || (x.pr.MergedAt == null && x.pr.State != "open" && x.pr.State != "closed"))
+                    && (
+                        (x.state.DefaultBranchAheadCommits ?? 0) > 0
+                        || db.WorkspaceFeatureRepositories.Any(fr =>
+                            fr.WorkspaceFeatureContextId == cid
+                            && fr.WorkspaceRepositoryId == x.wr.WorkspaceRepositoryId
+                            && fr.BaseCommitSha != null
+                            && x.state.HeadCommit != null
+                            && fr.BaseCommitSha != x.state.HeadCommit))),
+                OpenPr = g.Count(x => x.pr != null && x.pr.PullRequestNumber != null && x.pr.State == "open"),
+                AnyPr = g.Count(x => x.pr != null && x.pr.PullRequestNumber != null),
+            })
+            .FirstOrDefaultAsync(cancellationToken);
 
-        // Same eligibility as PRBadge.ShowsCreateBadge: ahead of comparison base (Feature parent /
-        // Workspace default), not on a tag, and no open/merged/closed pull request.
-        var hasCreatablePr = await prQuery.AnyAsync(
-            x => x.state != null
-                && string.IsNullOrEmpty(x.state.CheckedOutTag)
-                && (x.pr == null
-                    || (x.pr.MergedAt == null && x.pr.State != "open" && x.pr.State != "closed"))
-                && (
-                    (x.state.DefaultBranchAheadCommits ?? 0) > 0
-                    || db.WorkspaceFeatureRepositories.Any(fr =>
-                        fr.WorkspaceFeatureContextId == cid
-                        && fr.WorkspaceRepositoryId == x.state.WorkspaceRepositoryId
-                        && fr.BaseCommitSha != null
-                        && x.state.HeadCommit != null
-                        && fr.BaseCommitSha != x.state.HeadCommit)),
-            cancellationToken);
-
-        var hasOpenPr = await prQuery.AnyAsync(
-            x => x.pr != null
-                && x.pr.PullRequestNumber != null
-                && x.pr.State == "open",
-            cancellationToken);
-
-        // E2: at least one pull request exists for this Feature, every one of them is merged or closed
-        // (hasOpenPr is false), and no repository has commits that are not covered by a pull request
-        // (hasCreatablePr is false).
-        var hasAnyPr = await prQuery.AnyAsync(
-            x => x.pr != null && x.pr.PullRequestNumber != null,
-            cancellationToken);
-        var allFeaturePrsCompleted = hasAnyPr && !hasOpenPr && !hasCreatablePr;
+        var hasOpenPr = (feature?.OpenPr ?? 0) > 0;
+        var hasCreatablePr = (feature?.CreatablePr ?? 0) > 0;
+        var allFeaturePrsCompleted = (feature?.AnyPr ?? 0) > 0 && !hasOpenPr && !hasCreatablePr;
 
         return new WorkspaceRepositoryHeaderStateDto(
-            totalCount,
-            hasUnmatchedDependencies,
-            isPushRecommended,
-            hasIncomingCommits,
-            hasTaggedRepos,
-            isOutOfSync,
-            lowestLevelNeedingWork,
+            feature?.Total ?? 0,
+            (feature?.Unmatched ?? 0) > 0,
+            (feature?.Push ?? 0) > 0,
+            (feature?.Incoming ?? 0) > 0,
+            (feature?.Tagged ?? 0) > 0,
+            (feature?.OutOfSync ?? 0) > 0,
+            feature?.Lowest,
             hasCreatablePr,
             hasOpenPr,
-            allFeaturePrsCompleted,
-            hasOutOfDateFiles);
+            allFeaturePrsCompleted);
     }
 
     public async Task<IReadOnlyList<WorkspaceRepositoryLinkIndexEntry>> GetIndexAsync(
@@ -464,29 +479,26 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
         }
 
         var cid = contextId.Value.Value;
-        var states = db.WorkspaceRepositoryContextStates.AsNoTracking()
-            .Where(s => s.WorkspaceFeatureContextId == cid);
+        var joined =
+            from wr in query
+            join s in db.WorkspaceRepositoryContextStates.AsNoTracking().Where(s => s.WorkspaceFeatureContextId == cid)
+                on wr.WorkspaceRepositoryId equals s.WorkspaceRepositoryId into states
+            from state in states.DefaultIfEmpty()
+            select new { wr, state };
 
-        return query
-            .OrderBy(wr => wr.Role == WorkspaceRepositoryRole.Workspace ? 0 : 1)
-            .ThenByDescending(wr => (states
-                .Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId)
-                .Select(s => s.DependencyLevel)
-                .FirstOrDefault()) ?? int.MinValue)
-            .ThenBy(wr => states
-                .Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId)
-                .Select(s => s.RepositoryType)
-                .FirstOrDefault() == ProjectType.Service ? 0
-                : states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Package ? 1
-                : states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Executable ? 2
-                : states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Library ? 3
-                : states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Test ? 4
+        return joined
+            .OrderBy(x => x.wr.Role == WorkspaceRepositoryRole.Workspace ? 0 : 1)
+            .ThenByDescending(x => (x.state != null ? x.state.DependencyLevel : null) ?? int.MinValue)
+            .ThenBy(x => x.state == null || x.state.RepositoryType == null ? 5
+                : x.state.RepositoryType == ProjectType.Service ? 0
+                : x.state.RepositoryType == ProjectType.Package ? 1
+                : x.state.RepositoryType == ProjectType.Executable ? 2
+                : x.state.RepositoryType == ProjectType.Library ? 3
+                : x.state.RepositoryType == ProjectType.Test ? 4
                 : 5)
-            .ThenByDescending(wr => (states
-                .Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId)
-                .Select(s => s.Dependencies)
-                .FirstOrDefault()) ?? int.MinValue)
-            .ThenBy(wr => wr.WorkspaceRepositoryId);
+            .ThenByDescending(x => (x.state != null ? x.state.Dependencies : null) ?? int.MinValue)
+            .ThenBy(x => x.wr.WorkspaceRepositoryId)
+            .Select(x => x.wr);
     }
 
     private static IQueryable<WorkspaceRepositoryLink> ApplyKeyset(
@@ -542,35 +554,43 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
         }
 
         var cid = contextId.Value.Value;
-        var states = db.WorkspaceRepositoryContextStates.AsNoTracking()
-            .Where(s => s.WorkspaceFeatureContextId == cid);
+        var joined =
+            from wr in query
+            join s in db.WorkspaceRepositoryContextStates.AsNoTracking().Where(s => s.WorkspaceFeatureContextId == cid)
+                on wr.WorkspaceRepositoryId equals s.WorkspaceRepositoryId into states
+            from state in states.DefaultIfEmpty()
+            select new { wr, state };
 
-        return query.Where(wr =>
-            ((states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.DependencyLevel).FirstOrDefault()) ?? int.MinValue) < cursor.DependencyLevelSortKey
-            || (((states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.DependencyLevel).FirstOrDefault()) ?? int.MinValue) == cursor.DependencyLevelSortKey
-                && (states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Service ? 0
-                    : states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Package ? 1
-                    : states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Executable ? 2
-                    : states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Library ? 3
-                    : states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Test ? 4
+        return joined.Where(x =>
+            ((x.state != null ? x.state.DependencyLevel : null) ?? int.MinValue) < cursor.DependencyLevelSortKey
+            || (((x.state != null ? x.state.DependencyLevel : null) ?? int.MinValue) == cursor.DependencyLevelSortKey
+                && (x.state == null || x.state.RepositoryType == null ? 5
+                    : x.state.RepositoryType == ProjectType.Service ? 0
+                    : x.state.RepositoryType == ProjectType.Package ? 1
+                    : x.state.RepositoryType == ProjectType.Executable ? 2
+                    : x.state.RepositoryType == ProjectType.Library ? 3
+                    : x.state.RepositoryType == ProjectType.Test ? 4
                     : 5) > cursor.RepositoryTypeSortKey)
-            || (((states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.DependencyLevel).FirstOrDefault()) ?? int.MinValue) == cursor.DependencyLevelSortKey
-                && (states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Service ? 0
-                    : states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Package ? 1
-                    : states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Executable ? 2
-                    : states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Library ? 3
-                    : states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Test ? 4
+            || (((x.state != null ? x.state.DependencyLevel : null) ?? int.MinValue) == cursor.DependencyLevelSortKey
+                && (x.state == null || x.state.RepositoryType == null ? 5
+                    : x.state.RepositoryType == ProjectType.Service ? 0
+                    : x.state.RepositoryType == ProjectType.Package ? 1
+                    : x.state.RepositoryType == ProjectType.Executable ? 2
+                    : x.state.RepositoryType == ProjectType.Library ? 3
+                    : x.state.RepositoryType == ProjectType.Test ? 4
                     : 5) == cursor.RepositoryTypeSortKey
-                && ((states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.Dependencies).FirstOrDefault()) ?? int.MinValue) < cursor.DependenciesSortKey)
-            || (((states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.DependencyLevel).FirstOrDefault()) ?? int.MinValue) == cursor.DependencyLevelSortKey
-                && (states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Service ? 0
-                    : states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Package ? 1
-                    : states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Executable ? 2
-                    : states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Library ? 3
-                    : states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.RepositoryType).FirstOrDefault() == ProjectType.Test ? 4
+                && ((x.state != null ? x.state.Dependencies : null) ?? int.MinValue) < cursor.DependenciesSortKey)
+            || (((x.state != null ? x.state.DependencyLevel : null) ?? int.MinValue) == cursor.DependencyLevelSortKey
+                && (x.state == null || x.state.RepositoryType == null ? 5
+                    : x.state.RepositoryType == ProjectType.Service ? 0
+                    : x.state.RepositoryType == ProjectType.Package ? 1
+                    : x.state.RepositoryType == ProjectType.Executable ? 2
+                    : x.state.RepositoryType == ProjectType.Library ? 3
+                    : x.state.RepositoryType == ProjectType.Test ? 4
                     : 5) == cursor.RepositoryTypeSortKey
-                && ((states.Where(s => s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId).Select(s => s.Dependencies).FirstOrDefault()) ?? int.MinValue) == cursor.DependenciesSortKey
-                && wr.WorkspaceRepositoryId > cursor.WorkspaceRepositoryId));
+                && ((x.state != null ? x.state.Dependencies : null) ?? int.MinValue) == cursor.DependenciesSortKey
+                && x.wr.WorkspaceRepositoryId > cursor.WorkspaceRepositoryId))
+            .Select(x => x.wr);
     }
 
     /// <summary>
@@ -621,7 +641,14 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
                 wr.PullRequest != null ? wr.PullRequest.MergeableState : null,
                 wr.PullRequest != null ? wr.PullRequest.ChangedFiles : null,
                 wr.Repository != null && wr.Repository.Archived,
-                wr.GitChangeEntries.Count(),
+                db.WorkspaceGitContextChangeEntries.Count(e =>
+                    e.WorkspaceRepositoryId == wr.WorkspaceRepositoryId
+                    && (contextId != null
+                        ? e.WorkspaceFeatureContextId == contextId.Value.Value
+                        : db.WorkspaceFeatureContexts.Any(c =>
+                            c.WorkspaceFeatureContextId == e.WorkspaceFeatureContextId
+                            && c.WorkspaceId == wr.WorkspaceId
+                            && c.Kind == WorkspaceFeatureContextKind.Workspace))),
                 HeadCommit: null,
                 FeatureBaseCommitSha: null,
                 ParentBranchName: null,

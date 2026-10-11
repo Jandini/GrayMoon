@@ -96,9 +96,6 @@ public sealed partial class WorkspaceGitChanges
             await Task.WhenAll(tasks);
 
             SafeInvoke(ClearMultiSelection);
-
-            // Give the write queue a moment to flush before the job's own reload runs.
-            await Task.Delay(150, ct);
         });
     }
 }

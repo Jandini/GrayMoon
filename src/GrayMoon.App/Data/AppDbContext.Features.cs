@@ -39,6 +39,8 @@ public partial class AppDbContext
                 .IsUnique()
                 .HasFilter("\"Kind\" = 0")
                 .HasDatabaseName("IX_WorkspaceFeatureContexts_Workspace_KindWorkspace");
+            entity.HasIndex(c => c.WorkspaceId, "IX_WorkspaceFeatureContexts_WorkspaceId")
+                .HasDatabaseName("IX_WorkspaceFeatureContexts_WorkspaceId");
             entity.HasIndex(c => c.WorkspaceFeatureId)
                 .IsUnique()
                 .HasFilter("\"WorkspaceFeatureId\" IS NOT NULL")
@@ -59,6 +61,8 @@ public partial class AppDbContext
             entity.HasKey(r => r.WorkspaceFeatureRepositoryId);
             entity.Property(r => r.WorkspaceFeatureRepositoryId).ValueGeneratedOnAdd();
             entity.HasIndex(r => new { r.WorkspaceFeatureContextId, r.WorkspaceRepositoryId }).IsUnique();
+            entity.HasIndex(r => r.WorkspaceRepositoryId)
+                .HasDatabaseName("IX_WorkspaceFeatureRepositories_WorkspaceRepositoryId");
             entity.Property(r => r.WorktreePath).IsRequired().HasMaxLength(2000);
             entity.Property(r => r.BaseCommitSha).IsRequired().HasMaxLength(64);
             entity.Property(r => r.ParentBranchName).HasMaxLength(200);

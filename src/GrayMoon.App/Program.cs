@@ -95,12 +95,15 @@ try
     // Database (SQLite) for persisted data - stored in db/ for easy container volume mounting.
     // WAL + busy_timeout so a large workspace's reads/writes do not block other circuits as hard.
     var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=db/graymoon.db";
-    if (!connectionString.Contains("Cache=", StringComparison.OrdinalIgnoreCase))
-        connectionString += connectionString.EndsWith(';') ? "Cache=Shared;" : ";Cache=Shared;";
+    connectionString = EnsureConnectionSetting(connectionString, "Cache=", "Cache=Shared");
+    connectionString = EnsureConnectionSetting(connectionString, "Default Timeout=", "Default Timeout=5");
+    connectionString = EnsureConnectionSetting(connectionString, "Foreign Keys=", "Foreign Keys=True");
     // AddDbContext + AddDbContextFactory together fails on EF Core 10 (scoped
     // IDbContextOptionsConfiguration resolved from the root provider). Register the
     // factory only, then supply scoped AppDbContext instances from it.
-    builder.Services.AddDbContextFactory<AppDbContext>(options => options.UseSqlite(connectionString));
+    // busy_timeout and foreign_keys are per connection; the interceptor sets them on every open.
+    builder.Services.AddDbContextFactory<AppDbContext>(options =>
+        options.UseSqlite(connectionString).AddInterceptors(SqliteConnectionPragmasInterceptor.Instance));
     builder.Services.AddScoped(sp => sp.GetRequiredService<IDbContextFactory<AppDbContext>>().CreateDbContext());
     builder.Services.AddScoped<ConnectorRepository>();
     builder.Services.AddScoped<GitHubRepositoryRepository>();
@@ -334,6 +337,15 @@ try
     }
 
     static string? GetDatabasePath(string connectionString) => DatabasePathResolver.GetDatabasePath(connectionString);
+
+    static string EnsureConnectionSetting(string connectionString, string keyPrefix, string assignment)
+    {
+        if (connectionString.Contains(keyPrefix, StringComparison.OrdinalIgnoreCase))
+            return connectionString;
+        if (!connectionString.EndsWith(';'))
+            connectionString += ';';
+        return connectionString + assignment + ';';
+    }
 
     // Configure the HTTP request pipeline.
     if (!app.Environment.IsDevelopment())

@@ -32,7 +32,8 @@ public sealed class RepositoryBranchWriter(AppDbContext dbContext, ILogger<Repos
         string? defaultBranchName,
         IReadOnlyList<string>? tags,
         string? currentTag,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool save = true)
     {
         var now = DateTime.UtcNow;
         var existingBranches = await dbContext.RepositoryBranches
@@ -150,7 +151,8 @@ public sealed class RepositoryBranchWriter(AppDbContext dbContext, ILogger<Repos
             }
         }
 
-        await dbContext.SaveChangesAsync(cancellationToken);
+        if (save)
+            await dbContext.SaveChangesAsync(cancellationToken);
         logger.LogTrace("Persisted {Count} ref(s) for workspace repository {WorkspaceRepositoryId}", fetchedRefs.Count, workspaceRepositoryId);
     }
 

@@ -102,13 +102,15 @@ public sealed class WorkspacePullRequestService(
         // clear the row rather than skipping it and leaving the previous branch's badge on screen.
         var toClear = links.Where(wr => wr.Repository == null || string.IsNullOrWhiteSpace(wr.BranchName)).ToList();
         foreach (var wr in toClear)
-        {
-            await pullRequestRepository.UpsertAsync(wr.WorkspaceRepositoryId, null, cancellationToken);
             outcomes[wr.RepositoryId] = PullRequestRefreshOutcome.Cleared;
-        }
 
         var toRefresh = links.Where(wr => wr.Repository != null && !string.IsNullOrWhiteSpace(wr.BranchName)).ToList();
-        if (toRefresh.Count == 0) return outcomes;
+        var mutations = toClear.Select(wr => (wr.WorkspaceRepositoryId, (PullRequestInfo?)null)).ToList();
+        if (toRefresh.Count == 0)
+        {
+            await pullRequestRepository.UpsertManyAsync(mutations, cancellationToken);
+            return outcomes;
+        }
 
         using var semaphore = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
         var fetchTasks = toRefresh.Select(async wr =>
@@ -162,8 +164,10 @@ public sealed class WorkspacePullRequestService(
         {
             outcomes[result.Wr.RepositoryId] = result.Outcome;
             if (result.Outcome == PullRequestRefreshOutcome.Refreshed)
-                await pullRequestRepository.UpsertAsync(result.Wr.WorkspaceRepositoryId, result.Pr, cancellationToken);
+                mutations.Add((result.Wr.WorkspaceRepositoryId, result.Pr));
         }
+
+        await pullRequestRepository.UpsertManyAsync(mutations, cancellationToken);
 
         logger.LogTrace("Refreshed PR for {Count} repo(s) in workspace {WorkspaceId}", toRefresh.Count, workspaceId);
         return outcomes;
@@ -221,13 +225,15 @@ public sealed class WorkspacePullRequestService(
 
         var toClear = links.Where(wr => wr.Repository == null || string.IsNullOrWhiteSpace(branchByRepositoryId.GetValueOrDefault(wr.RepositoryId))).ToList();
         foreach (var wr in toClear)
-        {
-            await pullRequestRepository.UpsertContextAsync(contextId, wr.WorkspaceRepositoryId, null, cancellationToken);
             outcomes[wr.RepositoryId] = PullRequestRefreshOutcome.Cleared;
-        }
 
         var toRefresh = links.Where(wr => wr.Repository != null && !string.IsNullOrWhiteSpace(branchByRepositoryId.GetValueOrDefault(wr.RepositoryId))).ToList();
-        if (toRefresh.Count == 0) return outcomes;
+        var mutations = toClear.Select(wr => (wr.WorkspaceRepositoryId, (PullRequestInfo?)null)).ToList();
+        if (toRefresh.Count == 0)
+        {
+            await pullRequestRepository.UpsertContextManyAsync(contextId, mutations, cancellationToken);
+            return outcomes;
+        }
 
         using var semaphore = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
         var fetchTasks = toRefresh.Select(async wr =>
@@ -270,8 +276,10 @@ public sealed class WorkspacePullRequestService(
             // Workspace RefreshPullRequestsAsync above): a cache warmed by one context must still be
             // written into a different context's row the first time that context asks for it.
             if (result.Outcome is PullRequestRefreshOutcome.Refreshed or PullRequestRefreshOutcome.CacheHit)
-                await pullRequestRepository.UpsertContextAsync(contextId, result.Wr.WorkspaceRepositoryId, result.Pr, cancellationToken);
+                mutations.Add((result.Wr.WorkspaceRepositoryId, result.Pr));
         }
+
+        await pullRequestRepository.UpsertContextManyAsync(contextId, mutations, cancellationToken);
 
         return outcomes;
     }

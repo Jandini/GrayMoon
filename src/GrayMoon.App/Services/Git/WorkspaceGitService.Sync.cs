@@ -392,21 +392,22 @@ public sealed partial class WorkspaceGitService
         var resultList = results.ToList();
         if (resultList.Count == 0) return;
 
-        var repoIds = resultList.Select(r => r.RepoId).ToList();
-
-        foreach (var (repoId, info) in resultList)
-        {
-            var snapshot = info.Snapshot ?? SnapshotFromFlatInfo(info);
-            await _stateWriter.ApplyAsync(contextId, workspaceId, repoId, snapshot, new RepositoryStateWriteOptions
+        var items = resultList
+            .Select(r => (r.RepoId, r.info.Snapshot ?? SnapshotFromFlatInfo(r.info)))
+            .ToList();
+        await _stateWriter.ApplyBatchAsync(
+            contextId,
+            workspaceId,
+            items,
+            new RepositoryStateWriteOptions
             {
                 SyncStatus = SyncStatusWrite.Derive,
                 ReconcilePullRequest = true,
-            }, cancellationToken);
-        }
+            },
+            cancellationToken);
 
-        // The writer already merged each repository's projects; the dependency edges still have to be
-        // merged as one batch so the level computation sees the whole graph at once. A workspace without a
-        // dependency graph gets no edges and no levels, even if a worker reported projects anyway.
+        // One dependency merge for the whole graph. A workspace without a dependency graph gets no edges
+        // and no levels, even if a worker reported projects anyway.
         var capabilities = await _capabilitiesResolver.GetAsync(workspaceId, cancellationToken);
         if (capabilities.UsesDependencyGraph)
         {
