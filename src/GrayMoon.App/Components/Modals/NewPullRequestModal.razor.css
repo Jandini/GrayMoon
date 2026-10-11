@@ -105,9 +105,11 @@
     z-index: 1;
 }
 
-/* Explicit remote refresh; the first paint uses persisted branches only. */
+/* Explicit remote refresh; the first paint uses persisted branches only.
+   Slightly in from the right edge so the focus line after a click does not sit on it. */
 .new-pr-branch-refresh {
     margin-left: auto !important;
+    margin-right: 0.5rem;
     z-index: 1;
     font-size: 0.8125rem;
     text-decoration: none;
