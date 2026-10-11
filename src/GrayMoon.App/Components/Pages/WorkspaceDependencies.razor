@@ -14,6 +14,7 @@
 @inject WorkspaceContextNavigationService ContextNavigation
 @inject IWorkspacePageAccessResolver PageAccess
 @inject IJSRuntime JSRuntime
+@inject IWorkspaceFeatureContextResolver ContextResolver
 @inject ILogger<WorkspaceDependencies> Logger
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 @implements IAsyncDisposable
@@ -104,6 +105,13 @@
                                 <div class="deps-filter-backdrop" @onclick="CloseFilterMenu"></div>
                             }
                         </div>
+                        <button type="button"
+                                class="btn btn-outline-secondary deps-layout-reset"
+                                disabled="@(!_hasSavedLayout)"
+                                title="Restore the automatic layout"
+                                @onclick="ResetLayoutAsync">
+                            Reset
+                        </button>
                     }
                 </div>
             </div>
@@ -116,16 +124,10 @@
         {
             <div class="grid-page-body">
                 <div id="cytoscape-dependency-graph" class="cytoscape-graph"></div>
-                @if (graph.Nodes.Count > 0 && !NoRepositoriesMatchSearch)
-                {
-                    <ul class="deps-graph-legend" aria-label="Repository type legend">
-                        <li><span class="deps-graph-legend__swatch deps-graph-legend__swatch--service" aria-hidden="true"></span>Service</li>
-                        <li><span class="deps-graph-legend__swatch deps-graph-legend__swatch--package" aria-hidden="true"></span>Package</li>
-                        <li><span class="deps-graph-legend__swatch deps-graph-legend__swatch--library" aria-hidden="true"></span>Library</li>
-                        <li><span class="deps-graph-legend__swatch deps-graph-legend__swatch--executable" aria-hidden="true"></span>Executable</li>
-                        <li><span class="deps-graph-legend__swatch deps-graph-legend__swatch--test" aria-hidden="true"></span>Test</li>
-                    </ul>
-                }
+                <div id="deps-graph-hover-legend" class="deps-graph-legend" hidden>
+                    <span class="deps-graph-legend__swatch" aria-hidden="true"></span>
+                    <span class="deps-graph-legend__label"></span>
+                </div>
                 @if (graph.Nodes.Count == 0)
                 {
                     <p class="dependencies-empty-message text-muted text-center mb-0">No dependencies to display. Sync repositories to discover projects and dependencies.</p>
@@ -149,6 +151,9 @@
 
     private WorkspacePageAccessOutcome? _pageAccess;
     private WorkspaceFeatureContextId? _selectedContextId;
+    private int? _layoutFeatureContextId;
+    private bool _hasSavedLayout;
+    private DotNetObjectReference<WorkspaceDependencies>? _layoutDotNetRef;
     private WorkspaceModel? workspace;
     private RepositoryDependencyGraph? graph;
     private string? errorMessage;
@@ -175,6 +180,7 @@
         {
             var info = await ContextNavigation.ResolveForPageAsync(WorkspaceId, ContextQuery);
             _selectedContextId = info.ContextId;
+            ApplyLayoutContext(info.IsSpecialWorkspace, info.ContextId);
             await LoadAsync();
             ApplyRepositoryFilterFromQuery();
         });
@@ -183,8 +189,29 @@
     private async Task OnSelectedContextChangedAsync(WorkspaceFeatureContextId contextId)
     {
         _selectedContextId = contextId;
+        try
+        {
+            var info = await ContextResolver.GetRequiredAsync(contextId, WorkspaceId);
+            ApplyLayoutContext(info.IsSpecialWorkspace, contextId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Could not resolve feature context {ContextId} for the dependency layout", contextId.Value);
+            _layoutFeatureContextId = contextId.Value;
+        }
         await LoadAsync();
     }
+
+    /// <summary>Feature contexts keep their own layout. The workspace itself is keyed by workspace id only.</summary>
+    private void ApplyLayoutContext(bool isSpecialWorkspace, WorkspaceFeatureContextId contextId)
+    {
+        _layoutFeatureContextId = isSpecialWorkspace ? null : contextId.Value;
+    }
+
+    private string LayoutStateToken => _layoutFeatureContextId is int featureId ? featureId.ToString() : "workspace";
+
+    private DotNetObjectReference<WorkspaceDependencies> LayoutDotNetRef =>
+        _layoutDotNetRef ??= DotNetObjectReference.Create(this);
 
     private IEnumerable<int> GetOrderedDependencyLevels()
     {
@@ -276,38 +303,93 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (graph == null || graph.Nodes.Count == 0) return;
+        if (isLoading || graph == null || graph.Nodes.Count == 0) return;
 
-        var stateKey = $"{selectedFilterValue}|{searchTerm}";
-        if (!firstRender && _lastRenderedState == stateKey) return;
-
-        _lastRenderedState = stateKey;
-        try
+        // Context is part of the key so a feature switch loads that context's saved layout.
+        var stateKey = $"{WorkspaceId}|{LayoutStateToken}|{selectedFilterValue}|{searchTerm}";
+        if (_lastRenderedState != stateKey)
         {
-            await JSRuntime.InvokeVoidAsync("destroyCytoscapeGraph", GraphContainerId);
-        }
-        catch { /* ignore */ }
-
-        var (filteredNodes, filteredEdges) = GetFilteredNodesAndEdges();
-        if (filteredNodes.Count == 0) return;
-
-        try
-        {
-            var prefixByRepoId = GetLabelsWithGroupPrefixStripped(graph.Nodes.Select(n => (n.RepositoryId, n.RepositoryName)).ToList());
-            var nodes = filteredNodes.Select(n => new
+            _lastRenderedState = stateKey;
+            try
             {
-                id = n.RepositoryId.ToString(),
-                label = prefixByRepoId.TryGetValue(n.RepositoryId, out var label) ? label : n.RepositoryName,
-                nodeType = n.RepositoryType?.ToString().ToLowerInvariant() ?? "other"
-            }).ToList();
-            var edges = filteredEdges.Select(e => new { source = e.DependentRepositoryId.ToString(), target = e.ReferencedRepositoryId.ToString() }).ToList();
-            var roots = filteredNodes.Select(n => n.RepositoryId.ToString()).Except(edges.Select(e => e.target)).ToList();
-            await JSRuntime.InvokeVoidAsync("renderCytoscapeGraph", GraphContainerId, nodes, edges, roots);
+                await JSRuntime.InvokeVoidAsync("destroyCytoscapeGraph", GraphContainerId);
+            }
+            catch { /* ignore */ }
+
+            var (filteredNodes, filteredEdges) = GetFilteredNodesAndEdges();
+            if (filteredNodes.Count > 0)
+            {
+                try
+                {
+                    var prefixByRepoId = GetLabelsWithGroupPrefixStripped(graph.Nodes.Select(n => (n.RepositoryId, n.RepositoryName)).ToList());
+                    var nodes = filteredNodes.Select(n => new
+                    {
+                        id = n.RepositoryId.ToString(),
+                        label = prefixByRepoId.TryGetValue(n.RepositoryId, out var label) ? label : n.RepositoryName,
+                        nodeType = n.RepositoryType?.ToString().ToLowerInvariant() ?? "other"
+                    }).ToList();
+                    var edges = filteredEdges.Select(e => new { source = e.DependentRepositoryId.ToString(), target = e.ReferencedRepositoryId.ToString() }).ToList();
+                    var roots = filteredNodes.Select(n => n.RepositoryId.ToString()).Except(edges.Select(e => e.target)).ToList();
+                    var repositoryIds = graph.Nodes.Select(n => n.RepositoryId.ToString()).ToList();
+                    await JSRuntime.InvokeVoidAsync(
+                        "renderCytoscapeGraph",
+                        GraphContainerId,
+                        nodes,
+                        edges,
+                        roots,
+                        WorkspaceId,
+                        _layoutFeatureContextId,
+                        repositoryIds,
+                        LayoutDotNetRef);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "Cytoscape render failed for workspace {WorkspaceId}", WorkspaceId);
+                }
+            }
+        }
+
+        try
+        {
+            var saved = await JSRuntime.InvokeAsync<bool>("cytoscapeDependencyLayoutSaved", WorkspaceId, _layoutFeatureContextId);
+            if (saved != _hasSavedLayout)
+            {
+                _hasSavedLayout = saved;
+                await InvokeAsync(StateHasChanged);
+            }
         }
         catch (Exception ex)
         {
-            Logger.LogWarning(ex, "Cytoscape render failed for workspace {WorkspaceId}", WorkspaceId);
+            Logger.LogWarning(ex, "Could not read the saved dependency layout for workspace {WorkspaceId}", WorkspaceId);
         }
+    }
+
+    [JSInvokable]
+    public Task OnDependencyLayoutSaved()
+    {
+        if (_hasSavedLayout)
+            return Task.CompletedTask;
+
+        _hasSavedLayout = true;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ResetLayoutAsync()
+    {
+        if (!_hasSavedLayout || graph == null) return;
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("clearCytoscapeDependencyLayout", WorkspaceId, _layoutFeatureContextId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Could not clear the saved dependency layout for workspace {WorkspaceId}", WorkspaceId);
+            return;
+        }
+
+        _hasSavedLayout = false;
+        _lastRenderedState = "";
+        StateHasChanged();
     }
 
     private (IReadOnlyList<RepositoryDependencyNode> Nodes, IReadOnlyList<RepositoryDependencyEdge> Edges) GetFilteredNodesAndEdges()
@@ -551,5 +633,8 @@
             await JSRuntime.InvokeVoidAsync("destroyCytoscapeGraph", GraphContainerId);
         }
         catch { /* ignore if JS not loaded */ }
+
+        _layoutDotNetRef?.Dispose();
+        _layoutDotNetRef = null;
     }
 }

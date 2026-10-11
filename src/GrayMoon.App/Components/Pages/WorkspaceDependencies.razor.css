@@ -23,33 +23,29 @@
     background: #141416;
 }
 
-/* Compact shape/color key overlaid on the graph */
+/* One repository type, pinned to the bottom-left of the graph while a typed tile is hovered */
 .deps-graph-legend {
     position: absolute;
     left: 0.75rem;
     bottom: 0.75rem;
     z-index: 2;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.35rem 0.75rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
     margin: 0;
-    padding: 0.4rem 0.65rem;
-    list-style: none;
-    max-width: calc(100% - 1.5rem);
-    background: rgba(20, 20, 22, 0.88);
+    padding: 0.35rem 0.5rem;
+    white-space: nowrap;
+    background: rgba(20, 20, 22, 0.92);
     border: 1px solid rgba(82, 82, 91, 0.55);
     border-radius: 0.375rem;
-    color: #a1a1aa;
+    color: #e4e4e7;
     font-size: 0.75rem;
     line-height: 1.2;
     pointer-events: none;
 }
 
-.deps-graph-legend li {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    white-space: nowrap;
+.deps-graph-legend[hidden] {
+    display: none !important;
 }
 
 .deps-graph-legend__swatch {
@@ -220,4 +216,9 @@
     inset: 0;
     z-index: 0;
     background: transparent;
+}
+
+.deps-layout-reset {
+    flex: 0 0 auto;
+    white-space: nowrap;
 }
