@@ -13,6 +13,7 @@
 @inject IJSRuntime JS
 @inject IConfiguration Configuration
 @inject IToastService ToastService
+@inject IFeatureRemovalQueue RemovalQueue
 
 <div class="btn-group position-relative workspace-feature-selector">
     <button type="button"
@@ -446,6 +447,7 @@
     {
         ApplyDesktopOpenInState();
         ToastService.OnShow += OnToastChanged;
+        RemovalQueue.Completed += OnFeatureRemovalCompleted;
     }
 
     private void ApplyDesktopOpenInState()
@@ -579,6 +581,7 @@
     public async ValueTask DisposeAsync()
     {
         _disposed = true;
+        RemovalQueue.Completed -= OnFeatureRemovalCompleted;
         ToastService.OnShow -= OnToastChanged;
         CloseToolMenu();
         if (_toolAvailabilitySubscribed && _toolAvailabilityRef is not null)
@@ -1078,6 +1081,33 @@
         catch (ObjectDisposedException)
         {
         }
+    }
+
+    /// <summary>
+    /// The feature list is loaded once and again only when the selection changes. Removal finishes
+    /// while Workspace is already selected, so drop the finished Feature here without reloading the page.
+    /// </summary>
+    private void OnFeatureRemovalCompleted(FeatureRemovalCompleted completed)
+    {
+        if (_disposed || completed.WorkspaceId != WorkspaceId)
+            return;
+
+        _featuresByWorkspace.Remove(completed.WorkspaceId);
+        _featureCountByWorkspace.Remove(completed.WorkspaceId);
+        _ = InvokeAsync(async () =>
+        {
+            if (_disposed)
+                return;
+
+            try
+            {
+                await ReloadAsync();
+                StateHasChanged();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        });
     }
 
     private async Task ReloadAsync()

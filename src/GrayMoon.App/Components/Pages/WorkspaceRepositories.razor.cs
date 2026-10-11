@@ -37,7 +37,6 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     [Inject] private WorkspaceContextNavigationService ContextNavigation { get; set; } = default!;
     [Inject] private IWorkspaceCapabilitiesResolver CapabilitiesResolver { get; set; } = default!;
     [Inject] private IFeatureFolderCleanupService FeatureFolderCleanup { get; set; } = default!;
-    [Inject] private IFeatureRemovalQueue RemovalQueue { get; set; } = default!;
 
     /// <summary>Keeps modal deep-links on the Feature currently being viewed (Workspace URLs stay bare).</summary>
     private string BuildContextScopedUrl(string relativePathWithoutQuery)
@@ -64,7 +63,6 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     {
         WorkerQueueStateService.OnQueueStateChanged(OnQueueStateChanged);
         JobService.Changed += OnJobServiceChanged;
-        RemovalQueue.Completed += OnFeatureRemovalCompleted;
     }
 
     private async Task ResolveSelectedContextAsync()
@@ -349,33 +347,6 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         await OnSelectedContextChangedAsync(leave.Workspace!.ContextId);
     }
 
-    /// <summary>
-    /// Background removal finished. Reload the grid so the Feature drops out of the selector.
-    /// This is not the Workspace status refresh; that already started when the user left for the Workspace.
-    /// </summary>
-    private void OnFeatureRemovalCompleted(FeatureRemovalCompleted completed)
-    {
-        if (_disposed || completed.WorkspaceId != WorkspaceId)
-            return;
-
-        _ = InvokeAsync(async () =>
-        {
-            if (_disposed)
-                return;
-
-            try
-            {
-                await LoadWorkspaceAsync();
-                ApplySyncStateFromLoadedItems();
-                StateHasChanged();
-            }
-            catch (Exception ex)
-            {
-                Logger.LogWarning(ex, "Refreshing the Workspace after Feature removal failed.");
-            }
-        });
-    }
-
     /// <summary>Reads the saved tbody scroll offset for the current WorkspaceId from sessionStorage, consumed by the next ResetAndLoadFromTopAsync(restoreScroll: true) call. Best-effort: malformed or missing storage falls back to no restore (top of grid), matching current behavior.</summary>
     private async Task LoadPendingRestoreScrollTopAsync()
     {
@@ -515,7 +486,6 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         CancelBackgroundWork();
         WorkerQueueStateService.RemoveQueueStateChanged(OnQueueStateChanged);
         JobService.Changed -= OnJobServiceChanged;
-        RemovalQueue.Completed -= OnFeatureRemovalCompleted;
         lock (_refreshDebounceLock)
         {
             _refreshDebounceCts?.Cancel();
