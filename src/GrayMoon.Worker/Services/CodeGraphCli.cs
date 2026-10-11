@@ -182,6 +182,20 @@ public sealed class CodeGraphCli(
         var deadline = DateTime.UtcNow + (timeout ?? LockWaitTimeout);
         while (File.Exists(lockPath))
         {
+            if (IsLockStale(lockPath))
+            {
+                // The process that wrote it is gone (e.g. its build was stopped), so nothing will ever remove it.
+                logger.LogInformation("Removing stale CodeGraph lock {LockPath}", lockPath);
+                try { File.Delete(lockPath); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    logger.LogDebug(ex, "Could not delete stale CodeGraph lock {LockPath}", lockPath);
+                    return true;
+                }
+
+                continue;
+            }
+
             if (DateTime.UtcNow >= deadline)
             {
                 logger.LogWarning("CodeGraph lock {LockPath} was not released in time", lockPath);
@@ -192,6 +206,34 @@ public sealed class CodeGraphCli(
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// True when the lock file names a process id (CodeGraph writes its own) that is no longer running. A lock that
+    /// cannot be read, or names no process, is treated as held.
+    /// </summary>
+    internal static bool IsLockStale(string lockPath)
+    {
+        try
+        {
+            var text = File.ReadAllText(lockPath).Trim();
+            if (!int.TryParse(text, out var pid) || pid <= 0)
+                return false;
+
+            try
+            {
+                using var process = System.Diagnostics.Process.GetProcessById(pid);
+                return process.HasExited;
+            }
+            catch (ArgumentException)
+            {
+                return true;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return false;
+        }
     }
 
     /// <summary>Runs <c>codegraph uninit -f</c>, which deletes <c>.codegraph</c> in <paramref name="root"/>.</summary>

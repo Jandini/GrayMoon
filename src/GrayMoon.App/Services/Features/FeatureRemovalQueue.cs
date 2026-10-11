@@ -103,6 +103,17 @@ public sealed class FeatureRemovalQueue(
 
     private void Announce(QueuedRemoval removal, OperationResult result)
     {
+        // Subscribers first (the page refreshes the Workspace already opened at confirm); the toast never delays them.
+        try
+        {
+            Completed?.Invoke(new FeatureRemovalCompleted(
+                removal.WorkspaceId, removal.FeatureContextId, removal.FeatureName, result));
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "A Feature removal subscriber failed.");
+        }
+
         try
         {
             var message = BuildToast(removal.FeatureName, result, out var isError);
@@ -114,16 +125,6 @@ public sealed class FeatureRemovalQueue(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Could not show the Feature removal toast.");
-        }
-
-        try
-        {
-            Completed?.Invoke(new FeatureRemovalCompleted(
-                removal.WorkspaceId, removal.FeatureContextId, removal.FeatureName, result));
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "A Feature removal subscriber failed.");
         }
     }
 

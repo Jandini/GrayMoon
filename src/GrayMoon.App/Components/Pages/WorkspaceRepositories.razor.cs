@@ -331,16 +331,26 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         StateHasChanged();
     }
 
-    /// <summary>The user confirmed the dialog: the removal now runs in the background, so just close it.</summary>
-    private Task OnFeatureRemovalQueuedAsync()
+    /// <summary>
+    /// The user confirmed Remove Feature. The departure service already queued the work and persisted
+    /// Workspace; open that view and refresh it now, regardless of the Feature's state.
+    /// </summary>
+    private async Task OnFeatureRemovalConfirmedAsync(FeatureRemovalLeave leave)
     {
         _removeFeatureModalVisible = false;
         _removeFeatureContextId = null;
         _removeFeaturePlan = null;
+        _featureStatusPanelVisible = false;
+        _featureStatusContextId = null;
         ToastService.Show("Removing feature...");
-        return Task.CompletedTask;
+
+        NavigationManager.NavigateTo(leave.Path, replace: true);
+        await OnSelectedContextChangedAsync(leave.Workspace!.ContextId);
     }
 
+    /// <summary>
+    /// Background removal finished: refresh the Workspace already on screen. Navigation happened at confirm.
+    /// </summary>
     private void OnFeatureRemovalCompleted(FeatureRemovalCompleted completed)
     {
         if (_disposed || completed.WorkspaceId != WorkspaceId)
@@ -353,46 +363,15 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
 
             try
             {
-                if (completed.Result.Success)
-                    await OnFeatureRemovedAsync(completed.FeatureContextId);
-                else
-                    // A failed Remove can already have changed the Feature (worktrees gone, NeedsRepair): re-read it.
-                    await OnFeatureStatusChangedAsync();
+                await LoadWorkspaceAsync();
+                ApplySyncStateFromLoadedItems();
+                StateHasChanged();
             }
             catch (Exception ex)
             {
-                Logger.LogWarning(ex, "Refreshing the page after Feature removal failed.");
+                Logger.LogWarning(ex, "Refreshing the Workspace after Feature removal failed.");
             }
         });
-    }
-
-    private async Task OnFeatureRemovedAsync(WorkspaceFeatureContextId removedId)
-    {
-        // Only force a navigation away from the current view when the Feature that was just removed is the
-        // one being viewed (e.g. removed via the "Feature" button's own "Remove Feature" menu item, or via the
-        // "-" icon on the currently-selected row in the context-switcher dropdown). Removing a *different*
-        // Feature from that dropdown's "-" icon shouldn't kick the user out of whatever context they're
-        // currently viewing.
-        var removedCurrentContext = _selectedContextId is { } selectedId
-            && removedId.Value == selectedId.Value;
-
-        if (removedCurrentContext)
-        {
-            try
-            {
-                var special = await FeatureContextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(WorkspaceId);
-                await SelectedFeatureContextService.SetSelectedAsync(WorkspaceId, special);
-                await OnSelectedContextChangedAsync(special);
-                var path = new Uri(NavigationManager.Uri).GetLeftPart(UriPartial.Path);
-                NavigationManager.NavigateTo(path, replace: true);
-            }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("was not found", StringComparison.Ordinal))
-            {
-                // The Feature context is already gone after a successful remove; a follow-up load that
-                // still targets it must not surface as a remove-dialog error.
-                Logger.LogDebug(ex, "Post-remove navigation ignored expected missing Feature context.");
-            }
-        }
     }
 
     /// <summary>Reads the saved tbody scroll offset for the current WorkspaceId from sessionStorage, consumed by the next ResetAndLoadFromTopAsync(restoreScroll: true) call. Best-effort: malformed or missing storage falls back to no restore (top of grid), matching current behavior.</summary>

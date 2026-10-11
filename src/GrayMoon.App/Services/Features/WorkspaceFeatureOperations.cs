@@ -1404,9 +1404,8 @@ public sealed class WorkspaceFeatureOperations(
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken)
     {
-        if (repositoryIds.Count == 0)
-            return;
-
+        // Always runs, whether or not the Feature had changes. With no repository rows to name (an earlier partial remove
+        // already dropped them), the whole Workspace is refreshed: an empty id list means "every repository" to Sync.
         progress?.Report(new OperationProgress("Refreshing Workspace repository status..."));
 
         try

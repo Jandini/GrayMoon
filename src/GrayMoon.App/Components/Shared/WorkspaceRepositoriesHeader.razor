@@ -138,9 +138,9 @@
                             </button>
                         </li>
                     }
-                    @* Status and repair is reachable only through the "Repair" primary button (replaces Sync)
-                       while the Feature actually NeedsRepair - never from this menu, so a healthy Feature
-                       never exposes Roll back / Remove-via-repair. *@
+                    @* Status and repair is reachable only through the callout Repair button while the
+                       Feature actually NeedsRepair - never from this menu, so a healthy Feature never
+                       exposes Roll back / Remove-via-repair. *@
                     @if (IsFeatureContext)
                     {
                         <li><hr class="dropdown-divider branch-menu-divider" /></li>
@@ -349,19 +349,7 @@
                 </button>
             }
         }
-        @if (IsReadOnlyContext)
-        {
-            @* Feature NeedsRepair: Sync/Fetch/Restore stay disabled (C3), so the primary control becomes
-               "Repair" and opens the same Status and repair dialog as the Feature menu item. *@
-            <button type="button"
-                    class="btn btn-warning"
-                    @onclick="HandleRepairClick"
-                    @onclick:stopPropagation
-                    disabled="@(IsSyncing || IsUpdating || IsPushing)">
-                Repair
-            </button>
-        }
-        else if (HasRepositoryErrors)
+        @if (HasRepositoryErrors)
         {
                 <button type="button"
                     class="btn btn-primary"
@@ -433,9 +421,8 @@
     [Parameter] public int WorkspaceId { get; set; }
     [Parameter] public WorkspaceFeatureContextId? SelectedContextId { get; set; }
     [Parameter] public bool IsFeatureContext { get; set; }
-    /// <summary>True when the selected Feature is NeedsRepair - Sync/Push/Update/Prepare stay disabled (C3).</summary>
+    /// <summary>True when the selected Feature is NeedsRepair - Sync/Push/Update/Prepare stay disabled (C3). Repair lives on the attention callout, not here.</summary>
     [Parameter] public bool IsReadOnlyContext { get; set; }
-    [Parameter] public EventCallback OnShowFeatureStatus { get; set; }
     [Parameter] public EventCallback<WorkspaceFeatureContextId> OnSelectedContextChanged { get; set; }
     [Parameter] public EventCallback<WorkspaceFeatureContextId> OnRequestRemoveFeature { get; set; }
     [Parameter] public EventCallback OnRemoveFeature { get; set; }
@@ -630,12 +617,6 @@
     {
         CloseSyncMenu();
         await OnClearErrors.InvokeAsync();
-    }
-
-    private async Task HandleRepairClick()
-    {
-        CloseSyncMenu();
-        await OnShowFeatureStatus.InvokeAsync();
     }
 
     private async Task HandleSyncPrimaryClick()
