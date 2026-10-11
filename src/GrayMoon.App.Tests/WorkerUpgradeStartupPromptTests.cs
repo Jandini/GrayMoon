@@ -62,6 +62,49 @@ public sealed class WorkerUpgradeStartupPromptTests
     }
 
     [Fact]
+    public void Online_before_the_worker_reports_a_version_does_not_drop_the_startup_dialog()
+    {
+        var prompt = new WorkerUpgradeStartupPrompt();
+        prompt.OnDesktopConnected();
+
+        var connected = prompt.Observe(WorkerConnectionState.Online, selfUpdateInProgress: false, workerSemVer: null, appSemVer: "1.0.0");
+        Assert.False(connected.SuppressUpdateNotification);
+        Assert.Null(connected.Prompt);
+
+        var mismatch = prompt.Observe(WorkerConnectionState.VersionMismatch, selfUpdateInProgress: false, "0.9.0", "1.0.0");
+
+        Assert.True(mismatch.SuppressUpdateNotification);
+        Assert.Equal("0.9.0", mismatch.Prompt!.WorkerVersion);
+        Assert.Equal("1.0.0", mismatch.Prompt.AppVersion);
+    }
+
+    [Fact]
+    public void Online_before_a_version_does_not_cancel_a_prompt_waiting_for_desktop()
+    {
+        var prompt = new WorkerUpgradeStartupPrompt();
+        prompt.Observe(WorkerConnectionState.VersionMismatch, selfUpdateInProgress: false, "0.9.0", "1.0.0");
+        prompt.Observe(WorkerConnectionState.Online, selfUpdateInProgress: false, workerSemVer: null, appSemVer: "1.0.0");
+
+        var caughtUp = prompt.OnDesktopConnected();
+
+        Assert.Equal("0.9.0", caughtUp!.WorkerVersion);
+    }
+
+    [Fact]
+    public void Confirmed_match_after_an_unversioned_connect_suppresses_a_later_dialog()
+    {
+        var prompt = new WorkerUpgradeStartupPrompt();
+        prompt.OnDesktopConnected();
+        prompt.Observe(WorkerConnectionState.Online, selfUpdateInProgress: false, workerSemVer: null, appSemVer: "1.0.0");
+        prompt.Observe(WorkerConnectionState.Online, selfUpdateInProgress: false, "1.0.0", "1.0.0");
+
+        var later = prompt.Observe(WorkerConnectionState.VersionMismatch, selfUpdateInProgress: false, "0.9.0", "1.0.0");
+
+        Assert.False(later.SuppressUpdateNotification);
+        Assert.Null(later.Prompt);
+    }
+
+    [Fact]
     public void Matching_worker_at_startup_suppresses_a_later_dialog()
     {
         var prompt = new WorkerUpgradeStartupPrompt();

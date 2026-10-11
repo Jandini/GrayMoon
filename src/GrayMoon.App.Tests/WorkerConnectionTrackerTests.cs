@@ -98,6 +98,54 @@ public sealed class WorkerConnectionTrackerTests
     }
 
     [Fact]
+    public void ReportWorkerSemVer_notifies_when_a_matching_version_leaves_the_state_online()
+    {
+        var tracker = new WorkerConnectionTracker("1.0.0");
+        var versions = new List<string?>();
+        tracker.OnStateChanged(_ => versions.Add(tracker.WorkerSemVer));
+        versions.Clear();
+
+        tracker.OnWorkerConnected("w");
+        tracker.ReportWorkerSemVer("w", "1.0.0");
+
+        Assert.Equal(WorkerConnectionState.Online, tracker.State);
+        Assert.Equal(new string?[] { null, "1.0.0" }, versions);
+    }
+
+    [Fact]
+    public void ReportWorkerSemVer_mismatch_is_a_single_transition_off_the_unversioned_online()
+    {
+        var tracker = new WorkerConnectionTracker("1.0.0");
+        var raised = new List<WorkerConnectionState>();
+        tracker.OnStateChanged(raised.Add);
+        raised.Clear();
+
+        tracker.OnWorkerConnected("w");
+        tracker.ReportWorkerSemVer("w", "0.9.0");
+
+        Assert.Equal(WorkerConnectionState.VersionMismatch, tracker.State);
+        Assert.Equal(
+            [WorkerConnectionState.Online, WorkerConnectionState.VersionMismatch],
+            raised);
+    }
+
+    [Fact]
+    public void ReportWorkerSemVer_same_matching_version_again_does_not_notify()
+    {
+        var tracker = new WorkerConnectionTracker("1.0.0");
+        tracker.OnWorkerConnected("w");
+        tracker.ReportWorkerSemVer("w", "1.0.0");
+
+        var raised = new List<WorkerConnectionState>();
+        tracker.OnStateChanged(raised.Add);
+        raised.Clear();
+
+        tracker.ReportWorkerSemVer("w", "1.0.0");
+
+        Assert.Empty(raised);
+    }
+
+    [Fact]
     public void BeginSelfUpdate_from_a_state_handler_does_not_deadlock()
     {
         var tracker = new WorkerConnectionTracker("1.0.0");

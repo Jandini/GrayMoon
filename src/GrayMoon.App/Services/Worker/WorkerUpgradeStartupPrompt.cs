@@ -32,6 +32,12 @@ public sealed class WorkerUpgradeStartupPrompt
         {
             lock (_gate)
             {
+                // OnWorkerConnected reports Online before the Worker calls ReportSemVer.
+                // That connection is not a confirmed match; treating it as one drops the
+                // version-mismatch dialog that arrives with the version a moment later.
+                if (!WorkerVersionPolicy.AreSameProductVersion(workerSemVer, appSemVer))
+                    return default;
+
                 _seenMatchingWorker = true;
                 if (!_emitted)
                     _prompt = null;
