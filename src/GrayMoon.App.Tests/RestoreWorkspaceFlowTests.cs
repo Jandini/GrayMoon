@@ -66,7 +66,7 @@ public sealed class RestoreWorkspaceFlowTests
             fixture.Operations, root.RepositoryId, "bare", sync.RequestAsync, progress: null, CancellationToken.None);
 
         Assert.False(outcome.Restore.Success);
-        Assert.Equal("This repository does not contain .graymoon.json.", outcome.Restore.Error);
+        Assert.Equal("This repository does not contain graymoon.json.", outcome.Restore.Error);
         Assert.False(outcome.SyncRequested);
         Assert.Empty(sync.WorkspaceIds);
         await fixture.AssertNoWorkspaceAsync();
@@ -290,7 +290,7 @@ public sealed class RestoreWorkspaceFlowTests
         Assert.True(gate.TryComplete(invalid, selectedRepositoryId: 1));
 
         // Its definition was invalid: Restore stays disabled, but choosing another repository checks that one.
-        var failed = new RestoreReadinessBuilder().Build() with { Preflight = RestoreWorkspacePreflight.Failed("This repository does not contain .graymoon.json.") };
+        var failed = new RestoreReadinessBuilder().Build() with { Preflight = RestoreWorkspacePreflight.Failed("This repository does not contain graymoon.json.") };
         Assert.False(RestoreWorkspaceFlow.CanRestore(failed));
 
         var next = gate.Begin(2);

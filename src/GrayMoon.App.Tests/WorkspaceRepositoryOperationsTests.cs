@@ -172,7 +172,7 @@ public sealed class WorkspaceRepositoryOperationsTests
         var preflight = await fixture.Operations.PreflightRestoreAsync(root.RepositoryId);
 
         Assert.False(preflight.Success);
-        Assert.Equal("This repository does not contain .graymoon.json.", preflight.Error);
+        Assert.Equal("This repository does not contain graymoon.json.", preflight.Error);
     }
 
     [Fact]
@@ -224,12 +224,12 @@ public sealed class WorkspaceRepositoryOperationsTests
     {
         await using var fixture = await OperationsFixture.CreateAsync();
         var root = await fixture.SeedRootAsync();
-        fixture.Remote.Error = "Could not read .graymoon.json from GitHub: Not authorized.";
+        fixture.Remote.Error = "Could not read graymoon.json from GitHub: Not authorized.";
 
         var preflight = await fixture.Operations.PreflightRestoreAsync(root.RepositoryId);
 
         Assert.False(preflight.Success);
-        Assert.Equal("Could not read .graymoon.json from GitHub: Not authorized.", preflight.Error);
+        Assert.Equal("Could not read graymoon.json from GitHub: Not authorized.", preflight.Error);
     }
 
     [Fact]
@@ -353,7 +353,7 @@ public sealed class WorkspaceRepositoryOperationsTests
         var only = Assert.Single(await fixture.GetLinksAsync(result.WorkspaceId!.Value));
         Assert.Equal(WorkspaceRepositoryRole.Workspace, only.Role);
 
-        // Rewriting from the database would drop the missing repository from .graymoon.json.
+        // Rewriting from the database would drop the missing repository from graymoon.json.
         Assert.Equal(["gitignore"], fixture.Manifest.Calls.ToArray());
     }
 
@@ -408,7 +408,7 @@ public sealed class WorkspaceRepositoryOperationsTests
         var result = await fixture.Operations.RestoreFromRepositoryAsync(root.RepositoryId, "restored");
 
         Assert.False(result.Success);
-        Assert.Equal("This repository does not contain .graymoon.json.", result.Error);
+        Assert.Equal("This repository does not contain graymoon.json.", result.Error);
         Assert.Null(result.WorkspaceId);
         await fixture.AssertNoWorkspaceAsync();
         Assert.Empty(fixture.Bridge.Sent);
@@ -534,13 +534,13 @@ public sealed class WorkspaceRepositoryOperationsTests
         var root = await fixture.SeedRootAsync();
         fixture.UseDefinition(Definition(("basic", "none", "none"), []));
         fixture.Bridge.Handler = (command, _) => command == "GetFileContents"
-            ? new WorkerCommandResponse(true, new { errorMessage = "File not found: .graymoon.json" }, null)
+            ? new WorkerCommandResponse(true, new { errorMessage = "File not found: graymoon.json" }, null)
             : new WorkerCommandResponse(true, new { success = true, removed = true }, null);
 
         var result = await fixture.Operations.RestoreFromRepositoryAsync(root.RepositoryId, "restored");
 
         Assert.False(result.Success);
-        Assert.Equal("This repository does not contain .graymoon.json.", result.Error);
+        Assert.Equal("This repository does not contain graymoon.json.", result.Error);
         await fixture.AssertNoWorkspaceAsync();
     }
 
@@ -713,7 +713,7 @@ internal sealed class OperationsFixture : IAsyncDisposable
         if (content is null)
         {
             Bridge.Handler = (command, _) => command == "GetFileContents"
-                ? new WorkerCommandResponse(true, new { errorMessage = "File not found: .graymoon.json" }, null)
+                ? new WorkerCommandResponse(true, new { errorMessage = "File not found: graymoon.json" }, null)
                 : new WorkerCommandResponse(true, new { success = true, removed = true }, null);
         }
         else
@@ -775,7 +775,7 @@ internal sealed class OperationsFixture : IAsyncDisposable
     public ValueTask DisposeAsync() => _seed.DisposeAsync();
 }
 
-/// <summary>Stands in for reading .graymoon.json through the GitHub connector.</summary>
+/// <summary>Stands in for reading graymoon.json through the GitHub connector.</summary>
 internal sealed class FakeRemoteManifestReader : IRemoteWorkspaceManifestReader
 {
     /// <summary>File content; null means the repository has no definition.</summary>

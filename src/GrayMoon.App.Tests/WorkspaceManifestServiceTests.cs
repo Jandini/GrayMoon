@@ -74,7 +74,7 @@ public sealed class WorkspaceManifestServiceTests
         var sent = Assert.Single(fixture.Bridge.Sent, sent => sent.Command == "WriteRepositoryFile");
         Assert.Equal("WriteRepositoryFile", sent.Command);
         var args = ManifestTestFixture.ToJson(sent.Args);
-        Assert.Equal(".graymoon.json", args.GetProperty("filePath").GetString());
+        Assert.Equal("graymoon.json", args.GetProperty("filePath").GetString());
         Assert.Equal("ws-root", args.GetProperty("repositoryName").GetString());
         Assert.Equal("ws-root", args.GetProperty("workspaceRepositoryName").GetString());
         Assert.Equal(ManifestTestFixture.WorkspaceRoot, args.GetProperty("workspaceRoot").GetString());

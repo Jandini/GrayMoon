@@ -8,14 +8,14 @@ public interface IWorkspaceManifestService
     Task<OperationResult> WriteAuthoritativeManifestAsync(int workspaceId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Updates tag pins on existing repository entries in <c>.graymoon.json</c> and writes the file when it changed.
+    /// Updates tag pins on existing repository entries in <c>graymoon.json</c> and writes the file when it changed.
     /// Does not create a git commit. Does nothing when the Workspace has no Workspace repository.
     /// </summary>
     Task<OperationResult> SetRepositoryTagPinsAsync(int workspaceId, IReadOnlyList<WorkspaceRepositoryTagPinChange> changes, CancellationToken cancellationToken = default);
     Task<OperationResult> WriteManagedGitIgnoreAsync(int workspaceId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// True when the Workspace definition (<c>.graymoon.json</c> of the special Workspace) has <c>"codegraph": true</c>.
+    /// True when the Workspace definition (<c>graymoon.json</c> of the special Workspace) has <c>"codegraph": true</c>.
     /// False when there is no Workspace repository, no definition, or it cannot be read. Never throws.
     /// </summary>
     Task<bool> IsCodeGraphEnabledAsync(int workspaceId, CancellationToken cancellationToken = default);

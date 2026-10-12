@@ -53,7 +53,7 @@ Rules
   working tree is the Workspace root folder; Sources are nested folders ignored by a managed .gitignore section
   enable and disable are refused while Features exist; disable never deletes files or .git
   enable and restore are refused unless the Worker is connected with the same GrayMoon version (App/Worker version lock)
-  restore validates .graymoon.json before creating anything and rolls back a Workspace whose restore fails
+  restore validates graymoon.json before creating anything and rolls back a Workspace whose restore fails
   no dependency level, no projects
   Feature create: root worktree first, then Sources; remove and rollback: Sources first, root last
 ```
@@ -62,17 +62,17 @@ Implementation areas:
 
 ```text
 IWorkspaceRepositoryOperations / WorkspaceRepositoryOperations (enable, disable, restore)
-IWorkspaceManifestService / WorkspaceManifestService (.graymoon.json, managed .gitignore, drift)
-IRemoteWorkspaceManifestReader / GitHubRemoteWorkspaceManifestReader (read-only .graymoon.json preflight)
+IWorkspaceManifestService / WorkspaceManifestService (graymoon.json, managed .gitignore, drift)
+IRemoteWorkspaceManifestReader / GitHubRemoteWorkspaceManifestReader (read-only graymoon.json preflight)
 RestoreDefinitionEvaluator (definition validation and local resolution, shared by preflight and post-clone check)
 WorkerVersionPolicy + WorkerBridge (version lock: only SelfUpdate and GetHostInfo run on a version mismatch)
 Worker: AttachWorkspaceRepository, DiscardWorkspaceRoot, WriteRepositoryFile, WorkerRepositoryPaths.Resolve
 WorkspaceFeatureOperations (two-phase Feature create, Sources-first removal)
 ```
 
-Enable attaches the repository to the Workspace root through the Worker (`AttachWorkspaceRepository`), then writes the managed `.gitignore` section and `.graymoon.json` through `WriteRepositoryFile`. Worker commands carry `WorkspaceRepositoryName` so `WorkerRepositoryPaths.Resolve` maps the Workspace repository to the Workspace root and every other repository to a nested folder.
+Enable attaches the repository to the Workspace root through the Worker (`AttachWorkspaceRepository`), then writes the managed `.gitignore` section and `graymoon.json` through `WriteRepositoryFile`. Worker commands carry `WorkspaceRepositoryName` so `WorkerRepositoryPaths.Resolve` maps the Workspace repository to the Workspace root and every other repository to a nested folder.
 
-Restore is two steps. `PreflightRestoreAsync` reads `.graymoon.json` through the GitHub connector (no Worker, no clone, no database change), validates it (a missing file, invalid JSON, a newer schema and unknown profile values are blocking errors) and previews the profile, the Source repository count and the connectors and repositories missing on this computer. `RestoreFromRepositoryAsync` repeats that check, refuses a non-empty destination folder, then creates the Workspace, clones the repository into the empty root, validates the cloned definition again, applies the profile, links every Source repository it can resolve by normalized URL and writes the managed `.gitignore`. The definition is rewritten only when it is complete on this computer and not already canonical. Any failure after the Workspace was created rolls it back: the Worker command `DiscardWorkspaceRoot` deletes the root only when it is empty or a clean clone of the restored repository, then the Workspace row and links are deleted. Missing Source repositories and connectors never block a valid definition; they are reported as "owner/name" and host names.
+Restore is two steps. `PreflightRestoreAsync` reads `graymoon.json` through the GitHub connector (no Worker, no clone, no database change), validates it (a missing file, invalid JSON, a newer schema and unknown profile values are blocking errors) and previews the profile, the Source repository count and the connectors and repositories missing on this computer. `RestoreFromRepositoryAsync` repeats that check, refuses a non-empty destination folder, then creates the Workspace, clones the repository into the empty root, validates the cloned definition again, applies the profile, links every Source repository it can resolve by normalized URL and writes the managed `.gitignore`. The definition is rewritten only when it is complete on this computer and not already canonical. Any failure after the Workspace was created rolls it back: the Worker command `DiscardWorkspaceRoot` deletes the root only when it is empty or a clean clone of the restored repository, then the Workspace row and links are deleted. Missing Source repositories and connectors never block a valid definition; they are reported as "owner/name" and host names.
 
 App/Worker compatibility is the version lock, not a per-feature check: `WorkerConnectionTracker` compares the Worker's product SemVer with the App's (build metadata ignored, see `WorkerVersionPolicy`), and `WorkerBridge` refuses every command except `SelfUpdate` and `GetHostInfo` while the state is `VersionMismatch`. The Worker update therefore works against any Worker version, and the global Worker badge and Worker page direct the user to update.
 

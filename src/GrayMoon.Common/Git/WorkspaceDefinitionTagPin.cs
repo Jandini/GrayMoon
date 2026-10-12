@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace GrayMoon.Common.Git;
 
 /// <summary>
-/// A repository entry in <c>.graymoon.json</c> that is checked out on a tag stores the tag name and the
+/// A repository entry in <c>graymoon.json</c> that is checked out on a tag stores the tag name and the
 /// full commit hash that tag pointed at. Restore checks out that commit.
 /// </summary>
 public static class WorkspaceDefinitionTagPin

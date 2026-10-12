@@ -16,7 +16,7 @@ using Microsoft.EntityFrameworkCore;
 namespace GrayMoon.App.Components.Modals;
 
 /// <summary>
-/// "Restore Workspace" dialog (D14): pick an imported GitHub repository, see what its <c>.graymoon.json</c> will
+/// "Restore Workspace" dialog (D14): pick an imported GitHub repository, see what its <c>graymoon.json</c> will
 /// restore (checked read-only through the connector before anything is created), choose a Workspace name, then
 /// restore as a background job under the page overlay, run the normal full Sync and open the new Workspace.
 /// </summary>

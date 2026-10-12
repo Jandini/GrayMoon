@@ -1,6 +1,6 @@
 # Workspace as a Git Repository - Design Supplement v3.1
 
-> **Superseded in part (2026-10-08):** the `workspaceRepository` Worker capability (`supportedFeatures`, `GetCapabilities`, `IWorkerFeatureSupportService`) and the Repositories-page compatibility banner were removed. App/Worker compatibility is now the version lock (`WorkerVersionPolicy`), and Restore validates `.graymoon.json` before creating anything; "Restored without definition" no longer exists. See `docs/feedback/graymoon-restore-workspace-and-worker-version-lock.md`.
+> **Superseded in part (2026-10-08):** the `workspaceRepository` Worker capability (`supportedFeatures`, `GetCapabilities`, `IWorkerFeatureSupportService`) and the Repositories-page compatibility banner were removed. App/Worker compatibility is now the version lock (`WorkerVersionPolicy`), and Restore validates `graymoon.json` before creating anything; "Restored without definition" no longer exists. See `docs/feedback/graymoon-restore-workspace-and-worker-version-lock.md`.
 
 **Status:** Binding amendments to `GrayMoon-Workspace-As-Git-Repository-Design-v3.md`  
 **Why it exists:** The v3 review (`Workspace-Repository-Design-Review-2026-10-06.md`) found that v3 assumes the App resolves repository paths and writes files. In GrayMoon the Worker does both. This document records the decisions that make v3 implementable. Where v3 and this document disagree, this document wins.  
@@ -150,7 +150,7 @@ Algorithm, each step reported on `CommandOutput`:
 
 Response: `{ success, errorMessage, branch, isUnborn }`.
 
-The command never writes `.graymoon.json` or `.gitignore` and never commits. The App follows up with D5 writes, which then appear in Git Changes (v3 section 26.1).
+The command never writes `graymoon.json` or `.gitignore` and never commits. The App follows up with D5 writes, which then appear in Git Changes (v3 section 26.1).
 
 ---
 
@@ -227,7 +227,7 @@ Rationale recorded against v3 section 34.2: the Worker has no membership model a
 
 1. Add nullable column `Workspaces.ManifestDriftDetectedAt` (`DateTime?`). It is reconciliation state, not Git state, so v3 section 7.4 is not violated.
 2. After any of these complete for the **special Workspace context** and the Workspace has a `Role == Workspace` link: full Sync, single-repository sync of the Workspace repository, Checkout Branch / Tag on it, hook sync attributed to it - the App calls `IWorkspaceManifestService.DetectDriftAsync(workspaceId)`, which:
-   - reads `.graymoon.json` through `GetFileContents` (D1 makes it root-aware);
+   - reads `graymoon.json` through `GetFileContents` (D1 makes it root-aware);
    - parses it (D15); an unparsable file counts as drift with the parse error as the reason;
    - builds the canonical manifest from the database;
    - compares the two canonical models (not bytes);
@@ -367,7 +367,7 @@ Entry point: `Workspaces.razor`, action "Restore from Workspace repository".
    The name must not collide with an existing Workspace and the folder <root>\<name> must not exist or must be empty.
 2. App creates the Workspace row with profile Basic/None/None and the Role == Workspace link, then
    calls AttachWorkspaceRepository (D4), which clones into the root.
-3. App reads .graymoon.json (GetFileContents). Missing or unparsable -> Workspace stays as created,
+3. App reads graymoon.json (GetFileContents). Missing or unparsable -> Workspace stays as created,
    result "Restored without definition: <reason>". Done.
 4. App applies the manifest profile to the Workspace row.
 5. For each manifest connector: resolve (D11). Unresolved connectors are listed in the result; nothing is fabricated.

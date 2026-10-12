@@ -249,7 +249,7 @@ directly below the picker.
 
 Do not require another button.
 
-The preflight should validate `.graymoon.json` without creating a Workspace.
+The preflight should validate `graymoon.json` without creating a Workspace.
 
 ---
 
@@ -260,7 +260,7 @@ If the selected repository does not contain a valid Workspace definition, show t
 Examples:
 
 ```text
-This repository does not contain .graymoon.json.
+This repository does not contain graymoon.json.
 ```
 
 ```text
@@ -459,7 +459,7 @@ The dialog should look approximately like:
 | Restore Workspace                                  X |
 +------------------------------------------------------+
 | Restore a GrayMoon Workspace from a repository       |
-| containing .graymoon.json.                           |
+| containing graymoon.json.                           |
 |                                                      |
 | Workspace repository                                 |
 | [ Jandini/GrayMoon.Workspace                    v ]   |

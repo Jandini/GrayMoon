@@ -331,7 +331,7 @@ public sealed class SyncRepositoryCommand(
     /// </summary>
     private async Task<string?> CheckoutPinnedCommitAsync(string workspacePath, string repoPath, string? cloneUrl, CancellationToken cancellationToken)
     {
-        var manifestPath = Path.Combine(workspacePath, ".graymoon.json");
+        var manifestPath = Path.Combine(workspacePath, "graymoon.json");
         var definition = File.Exists(manifestPath)
             ? await File.ReadAllTextAsync(manifestPath, cancellationToken)
             : null;

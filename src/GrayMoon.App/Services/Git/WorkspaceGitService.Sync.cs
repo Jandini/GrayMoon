@@ -211,7 +211,7 @@ public sealed partial class WorkspaceGitService
     }
     /// <summary>
     /// Repositories already checked out on a tag get that tag and its full commit hash written into
-    /// <c>.graymoon.json</c>. The file is not committed.
+    /// <c>graymoon.json</c>. The file is not committed.
     /// </summary>
     private async Task RecordCheckedOutTagPinsAsync(
         Workspace workspace,

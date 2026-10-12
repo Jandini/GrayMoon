@@ -31,10 +31,10 @@ public sealed class GitRepositoryWatcherNestedRepoTests
         string[] nestedRoots = [Path.Combine(root, "Avr.Api")];
 
         var observation = GitRepositoryWatcher.TryCreateWorkTreeObservation(
-            Path.Combine(root, ".graymoon.json"), GitRepositoryObservedChangeKind.Changed, DateTimeOffset.UtcNow, null, nestedRoots);
+            Path.Combine(root, "graymoon.json"), GitRepositoryObservedChangeKind.Changed, DateTimeOffset.UtcNow, null, nestedRoots);
 
         Assert.NotNull(observation);
-        Assert.Equal(Path.Combine(root, ".graymoon.json"), observation!.Path);
+        Assert.Equal(Path.Combine(root, "graymoon.json"), observation!.Path);
     }
 
     [Fact]

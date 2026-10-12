@@ -110,7 +110,7 @@ Only optimize a verified serialization point when it is safe. Examples of possib
 - Restoring an empty destination with several independent source repositories allows multiple `SyncRepository` operations to make real progress concurrently subject to configured limits.
 - Existing Restore preflight, validation, rollback rules, missing-connector/repository reporting and success-with-sync-error messaging stay exactly correct.
 - A failed or cancelled initial Sync does **not** undo an otherwise successful Restore, matching existing behavior.
-- Parallel cloning does not corrupt the Workspace root repository, its `.gitignore`/`.graymoon.json`, or child directories.
+- Parallel cloning does not corrupt the Workspace root repository, its `.gitignore`/`graymoon.json`, or child directories.
 - No overlapping mutations for the same physical repository even when UI/workers/refreshes run concurrently.
 - A workspace with zero/one repository, basic profile, .NET dependency profile, worktree feature and tagged workspace repository still works.
 

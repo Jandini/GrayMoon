@@ -1,6 +1,6 @@
 # Workspace as a Git Repository - Design v3 Review Against the Codebase
 
-> **Superseded in part (2026-10-08):** the `workspaceRepository` Worker capability (`supportedFeatures`, `GetCapabilities`, `IWorkerFeatureSupportService`) and the Repositories-page compatibility banner were removed. App/Worker compatibility is now the version lock (`WorkerVersionPolicy`), and Restore validates `.graymoon.json` before creating anything; "Restored without definition" no longer exists. See `docs/feedback/graymoon-restore-workspace-and-worker-version-lock.md`.
+> **Superseded in part (2026-10-08):** the `workspaceRepository` Worker capability (`supportedFeatures`, `GetCapabilities`, `IWorkerFeatureSupportService`) and the Repositories-page compatibility banner were removed. App/Worker compatibility is now the version lock (`WorkerVersionPolicy`), and Restore validates `graymoon.json` before creating anything; "Restored without definition" no longer exists. See `docs/feedback/graymoon-restore-workspace-and-worker-version-lock.md`.
 
 **Reviewed document:** `GrayMoon-Workspace-As-Git-Repository-Design-v3.md`  
 **Code baseline:** `workspace-as-git-repository` branch at `f7f94ce` (parent `ee5b536`, which includes workspace profiles `a6d951d`)  
@@ -40,7 +40,7 @@ Adding `Role` to the link is the only place that fits. The three profile axes on
 
 ### 2.3 Context isolation rules are already enforced and documented
 
-`AGENTS.md` "Feature-context scoping" and `.cursor/rules/feature-context-scoping.mdc` already require every read/write to be context-scoped. The design's 5.6 / 15.2 / 26.2 (Feature `.graymoon.json` is non-authoritative) is a direct application of that rule rather than a new one.
+`AGENTS.md` "Feature-context scoping" and `.cursor/rules/feature-context-scoping.mdc` already require every read/write to be context-scoped. The design's 5.6 / 15.2 / 26.2 (Feature `graymoon.json` is non-authoritative) is a direct application of that rule rather than a new one.
 
 ### 2.4 Hook attribution needs no new mechanism
 
@@ -88,7 +88,7 @@ A second consequence is deployment ordering: an old Worker that ignores a new re
 
 Adopted as supplement D1 (Worker path contract) and D2 (compatibility gate). This is Phase 0 of the plan; nothing else may ship before it.
 
-### F2 - BLOCKER - The App cannot write `.graymoon.json` or `.gitignore`
+### F2 - BLOCKER - The App cannot write `graymoon.json` or `.gitignore`
 
 Design 26.1, 16.1 and 26.4 say GrayMoon "writes" and "regenerates" files. `CLAUDE.md` Architecture: "GrayMoon.App ... Never touches the local filesystem or runs git directly."
 
@@ -144,9 +144,9 @@ Adopted as supplement D7 with the rationale recorded; the model-driven list rema
 
 ### F8 - MAJOR - Manifest change detection cannot come from Git Changes
 
-Design 34.7: the watcher "may be used as the low-level signal that `.graymoon.json` changed".
+Design 34.7: the watcher "may be used as the low-level signal that `graymoon.json` changed".
 
-After `git pull` or `git checkout`, the manifest matches HEAD, so `git status` shows no entry and the Git Changes projection carries no signal. The only reliable trigger is: after a Workspace-role repository operation completes in the special context (sync, checkout, pull, hook sync), read `.graymoon.json` through `GetFileContents` and compare it semantically against the canonical manifest generated from the database.
+After `git pull` or `git checkout`, the manifest matches HEAD, so `git status` shows no entry and the Git Changes projection carries no signal. The only reliable trigger is: after a Workspace-role repository operation completes in the special context (sync, checkout, pull, hook sync), read `graymoon.json` through `GetFileContents` and compare it semantically against the canonical manifest generated from the database.
 
 Adopted as supplement D8.
 

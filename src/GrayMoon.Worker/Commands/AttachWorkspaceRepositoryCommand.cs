@@ -10,7 +10,7 @@ namespace GrayMoon.Worker.Commands;
 /// Makes the Workspace root folder itself a Git working tree for <see cref="AttachWorkspaceRepositoryRequest.CloneUrl"/>.
 /// An empty root is cloned into in place. A non-empty root without Git is initialized, given an origin remote and
 /// checked out on the remote default branch (or left on an unborn <c>main</c> when the remote is empty). A root that
-/// already has a matching origin is left alone. Never writes <c>.graymoon.json</c> or <c>.gitignore</c> and never commits.
+/// already has a matching origin is left alone. Never writes <c>graymoon.json</c> or <c>.gitignore</c> and never commits.
 /// </summary>
 public sealed class AttachWorkspaceRepositoryCommand(
     IGitService git,

@@ -119,7 +119,7 @@ WorkspaceRoot/
   .claude/
   .codegraph/
   .gitignore
-  .graymoon.json
+  graymoon.json
   CLAUDE.md
   GrayMoon/
   GrayMoon.Desktop/

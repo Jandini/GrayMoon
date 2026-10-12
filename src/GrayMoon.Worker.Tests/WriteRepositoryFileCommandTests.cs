@@ -42,11 +42,11 @@ public sealed class WriteRepositoryFileCommandTests : IDisposable
     [Fact]
     public async Task Writes_utf8_without_bom()
     {
-        var response = await _command.ExecuteAsync(NewRequest(".graymoon.json", "{\"name\":\"café\"}\n"));
+        var response = await _command.ExecuteAsync(NewRequest("graymoon.json", "{\"name\":\"café\"}\n"));
 
         Assert.True(response.Success, response.ErrorMessage);
         Assert.True(response.Written);
-        var bytes = File.ReadAllBytes(Path.Combine(RootPath, ".graymoon.json"));
+        var bytes = File.ReadAllBytes(Path.Combine(RootPath, "graymoon.json"));
         Assert.False(bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF);
         Assert.Equal(System.Text.Encoding.UTF8.GetBytes("{\"name\":\"café\"}\n"), bytes);
         Assert.Empty(Directory.GetFiles(RootPath, "*.graymoon-tmp"));
