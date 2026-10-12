@@ -19,6 +19,7 @@ public sealed partial class WorkspaceProjectRepository(
         return await dbContext.WorkspaceProjects
             .AsNoTracking()
             .Include(p => p.MatchedConnector)
+            .Include(p => p.Repository)
             .Where(p => p.WorkspaceId == workspaceId && p.PackageId != null && p.PackageId != "")
             .OrderBy(p => p.PackageId)
             .ThenBy(p => p.TargetFramework)
@@ -32,6 +33,7 @@ public sealed partial class WorkspaceProjectRepository(
         return await dbContext.WorkspaceProjects
             .AsNoTracking()
             .Include(p => p.MatchedConnector)
+            .Include(p => p.Repository)
             .Where(p => p.WorkspaceId == workspaceId && p.PackageId != null && p.PackageId != "" && (
                 p.IsGenerated
                 || p.WorkspaceFeatureContextId == workspaceFeatureContextId

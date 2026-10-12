@@ -53,3 +53,19 @@
     width: 110px;
     white-space: nowrap;
 }
+
+/* Package Id links: same as the Repository column — inherited text, underline on hover only */
+.packages-table td .repo-link,
+.packages-table td a.repo-link,
+.packages-table td .repo-link strong {
+    text-decoration: none !important;
+    color: inherit !important;
+    cursor: pointer;
+    user-select: text;
+}
+
+.packages-table td .repo-link:hover,
+.packages-table td a.repo-link:hover,
+.packages-table td .repo-link:hover strong {
+    text-decoration: underline !important;
+}
