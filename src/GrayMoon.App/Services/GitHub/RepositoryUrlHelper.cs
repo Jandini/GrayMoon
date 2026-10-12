@@ -1,4 +1,5 @@
 using System.Globalization;
+using GrayMoon.App.Models;
 
 namespace GrayMoon.App.Services.GitHub;
 
@@ -177,6 +178,28 @@ public static class RepositoryUrlHelper
 
         return baseTrim;
     }
+
+    /// <summary>
+    /// Browser URL for a NuGet package on GitHub Packages (<c>owner/repo/pkgs/nuget/id</c>).
+    /// Null when the matched registry is not GitHub Packages, or the repository clone URL cannot be parsed.
+    /// </summary>
+    public static string? GetGitHubNuGetPackageUrl(string? registryApiBaseUrl, string? packageId, string? cloneUrl)
+    {
+        if (string.IsNullOrWhiteSpace(packageId) || string.IsNullOrWhiteSpace(registryApiBaseUrl))
+            return null;
+        if (!ConnectorHelpers.IsGitHubPackages(registryApiBaseUrl))
+            return null;
+        if (!TryParseGitHubOwnerRepo(cloneUrl, out var owner, out var repo)
+            || string.IsNullOrEmpty(owner)
+            || string.IsNullOrEmpty(repo))
+            return null;
+        if (!TryGetGitHostRootFromCloneUrl(cloneUrl, out var root) || string.IsNullOrEmpty(root))
+            return null;
+
+        return $"{root.TrimEnd('/')}/{EscapePathSegment(owner)}/{EscapePathSegment(repo)}/pkgs/nuget/{EscapePathSegment(packageId.Trim())}";
+    }
+
+    private static string EscapePathSegment(string value) => Uri.EscapeDataString(value);
 
     /// <summary>Converts a repository's CloneUrl to a web URL, or null if the URL is not parseable.</summary>
     public static string? GetRepositoryUrl(string? cloneUrl)

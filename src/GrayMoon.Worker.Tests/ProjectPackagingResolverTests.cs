@@ -174,6 +174,134 @@ public class ProjectPackagingResolverTests : IDisposable
     }
 
     [Fact]
+    public async Task PackageId_inside_a_pack_target_is_the_package()
+    {
+        var path = WriteProject("src/Edx1.IO.Pack.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+                <OutputType>Library</OutputType>
+                <AssemblyName>Edx1.IO.Pack</AssemblyName>
+              </PropertyGroup>
+              <Target Name="CopyProjectReferencesToPackage" DependsOnTargets="ResolveReferences" BeforeTargets="_GetPackageFiles">
+                <PropertyGroup>
+                  <PackageId>Edx1.IO</PackageId>
+                </PropertyGroup>
+              </Target>
+            </Project>
+            """);
+
+        var info = await Parse(path);
+
+        Assert.Equal(ProjectType.Package, info.ProjectType);
+        Assert.Equal("Edx1.IO", info.PackageId);
+        Assert.Equal("Edx1.IO", info.Name);
+    }
+
+    [Fact]
+    public async Task IsPackable_false_inside_the_same_target_property_group_stays_a_library()
+    {
+        var path = WriteProject("src/Edx1.IO.Pack.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+                <AssemblyName>Edx1.IO.Pack</AssemblyName>
+              </PropertyGroup>
+              <Target Name="CopyProjectReferencesToPackage">
+                <PropertyGroup>
+                  <PackageId>Edx1.IO</PackageId>
+                  <IsPackable>false</IsPackable>
+                </PropertyGroup>
+              </Target>
+            </Project>
+            """);
+
+        var info = await Parse(path);
+
+        Assert.Equal(ProjectType.Library, info.ProjectType);
+        Assert.Null(info.PackageId);
+        Assert.Equal("Edx1.IO", info.Name);
+    }
+
+    [Fact]
+    public async Task Conditioned_target_and_conditioned_property_group_inside_a_target_are_ignored()
+    {
+        var conditionedTarget = WriteProject("src/ConditionedTarget.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+                <PackageId>Acme.Lib</PackageId>
+              </PropertyGroup>
+              <Target Name="Pack" Condition="'$(Configuration)' == 'Release'">
+                <PropertyGroup>
+                  <PackageId>Other.Id</PackageId>
+                  <IsPackable>false</IsPackable>
+                </PropertyGroup>
+              </Target>
+            </Project>
+            """);
+        var conditionedGroup = WriteProject("src/ConditionedGroup.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <Target Name="Pack">
+                <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+                  <IsPackable>false</IsPackable>
+                </PropertyGroup>
+                <PropertyGroup>
+                  <PackageId>Edx1.IO</PackageId>
+                </PropertyGroup>
+              </Target>
+            </Project>
+            """);
+
+        var conditionedTargetInfo = await Parse(conditionedTarget);
+        Assert.Equal(ProjectType.Package, conditionedTargetInfo.ProjectType);
+        Assert.Equal("Acme.Lib", conditionedTargetInfo.PackageId);
+
+        var conditionedGroupInfo = await Parse(conditionedGroup);
+        Assert.Equal(ProjectType.Package, conditionedGroupInfo.ProjectType);
+        Assert.Equal("Edx1.IO", conditionedGroupInfo.PackageId);
+    }
+
+    [Fact]
+    public async Task Later_property_group_overrides_a_target_and_a_later_target_overrides_a_property_group()
+    {
+        var groupAfterTarget = WriteProject("src/GroupAfterTarget.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <Target Name="Pack">
+                <PropertyGroup>
+                  <PackageId>From.Target</PackageId>
+                </PropertyGroup>
+              </Target>
+              <PropertyGroup>
+                <IsPackable>false</IsPackable>
+              </PropertyGroup>
+            </Project>
+            """);
+        var targetAfterGroup = WriteProject("src/TargetAfterGroup.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <PackageId>From.Group</PackageId>
+                <IsPackable>false</IsPackable>
+              </PropertyGroup>
+              <Target Name="Pack">
+                <PropertyGroup>
+                  <PackageId>From.Target</PackageId>
+                  <IsPackable>true</IsPackable>
+                </PropertyGroup>
+              </Target>
+            </Project>
+            """);
+
+        var groupAfterTargetInfo = await Parse(groupAfterTarget);
+        Assert.Equal(ProjectType.Library, groupAfterTargetInfo.ProjectType);
+        Assert.Null(groupAfterTargetInfo.PackageId);
+
+        var targetAfterGroupInfo = await Parse(targetAfterGroup);
+        Assert.Equal(ProjectType.Package, targetAfterGroupInfo.ProjectType);
+        Assert.Equal("From.Target", targetAfterGroupInfo.PackageId);
+    }
+
+    [Fact]
     public async Task IsPackable_true_without_PackageId_is_still_a_package()
     {
         var path = WriteProject("src/NewLib.csproj", """
