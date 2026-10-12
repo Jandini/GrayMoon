@@ -93,7 +93,7 @@ public sealed class SyncRepositoryTagPinTests : IDisposable
         var workspace = Path.Combine(_root, "ws");
         Directory.CreateDirectory(workspace);
         await File.WriteAllTextAsync(
-            Path.Combine(workspace, ".graymoon.json"),
+            Path.Combine(workspace, "graymoon.json"),
             $$"""
             { "repositories": [ { "name": "repo", "repositoryUrl": "{{origin.Replace("\\", "\\\\")}}", "tag": "v1.0.0" } ] }
             """);
@@ -136,7 +136,7 @@ public sealed class SyncRepositoryTagPinTests : IDisposable
         Directory.CreateDirectory(workspace);
         var url = origin.Replace("\\", "\\\\");
         await File.WriteAllTextAsync(
-            Path.Combine(workspace, ".graymoon.json"),
+            Path.Combine(workspace, "graymoon.json"),
             $$"""
             { "repositories": [ { "name": "repo", "repositoryUrl": "{{url}}", "tag": "{{tag}}", "commit": "{{commit}}" } ] }
             """);

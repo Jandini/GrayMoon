@@ -30,7 +30,7 @@ public sealed record RestoreCatalogEntry(int RepositoryId, string CloneUrl);
 /// </summary>
 public static class RestoreDefinitionEvaluator
 {
-    public const string MissingDefinitionMessage = "This repository does not contain .graymoon.json.";
+    public const string MissingDefinitionMessage = "This repository does not contain graymoon.json.";
 
     public const string NewerSchemaMessage =
         "This Workspace definition was created by a newer GrayMoon version. Update GrayMoon before restoring it.";

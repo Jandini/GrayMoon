@@ -7,7 +7,7 @@
 
 > **Read with:** `Workspace-Repository-Design-Supplement-v3.1.md` (binding decisions D1-D15; wins over this document where they differ) and `Workspace-Repository-Design-Review-2026-10-06.md` (why those decisions exist). Execution state lives in `Workspace-Repository-Implementation-Plan.md`.
 >
-> The main corrections the supplement makes to this document: the Worker, not the App, derives repository paths (section 17 is App-only as written; see D1); the App cannot write `.graymoon.json` or `.gitignore` (sections 16 and 26; see D5); a local-only Workspace repository is not representable in v1 (section 29.1; see D3); conversion of a non-empty root is the normal case, not a deferred one (sections 29.2 and 29.4; see D4); connector identity is derived from `Connector.ApiBaseUrl` (section 10; see D11); manifest drift is detected by read-and-compare after Workspace-repository operations, not by the watcher (section 34.7; see D8).
+> The main corrections the supplement makes to this document: the Worker, not the App, derives repository paths (section 17 is App-only as written; see D1); the App cannot write `graymoon.json` or `.gitignore` (sections 16 and 26; see D5); a local-only Workspace repository is not representable in v1 (section 29.1; see D3); conversion of a non-empty root is the normal case, not a deferred one (sections 29.2 and 29.4; see D4); connector identity is derived from `Connector.ApiBaseUrl` (section 10; see D11); manifest drift is detected by read-and-compare after Workspace-repository operations, not by the watcher (section 34.7; see D8).
 
 ---
 
@@ -17,7 +17,7 @@ GrayMoon should allow a Workspace itself to be backed by a normal Git repository
 
 The Workspace repository is not a replacement for the repositories contained in the Workspace. It is the Git home for the **Workspace definition and Workspace-level files**:
 
-- `.graymoon.json`
+- `graymoon.json`
 - `.gitignore`
 - `CLAUDE.md`
 - `AGENTS.md`
@@ -184,7 +184,7 @@ Example:
 
 ```text
 C:\Workspace\AVR\.git
-C:\Workspace\AVR\.graymoon.json
+C:\Workspace\AVR\graymoon.json
 C:\Workspace\AVR\CLAUDE.md
 ```
 
@@ -209,7 +209,7 @@ In the data model these remain normal `WorkspaceRepositoryLink` rows with role `
 The machine-readable Workspace definition stored in the Workspace repository:
 
 ```text
-.graymoon.json
+graymoon.json
 ```
 
 ### Connector
@@ -296,9 +296,9 @@ Feature root == Workspace-repository worktree root
 
 and Source repository worktrees live beneath it.
 
-### 5.6 `.graymoon.json` is authoritative only in the special Workspace context
+### 5.6 `graymoon.json` is authoritative only in the special Workspace context
 
-A Feature copy of `.graymoon.json` is:
+A Feature copy of `graymoon.json` is:
 
 - tracked;
 - visible in Git Changes;
@@ -335,7 +335,7 @@ The manifest describes external resources and portable Workspace configuration o
 C:\Workspace\AVR\                   <-- Workspace repository working tree
 │
 ├── .git\
-├── .graymoon.json
+├── graymoon.json
 ├── .gitignore
 ├── CLAUDE.md
 ├── AGENTS.md
@@ -506,7 +506,7 @@ It is a normal GitHub repository for CI purposes.
 The Workspace repository root contains:
 
 ```text
-.graymoon.json
+graymoon.json
 ```
 
 The manifest is the portable, declarative Workspace definition.
@@ -516,7 +516,7 @@ It is intentionally **GrayMoon-installation-agnostic**.
 It should be possible to:
 
 1. clone the Workspace repository on another computer;
-2. read `.graymoon.json`;
+2. read `graymoon.json`;
 3. understand what external connectors and repositories the Workspace needs;
 4. recreate equivalent local GrayMoon persistence from those external identities.
 
@@ -796,7 +796,7 @@ Therefore connector association stays explicit in the manifest.
 
 ### 12.1 Do not list the Workspace repository in `repositories`
 
-The repository containing `.graymoon.json` is inherently the Workspace repository.
+The repository containing `graymoon.json` is inherently the Workspace repository.
 
 The `repositories` array contains Source repositories only.
 
@@ -923,7 +923,7 @@ This keeps restore compatible with the current Worker path model.
 
 ---
 
-## 15. `.graymoon.json` and Features
+## 15. `graymoon.json` and Features
 
 This file needs explicit semantics.
 
@@ -932,7 +932,7 @@ This file needs explicit semantics.
 Because the Workspace repository always participates in every Feature, the Feature's Workspace-repository worktree naturally contains:
 
 ```text
-.graymoon.json
+graymoon.json
 ```
 
 Do not use sparse checkout or `skip-worktree` merely to hide it.
@@ -942,18 +942,18 @@ Do not use sparse checkout or `skip-worktree` merely to hide it.
 Only this file is authoritative:
 
 ```text
-special Workspace context / .graymoon.json
+special Workspace context / graymoon.json
 ```
 
 This file is not authoritative:
 
 ```text
-Feature context / .graymoon.json
+Feature context / graymoon.json
 ```
 
 ### 15.3 Feature copy behavior
 
-Inside a Feature, `.graymoon.json` is a normal tracked Git file.
+Inside a Feature, `graymoon.json` is a normal tracked Git file.
 
 It may:
 
@@ -998,7 +998,7 @@ immediate Feature-local repository membership mutation
 
 ### 15.5 After merge
 
-When the Workspace-repository change reaches the authoritative parent branch and the special Workspace context checks out or pulls that branch, GrayMoon can detect that `.graymoon.json` changed and offer reconciliation.
+When the Workspace-repository change reaches the authoritative parent branch and the special Workspace context checks out or pulls that branch, GrayMoon can detect that `graymoon.json` changed and offer reconciliation.
 
 ---
 
@@ -1153,7 +1153,7 @@ The Feature root itself becomes the Workspace repository worktree:
 <ManagedFeatureStorageRoot>\<FeatureName>\    <-- Workspace repo worktree
 │
 ├── .git
-├── .graymoon.json
+├── graymoon.json
 ├── .gitignore
 ├── CLAUDE.md
 ├── AGENTS.md
@@ -1256,7 +1256,7 @@ CLAUDE.md
 AGENTS.md
 docs/
 prompts/
-.graymoon.json
+graymoon.json
 ```
 
 can be committed and pushed on the Workspace repository's Feature branch and opened as a PR.
@@ -1343,7 +1343,7 @@ There are two sources of state:
 
 ```text
 GrayMoon database
-.graymoon.json
+graymoon.json
 ```
 
 They serve different roles.
@@ -1352,7 +1352,7 @@ They serve different roles.
 
 The GrayMoon database remains the runtime source of truth.
 
-When portable authoritative Workspace settings change, GrayMoon updates the special Workspace context's `.graymoon.json`.
+When portable authoritative Workspace settings change, GrayMoon updates the special Workspace context's `graymoon.json`.
 
 Examples:
 
@@ -1370,11 +1370,11 @@ GrayMoon must never auto-commit it.
 
 Feature copies are not runtime sources of truth.
 
-A Feature may change its `.graymoon.json`, but that remains proposal state.
+A Feature may change its `graymoon.json`, but that remains proposal state.
 
 ### 26.3 External authoritative edits
 
-If the special Workspace context's `.graymoon.json` changes because of:
+If the special Workspace context's `graymoon.json` changes because of:
 
 - pull;
 - branch switch;
@@ -1406,7 +1406,7 @@ Manifest writes should:
 
 This is not part of the first implementation.
 
-A Feature may modify `.graymoon.json` to propose:
+A Feature may modify `graymoon.json` to propose:
 
 ```text
 + Source repository
@@ -1446,13 +1446,13 @@ On computer A:
 
 1. configure Workspace;
 2. enable Workspace repository;
-3. commit `.graymoon.json` and Workspace-level files;
+3. commit `graymoon.json` and Workspace-level files;
 4. push.
 
 On computer B:
 
 1. clone/select Workspace repository;
-2. GrayMoon detects `.graymoon.json`;
+2. GrayMoon detects `graymoon.json`;
 3. GrayMoon creates local Workspace;
 4. restores profile;
 5. resolves connectors by normalized `connectorUrl`;
@@ -1510,7 +1510,7 @@ found?
 A repository containing:
 
 ```text
-.graymoon.json
+graymoon.json
 ```
 
 can be recognized as a GrayMoon Workspace repository.
@@ -1530,7 +1530,7 @@ Open as Workspace
 1. create Workspace;
 2. enable Workspace Git repository;
 3. initialize Git at Workspace root;
-4. create `.graymoon.json`;
+4. create `graymoon.json`;
 5. create managed `.gitignore`;
 6. optionally publish/connect remote later.
 
@@ -1682,7 +1682,7 @@ With a Workspace repository:
 Workspace/       <- watched Workspace repository
 ├── CLAUDE.md
 ├── AGENTS.md
-├── .graymoon.json
+├── graymoon.json
 ├── prompts/
 ├── docs/
 ├── RepoA/       <- watched Source repository
@@ -1695,7 +1695,7 @@ The Workspace repository watcher covers Workspace-level files such as:
 ```text
 CLAUDE.md
 AGENTS.md
-.graymoon.json
+graymoon.json
 README.md
 docs/**
 prompts/**
@@ -1749,7 +1749,7 @@ When the Workspace repository exists, a Feature looks like:
 FeatureRoot/          <- Workspace repository worktree + watcher
 ├── CLAUDE.md
 ├── AGENTS.md
-├── .graymoon.json
+├── graymoon.json
 ├── prompts/
 ├── RepoA/            <- Source repository worktree + watcher
 ├── RepoB/            <- Source repository worktree + watcher
@@ -1799,14 +1799,14 @@ A file watcher event should:
 
 The watcher is a signal that disk state changed, not the owner of application-level reconciliation.
 
-### 34.6 `.graymoon.json` write-loop protection
+### 34.6 `graymoon.json` write-loop protection
 
 A common authoritative flow will be:
 
 ```text
 Workspace setting changes
     -> GrayMoon updates database
-    -> GrayMoon writes .graymoon.json
+    -> GrayMoon writes graymoon.json
     -> Workspace repository watcher fires
     -> Git Changes refreshes
 ```
@@ -1840,21 +1840,21 @@ Manifest writes should remain deterministic and write only when content actually
 
 ### 34.7 Authoritative manifest change detection
 
-The Workspace repository watcher may be used as the low-level signal that `.graymoon.json` changed, but a higher-level manifest service decides whether reconciliation is required.
+The Workspace repository watcher may be used as the low-level signal that `graymoon.json` changed, but a higher-level manifest service decides whether reconciliation is required.
 
 The service should compare the authoritative special-Workspace-context manifest against the last/current canonical Workspace definition.
 
-Feature copies of `.graymoon.json` remain non-authoritative and must never trigger runtime Workspace reconciliation.
+Feature copies of `graymoon.json` remain non-authoritative and must never trigger runtime Workspace reconciliation.
 
 Therefore:
 
 ```text
-special Workspace context .graymoon.json change
+special Workspace context graymoon.json change
     -> Git Changes refresh
     -> authoritative manifest difference may be detected
     -> offer reconciliation
 
-Feature context .graymoon.json change
+Feature context graymoon.json change
     -> Git Changes refresh only
 ```
 
@@ -1897,13 +1897,13 @@ After the operation completes:
 Add coverage for:
 
 - Workspace repository root watcher detects `CLAUDE.md` changes;
-- Workspace repository root watcher detects `.graymoon.json` changes;
+- Workspace repository root watcher detects `graymoon.json` changes;
 - Source-repository file changes do not surface as Workspace-repository Git Changes;
 - Source repository watcher still detects the same child change;
 - Feature Workspace-root watcher attributes Workspace-level changes to the Feature context;
 - Feature Source worktree changes do not leak into Workspace-repository watcher results;
-- authoritative `.graymoon.json` change can trigger reconciliation detection;
-- Feature `.graymoon.json` change never triggers runtime reconciliation;
+- authoritative `graymoon.json` change can trigger reconciliation detection;
+- Feature `graymoon.json` change never triggers runtime reconciliation;
 - GrayMoon-authored manifest write does not create a rewrite loop;
 - watcher scopes are rebuilt correctly after Feature create/remove;
 - active-context watcher retention includes the Workspace repository.
@@ -1926,7 +1926,7 @@ No projection/copy mechanism is needed.
 
 ## 36. Security and privacy
 
-Never write these into `.graymoon.json`:
+Never write these into `graymoon.json`:
 
 - tokens;
 - passwords;
@@ -2196,7 +2196,7 @@ Do not automatically mutate Workspace composition during checkout.
 - Source worktrees underneath;
 - root removed last;
 - AI files live in Feature;
-- Feature `.graymoon.json` non-authoritative;
+- Feature `graymoon.json` non-authoritative;
 - repair tests.
 
 ### Phase H - restore
@@ -2281,7 +2281,7 @@ repositoryUrl
 - Workspace removed last;
 - AI rules present;
 - AI-rule edits appear in Workspace-repo Git Changes;
-- Feature `.graymoon.json` edit does not mutate runtime state.
+- Feature `graymoon.json` edit does not mutate runtime state.
 
 ### `.gitignore`
 
@@ -2402,7 +2402,7 @@ Rejected.
 
 A real Workspace-repository worktree provides correct Git semantics directly.
 
-### 46.10 Apply Feature `.graymoon.json` immediately
+### 46.10 Apply Feature `graymoon.json` immediately
 
 Rejected.
 
@@ -2477,7 +2477,7 @@ Connector definitions may travel with the Workspace, but credentials never do.
 This gives GrayMoon a clean split:
 
 ```text
-.graymoon.json
+graymoon.json
     portable description of external resources and Workspace configuration
 
 GrayMoon database

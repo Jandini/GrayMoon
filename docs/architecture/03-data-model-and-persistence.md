@@ -150,9 +150,9 @@ Worktree-backed Features do not write these columns. Each Feature context stores
 
 A filtered unique index, `IX_WorkspaceRepositories_WorkspaceId_WorkspaceRole` (`WorkspaceId` where `Role = 1`), allows at most one Workspace-role link per Workspace. Strict migration step 5 adds the column and the index.
 
-`Workspaces.ManifestDriftDetectedAt` (nullable `DateTime`, strict migration step 6) is set when a check after a Sync finds `.graymoon.json` different from the database, and cleared when they agree, on Dismiss, or when the Workspace repository is disabled. It is reconciliation state, not Git state.
+`Workspaces.ManifestDriftDetectedAt` (nullable `DateTime`, strict migration step 6) is set when a check after a Sync finds `graymoon.json` different from the database, and cleared when they agree, on Dismiss, or when the Workspace repository is disabled. It is reconciliation state, not Git state.
 
-`.graymoon.json` itself is not persisted in the database. It is built from the database (Source links, connectors, Workspace name and profile) and written to the Workspace repository root. Drift compares repositories by normalized URL, connectors by normalized URL, and the profile fields `type`, `versioning` and `ci`. Feature contexts never run drift detection.
+`graymoon.json` itself is not persisted in the database. It is built from the database (Source links, connectors, Workspace name and profile) and written to the Workspace repository root. Drift compares repositories by normalized URL, connectors by normalized URL, and the profile fields `type`, `versioning` and `ci`. Feature contexts never run drift detection.
 
 ---
 

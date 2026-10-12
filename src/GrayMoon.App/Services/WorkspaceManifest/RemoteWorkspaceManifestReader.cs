@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Services.WorkspaceManifest;
 
-/// <summary>Result of reading <c>.graymoon.json</c> from an imported repository without cloning it.</summary>
+/// <summary>Result of reading <c>graymoon.json</c> from an imported repository without cloning it.</summary>
 /// <param name="Found">False when the repository has no such file (not an error).</param>
 /// <param name="Content">The file text when <paramref name="Found"/> is true.</param>
 /// <param name="Error">Set when the file could not be read at all (repository, connector or network problem).</param>
@@ -18,7 +18,7 @@ public interface IRemoteWorkspaceManifestReader
     Task<RemoteManifestRead> ReadAsync(int repositoryId, CancellationToken cancellationToken = default);
 }
 
-/// <summary>Reads <c>.graymoon.json</c> from the default branch with the GitHub contents API of the repository's connector.</summary>
+/// <summary>Reads <c>graymoon.json</c> from the default branch with the GitHub contents API of the repository's connector.</summary>
 public sealed class GitHubRemoteWorkspaceManifestReader(
     IDbContextFactory<AppDbContext> dbContextFactory,
     GitHubService gitHubService,
@@ -58,7 +58,7 @@ public sealed class GitHubRemoteWorkspaceManifestReader(
         {
             logger.LogWarning(ex, "Could not read the Workspace definition of repository {RepositoryId} from GitHub", repositoryId);
             var detail = ex is HttpRequestException http ? GitHubApiErrorHelper.FormatFriendlyGitHubHttpError(http) : ex.Message;
-            return new RemoteManifestRead(false, null, $"Could not read .graymoon.json from GitHub: {detail}");
+            return new RemoteManifestRead(false, null, $"Could not read graymoon.json from GitHub: {detail}");
         }
     }
 }

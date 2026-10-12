@@ -287,7 +287,7 @@ Do not use the primary Restore button spinner for this.
 
 The preflight must verify:
 
-- `.graymoon.json` exists
+- `graymoon.json` exists
 - definition parses
 - supported schema/version
 - profile values are understood
@@ -307,7 +307,7 @@ If the repository is not a valid Workspace repository:
 Examples:
 
 ```text
-This repository does not contain .graymoon.json.
+This repository does not contain graymoon.json.
 ```
 
 ```text

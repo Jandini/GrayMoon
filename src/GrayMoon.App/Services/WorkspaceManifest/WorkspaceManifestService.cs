@@ -21,7 +21,7 @@ using WorkspaceManifestWorkspace = GrayMoon.Application.WorkspaceManifest.Worksp
 using WorkspaceRepositoryTagPinChange = GrayMoon.Application.WorkspaceManifest.WorkspaceRepositoryTagPinChange;
 
 /// <summary>
-/// Builds, writes and compares the Workspace definition (<c>.graymoon.json</c>) and the managed <c>.gitignore</c>
+/// Builds, writes and compares the Workspace definition (<c>graymoon.json</c>) and the managed <c>.gitignore</c>
 /// section of the Workspace repository (D5, D8, D11, D12). Uses factory-created contexts, so it is safe to run
 /// outside the circuit's DbContext.
 /// </summary>
@@ -372,7 +372,7 @@ public sealed class WorkspaceManifestService(
 /// </summary>
 internal static class WorkspaceRepositoryFileAccess
 {
-    public const string ManifestFilePath = ".graymoon.json";
+    public const string ManifestFilePath = "graymoon.json";
     public const string GitIgnoreFilePath = ".gitignore";
 
     private const string NotFoundPrefix = "File not found";

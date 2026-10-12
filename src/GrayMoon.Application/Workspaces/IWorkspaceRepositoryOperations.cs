@@ -11,7 +11,7 @@ public interface IWorkspaceRepositoryOperations
     Task<OperationResult> DisableWorkspaceRepositoryAsync(int workspaceId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Read-only check of an imported repository before a restore: reads <c>.graymoon.json</c> through the connector
+    /// Read-only check of an imported repository before a restore: reads <c>graymoon.json</c> through the connector
     /// (no Worker, no clone, no database change), validates it and previews what a restore would resolve locally.
     /// </summary>
     Task<RestoreWorkspacePreflight> PreflightRestoreAsync(int repositoryId, CancellationToken cancellationToken = default);

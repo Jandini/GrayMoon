@@ -1,6 +1,6 @@
 # Workspace as a Git Repository - Implementation Plan
 
-> **Superseded in part (2026-10-08):** the `workspaceRepository` Worker capability (`supportedFeatures`, `GetCapabilities`, `IWorkerFeatureSupportService`) and the Repositories-page compatibility banner were removed. App/Worker compatibility is now the version lock (`WorkerVersionPolicy`), and Restore validates `.graymoon.json` before creating anything; "Restored without definition" no longer exists. See `docs/feedback/graymoon-restore-workspace-and-worker-version-lock.md`.
+> **Superseded in part (2026-10-08):** the `workspaceRepository` Worker capability (`supportedFeatures`, `GetCapabilities`, `IWorkerFeatureSupportService`) and the Repositories-page compatibility banner were removed. App/Worker compatibility is now the version lock (`WorkerVersionPolicy`), and Restore validates `graymoon.json` before creating anything; "Restored without definition" no longer exists. See `docs/feedback/graymoon-restore-workspace-and-worker-version-lock.md`.
 
 Living execution document. Three documents define this feature:
 
@@ -27,7 +27,7 @@ It must be possible to stop work here and resume later without reconstructing st
 
 **What works today.** Nothing of this feature. A Workspace is a folder containing one subfolder per repository; the Worker derives every repository path as `<root>\<WorkspaceName>\<RepositoryName>`; Features create one worktree per repository under `<FeatureStorageRoot>\<Feature>\<RepositoryName>`.
 
-**What "done" looks like.** A Workspace can name one of its imported GitHub repositories as its Workspace repository. That repository's working tree is the Workspace root; it appears first in the Repositories grid with a `Workspace` badge and full Git actions; it is always the root worktree of every Feature; `.graymoon.json` and the managed `.gitignore` section are written to it by the Worker and show up in Git Changes; a second computer can restore the Workspace from that repository by URL matching alone.
+**What "done" looks like.** A Workspace can name one of its imported GitHub repositories as its Workspace repository. That repository's working tree is the Workspace root; it appears first in the Repositories grid with a `Workspace` badge and full Git actions; it is always the root worktree of every Feature; `graymoon.json` and the managed `.gitignore` section are written to it by the Worker and show up in Git Changes; a second computer can restore the Workspace from that repository by URL matching alone.
 
 ---
 
@@ -904,7 +904,7 @@ src/GrayMoon.App.Tests/WorkspaceManifestDriftMigrationTests.cs              (new
 3. `WorkspaceManifestService : IWorkspaceManifestService` (sealed, factory-based `AppDbContext`, injects `IWorkerBridge`, `IWorkspaceContextPathResolver`, `IWorkspaceFeatureContextResolver`):
    - `BuildFromDatabaseAsync`: Workspace name, profile strings via `WorkspaceManifestProfileNames`, connectors = distinct GitHub connectors of all Source links mapped per D11, repositories = Source links only (D15 / v3 12.1).
    - `Serialize` / `TryParse` delegate to `WorkspaceManifestSerializer`.
-   - `WriteAuthoritativeManifestAsync`: if the Workspace has no Workspace-role link return `OperationResult` success with message "No Workspace repository" and do nothing. Otherwise resolve the special context, get worker args, send `WriteRepositoryFile` with `repositoryName = workspaceRepositoryName`, `filePath = ".graymoon.json"`, `onlyIfChanged = true`.
+   - `WriteAuthoritativeManifestAsync`: if the Workspace has no Workspace-role link return `OperationResult` success with message "No Workspace repository" and do nothing. Otherwise resolve the special context, get worker args, send `WriteRepositoryFile` with `repositoryName = workspaceRepositoryName`, `filePath = "graymoon.json"`, `onlyIfChanged = true`.
    - `WriteManagedGitIgnoreAsync`: read `.gitignore` through `GetFileContents` (missing file -> null), apply `ManagedGitIgnoreSection.Apply`, write through `WriteRepositoryFile` with `onlyIfChanged = true`.
    - `DetectDriftAsync`: per D8. Refuse (throw `InvalidOperationException`) when called with a Feature context; the method takes `workspaceId` and always uses the special context. Compare the parsed file with `BuildFromDatabaseAsync` after normalizing URLs with `RepositoryUrlIdentity`. Persist `ManifestDriftDetectedAt = HasDrift ? UtcNow : null`.
 
@@ -966,7 +966,7 @@ Deviations from the steps (and why):
   2. Step 6 "caller facade": the only callers of the membership methods are Razor pages, so those call sites were edited: Workspaces.razor (3 sites: UpdateAsync in the editor, UpdateAsync in the repositories modal, AddRepositoriesAsync in ConfirmImportAsync) and WorkspaceRepositories.RepositoriesModal.cs (1 site). Each calls the new extension WorkspaceManifestHooks.SyncDefinitionToDiskAsync (in WorkspaceManifestService.cs): writes .gitignore, then the manifest, never throws, returns an error string shown with ShowError. The profile-change hook is covered by the editor UpdateAsync site; WorkspaceProfileTransition itself is unedited.
   3. OperationResult has no message field, so "No Workspace repository" is returned as new OperationResult(true, "No Workspace repository") (text in Error on a success result).
   4. DetectDriftAsync takes only workspaceId; "refuse a Feature context" is implemented by asking IWorkspaceFeatureContextResolver for the special context and throwing InvalidOperationException when GetRequiredAsync reports it is not special.
-  5. With no Workspace-role link DetectDriftAsync clears ManifestDriftDetectedAt and returns no drift. A missing .graymoon.json counts as drift with a ParseError. A Worker or read failure throws and persists nothing.
+  5. With no Workspace-role link DetectDriftAsync clears ManifestDriftDetectedAt and returns no drift. A missing graymoon.json counts as drift with a ParseError. A Worker or read failure throws and persists nothing.
   6. Enable step (g): if the .gitignore or manifest write fails after the attach, the link and attached repository are kept and the result is Fail "The Workspace repository was attached, but ...". A retry of Enable then fails at check (c). The drift banner's "Write Workspace definition to disk" is the repair path.
   7. Restore reports problems in RestoreWorkspaceResult: Success=true with Error="Restored without definition: <reason>" when the file is missing or unparsable; Success=true with Error="Workspace restored, but the Workspace definition could not be written: ..." when step 7 fails.
   8. UnresolvedRepositoryUrls entries are "<repositoryUrl> (connector <connectorUrl>)" because the result type has no other place for the connector URL (Unit G must know this format).
@@ -1031,7 +1031,7 @@ src/GrayMoon.App.Tests/WorkspaceRepositoryLinkListQueryServiceRoleTests.cs  (new
 
 7. Desktop README bullet (per `AGENTS.md`): "**Workspace repository** - a Workspace can name one of its GitHub repositories as its Workspace repository; its working tree is the Workspace root, it appears first in Repositories with a Workspace badge, and it is the root of every Feature."
 
-**Acceptance.** Build clean. `GrayMoon.App.Tests` green. Manual: enable a Workspace repository on a test Workspace; grid shows it first with badge; Git Changes shows `.graymoon.json` and `.gitignore` as new files; commit from Git Changes works.
+**Acceptance.** Build clean. `GrayMoon.App.Tests` green. Manual: enable a Workspace repository on a test Workspace; grid shows it first with badge; Git Changes shows `graymoon.json` and `.gitignore` as new files; commit from Git Changes works.
 
 **Non-goals.** Restore UI (G). Feature creation (F).
 
@@ -1043,7 +1043,7 @@ New tests: App WorkspaceRepositoryLinkListQueryServiceRoleTests (Workspace_role_
 Deviations: Role added as optional trailing members (DTO, index entry, cursor RoleSortKey = 1). Keyset cursor key 0 resumes at the first Source row. The "Workspace repository" header shows whenever a Workspace-role row exists. Level 0 / No dependencies bulk actions exclude the Workspace row. The modal select is disabled while Features exist (rename wording). Disable runs before Enable; results shown as toast and modal error; link re-read from the DB after each call. WorkspaceRepositoriesModal has a new ExcludedRepositoryIds parameter. Drift banner: "Write Workspace definition to disk" runs SyncDefinitionToDiskAsync then DetectDriftAsync; Dismiss clears ManifestDriftDetectedAt. Both banners show in the special Workspace context only.
 Discoveries: App WorkspaceFileSearchService already sent workspaceRepositoryName (unchanged, no App search test). Projects, Packages and Deps pages were NOT checked for skipping repositories with no Projects (D6): manual check needed. Compatibility banner shows "does not support" also when the Worker is merely offline (follows plan literally). Pre-existing non-ASCII in WorkspaceRepositories.Loading.cs line 547 left alone.
 Follow-ups: decide whether the compatibility banner hides when the Worker is disconnected. D8 Review action (diff view) not built, DetectDriftAsync returns the data. Create flow: Enable runs before the existing-repositories import suggestion; if Enable fails the modal stays open and a second Save retries Enable but skips the import suggestion.
-Manual testing needed: Add/Edit Workspace modal (select, disabled with Features, enable/change/clear, old Worker refusal toast); grid first row, header, badge, no phantom Level 0 / No dependencies group, virtual scroll, Feature selector view; both banners; Repositories membership modals; Git Changes shows .graymoon.json and .gitignore as new files and commit works; Projects/Packages/Deps pages with a Workspace repository.
+Manual testing needed: Add/Edit Workspace modal (select, disabled with Features, enable/change/clear, old Worker refusal toast); grid first row, header, badge, no phantom Level 0 / No dependencies group, virtual scroll, Feature selector view; both banners; Repositories membership modals; Git Changes shows graymoon.json and .gitignore as new files and commit works; Projects/Packages/Deps pages with a Workspace repository.
 ```
 
 ---
@@ -1133,9 +1133,9 @@ src/GrayMoon.App.Tests/RestoreWorkspaceFlowTests.cs                    (new, ser
 
 2. `Workspaces.razor`: add the "Restore from repository" button next to the existing create/import actions.
 
-3. Tests `RestoreWorkspaceFlowTests` (service level, fake bridge returning a canned `.graymoon.json`): `Restore_creates_workspace_links_and_profile_from_manifest`, `Restore_without_manifest_creates_bare_workspace`, `Restore_lists_unresolved_repositories_and_still_succeeds`.
+3. Tests `RestoreWorkspaceFlowTests` (service level, fake bridge returning a canned `graymoon.json`): `Restore_creates_workspace_links_and_profile_from_manifest`, `Restore_without_manifest_creates_bare_workspace`, `Restore_lists_unresolved_repositories_and_still_succeeds`.
 
-4. Desktop README bullet: "**Restore Workspace from repository** - pick a GitHub repository that contains `.graymoon.json`; GrayMoon clones it as the Workspace root, recreates the Workspace profile and repository list by URL, and syncs."
+4. Desktop README bullet: "**Restore Workspace from repository** - pick a GitHub repository that contains `graymoon.json`; GrayMoon clones it as the Workspace root, recreates the Workspace profile and repository list by URL, and syncs."
 
 **Acceptance.** Build clean. App tests green. Manual: restore on a second database (delete `graymoon.db`, start, import connector, restore) reproduces the Workspace.
 
@@ -1145,7 +1145,7 @@ src/GrayMoon.App.Tests/RestoreWorkspaceFlowTests.cs                    (new, ser
 Date: 2026-10-06. Status: DONE (merged). Files: RestoreWorkspaceModal.razor and .razor.cs (new), Workspaces.razor (button + modal host + 4 small members), RestoreWorkspaceFlowTests.cs (new). Desktop README bullet applied by the orchestrator (uncommitted, GrayMoon.Desktop). Build 0 warnings; App 1096 (+12). Tests: Restore_creates_workspace_links_and_profile_from_manifest, Restore_without_manifest_creates_bare_workspace, Restore_lists_unresolved_repositories_and_still_succeeds, Sync_is_not_requested_when_restore_fails, A_failing_sync_keeps_the_restored_workspace_and_is_reported, Default_name_is_the_repository_name (5 cases), Name_must_be_present_a_valid_folder_name_and_unique_ignoring_case, Folder_must_be_absent_or_empty.
 Deviations: (1) the dialog blocks Restore only when the folder exists and holds repositories (the App can only ask the Worker whether the folder exists and how many repositories it holds); an existing folder with no repositories gets a warning, and the Worker's requireEmptyRoot is the real guard (a folder with only non-repository files passes the dialog and fails in the Worker with its message). (2) Sync runs inside the restore job (key /workspaces) via IWorkspaceSyncOperations.SyncAsync on the special-Workspace context, without WorkspaceOperationLock (brand-new Workspace); a Sync failure or cancel does not undo the restore and shows as a warning. (3) If there is anything to show (unresolved lists or a warning) the modal stays open with an "Open Workspace" button; otherwise it navigates to workspaces/{id} (the plan says the Repositories page; the Workspace page route is workspaces/{id}).
 Discoveries: BackgroundJobOverlay matches jobs on the lowercase URL path. RestoreWorkspaceResult.Error also carries warnings when Success is true.
-Manual testing needed: button and dialog (list of imported GitHub repositories, filter, name defaulting, duplicate name error, non-empty folder block); restore end to end on a second database (overlay shows restore then sync); manifest with unimported repositories (panel text and Open Workspace); repository without .graymoon.json ("Restored without definition"); abort during overlay; restore into an existing empty folder and into one with non-repository files.
+Manual testing needed: button and dialog (list of imported GitHub repositories, filter, name defaulting, duplicate name error, non-empty folder block); restore end to end on a second database (overlay shows restore then sync); manifest with unimported repositories (panel text and Open Workspace); repository without graymoon.json ("Restored without definition"); abort during overlay; restore into an existing empty folder and into one with non-repository files.
 ```
 
 ---
@@ -1170,7 +1170,7 @@ Manual testing needed: button and dialog (list of imported GitHub repositories, 
    | Create Feature | root worktree first, Sources under it, `CLAUDE.md` present in Feature root | |
    | Edit `CLAUDE.md` in Feature | appears in Feature Git Changes for the Workspace repo only | |
    | Edit `Avr.Api/x.cs` in Feature | appears under `Avr.Api` only | |
-   | Edit Feature `.graymoon.json` | Git change only; special Workspace unchanged; no drift banner | |
+   | Edit Feature `graymoon.json` | Git change only; special Workspace unchanged; no drift banner | |
    | Pull Workspace repo with changed manifest | drift banner appears | |
    | Remove Feature | Sources removed, then root; folder gone | |
    | Old Worker connected | enable refused; banner when link exists | |

@@ -30,7 +30,7 @@ Sections 1-19 below are the original feedback. Reading the `feedback` branch con
 
 ## 0.1 Confirmed
 
-- `RestoreCoreAsync` returned `Success = true` with "Restored without definition: ..." for a missing, unreadable or unparsable `.graymoon.json`, after the Workspace row, the Workspace-role link and the clone already existed.
+- `RestoreCoreAsync` returned `Success = true` with "Restored without definition: ..." for a missing, unreadable or unparsable `graymoon.json`, after the Workspace row, the Workspace-role link and the clone already existed.
 - `WorkerConnectionTracker` already had `VersionMismatch`, and the self-update flow already waited for a Worker reporting the App's version.
 - `GetCapabilities` had no consumer other than `WorkerFeatureSupportService` (searched the App, the Worker, the tests and `GrayMoon.Desktop`).
 
@@ -44,7 +44,7 @@ Sections 1-19 below are the original feedback. Reading the `feedback` branch con
 
 ## 0.3 Additional problems found
 
-- **Restore with missing repositories damaged the definition.** After linking only the locally resolvable repositories, restore always called `WriteAuthoritativeManifestAsync`, which rebuilds `.graymoon.json` from the database. Every repository that was not imported on this computer was silently removed from the file, leaving a dirty working tree that would lose them on the next commit. Fixed by section 7's "write only if required" (see 20.2).
+- **Restore with missing repositories damaged the definition.** After linking only the locally resolvable repositories, restore always called `WriteAuthoritativeManifestAsync`, which rebuilds `graymoon.json` from the database. Every repository that was not imported on this computer was silently removed from the file, leaving a dirty working tree that would lose them on the next commit. Fixed by section 7's "write only if required" (see 20.2).
 - **Unknown profile values were silently ignored.** An unknown `type`, `versioning` or `ci` kept the Basic / None / None default for that axis. Restore now refuses such a definition (section 3.3 example).
 - **Cancellation after the Workspace was created left it behind.** `LinkAndAttachAsync` removed the link on cancellation, but the Workspace row stayed. Restore now rolls the whole Workspace back on cancellation too.
 
@@ -92,7 +92,7 @@ link selected repository as Workspace repository
     ↓
 clone/attach repository into Workspace root
     ↓
-read .graymoon.json
+read graymoon.json
     ↓
 if missing/invalid:
     return SUCCESS as "Restored without definition"
@@ -210,7 +210,7 @@ Before GrayMoon creates a Workspace row or clones into the final Workspace folde
 At minimum:
 
 - repository is accessible
-- `.graymoon.json` exists
+- `graymoon.json` exists
 - manifest parses
 - manifest schema/version is supported
 - Workspace profile values are understood or explicitly handled
@@ -233,7 +233,7 @@ Restore Workspace
 Help text:
 
 ```text
-Restore a GrayMoon Workspace from a repository containing .graymoon.json.
+Restore a GrayMoon Workspace from a repository containing graymoon.json.
 ```
 
 Avoid making the title unnecessarily technical.
@@ -303,7 +303,7 @@ The user should understand what is about to be restored **before cloning**.
 Examples:
 
 ```text
-This repository does not contain .graymoon.json.
+This repository does not contain graymoon.json.
 ```
 
 ```text
@@ -328,7 +328,7 @@ No Workspace row or final Workspace directory is created.
 
 The selected repository already exists in GrayMoon's imported GitHub repository catalog.
 
-Prefer reading `.graymoon.json` through the existing GitHub connector/API path when possible.
+Prefer reading `graymoon.json` through the existing GitHub connector/API path when possible.
 
 That avoids:
 
@@ -404,9 +404,9 @@ The user may intentionally be restoring on another computer before all connector
 
 Therefore:
 
-- valid `.graymoon.json` + missing Source repositories = Restore allowed
-- valid `.graymoon.json` + missing connector(s) = Restore allowed if the Workspace repository itself is already accessible
-- missing/invalid `.graymoon.json` = Restore blocked
+- valid `graymoon.json` + missing Source repositories = Restore allowed
+- valid `graymoon.json` + missing connector(s) = Restore allowed if the Workspace repository itself is already accessible
+- missing/invalid `graymoon.json` = Restore blocked
 
 This preserves portability.
 
@@ -491,7 +491,7 @@ link all locally resolvable Source repositories
     ↓
 write managed .gitignore
     ↓
-write authoritative .graymoon.json only if required
+write authoritative graymoon.json only if required
     ↓
 full Sync
     ↓
@@ -500,7 +500,7 @@ success panel / open Workspace
 
 ## 7.1 Revalidate after clone
 
-The local `.graymoon.json` should still be parsed after clone.
+The local `graymoon.json` should still be parsed after clone.
 
 This protects against the remote branch changing between preflight and clone.
 
@@ -825,8 +825,8 @@ Do not leave comparison semantics accidental.
 
 Add tests for:
 
-- valid `.graymoon.json`
-- missing `.graymoon.json`
+- valid `graymoon.json`
+- missing `graymoon.json`
 - invalid JSON
 - supported/unsupported manifest schema version if versioned
 - unknown profile values
@@ -980,11 +980,11 @@ Test:
 
 ## Restore Workspace
 
-- The dialog validates `.graymoon.json` before mutating the Workspace.
+- The dialog validates `graymoon.json` before mutating the Workspace.
 - The user sees what profile and repositories will be restored.
 - Missing connectors/repositories are visible before Restore.
 - Missing Source repositories do not block a valid Workspace restore.
-- Missing or invalid `.graymoon.json` does block Restore.
+- Missing or invalid `graymoon.json` does block Restore.
 - `RestoredWithoutDefinition` no longer exists as a successful outcome.
 - Non-empty destination folders are never merged into.
 - Restore progress is understandable.
@@ -1030,7 +1030,7 @@ Use this when handing the work to an implementation agent:
 >
 > Two product decisions are fixed:
 >
-> 1. Restore Workspace must preflight and validate `.graymoon.json` before creating a Workspace or cloning into the final root. A missing/invalid definition is a failure, never "restored without definition".
+> 1. Restore Workspace must preflight and validate `graymoon.json` before creating a Workspace or cloning into the final root. A missing/invalid definition is a failure, never "restored without definition".
 > 2. GrayMoon App and Worker are version-locked. Replace the Workspace-repository feature-capability gate and compatibility banner with the existing App/Worker version mismatch mechanism. Do not introduce another compatibility framework.
 >
 > Split implementation into independently testable units. Prefer minimal, cohesive changes. Preserve existing Workspace/Feature behavior outside the named changes. Add regression tests before or with each behavior change. Keep the living implementation document updated with discoveries, deviations, test counts, and manual-test gates. Do not commit or push until the requested review gate.
@@ -1109,10 +1109,10 @@ Build: 0 warnings, 0 errors. Full run: Common 261, Worker 567 (+1 pre-existing s
 
 1. Matching App and Worker: restore a valid Workspace repository; the dialog shows the preview, Restore opens the Workspace after Sync.
 2. Older Worker: badge says "update"; the Restore dialog shows "Update the GrayMoon Worker before restoring this Workspace." with both versions and Restore disabled; Sync and other actions fail with the version message; **Update Worker from the badge or the Worker page succeeds** and everything works after the reconnect.
-3. Repository without `.graymoon.json`: blocking error right after selection, Restore disabled, nothing created.
-4. Malformed `.graymoon.json` and an unknown profile value: blocking error, nothing created.
+3. Repository without `graymoon.json`: blocking error right after selection, Restore disabled, nothing created.
+4. Malformed `graymoon.json` and an unknown profile value: blocking error, nothing created.
 5. The real 24-repository Workspace: preview shows 24 repositories and the profile; restore and Sync complete.
-6. Missing connector(s) and repository(s): preview lists them; restore succeeds; the panel lists them with Open Connectors / Open Workspace; `.graymoon.json` in the new root is unchanged (`git status` clean).
+6. Missing connector(s) and repository(s): preview lists them; restore succeeds; the panel lists them with Open Connectors / Open Workspace; `graymoon.json` in the new root is unchanged (`git status` clean).
 7. Existing empty folder: info note, restore uses it.
 8. Existing folder with a file: error, Restore disabled.
 9. Force a clone failure (for example revoke the token): error, no Workspace in the list, no folder left (or a residue line naming it).
