@@ -8,6 +8,7 @@ namespace GrayMoon.Worker.Services;
 /// Layers, later replacing earlier: the nearest <c>Directory.Build.props</c> inside the repository
 /// (and a parent file only when that nearest file imports it), then the project in document order,
 /// then the nearest <c>Directory.Build.targets</c>.
+/// A property group that is a direct child of an unconditional <c>Target</c> is part of that document order.
 /// </summary>
 /// <remarks>
 /// Not evaluated in this pass, and intentionally skipped:
@@ -17,7 +18,7 @@ namespace GrayMoon.Worker.Services;
 /// props and targets imported by the SDK or a NuGet package, a <c>Directory.Build.props</c> that lives
 /// outside the repository root, and disabling the automatic import through an environment variable or a
 /// global MSBuild property rather than the project file.
-/// A property group or property that carries a Condition is skipped. A value that still contains <c>$(...)</c> does not change the effective value.
+/// A property group, property, or <c>Target</c> that carries a Condition is skipped. A value that still contains <c>$(...)</c> does not change the effective value.
 /// </remarks>
 public static class ProjectPackagingResolver
 {
@@ -134,6 +135,8 @@ public static class ProjectPackagingResolver
                     ApplyImport(child, directory, repositoryRoot, state, stack, depth);
                 else if (NameIs(child, "PropertyGroup") && !HasCondition(child))
                     ApplyPropertyGroup(child, state);
+                else if (NameIs(child, "Target") && !HasCondition(child))
+                    ApplyTarget(child, state);
             }
         }
         finally
@@ -174,6 +177,15 @@ public static class ProjectPackagingResolver
             return;
 
         ApplyFile(combined, repositoryRoot, state, stack, depth + 1);
+    }
+
+    private static void ApplyTarget(XElement target, PropertyState state)
+    {
+        foreach (var child in target.Elements())
+        {
+            if (NameIs(child, "PropertyGroup") && !HasCondition(child))
+                ApplyPropertyGroup(child, state);
+        }
     }
 
     private static void ApplyPropertyGroup(XElement group, PropertyState state)
