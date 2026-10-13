@@ -4,14 +4,15 @@ using GrayMoon.App.Services.GitHub;
 using GrayMoon.App.Services.WorkspaceManifest;
 using GrayMoon.Application.WorkspaceManifest;
 using GrayMoon.Common.Git;
-using GrayMoon.Common.Manifest;
-using WorkspaceManifestModel = GrayMoon.Common.Manifest.WorkspaceManifest;
 
 namespace GrayMoon.App.Services.Application;
 
+// Inside the namespace, so WorkspaceManifest binds to the type and not to GrayMoon.App.Services.WorkspaceManifest.
+using GrayMoon.Common.Manifest;
+
 /// <summary>What a valid Workspace definition resolves to on this computer.</summary>
 public sealed record RestoreDefinitionPlan(
-    WorkspaceManifestModel Manifest,
+    WorkspaceManifest Manifest,
     WorkspaceType Type,
     WorkspaceVersioningMode Versioning,
     WorkspaceCiProvider Ci,

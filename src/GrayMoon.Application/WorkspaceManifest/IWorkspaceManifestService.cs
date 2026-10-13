@@ -1,10 +1,11 @@
 namespace GrayMoon.Application.WorkspaceManifest;
 
-using WorkspaceManifest = GrayMoon.Common.Manifest.WorkspaceManifest;
+// Inside the namespace, so WorkspaceManifest binds to the type and not to this namespace.
+using GrayMoon.Common.Manifest;
 
 /// <summary>
 /// Keeps the Workspace definition of a Workspace in step with its database: builds it, writes it, detects drift. The
-/// file's name, format and parsing belong to <see cref="GrayMoon.Common.Manifest.IWorkspaceManifestFile"/>.
+/// file's name, format and parsing belong to <see cref="IWorkspaceManifestFile"/>.
 /// </summary>
 public interface IWorkspaceManifestService
 {

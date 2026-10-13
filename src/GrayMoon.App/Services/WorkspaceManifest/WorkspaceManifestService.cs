@@ -7,18 +7,14 @@ using GrayMoon.App.Services.Worker;
 using GrayMoon.Application;
 using GrayMoon.Application.Features;
 using GrayMoon.Common.Git;
-using GrayMoon.Common.Manifest;
 using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Services.WorkspaceManifest;
 
+// Inside the namespace, so WorkspaceManifest binds to the type and not to this namespace.
+using GrayMoon.Common.Manifest;
 using IWorkspaceManifestService = GrayMoon.Application.WorkspaceManifest.IWorkspaceManifestService;
-using WorkspaceManifest = GrayMoon.Common.Manifest.WorkspaceManifest;
-using WorkspaceManifestConnector = GrayMoon.Common.Manifest.WorkspaceManifestConnector;
 using WorkspaceManifestDrift = GrayMoon.Application.WorkspaceManifest.WorkspaceManifestDrift;
-using WorkspaceManifestProfile = GrayMoon.Common.Manifest.WorkspaceManifestProfile;
-using WorkspaceManifestRepository = GrayMoon.Common.Manifest.WorkspaceManifestRepository;
-using WorkspaceManifestWorkspace = GrayMoon.Common.Manifest.WorkspaceManifestWorkspace;
 using WorkspaceRepositoryTagPinChange = GrayMoon.Application.WorkspaceManifest.WorkspaceRepositoryTagPinChange;
 
 /// <summary>

@@ -81,7 +81,7 @@ public sealed class CodeGraphWorkspaceTests
         await using var fixture = await ManifestTestFixture.CreateAsync();
         var workspace = await fixture.SeedWorkspaceWithRootRepositoryAsync();
         var service = fixture.CreateService();
-        var definition = new GrayMoon.Common.Manifest.WorkspaceManifestFile().Serialize(await service.BuildFromDatabaseAsync(workspace.WorkspaceId) with { CodeGraph = true });
+        var definition = new WorkspaceManifestFile().Serialize(await service.BuildFromDatabaseAsync(workspace.WorkspaceId) with { CodeGraph = true });
         fixture.Bridge.RespondWithFile(definition);
 
         var result = await service.WriteAuthoritativeManifestAsync(workspace.WorkspaceId);
@@ -97,7 +97,7 @@ public sealed class CodeGraphWorkspaceTests
         await using var fixture = await ManifestTestFixture.CreateAsync();
         var workspace = await fixture.SeedWorkspaceWithRootRepositoryAsync();
         var service = fixture.CreateService();
-        fixture.Bridge.RespondWithFile(new GrayMoon.Common.Manifest.WorkspaceManifestFile().Serialize(await service.BuildFromDatabaseAsync(workspace.WorkspaceId) with { CodeGraph = true }));
+        fixture.Bridge.RespondWithFile(new WorkspaceManifestFile().Serialize(await service.BuildFromDatabaseAsync(workspace.WorkspaceId) with { CodeGraph = true }));
 
         var drift = await service.DetectDriftAsync(workspace.WorkspaceId);
 
@@ -113,7 +113,7 @@ public sealed class CodeGraphWorkspaceTests
         await using var fixture = await ManifestTestFixture.CreateAsync();
         var workspace = await fixture.SeedWorkspaceWithRootRepositoryAsync();
         var service = fixture.CreateService();
-        fixture.Bridge.RespondWithFile(new GrayMoon.Common.Manifest.WorkspaceManifestFile().Serialize(await service.BuildFromDatabaseAsync(workspace.WorkspaceId) with { CodeGraph = codeGraph }));
+        fixture.Bridge.RespondWithFile(new WorkspaceManifestFile().Serialize(await service.BuildFromDatabaseAsync(workspace.WorkspaceId) with { CodeGraph = codeGraph }));
 
         Assert.Equal(expected, await service.IsCodeGraphEnabledAsync(workspace.WorkspaceId));
     }
