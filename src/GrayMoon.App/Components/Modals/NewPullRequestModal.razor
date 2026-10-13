@@ -41,19 +41,16 @@
                                 Details
                             </button>
                         </li>
-                        @if (IsMultiRepo)
-                        {
-                            <li class="nav-item" role="presentation">
-                                <button type="button"
-                                        class="nav-link @(_activeTab == "branch" ? "active" : null)"
-                                        role="tab"
-                                        aria-selected="@(_activeTab == "branch")"
-                                        id="new-pr-tab-branch"
-                                        @onclick='() => SetActiveTab("branch")'>
-                                    Branch
-                                </button>
-                            </li>
-                        }
+                        <li class="nav-item" role="presentation">
+                            <button type="button"
+                                    class="nav-link @(_activeTab == "branch" ? "active" : null)"
+                                    role="tab"
+                                    aria-selected="@(_activeTab == "branch")"
+                                    id="new-pr-tab-branch"
+                                    @onclick='() => SetActiveTab("branch")'>
+                                Branch
+                            </button>
+                        </li>
                         <li class="nav-item" role="presentation">
                             <button type="button"
                                     class="nav-link @(_activeTab == "review" ? "active" : null)"
@@ -69,100 +66,6 @@
                     <div class="new-pr-tab-panels">
                         <div class="@TabPanelClass("details")"
                              aria-hidden="@(_activeTab != "details")">
-                            @if (!IsMultiRepo)
-                            {
-                                <div class="mb-3">
-                                    <div class="new-pr-branch-label-row">
-                                        <label class="form-label" for="new-pr-branch">Branch</label>
-                                        <span class="new-pr-branch-direction" aria-hidden="true">
-                                            <span class="new-pr-branch-caption">Source</span>
-                                            <span class="new-pr-branch-arrow">→</span>
-                                            <span class="new-pr-branch-caption">Target</span>
-                                        </span>
-                                        <button type="button"
-                                                class="btn btn-link btn-sm p-0 ms-2 text-nowrap new-pr-branch-refresh"
-                                                title="Fetch the latest branches from the remote"
-                                                disabled="@(IsBusy || _refreshingBranches)"
-                                                @onclick="RefreshAllTargetBranchesAsync">
-                                            @if (_refreshingBranches)
-                                            {
-                                                <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
-                                            }
-                                            Refresh
-                                        </button>
-                                    </div>
-                                    <div id="new-pr-branch"
-                                         class="new-pr-branch-panel @(_openTargetMenuRepoId.HasValue ? "new-pr-branch-panel--menu-open" : null)"
-                                         role="group"
-                                         aria-label="Pull request branches">
-                                        @foreach (var target in Targets)
-                                        {
-                                            var state = GetRepoBranchState(target.RepositoryId);
-                                            var menuOpen = _openTargetMenuRepoId == target.RepositoryId;
-                                            <div class="new-pr-branch-row">
-                                                <div class="new-pr-branch-main">
-                                                    <span class="new-pr-branch-name text-truncate" title="@target.HeadBranch">@target.HeadBranch</span>
-                                                </div>
-                                                @if (state.IsLoading)
-                                                {
-                                                    <div class="new-pr-branch-target new-pr-branch-target--loading">
-                                                        <span class="new-pr-branch-loading d-inline-flex align-items-center gap-2 text-muted">
-                                                            <span class="spinner-border new-pr-branch-spinner" role="status" aria-hidden="true"></span>
-                                                            Loading…
-                                                        </span>
-                                                    </div>
-                                                }
-                                                else if (state.Candidates.Count == 0)
-                                                {
-                                                    <div class="new-pr-branch-target new-pr-branch-target--error" title="@(state.Error ?? "No target branches available")">
-                                                        <span class="new-pr-branch-target-value text-truncate">@(state.Error ?? "Unavailable")</span>
-                                                    </div>
-                                                }
-                                                else
-                                                {
-                                                    <div class="new-pr-branch-target @(menuOpen ? "new-pr-branch-target--open" : null)">
-                                                        <button type="button"
-                                                                class="new-pr-branch-select"
-                                                                id="@($"new-pr-target-{target.RepositoryId}")"
-                                                                aria-label="@($"Target branch for {target.RepositoryName}")"
-                                                                aria-haspopup="listbox"
-                                                                aria-expanded="@menuOpen"
-                                                                title="@state.SelectedBase"
-                                                                disabled="@(IsBusy || state.IsLoading)"
-                                                                @onclick="() => ToggleTargetMenu(target.RepositoryId)">
-                                                            <span class="new-pr-branch-select-text text-truncate">@state.SelectedBase</span>
-                                                        </button>
-                                                        <span class="new-pr-branch-chevron" aria-hidden="true"></span>
-                                                        @if (menuOpen)
-                                                        {
-                                                            <div class="new-pr-branch-menu-backdrop" @onclick="CloseTargetMenu"></div>
-                                                            <ul class="new-pr-branch-menu"
-                                                                role="listbox"
-                                                                aria-labelledby="@($"new-pr-target-{target.RepositoryId}")">
-                                                                @foreach (var branch in state.Candidates)
-                                                                {
-                                                                    var selected = string.Equals(branch, state.SelectedBase, StringComparison.Ordinal);
-                                                                    <li role="option"
-                                                                        aria-selected="@selected"
-                                                                        class="new-pr-branch-menu-item @(selected ? "new-pr-branch-menu-item--selected" : null)"
-                                                                        @onclick="() => SelectTargetBranch(target.RepositoryId, branch)">
-                                                                        <span class="text-truncate" title="@branch">@branch</span>
-                                                                    </li>
-                                                                }
-                                                            </ul>
-                                                        }
-                                                    </div>
-                                                }
-                                            </div>
-                                        }
-                                    </div>
-                                    @if (!string.IsNullOrEmpty(_branchLoadError))
-                                    {
-                                        <div class="form-text text-muted">@_branchLoadError</div>
-                                    }
-                                </div>
-                            }
-
                             <div class="mb-3">
                                 <label class="form-label" for="new-pr-title">Title</label>
                                 <input id="new-pr-title"
@@ -197,101 +100,98 @@
                             </div>
                         </div>
 
-                        @if (IsMultiRepo)
-                        {
-                            <div class="@TabPanelClass("branch")"
-                                 aria-hidden="@(_activeTab != "branch")">
-                                <div class="new-pr-branch-label-row">
-                                    <label class="form-label" for="new-pr-branch">Repositories</label>
-                                    <span class="new-pr-branch-direction" aria-hidden="true">
-                                        <span class="new-pr-branch-caption">Source</span>
-                                        <span class="new-pr-branch-arrow">→</span>
-                                        <span class="new-pr-branch-caption">Target</span>
-                                    </span>
-                                    <button type="button"
-                                            class="btn btn-link btn-sm p-0 ms-2 text-nowrap new-pr-branch-refresh"
-                                            title="Fetch the latest branches from the remote"
-                                            disabled="@(IsBusy || _refreshingBranches)"
-                                            @onclick="RefreshAllTargetBranchesAsync">
-                                        @if (_refreshingBranches)
-                                        {
-                                            <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
-                                        }
-                                        Refresh
-                                    </button>
-                                </div>
-                                <div id="new-pr-branch"
-                                     class="new-pr-branch-panel new-pr-branch-panel--scroll @(_openTargetMenuRepoId.HasValue ? "new-pr-branch-panel--menu-open" : null)"
-                                     role="group"
-                                     aria-label="Pull request branches">
-                                    @foreach (var target in Targets)
+                        <div class="@TabPanelClass("branch")"
+                             aria-hidden="@(_activeTab != "branch")">
+                            <div class="new-pr-branch-label-row">
+                                <label class="form-label" for="new-pr-branch">Repositories</label>
+                                <span class="new-pr-branch-direction" aria-hidden="true">
+                                    <span class="new-pr-branch-caption">Source</span>
+                                    <span class="new-pr-branch-arrow">→</span>
+                                    <span class="new-pr-branch-caption">Target</span>
+                                </span>
+                                <button type="button"
+                                        class="btn btn-link btn-sm p-0 ms-2 text-nowrap new-pr-branch-refresh"
+                                        title="Fetch the latest branches from the remote"
+                                        disabled="@(IsBusy || _refreshingBranches)"
+                                        @onclick="RefreshAllTargetBranchesAsync">
+                                    @if (_refreshingBranches)
                                     {
-                                        var state = GetRepoBranchState(target.RepositoryId);
-                                        var menuOpen = _openTargetMenuRepoId == target.RepositoryId;
-                                        <div class="new-pr-branch-row new-pr-branch-row--multi">
-                                            <div class="new-pr-branch-main">
-                                                <span class="new-pr-branch-repo text-truncate" title="@target.RepositoryName">@target.RepositoryName</span>
-                                                <span class="new-pr-branch-name text-truncate" title="@target.HeadBranch">@target.HeadBranch</span>
-                                            </div>
-                                            @if (state.IsLoading)
-                                            {
-                                                <div class="new-pr-branch-target new-pr-branch-target--loading">
-                                                    <span class="new-pr-branch-loading d-inline-flex align-items-center gap-2 text-muted">
-                                                        <span class="spinner-border new-pr-branch-spinner" role="status" aria-hidden="true"></span>
-                                                        Loading…
-                                                    </span>
-                                                </div>
-                                            }
-                                            else if (state.Candidates.Count == 0)
-                                            {
-                                                <div class="new-pr-branch-target new-pr-branch-target--error" title="@(state.Error ?? "No target branches available")">
-                                                    <span class="new-pr-branch-target-value text-truncate">@(state.Error ?? "Unavailable")</span>
-                                                </div>
-                                            }
-                                            else
-                                            {
-                                                <div class="new-pr-branch-target @(menuOpen ? "new-pr-branch-target--open" : null)">
-                                                    <button type="button"
-                                                            class="new-pr-branch-select"
-                                                            id="@($"new-pr-target-{target.RepositoryId}")"
-                                                            aria-label="@($"Target branch for {target.RepositoryName}")"
-                                                            aria-haspopup="listbox"
-                                                            aria-expanded="@menuOpen"
-                                                            title="@state.SelectedBase"
-                                                            disabled="@(IsBusy || state.IsLoading)"
-                                                            @onclick="() => ToggleTargetMenu(target.RepositoryId)">
-                                                        <span class="new-pr-branch-select-text text-truncate">@state.SelectedBase</span>
-                                                    </button>
-                                                    <span class="new-pr-branch-chevron" aria-hidden="true"></span>
-                                                    @if (menuOpen)
-                                                    {
-                                                        <div class="new-pr-branch-menu-backdrop" @onclick="CloseTargetMenu"></div>
-                                                        <ul class="new-pr-branch-menu"
-                                                            role="listbox"
-                                                            aria-labelledby="@($"new-pr-target-{target.RepositoryId}")">
-                                                            @foreach (var branch in state.Candidates)
-                                                            {
-                                                                var selected = string.Equals(branch, state.SelectedBase, StringComparison.Ordinal);
-                                                                <li role="option"
-                                                                    aria-selected="@selected"
-                                                                    class="new-pr-branch-menu-item @(selected ? "new-pr-branch-menu-item--selected" : null)"
-                                                                    @onclick="() => SelectTargetBranch(target.RepositoryId, branch)">
-                                                                    <span class="text-truncate" title="@branch">@branch</span>
-                                                                </li>
-                                                            }
-                                                        </ul>
-                                                    }
-                                                </div>
-                                            }
-                                        </div>
+                                        <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
                                     }
-                                </div>
-                                @if (!string.IsNullOrEmpty(_branchLoadError))
+                                    Refresh
+                                </button>
+                            </div>
+                            <div id="new-pr-branch"
+                                 class="new-pr-branch-panel new-pr-branch-panel--scroll @(_openTargetMenuRepoId.HasValue ? "new-pr-branch-panel--menu-open" : null)"
+                                 role="group"
+                                 aria-label="Pull request branches">
+                                @foreach (var target in Targets)
                                 {
-                                    <div class="form-text text-muted">@_branchLoadError</div>
+                                    var state = GetRepoBranchState(target.RepositoryId);
+                                    var menuOpen = _openTargetMenuRepoId == target.RepositoryId;
+                                    <div class="new-pr-branch-row new-pr-branch-row--multi">
+                                        <div class="new-pr-branch-main">
+                                            <span class="new-pr-branch-repo text-truncate" title="@target.RepositoryName">@target.RepositoryName</span>
+                                            <span class="new-pr-branch-name text-truncate" title="@target.HeadBranch">@target.HeadBranch</span>
+                                        </div>
+                                        @if (state.IsLoading)
+                                        {
+                                            <div class="new-pr-branch-target new-pr-branch-target--loading">
+                                                <span class="new-pr-branch-loading d-inline-flex align-items-center gap-2 text-muted">
+                                                    <span class="spinner-border new-pr-branch-spinner" role="status" aria-hidden="true"></span>
+                                                    Loading…
+                                                </span>
+                                            </div>
+                                        }
+                                        else if (state.Candidates.Count == 0)
+                                        {
+                                            <div class="new-pr-branch-target new-pr-branch-target--error" title="@(state.Error ?? "No target branches available")">
+                                                <span class="new-pr-branch-target-value text-truncate">@(state.Error ?? "Unavailable")</span>
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <div class="new-pr-branch-target @(menuOpen ? "new-pr-branch-target--open" : null)">
+                                                <button type="button"
+                                                        class="new-pr-branch-select"
+                                                        id="@($"new-pr-target-{target.RepositoryId}")"
+                                                        aria-label="@($"Target branch for {target.RepositoryName}")"
+                                                        aria-haspopup="listbox"
+                                                        aria-expanded="@menuOpen"
+                                                        title="@state.SelectedBase"
+                                                        disabled="@(IsBusy || state.IsLoading)"
+                                                        @onclick="() => ToggleTargetMenu(target.RepositoryId)">
+                                                    <span class="new-pr-branch-select-text text-truncate">@state.SelectedBase</span>
+                                                </button>
+                                                <span class="new-pr-branch-chevron" aria-hidden="true"></span>
+                                                @if (menuOpen)
+                                                {
+                                                    <div class="new-pr-branch-menu-backdrop" @onclick="CloseTargetMenu"></div>
+                                                    <ul class="new-pr-branch-menu"
+                                                        role="listbox"
+                                                        aria-labelledby="@($"new-pr-target-{target.RepositoryId}")">
+                                                        @foreach (var branch in state.Candidates)
+                                                        {
+                                                            var selected = string.Equals(branch, state.SelectedBase, StringComparison.Ordinal);
+                                                            <li role="option"
+                                                                aria-selected="@selected"
+                                                                class="new-pr-branch-menu-item @(selected ? "new-pr-branch-menu-item--selected" : null)"
+                                                                @onclick="() => SelectTargetBranch(target.RepositoryId, branch)">
+                                                                <span class="text-truncate" title="@branch">@branch</span>
+                                                            </li>
+                                                        }
+                                                    </ul>
+                                                }
+                                            </div>
+                                        }
+                                    </div>
                                 }
                             </div>
-                        }
+                            @if (!string.IsNullOrEmpty(_branchLoadError))
+                            {
+                                <div class="form-text text-muted">@_branchLoadError</div>
+                            }
+                        </div>
 
                         <div class="@TabPanelClass("review")"
                              aria-hidden="@(_activeTab != "review")">
@@ -434,8 +334,6 @@
 
     private readonly Dictionary<int, RepoBranchUiState> _branchByRepoId = new();
 
-    private bool IsMultiRepo => Targets.Count > 1;
-
     private bool IsValid =>
         !string.IsNullOrWhiteSpace(_title)
         && Targets.Count > 0
@@ -452,11 +350,6 @@
 
     private void SetActiveTab(string tab)
     {
-        if (tab == "branch" && !IsMultiRepo)
-        {
-            tab = "details";
-        }
-
         if (_activeTab == tab)
         {
             return;
