@@ -2,6 +2,7 @@ using System.Net.Http;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services.GitHub;
+using GrayMoon.Common.Manifest;
 using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Services.WorkspaceManifest;
@@ -22,6 +23,7 @@ public interface IRemoteWorkspaceManifestReader
 public sealed class GitHubRemoteWorkspaceManifestReader(
     IDbContextFactory<AppDbContext> dbContextFactory,
     GitHubService gitHubService,
+    IWorkspaceManifestFile manifestFile,
     ILogger<GitHubRemoteWorkspaceManifestReader> logger) : IRemoteWorkspaceManifestReader
 {
     public async Task<RemoteManifestRead> ReadAsync(int repositoryId, CancellationToken cancellationToken = default)
@@ -49,7 +51,7 @@ public sealed class GitHubRemoteWorkspaceManifestReader(
         try
         {
             var content = await gitHubService.GetRepositoryFileUtf8TextAsync(
-                connector, owner, name, WorkspaceRepositoryFileAccess.ManifestFilePath, cancellationToken);
+                connector, owner, name, manifestFile.FileName, cancellationToken);
             return content is null
                 ? new RemoteManifestRead(false, null, null)
                 : new RemoteManifestRead(true, content, null);
@@ -58,7 +60,7 @@ public sealed class GitHubRemoteWorkspaceManifestReader(
         {
             logger.LogWarning(ex, "Could not read the Workspace definition of repository {RepositoryId} from GitHub", repositoryId);
             var detail = ex is HttpRequestException http ? GitHubApiErrorHelper.FormatFriendlyGitHubHttpError(http) : ex.Message;
-            return new RemoteManifestRead(false, null, $"Could not read graymoon.json from GitHub: {detail}");
+            return new RemoteManifestRead(false, null, $"Could not read {manifestFile.FileName} from GitHub: {detail}");
         }
     }
 }

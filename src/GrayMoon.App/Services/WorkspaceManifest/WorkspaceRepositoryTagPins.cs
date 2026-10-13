@@ -1,14 +1,15 @@
 using GrayMoon.Common.Git;
-using WorkspaceManifestModel = GrayMoon.Application.WorkspaceManifest.WorkspaceManifest;
-using WorkspaceManifestRepository = GrayMoon.Application.WorkspaceManifest.WorkspaceManifestRepository;
 using WorkspaceRepositoryTagPinChange = GrayMoon.Application.WorkspaceManifest.WorkspaceRepositoryTagPinChange;
 
 namespace GrayMoon.App.Services.WorkspaceManifest;
 
+// Inside the namespace, so WorkspaceManifest binds to the type and not to this namespace.
+using GrayMoon.Common.Manifest;
+
 /// <summary>Applies tag pins onto a Workspace definition without adding or removing repository entries.</summary>
 public static class WorkspaceRepositoryTagPins
 {
-    public static WorkspaceManifestModel CopyOnto(WorkspaceManifestModel target, WorkspaceManifestModel source)
+    public static WorkspaceManifest CopyOnto(WorkspaceManifest target, WorkspaceManifest source)
     {
         var pins = new Dictionary<string, WorkspaceManifestRepository>(StringComparer.OrdinalIgnoreCase);
         foreach (var repository in source.Repositories ?? [])
@@ -32,9 +33,9 @@ public static class WorkspaceRepositoryTagPins
     }
 
     public static bool TryApply(
-        WorkspaceManifestModel manifest,
+        WorkspaceManifest manifest,
         IReadOnlyList<WorkspaceRepositoryTagPinChange> changes,
-        out WorkspaceManifestModel updated,
+        out WorkspaceManifest updated,
         out string? error)
     {
         updated = manifest;

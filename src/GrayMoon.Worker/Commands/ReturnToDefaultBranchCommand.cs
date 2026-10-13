@@ -100,7 +100,6 @@ public sealed class ReturnToDefaultBranchCommand(IGitService git, IGitRepository
             IncludeGitVersion = true,
             IncludeBranchLists = true,
             IncludeProjects = true,
-            IsWorkspaceRepository = WorkerRepositoryPaths.IsWorkspaceRepository(repositoryName, request.WorkspaceRepositoryName),
             BranchNameOverride = defaultBranch,
             Capabilities = request.Capabilities
         }, cancellationToken);

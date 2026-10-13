@@ -52,19 +52,7 @@ public sealed partial class WorkspaceProjectRepository
             .ToListAsync(cancellationToken);
         if (links.Count == 0) return new RepositoryDependencyGraph(new List<RepositoryDependencyNode>(), new List<RepositoryDependencyEdge>());
 
-        // The Workspace-role repository has no projects (D6) and no dependency level, so it never takes part in the dependency graph.
-        var sourceLinks = links.Where(l => l.Role != WorkspaceRepositoryRole.Workspace).ToList();
-        var repoIdsInWorkspace = sourceLinks.Select(l => l.RepositoryId).ToHashSet();
-        var nameToRepoId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        foreach (var wr in sourceLinks)
-        {
-            if (wr.Repository != null && !string.IsNullOrEmpty(wr.Repository.RepositoryName))
-            {
-                var name = wr.Repository.RepositoryName.Trim();
-                if (!nameToRepoId.ContainsKey(name))
-                    nameToRepoId[name] = wr.RepositoryId;
-            }
-        }
+        var (repoIdsInWorkspace, nameToRepoId, workspaceRoleRepoIds) = BuildGraphMembership(links);
 
         var projects = await GetByWorkspaceIdAsync(workspaceId, cancellationToken);
         var byProject = projects.ToDictionary(p => p.ProjectId);
@@ -78,11 +66,12 @@ public sealed partial class WorkspaceProjectRepository
             workspaceId,
             repoIdsInWorkspace,
             nameToRepoId,
+            workspaceRoleRepoIds,
             uniqueEdges,
             byProject,
             cancellationToken);
 
-        var repoNodes = sourceLinks
+        var repoNodes = links
             .Where(wr => wr.Repository != null && !string.IsNullOrEmpty(wr.Repository.RepositoryName))
             .Select(wr => new RepositoryDependencyNode(wr.RepositoryId, wr.Repository!.RepositoryName!, wr.RepositoryType))
             .ToList();
@@ -102,19 +91,7 @@ public sealed partial class WorkspaceProjectRepository
             .ToListAsync(cancellationToken);
         if (links.Count == 0) return new RepositoryDependencyGraph(new List<RepositoryDependencyNode>(), new List<RepositoryDependencyEdge>());
 
-        // The Workspace-role repository has no projects (D6) and no dependency level, so it never takes part in the dependency graph.
-        var sourceLinks = links.Where(l => l.Role != WorkspaceRepositoryRole.Workspace).ToList();
-        var repoIdsInWorkspace = sourceLinks.Select(l => l.RepositoryId).ToHashSet();
-        var nameToRepoId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        foreach (var wr in sourceLinks)
-        {
-            if (wr.Repository != null && !string.IsNullOrEmpty(wr.Repository.RepositoryName))
-            {
-                var name = wr.Repository.RepositoryName.Trim();
-                if (!nameToRepoId.ContainsKey(name))
-                    nameToRepoId[name] = wr.RepositoryId;
-            }
-        }
+        var (repoIdsInWorkspace, nameToRepoId, workspaceRoleRepoIds) = BuildGraphMembership(links);
 
         var projects = await GetByWorkspaceIdAsync(workspaceId, contextId, cancellationToken);
         var byProject = projects.ToDictionary(p => p.ProjectId);
@@ -128,12 +105,13 @@ public sealed partial class WorkspaceProjectRepository
             workspaceId,
             repoIdsInWorkspace,
             nameToRepoId,
+            workspaceRoleRepoIds,
             uniqueEdges,
             byProject,
             cancellationToken,
             contextId?.Value);
 
-        var repoNodes = sourceLinks
+        var repoNodes = links
             .Where(wr => wr.Repository != null && !string.IsNullOrEmpty(wr.Repository.RepositoryName))
             .Select(wr => new RepositoryDependencyNode(wr.RepositoryId, wr.Repository!.RepositoryName!, wr.RepositoryType))
             .ToList();
@@ -193,6 +171,7 @@ public sealed partial class WorkspaceProjectRepository
     /// <summary>
     /// Repo IDs that must not appear in the custom-dependencies picker for the given dependent
     /// because adding them would create a cycle. Already-existing dependencies of the dependent are excluded from this set.
+    /// The Workspace-role repository is always in it: nothing may depend on it (see <see cref="IsEdgeIntoWorkspaceRole"/>).
     /// </summary>
     public async Task<HashSet<int>> GetCircularCustomDependencyRepoIdsAsync(
         int workspaceId,
@@ -215,6 +194,11 @@ public sealed partial class WorkspaceProjectRepository
         {
             if (candidateRepoId == dependentRepositoryId)
                 continue;
+            if (IsEdgeIntoWorkspaceRole(graph.WorkspaceRoleRepoIds, candidateRepoId))
+            {
+                circular.Add(candidateRepoId);
+                continue;
+            }
             if (existingDepsOfDependent.Contains(candidateRepoId))
                 continue;
             if (WouldCreateCycleOnAdd(allEdges, forwardAdjacency, dependentRepositoryId, candidateRepoId))
@@ -274,6 +258,7 @@ public sealed partial class WorkspaceProjectRepository
 
     private sealed record WorkspaceRepoDependencyGraph(
         HashSet<int> RepoIdsInWorkspace,
+        HashSet<int> WorkspaceRoleRepoIds,
         RepoDependencyEdgeSets EdgeSets);
 
     private async Task<WorkspaceRepoDependencyGraph?> LoadWorkspaceRepoDependencyGraphAsync(
@@ -288,19 +273,7 @@ public sealed partial class WorkspaceProjectRepository
         if (links.Count == 0)
             return null;
 
-        // The Workspace-role repository has no projects (D6) and no dependency level, so it never takes part in the dependency graph.
-        var sourceLinks = links.Where(l => l.Role != WorkspaceRepositoryRole.Workspace).ToList();
-        var repoIdsInWorkspace = sourceLinks.Select(l => l.RepositoryId).ToHashSet();
-        var nameToRepoId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        foreach (var wr in sourceLinks)
-        {
-            if (wr.Repository != null && !string.IsNullOrEmpty(wr.Repository.RepositoryName))
-            {
-                var name = wr.Repository.RepositoryName.Trim();
-                if (!nameToRepoId.ContainsKey(name))
-                    nameToRepoId[name] = wr.RepositoryId;
-            }
-        }
+        var (repoIdsInWorkspace, nameToRepoId, workspaceRoleRepoIds) = BuildGraphMembership(links);
 
         var projects = await GetByWorkspaceIdAsync(workspaceId, cancellationToken);
         var byProject = projects.ToDictionary(p => p.ProjectId);
@@ -314,11 +287,12 @@ public sealed partial class WorkspaceProjectRepository
             workspaceId,
             repoIdsInWorkspace,
             nameToRepoId,
+            workspaceRoleRepoIds,
             uniqueEdges,
             byProject,
             cancellationToken);
 
-        return new WorkspaceRepoDependencyGraph(repoIdsInWorkspace, edgeSets);
+        return new WorkspaceRepoDependencyGraph(repoIdsInWorkspace, workspaceRoleRepoIds, edgeSets);
     }
 
     private sealed record RepoDependencyEdgeSets(
@@ -328,10 +302,46 @@ public sealed partial class WorkspaceProjectRepository
         HashSet<(int DepRepoId, int RefRepoId)> Custom,
         List<(int DepRepoId, int RefRepoId)> All);
 
+    /// <summary>
+    /// Every repository of the Workspace takes part in the dependency graph, the Workspace-role repository too: its own
+    /// .csproj files, version files and custom dependencies make it depend on source repositories. It is the top of the
+    /// graph, so <c>WorkspaceRoleRepoIds</c> lets edge builders drop any edge pointing at it (see <see cref="IsEdgeIntoWorkspaceRole"/>).
+    /// </summary>
+    private static (HashSet<int> RepoIds, Dictionary<string, int> NameToRepoId, HashSet<int> WorkspaceRoleRepoIds) BuildGraphMembership(
+        IEnumerable<WorkspaceRepositoryLink> links)
+    {
+        var repoIds = new HashSet<int>();
+        var workspaceRoleRepoIds = new HashSet<int>();
+        var nameToRepoId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var wr in links)
+        {
+            repoIds.Add(wr.RepositoryId);
+            if (wr.Role == WorkspaceRepositoryRole.Workspace)
+                workspaceRoleRepoIds.Add(wr.RepositoryId);
+            if (wr.Repository != null && !string.IsNullOrEmpty(wr.Repository.RepositoryName))
+            {
+                var name = wr.Repository.RepositoryName.Trim();
+                if (!nameToRepoId.ContainsKey(name))
+                    nameToRepoId[name] = wr.RepositoryId;
+            }
+        }
+
+        return (repoIds, nameToRepoId, workspaceRoleRepoIds);
+    }
+
+    /// <summary>
+    /// True when <paramref name="referencedRepoId"/> is the Workspace-role repository. Nothing may depend on it: it records
+    /// the state of every source repository, so it is always updated and pushed last, and an edge into it (a source .csproj
+    /// referencing one of its projects, a version-file token or a custom dependency naming it) would only create a cycle.
+    /// </summary>
+    private static bool IsEdgeIntoWorkspaceRole(IReadOnlySet<int> workspaceRoleRepoIds, int referencedRepoId)
+        => workspaceRoleRepoIds.Contains(referencedRepoId);
+
     private async Task<RepoDependencyEdgeSets> BuildRepoDependencyEdgeSetsAsync(
         int workspaceId,
         HashSet<int> repoIdsInWorkspace,
         Dictionary<string, int> nameToRepoId,
+        HashSet<int> workspaceRoleRepoIds,
         List<(int DependentProjectId, int ReferencedProjectId, string? Version)> uniqueEdges,
         Dictionary<int, WorkspaceProject> byProject,
         CancellationToken cancellationToken,
@@ -348,6 +358,7 @@ public sealed partial class WorkspaceProjectRepository
             if (!byProject.TryGetValue(depId, out var depProj) || !byProject.TryGetValue(refId, out var refProj)) continue;
             if (depProj.RepositoryId == refProj.RepositoryId) continue;
             if (!repoIdsInWorkspace.Contains(depProj.RepositoryId) || !repoIdsInWorkspace.Contains(refProj.RepositoryId)) continue;
+            if (IsEdgeIntoWorkspaceRole(workspaceRoleRepoIds, refProj.RepositoryId)) continue;
 
             if (refProj.IsGenerated)
                 generatedPackageRepoEdges.Add((depProj.RepositoryId, refProj.RepositoryId));
@@ -403,11 +414,14 @@ public sealed partial class WorkspaceProjectRepository
             {
                 if (!nameToRepoId.TryGetValue(token.RepositoryName, out var referencedRepoId)) continue;
                 if (referencedRepoId == dependentRepoId) continue;
+                if (IsEdgeIntoWorkspaceRole(workspaceRoleRepoIds, referencedRepoId)) continue;
                 fileConfigRepoEdges.Add((dependentRepoId, referencedRepoId));
             }
         }
 
-        var customRepoEdges = await customDependencyRepository.GetRepoEdgesByWorkspaceIdAsync(workspaceId, cancellationToken);
+        var customRepoEdges = (await customDependencyRepository.GetRepoEdgesByWorkspaceIdAsync(workspaceId, cancellationToken))
+            .Where(e => !IsEdgeIntoWorkspaceRole(workspaceRoleRepoIds, e.RefRepoId))
+            .ToHashSet();
 
         var allRepoEdges = projectDerivedRepoEdges
             .Union(generatedPackageRepoEdges)

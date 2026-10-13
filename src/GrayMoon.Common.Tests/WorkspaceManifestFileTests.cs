@@ -1,10 +1,11 @@
-using GrayMoon.App.Services.WorkspaceManifest;
-using GrayMoon.Application.WorkspaceManifest;
+using GrayMoon.Common.Manifest;
 
-namespace GrayMoon.App.Tests;
+namespace GrayMoon.Common.Tests;
 
-public sealed class WorkspaceManifestSerializerTests
+public sealed class WorkspaceManifestFileTests
 {
+    private static readonly IWorkspaceManifestFile ManifestFile = new WorkspaceManifestFile();
+
     private static WorkspaceManifest Sample() => new(
         1,
         new WorkspaceManifestWorkspace("AVR", new WorkspaceManifestProfile("basic", "none", "none")),
@@ -19,10 +20,10 @@ public sealed class WorkspaceManifestSerializerTests
     [Fact]
     public void Round_trip_is_byte_identical()
     {
-        var first = WorkspaceManifestSerializer.Serialize(Sample());
+        var first = ManifestFile.Serialize(Sample());
 
-        Assert.True(WorkspaceManifestSerializer.TryParse(first, out var parsed, out var error), error);
-        var second = WorkspaceManifestSerializer.Serialize(parsed!);
+        Assert.True(ManifestFile.TryParse(first, out var parsed, out var error), error);
+        var second = ManifestFile.Serialize(parsed!);
 
         Assert.Equal(first, second);
     }
@@ -45,7 +46,7 @@ public sealed class WorkspaceManifestSerializerTests
             ]
         };
 
-        var text = WorkspaceManifestSerializer.Serialize(manifest);
+        var text = ManifestFile.Serialize(manifest);
 
         Assert.True(text.IndexOf("AAA.example.com", StringComparison.Ordinal) < text.IndexOf("zzz.example.com", StringComparison.Ordinal));
         var alpha = text.IndexOf("\"Alpha\"", StringComparison.Ordinal);
@@ -57,7 +58,7 @@ public sealed class WorkspaceManifestSerializerTests
     [Fact]
     public void Serialize_uses_lf_and_trailing_newline()
     {
-        var text = WorkspaceManifestSerializer.Serialize(Sample());
+        var text = ManifestFile.Serialize(Sample());
 
         Assert.DoesNotContain('\r', text);
         Assert.EndsWith("\n", text);
@@ -66,7 +67,7 @@ public sealed class WorkspaceManifestSerializerTests
     [Fact]
     public void Serialize_never_contains_id_fields()
     {
-        var text = WorkspaceManifestSerializer.Serialize(Sample());
+        var text = ManifestFile.Serialize(Sample());
 
         Assert.DoesNotContain("\"workspaceId\"", text);
         Assert.DoesNotContain("\"repositoryId\"", text);
@@ -80,7 +81,7 @@ public sealed class WorkspaceManifestSerializerTests
     {
         const string json = """{ "version": 2, "workspace": { "name": "AVR" } }""";
 
-        Assert.False(WorkspaceManifestSerializer.TryParse(json, out var manifest, out var error));
+        Assert.False(ManifestFile.TryParse(json, out var manifest, out var error));
         Assert.Null(manifest);
         Assert.Equal("Workspace definition schema 2 is newer than this GrayMoon", error);
     }
@@ -90,7 +91,7 @@ public sealed class WorkspaceManifestSerializerTests
     {
         const string json = """{ "workspace": { "name": "AVR" } }""";
 
-        Assert.True(WorkspaceManifestSerializer.TryParse(json, out var manifest, out var error), error);
+        Assert.True(ManifestFile.TryParse(json, out var manifest, out var error), error);
         Assert.Equal(1, manifest!.SchemaVersion);
         Assert.Empty(manifest.Connectors);
         Assert.Empty(manifest.Repositories);
@@ -106,7 +107,7 @@ public sealed class WorkspaceManifestSerializerTests
               "repositories": [ { "name": "Avr.Api", "repositoryUrl": "u", "connectorUrl": "c", "other": 5 } ] }
             """;
 
-        Assert.True(WorkspaceManifestSerializer.TryParse(json, out var manifest, out var error), error);
+        Assert.True(ManifestFile.TryParse(json, out var manifest, out var error), error);
         Assert.Equal("AVR", manifest!.Workspace.Name);
         Assert.Empty(manifest.Connectors);
         Assert.Single(manifest.Repositories);
@@ -115,7 +116,7 @@ public sealed class WorkspaceManifestSerializerTests
     [Fact]
     public void Serialize_omits_tag_and_commit_when_unset()
     {
-        var text = WorkspaceManifestSerializer.Serialize(Sample());
+        var text = ManifestFile.Serialize(Sample());
 
         Assert.DoesNotContain("\"tag\"", text);
         Assert.DoesNotContain("\"commit\"", text);
@@ -138,15 +139,15 @@ public sealed class WorkspaceManifestSerializerTests
             ]
         };
 
-        var text = WorkspaceManifestSerializer.Serialize(manifest);
+        var text = ManifestFile.Serialize(manifest);
 
         Assert.Contains("\"tag\": \"v1.0.0\"", text);
         Assert.Contains($"\"commit\": \"{sha}\"", text);
-        Assert.True(WorkspaceManifestSerializer.TryParse(text, out var parsed, out var error), error);
+        Assert.True(ManifestFile.TryParse(text, out var parsed, out var error), error);
         var repository = Assert.Single(parsed!.Repositories);
         Assert.Equal("v1.0.0", repository.Tag);
         Assert.Equal(sha, repository.Commit);
-        Assert.Equal(text, WorkspaceManifestSerializer.Serialize(parsed));
+        Assert.Equal(text, ManifestFile.Serialize(parsed));
     }
 
     [Fact]
@@ -157,7 +158,7 @@ public sealed class WorkspaceManifestSerializerTests
               "repositories": [ { "name": "Avr.Api", "repositoryUrl": "u", "connectorUrl": "c", "tag": "v1", "commit": "0123456789ABCDEF0123456789abcdef01234567" } ] }
             """;
 
-        Assert.True(WorkspaceManifestSerializer.TryParse(json, out var parsed, out var error), error);
+        Assert.True(ManifestFile.TryParse(json, out var parsed, out var error), error);
         Assert.Equal("0123456789abcdef0123456789abcdef01234567", parsed!.Repositories[0].Commit);
     }
 
@@ -169,7 +170,7 @@ public sealed class WorkspaceManifestSerializerTests
               "repositories": [ { "name": "Avr.Api", "repositoryUrl": "u", "connectorUrl": "c", "tag": "v1" } ] }
             """;
 
-        Assert.False(WorkspaceManifestSerializer.TryParse(json, out var manifest, out var error));
+        Assert.False(ManifestFile.TryParse(json, out var manifest, out var error));
         Assert.Null(manifest);
         Assert.Equal("Repository 'Avr.Api' is on a tag but is missing the tag name or the full commit hash.", error);
     }
@@ -182,7 +183,7 @@ public sealed class WorkspaceManifestSerializerTests
               "repositories": [ { "name": "Avr.Api", "repositoryUrl": "u", "connectorUrl": "c", "tag": "v1", "commit": "abc123" } ] }
             """;
 
-        Assert.False(WorkspaceManifestSerializer.TryParse(json, out var manifest, out var error));
+        Assert.False(ManifestFile.TryParse(json, out var manifest, out var error));
         Assert.Null(manifest);
         Assert.Equal("Repository 'Avr.Api' commit must be the full commit hash.", error);
     }
@@ -192,8 +193,69 @@ public sealed class WorkspaceManifestSerializerTests
     {
         const string json = """{ "version": 1, "workspace": { "profile": { "type": "basic", "versioning": "none", "ci": "none" } } }""";
 
-        Assert.False(WorkspaceManifestSerializer.TryParse(json, out var manifest, out var error));
+        Assert.False(ManifestFile.TryParse(json, out var manifest, out var error));
         Assert.Null(manifest);
         Assert.False(string.IsNullOrWhiteSpace(error));
+    }
+
+    [Fact]
+    public void File_name_is_graymoon_json()
+        => Assert.Equal("graymoon.json", ManifestFile.FileName);
+
+    [Fact]
+    public void Repository_folder_names_are_read_from_every_listed_repository()
+    {
+        var names = ManifestFile.ReadRepositoryFolderNames("""
+            {
+              "version": 1,
+              "repositories": [
+                { "name": "GrayMoon", "repositoryUrl": "https://github.com/acme/GrayMoon.git" },
+                { "Name": " GrayMoon.Desktop " }
+              ]
+            }
+            """);
+
+        Assert.Equal(["GrayMoon", "GrayMoon.Desktop"], names);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("{ not json")]
+    [InlineData("[]")]
+    [InlineData("""{ "version": 1 }""")]
+    [InlineData("""{ "repositories": {} }""")]
+    public void Repository_folder_names_of_missing_or_unreadable_content_are_empty(string? json)
+        => Assert.Empty(ManifestFile.ReadRepositoryFolderNames(json));
+
+    [Fact]
+    public void Repository_folder_names_skip_entries_that_cannot_be_one_folder_name()
+    {
+        var names = ManifestFile.ReadRepositoryFolderNames("""
+            { "repositories": [ "Api", { "name": 5 }, { "name": "" }, { "name": ".." }, { "name": "a/b" }, { "name": "a\\b" }, { "name": "Api" }, { "name": "api" } ] }
+            """);
+
+        Assert.Equal(["Api"], names);
+    }
+
+    [Fact]
+    public async Task Definition_is_read_from_the_root_of_a_directory()
+    {
+        var folder = Directory.CreateTempSubdirectory("graymoon-definition-").FullName;
+        try
+        {
+            Assert.Null(await ManifestFile.ReadFromDirectoryAsync(folder));
+            Assert.Empty(ManifestFile.ReadRepositoryFolderNamesFromDirectory(folder));
+
+            const string content = """{ "repositories": [ { "name": "Api" } ] }""";
+            File.WriteAllText(Path.Combine(folder, ManifestFile.FileName), content);
+
+            Assert.Equal(content, await ManifestFile.ReadFromDirectoryAsync(folder));
+            Assert.Equal(["Api"], ManifestFile.ReadRepositoryFolderNamesFromDirectory(folder));
+        }
+        finally
+        {
+            Directory.Delete(folder, true);
+        }
     }
 }

@@ -5,6 +5,7 @@ using GrayMoon.App.Services.Git;
 using GrayMoon.App.Services.WorkspaceManifest;
 using GrayMoon.Application;
 using GrayMoon.Application.WorkspaceManifest;
+using GrayMoon.Common.Manifest;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace GrayMoon.App.Tests;
@@ -157,11 +158,6 @@ public sealed class WorkspaceManifestDriftTriggerTests
         public Task<WorkspaceManifest> BuildFromDatabaseAsync(int workspaceId, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
-        public string Serialize(WorkspaceManifest manifest) => throw new NotSupportedException();
-
-        public bool TryParse(string content, out WorkspaceManifest? manifest, out string? error) =>
-            throw new NotSupportedException();
-
         public Task<OperationResult> WriteAuthoritativeManifestAsync(int workspaceId, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
@@ -177,4 +173,4 @@ public sealed class WorkspaceManifestDriftTriggerTests
         public Task<OperationResult> WriteCodeGraphConfigAsync(int workspaceId, GrayMoon.Application.Features.WorkspaceFeatureContextId? contextId = null, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
     }
-}
+}

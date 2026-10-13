@@ -1,11 +1,16 @@
 using System.Diagnostics;
+using GrayMoon.Common.Manifest;
 using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Models;
 using Microsoft.Extensions.Logging;
 
 namespace GrayMoon.Worker.Services;
 
-public sealed class CsProjFileService(ICsProjFileParser parser, IGitIgnoreService ignore, ILogger<CsProjFileService> logger) : ICsProjFileService
+public sealed class CsProjFileService(
+    ICsProjFileParser parser,
+    IGitIgnoreService ignore,
+    IWorkspaceManifestFile manifestFile,
+    ILogger<CsProjFileService> logger) : ICsProjFileService
 {
     private const int DefaultMaxParallel = 8;
 
@@ -72,10 +77,15 @@ public sealed class CsProjFileService(ICsProjFileParser parser, IGitIgnoreServic
         var sw = Stopwatch.StartNew();
         var stats = new WalkStats();
         var results = new List<string>();
+        // A Workspace repository's working tree holds the Workspace's other repositories as immediate child
+        // folders. Skip every one its definition lists, on top of the nested-repository and Git-ignore pruning
+        // below, so their projects are never attributed to the Workspace repository.
+        var siblingRepositories = new HashSet<string>(
+            manifestFile.ReadRepositoryFolderNamesFromDirectory(repoPath), StringComparer.OrdinalIgnoreCase);
         try
         {
             using var session = ignore.Open(repoPath);
-            Walk(session, repoPath, repoPath, relativeDir: "", results, stats, cancellationToken);
+            Walk(session, repoPath, repoPath, relativeDir: "", siblingRepositories, results, stats, cancellationToken);
         }
         catch (GitIgnoreException ex)
         {
@@ -84,19 +94,19 @@ public sealed class CsProjFileService(ICsProjFileParser parser, IGitIgnoreServic
 
         results.Sort(StringComparer.Ordinal);
         logger.LogDebug(
-            "Git ignore/project discovery: repo={RepoPath} elapsedMs={ElapsedMs} directoriesVisited={Visited} directoriesPruned={Pruned} nestedReposSkipped={Nested} candidateFiles={Candidates} excludedCandidates={ExcludedCandidates} returnedFiles={Returned}",
-            repoPath, sw.ElapsedMilliseconds, stats.Visited, stats.Pruned, stats.NestedRepos, stats.Candidates, stats.ExcludedCandidates, results.Count);
+            "Git ignore/project discovery: repo={RepoPath} elapsedMs={ElapsedMs} directoriesVisited={Visited} directoriesPruned={Pruned} nestedReposSkipped={Nested} siblingReposSkipped={Siblings} candidateFiles={Candidates} excludedCandidates={ExcludedCandidates} returnedFiles={Returned}",
+            repoPath, sw.ElapsedMilliseconds, stats.Visited, stats.Pruned, stats.NestedRepos, stats.SiblingRepos, stats.Candidates, stats.ExcludedCandidates, results.Count);
         return Task.FromResult<IReadOnlyList<string>>(results);
     }
 
     private sealed class WalkStats
     {
-        public int Visited, Pruned, NestedRepos, Candidates, ExcludedCandidates;
+        public int Visited, Pruned, NestedRepos, SiblingRepos, Candidates, ExcludedCandidates;
     }
 
     private static void Walk(
         IGitIgnoreSession session, string repoRoot, string directory, string relativeDir,
-        List<string> results, WalkStats stats, CancellationToken cancellationToken)
+        IReadOnlySet<string> siblingRepositories, List<string> results, WalkStats stats, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         stats.Visited++;
@@ -117,6 +127,13 @@ public sealed class CsProjFileService(ICsProjFileParser parser, IGitIgnoreServic
                 var name = Path.GetFileName(sub);
                 if (string.Equals(name, ".git", StringComparison.OrdinalIgnoreCase))
                     continue;
+                // A sibling repository is decided from its folder name alone, before anything looks inside it: no
+                // .git probe, no ignore check, no enumeration. Listed even before it is cloned.
+                if (relativeDir.Length == 0 && siblingRepositories.Contains(name))
+                {
+                    stats.SiblingRepos++;
+                    continue;
+                }
                 if (WorkerRepositoryPaths.HasGitMetadata(sub))
                 {
                     stats.NestedRepos++; // Git never tracks the contents of a nested repository or submodule.
@@ -130,7 +147,7 @@ public sealed class CsProjFileService(ICsProjFileParser parser, IGitIgnoreServic
                     continue;
                 }
 
-                Walk(session, repoRoot, sub, rel, results, stats, cancellationToken);
+                Walk(session, repoRoot, sub, rel, siblingRepositories, results, stats, cancellationToken);
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

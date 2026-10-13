@@ -25,6 +25,7 @@ using GrayMoon.Application.Features;
 using GrayMoon.Application.Workspaces;
 using GrayMoon.Common;
 using GrayMoon.Common.Git;
+using GrayMoon.Common.Manifest;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -212,6 +213,7 @@ try
     builder.Services.AddScoped<IWorkspacePullRequestOperations, WorkspacePullRequestOperations>();
     builder.Services.AddScoped<IWorkspaceFileOperations, WorkspaceFileOperations>();
     builder.Services.AddScoped<IWorkspaceGitChangesOperations, WorkspaceGitChangesOperations>();
+    builder.Services.AddSingleton<IWorkspaceManifestFile, WorkspaceManifestFile>();
     builder.Services.AddScoped<GrayMoon.Application.WorkspaceManifest.IWorkspaceManifestService, GrayMoon.App.Services.WorkspaceManifest.WorkspaceManifestService>();
     builder.Services.AddScoped<GrayMoon.App.Services.WorkspaceManifest.IRemoteWorkspaceManifestReader, GrayMoon.App.Services.WorkspaceManifest.GitHubRemoteWorkspaceManifestReader>();
     builder.Services.AddScoped<IWorkspaceRepositoryOperations, GrayMoon.App.Services.Application.WorkspaceRepositoryOperations>();

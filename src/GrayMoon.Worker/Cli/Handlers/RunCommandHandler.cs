@@ -2,6 +2,7 @@ using System.Reflection;
 using GrayMoon.Worker.Abstractions;
 using GrayMoon.Common;
 using GrayMoon.Common.Git;
+using GrayMoon.Common.Manifest;
 using GrayMoon.Worker.Commands;
 using GrayMoon.Worker.Hosted;
 using GrayMoon.Worker.Hub;
@@ -126,6 +127,7 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<IWorkerTokenProvider, WorkerTokenProvider>();
         builder.Services.AddSingleton<IWorkspaceCapabilityProvider, WorkspaceCapabilityProvider>();
         builder.Services.AddSingleton<IGitIgnoreService, LibGit2SharpGitIgnoreService>();
+        builder.Services.AddSingleton<IWorkspaceManifestFile, WorkspaceManifestFile>();
         builder.Services.AddSingleton<ICsProjFileParser, CsProjFileParser>();
         builder.Services.AddSingleton<ICsProjFileService, CsProjFileService>();
         builder.Services.AddSingleton<GitVersionResultCache>();

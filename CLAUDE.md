@@ -104,7 +104,7 @@ Allowed leftovers until a later pass: `IWorkspacePageService` bag properties alr
 
 ### Dependency levels
 
-Workspace repositories are topologically sorted into dependency levels (Kahn's algorithm). Level 1 = no dependencies; higher levels depend on lower ones. This drives: grid grouping, push ordering (synchronized push waits for NuGet availability level-by-level), and the dependency update flow. Dependency edges come from three sources, all merged before the sort runs: (1) csproj `<PackageReference>` entries, (2) file-config token names (`{repositoryname}` in `WorkspaceFileVersionConfig` patterns), and (3) user-declared `WorkspaceRepositoryCustomDependencies` edges.
+Workspace repositories are topologically sorted into dependency levels (Kahn's algorithm). Level 1 = no dependencies; higher levels depend on lower ones. This drives: grid grouping, push ordering (synchronized push waits for NuGet availability level-by-level), and the dependency update flow. Dependency edges come from three sources, all merged before the sort runs: (1) csproj `<PackageReference>` entries, (2) file-config token names (`{repositoryname}` in `WorkspaceFileVersionConfig` patterns), and (3) user-declared `WorkspaceRepositoryCustomDependencies` edges. The Workspace-role repository takes part too (its `.csproj` scan skips the sibling repositories its `graymoon.json` lists, on top of the nested-repository and Git-ignore pruning), but it is always persisted as the top level (max source level + 1) and any edge pointing at it is dropped (`IsEdgeIntoWorkspaceRole`), so it never closes a cycle and is updated and pushed last. The grid still pins it above the level groups.
 
 ### Token encryption
 

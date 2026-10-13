@@ -1,3 +1,4 @@
+using GrayMoon.Common.Manifest;
 using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Services;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -7,7 +8,7 @@ namespace GrayMoon.Worker.Tests;
 public sealed class CsProjFileServiceIgnoredDirTests : IDisposable
 {
     private readonly TempGitRepositoryFixture _repo = new();
-    private readonly CsProjFileService _service = new(new CsProjFileParser(), new LibGit2SharpGitIgnoreService(), NullLogger<CsProjFileService>.Instance);
+    private readonly CsProjFileService _service = new(new CsProjFileParser(), new LibGit2SharpGitIgnoreService(), new WorkspaceManifestFile(), NullLogger<CsProjFileService>.Instance);
 
     public void Dispose() => _repo.Dispose();
 
@@ -106,6 +107,66 @@ public sealed class CsProjFileServiceIgnoredDirTests : IDisposable
     }
 
     [Fact]
+    public async Task FindAsync_skips_top_level_sibling_repositories_listed_in_the_workspace_definition()
+    {
+        _repo.CommitInitial();
+        _repo.WriteFile("graymoon.json", """{ "repositories": [ { "name": "Repo.A" }, { "name": "repo.b" } ] }""");
+        _repo.WriteFile("tools/Ws/Ws.csproj", MinimalCsproj("Ws"));
+        // Neither sibling is cloned or Git-ignored here: only the definition keeps them out.
+        _repo.WriteFile("Repo.A/src/A.csproj", MinimalCsproj("A"));
+        _repo.WriteFile("Repo.B/src/B.csproj", MinimalCsproj("B"));
+        // A listed name deeper in the tree is not a sibling repository.
+        _repo.WriteFile("tools/Repo.A/Nested.csproj", MinimalCsproj("Nested"));
+
+        Assert.Equal(["tools/Repo.A/Nested.csproj", "tools/Ws/Ws.csproj"], await FindPathsAsync());
+    }
+
+    [Fact]
+    public async Task FindAsync_keeps_the_nested_repository_guard_for_unlisted_folders_of_a_workspace_repository()
+    {
+        _repo.CommitInitial();
+        _repo.WriteFile("graymoon.json", """{ "repositories": [ { "name": "listed" } ] }""");
+        _repo.WriteFile("Root.csproj", MinimalCsproj("Root"));
+        _repo.WriteFile("unlisted/U.csproj", MinimalCsproj("U"));
+        Directory.CreateDirectory(Path.Combine(_repo.RepositoryPath, "unlisted", ".git"));
+
+        Assert.Equal(["Root.csproj"], await FindPathsAsync());
+    }
+
+    [Fact]
+    public async Task FindAsync_with_an_unreadable_workspace_definition_falls_back_to_the_other_guards()
+    {
+        CommitGitIgnore("/ignored-sibling/\n");
+        _repo.WriteFile("graymoon.json", "{ not json");
+        _repo.WriteFile("Root.csproj", MinimalCsproj("Root"));
+        _repo.WriteFile("ignored-sibling/I.csproj", MinimalCsproj("I"));
+        _repo.WriteFile("nested-sibling/N.csproj", MinimalCsproj("N"));
+        Directory.CreateDirectory(Path.Combine(_repo.RepositoryPath, "nested-sibling", ".git"));
+
+        Assert.Equal(["Root.csproj"], await FindPathsAsync());
+    }
+
+    [Fact]
+    public async Task FindAsync_never_looks_inside_a_listed_sibling_repository()
+    {
+        _repo.CommitInitial();
+        _repo.WriteFile("graymoon.json", """{ "repositories": [ { "name": "Sibling" } ] }""");
+        _repo.WriteFile("Root.csproj", MinimalCsproj("Root"));
+        _repo.WriteFile("src/Lib/Lib.csproj", MinimalCsproj("Lib"));
+        _repo.WriteFile("Sibling/deep/S.csproj", MinimalCsproj("S"));
+        _repo.WriteFile("Sibling/S.csproj", MinimalCsproj("S2"));
+        var ignore = new RecordingGitIgnoreService(new LibGit2SharpGitIgnoreService());
+        var service = new CsProjFileService(new CsProjFileParser(), ignore, new WorkspaceManifestFile(), NullLogger<CsProjFileService>.Instance);
+
+        var found = await service.GetProjectPathsAsync(_repo.RepositoryPath);
+
+        Assert.Equal(["Root.csproj", "src/Lib/Lib.csproj"], found.Select(p => Path.GetRelativePath(_repo.RepositoryPath, p).Replace('\\', '/')));
+        // The sibling is skipped on its name: not even the folder itself reaches the ignore check, nothing under it is listed.
+        Assert.DoesNotContain(ignore.Checked, p => p.StartsWith("Sibling", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("src", ignore.Checked);
+    }
+
+    [Fact]
     public async Task GetProjectPathsAsync_throws_instead_of_returning_empty_when_not_a_repository()
     {
         using var plain = new TempFolder();
@@ -118,6 +179,27 @@ public sealed class CsProjFileServiceIgnoredDirTests : IDisposable
     {
         public string Path { get; } = Directory.CreateTempSubdirectory("graymoon-plain-").FullName;
         public void Dispose() { try { Directory.Delete(Path, true); } catch { } }
+    }
+
+    /// <summary>Records every path the walk asks the ignore rules about, so a test can prove a folder was never entered.</summary>
+    private sealed class RecordingGitIgnoreService(IGitIgnoreService inner) : IGitIgnoreService
+    {
+        public List<string> Checked { get; } = [];
+
+        public IGitIgnoreSession Open(string repositoryPath) => new Session(inner.Open(repositoryPath), Checked);
+
+        private sealed class Session(IGitIgnoreSession inner, List<string> checkedPaths) : IGitIgnoreSession
+        {
+            public bool IsExcluded(string relativePath, GitPathKind kind)
+            {
+                checkedPaths.Add(relativePath);
+                return inner.IsExcluded(relativePath, kind);
+            }
+
+            public GitStageSelection SelectStageable(IReadOnlyList<string> relativePaths) => inner.SelectStageable(relativePaths);
+
+            public void Dispose() => inner.Dispose();
+        }
     }
 
     private static string MinimalCsproj(string name) =>

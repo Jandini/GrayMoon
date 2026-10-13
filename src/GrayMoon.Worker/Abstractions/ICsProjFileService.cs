@@ -5,7 +5,7 @@ namespace GrayMoon.Worker.Abstractions;
 /// <summary>Finds and parses .csproj files within a repository path (root and subdirectories) that Git does not exclude, with parallel parsing.</summary>
 public interface ICsProjFileService
 {
-    /// <summary>Finds all *.csproj in repo root and subdirectories that Git does not exclude (see IGitIgnoreSession.IsExcluded; nested repositories are skipped), parses each in parallel (up to maxParallel at a time when specified), and returns parsed info for every successfully parsed file. A file that fails to parse is skipped. Throws when discovery itself fails.</summary>
+    /// <summary>Finds all *.csproj in repo root and subdirectories that Git does not exclude (see IGitIgnoreSession.IsExcluded; nested repositories and, for a Workspace repository, the sibling repositories its graymoon.json lists are skipped), parses each in parallel (up to maxParallel at a time when specified), and returns parsed info for every successfully parsed file. A file that fails to parse is skipped. Throws when discovery itself fails.</summary>
     /// <param name="maxParallel">When null, uses a default (e.g. 8).</param>
     Task<IReadOnlyList<CsProjFileInfo>> FindAsync(string repoPath, CancellationToken cancellationToken = default, int? maxParallel = null);
 

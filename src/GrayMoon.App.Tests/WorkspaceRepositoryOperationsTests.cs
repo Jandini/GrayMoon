@@ -9,6 +9,7 @@ using GrayMoon.App.Services.GitChanges;
 using GrayMoon.App.Services.WorkspaceManifest;
 using GrayMoon.Application.Features;
 using GrayMoon.Application.WorkspaceManifest;
+using GrayMoon.Common.Manifest;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -641,7 +642,7 @@ public sealed class WorkspaceRepositoryOperationsTests
         (string Type, string Versioning, string Ci) profile,
         string[] connectors,
         params (string Name, string Url)[] repositories) =>
-        WorkspaceManifestSerializer.Serialize(new WorkspaceManifest(
+        new WorkspaceManifestFile().Serialize(new WorkspaceManifest(
             1,
             new WorkspaceManifestWorkspace("restored", new WorkspaceManifestProfile(profile.Type, profile.Versioning, profile.Ci)),
             connectors.Select(c => new WorkspaceManifestConnector("github", c)).ToList(),
@@ -694,6 +695,7 @@ internal sealed class OperationsFixture : IAsyncDisposable
             seed.Factory,
             seed.Bridge,
             Remote,
+            new WorkspaceManifestFile(),
             Manifest,
             new WorkspaceOperationRunner(NullLogger<WorkspaceOperationRunner>.Instance),
             new FakeWorkspacePathResolver(seed.Factory),
@@ -810,11 +812,6 @@ internal sealed class RecordingManifestService(IWorkspaceManifestService? inner 
 
     public Task<WorkspaceManifest> BuildFromDatabaseAsync(int workspaceId, CancellationToken cancellationToken = default) =>
         inner?.BuildFromDatabaseAsync(workspaceId, cancellationToken) ?? throw new NotSupportedException();
-
-    public string Serialize(WorkspaceManifest manifest) => WorkspaceManifestSerializer.Serialize(manifest);
-
-    public bool TryParse(string content, out WorkspaceManifest? manifest, out string? error) =>
-        WorkspaceManifestSerializer.TryParse(content, out manifest, out error);
 
     public Task<GrayMoon.Application.OperationResult> WriteAuthoritativeManifestAsync(int workspaceId, CancellationToken cancellationToken = default)
     {

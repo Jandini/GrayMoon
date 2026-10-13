@@ -147,9 +147,7 @@ public sealed class PushRepositoryCommand(
             .GetVersionAsync(repoPath, new RepositoryVersionOptions { NonNormalize = true }, CancellationToken.None);
         var versionBranch = versionResult.Result?.BranchName ?? versionResult.Result?.EscapedBranchName ?? branch;
         List<RepositorySyncProjectNotification>? syncProjects = null;
-        var discoverProjects = request.EffectiveCapabilities.ShouldDiscoverProjects
-            && !WorkerRepositoryPaths.IsWorkspaceRepository(request.RepositoryName ?? string.Empty, request.WorkspaceRepositoryName);
-        var projectsProbed = discoverProjects;
+        var projectsProbed = request.EffectiveCapabilities.ShouldDiscoverProjects;
         if (projectsProbed)
         {
             try
