@@ -106,6 +106,46 @@ public sealed class CsProjFileServiceIgnoredDirTests : IDisposable
     }
 
     [Fact]
+    public async Task FindAsync_skips_top_level_sibling_repositories_listed_in_the_workspace_definition()
+    {
+        _repo.CommitInitial();
+        _repo.WriteFile("graymoon.json", """{ "repositories": [ { "name": "Repo.A" }, { "name": "repo.b" } ] }""");
+        _repo.WriteFile("tools/Ws/Ws.csproj", MinimalCsproj("Ws"));
+        // Neither sibling is cloned or Git-ignored here: only the definition keeps them out.
+        _repo.WriteFile("Repo.A/src/A.csproj", MinimalCsproj("A"));
+        _repo.WriteFile("Repo.B/src/B.csproj", MinimalCsproj("B"));
+        // A listed name deeper in the tree is not a sibling repository.
+        _repo.WriteFile("tools/Repo.A/Nested.csproj", MinimalCsproj("Nested"));
+
+        Assert.Equal(["tools/Repo.A/Nested.csproj", "tools/Ws/Ws.csproj"], await FindPathsAsync());
+    }
+
+    [Fact]
+    public async Task FindAsync_keeps_the_nested_repository_guard_for_unlisted_folders_of_a_workspace_repository()
+    {
+        _repo.CommitInitial();
+        _repo.WriteFile("graymoon.json", """{ "repositories": [ { "name": "listed" } ] }""");
+        _repo.WriteFile("Root.csproj", MinimalCsproj("Root"));
+        _repo.WriteFile("unlisted/U.csproj", MinimalCsproj("U"));
+        Directory.CreateDirectory(Path.Combine(_repo.RepositoryPath, "unlisted", ".git"));
+
+        Assert.Equal(["Root.csproj"], await FindPathsAsync());
+    }
+
+    [Fact]
+    public async Task FindAsync_with_an_unreadable_workspace_definition_falls_back_to_the_other_guards()
+    {
+        CommitGitIgnore("/ignored-sibling/\n");
+        _repo.WriteFile("graymoon.json", "{ not json");
+        _repo.WriteFile("Root.csproj", MinimalCsproj("Root"));
+        _repo.WriteFile("ignored-sibling/I.csproj", MinimalCsproj("I"));
+        _repo.WriteFile("nested-sibling/N.csproj", MinimalCsproj("N"));
+        Directory.CreateDirectory(Path.Combine(_repo.RepositoryPath, "nested-sibling", ".git"));
+
+        Assert.Equal(["Root.csproj"], await FindPathsAsync());
+    }
+
+    [Fact]
     public async Task GetProjectPathsAsync_throws_instead_of_returning_empty_when_not_a_repository()
     {
         using var plain = new TempFolder();

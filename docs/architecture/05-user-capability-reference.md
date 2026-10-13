@@ -54,7 +54,7 @@ Rules
   enable and disable are refused while Features exist; disable never deletes files or .git
   enable and restore are refused unless the Worker is connected with the same GrayMoon version (App/Worker version lock)
   restore validates graymoon.json before creating anything and rolls back a Workspace whose restore fails
-  no dependency level, no projects
+  takes part in the dependency graph (own projects, version files, custom dependencies); always the top level; edges into it are dropped
   Feature create: root worktree first, then Sources; remove and rollback: Sources first, root last
 ```
 

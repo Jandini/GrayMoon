@@ -52,9 +52,9 @@ public sealed partial class WorkspaceProjectRepository
             }
         }
 
-        // The Workspace-role repository has no projects and no persisted level (it is outside the dependency graph), but it
-        // records the state of every source repository, so every level-by-level walk (update, push) must reach it last.
-        // Without this it reads as level 0 and runs first, before the source repositories it depends on are updated or pushed.
+        // The Workspace-role repository records the state of every source repository, so every level-by-level walk (update,
+        // push) must reach it last, whatever level its own edges would give it. Its persisted level is already the top one;
+        // this also covers a context whose levels were never persisted (null, which would otherwise read as level 0 and run first).
         var sourceLevels = links.Where(l => l.Role != WorkspaceRepositoryRole.Workspace && levelByRepo.GetValueOrDefault(l.RepositoryId).HasValue)
             .Select(l => levelByRepo[l.RepositoryId]!.Value)
             .ToList();
@@ -92,6 +92,14 @@ public sealed partial class WorkspaceProjectRepository
             .Select(d => new { d.DependentProjectId, d.ReferencedProjectId, d.Version })
             .ToListAsync(cancellationToken);
 
+        // Nothing may depend on the Workspace-role repository (it is updated last), so a source project referencing one of
+        // its projects is never rewritten to its version; the dependency graph drops the same edge.
+        var workspaceRoleRepoIds = await dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Where(wr => wr.WorkspaceId == workspaceId && wr.Role == WorkspaceRepositoryRole.Workspace)
+            .Select(wr => wr.RepositoryId)
+            .ToHashSetAsync(cancellationToken);
+
         var repoIds = projects.Select(p => p.RepositoryId).Distinct().ToList();
         var repoToProjectUpdates = new Dictionary<int, Dictionary<string, Dictionary<string, (string Current, string New)>>>(repoIds.Count);
         foreach (var repoId in repoIds)
@@ -100,6 +108,8 @@ public sealed partial class WorkspaceProjectRepository
         foreach (var d in dependencies)
         {
             if (!byProject.TryGetValue(d.DependentProjectId, out var depProj) || !byProject.TryGetValue(d.ReferencedProjectId, out var refProj))
+                continue;
+            if (depProj.RepositoryId != refProj.RepositoryId && IsEdgeIntoWorkspaceRole(workspaceRoleRepoIds, refProj.RepositoryId))
                 continue;
 
             var refVersion = versionByRepo.GetValueOrDefault(refProj.RepositoryId);

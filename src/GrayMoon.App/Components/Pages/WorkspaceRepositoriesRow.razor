@@ -158,12 +158,7 @@
                             OnUpgradeClick="@(() => OnUpgradeClick.InvokeAsync(Link))"
                             OnMergeClick="@((int prNumber) => OnMergeClick.InvokeAsync(Link))" />
                 </span>
-                @if (Presentation.ShowDependencyMetrics && isWorkspaceRepository)
-                {
-                    @* The Workspace repository has no projects or dependencies (D6): keep the grid slot, render nothing. *@
-                    <span class="metrics-block metrics-deps"></span>
-                }
-                else if (Presentation.ShowDependencyMetrics)
+                @if (Presentation.ShowDependencyMetrics)
                 {
                     <span class="metrics-block metrics-deps">
                         @if (totalWithFiles == 0)

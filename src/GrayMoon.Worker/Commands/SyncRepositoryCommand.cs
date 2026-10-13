@@ -170,11 +170,10 @@ public sealed class SyncRepositoryCommand(
                 .Create(capabilities)
                 .GetVersionAsync(repoPath, RepositoryVersionOptions.Default, cancellationToken));
             var refsTask = ReadRefsAsync(repoPath, request.DivergenceBaseBranch, readBranchInLane, cancellationToken);
-            // The Workspace repository's working tree is the Workspace root, which contains the nested source
-            // repositories, so scanning it would attribute their projects to it.
-            var discoverProjects = capabilities.ShouldDiscoverProjects
-                && !WorkerRepositoryPaths.IsWorkspaceRepository(repositoryName, request.WorkspaceRepositoryName);
-            var projectsTask = discoverProjects
+            // The Workspace repository is scanned too: its working tree holds the source repositories, and the
+            // scanner skips them (listed in its graymoon.json, nested Git metadata, Git-ignored) so only its own
+            // projects are attributed to it.
+            var projectsTask = capabilities.ShouldDiscoverProjects
                 ? TimedAsync(() => ScanProjectsAsync(repoPath, cancellationToken))
                 : Task.FromResult<(IReadOnlyList<CsProjFileInfo>? Value, long Ms)>((null, 0));
 

@@ -190,6 +190,8 @@ Reading uses the existing `GetFileContents` command, which already resolves thro
 
 ## D6 - The Workspace-root repository never discovers projects (Worker rule)
 
+> **Superseded (2026-10-14).** The Workspace repository now discovers its own projects and takes part in the dependency graph. The concern behind D6 (a scan from the root recursing into every Source repository) no longer holds: `CsProjFileService` skips nested repositories (`HasGitMetadata`) and Git-ignored folders, and on top of that skips every top-level folder the root's `graymoon.json` lists (`WorkspaceDefinitionRepositories`), so even a Source folder not yet cloned is never scanned. All the discovery gates below are removed, including `RepositoryStateProbeOptions.IsWorkspaceRepository`. App side, the Workspace repository's projects, version files and custom dependencies become edges; it is always persisted as the top dependency level (max Source level + 1), every edge into it is dropped so it can never close a cycle, and the Repositories grid still lists it above the level groups but now shows its dependency badge. The text below is the original decision, kept for history.
+
 ### Decision
 
 In the Worker, wherever a handler consults `request.EffectiveCapabilities.ShouldDiscoverProjects`, it uses instead:

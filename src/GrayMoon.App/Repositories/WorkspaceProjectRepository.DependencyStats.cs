@@ -55,9 +55,7 @@ public sealed partial class WorkspaceProjectRepository
             .ToListAsync(cancellationToken);
         if (links.Count == 0) return;
 
-        // The Workspace-role repository has no projects (D6) and no dependency level, so it never takes part in the dependency graph.
-        var sourceLinks = links.Where(l => l.Role != WorkspaceRepositoryRole.Workspace).ToList();
-        var repoIdsInWorkspace = sourceLinks.Select(l => l.RepositoryId).ToHashSet();
+        var (repoIdsInWorkspace, nameToRepoId, workspaceRoleRepoIds) = BuildGraphMembership(links);
 
         // The Feature's own checked-out version is what unmatched-dependency comparisons must use; the shared
         // link's GitVersion is only correct for the special Workspace context (see design §6.4).
@@ -84,22 +82,12 @@ public sealed partial class WorkspaceProjectRepository
                 ? x.GitVersion
                 : contextVersionByLink.GetValueOrDefault(x.WorkspaceRepositoryId, x.GitVersion));
 
-        var nameToRepoId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        foreach (var wr in links)
-        {
-            if (wr.Repository != null && !string.IsNullOrEmpty(wr.Repository.RepositoryName))
-            {
-                var name = wr.Repository.RepositoryName.Trim();
-                if (!nameToRepoId.ContainsKey(name))
-                    nameToRepoId[name] = wr.RepositoryId;
-            }
-        }
-
         var byProject = workspaceProjects.Count > 0 ? workspaceProjects.ToDictionary(p => p.ProjectId) : new Dictionary<int, WorkspaceProject>();
         var edgeSets = await BuildRepoDependencyEdgeSetsAsync(
             workspaceId,
             repoIdsInWorkspace,
             nameToRepoId,
+            workspaceRoleRepoIds,
             uniqueEdges,
             byProject,
             cancellationToken,
@@ -149,6 +137,7 @@ public sealed partial class WorkspaceProjectRepository
             if (!byProject.TryGetValue(depId, out var depProj) || !byProject.TryGetValue(refId, out var refProj)) continue;
             if (depProj.RepositoryId == refProj.RepositoryId) continue;
             if (!repoIdsInWorkspace.Contains(depProj.RepositoryId) || !repoIdsInWorkspace.Contains(refProj.RepositoryId)) continue;
+            if (IsEdgeIntoWorkspaceRole(workspaceRoleRepoIds, refProj.RepositoryId)) continue;
             if (pendingRepoIds.Contains(refProj.RepositoryId))
             {
                 pendingDependentRepoIds.Add(depProj.RepositoryId);
@@ -162,6 +151,14 @@ public sealed partial class WorkspaceProjectRepository
         }
         foreach (var (depRepoId, _) in unmatchedRepoEdges)
             unmatchedCountByRepo[depRepoId] = unmatchedCountByRepo.GetValueOrDefault(depRepoId, 0) + 1;
+
+        // The Workspace-role repository is always the top level, wherever its own edges would place it: it records the
+        // state of every source repository, so it is updated and pushed after all of them (same rule as
+        // GetContextVersionAndLevelByRepoAsync applies to every level-by-level walk).
+        var sourceLevels = levelByRepo.Where(kv => !workspaceRoleRepoIds.Contains(kv.Key)).Select(kv => kv.Value).ToList();
+        var workspaceRoleLevel = (sourceLevels.Count > 0 ? sourceLevels.Max() : 0) + 1;
+        foreach (var repoId in workspaceRoleRepoIds)
+            levelByRepo[repoId] = workspaceRoleLevel;
 
         int? dependencyLevelForRepo(int repoId)
         {

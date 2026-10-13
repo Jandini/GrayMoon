@@ -17,9 +17,7 @@ public sealed class RefreshRepositoryProjectsCommand(ICsProjFileService csProjFi
         var workspaceName = request.WorkspaceName ?? throw new ArgumentException("workspaceName required");
         var repositoryName = request.RepositoryName ?? throw new ArgumentException("repositoryName required");
 
-        var discoverProjects = request.EffectiveCapabilities.ShouldDiscoverProjects
-            && !WorkerRepositoryPaths.IsWorkspaceRepository(repositoryName, request.WorkspaceRepositoryName);
-        if (!discoverProjects)
+        if (!request.EffectiveCapabilities.ShouldDiscoverProjects)
             return new RefreshRepositoryProjectsResponse { Projects = null };
 
         var workspacePath = WorkerRepositoryPaths.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
