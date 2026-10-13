@@ -1,6 +1,7 @@
 using GrayMoon.Abstractions.Workspaces;
 using GrayMoon.Common;
 using GrayMoon.Common.Git;
+using GrayMoon.Common.Manifest;
 using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Commands;
 using GrayMoon.Worker.Jobs.Requests;
@@ -70,7 +71,7 @@ public sealed class WorkspaceRepositoryDiscoveryGateTests : IDisposable
         // An unlisted nested repository is still skipped by the nested-repository guard.
         WriteCsproj(workspace, "stray/S.csproj");
         Directory.CreateDirectory(Path.Combine(workspace, "stray", ".git"));
-        var scanner = new CsProjFileService(new CsProjFileParser(), new LibGit2SharpGitIgnoreService(), NullLogger<CsProjFileService>.Instance);
+        var scanner = new CsProjFileService(new CsProjFileParser(), new LibGit2SharpGitIgnoreService(), new WorkspaceManifestFile(), NullLogger<CsProjFileService>.Instance);
 
         var response = await new SyncRepositoryCommand(_git, _reader, new LibGit2SharpLocalGitSnapshotReader(), scanner, CapabilityTestDoubles.RealFactory(_git))
             .ExecuteAsync(new SyncRepositoryRequest
@@ -174,4 +175,4 @@ public sealed class WorkspaceRepositoryDiscoveryGateTests : IDisposable
         if (exit != 0)
             throw new InvalidOperationException($"git {args} failed: {stderr}");
     }
-}
+}

@@ -126,6 +126,7 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<IWorkerTokenProvider, WorkerTokenProvider>();
         builder.Services.AddSingleton<IWorkspaceCapabilityProvider, WorkspaceCapabilityProvider>();
         builder.Services.AddSingleton<IGitIgnoreService, LibGit2SharpGitIgnoreService>();
+        builder.Services.AddSingleton<GrayMoon.Common.Manifest.IWorkspaceManifestFile, GrayMoon.Common.Manifest.WorkspaceManifestFile>();
         builder.Services.AddSingleton<ICsProjFileParser, CsProjFileParser>();
         builder.Services.AddSingleton<ICsProjFileService, CsProjFileService>();
         builder.Services.AddSingleton<GitVersionResultCache>();

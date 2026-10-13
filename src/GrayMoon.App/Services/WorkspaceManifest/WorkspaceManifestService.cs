@@ -7,26 +7,28 @@ using GrayMoon.App.Services.Worker;
 using GrayMoon.Application;
 using GrayMoon.Application.Features;
 using GrayMoon.Common.Git;
+using GrayMoon.Common.Manifest;
 using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Services.WorkspaceManifest;
 
 using IWorkspaceManifestService = GrayMoon.Application.WorkspaceManifest.IWorkspaceManifestService;
-using WorkspaceManifest = GrayMoon.Application.WorkspaceManifest.WorkspaceManifest;
-using WorkspaceManifestConnector = GrayMoon.Application.WorkspaceManifest.WorkspaceManifestConnector;
+using WorkspaceManifest = GrayMoon.Common.Manifest.WorkspaceManifest;
+using WorkspaceManifestConnector = GrayMoon.Common.Manifest.WorkspaceManifestConnector;
 using WorkspaceManifestDrift = GrayMoon.Application.WorkspaceManifest.WorkspaceManifestDrift;
-using WorkspaceManifestProfile = GrayMoon.Application.WorkspaceManifest.WorkspaceManifestProfile;
-using WorkspaceManifestRepository = GrayMoon.Application.WorkspaceManifest.WorkspaceManifestRepository;
-using WorkspaceManifestWorkspace = GrayMoon.Application.WorkspaceManifest.WorkspaceManifestWorkspace;
+using WorkspaceManifestProfile = GrayMoon.Common.Manifest.WorkspaceManifestProfile;
+using WorkspaceManifestRepository = GrayMoon.Common.Manifest.WorkspaceManifestRepository;
+using WorkspaceManifestWorkspace = GrayMoon.Common.Manifest.WorkspaceManifestWorkspace;
 using WorkspaceRepositoryTagPinChange = GrayMoon.Application.WorkspaceManifest.WorkspaceRepositoryTagPinChange;
 
 /// <summary>
 /// Builds, writes and compares the Workspace definition (<c>graymoon.json</c>) and the managed <c>.gitignore</c>
-/// section of the Workspace repository (D5, D8, D11, D12). Uses factory-created contexts, so it is safe to run
-/// outside the circuit's DbContext.
+/// section of the Workspace repository (D5, D8, D11, D12). The file's name and format come from
+/// <see cref="IWorkspaceManifestFile"/>. Uses factory-created contexts, so it is safe to run outside the circuit's DbContext.
 /// </summary>
 public sealed class WorkspaceManifestService(
     IDbContextFactory<AppDbContext> dbContextFactory,
+    IWorkspaceManifestFile manifestFile,
     IWorkerBridge workerBridge,
     IWorkspaceContextPathResolver pathResolver,
     IWorkspaceFeatureContextResolver contextResolver,
@@ -70,7 +72,7 @@ public sealed class WorkspaceManifestService(
             .ToList();
 
         return new WorkspaceManifest(
-            WorkspaceManifestSerializer.CurrentSchemaVersion,
+            manifestFile.CurrentSchemaVersion,
             new WorkspaceManifestWorkspace(
                 workspace.Name,
                 new WorkspaceManifestProfile(
@@ -80,11 +82,6 @@ public sealed class WorkspaceManifestService(
             connectors,
             repositories);
     }
-
-    public string Serialize(WorkspaceManifest manifest) => WorkspaceManifestSerializer.Serialize(manifest);
-
-    public bool TryParse(string content, out WorkspaceManifest? manifest, out string? error) =>
-        WorkspaceManifestSerializer.TryParse(content, out manifest, out error);
 
     public async Task<OperationResult> WriteAuthoritativeManifestAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
@@ -96,21 +93,21 @@ public sealed class WorkspaceManifestService(
 
             var manifest = await BuildFromDatabaseAsync(workspaceId, cancellationToken);
             var read = await WorkspaceRepositoryFileAccess.ReadAsync(
-                workerBridge, args, WorkspaceRepositoryFileAccess.ManifestFilePath, cancellationToken);
+                workerBridge, args, manifestFile.FileName, cancellationToken);
             if (read.Error is not null)
                 return OperationResult.Fail($"Could not read the Workspace definition: {read.Error}");
             if (read.Found
                 && !string.IsNullOrWhiteSpace(read.Content)
-                && TryParse(read.Content, out var existing, out _)
+                && manifestFile.TryParse(read.Content, out var existing, out _)
                 && existing is not null)
             {
                 manifest = WorkspaceRepositoryTagPins.CopyOnto(manifest, existing);
                 manifest = manifest with { CodeGraph = existing.CodeGraph };
             }
 
-            var content = Serialize(manifest);
+            var content = manifestFile.Serialize(manifest);
             return await WorkspaceRepositoryFileAccess.WriteAsync(
-                workerBridge, args, WorkspaceRepositoryFileAccess.ManifestFilePath, content, cancellationToken);
+                workerBridge, args, manifestFile.FileName, content, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -134,23 +131,23 @@ public sealed class WorkspaceManifestService(
                 return new OperationResult(true, NoWorkspaceRepositoryMessage);
 
             var read = await WorkspaceRepositoryFileAccess.ReadAsync(
-                workerBridge, args, WorkspaceRepositoryFileAccess.ManifestFilePath, cancellationToken);
+                workerBridge, args, manifestFile.FileName, cancellationToken);
             if (read.Error is not null)
                 return OperationResult.Fail(read.Error);
             if (!read.Found || string.IsNullOrWhiteSpace(read.Content))
                 return OperationResult.Fail("The Workspace definition was not found.");
-            if (!TryParse(read.Content, out var manifest, out var parseError) || manifest is null)
+            if (!manifestFile.TryParse(read.Content, out var manifest, out var parseError) || manifest is null)
                 return OperationResult.Fail(parseError ?? "The Workspace definition could not be read.");
             if (!WorkspaceRepositoryTagPins.TryApply(manifest, changes, out var updated, out var applyError))
                 return OperationResult.Fail(applyError ?? "The repository tag could not be recorded.");
 
-            var content = Serialize(updated);
+            var content = manifestFile.Serialize(updated);
             if (string.Equals(content, read.Content.Replace("\r\n", "\n"), StringComparison.Ordinal))
                 return OperationResult.Ok();
 
             // The file is updated in the working tree only. The user commits the Workspace repository.
             return await WorkspaceRepositoryFileAccess.WriteAsync(
-                workerBridge, args, WorkspaceRepositoryFileAccess.ManifestFilePath, content, cancellationToken);
+                workerBridge, args, manifestFile.FileName, content, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -198,9 +195,9 @@ public sealed class WorkspaceManifestService(
                 return false;
 
             var read = await WorkspaceRepositoryFileAccess.ReadAsync(
-                workerBridge, args, WorkspaceRepositoryFileAccess.ManifestFilePath, cancellationToken);
+                workerBridge, args, manifestFile.FileName, cancellationToken);
             return read.Found
-                && TryParse(read.Content ?? string.Empty, out var manifest, out _)
+                && manifestFile.TryParse(read.Content ?? string.Empty, out var manifest, out _)
                 && manifest?.CodeGraph == true;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -259,16 +256,16 @@ public sealed class WorkspaceManifestService(
         }
 
         var read = await WorkspaceRepositoryFileAccess.ReadAsync(
-            workerBridge, args, WorkspaceRepositoryFileAccess.ManifestFilePath, cancellationToken);
+            workerBridge, args, manifestFile.FileName, cancellationToken);
         if (read.Error is not null)
             throw new InvalidOperationException(read.Error);
 
         WorkspaceManifestDrift drift;
         if (!read.Found)
         {
-            drift = ParseFailure($"{WorkspaceRepositoryFileAccess.ManifestFilePath} was not found in the Workspace repository");
+            drift = ParseFailure($"{manifestFile.FileName} was not found in the Workspace repository");
         }
-        else if (!TryParse(read.Content ?? string.Empty, out var fileManifest, out var parseError) || fileManifest is null)
+        else if (!manifestFile.TryParse(read.Content ?? string.Empty, out var fileManifest, out var parseError) || fileManifest is null)
         {
             drift = ParseFailure(parseError ?? "Workspace definition could not be read");
         }
@@ -372,7 +369,6 @@ public sealed class WorkspaceManifestService(
 /// </summary>
 internal static class WorkspaceRepositoryFileAccess
 {
-    public const string ManifestFilePath = "graymoon.json";
     public const string GitIgnoreFilePath = ".gitignore";
 
     private const string NotFoundPrefix = "File not found";

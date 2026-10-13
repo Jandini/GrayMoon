@@ -1,10 +1,14 @@
 namespace GrayMoon.Application.WorkspaceManifest;
 
+using WorkspaceManifest = GrayMoon.Common.Manifest.WorkspaceManifest;
+
+/// <summary>
+/// Keeps the Workspace definition of a Workspace in step with its database: builds it, writes it, detects drift. The
+/// file's name, format and parsing belong to <see cref="GrayMoon.Common.Manifest.IWorkspaceManifestFile"/>.
+/// </summary>
 public interface IWorkspaceManifestService
 {
     Task<WorkspaceManifest> BuildFromDatabaseAsync(int workspaceId, CancellationToken cancellationToken = default);
-    string Serialize(WorkspaceManifest manifest);
-    bool TryParse(string content, out WorkspaceManifest? manifest, out string? error);
     Task<OperationResult> WriteAuthoritativeManifestAsync(int workspaceId, CancellationToken cancellationToken = default);
 
     /// <summary>

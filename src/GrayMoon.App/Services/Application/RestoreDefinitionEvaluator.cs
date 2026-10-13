@@ -4,7 +4,8 @@ using GrayMoon.App.Services.GitHub;
 using GrayMoon.App.Services.WorkspaceManifest;
 using GrayMoon.Application.WorkspaceManifest;
 using GrayMoon.Common.Git;
-using WorkspaceManifestModel = GrayMoon.Application.WorkspaceManifest.WorkspaceManifest;
+using GrayMoon.Common.Manifest;
+using WorkspaceManifestModel = GrayMoon.Common.Manifest.WorkspaceManifest;
 
 namespace GrayMoon.App.Services.Application;
 
@@ -30,12 +31,13 @@ public sealed record RestoreCatalogEntry(int RepositoryId, string CloneUrl);
 /// </summary>
 public static class RestoreDefinitionEvaluator
 {
-    public const string MissingDefinitionMessage = "This repository does not contain graymoon.json.";
+    public const string MissingDefinitionMessage = "This repository does not contain " + WorkspaceManifestFile.FileName + ".";
 
     public const string NewerSchemaMessage =
         "This Workspace definition was created by a newer GrayMoon version. Update GrayMoon before restoring it.";
 
     public static (RestoreDefinitionPlan? Plan, string? Error) Evaluate(
+        IWorkspaceManifestFile manifestFile,
         string? content,
         string workspaceRepositoryCloneUrl,
         IReadOnlyList<Connector> localConnectors,
@@ -44,10 +46,10 @@ public static class RestoreDefinitionEvaluator
         if (content is null)
             return (null, MissingDefinitionMessage);
 
-        if (WorkspaceManifestSerializer.IsNewerSchema(content))
+        if (manifestFile.IsNewerSchema(content))
             return (null, NewerSchemaMessage);
 
-        if (!WorkspaceManifestSerializer.TryParse(content, out var manifest, out var parseError) || manifest is null)
+        if (!manifestFile.TryParse(content, out var manifest, out var parseError) || manifest is null)
             return (null, Invalid(parseError ?? "it could not be read"));
 
         var profile = manifest.Workspace.Profile;

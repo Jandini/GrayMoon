@@ -119,6 +119,7 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddScoped<WorkspaceStateRecomputeScope>();
         services.AddScoped<WorkspaceDependencyService>();
         services.AddScoped<WorkspaceFileVersionService>();
+        services.AddSingleton<GrayMoon.Common.Manifest.IWorkspaceManifestFile, GrayMoon.Common.Manifest.WorkspaceManifestFile>();
         services.AddScoped<GrayMoon.Application.WorkspaceManifest.IWorkspaceManifestService, GrayMoon.App.Services.WorkspaceManifest.WorkspaceManifestService>();
         services.AddScoped<WorkspaceGitService>();
         services.AddScoped<ConnectorHealthService>();

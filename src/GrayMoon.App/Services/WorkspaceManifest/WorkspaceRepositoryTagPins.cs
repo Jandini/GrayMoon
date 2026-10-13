@@ -1,6 +1,6 @@
 using GrayMoon.Common.Git;
-using WorkspaceManifestModel = GrayMoon.Application.WorkspaceManifest.WorkspaceManifest;
-using WorkspaceManifestRepository = GrayMoon.Application.WorkspaceManifest.WorkspaceManifestRepository;
+using WorkspaceManifestModel = GrayMoon.Common.Manifest.WorkspaceManifest;
+using WorkspaceManifestRepository = GrayMoon.Common.Manifest.WorkspaceManifestRepository;
 using WorkspaceRepositoryTagPinChange = GrayMoon.Application.WorkspaceManifest.WorkspaceRepositoryTagPinChange;
 
 namespace GrayMoon.App.Services.WorkspaceManifest;

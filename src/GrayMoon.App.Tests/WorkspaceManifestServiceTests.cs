@@ -8,8 +8,8 @@ using GrayMoon.App.Services.WorkspaceManifest;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
-using WorkspaceManifestConnector = GrayMoon.Application.WorkspaceManifest.WorkspaceManifestConnector;
-using WorkspaceManifestRepository = GrayMoon.Application.WorkspaceManifest.WorkspaceManifestRepository;
+using WorkspaceManifestConnector = GrayMoon.Common.Manifest.WorkspaceManifestConnector;
+using WorkspaceManifestRepository = GrayMoon.Common.Manifest.WorkspaceManifestRepository;
 using WorkspaceRepositoryTagPinChange = GrayMoon.Application.WorkspaceManifest.WorkspaceRepositoryTagPinChange;
 
 namespace GrayMoon.App.Tests;
@@ -81,7 +81,7 @@ public sealed class WorkspaceManifestServiceTests
         Assert.Equal(ManifestTestFixture.WorkspaceFolder, args.GetProperty("workspaceName").GetString());
         Assert.True(args.GetProperty("onlyIfChanged").GetBoolean());
 
-        var expected = service.Serialize(await service.BuildFromDatabaseAsync(workspace.WorkspaceId));
+        var expected = new GrayMoon.Common.Manifest.WorkspaceManifestFile().Serialize(await service.BuildFromDatabaseAsync(workspace.WorkspaceId));
         Assert.Equal(expected, args.GetProperty("content").GetString());
     }
 
@@ -99,7 +99,7 @@ public sealed class WorkspaceManifestServiceTests
                 .Select(repository => repository.Name == "Api" ? repository with { Tag = "v1.0.0", Commit = sha } : repository)
                 .ToList()
         };
-        fixture.Bridge.RespondWithFile(service.Serialize(pinned));
+        fixture.Bridge.RespondWithFile(new GrayMoon.Common.Manifest.WorkspaceManifestFile().Serialize(pinned));
 
         var result = await service.WriteAuthoritativeManifestAsync(workspace.WorkspaceId);
 
@@ -118,7 +118,7 @@ public sealed class WorkspaceManifestServiceTests
         await using var fixture = await ManifestTestFixture.CreateAsync();
         var workspace = await fixture.SeedWorkspaceWithRootRepositoryAsync();
         var service = fixture.CreateService();
-        fixture.Bridge.RespondWithFile(service.Serialize(await service.BuildFromDatabaseAsync(workspace.WorkspaceId)));
+        fixture.Bridge.RespondWithFile(new GrayMoon.Common.Manifest.WorkspaceManifestFile().Serialize(await service.BuildFromDatabaseAsync(workspace.WorkspaceId)));
         var change = new WorkspaceRepositoryTagPinChange("https://github.com/acme/Api.git", "v1.0.0", sha);
 
         var result = await service.SetRepositoryTagPinsAsync(workspace.WorkspaceId, [change]);
@@ -129,7 +129,7 @@ public sealed class WorkspaceManifestServiceTests
         var content = written.GetProperty("content").GetString()!;
         Assert.Contains("\"tag\": \"v1.0.0\"", content);
         Assert.Contains($"\"commit\": \"{sha}\"", content);
-        Assert.Equal("Api", service.TryParse(content, out var parsed, out var error) ? parsed!.Repositories.Single(r => r.Tag != null).Name : null);
+        Assert.Equal("Api", new GrayMoon.Common.Manifest.WorkspaceManifestFile().TryParse(content, out var parsed, out var error) ? parsed!.Repositories.Single(r => r.Tag != null).Name : null);
         Assert.True(string.IsNullOrEmpty(error));
 
         fixture.Bridge.Sent.Clear();
@@ -153,7 +153,7 @@ public sealed class WorkspaceManifestServiceTests
                 .Select(repository => repository.Name == "Api" ? repository with { Tag = "v1.0.0", Commit = sha } : repository)
                 .ToList()
         };
-        fixture.Bridge.RespondWithFile(service.Serialize(pinned));
+        fixture.Bridge.RespondWithFile(new GrayMoon.Common.Manifest.WorkspaceManifestFile().Serialize(pinned));
 
         var result = await service.SetRepositoryTagPinsAsync(
             workspace.WorkspaceId,
@@ -173,7 +173,7 @@ public sealed class WorkspaceManifestServiceTests
         await using var fixture = await ManifestTestFixture.CreateAsync();
         var workspace = await fixture.SeedWorkspaceWithRootRepositoryAsync();
         var service = fixture.CreateService();
-        fixture.Bridge.RespondWithFile(service.Serialize(await service.BuildFromDatabaseAsync(workspace.WorkspaceId)));
+        fixture.Bridge.RespondWithFile(new GrayMoon.Common.Manifest.WorkspaceManifestFile().Serialize(await service.BuildFromDatabaseAsync(workspace.WorkspaceId)));
 
         var result = await service.SetRepositoryTagPinsAsync(
             workspace.WorkspaceId,
@@ -223,7 +223,7 @@ public sealed class WorkspaceManifestServiceTests
         await using var fixture = await ManifestTestFixture.CreateAsync();
         var workspace = await fixture.SeedWorkspaceWithRootRepositoryAsync();
         var service = fixture.CreateService();
-        fixture.Bridge.RespondWithFile(service.Serialize(await service.BuildFromDatabaseAsync(workspace.WorkspaceId)));
+        fixture.Bridge.RespondWithFile(new GrayMoon.Common.Manifest.WorkspaceManifestFile().Serialize(await service.BuildFromDatabaseAsync(workspace.WorkspaceId)));
 
         var drift = await service.DetectDriftAsync(workspace.WorkspaceId);
 
@@ -244,7 +244,7 @@ public sealed class WorkspaceManifestServiceTests
             Repositories = [.. databaseManifest.Repositories,
                 new WorkspaceManifestRepository("Extra", "https://github.com/acme/Extra.git", "https://github.com")]
         };
-        fixture.Bridge.RespondWithFile(service.Serialize(withExtra));
+        fixture.Bridge.RespondWithFile(new GrayMoon.Common.Manifest.WorkspaceManifestFile().Serialize(withExtra));
 
         var drift = await service.DetectDriftAsync(workspace.WorkspaceId);
 
@@ -294,7 +294,7 @@ public sealed class WorkspaceManifestServiceTests
                 .Select(r => new WorkspaceManifestRepository(r.Name, "git@GitHub.com:acme/" + r.Name + ".git", "https://GitHub.com/"))
                 .ToList()
         };
-        fixture.Bridge.RespondWithFile(service.Serialize(reformatted));
+        fixture.Bridge.RespondWithFile(new GrayMoon.Common.Manifest.WorkspaceManifestFile().Serialize(reformatted));
 
         var drift = await service.DetectDriftAsync(workspace.WorkspaceId);
 
@@ -307,7 +307,7 @@ public sealed class WorkspaceManifestServiceTests
         await using var fixture = await ManifestTestFixture.CreateAsync();
         var workspace = await fixture.SeedWorkspaceWithRootRepositoryAsync();
         var service = fixture.CreateService();
-        var definition = service.Serialize(await service.BuildFromDatabaseAsync(workspace.WorkspaceId));
+        var definition = new GrayMoon.Common.Manifest.WorkspaceManifestFile().Serialize(await service.BuildFromDatabaseAsync(workspace.WorkspaceId));
         var withTools = definition.TrimEnd();
         var inserted = withTools.Insert(withTools.Length - 1, ",\"tools\":[\"vsCode\"]");
         fixture.Bridge.RespondWithFile(inserted + "\n");
@@ -437,6 +437,7 @@ internal sealed class ManifestTestFixture : IAsyncDisposable
 
     public WorkspaceManifestService CreateService() => new(
         Factory,
+        new GrayMoon.Common.Manifest.WorkspaceManifestFile(),
         Bridge,
         new FakeWorkspacePathResolver(Factory),
         new FakeFeatureContextResolver(_contextIsSpecialWorkspace),

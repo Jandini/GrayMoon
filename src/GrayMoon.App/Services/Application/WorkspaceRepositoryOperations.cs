@@ -14,6 +14,7 @@ using GrayMoon.Application.Features;
 using GrayMoon.Application.WorkspaceManifest;
 using GrayMoon.Application.Workspaces;
 using GrayMoon.Common.Git;
+using GrayMoon.Common.Manifest;
 using Microsoft.EntityFrameworkCore;
 using WorkspaceEntity = GrayMoon.App.Models.Workspace;
 using WorkspaceRepositoryEntity = GrayMoon.App.Repositories.WorkspaceRepository;
@@ -30,6 +31,7 @@ public sealed class WorkspaceRepositoryOperations(
     IDbContextFactory<AppDbContext> dbContextFactory,
     IWorkerBridge workerBridge,
     IRemoteWorkspaceManifestReader remoteManifestReader,
+    IWorkspaceManifestFile manifestFile,
     IWorkspaceManifestService manifestService,
     IWorkspaceOperationLock operationLock,
     IWorkspaceContextPathResolver pathResolver,
@@ -333,12 +335,12 @@ public sealed class WorkspaceRepositoryOperations(
         // D14 step 3: the remote branch may have changed since the preflight, so the local copy is validated again.
         var (_, args) = await GetSpecialContextArgsAsync(workspaceId, cancellationToken);
         var read = await WorkspaceRepositoryFileAccess.ReadAsync(
-            workerBridge, args, WorkspaceRepositoryFileAccess.ManifestFilePath, cancellationToken);
+            workerBridge, args, manifestFile.FileName, cancellationToken);
         if (read.Error is not null)
             return (null, $"The Workspace definition could not be read after cloning: {read.Error}");
 
         var localContent = read.Found ? read.Content ?? string.Empty : null;
-        var (plan, planError) = RestoreDefinitionEvaluator.Evaluate(localContent, context.CloneUrl, context.Connectors, context.Catalog);
+        var (plan, planError) = RestoreDefinitionEvaluator.Evaluate(manifestFile, localContent, context.CloneUrl, context.Connectors, context.Catalog);
         if (plan is null)
             return (null, planError);
 
@@ -408,9 +410,9 @@ public sealed class WorkspaceRepositoryOperations(
             return false;
 
         var database = await manifestService.BuildFromDatabaseAsync(workspaceId, cancellationToken);
-        if (manifestService.TryParse(fileContent, out var fileManifest, out _) && fileManifest is not null)
+        if (manifestFile.TryParse(fileContent, out var fileManifest, out _) && fileManifest is not null)
             database = WorkspaceRepositoryTagPins.CopyOnto(database, fileManifest);
-        var canonical = manifestService.Serialize(database with
+        var canonical = manifestFile.Serialize(database with
         {
             Workspace = database.Workspace with { Name = plan.Manifest.Workspace.Name },
         });
@@ -481,7 +483,7 @@ public sealed class WorkspaceRepositoryOperations(
             return (null, read.Error);
 
         var (plan, error) = RestoreDefinitionEvaluator.Evaluate(
-            read.Found ? read.Content ?? string.Empty : null, context.CloneUrl, context.Connectors, context.Catalog);
+            manifestFile, read.Found ? read.Content ?? string.Empty : null, context.CloneUrl, context.Connectors, context.Catalog);
         return plan is null ? (null, error) : (new CheckedDefinition(context, plan), null);
     }
 

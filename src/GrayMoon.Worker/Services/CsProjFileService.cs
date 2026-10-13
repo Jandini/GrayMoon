@@ -1,12 +1,16 @@
 using System.Diagnostics;
-using GrayMoon.Common.Git;
+using GrayMoon.Common.Manifest;
 using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Models;
 using Microsoft.Extensions.Logging;
 
 namespace GrayMoon.Worker.Services;
 
-public sealed class CsProjFileService(ICsProjFileParser parser, IGitIgnoreService ignore, ILogger<CsProjFileService> logger) : ICsProjFileService
+public sealed class CsProjFileService(
+    ICsProjFileParser parser,
+    IGitIgnoreService ignore,
+    IWorkspaceManifestFile manifestFile,
+    ILogger<CsProjFileService> logger) : ICsProjFileService
 {
     private const int DefaultMaxParallel = 8;
 
@@ -77,7 +81,7 @@ public sealed class CsProjFileService(ICsProjFileParser parser, IGitIgnoreServic
         // folders. Skip every one its definition lists, on top of the nested-repository and Git-ignore pruning
         // below, so their projects are never attributed to the Workspace repository.
         var siblingRepositories = new HashSet<string>(
-            WorkspaceDefinitionRepositories.ReadNamesFromDirectory(repoPath), StringComparer.OrdinalIgnoreCase);
+            manifestFile.ReadRepositoryFolderNamesFromDirectory(repoPath), StringComparer.OrdinalIgnoreCase);
         try
         {
             using var session = ignore.Open(repoPath);
@@ -123,9 +127,11 @@ public sealed class CsProjFileService(ICsProjFileParser parser, IGitIgnoreServic
                 var name = Path.GetFileName(sub);
                 if (string.Equals(name, ".git", StringComparison.OrdinalIgnoreCase))
                     continue;
+                // A sibling repository is decided from its folder name alone, before anything looks inside it: no
+                // .git probe, no ignore check, no enumeration. Listed even before it is cloned.
                 if (relativeDir.Length == 0 && siblingRepositories.Contains(name))
                 {
-                    stats.SiblingRepos++; // A repository the Workspace definition lists, even before it is cloned.
+                    stats.SiblingRepos++;
                     continue;
                 }
                 if (WorkerRepositoryPaths.HasGitMetadata(sub))

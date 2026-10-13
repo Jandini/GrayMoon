@@ -1,8 +1,12 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace GrayMoon.Application.WorkspaceManifest;
+namespace GrayMoon.Common.Manifest;
 
+/// <summary>
+/// The Workspace definition file (<c>graymoon.json</c>) at the root of the Workspace repository. Read and written only
+/// through <see cref="IWorkspaceManifestFile"/>.
+/// </summary>
 /// <param name="CodeGraph">
 /// <c>codegraph</c>: true lets GrayMoon maintain <c>codegraph.json</c> in the Workspace repository and give each Feature
 /// its own CodeGraph index when the Workspace root has one. Owned by the file, not the database: GrayMoon keeps it on
@@ -54,9 +58,3 @@ public sealed record WorkspaceManifestRepository(
     string ConnectorUrl,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Tag = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Commit = null);
-
-/// <summary>
-/// One source repository's tag pin in the Workspace definition. Both <see cref="Tag"/> and <see cref="Commit"/>
-/// null clears the pin. Setting a pin requires both.
-/// </summary>
-public sealed record WorkspaceRepositoryTagPinChange(string RepositoryUrl, string? Tag, string? Commit);

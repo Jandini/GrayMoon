@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using GrayMoon.Common.Git;
+using GrayMoon.Common.Manifest;
 using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Jobs.Requests;
 using GrayMoon.Worker.Jobs.Response;
@@ -29,8 +30,11 @@ public sealed class SyncRepositoryCommand(
     IRepositoryVersionProviderFactory versionProviderFactory,
     ILogger<SyncRepositoryCommand>? logger = null,
     IGitChangesRefreshSuppressor? refreshSuppressor = null,
-    IRepositoryConfigurationInitializer? configuration = null) : ICommandHandler<SyncRepositoryRequest, SyncRepositoryResponse>
+    IRepositoryConfigurationInitializer? configuration = null,
+    IWorkspaceManifestFile? manifestFile = null) : ICommandHandler<SyncRepositoryRequest, SyncRepositoryResponse>
 {
+    private readonly IWorkspaceManifestFile _manifestFile = manifestFile ?? new WorkspaceManifestFile();
+
     /// <summary>Where the read lane's answers came from.</summary>
     private enum RefsSource
     {
@@ -330,11 +334,8 @@ public sealed class SyncRepositoryCommand(
     /// </summary>
     private async Task<string?> CheckoutPinnedCommitAsync(string workspacePath, string repoPath, string? cloneUrl, CancellationToken cancellationToken)
     {
-        var manifestPath = Path.Combine(workspacePath, "graymoon.json");
-        var definition = File.Exists(manifestPath)
-            ? await File.ReadAllTextAsync(manifestPath, cancellationToken)
-            : null;
-        var (commit, error) = WorkspaceDefinitionTagPin.ReadCommit(definition, cloneUrl);
+        var definition = await _manifestFile.ReadFromDirectoryAsync(workspacePath, cancellationToken);
+        var (commit, error) = _manifestFile.ReadTagPinCommit(definition, cloneUrl);
         if (error is not null)
         {
             RemoveFailedClone(workspacePath, repoPath);
