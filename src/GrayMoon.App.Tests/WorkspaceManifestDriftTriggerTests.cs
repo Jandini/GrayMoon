@@ -167,6 +167,12 @@ public sealed class WorkspaceManifestDriftTriggerTests
         public Task<OperationResult> WriteManagedGitIgnoreAsync(int workspaceId, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
+        public Task<OperationResult> WriteVersionFilesAsync(int workspaceId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<string>> MergeVersionFilesIntoDatabaseAsync(int workspaceId, IReadOnlyList<WorkspaceManifestVersionFile>? versionFiles, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
         public Task<bool> IsCodeGraphEnabledAsync(int workspaceId, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 

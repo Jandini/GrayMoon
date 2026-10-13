@@ -17,6 +17,20 @@ public interface IWorkspaceManifestService
     /// Does not create a git commit. Does nothing when the Workspace has no Workspace repository.
     /// </summary>
     Task<OperationResult> SetRepositoryTagPinsAsync(int workspaceId, IReadOnlyList<WorkspaceRepositoryTagPinChange> changes, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Replaces <c>versionFiles</c> in <c>graymoon.json</c> with the version configurations in the database and writes
+    /// the file when it changed. Nothing else in the file changes. Does not create a git commit. Does nothing when the
+    /// Workspace has no Workspace repository; fails when the definition is missing or cannot be read.
+    /// </summary>
+    Task<OperationResult> WriteVersionFilesAsync(int workspaceId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Merges version files of a Workspace definition into the database (Restore): the definition is the source of
+    /// truth, so its pattern replaces an existing configuration of the same file, and a missing Workspace file is
+    /// added. Configurations the definition does not list are kept. Returns the entries whose repository is not
+    /// linked to the Workspace (<c>repository/path</c>); those are skipped.
+    /// </summary>
+    Task<IReadOnlyList<string>> MergeVersionFilesIntoDatabaseAsync(int workspaceId, IReadOnlyList<WorkspaceManifestVersionFile>? versionFiles, CancellationToken cancellationToken = default);
     Task<OperationResult> WriteManagedGitIgnoreAsync(int workspaceId, CancellationToken cancellationToken = default);
 
     /// <summary>

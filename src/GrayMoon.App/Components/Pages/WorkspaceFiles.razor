@@ -4,6 +4,7 @@
 @using GrayMoon.App.Components.Features
 @using GrayMoon.Application.Features
 @using GrayMoon.Application.Workspaces
+@using GrayMoon.Application.WorkspaceManifest
 @using GrayMoon.App.Services.Features
 @using GrayMoon.App.Models
 @using GrayMoon.App.Models.Api
@@ -17,6 +18,7 @@
 @inject WorkspaceFileVersionConfigRepository VersionConfigRepository
 @inject WorkspaceFileVersionService FileVersionService
 @inject IWorkspaceFileOperations FileOperations
+@inject IWorkspaceManifestService ManifestService
 @inject IServiceScopeFactory ServiceScopeFactory
 @inject WorkspaceService WorkspaceService
 @inject IWorkspaceContextPathResolver PathResolver
@@ -395,6 +397,7 @@
                 fileVersionConfigs[configuringFile.FileId] = normalized;
             }
             CloseVersionConfigModal();
+            await WriteVersionFilesToDefinitionAsync();
             await RefreshFileDependencyStateAsync();
         }
         catch (Exception ex)
@@ -426,6 +429,8 @@
         try
         {
             var result = await FileOperations.UpdateVersionsAsync(WorkspaceId, _selectedContextId!.Value, _updateCts.Token, checkAfter: true);
+            // Also brings a Workspace definition written before version files were stored in it up to date.
+            await WriteVersionFilesToDefinitionAsync();
             if (result.Error == null)
                 await LoadAsync();
             if (result.Error != null)
@@ -450,6 +455,17 @@
 
     private void AbortUpdate() => _updateCts?.Cancel();
 
+    /// <summary>
+    /// Writes the version configurations to <c>versionFiles</c> of the Workspace definition (always the special
+    /// Workspace's <c>graymoon.json</c>, like every other definition write). A failure is shown, never thrown.
+    /// </summary>
+    private async Task WriteVersionFilesToDefinitionAsync()
+    {
+        var result = await ManifestService.WriteVersionFilesAsync(WorkspaceId);
+        if (!result.Success)
+            ToastService.ShowError($"Could not store version files in the Workspace definition: {result.Error}");
+    }
+
     private async Task RemoveFileAsync(WorkspaceFileDto f)
     {
         try
@@ -457,6 +473,8 @@
             errorMessage = null;
             await WorkspaceFileRepository.RemoveAsync(f.FileId);
             files.Remove(f);
+            if (fileVersionConfigs.Remove(f.FileId))
+                await WriteVersionFilesToDefinitionAsync();
             await RefreshFileDependencyStateAsync();
         }
         catch (Exception ex)

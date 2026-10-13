@@ -38,7 +38,13 @@ public sealed class WorkspaceManifestFile : IWorkspaceManifestFile
                 .ToList(),
             Repositories = (manifest.Repositories ?? [])
                 .OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
-                .ToList()
+                .ToList(),
+            VersionFiles = manifest.VersionFiles is { Count: > 0 } versionFiles
+                ? versionFiles
+                    .OrderBy(f => f.Repository, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(f => f.Path, StringComparer.OrdinalIgnoreCase)
+                    .ToList()
+                : null
         };
 
         var json = JsonSerializer.Serialize(sorted, WriteOptions).Replace("\r\n", "\n");
@@ -107,6 +113,12 @@ public sealed class WorkspaceManifestFile : IWorkspaceManifestFile
                     commit));
             }
 
+            if (!TryNormalizeVersionFiles(parsed.VersionFiles, out var versionFiles, out var versionFileError))
+            {
+                error = versionFileError;
+                return false;
+            }
+
             manifest = new WorkspaceManifest(
                 schemaVersion,
                 new WorkspaceManifestWorkspace(
@@ -120,7 +132,8 @@ public sealed class WorkspaceManifestFile : IWorkspaceManifestFile
                     .Select(c => new WorkspaceManifestConnector(c.Type ?? string.Empty, c.Url ?? string.Empty))
                     .ToList(),
                 repositories,
-                parsed.CodeGraph);
+                parsed.CodeGraph,
+                versionFiles);
             return true;
         }
         catch (JsonException ex)
@@ -272,6 +285,48 @@ public sealed class WorkspaceManifestFile : IWorkspaceManifestFile
         }
 
         return SchemaVersion;
+    }
+
+    /// <summary>
+    /// Validates the <c>versionFiles</c> entries: each needs a repository and a path. Paths use <c>/</c>, pattern lines
+    /// are normalized, and an entry listed twice (same repository and path) keeps its last occurrence.
+    /// </summary>
+    private static bool TryNormalizeVersionFiles(
+        IReadOnlyList<WorkspaceManifestVersionFile>? entries,
+        out IReadOnlyList<WorkspaceManifestVersionFile>? versionFiles,
+        out string? error)
+    {
+        versionFiles = null;
+        error = null;
+        if (entries is null)
+            return true;
+
+        var byKey = new Dictionary<string, WorkspaceManifestVersionFile>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in entries)
+        {
+            if (entry is null)
+                continue;
+
+            var repository = entry.Repository?.Trim() ?? string.Empty;
+            var path = WorkspaceManifestVersionFile.NormalizePath(entry.Path);
+            if (repository.Length == 0)
+            {
+                error = "A version file entry has no repository";
+                return false;
+            }
+
+            if (path.Length == 0)
+            {
+                error = $"A version file entry of repository '{repository}' has no path";
+                return false;
+            }
+
+            var pattern = WorkspaceManifestVersionFile.SplitPattern(string.Join("\n", (entry.Pattern ?? []).Where(l => l is not null)));
+            byKey[$"{repository}\n{path}"] = new WorkspaceManifestVersionFile(repository, path, pattern);
+        }
+
+        versionFiles = byKey.Values.ToList();
+        return true;
     }
 
     // A name that is not one plain folder name (".", "..", or one with a separator on any platform) can never be a sibling folder.

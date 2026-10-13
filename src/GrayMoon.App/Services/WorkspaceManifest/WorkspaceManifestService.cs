@@ -67,6 +67,8 @@ public sealed class WorkspaceManifestService(
             .OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        var versionFiles = await BuildVersionFilesAsync(db, workspaceId, cancellationToken);
+
         return new WorkspaceManifest(
             manifestFile.CurrentSchemaVersion,
             new WorkspaceManifestWorkspace(
@@ -76,7 +78,152 @@ public sealed class WorkspaceManifestService(
                     WorkspaceManifestProfileNames.ToManifest(workspace.VersioningMode),
                     WorkspaceManifestProfileNames.ToManifest(workspace.CiProvider))),
             connectors,
-            repositories);
+            repositories,
+            VersionFiles: versionFiles.Count > 0 ? versionFiles : null);
+    }
+
+    /// <summary>
+    /// Every configured version file of a repository still linked to the Workspace (Source or Workspace role). A
+    /// configuration whose pattern has no lines is left out.
+    /// </summary>
+    private static async Task<List<WorkspaceManifestVersionFile>> BuildVersionFilesAsync(
+        AppDbContext db,
+        int workspaceId,
+        CancellationToken cancellationToken)
+    {
+        var linkedRepositoryIds = db.WorkspaceRepositories
+            .Where(l => l.WorkspaceId == workspaceId)
+            .Select(l => l.RepositoryId);
+
+        var rows = await db.WorkspaceFileVersionConfigs
+            .AsNoTracking()
+            .Where(c => c.File!.WorkspaceId == workspaceId && linkedRepositoryIds.Contains(c.File.RepositoryId))
+            .Select(c => new { c.File!.Repository!.RepositoryName, c.File.FilePath, c.VersionPattern })
+            .ToListAsync(cancellationToken);
+
+        return rows
+            .Select(r => new WorkspaceManifestVersionFile(
+                r.RepositoryName,
+                WorkspaceManifestVersionFile.NormalizePath(r.FilePath),
+                WorkspaceManifestVersionFile.SplitPattern(r.VersionPattern)))
+            .Where(f => f.Path.Length > 0 && f.Pattern.Count > 0)
+            .OrderBy(f => f.Repository, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(f => f.Path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    public async Task<OperationResult> WriteVersionFilesAsync(int workspaceId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var (_, args) = await GetSpecialContextArgsAsync(workspaceId, cancellationToken);
+            if (args.WorkspaceRepositoryName is null)
+                return new OperationResult(true, NoWorkspaceRepositoryMessage);
+
+            var read = await WorkspaceRepositoryFileAccess.ReadAsync(
+                workerBridge, args, manifestFile.FileName, cancellationToken);
+            if (read.Error is not null)
+                return OperationResult.Fail(read.Error);
+            if (!read.Found || string.IsNullOrWhiteSpace(read.Content))
+                return OperationResult.Fail("The Workspace definition was not found.");
+            if (!manifestFile.TryParse(read.Content, out var manifest, out var parseError) || manifest is null)
+                return OperationResult.Fail(parseError ?? "The Workspace definition could not be read.");
+
+            await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+            var versionFiles = await BuildVersionFilesAsync(db, workspaceId, cancellationToken);
+            var content = manifestFile.Serialize(manifest with { VersionFiles = versionFiles.Count > 0 ? versionFiles : null });
+            if (string.Equals(content, read.Content.Replace("\r\n", "\n"), StringComparison.Ordinal))
+                return OperationResult.Ok();
+
+            // The file is updated in the working tree only. The user commits the Workspace repository.
+            return await WorkspaceRepositoryFileAccess.WriteAsync(
+                workerBridge, args, manifestFile.FileName, content, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Writing version files to the Workspace definition failed. WorkspaceId={WorkspaceId}", workspaceId);
+            return OperationResult.Fail(ex.Message);
+        }
+    }
+
+    public async Task<IReadOnlyList<string>> MergeVersionFilesIntoDatabaseAsync(
+        int workspaceId,
+        IReadOnlyList<WorkspaceManifestVersionFile>? versionFiles,
+        CancellationToken cancellationToken = default)
+    {
+        var skipped = new List<string>();
+        if (versionFiles is not { Count: > 0 })
+            return skipped;
+
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var repositoryIdsByName = (await db.WorkspaceRepositories
+                .AsNoTracking()
+                .Where(l => l.WorkspaceId == workspaceId && l.Repository != null)
+                .Select(l => new { l.RepositoryId, l.Repository!.RepositoryName })
+                .ToListAsync(cancellationToken))
+            .GroupBy(l => l.RepositoryName, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().RepositoryId, StringComparer.OrdinalIgnoreCase);
+
+        var files = await db.WorkspaceFiles
+            .Where(f => f.WorkspaceId == workspaceId)
+            .ToListAsync(cancellationToken);
+        var configs = await db.WorkspaceFileVersionConfigs
+            .Where(c => c.File!.WorkspaceId == workspaceId)
+            .ToListAsync(cancellationToken);
+
+        foreach (var entry in versionFiles)
+        {
+            var path = WorkspaceManifestVersionFile.NormalizePath(entry.Path);
+            if (entry.Pattern.Count == 0 || path.Length == 0)
+                continue;
+
+            if (!repositoryIdsByName.TryGetValue(entry.Repository, out var repositoryId))
+            {
+                skipped.Add($"{entry.Repository}/{path}");
+                continue;
+            }
+
+            var file = files.FirstOrDefault(f =>
+                f.RepositoryId == repositoryId
+                && string.Equals(WorkspaceManifestVersionFile.NormalizePath(f.FilePath), path, StringComparison.OrdinalIgnoreCase));
+            if (file is null)
+            {
+                file = new WorkspaceFile
+                {
+                    WorkspaceId = workspaceId,
+                    RepositoryId = repositoryId,
+                    FileName = Path.GetFileName(path),
+                    FilePath = path,
+                };
+                db.WorkspaceFiles.Add(file);
+                files.Add(file);
+            }
+
+            // The definition is the source of truth: its pattern replaces the one in the database.
+            var pattern = entry.PatternText();
+            // Tracked configs have their File fixed up by EF, so this also finds one added earlier in this loop.
+            var config = configs.FirstOrDefault(c => ReferenceEquals(c.File, file));
+            if (config is null)
+            {
+                config = new WorkspaceFileVersionConfig { File = file, VersionPattern = pattern };
+                db.WorkspaceFileVersionConfigs.Add(config);
+                configs.Add(config);
+            }
+            else
+            {
+                config.VersionPattern = pattern;
+            }
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        if (skipped.Count > 0)
+        {
+            logger.LogInformation(
+                "Version files of repositories not in the Workspace were not imported. WorkspaceId={WorkspaceId} Files={Files}",
+                workspaceId, string.Join(", ", skipped));
+        }
+
+        return skipped;
     }
 
     public async Task<OperationResult> WriteAuthoritativeManifestAsync(int workspaceId, CancellationToken cancellationToken = default)

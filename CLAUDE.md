@@ -118,6 +118,7 @@ Connector tokens are AES-256-GCM encrypted at rest via `AesGcmTokenProtector`. T
 - **`WorkspaceFileLineStatuses`** - one row per out-of-date token per file. Stores `TokenName`, `CurrentValue`, `ExpectedValue`. Cleared and rebuilt on every check.
 - **`WorkspaceFile.IsMissingOnDisk`** - nullable bool set by `CheckFileVersions` when the file path no longer exists. Missing files are excluded from badge computation and version update.
 - Worker commands `CheckFileVersions` and `UpdateFileVersions` live in `src/GrayMoon.Worker/Commands/`.
+- **Stored in `graymoon.json`** as `versionFiles` (`repository` folder name, `/` path, `pattern` lines; omitted when empty). `BuildFromDatabaseAsync` includes them, so every authoritative write does; the Files page calls `WriteVersionFilesAsync` (replaces only `versionFiles`) after a configuration save, a configured file's removal, and Update (which also migrates older definitions). Restore merges them into the database with `MergeVersionFilesIntoDatabaseAsync` (file wins; entries of repositories not here are skipped, and then the definition is not rewritten). Drift detection ignores them.
 - File-config token names also contribute dependency edges to the topological sort (alongside csproj project deps). `ImplicitReferencedRepoIdsBySource` separates `FromProject` vs `FromFile` for badge tooltip clarity.
 
 ### Git Changes (in-app diff viewer)
