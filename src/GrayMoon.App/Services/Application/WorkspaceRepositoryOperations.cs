@@ -369,6 +369,10 @@ public sealed class WorkspaceRepositoryOperations(
             await linkDb.SaveChangesAsync(cancellationToken);
         }
 
+        // The definition is the source of truth for version files; entries of repositories that are not here are skipped.
+        var skippedVersionFiles = await manifestService.MergeVersionFilesIntoDatabaseAsync(
+            workspaceId, plan.Manifest.VersionFiles, cancellationToken);
+
         // D14 step 7. Step 8 (the Sync) is requested by the caller.
         progress.Report("Preparing Workspace files...");
         string? warning = null;
@@ -377,7 +381,8 @@ public sealed class WorkspaceRepositoryOperations(
         {
             warning = $"Workspace restored, but .gitignore could not be updated: {gitIgnore.Error}";
         }
-        else if (await IsDefinitionRewriteRequiredAsync(workspaceId, plan, localContent!, cancellationToken))
+        else if (skippedVersionFiles.Count == 0
+                 && await IsDefinitionRewriteRequiredAsync(workspaceId, plan, localContent!, cancellationToken))
         {
             var written = await manifestService.WriteAuthoritativeManifestAsync(workspaceId, cancellationToken);
             if (!written.Success)
@@ -397,7 +402,7 @@ public sealed class WorkspaceRepositoryOperations(
     /// <summary>
     /// The restored definition is rewritten only when it is complete on this computer and its canonical form differs
     /// (for example duplicate entries, or the Workspace repository listed as its own Source repository). A definition
-    /// with repositories or connectors that are missing here is never rewritten: that would drop them from the file.
+    /// with repositories, connectors or version files that are missing here is never rewritten: that would drop them from the file.
     /// The Workspace name in the file is not a reason to rewrite, so choosing a local name does not dirty the repository.
     /// </summary>
     private async Task<bool> IsDefinitionRewriteRequiredAsync(

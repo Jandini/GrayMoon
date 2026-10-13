@@ -834,6 +834,16 @@ internal sealed class RecordingManifestService(IWorkspaceManifestService? inner 
     public Task<WorkspaceManifestDrift> DetectDriftAsync(int workspaceId, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
 
+    public Task<GrayMoon.Application.OperationResult> WriteVersionFilesAsync(int workspaceId, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+
+    public Task<IReadOnlyList<string>> MergeVersionFilesIntoDatabaseAsync(
+        int workspaceId,
+        IReadOnlyList<WorkspaceManifestVersionFile>? versionFiles,
+        CancellationToken cancellationToken = default) =>
+        inner?.MergeVersionFilesIntoDatabaseAsync(workspaceId, versionFiles, cancellationToken)
+        ?? Task.FromResult<IReadOnlyList<string>>([]);
+
     public bool CodeGraphEnabled { get; set; }
 
     public Task<bool> IsCodeGraphEnabledAsync(int workspaceId, CancellationToken cancellationToken = default) =>

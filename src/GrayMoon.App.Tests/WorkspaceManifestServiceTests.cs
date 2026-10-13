@@ -318,6 +318,123 @@ public sealed class WorkspaceManifestServiceTests
     }
 
     [Fact]
+    public async Task Build_includes_configured_version_files_of_linked_repositories_only()
+    {
+        await using var fixture = await ManifestTestFixture.CreateAsync();
+        var workspace = await fixture.SeedWorkspaceWithRootRepositoryAsync();
+        await fixture.AddVersionFileAsync(workspace, "Api", "src\\Directory.Packages.props", "  A={web}\r\n\r\nB={ws-root}");
+        await fixture.AddVersionFileAsync(workspace, "ws-root", "tools.json", "C={api}");
+        await fixture.AddVersionFileAsync(workspace, "Web", "unconfigured.txt", pattern: null);
+
+        var manifest = await fixture.CreateService().BuildFromDatabaseAsync(workspace.WorkspaceId);
+
+        Assert.NotNull(manifest.VersionFiles);
+        Assert.Equal(
+            ["Api:src/Directory.Packages.props", "ws-root:tools.json"],
+            manifest.VersionFiles.Select(f => $"{f.Repository}:{f.Path}").ToArray());
+        Assert.Equal(["A={web}", "B={ws-root}"], manifest.VersionFiles[0].Pattern.ToArray());
+    }
+
+    [Fact]
+    public async Task Build_has_no_version_files_when_none_are_configured()
+    {
+        await using var fixture = await ManifestTestFixture.CreateAsync();
+        var workspace = await fixture.SeedWorkspaceWithRootRepositoryAsync();
+
+        var manifest = await fixture.CreateService().BuildFromDatabaseAsync(workspace.WorkspaceId);
+
+        Assert.Null(manifest.VersionFiles);
+    }
+
+    [Fact]
+    public async Task Write_version_files_changes_only_version_files_and_a_repeat_does_not_write_again()
+    {
+        await using var fixture = await ManifestTestFixture.CreateAsync();
+        var workspace = await fixture.SeedWorkspaceWithRootRepositoryAsync();
+        var service = fixture.CreateService();
+        // The file lists a repository the database does not have: it must survive, only versionFiles is replaced.
+        var databaseManifest = await service.BuildFromDatabaseAsync(workspace.WorkspaceId);
+        var fileManifest = databaseManifest with
+        {
+            Repositories = [.. databaseManifest.Repositories,
+                new WorkspaceManifestRepository("Extra", "https://github.com/acme/Extra.git", "https://github.com")],
+            VersionFiles = [new WorkspaceManifestVersionFile("Web", "old.props", ["OLD={api}"])],
+        };
+        fixture.Bridge.RespondWithFile(new WorkspaceManifestFile().Serialize(fileManifest));
+        await fixture.AddVersionFileAsync(workspace, "Api", "src/a.props", "A={web}");
+
+        var result = await service.WriteVersionFilesAsync(workspace.WorkspaceId);
+
+        Assert.True(result.Success, result.Error);
+        var content = ManifestTestFixture.ToJson(
+            Assert.Single(fixture.Bridge.Sent, sent => sent.Command == "WriteRepositoryFile").Args)
+            .GetProperty("content").GetString()!;
+        Assert.True(new WorkspaceManifestFile().TryParse(content, out var written, out _));
+        Assert.Contains(written!.Repositories, r => r.Name == "Extra");
+        var file = Assert.Single(written.VersionFiles!);
+        Assert.Equal("src/a.props", file.Path);
+
+        fixture.Bridge.Sent.Clear();
+        fixture.Bridge.RespondWithFile(content);
+        var repeat = await service.WriteVersionFilesAsync(workspace.WorkspaceId);
+
+        Assert.True(repeat.Success, repeat.Error);
+        Assert.DoesNotContain(fixture.Bridge.Sent, sent => sent.Command == "WriteRepositoryFile");
+    }
+
+    [Fact]
+    public async Task Write_version_files_fails_without_a_definition_and_is_noop_without_workspace_repository()
+    {
+        await using var fixture = await ManifestTestFixture.CreateAsync();
+        var bare = await fixture.AddWorkspaceAsync("bare");
+
+        var noRepository = await fixture.CreateService().WriteVersionFilesAsync(bare.WorkspaceId);
+
+        Assert.True(noRepository.Success);
+        Assert.Empty(fixture.Bridge.Sent);
+
+        var workspace = await fixture.SeedWorkspaceWithRootRepositoryAsync();
+        fixture.Bridge.Handler = (command, _) => command == "GetFileContents"
+            ? new WorkerCommandResponse(true, new { errorMessage = "File not found: graymoon.json" }, null)
+            : new WorkerCommandResponse(true, new { success = true }, null);
+
+        var missing = await fixture.CreateService().WriteVersionFilesAsync(workspace.WorkspaceId);
+
+        Assert.False(missing.Success);
+        Assert.DoesNotContain(fixture.Bridge.Sent, sent => sent.Command == "WriteRepositoryFile");
+    }
+
+    [Fact]
+    public async Task Merge_version_files_adds_files_replaces_patterns_keeps_others_and_skips_unknown_repositories()
+    {
+        await using var fixture = await ManifestTestFixture.CreateAsync();
+        var workspace = await fixture.SeedWorkspaceWithRootRepositoryAsync();
+        await fixture.AddVersionFileAsync(workspace, "Api", "src/a.props", "A={old}");
+        await fixture.AddVersionFileAsync(workspace, "Web", "kept.props", "K={api}");
+
+        var skipped = await fixture.CreateService().MergeVersionFilesIntoDatabaseAsync(
+            workspace.WorkspaceId,
+            [
+                new WorkspaceManifestVersionFile("Api", "src/a.props", ["A={web}"]),
+                new WorkspaceManifestVersionFile("ws-root", "tools/versions.json", ["T={api}", "U={web}"]),
+                new WorkspaceManifestVersionFile("Missing", "x.props", ["X={api}"]),
+            ]);
+
+        Assert.Equal(["Missing/x.props"], skipped.ToArray());
+        await using var db = new AppDbContext(fixture.Options);
+        var configs = await db.WorkspaceFileVersionConfigs
+            .AsNoTracking()
+            .Include(c => c.File).ThenInclude(f => f!.Repository)
+            .ToListAsync();
+        var byPath = configs.ToDictionary(c => $"{c.File!.Repository!.RepositoryName}:{c.File.FilePath}", c => c.VersionPattern);
+        Assert.Equal(3, byPath.Count);
+        Assert.Equal("A={web}", byPath["Api:src/a.props"]);
+        Assert.Equal("K={api}", byPath["Web:kept.props"]);
+        Assert.Equal("T={api}\nU={web}", byPath["ws-root:tools/versions.json"]);
+        Assert.Equal("versions.json", configs.Single(c => c.File!.FilePath == "tools/versions.json").File!.FileName);
+    }
+
+    [Fact]
     public async Task Write_manifest_does_not_store_recent_open_in_tools()
     {
         await using var fixture = await ManifestTestFixture.CreateAsync();
@@ -515,6 +632,27 @@ internal sealed class ManifestTestFixture : IAsyncDisposable
         await LinkAsync(workspace, web, WorkspaceRepositoryRole.Source);
         await LinkAsync(workspace, root, WorkspaceRepositoryRole.Workspace);
         return workspace;
+    }
+
+    /// <summary>Adds a Workspace file of the named repository, with a version configuration unless <paramref name="pattern"/> is null.</summary>
+    public async Task AddVersionFileAsync(Workspace workspace, string repositoryName, string filePath, string? pattern)
+    {
+        await using var db = new AppDbContext(Options);
+        var repositoryId = await db.Repositories
+            .Where(r => r.RepositoryName == repositoryName)
+            .Select(r => r.RepositoryId)
+            .SingleAsync();
+        var file = new WorkspaceFile
+        {
+            WorkspaceId = workspace.WorkspaceId,
+            RepositoryId = repositoryId,
+            FileName = Path.GetFileName(filePath.Replace('\\', '/')),
+            FilePath = filePath,
+        };
+        db.WorkspaceFiles.Add(file);
+        if (pattern is not null)
+            db.WorkspaceFileVersionConfigs.Add(new WorkspaceFileVersionConfig { File = file, VersionPattern = pattern });
+        await db.SaveChangesAsync();
     }
 
     public async Task<DateTime?> GetDriftTimestampAsync(int workspaceId)

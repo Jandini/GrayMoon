@@ -29,6 +29,60 @@ public sealed class WorkspaceManifestFileTests
     }
 
     [Fact]
+    public void Version_files_round_trip_sorted_and_are_omitted_when_empty()
+    {
+        var manifest = Sample() with
+        {
+            VersionFiles =
+            [
+                new WorkspaceManifestVersionFile("Avr.Web", "src/b.props", ["B={avr.api}"]),
+                new WorkspaceManifestVersionFile("Avr.Api", "src/a.props", ["A={avr.web}", "C={avr.web:commit}"])
+            ]
+        };
+
+        var text = ManifestFile.Serialize(manifest);
+
+        Assert.Contains("\"versionFiles\"", text);
+        Assert.True(text.IndexOf("src/a.props", StringComparison.Ordinal) < text.IndexOf("src/b.props", StringComparison.Ordinal));
+        Assert.True(ManifestFile.TryParse(text, out var parsed, out var error), error);
+        Assert.Equal(text, ManifestFile.Serialize(parsed!));
+        Assert.Equal("A={avr.web}\nC={avr.web:commit}", parsed!.VersionFiles!.Single(f => f.Repository == "Avr.Api").PatternText());
+
+        Assert.DoesNotContain("versionFiles", ManifestFile.Serialize(Sample() with { VersionFiles = [] }));
+    }
+
+    [Fact]
+    public void Parse_normalizes_version_file_paths_and_pattern_lines()
+    {
+        const string content = """
+            {
+              "version": 1,
+              "workspace": { "name": "AVR" },
+              "versionFiles": [
+                { "repository": "Avr.Api", "path": "\\src\\a.props", "pattern": ["  A={avr.web}", "", "B={avr.web}\nC={avr.web}"] }
+              ]
+            }
+            """;
+
+        Assert.True(ManifestFile.TryParse(content, out var parsed, out var error), error);
+
+        var file = Assert.Single(parsed!.VersionFiles!);
+        Assert.Equal("src/a.props", file.Path);
+        Assert.Equal(["A={avr.web}", "B={avr.web}", "C={avr.web}"], file.Pattern.ToArray());
+    }
+
+    [Fact]
+    public void Parse_rejects_version_file_without_path()
+    {
+        const string content = """
+            { "version": 1, "workspace": { "name": "AVR" }, "versionFiles": [ { "repository": "Avr.Api", "pattern": ["A={avr.web}"] } ] }
+            """;
+
+        Assert.False(ManifestFile.TryParse(content, out _, out var error));
+        Assert.Contains("no path", error);
+    }
+
+    [Fact]
     public void Serialize_sorts_connectors_and_repositories()
     {
         var manifest = Sample() with
