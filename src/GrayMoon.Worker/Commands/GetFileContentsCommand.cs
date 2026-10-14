@@ -49,6 +49,11 @@ public sealed class GetFileContentsCommand() : ICommandHandler<GetFileContentsRe
             };
         }
 
+        if (TextFileGuard.GetRejectionReason(fullFilePath) is { } rejection)
+        {
+            return new GetFileContentsResponse { ErrorMessage = rejection };
+        }
+
         var content = await File.ReadAllTextAsync(fullFilePath, Encoding.UTF8, cancellationToken);
         return new GetFileContentsResponse { Content = content };
     }
