@@ -118,4 +118,37 @@ public sealed class UpdateFileVersionsCommandTests : IDisposable
         Assert.Equal(1, response.UpdatedCount);
         Assert.Contains("V=9.9.9", await File.ReadAllTextAsync(fullPath));
     }
+    [Fact]
+    public async Task Json_lock_line_replaces_only_the_commit_token()
+    {
+        var workspaceName = "ws";
+        var repoName = "Repo";
+        var repoPath = Path.Combine(_root, workspaceName, repoName);
+        Directory.CreateDirectory(repoPath);
+        var filePath = "aot.lock.json";
+        var fullPath = Path.Combine(repoPath, filePath);
+        await File.WriteAllTextAsync(fullPath, """
+            { "name": "Edx1.IO", "repository": "Jandini/Edx1.IO", "commit": "oldsha" },
+            { "name": "Edx1.Cli", "repository": "Jandini/Edx1.Cli", "commit": "keep" },
+            """);
+        var response = await _command.ExecuteAsync(new UpdateFileVersionsRequest
+        {
+            WorkspaceRoot = _root,
+            WorkspaceName = workspaceName,
+            RepositoryName = repoName,
+            FilePath = filePath,
+            VersionPattern = """
+                { "name": "Edx1.IO", "repository": "Jandini/Edx1.IO", "commit": "{@Edx1.IO:commit}" },
+                { "name": "Edx1.Cli", "repository": "Jandini/Edx1.Cli", "commit": "{@Edx1.Cli:commit}" },
+                """,
+            TokenValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["@Edx1.IO:commit"] = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            }
+        });
+        Assert.Equal(1, response.UpdatedCount);
+        var text = await File.ReadAllTextAsync(fullPath);
+        Assert.Contains("{ \"name\": \"Edx1.IO\", \"repository\": \"Jandini/Edx1.IO\", \"commit\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\" },", text);
+        Assert.Contains("{ \"name\": \"Edx1.Cli\", \"repository\": \"Jandini/Edx1.Cli\", \"commit\": \"keep\" },", text);
+    }
 }

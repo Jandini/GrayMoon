@@ -306,11 +306,7 @@ public sealed class WorkspaceFileVersionService(
         {
             var line = raw.TrimEnd('\r');
             if (string.IsNullOrWhiteSpace(line)) continue;
-            var start = line.IndexOf('{');
-            var end = start >= 0 ? line.IndexOf('}', start) : -1;
-            if (start < 0 || end <= start) continue;
-            var inner = line[(start + 1)..end];
-            if (!FileVersionTokenParser.TryParse(inner, out var token, out _) || token == null) continue;
+            if (!FileVersionTokenParser.TryFindLineToken(line, out _, out _, out var token, out _) || token == null) continue;
             if (!allowedRepoNames.Contains(token.RepositoryName)) continue;
             lines.Add(line);
         }

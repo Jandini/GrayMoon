@@ -19,6 +19,18 @@ public sealed class FileVersionFilterAndCountersTests
         Assert.DoesNotContain("ServiceB", filtered);
     }
     [Fact]
+    public void FilterPatternLinesToRepos_keeps_json_lines_by_inner_token()
+    {
+        var pattern = """
+            { "name": "Edx1.IO", "commit": "{@Edx1.IO:commit}" },
+            { "name": "Edx1.Cli", "commit": "{@Edx1.Cli:commit}" },
+            """;
+        var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Edx1.IO" };
+        var filtered = GrayMoon.App.Services.Workspaces.WorkspaceFileVersionService.FilterPatternLinesToRepos(pattern, allowed);
+        Assert.Contains("{@Edx1.IO:commit}", filtered);
+        Assert.DoesNotContain("Edx1.Cli", filtered);
+    }
+    [Fact]
     public void Three_token_kinds_for_same_repo_are_one_dependency_repository()
     {
         var tokens = FileVersionTokenParser.ExtractTokens("""

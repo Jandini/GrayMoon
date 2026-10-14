@@ -1,5 +1,8 @@
 namespace GrayMoon.Common.FileVersions;
-/// <summary>Central parser for GrayMoon file-version <c>{...}</c> tokens.</summary>
+/// <summary>
+/// Central parser for GrayMoon file-version <c>{...}</c> tokens.
+/// Literal braces that are not a token (JSON objects, for example) are left alone.
+/// </summary>
 public static class FileVersionTokenParser
 {
     /// <summary>
@@ -55,15 +58,77 @@ public static class FileVersionTokenParser
         foreach (var raw in pattern.Split('\n'))
         {
             var line = raw.Trim().TrimEnd('\r');
-            var start = line.IndexOf('{');
-            var end = start >= 0 ? line.IndexOf('}', start) : -1;
-            if (start < 0 || end <= start)
-                continue;
-            var inner = line[(start + 1)..end];
-            if (TryParse(inner, out var token, out _) && token != null)
+            if (TryFindLineToken(line, out _, out _, out var token, out _) && token != null)
                 tokens.Add(token);
         }
         return tokens;
+    }
+    /// <summary>
+    /// Finds the first version token on <paramref name="line"/>.
+    /// Brace pairs that contain whitespace, quotes, or nested braces are structural text, not tokens,
+    /// so a JSON line such as <c>{ "commit": "{@Repo:commit}" }</c> resolves to <c>{@Repo:commit}</c>.
+    /// Returns false when the line has no token. An unsupported selector still sets
+    /// <paramref name="unsupportedSelector"/> and the token span.
+    /// </summary>
+    public static bool TryFindLineToken(
+        string line,
+        out int tokenStart,
+        out int tokenEnd,
+        out FileVersionToken? token,
+        out string? unsupportedSelector)
+    {
+        token = null;
+        unsupportedSelector = null;
+        tokenStart = -1;
+        tokenEnd = -1;
+        var searchFrom = 0;
+        while (searchFrom < line.Length)
+        {
+            var open = line.IndexOf('{', searchFrom);
+            if (open < 0)
+                return false;
+            var close = line.IndexOf('}', open + 1);
+            if (close < 0)
+                return false;
+            var inner = line[(open + 1)..close];
+            if (!LooksLikeToken(inner))
+            {
+                searchFrom = open + 1;
+                continue;
+            }
+            if (TryParse(inner, out token, out unsupportedSelector) && token != null)
+            {
+                tokenStart = open;
+                tokenEnd = close;
+                return true;
+            }
+            if (!string.IsNullOrEmpty(unsupportedSelector))
+            {
+                tokenStart = open;
+                tokenEnd = close;
+                return false;
+            }
+            token = null;
+            unsupportedSelector = null;
+            searchFrom = close + 1;
+        }
+        return false;
+    }
+    /// <summary>
+    /// A token interior is <c>@Repo</c>, <c>@Repo:selector</c>, or the legacy form without <c>@</c>.
+    /// Anything with whitespace, quotes, or braces is surrounding file text.
+    /// </summary>
+    private static bool LooksLikeToken(string inner)
+    {
+        var content = inner.Trim();
+        if (content.Length == 0)
+            return false;
+        foreach (var c in content)
+        {
+            if (char.IsWhiteSpace(c) || c is '"' or '\'' or '{' or '}')
+                return false;
+        }
+        return true;
     }
     /// <summary>
     /// Validates pattern lines against known repository names. Separates unknown repositories
@@ -88,12 +153,7 @@ public static class FileVersionTokenParser
             var line = raw.Trim().TrimEnd('\r');
             if (string.IsNullOrEmpty(line))
                 continue;
-            var start = line.IndexOf('{');
-            var end = start >= 0 ? line.IndexOf('}', start) : -1;
-            if (start < 0 || end <= start)
-                continue;
-            var inner = line[(start + 1)..end];
-            if (!TryParse(inner, out var token, out var unsupportedSelector) || token == null)
+            if (!TryFindLineToken(line, out _, out _, out var token, out var unsupportedSelector) || token == null)
             {
                 if (!string.IsNullOrEmpty(unsupportedSelector))
                     unsupportedSelectors.Add(unsupportedSelector);
@@ -127,16 +187,13 @@ public static class FileVersionTokenParser
             var line = raw.Trim().TrimEnd('\r');
             if (string.IsNullOrEmpty(line))
                 continue;
-            var start = line.IndexOf('{');
-            var end = line.IndexOf('}', start >= 0 ? start : 0);
-            if (start < 1 || end <= start)
+            if (!TryFindLineToken(line, out var start, out var end, out var token, out _) || token == null)
+                continue;
+            if (start < 1)
                 continue;
             var prefix = line[..start];
-            var inner = line[(start + 1)..end];
             var suffix = end + 1 < line.Length ? line[(end + 1)..] : "";
             if (string.IsNullOrEmpty(prefix))
-                continue;
-            if (!TryParse(inner, out var token, out _) || token == null)
                 continue;
             result.Add(new FileVersionPatternEntry(prefix, token, suffix));
         }

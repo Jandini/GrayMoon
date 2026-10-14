@@ -104,6 +104,48 @@ public sealed class FileVersionTokenParserTests
         Assert.Equal("", entries[0].Suffix);
     }
     [Fact]
+    public void ParsePatternLines_json_object_uses_the_inner_commit_token()
+    {
+        var line = """{ "name": "Edx1.IO", "repository": "Jandini/Edx1.IO", "commit": "{@Edx1.IO:commit}" },""";
+        var entries = FileVersionTokenParser.ParsePatternLines(line);
+        Assert.Single(entries);
+        Assert.Equal("{ \"name\": \"Edx1.IO\", \"repository\": \"Jandini/Edx1.IO\", \"commit\": \"", entries[0].Prefix);
+        Assert.Equal("\" },", entries[0].Suffix);
+        Assert.Equal("Edx1.IO", entries[0].Token.RepositoryName);
+        Assert.Equal(FileVersionTokenKind.Commit, entries[0].Token.Kind);
+        Assert.Equal("@Edx1.IO:commit", entries[0].Token.TokenKey);
+    }
+    [Fact]
+    public void ExtractTokens_json_lines_ignore_structural_braces()
+    {
+        var pattern = """
+            { "name": "Edx1.IO", "repository": "Jandini/Edx1.IO", "commit": "{@Edx1.IO:commit}" },
+            { "name": "Edx1.Cli", "repository": "Jandini/Edx1.Cli", "commit": "{@Edx1.Cli:commit}" },
+            """;
+        var tokens = FileVersionTokenParser.ExtractTokens(pattern);
+        Assert.Equal(2, tokens.Count);
+        Assert.Equal("Edx1.IO", tokens[0].RepositoryName);
+        Assert.Equal(FileVersionTokenKind.Commit, tokens[0].Kind);
+        Assert.Equal("Edx1.Cli", tokens[1].RepositoryName);
+    }
+    [Fact]
+    public void Validate_json_braces_are_not_unsupported_selectors()
+    {
+        var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Edx1.IO", "Edx1.Cli" };
+        var pattern = """
+            { "name": "Edx1.IO", "repository": "Jandini/Edx1.IO", "commit": "{@Edx1.IO:commit}" },
+            { "name": "Edx1.Cli", "repository": "Jandini/Edx1.Cli", "commit": "{@Edx1.Cli:foo}" },
+            { "name": "plain" }
+            """;
+        var result = FileVersionTokenParser.Validate(pattern, known);
+        Assert.Single(result.ValidTokens);
+        Assert.Equal("Edx1.IO", result.ValidTokens[0].RepositoryName);
+        Assert.Equal(FileVersionTokenKind.Commit, result.ValidTokens[0].Kind);
+        Assert.Contains("foo", result.UnsupportedSelectors);
+        Assert.Single(result.UnsupportedSelectors);
+        Assert.Empty(result.UnknownRepositories);
+    }
+    [Fact]
     public void ExtractTokens_same_repo_three_kinds_are_distinct_keys_same_repository()
     {
         var tokens = FileVersionTokenParser.ExtractTokens("""
