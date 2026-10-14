@@ -45,7 +45,12 @@ public sealed class CheckFileVersionsCommand(ILogger<CheckFileVersionsCommand> l
                 });
                 continue;
             }
-            var fileLines = await File.ReadAllLinesAsync(fullFilePath, cancellationToken);
+            // A binary (or huge) file is never parsed: every token reports as not found.
+            string[] fileLines = [];
+            if (TextFileGuard.GetRejectionReason(fullFilePath) is { } rejection)
+                logger.LogWarning("CheckFileVersions skipped {FilePath}: {Reason}", filePath, rejection);
+            else
+                fileLines = await File.ReadAllLinesAsync(fullFilePath, cancellationToken);
             var totalMatchedLines = 0;
             var outOfDateLines = new List<CheckFileVersionsOutOfDateLine>();
             var matchedTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

@@ -23,6 +23,9 @@ public sealed class UpdateFileVersionsCommand() : ICommandHandler<UpdateFileVers
         var patternEntries = FileVersionTokenParser.ParsePatternLines(versionPattern);
         if (patternEntries.Count == 0)
             return new UpdateFileVersionsResponse { UpdatedCount = 0 };
+        // Never rewrite a binary (or huge) file as text lines - that would corrupt it.
+        if (TextFileGuard.GetRejectionReason(fullFilePath) is { } rejection)
+            return new UpdateFileVersionsResponse { UpdatedCount = 0, ErrorMessage = $"{rejection} Skipped: {filePath}" };
         var fileLines = await File.ReadAllLinesAsync(fullFilePath, cancellationToken);
         var updatedCount = 0;
         var modified = false;

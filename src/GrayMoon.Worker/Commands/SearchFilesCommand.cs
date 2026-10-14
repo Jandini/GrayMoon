@@ -21,9 +21,15 @@ public sealed class SearchFilesCommand(IWorkspaceFileSearchService fileSearch) :
             request.WorkspaceRepositoryName,
             cancellationToken);
 
+        // Only text files can be version files; sniffing lazily keeps the cost to the files actually returned.
         return new SearchFilesResponse
         {
-            Files = files.Take(20).ToArray()
+            Files = files
+                .Where(f => TextFileGuard.GetRejectionReason(Path.Combine(
+                    WorkerRepositoryPaths.Resolve(workspacePath, f.RepositoryName, request.WorkspaceRepositoryName),
+                    f.FilePath.Replace('/', Path.DirectorySeparatorChar))) is null)
+                .Take(20)
+                .ToArray()
         };
     }
 }
