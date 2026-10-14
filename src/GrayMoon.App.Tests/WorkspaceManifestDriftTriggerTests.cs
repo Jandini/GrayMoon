@@ -173,6 +173,9 @@ public sealed class WorkspaceManifestDriftTriggerTests
         public Task<IReadOnlyList<string>> MergeVersionFilesIntoDatabaseAsync(int workspaceId, IReadOnlyList<WorkspaceManifestVersionFile>? versionFiles, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
+        public Task<OperationResult> MergeVersionFilesFromDefinitionAsync(int workspaceId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(OperationResult.Ok());
+
         public Task<bool> IsCodeGraphEnabledAsync(int workspaceId, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 

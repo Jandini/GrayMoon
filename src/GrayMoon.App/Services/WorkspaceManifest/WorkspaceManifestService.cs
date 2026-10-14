@@ -130,7 +130,8 @@ public sealed class WorkspaceManifestService(
                 return OperationResult.Fail(parseError ?? "The Workspace definition could not be read.");
 
             await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-            var versionFiles = await BuildVersionFilesAsync(db, workspaceId, cancellationToken);
+            var versionFiles = await WithUnlinkedEntriesAsync(
+                db, workspaceId, await BuildVersionFilesAsync(db, workspaceId, cancellationToken), manifest.VersionFiles, cancellationToken);
             var content = manifestFile.Serialize(manifest with { VersionFiles = versionFiles.Count > 0 ? versionFiles : null });
             if (string.Equals(content, read.Content.Replace("\r\n", "\n"), StringComparison.Ordinal))
                 return OperationResult.Ok();
@@ -226,6 +227,75 @@ public sealed class WorkspaceManifestService(
         return skipped;
     }
 
+    public async Task<OperationResult> MergeVersionFilesFromDefinitionAsync(int workspaceId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var (_, args) = await GetSpecialContextArgsAsync(workspaceId, cancellationToken);
+            if (args.WorkspaceRepositoryName is null)
+                return new OperationResult(true, NoWorkspaceRepositoryMessage);
+
+            // Only the Workspace repository is read; a source repository's own graymoon.json is never looked at.
+            var read = await WorkspaceRepositoryFileAccess.ReadAsync(
+                workerBridge, args, manifestFile.FileName, cancellationToken);
+            if (read.Error is not null)
+                return OperationResult.Fail(read.Error);
+            if (!read.Found || string.IsNullOrWhiteSpace(read.Content))
+                return OperationResult.Ok();
+            if (!manifestFile.TryParse(read.Content, out var manifest, out var parseError) || manifest is null)
+                return OperationResult.Fail(parseError ?? "The Workspace definition could not be read.");
+
+            await MergeVersionFilesIntoDatabaseAsync(workspaceId, manifest.VersionFiles, cancellationToken);
+            return OperationResult.Ok();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Importing version files from the Workspace definition failed. WorkspaceId={WorkspaceId}", workspaceId);
+            return OperationResult.Fail(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// The version files to write: those of the database, plus the entries already in the file whose repository is not
+    /// linked to the Workspace. Those could not be imported (see <see cref="MergeVersionFilesIntoDatabaseAsync"/>), so
+    /// dropping them would lose them. An entry of a linked repository is not kept: the database is authoritative for it,
+    /// and Sync imports file-only entries before anything is written.
+    /// </summary>
+    private static async Task<List<WorkspaceManifestVersionFile>> WithUnlinkedEntriesAsync(
+        AppDbContext db,
+        int workspaceId,
+        List<WorkspaceManifestVersionFile> databaseFiles,
+        IReadOnlyList<WorkspaceManifestVersionFile>? fileEntries,
+        CancellationToken cancellationToken)
+    {
+        if (fileEntries is not { Count: > 0 })
+            return databaseFiles;
+
+        var linkedNames = (await db.WorkspaceRepositories
+                .AsNoTracking()
+                .Where(l => l.WorkspaceId == workspaceId && l.Repository != null)
+                .Select(l => l.Repository!.RepositoryName)
+                .ToListAsync(cancellationToken))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var result = databaseFiles.ToList();
+        foreach (var entry in fileEntries)
+        {
+            var path = WorkspaceManifestVersionFile.NormalizePath(entry.Path);
+            if (path.Length == 0 || entry.Pattern.Count == 0 || linkedNames.Contains(entry.Repository))
+                continue;
+            if (result.Any(f => string.Equals(f.Repository, entry.Repository, StringComparison.OrdinalIgnoreCase)
+                                && string.Equals(f.Path, path, StringComparison.OrdinalIgnoreCase)))
+                continue;
+            result.Add(entry with { Path = path });
+        }
+
+        return result
+            .OrderBy(f => f.Repository, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(f => f.Path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     public async Task<OperationResult> WriteAuthoritativeManifestAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
         try
@@ -246,6 +316,12 @@ public sealed class WorkspaceManifestService(
             {
                 manifest = WorkspaceRepositoryTagPins.CopyOnto(manifest, existing);
                 manifest = manifest with { CodeGraph = existing.CodeGraph };
+
+                // Version files of repositories that are not linked here could not be imported; keep them in the file.
+                await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+                var versionFiles = await WithUnlinkedEntriesAsync(
+                    db, workspaceId, manifest.VersionFiles?.ToList() ?? [], existing.VersionFiles, cancellationToken);
+                manifest = manifest with { VersionFiles = versionFiles.Count > 0 ? versionFiles : null };
             }
 
             var content = manifestFile.Serialize(manifest);

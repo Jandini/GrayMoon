@@ -844,6 +844,9 @@ internal sealed class RecordingManifestService(IWorkspaceManifestService? inner 
         inner?.MergeVersionFilesIntoDatabaseAsync(workspaceId, versionFiles, cancellationToken)
         ?? Task.FromResult<IReadOnlyList<string>>([]);
 
+    public Task<GrayMoon.Application.OperationResult> MergeVersionFilesFromDefinitionAsync(int workspaceId, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+
     public bool CodeGraphEnabled { get; set; }
 
     public Task<bool> IsCodeGraphEnabledAsync(int workspaceId, CancellationToken cancellationToken = default) =>

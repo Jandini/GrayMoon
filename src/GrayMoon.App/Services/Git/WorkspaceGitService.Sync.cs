@@ -140,6 +140,13 @@ public sealed partial class WorkspaceGitService
             workspaceId, contextId.Value, totalCount, maxActive[0],
             (long)Stopwatch.GetElapsedTime(fanOutStart).TotalMilliseconds, "fan-out");
 
+        // Before the persist: file-config tokens are dependency edges, and the file check below reads the configurations.
+        var syncedRepositoryIds = repos.Select(r => r.RepositoryId).ToHashSet();
+        var syncIncludesWorkspaceRepository = workspace.Repositories.Any(l =>
+            l.Role == WorkspaceRepositoryRole.Workspace && syncedRepositoryIds.Contains(l.RepositoryId));
+        if (applyRepositoryTagPin && syncIncludesWorkspaceRepository)
+            await ImportVersionFilesFromDefinitionAsync(workspaceId, cancellationToken);
+
         var persistStart = Stopwatch.GetTimestamp();
         await PersistVersionsAsync(workspaceId, contextId, results, persistDependencyLevel: !skipDependencyLevelPersistence, cancellationToken);
         _logger.LogDebug(
@@ -172,9 +179,8 @@ public sealed partial class WorkspaceGitService
 
         // D8: a Sync in the special Workspace context re-checks the Workspace definition when the synced set
         // (the whole workspace, or a subset) includes the Workspace-role repository.
-        var syncedRepositoryIds = repos.Select(r => r.RepositoryId).ToHashSet();
         await TriggerManifestDriftCheckAsync(
-            workspace.Repositories.Any(l => l.Role == WorkspaceRepositoryRole.Workspace && syncedRepositoryIds.Contains(l.RepositoryId)),
+            syncIncludesWorkspaceRepository,
             workspaceId,
             contextId,
             cancellationToken);
@@ -184,6 +190,24 @@ public sealed partial class WorkspaceGitService
 
         _logger.LogDebug("Sync completed for workspace {WorkspaceName}", workspace.Name);
         return results.ToDictionary(r => r.RepositoryId, r => r.info);
+    }
+
+    /// <summary>
+    /// Imports the <c>versionFiles</c> of the Workspace repository's <c>graymoon.json</c> into the database, so version
+    /// files that arrived with the repository (a pull, a checkout) are configured. Never fails the Sync.
+    /// </summary>
+    private async Task ImportVersionFilesFromDefinitionAsync(int workspaceId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var merged = await _manifestService.MergeVersionFilesFromDefinitionAsync(workspaceId, cancellationToken);
+            if (!merged.Success)
+                _logger.LogWarning("Version files of the Workspace definition were not imported. WorkspaceId={WorkspaceId} Error={Error}", workspaceId, merged.Error);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Importing version files from the Workspace definition failed. WorkspaceId={WorkspaceId}", workspaceId);
+        }
     }
 
     /// <summary>

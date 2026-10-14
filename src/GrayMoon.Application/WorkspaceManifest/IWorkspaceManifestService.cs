@@ -31,6 +31,14 @@ public interface IWorkspaceManifestService
     /// linked to the Workspace (<c>repository/path</c>); those are skipped.
     /// </summary>
     Task<IReadOnlyList<string>> MergeVersionFilesIntoDatabaseAsync(int workspaceId, IReadOnlyList<WorkspaceManifestVersionFile>? versionFiles, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Reads <c>versionFiles</c> from the <c>graymoon.json</c> in the root of the Workspace repository of the special
+    /// Workspace and merges them into the database with <see cref="MergeVersionFilesIntoDatabaseAsync"/>. No other
+    /// repository is searched. Does nothing (success) when the Workspace has no Workspace repository, the file is
+    /// absent, or it lists no version files; fails when the file cannot be read or parsed.
+    /// </summary>
+    Task<OperationResult> MergeVersionFilesFromDefinitionAsync(int workspaceId, CancellationToken cancellationToken = default);
     Task<OperationResult> WriteManagedGitIgnoreAsync(int workspaceId, CancellationToken cancellationToken = default);
 
     /// <summary>
