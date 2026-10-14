@@ -435,6 +435,81 @@ public sealed class WorkspaceManifestServiceTests
     }
 
     [Fact]
+    public async Task Merge_from_definition_reads_only_the_workspace_repository_and_imports_its_version_files()
+    {
+        await using var fixture = await ManifestTestFixture.CreateAsync();
+        var workspace = await fixture.SeedWorkspaceWithRootRepositoryAsync();
+        var service = fixture.CreateService();
+        var fileManifest = (await service.BuildFromDatabaseAsync(workspace.WorkspaceId)) with
+        {
+            VersionFiles = [new WorkspaceManifestVersionFile("Api", "src/a.props", ["A={web}"])],
+        };
+        fixture.Bridge.RespondWithFile(new WorkspaceManifestFile().Serialize(fileManifest));
+
+        var result = await service.MergeVersionFilesFromDefinitionAsync(workspace.WorkspaceId);
+
+        Assert.True(result.Success, result.Error);
+        var read = Assert.Single(fixture.Bridge.Sent);
+        Assert.Equal("GetFileContents", read.Command);
+        var args = ManifestTestFixture.ToJson(read.Args);
+        Assert.Equal("ws-root", args.GetProperty("repositoryName").GetString());
+        Assert.Equal("graymoon.json", args.GetProperty("filePath").GetString());
+        await using var db = new AppDbContext(fixture.Options);
+        var config = Assert.Single(await db.WorkspaceFileVersionConfigs.AsNoTracking().ToListAsync());
+        Assert.Equal("A={web}", config.VersionPattern);
+    }
+
+    [Fact]
+    public async Task Merge_from_definition_does_nothing_without_workspace_repository_or_definition()
+    {
+        await using var fixture = await ManifestTestFixture.CreateAsync();
+        var bare = await fixture.AddWorkspaceAsync("bare");
+
+        var noRepository = await fixture.CreateService().MergeVersionFilesFromDefinitionAsync(bare.WorkspaceId);
+
+        Assert.True(noRepository.Success);
+        Assert.Empty(fixture.Bridge.Sent);
+
+        var workspace = await fixture.SeedWorkspaceWithRootRepositoryAsync();
+        fixture.Bridge.Handler = (command, _) => command == "GetFileContents"
+            ? new WorkerCommandResponse(true, new { errorMessage = "File not found: graymoon.json" }, null)
+            : new WorkerCommandResponse(true, new { success = true }, null);
+
+        var missing = await fixture.CreateService().MergeVersionFilesFromDefinitionAsync(workspace.WorkspaceId);
+
+        Assert.True(missing.Success, missing.Error);
+        await using var db = new AppDbContext(fixture.Options);
+        Assert.Empty(await db.WorkspaceFileVersionConfigs.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Write_manifest_keeps_version_files_of_unlinked_repositories_but_not_removed_linked_ones()
+    {
+        await using var fixture = await ManifestTestFixture.CreateAsync();
+        var workspace = await fixture.SeedWorkspaceWithRootRepositoryAsync();
+        var service = fixture.CreateService();
+        var fileManifest = (await service.BuildFromDatabaseAsync(workspace.WorkspaceId)) with
+        {
+            VersionFiles =
+            [
+                new WorkspaceManifestVersionFile("Missing", "x.props", ["X={api}"]),
+                new WorkspaceManifestVersionFile("Api", "removed.props", ["R={web}"]),
+            ],
+        };
+        fixture.Bridge.RespondWithFile(new WorkspaceManifestFile().Serialize(fileManifest));
+
+        var result = await service.WriteAuthoritativeManifestAsync(workspace.WorkspaceId);
+
+        Assert.True(result.Success, result.Error);
+        var content = ManifestTestFixture.ToJson(
+            Assert.Single(fixture.Bridge.Sent, sent => sent.Command == "WriteRepositoryFile").Args)
+            .GetProperty("content").GetString()!;
+        Assert.True(new WorkspaceManifestFile().TryParse(content, out var written, out _));
+        var kept = Assert.Single(written!.VersionFiles!);
+        Assert.Equal("Missing", kept.Repository);
+    }
+
+    [Fact]
     public async Task Write_manifest_does_not_store_recent_open_in_tools()
     {
         await using var fixture = await ManifestTestFixture.CreateAsync();
