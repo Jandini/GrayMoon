@@ -19,15 +19,13 @@ namespace GrayMoon.Worker.Tests;
 public sealed class ReferenceTransactionHookTests : IDisposable
 {
     private readonly TempGitRepositoryFixture _repo = new();
-    private readonly HttpListener _listener = new();
+    private readonly HttpListener _listener;
     private readonly ConcurrentQueue<(string Path, string Body)> _posts = new();
     private readonly Task _listen;
 
     public ReferenceTransactionHookTests()
     {
-        var port = FreePort();
-        _listener.Prefixes.Add($"http://127.0.0.1:{port}/");
-        _listener.Start();
+        (_listener, var port) = StartListener();
         _listen = Task.Run(ListenAsync);
 
         var inner = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
@@ -45,6 +43,30 @@ public sealed class ReferenceTransactionHookTests : IDisposable
         _listener.Close();
         try { _listen.GetAwaiter().GetResult(); } catch { /* listener closed */ }
         _repo.Dispose();
+    }
+
+    /// <summary>
+    /// Picks a free port and binds the listener to it. Probing then releasing a port leaves a window in which another test class
+    /// running in parallel (or any process) can take it, so a failed bind retries on a new port instead of failing the test.
+    /// </summary>
+    private static (HttpListener Listener, int Port) StartListener()
+    {
+        const int attempts = 20;
+        for (var attempt = 1; ; attempt++)
+        {
+            var port = FreePort();
+            var listener = new HttpListener();
+            listener.Prefixes.Add($"http://127.0.0.1:{port}/");
+            try
+            {
+                listener.Start();
+                return (listener, port);
+            }
+            catch (HttpListenerException) when (attempt < attempts)
+            {
+                listener.Close();
+            }
+        }
     }
 
     private static int FreePort()
