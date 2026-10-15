@@ -1999,33 +1999,33 @@ public sealed class WorkspaceFeatureOperations(
             logger.LogWarning(ex, "Could not resolve Feature storage paths for roll back.");
         }
 
-        var results = new List<FeatureRepairRepositoryResult>();
         var done = 0;
+        var progressLock = new object();
         // D10: the Workspace-role root worktree is the Feature root and holds the Source worktrees, so
         // it is rolled back last and only when every Source row rolled back without a failure.
         var rootRow = rows.SingleOrDefault(r =>
             linkByWrId.TryGetValue(r.WorkspaceRepositoryId, out var rootLink)
             && rootLink.Role == WorkspaceRepositoryRole.Workspace);
-        var orderedRows = rows.Where(r => r != rootRow).ToList();
-        if (rootRow != null)
-            orderedRows.Add(rootRow);
+        var sourceRows = rows.Where(r => r != rootRow).ToList();
         const string rootKeptMessage = "Workspace repository worktree kept until all repository worktrees are removed.";
         var rootKept = false;
-        foreach (var row in orderedRows)
+
+        FeatureRepairRepositoryResult Finish(FeatureRepairRepositoryResult result)
+        {
+            lock (progressLock)
+            {
+                done++;
+                progress?.Report(new OperationProgress($"Rolled back {done} of {rows.Count} repositories", done, rows.Count));
+            }
+
+            return result;
+        }
+
+        async Task<FeatureRepairRepositoryResult> RollbackRowAsync(WorkspaceFeatureRepository row, bool isRootRow)
         {
             var repoName = linkByWrId.TryGetValue(row.WorkspaceRepositoryId, out var link)
                 ? link.Repository?.RepositoryName ?? ""
                 : "";
-            var isRootRow = ReferenceEquals(row, rootRow);
-            if (isRootRow && results.Any(r => r.Outcome == FeatureRepositoryOperationOutcome.Failed))
-            {
-                rootKept = true;
-                results.Add(new FeatureRepairRepositoryResult(repoName, FeatureRepositoryOperationOutcome.Skipped, rootKeptMessage));
-                done++;
-                progress?.Report(new OperationProgress($"Rolled back {done} of {rows.Count} repositories", done, rows.Count));
-                continue;
-            }
-
             var mainPath = await pathResolver.GetRepositoryPathAsync(specialContextId, row.WorkspaceRepositoryId, cancellationToken);
 
             var listResp = await workerBridge.SendCommandAsync(
@@ -2045,9 +2045,10 @@ public sealed class WorkspaceFeatureOperations(
                     ?.BranchName;
             }
 
+            FeatureRepairRepositoryResult result;
             if (registered is null)
             {
-                results.Add(new FeatureRepairRepositoryResult(repoName, FeatureRepositoryOperationOutcome.Skipped, "Worktree not registered."));
+                result = new FeatureRepairRepositoryResult(repoName, FeatureRepositoryOperationOutcome.Skipped, "Worktree not registered.");
             }
             else
             {
@@ -2066,11 +2067,8 @@ public sealed class WorkspaceFeatureOperations(
                 if (!removeResp.Success)
                 {
                     logger.FeatureRepositoryFailed("Rollback", info.WorkspaceId, featureName, repoName, removeResp.Error ?? "RemoveGitWorktree failed.");
-                    results.Add(new FeatureRepairRepositoryResult(
+                    return Finish(new FeatureRepairRepositoryResult(
                         repoName, FeatureRepositoryOperationOutcome.Failed, removeResp.Error ?? "RemoveGitWorktree failed."));
-                    done++;
-                    progress?.Report(new OperationProgress($"Rolled back {done} of {rows.Count} repositories", done, rows.Count));
-                    continue;
                 }
 
                 var branchName = row.PinnedTag == null ? featureName : null;
@@ -2105,24 +2103,57 @@ public sealed class WorkspaceFeatureOperations(
                     if (!deleteLocal.Success)
                     {
                         logger.FeatureRepositoryFailed("Rollback", info.WorkspaceId, featureName, repoName, deleteLocal.Error ?? "Local branch kept (could not delete).");
-                        results.Add(new FeatureRepairRepositoryResult(
+                        return Finish(new FeatureRepairRepositoryResult(
                             repoName,
                             FeatureRepositoryOperationOutcome.Succeeded,
                             deleteLocal.Error ?? "Local branch kept (could not delete)."));
-                        done++;
-                        progress?.Report(new OperationProgress($"Rolled back {done} of {rows.Count} repositories", done, rows.Count));
-                        continue;
                     }
                 }
 
-                results.Add(skipBranch && !string.IsNullOrWhiteSpace(branchName)
+                result = skipBranch && !string.IsNullOrWhiteSpace(branchName)
                     ? new FeatureRepairRepositoryResult(repoName, FeatureRepositoryOperationOutcome.Skipped, "Branch delete refused (default or primary checkout).")
-                    : new FeatureRepairRepositoryResult(repoName, FeatureRepositoryOperationOutcome.Succeeded, null));
+                    : new FeatureRepairRepositoryResult(repoName, FeatureRepositoryOperationOutcome.Succeeded, null);
             }
 
-            logger.FeatureRepositoryDone("Rollback", info.WorkspaceId, featureName, repoName, results[^1].Outcome.ToString());
-            done++;
-            progress?.Report(new OperationProgress($"Rolled back {done} of {rows.Count} repositories", done, rows.Count));
+            logger.FeatureRepositoryDone("Rollback", info.WorkspaceId, featureName, repoName, result.Outcome.ToString());
+            return Finish(result);
+        }
+
+        // Source rows are independent worktrees: fan out bounded by MaxParallel. Results are stored by
+        // index so their order (and the first-failure message) stays deterministic.
+        var sourceResults = new FeatureRepairRepositoryResult[sourceRows.Count];
+        using (var gate = new SemaphoreSlim(MaxParallel))
+        {
+            var tasks = sourceRows.Select(async (row, index) =>
+            {
+                await gate.WaitAsync(cancellationToken);
+                try
+                {
+                    sourceResults[index] = await RollbackRowAsync(row, false);
+                }
+                finally
+                {
+                    gate.Release();
+                }
+            });
+            await Task.WhenAll(tasks);
+        }
+
+        var results = sourceResults.ToList();
+        if (rootRow != null)
+        {
+            if (results.Any(r => r.Outcome == FeatureRepositoryOperationOutcome.Failed))
+            {
+                rootKept = true;
+                var rootRepoName = linkByWrId.TryGetValue(rootRow.WorkspaceRepositoryId, out var rootRowLink)
+                    ? rootRowLink.Repository?.RepositoryName ?? ""
+                    : "";
+                results.Add(Finish(new FeatureRepairRepositoryResult(rootRepoName, FeatureRepositoryOperationOutcome.Skipped, rootKeptMessage)));
+            }
+            else
+            {
+                results.Add(await RollbackRowAsync(rootRow, true));
+            }
         }
 
         if (results.Any(r => r.Outcome == FeatureRepositoryOperationOutcome.Failed))

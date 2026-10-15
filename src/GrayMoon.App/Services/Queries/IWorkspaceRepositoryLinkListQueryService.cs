@@ -87,4 +87,15 @@ public interface IWorkspaceRepositoryLinkListQueryService
         WorkspaceFeatureContextId? contextId = null,
         bool isSpecialWorkspace = true,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Batch form of <see cref="GetSnapshotAsync"/> in one pass. Keyed by repository id; a repository with no
+    /// link in the workspace is absent from the result (where the single call returns null).
+    /// </summary>
+    Task<IReadOnlyDictionary<int, WorkspaceRepositoryLinkListItemDto>> GetSnapshotsAsync(
+        int workspaceId,
+        IReadOnlyCollection<int> repositoryIds,
+        WorkspaceFeatureContextId? contextId = null,
+        bool isSpecialWorkspace = true,
+        CancellationToken cancellationToken = default);
 }

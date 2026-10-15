@@ -12,6 +12,10 @@ public sealed class CsProjFileService(
     IWorkspaceManifestFile manifestFile,
     ILogger<CsProjFileService> logger) : ICsProjFileService
 {
+    /// <summary>
+    /// Default bound on concurrent project parses (<see cref="FindAsync"/>) and project updates
+    /// (<see cref="UpdatePackageVersionsAsync"/>) when the caller passes no limit. File IO bound, so a small fixed value.
+    /// </summary>
     private const int DefaultMaxParallel = 8;
 
     public async Task<IReadOnlyList<CsProjFileInfo>> FindAsync(string repoPath, CancellationToken cancellationToken = default, int? maxParallel = null)
@@ -164,21 +168,38 @@ public sealed class CsProjFileService(
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || projectUpdates == null || projectUpdates.Count == 0)
             return 0;
 
-        var updatedCount = 0;
+        // Entries that resolve to the same file are grouped and applied in order (each edit rewrites the file in
+        // place); distinct files are updated in parallel, at most DefaultMaxParallel at a time.
+        var groups = new Dictionary<string, List<IReadOnlyDictionary<string, string>>>(StringComparer.OrdinalIgnoreCase);
         foreach (var (relativePath, packageUpdates) in projectUpdates)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (string.IsNullOrWhiteSpace(relativePath) || packageUpdates == null || packageUpdates.Count == 0)
                 continue;
 
-            var fullPath = Path.Combine(repoPath, relativePath.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            var fullPath = Path.GetFullPath(Path.Combine(repoPath, relativePath.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)));
             if (!File.Exists(fullPath))
                 continue;
 
-            var modified = await parser.UpdateAsync(fullPath, packageUpdates, cancellationToken);
-            if (modified)
-                updatedCount++;
+            if (!groups.TryGetValue(fullPath, out var list))
+                groups[fullPath] = list = [];
+            list.Add(packageUpdates);
         }
+
+        var updatedCount = 0;
+        await Parallel.ForEachAsync(
+            groups,
+            new ParallelOptions { MaxDegreeOfParallelism = DefaultMaxParallel, CancellationToken = cancellationToken },
+            async (group, token) =>
+            {
+                foreach (var packageUpdates in group.Value)
+                {
+                    token.ThrowIfCancellationRequested();
+                    var modified = await parser.UpdateAsync(group.Key, packageUpdates, token);
+                    if (modified)
+                        Interlocked.Increment(ref updatedCount);
+                }
+            });
 
         return updatedCount;
     }

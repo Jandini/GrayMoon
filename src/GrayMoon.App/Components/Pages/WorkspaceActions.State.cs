@@ -150,13 +150,13 @@ public sealed partial class WorkspaceActions
 
     /// <summary>Same wording as Git Changes' header scan indicator.</summary>
     internal string RefreshStatusText =>
-        _refreshTotal > 0
-            ? $"Refreshing {_refreshCompleted} of {_refreshTotal} repositories..."
-            : "Refreshing repositories...";
+        _refreshTotal > 0 && _refreshCompleted > 0
+            ? $"Refreshed {_refreshCompleted} of {_refreshTotal}"
+            : "Refreshing...";
 
     /// <summary>Compact progress ("1 of 3") shown when the title row is too narrow for <see cref="RefreshStatusText"/>.</summary>
     internal string RefreshStatusShortText =>
-        _refreshTotal > 0
+        _refreshTotal > 0 && _refreshCompleted > 0
             ? $"{_refreshCompleted} of {_refreshTotal}"
             : "";
 

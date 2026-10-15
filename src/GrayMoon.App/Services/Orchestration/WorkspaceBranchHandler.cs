@@ -1,8 +1,10 @@
 using System.Collections.Concurrent;
 using GrayMoon.App.Api.Endpoints;
+using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Services.Features;
 using GrayMoon.Application.Features;
+using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services.Orchestration;
 
@@ -15,9 +17,10 @@ public sealed class WorkspaceBranchHandler(
     IWorkspaceBranchOperations branchOperations,
     IWorkspaceBranchOccupancyService branchOccupancyService,
     IFeatureBranchGuard featureBranchGuard,
+    IOptions<WorkspaceOptions> workspaceOptions,
     ILogger<WorkspaceBranchHandler> logger)
 {
-    private const int DefaultMaxParallelOperations = 16;
+    private int MaxParallelOperations => Math.Max(1, workspaceOptions.Value.MaxParallelOperations);
 
     public async Task<CommonBranchesApiResult?> GetCommonBranchesAsync(int workspaceId, CancellationToken cancellationToken)
     {
@@ -177,7 +180,7 @@ public sealed class WorkspaceBranchHandler(
         var total = repositoryIds.Count;
         var completed = 0;
         var errors = new ConcurrentDictionary<int, string>();
-        using var semaphore = new SemaphoreSlim(DefaultMaxParallelOperations, DefaultMaxParallelOperations);
+        using var semaphore = new SemaphoreSlim(MaxParallelOperations, MaxParallelOperations);
 
         var tasks = repositoryIds.Select(async repositoryId =>
         {
@@ -251,10 +254,15 @@ public sealed class WorkspaceBranchHandler(
 
         var errors = new ConcurrentDictionary<int, string>();
         var occupancyCheckDegraded = false;
-        var repositoryIdsToCheckout = new List<int>();
 
-        foreach (var (repositoryId, workspaceRepositoryId) in workspaceRepositoryIdsByRepositoryId)
+        // Each check is a worker round trip (git worktree list) plus its own short-lived DbContext, so the
+        // checks fan out bounded by the same limit as the checkouts below instead of running one repo at a time.
+        using var occupancySemaphore = new SemaphoreSlim(MaxParallelOperations, MaxParallelOperations);
+        var checkoutAllowed = new ConcurrentDictionary<int, bool>();
+        var occupancyTasks = workspaceRepositoryIdsByRepositoryId.Select(async pair =>
         {
+            var (repositoryId, workspaceRepositoryId) = pair;
+            await occupancySemaphore.WaitAsync(cancellationToken);
             try
             {
                 var badges = await branchOccupancyService.GetBadgesForRepositoryAsync(
@@ -264,7 +272,7 @@ public sealed class WorkspaceBranchHandler(
                     errors[repositoryId] = badge.Kind == BranchOccupancyKind.Feature
                         ? $"Skipped: branch is held by Feature '{badge.FeatureName}'."
                         : "Skipped: branch is checked out in another worktree.";
-                    continue;
+                    return;
                 }
             }
             catch (OperationCanceledException)
@@ -276,13 +284,21 @@ public sealed class WorkspaceBranchHandler(
                 logger.LogWarning(ex, "Branch occupancy check failed for repository {RepositoryId}; attempting checkout anyway", repositoryId);
                 occupancyCheckDegraded = true;
             }
-            repositoryIdsToCheckout.Add(repositoryId);
-        }
+            finally
+            {
+                occupancySemaphore.Release();
+            }
+            checkoutAllowed[repositoryId] = true;
+        });
+        await Task.WhenAll(occupancyTasks);
+
+        // Keep the caller's repository order so progress and checkout start order stay deterministic.
+        var repositoryIdsToCheckout = workspaceRepositoryIdsByRepositoryId.Keys.Where(checkoutAllowed.ContainsKey).ToList();
 
         var total = workspaceRepositoryIdsByRepositoryId.Count;
         var completed = total - repositoryIdsToCheckout.Count;
         reportProgress?.Invoke(completed, total);
-        using var semaphore = new SemaphoreSlim(DefaultMaxParallelOperations, DefaultMaxParallelOperations);
+        using var semaphore = new SemaphoreSlim(MaxParallelOperations, MaxParallelOperations);
 
         var tasks = repositoryIdsToCheckout.Select(async repositoryId =>
         {

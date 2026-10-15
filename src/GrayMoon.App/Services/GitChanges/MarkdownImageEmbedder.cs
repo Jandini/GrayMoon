@@ -2,9 +2,11 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.RegularExpressions;
+using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Services;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services.GitChanges;
 
@@ -12,7 +14,11 @@ namespace GrayMoon.App.Services.GitChanges;
 /// Rewrites relative (and remote) markdown image <c>src</c> values to data URIs so Preview can render
 /// them inside the App (no repository filesystem access; WebView2 also has no GitHub session cookies).
 /// </summary>
-public sealed class MarkdownImageEmbedder(IWorkerBridge workerBridge, IHttpClientFactory httpClientFactory, ILogger<MarkdownImageEmbedder> logger)
+public sealed class MarkdownImageEmbedder(
+    IWorkerBridge workerBridge,
+    IHttpClientFactory httpClientFactory,
+    ILogger<MarkdownImageEmbedder> logger,
+    IOptions<WorkspaceOptions> workspaceOptions)
 {
     private const int MaxImages = 24;
     private const long MaxRemoteBytes = 2 * 1024 * 1024;
@@ -49,41 +55,52 @@ public sealed class MarkdownImageEmbedder(IWorkerBridge workerBridge, IHttpClien
 
         var markdownDir = Path.GetDirectoryName(markdownRelativePath.Replace('\\', '/'))?.Replace('\\', '/') ?? string.Empty;
         var replacements = new Dictionary<string, string>(StringComparer.Ordinal);
-        var embedded = 0;
 
+        // Distinct embeddable sources in document order (deduped by src).
+        var candidates = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (Match match in matches)
         {
-            if (embedded >= MaxImages)
-            {
-                break;
-            }
-
             var src = match.Groups[1].Success ? match.Groups[1].Value : match.Groups[2].Value;
-            if (string.IsNullOrWhiteSpace(src) || replacements.ContainsKey(src) || src.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+            if (string.IsNullOrWhiteSpace(src) || src.StartsWith("data:", StringComparison.OrdinalIgnoreCase) || !seen.Add(src))
             {
                 continue;
             }
 
-            string? dataUri = null;
-            if (IsHttpUrl(src))
+            if (IsHttpUrl(src) || (!src.StartsWith('#') && !LooksLikeScheme(src)))
             {
-                dataUri = await TryDownloadRemoteAsync(src, githubBearerToken, cancellationToken);
+                candidates.Add(src);
             }
-            else if (!src.StartsWith('#') && !LooksLikeScheme(src))
-            {
-                dataUri = await TryLoadRepoFileAsync(
-                    workspaceRoot,
-                    workspaceName,
-                    repositoryName,
-                    workspaceRepositoryName,
-                    ResolveRepoRelativePath(markdownDir, src),
-                    cancellationToken);
-            }
+        }
 
-            if (dataUri != null)
+        async Task<string?> LoadAsync(string src) => IsHttpUrl(src)
+            ? await TryDownloadRemoteAsync(src, githubBearerToken, cancellationToken)
+            : await TryLoadRepoFileAsync(
+                workspaceRoot,
+                workspaceName,
+                repositoryName,
+                workspaceRepositoryName,
+                ResolveRepoRelativePath(markdownDir, src),
+                cancellationToken);
+
+        // Load in document-order batches of at most MaxParallelOperations. A batch never holds more sources
+        // than there are embeds left under MaxImages, so the cap holds exactly and the result is the same
+        // as the sequential pass: the first MaxImages sources that embed successfully, in document order.
+        var maxParallel = Math.Max(1, workspaceOptions.Value.MaxParallelOperations);
+        var next = 0;
+        while (next < candidates.Count && replacements.Count < MaxImages)
+        {
+            var batchSize = Math.Min(Math.Min(maxParallel, MaxImages - replacements.Count), candidates.Count - next);
+            var batch = candidates.GetRange(next, batchSize);
+            next += batchSize;
+
+            var loaded = await Task.WhenAll(batch.Select(LoadAsync));
+            for (var i = 0; i < batch.Count; i++)
             {
-                replacements[src] = dataUri;
-                embedded++;
+                if (loaded[i] != null)
+                {
+                    replacements[batch[i]] = loaded[i]!;
+                }
             }
         }
 

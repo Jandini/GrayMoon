@@ -12,6 +12,7 @@ using GrayMoon.Application.Features;
 using GrayMoon.Application.Workspaces;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using System.Collections.Concurrent;
 using System.Threading.Channels;
 
 namespace GrayMoon.App.Services.Workspaces;
@@ -689,7 +690,7 @@ public sealed class WorkspacePushService(
         {
             var rawErr = response.Error ?? WorkerResponseJson.DeserializeWorkerResponse<PushRepositoryResponse>(response.Data!)?.ErrorMessage;
             if (PushErrorFormatter.IsNonFastForwardRejection(rawErr))
-                await FetchAfterRejectionAsync(workspaceId, contextId, repositoryId, repo.RepositoryName, workspace.Name, workspaceRoot, workspaceRepositoryName, cancellationToken);
+                await FetchAfterRejectionsAsync(workspaceId, contextId, [(repositoryId, repo.RepositoryName)], workspace.Name, workspaceRoot, workspaceRepositoryName, cancellationToken);
             return (false, PushErrorFormatter.Format(rawErr));
         }
 
@@ -1003,7 +1004,7 @@ public sealed class WorkspacePushService(
         var workspaceFolderName = workerArgs.WorkspaceFolderName;
         var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
         var capabilities = await ResolveRepositoryOperationCapabilitiesAsync(workspace.WorkspaceId, cancellationToken);
-        var rejectedRepos = new System.Collections.Concurrent.ConcurrentBag<(int RepoId, string RepoName)>();
+        var rejectedRepos = new ConcurrentBag<(int RepoId, string RepoName)>();
         var failures = new System.Collections.Concurrent.ConcurrentBag<(int RepoId, string Error)>();
         var pushTasks = repos.Select(async repo =>
         {
@@ -1074,41 +1075,78 @@ public sealed class WorkspacePushService(
             }
         });
         await Task.WhenAll(pushTasks);
-        foreach (var (repoId, repoName) in rejectedRepos)
-            await FetchAfterRejectionAsync(workspace.WorkspaceId, contextId, repoId, repoName, workspace.Name, workspaceRoot, workspaceRepositoryName, cancellationToken);
+        await FetchAfterRejectionsAsync(workspace.WorkspaceId, contextId, rejectedRepos.ToList(), workspace.Name, workspaceRoot, workspaceRepositoryName, cancellationToken);
         return failures.ToList();
     }
 
     private async Task<RepositoryOperationCapabilities> ResolveRepositoryOperationCapabilitiesAsync(int workspaceId, CancellationToken cancellationToken)
         => (await _capabilitiesResolver.GetAsync(workspaceId, cancellationToken)).ToRepositoryOperationCapabilities();
 
-    private async Task FetchAfterRejectionAsync(
+    internal async Task FetchAfterRejectionsAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
-        int repositoryId,
-        string repoName,
+        IReadOnlyList<(int RepoId, string RepoName)> rejectedRepos,
         string workspaceName,
         string? workspaceRoot,
         string? workspaceRepositoryName,
         CancellationToken cancellationToken)
     {
-        try
+        if (rejectedRepos.Count == 0)
+            return;
+
+        // Phase 1: Worker RefreshBranches round trips fan out, bounded by _maxConcurrent.
+        var refreshed = new ConcurrentBag<(int RepoId, string RepoName)>();
+        using (var semaphore = new SemaphoreSlim(_maxConcurrent))
         {
-            await _workerBridge.SendCommandAsync("RefreshBranches", new
+            var tasks = rejectedRepos.Select(async repo =>
             {
-                workspaceName,
-                repositoryId,
-                repositoryName = repoName,
-                workspaceRoot,
-                workspaceRepositoryName
-            }, cancellationToken);
-            await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, contextId,
-                [new PushRepoPayload(repositoryId, repoName, null, [])],
-                cancellationToken);
+                await semaphore.WaitAsync(cancellationToken);
+                try
+                {
+                    await _workerBridge.SendCommandAsync("RefreshBranches", new
+                    {
+                        workspaceName,
+                        repositoryId = repo.RepoId,
+                        repositoryName = repo.RepoName,
+                        workspaceRoot,
+                        workspaceRepositoryName
+                    }, cancellationToken);
+                    refreshed.Add(repo);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Fetch after push rejection failed for repo {RepoId}", repo.RepoId);
+                }
+                finally
+                {
+                    semaphore.Release();
+                }
+            });
+            await Task.WhenAll(tasks);
         }
-        catch (Exception ex)
+
+        // Phase 2: DB updates share the scoped _dbContext, so they run strictly one at a time.
+        var refreshedIds = refreshed.Select(r => r.RepoId).ToHashSet();
+        foreach (var (repoId, repoName) in rejectedRepos.Where(r => refreshedIds.Contains(r.RepoId)))
         {
-            _logger.LogWarning(ex, "Fetch after push rejection failed for repo {RepoId}", repositoryId);
+            try
+            {
+                await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, contextId,
+                    [new PushRepoPayload(repoId, repoName, null, [])],
+                    cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Fetch after push rejection failed for repo {RepoId}", repoId);
+            }
         }
     }
 

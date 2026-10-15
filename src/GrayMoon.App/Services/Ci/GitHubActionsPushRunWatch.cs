@@ -1,6 +1,9 @@
 using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Models;
+using GrayMoon.App.Services.GitHub;
 using GrayMoon.App.Services.Ui;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services.Ci;
 
@@ -8,10 +11,13 @@ namespace GrayMoon.App.Services.Ci;
 /// GitHub Actions run watching during synchronized push: every few seconds discovers running workflows on the
 /// branches already pushed, then streams their job/step transitions into the push overlay terminal. Moved out of
 /// <see cref="WorkspacePushService"/> unchanged; one instance per dependency level, like the state it replaced.
+/// GitHub lookups fan out (bounded by <see cref="WorkspaceOptions.MaxParallelOperations"/>), each in its own DI scope
+/// so no scoped DbContext is shared between parallel calls; results are applied to the state and the overlay
+/// sequentially, in the original order.
 /// </summary>
 internal sealed class GitHubActionsPushRunWatch(
-    GitHubActionsService gitHubActionsService,
-    GhaWorkflowLiveFeedService liveFeedService,
+    IServiceScopeFactory scopeFactory,
+    IOptions<WorkspaceOptions> workspaceOptions,
     OverlayCommandTerminalService overlayTerminal,
     ILogger logger) : IPushCiRunWatch
 {
@@ -22,6 +28,8 @@ internal sealed class GitHubActionsPushRunWatch(
     private bool _discoveryEnabled = true;
     private DateTime _lastDiscoveryUtc = DateTime.MinValue;
     private DateTime _lastPollUtc = DateTime.MinValue;
+
+    private int MaxConcurrency => Math.Max(1, workspaceOptions.Value.MaxParallelOperations);
 
     public async Task TickAsync(
         IReadOnlyList<PushRepoPayload> pushedRepos,
@@ -54,6 +62,7 @@ internal sealed class GitHubActionsPushRunWatch(
         CancellationToken cancellationToken)
     {
         var linksByRepoId = links.ToDictionary(l => l.RepositoryId);
+        var candidates = new List<(int RepoId, GitHubRepositoryEntry Entry, string Branch)>();
         foreach (var repo in pushedRepos)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -81,20 +90,27 @@ internal sealed class GitHubActionsPushRunWatch(
                 Archived = link.Repository.Archived
             };
 
-            IReadOnlyList<ActionStatusInfo>? statuses;
-            try
-            {
-                statuses = await gitHubActionsService.GetWorkflowStatusesForBranchAsync(entry, link.BranchName!, cancellationToken: cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                logger.LogDebug(ex, "Push wait: failed to discover running workflows for repo {RepoId}", repo.RepoId);
-                continue;
-            }
+            candidates.Add((repo.RepoId, entry, link.BranchName!));
+        }
 
+        if (candidates.Count == 0)
+            return;
+
+        // Fan out the GitHub lookups, then apply every result on this one thread in the original order.
+        using var gate = new SemaphoreSlim(MaxConcurrency);
+        var lookups = await Task.WhenAll(candidates.Select(c => LookUpWorkflowsAsync(c.RepoId, c.Entry, c.Branch, gate, cancellationToken)));
+
+        for (var i = 0; i < candidates.Count; i++)
+        {
+            var (repoId, entry, _) = candidates[i];
+            var lookup = lookups[i];
+            if (lookup.Failed)
+                continue;
+
+            var statuses = lookup.Statuses;
             if (statuses == null || statuses.Count == 0)
             {
-                _noWorkflowRepoIds.Add(repo.RepoId);
+                _noWorkflowRepoIds.Add(repoId);
                 logger.LogDebug("Push wait: repo {RepoName} has no active GitHub Actions workflows; skipping live feed.", entry.RepositoryName);
                 continue;
             }
@@ -126,19 +142,82 @@ internal sealed class GitHubActionsPushRunWatch(
         }
     }
 
+    private async Task<WorkflowLookup> LookUpWorkflowsAsync(
+        int repoId,
+        GitHubRepositoryEntry entry,
+        string branch,
+        SemaphoreSlim gate,
+        CancellationToken cancellationToken)
+    {
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            // Own scope per lookup: the service reads connectors through a scoped DbContext that must not be shared across parallel calls.
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var gitHubActionsService = scope.ServiceProvider.GetRequiredService<GitHubActionsService>();
+            var statuses = await gitHubActionsService.GetWorkflowStatusesForBranchAsync(entry, branch, cancellationToken: cancellationToken);
+            return new WorkflowLookup(false, statuses);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Push wait: failed to discover running workflows for repo {RepoId}", repoId);
+            return new WorkflowLookup(true, null);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
     private async Task PumpLiveFeedIntoOverlayAsync(CancellationToken cancellationToken)
     {
-        foreach (var feed in _feedByRunKey.Values)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
+        var feeds = _feedByRunKey.Values.ToList();
+        using var gate = new SemaphoreSlim(MaxConcurrency);
+        var updates = await Task.WhenAll(feeds.Select(feed => PollFeedAsync(feed, gate, cancellationToken)));
 
-            var update = await liveFeedService.PollOnceAsync(feed, cancellationToken);
-            if (update.NewLines.Count == 0)
+        for (var i = 0; i < feeds.Count; i++)
+        {
+            var update = updates[i];
+            if (update == null || update.NewLines.Count == 0)
                 continue;
 
-            var label = $"gha:{feed.RepositoryName}";
+            var label = $"gha:{feeds[i].RepositoryName}";
             foreach (var line in update.NewLines)
                 overlayTerminal.Append(label, WorkerCommandStreamKind.Stdout, line);
         }
     }
+
+    private async Task<GhaWorkflowLiveFeedUpdate?> PollFeedAsync(
+        GhaWorkflowLiveFeedState feed,
+        SemaphoreSlim gate,
+        CancellationToken cancellationToken)
+    {
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            // Own scope per poll: the first poll resolves the connector through a scoped DbContext.
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var liveFeedService = scope.ServiceProvider.GetRequiredService<GhaWorkflowLiveFeedService>();
+            return await liveFeedService.PollOnceAsync(feed, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Push wait: live feed poll failed for run {RunId}", feed.RunId);
+            return null;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private sealed record WorkflowLookup(bool Failed, IReadOnlyList<ActionStatusInfo>? Statuses);
 }

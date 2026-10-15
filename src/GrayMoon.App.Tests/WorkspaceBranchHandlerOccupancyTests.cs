@@ -1,11 +1,13 @@
 using System.Collections.Concurrent;
 using GrayMoon.App.Api.Endpoints;
+using GrayMoon.App.Models;
 using GrayMoon.App.Services.Features;
 using GrayMoon.App.Services.Orchestration;
 using GrayMoon.Application;
 using GrayMoon.Application.Features;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Tests;
 
@@ -118,10 +120,44 @@ public sealed class WorkspaceBranchHandlerOccupancyTests
         Assert.Equal(FeatureBranchPolicy.CreateBranchMessage, result.ErrorsByRepositoryId[101]);
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(3)]
+    public async Task CheckoutBranchForWorkspaceAsync_runs_occupancy_checks_in_parallel_bounded_by_MaxParallelOperations(int maxParallel)
+    {
+        var probe = new ConcurrencyProbe();
+        var occupancy = new FakeBranchOccupancyService { Probe = probe };
+        occupancy.SetBadge(workspaceRepositoryId: 10, branchName: BranchName, new BranchOccupancyBadge
+        {
+            Kind = BranchOccupancyKind.Feature,
+            FeatureName = "other-feature",
+            AllowCheckout = false,
+        });
+        var branchOperations = new FakeWorkspaceBranchOperations();
+        var handler = CreateHandler(branchOperations, occupancy, maxParallelOperations: maxParallel);
+
+        var repositories = Enumerable.Range(0, 8).ToDictionary(i => 100 + i, i => 10 + i);
+        var result = await handler.CheckoutBranchForWorkspaceAsync(
+            WorkspaceId,
+            new WorkspaceFeatureContextId(1),
+            repositories,
+            BranchName,
+            reportProgress: null,
+            CancellationToken.None);
+
+        // Repo 100 is occupied and skipped; the other seven are checked out, whatever order the checks finished in.
+        Assert.Equal(7, result.SuccessCount);
+        Assert.Equal(1, result.FailureCount);
+        Assert.DoesNotContain(100, branchOperations.AttemptedRepositoryIds);
+        Assert.Equal(Enumerable.Range(101, 7), branchOperations.AttemptedRepositoryIds.OrderBy(i => i));
+        probe.AssertBoundedBy(maxParallel);
+    }
+
     private static WorkspaceBranchHandler CreateHandler(
         FakeWorkspaceBranchOperations branchOperations,
         FakeBranchOccupancyService occupancy,
-        IFeatureBranchGuard? guard = null)
+        IFeatureBranchGuard? guard = null,
+        int maxParallelOperations = 16)
     {
         var services = new ServiceCollection();
         services.AddSingleton<IWorkspaceBranchOperations>(branchOperations);
@@ -132,6 +168,7 @@ public sealed class WorkspaceBranchHandlerOccupancyTests
             branchOperations,
             occupancy,
             guard ?? new AllowAllFeatureBranchGuard(),
+            Options.Create(new WorkspaceOptions { MaxParallelOperations = maxParallelOperations }),
             NullLogger<WorkspaceBranchHandler>.Instance);
     }
 
@@ -152,24 +189,29 @@ public sealed class WorkspaceBranchHandlerOccupancyTests
         private readonly Dictionary<(int WorkspaceRepositoryId, string BranchName), BranchOccupancyBadge> _badges = new();
         private readonly HashSet<int> _throwFor = new();
 
+        public ConcurrencyProbe? Probe { get; init; }
+
         public void SetBadge(int workspaceRepositoryId, string branchName, BranchOccupancyBadge badge) =>
             _badges[(workspaceRepositoryId, branchName)] = badge;
 
         public void ThrowFor(int workspaceRepositoryId) => _throwFor.Add(workspaceRepositoryId);
 
-        public Task<IReadOnlyDictionary<string, BranchOccupancyBadge>> GetBadgesForRepositoryAsync(
+        public async Task<IReadOnlyDictionary<string, BranchOccupancyBadge>> GetBadgesForRepositoryAsync(
             int workspaceId,
             int workspaceRepositoryId,
             WorkspaceFeatureContextId viewingContextId,
             CancellationToken cancellationToken = default)
         {
+            if (Probe is not null)
+                await Probe.RunAsync(cancellationToken);
+
             if (_throwFor.Contains(workspaceRepositoryId))
                 throw new InvalidOperationException("Worker is offline.");
 
             IReadOnlyDictionary<string, BranchOccupancyBadge> result = _badges
                 .Where(kvp => kvp.Key.WorkspaceRepositoryId == workspaceRepositoryId)
                 .ToDictionary(kvp => kvp.Key.BranchName, kvp => kvp.Value);
-            return Task.FromResult(result);
+            return result;
         }
     }
 

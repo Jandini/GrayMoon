@@ -1,5 +1,6 @@
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
+using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services.GitHub;
 
@@ -7,6 +8,7 @@ public sealed class GitHubRepositoryService(
     ConnectorRepository connectorRepository,
     GitHubRepositoryRepository repositoryRepository,
     GitHubService gitHubService,
+    IOptions<WorkspaceOptions> workspaceOptions,
     ILogger<GitHubRepositoryService> logger)
 {
     public async Task<List<GitHubRepositoryEntry>> GetRepositoriesAsync()
@@ -37,56 +39,40 @@ public sealed class GitHubRepositoryService(
 
         progress?.Report(0);
 
+        // Connectors are fetched in parallel, so every touch of the shared clone-url set and of the progress
+        // callback goes through one lock.
+        var sharedStateLock = new object();
         var batchProgress = progress == null ? null : new Progress<IReadOnlyList<GitHubRepositoryDto>>(batch =>
         {
-            foreach (var repo in batch)
+            lock (sharedStateLock)
             {
-                var url = (repo.CloneUrl ?? string.Empty).Trim();
-                if (!string.IsNullOrWhiteSpace(url))
-                    uniqueCloneUrls.Add(url);
+                foreach (var repo in batch)
+                {
+                    var url = (repo.CloneUrl ?? string.Empty).Trim();
+                    if (!string.IsNullOrWhiteSpace(url))
+                        uniqueCloneUrls.Add(url);
+                }
+                progress.Report(uniqueCloneUrls.Count);
             }
-            progress.Report(uniqueCloneUrls.Count);
         });
 
-        foreach (var connector in activeConnectors)
+        using var gate = new SemaphoreSlim(Math.Max(1, workspaceOptions.Value.MaxParallelOperations));
+        var fetches = await Task.WhenAll(activeConnectors.Select(connector =>
+            FetchConnectorAsync(connector, gate, batchProgress, sharedStateLock, uniqueCloneUrls, progress, cancellationToken)));
+
+        // Apply the results in connector order. The status writes share this service's scoped DbContext, so they stay sequential.
+        for (var i = 0; i < activeConnectors.Count; i++)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            try
+            var connector = activeConnectors[i];
+            var fetch = fetches[i];
+            if (fetch.ErrorMessage == null)
             {
-                var repositories = await gitHubService.GetRepositoriesAsync(connector, progress: null, batchProgress, cancellationToken);
-                var persisted = repositories.Select(repo => new Repository
-                {
-                    ConnectorId = connector.ConnectorId,
-                    OrgName = repo.Owner?.Login,
-                    RepositoryName = repo.Name,
-                    Visibility = repo.Private ? "Private" : "Public",
-                    Archived = repo.Archived,
-                    CloneUrl = (repo.CloneUrl ?? string.Empty).Trim(),
-                    GitHubRepositoryId = repo.Id,
-                    NodeId = string.IsNullOrWhiteSpace(repo.NodeId) ? null : repo.NodeId,
-                    Topics = repo.Topics != null && repo.Topics.Count > 0
-                        ? string.Join(",", repo.Topics.Where(t => !string.IsNullOrWhiteSpace(t)))
-                        : null
-                }).ToList();
-                allFetched.AddRange(persisted);
-                foreach (var r in persisted)
-                {
-                    if (!string.IsNullOrWhiteSpace(r.CloneUrl))
-                        uniqueCloneUrls.Add(r.CloneUrl);
-                }
-                progress?.Report(uniqueCloneUrls.Count);
+                allFetched.AddRange(fetch.Repositories);
+                continue;
             }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Error loading repositories for connector {ConnectorName}", connector.ConnectorName);
-                var message = ex is InvalidOperationException ? ex.Message : "Failed to fetch repositories. Please check the connector configuration.";
-                connectorErrors.Add(new ConnectorFetchError { ConnectorName = connector.ConnectorName, Message = message });
-                await connectorRepository.UpdateStatusAsync(connector.ConnectorId, "Error", message);
-            }
+
+            connectorErrors.Add(new ConnectorFetchError { ConnectorName = connector.ConnectorName, Message = fetch.ErrorMessage });
+            await connectorRepository.UpdateStatusAsync(connector.ConnectorId, "Error", fetch.ErrorMessage);
         }
 
         IReadOnlyList<RenamedRepositoryInfo> renamedRepositories = [];
@@ -108,4 +94,62 @@ public sealed class GitHubRepositoryService(
             KeptForFeatures = keptForFeatures
         };
     }
+
+    private async Task<ConnectorFetch> FetchConnectorAsync(
+        Connector connector,
+        SemaphoreSlim gate,
+        IProgress<IReadOnlyList<GitHubRepositoryDto>>? batchProgress,
+        object sharedStateLock,
+        HashSet<string> uniqueCloneUrls,
+        IProgress<int>? progress,
+        CancellationToken cancellationToken)
+    {
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            var repositories = await gitHubService.GetRepositoriesAsync(connector, progress: null, batchProgress, cancellationToken);
+            var persisted = repositories.Select(repo => new Repository
+            {
+                ConnectorId = connector.ConnectorId,
+                OrgName = repo.Owner?.Login,
+                RepositoryName = repo.Name,
+                Visibility = repo.Private ? "Private" : "Public",
+                Archived = repo.Archived,
+                CloneUrl = (repo.CloneUrl ?? string.Empty).Trim(),
+                GitHubRepositoryId = repo.Id,
+                NodeId = string.IsNullOrWhiteSpace(repo.NodeId) ? null : repo.NodeId,
+                Topics = repo.Topics != null && repo.Topics.Count > 0
+                    ? string.Join(",", repo.Topics.Where(t => !string.IsNullOrWhiteSpace(t)))
+                    : null
+            }).ToList();
+
+            lock (sharedStateLock)
+            {
+                foreach (var r in persisted)
+                {
+                    if (!string.IsNullOrWhiteSpace(r.CloneUrl))
+                        uniqueCloneUrls.Add(r.CloneUrl);
+                }
+                progress?.Report(uniqueCloneUrls.Count);
+            }
+
+            return new ConnectorFetch(persisted, null);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error loading repositories for connector {ConnectorName}", connector.ConnectorName);
+            var message = ex is InvalidOperationException ? ex.Message : "Failed to fetch repositories. Please check the connector configuration.";
+            return new ConnectorFetch([], message);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private sealed record ConnectorFetch(List<Repository> Repositories, string? ErrorMessage);
 }
