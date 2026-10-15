@@ -351,6 +351,8 @@ public sealed class WorkspaceFeatureOperations(
                     }
 
                     await writeDb.SaveChangesAsync(cancellationToken);
+                    if (tracked.State == WorkspaceFeatureRepositoryState.Ready && row.PinnedTag == null)
+                        await PersistLocalBranchAsync(row.WorkspaceRepositoryId, name, cancellationToken);
                     logger.FeatureRepositoryTiming(
                         "Create", workspaceId, name, link.Repository?.RepositoryName,
                         gateWaitMs, pathMs, workerMs,
@@ -906,6 +908,7 @@ public sealed class WorkspaceFeatureOperations(
                         {
                             branchOutcome = RemoveFeatureBranchOutcome.Deleted;
                             branchMessage = null;
+                            await RemovePersistedBranchAsync(row.WorkspaceRepositoryId, branchName, isRemote: false, cancellationToken);
                         }
                         else
                         {
@@ -981,6 +984,7 @@ public sealed class WorkspaceFeatureOperations(
                                     {
                                         remoteOutcome = RemoveFeatureRemoteBranchOutcome.Deleted;
                                         remoteMessage = null;
+                                        await RemovePersistedBranchAsync(row.WorkspaceRepositoryId, branchName, isRemote: true, cancellationToken);
                                     }
                                     else
                                     {
@@ -1131,6 +1135,47 @@ public sealed class WorkspaceFeatureOperations(
             RemoveFeatureReport = phaseOne.Report,
             RemoveFeaturePendingDeletionFolder = phaseOne.PendingDeletionFolder,
         };
+    }
+
+    /// <summary>
+    /// Records a local branch git just created in <c>RepositoryBranches</c>. Runs in its own DI scope (own DbContext) because
+    /// the per-repository work fans out in parallel and a DbContext is not thread-safe. Git has already changed by the time this
+    /// runs, so a failed write is logged and left for the next branch refresh to reconcile instead of failing the operation.
+    /// </summary>
+    private async Task PersistLocalBranchAsync(int workspaceRepositoryId, string branchName, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var writer = scope.ServiceProvider.GetRequiredService<RepositoryBranchWriter>();
+            await writer.AddLocalBranchesAsync([(workspaceRepositoryId, branchName)], cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex,
+                "Could not record created branch {Branch} for WorkspaceRepository {WorkspaceRepositoryId}.",
+                branchName, workspaceRepositoryId);
+        }
+    }
+
+    /// <summary>
+    /// Drops the <c>RepositoryBranches</c> row of a branch git just deleted. Same scope and failure rules as
+    /// <see cref="PersistLocalBranchAsync"/>. Call only after git confirmed the delete: a kept or failed delete leaves the branch, so its row stays.
+    /// </summary>
+    private async Task RemovePersistedBranchAsync(int workspaceRepositoryId, string branchName, bool isRemote, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var writer = scope.ServiceProvider.GetRequiredService<RepositoryBranchWriter>();
+            await writer.RemoveBranchAsync(workspaceRepositoryId, branchName, isRemote, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex,
+                "Could not remove deleted {Kind} branch {Branch} for WorkspaceRepository {WorkspaceRepositoryId}.",
+                isRemote ? "remote" : "local", branchName, workspaceRepositoryId);
+        }
     }
 
     /// <summary>What the background part of Remove Feature leaves for <see cref="FinalizeFeatureRemovalAsync"/>.</summary>
@@ -1840,6 +1885,8 @@ public sealed class WorkspaceFeatureOperations(
                     tracked.State = WorkspaceFeatureRepositoryState.Ready;
                     tracked.LastError = null;
                     await writeDb.SaveChangesAsync(cancellationToken);
+                    if (row.PinnedTag == null)
+                        await PersistLocalBranchAsync(row.WorkspaceRepositoryId, featureName, cancellationToken);
                     results.Add((row.WorkspaceRepositoryId, new FeatureRepairRepositoryResult(
                         repoName, FeatureRepositoryOperationOutcome.Succeeded, null)));
                     logger.FeatureRepositoryDone("Repair", info.WorkspaceId, featureName, repoName, "Ready");
@@ -2108,6 +2155,8 @@ public sealed class WorkspaceFeatureOperations(
                             FeatureRepositoryOperationOutcome.Succeeded,
                             deleteLocal.Error ?? "Local branch kept (could not delete)."));
                     }
+
+                    await RemovePersistedBranchAsync(row.WorkspaceRepositoryId, branchName!, isRemote: false, cancellationToken);
                 }
 
                 result = skipBranch && !string.IsNullOrWhiteSpace(branchName)

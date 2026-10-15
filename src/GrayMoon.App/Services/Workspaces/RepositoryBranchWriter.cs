@@ -176,4 +176,96 @@ public sealed class RepositoryBranchWriter(AppDbContext dbContext, ILogger<Repos
         await dbContext.SaveChangesAsync(cancellationToken);
         return stale.Count;
     }
+
+    /// <summary>The persisted name of a remote branch: always prefixed with <c>origin/</c>, whether the caller holds the bare branch name or the remote ref.</summary>
+    public static string ToRemoteBranchName(string branchName)
+    {
+        var trimmed = branchName.Trim();
+        return trimmed.StartsWith("origin/", StringComparison.OrdinalIgnoreCase) ? trimmed : "origin/" + trimmed;
+    }
+
+    /// <summary>Adds every missing local branch in one query and one save. Never removes or touches other rows. Returns the number of rows added.</summary>
+    public async Task<int> AddLocalBranchesAsync(
+        IReadOnlyList<(int WorkspaceRepositoryId, string BranchName)> branches,
+        CancellationToken cancellationToken = default)
+    {
+        var wanted = branches
+            .Where(b => !string.IsNullOrWhiteSpace(b.BranchName) && !IsSyntheticGitRef(b.BranchName))
+            .Select(b => (b.WorkspaceRepositoryId, BranchName: b.BranchName.Trim()))
+            .Distinct()
+            .ToList();
+        if (wanted.Count == 0)
+            return 0;
+
+        var linkIds = wanted.Select(b => b.WorkspaceRepositoryId).Distinct().ToList();
+        var existing = await dbContext.RepositoryBranches
+            .Where(rb => linkIds.Contains(rb.WorkspaceRepositoryId) && !rb.IsRemote && !rb.IsTag)
+            .Select(rb => new { rb.WorkspaceRepositoryId, rb.BranchName })
+            .ToListAsync(cancellationToken);
+        var existingSet = existing.Select(rb => (rb.WorkspaceRepositoryId, rb.BranchName)).ToHashSet();
+
+        var now = DateTime.UtcNow;
+        var toAdd = wanted
+            .Where(b => !existingSet.Contains((b.WorkspaceRepositoryId, b.BranchName)))
+            .Select(b => new RepositoryBranch
+            {
+                WorkspaceRepositoryId = b.WorkspaceRepositoryId,
+                BranchName = b.BranchName,
+                IsRemote = false,
+                LastSeenAt = now,
+                IsDefault = false
+            })
+            .ToList();
+        if (toAdd.Count == 0)
+            return 0;
+
+        dbContext.RepositoryBranches.AddRange(toAdd);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return toAdd.Count;
+    }
+
+    /// <summary>Adds a remote branch row (<c>origin/&lt;name&gt;</c>) when it is not persisted yet. Returns true when a row was added.</summary>
+    public async Task<bool> AddRemoteBranchAsync(int workspaceRepositoryId, string branchName, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(branchName) || IsSyntheticGitRef(branchName))
+            return false;
+
+        var remoteBranchName = ToRemoteBranchName(branchName);
+        var exists = await dbContext.RepositoryBranches
+            .AnyAsync(rb => rb.WorkspaceRepositoryId == workspaceRepositoryId && rb.IsRemote && !rb.IsTag && rb.BranchName == remoteBranchName, cancellationToken);
+        if (exists)
+            return false;
+
+        dbContext.RepositoryBranches.Add(new RepositoryBranch
+        {
+            WorkspaceRepositoryId = workspaceRepositoryId,
+            BranchName = remoteBranchName,
+            IsRemote = true,
+            LastSeenAt = DateTime.UtcNow,
+            IsDefault = false
+        });
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    /// <summary>
+    /// Removes the row of a branch that git no longer has. A remote branch is matched by its <c>origin/</c>-prefixed name, so the
+    /// bare branch name works for both kinds. Tags are never touched. Returns the number of rows removed.
+    /// </summary>
+    public async Task<int> RemoveBranchAsync(int workspaceRepositoryId, string branchName, bool isRemote, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(branchName))
+            return 0;
+
+        var persistedName = isRemote ? ToRemoteBranchName(branchName) : branchName.Trim();
+        var rows = await dbContext.RepositoryBranches
+            .Where(rb => rb.WorkspaceRepositoryId == workspaceRepositoryId && rb.IsRemote == isRemote && !rb.IsTag && rb.BranchName == persistedName)
+            .ToListAsync(cancellationToken);
+        if (rows.Count == 0)
+            return 0;
+
+        dbContext.RepositoryBranches.RemoveRange(rows);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return rows.Count;
+    }
 }
