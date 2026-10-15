@@ -1105,6 +1105,28 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
     private const string GrayMoonHookMarker = "# Created by GrayMoon.Agent";
     private const string ReplacedHookSuffix = ".replaced-by-graymoon";
 
+    // reference-transaction runs twice for every ref update, and every commit moves a branch, so the script filters with
+    // shell builtins only and starts git and curl once a branch or remote-branch ref was really created or deleted
+    // (one side of the update is the all-zero object id, 40 or 64 zeros). It acts on "committed" only: "prepared" and
+    // "aborted" mean the refs did not change, and exiting non-zero in "prepared" would abort the user's own command.
+    // Updates of existing branches, HEAD, tags, the stash and refs/remotes/*/HEAD never match. A blind update (for
+    // example "git update-ref <branch> <new>" without an old value) also shows a zero old id and so reports too; that
+    // costs one idempotent re-listing of the branches, never a wrong result.
+    private const string ReferenceTransactionFilter =
+        "[ \"$1\" = \"committed\" ] || exit 0\n" +
+        "MATCH=\n" +
+        "while read -r OLD NEW REF; do\n" +
+        "  case \"$REF\" in\n" +
+        "    refs/remotes/*/HEAD) continue ;;\n" +
+        "    refs/heads/*|refs/remotes/*) ;;\n" +
+        "    *) continue ;;\n" +
+        "  esac\n" +
+        "  [ -n \"$OLD\" ] && [ -n \"$NEW\" ] || continue\n" +
+        "  case \"$OLD\" in *[!0]*) ;; *) MATCH=1 ;; esac\n" +
+        "  case \"$NEW\" in *[!0]*) ;; *) MATCH=1 ;; esac\n" +
+        "done\n" +
+        "[ -n \"$MATCH\" ] || exit 0\n";
+
     // Hooks locations git has already resolved, replayed while the repository layout and config are unchanged.
     private readonly GitHooksLocationCache _hooksLocations = new();
 
@@ -1167,6 +1189,9 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
             "#!/bin/sh\n" + comment + resolveBody + Curl("merge") + "\n", utf8);
         InstallSyncHook(repoPath, hooksDir, "pre-push",
             "#!/bin/sh\n" + comment + resolveBody + Curl("push") + "\n", utf8);
+        // Git older than 2.28 never runs this hook, so installing it there is harmless.
+        InstallSyncHook(repoPath, hooksDir, "reference-transaction",
+            "#!/bin/sh\n" + comment + ReferenceTransactionFilter + resolveBody + Curl("refs") + "\n", utf8);
         logger.LogDebug("Sync hooks checked for repo {RepoId} in workspace {WorkspaceId}", repositoryId, workspaceId);
     }
 

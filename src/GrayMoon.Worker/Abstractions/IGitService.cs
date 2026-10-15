@@ -80,7 +80,7 @@ public interface IGitService
     /// <summary>Points HEAD at an unborn branch with <c>git symbolic-ref HEAD refs/heads/&lt;branch&gt;</c>.</summary>
     Task<(bool Success, string? Error)> SetUnbornHeadAsync(string repoPath, string branch, CancellationToken ct);
     /// <summary>
-    /// Installs the shared sync hooks (post-commit/post-checkout/post-merge/post-update/pre-push) once
+    /// Installs the shared sync hooks (post-commit/post-checkout/post-merge/pre-push/reference-transaction) once
     /// per common Git directory. Safe to call for a linked worktree (Feature) checkout - resolves the
     /// actual common <c>hooks</c> directory rather than assuming <c>.git</c> at <paramref name="repoPath"/>
     /// is a directory.

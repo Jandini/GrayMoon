@@ -75,12 +75,16 @@ public sealed class SyncCommandHandler(
 
         var stateWriter = scope.ServiceProvider.GetRequiredService<WorkspaceRepositoryStateWriter>();
         var snapshot = n.State ?? BuildSnapshotFromFlatNotification(n);
+
+        // A branch created or deleted outside GrayMoon reports the branch lists and nothing else. It is not a completed
+        // sync: it must not derive sync status, look up pull requests or recompute dependencies for a checkout it never read.
+        var refsOnly = snapshot.IsBranchRefsOnly;
         await stateWriter.ApplyAsync(contextId.Value, n.WorkspaceId, n.RepositoryId, snapshot, new RepositoryStateWriteOptions
         {
-            SyncStatus = SyncStatusWrite.Derive,
+            SyncStatus = refsOnly ? SyncStatusWrite.Leave : SyncStatusWrite.Derive,
             ErrorMessageForcesInSync = true,
             // A just-created Feature worktree is on a new local branch: it has no pull request to find.
-            ReconcilePullRequest = !n.FreshWorktree,
+            ReconcilePullRequest = !n.FreshWorktree && !refsOnly,
         });
 
         var branchWriter = scope.ServiceProvider.GetRequiredService<RepositoryBranchWriter>();
@@ -109,19 +113,22 @@ public sealed class SyncCommandHandler(
                 logger.LogInformation("SyncCommand pruned {Count} stale remote branch(es) for repo {RepositoryId}", pruned, n.RepositoryId);
         }
 
-        await UpdateContextSyncFlagsAsync(dbContext, contextId.Value, n.WorkspaceId, contextInfo.IsSpecialWorkspace);
+        if (!refsOnly)
+        {
+            await UpdateContextSyncFlagsAsync(dbContext, contextId.Value, n.WorkspaceId, contextInfo.IsSpecialWorkspace);
 
-        var depsSw = Stopwatch.StartNew();
-        var recomputeScope = scope.ServiceProvider.GetRequiredService<WorkspaceStateRecomputeScope>();
-        // Create Feature releases a sync per repository at once: share one recompute instead of running N in a row.
-        var coalescer = scope.ServiceProvider.GetService<SyncRecomputeCoalescer>();
-        if (coalescer is null)
-            await recomputeScope.RecomputeAsync(n.WorkspaceId, contextId.Value);
-        else
-            await coalescer.RunAsync($"{n.WorkspaceId}:{contextId.Value.Value}", () => recomputeScope.RecomputeAsync(n.WorkspaceId, contextId.Value));
-        logger.LogDebug(
-            "SyncCommand dependency stats persisted in {ElapsedMs}ms for workspace={WorkspaceId}, repo={RepositoryId}",
-            depsSw.ElapsedMilliseconds, n.WorkspaceId, n.RepositoryId);
+            var depsSw = Stopwatch.StartNew();
+            var recomputeScope = scope.ServiceProvider.GetRequiredService<WorkspaceStateRecomputeScope>();
+            // Create Feature releases a sync per repository at once: share one recompute instead of running N in a row.
+            var coalescer = scope.ServiceProvider.GetService<SyncRecomputeCoalescer>();
+            if (coalescer is null)
+                await recomputeScope.RecomputeAsync(n.WorkspaceId, contextId.Value);
+            else
+                await coalescer.RunAsync($"{n.WorkspaceId}:{contextId.Value.Value}", () => recomputeScope.RecomputeAsync(n.WorkspaceId, contextId.Value));
+            logger.LogDebug(
+                "SyncCommand dependency stats persisted in {ElapsedMs}ms for workspace={WorkspaceId}, repo={RepositoryId}",
+                depsSw.ElapsedMilliseconds, n.WorkspaceId, n.RepositoryId);
+        }
 
         // Context-aware broadcasts. Legacy WorkspaceSynced/RepositorySynced remain for special Workspace
         // so existing page listeners keep working during the Features cutover.
@@ -140,7 +147,7 @@ public sealed class SyncCommandHandler(
             await hubContext.Clients.All.SendAsync("RepositoryError", n.WorkspaceId, n.RepositoryId, n.ErrorMessage);
 
         // D8: a hook sync of the Workspace repository in the special context re-checks the Workspace definition.
-        if (contextInfo.IsSpecialWorkspace && wr.Role == WorkspaceRepositoryRole.Workspace)
+        if (!refsOnly && contextInfo.IsSpecialWorkspace && wr.Role == WorkspaceRepositoryRole.Workspace)
             WorkspaceManifestHooks.DetectDriftInBackground(scopeFactory, logger, n.WorkspaceId);
 
         logger.LogDebug(

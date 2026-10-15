@@ -73,4 +73,13 @@ public sealed class RepositoryStateSnapshot
 
     /// <summary>The working tree was scanned for projects; <see cref="Projects"/> is complete for this repository.</summary>
     public bool ProjectsProbed { get; init; }
+
+    /// <summary>
+    /// True when the only thing probed is the local and remote branch lists, as after a branch was created or deleted
+    /// outside GrayMoon. Such a snapshot says nothing about what is checked out or how it compares to its upstream, so
+    /// it must not derive sync status, reconcile pull requests or count as a completed sync.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsBranchRefsOnly =>
+        BranchesProbed && !IdentityProbed && !GitVersionProbed && !CommitCountsProbed && !UpstreamProbed && !ProjectsProbed;
 }

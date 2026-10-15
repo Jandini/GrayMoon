@@ -155,7 +155,8 @@ public sealed class HookSyncCapabilitiesTests : IDisposable
             new CheckoutHookSyncCommand(_git, _reader, probe, tokenProvider, capabilityProvider, hubProvider, NullLogger<CheckoutHookSyncCommand>.Instance),
             new CommitHookSyncCommand(probe, capabilityProvider, hubProvider, NullLogger<CommitHookSyncCommand>.Instance),
             new MergeHookSyncCommand(probe, capabilityProvider, hubProvider, NullLogger<MergeHookSyncCommand>.Instance),
-            new PushHookSyncCommand(_reader, probe, capabilityProvider, hubProvider, NullLogger<PushHookSyncCommand>.Instance));
+            new PushHookSyncCommand(_reader, probe, capabilityProvider, hubProvider, NullLogger<PushHookSyncCommand>.Instance),
+            new RefsHookSyncCommand(_reader, hubProvider, NullLogger<RefsHookSyncCommand>.Instance, TimeSpan.Zero));
 
         return new Harness(dispatcher, projectScanner, versionProviders, capabilityProvider);
     }

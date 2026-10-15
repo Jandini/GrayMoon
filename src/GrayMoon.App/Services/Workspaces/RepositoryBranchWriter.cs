@@ -24,7 +24,10 @@ public sealed class RepositoryBranchWriter(AppDbContext dbContext, ILogger<Repos
         return false;
     }
 
-    /// <summary>Persists branches and tags for a workspace repository. Removes branches/tags not in the fetched list, adds new ones, updates LastSeenAt for existing ones. Optionally marks the default branch (e.g. main or master) and the currently checked-out tag.</summary>
+    /// <summary>
+    /// Persists branches and tags for a workspace repository. Remote branches are stored as <c>origin/&lt;name&gt;</c> whether the
+    /// caller holds the bare name (the Worker lists them bare) or the prefixed ref, so every writer agrees on one row per branch.
+    /// Removes branches/tags not in the fetched list, adds new ones, updates LastSeenAt for existing ones. Optionally marks the default branch (e.g. main or master) and the currently checked-out tag.</summary>
     public async Task PersistAsync(
         int workspaceRepositoryId,
         IReadOnlyList<string>? localBranches,
@@ -56,7 +59,7 @@ public sealed class RepositoryBranchWriter(AppDbContext dbContext, ILogger<Repos
             foreach (var branch in remoteBranches)
             {
                 if (!string.IsNullOrWhiteSpace(branch) && !IsSyntheticGitRef(branch))
-                    fetchedRefs.Add((branch, true, false));
+                    fetchedRefs.Add((ToRemoteBranchName(branch), true, false));
             }
         }
         if (tags != null)

@@ -97,6 +97,7 @@ public sealed class HookListenerHostedService(
             "/hook/commit" => NotifyHookKind.Commit,
             "/hook/merge" => NotifyHookKind.Merge,
             "/hook/push" => NotifyHookKind.Push,
+            "/hook/refs" => NotifyHookKind.Refs,
             _ => null
         };
 
