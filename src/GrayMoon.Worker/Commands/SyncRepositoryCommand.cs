@@ -122,7 +122,7 @@ public sealed class SyncRepositoryCommand(
             // invoked with /nofetch, and the ref reads below must see the fetched refs. A failed fetch starts
             // nothing else (no version, no reads, no project scan).
             var fetchStart = Stopwatch.GetTimestamp();
-            var (fetchOk, fetchErr) = await git.FetchAsync(repoPath, includeTags: true, bearerToken, cancellationToken);
+            var (fetchOk, fetchErr) = await git.FetchAsync(repoPath, includeTags: true, bearerToken, cancellationToken, skipHooks: true);
             var fetchMs = ElapsedMs(fetchStart);
             fetchError = fetchErr;
             if (!fetchOk)

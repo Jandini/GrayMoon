@@ -241,6 +241,7 @@ try
     builder.Services.AddScoped<GitChangesSnapshotPushHandler>();
     builder.Services.AddSingleton<IWorkspaceGitChangesNotifier, WorkspaceGitChangesNotifier>();
     builder.Services.AddScoped<WorkspaceGitChangesSelectionMemory>();
+    builder.Services.AddSingleton<IGitChangesFileOrdering, TreeGitChangesFileOrdering>();
     builder.Services.AddScoped<WorkspaceGitChangesCommitMessageMemory>();
     builder.Services.AddScoped<WorkspaceGitChangesPushAfterCommitMemory>();
     builder.Services.AddSingleton<IWorkspaceGitChangesActivityTracker, WorkspaceGitChangesActivityTracker>();

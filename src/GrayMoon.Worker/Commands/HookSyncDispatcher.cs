@@ -7,7 +7,8 @@ public sealed class HookSyncDispatcher(
     CheckoutHookSyncCommand checkoutHandler,
     CommitHookSyncCommand commitHandler,
     MergeHookSyncCommand mergeHandler,
-    PushHookSyncCommand pushHandler) : INotifySyncHandler
+    PushHookSyncCommand pushHandler,
+    RefsHookSyncCommand refsHandler) : INotifySyncHandler
 {
     public Task ExecuteAsync(INotifyJob payload, CancellationToken cancellationToken = default)
         => payload.HookKind switch
@@ -15,6 +16,7 @@ public sealed class HookSyncDispatcher(
             NotifyHookKind.Checkout => checkoutHandler.ExecuteAsync(payload, cancellationToken),
             NotifyHookKind.Merge => mergeHandler.ExecuteAsync(payload, cancellationToken),
             NotifyHookKind.Push => pushHandler.ExecuteAsync(payload, cancellationToken),
+            NotifyHookKind.Refs => refsHandler.ExecuteAsync(payload, cancellationToken),
             _ => commitHandler.ExecuteAsync(payload, cancellationToken),
         };
 }

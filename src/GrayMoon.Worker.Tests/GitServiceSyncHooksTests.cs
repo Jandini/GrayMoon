@@ -14,7 +14,7 @@ public sealed class GitServiceSyncHooksTests : IDisposable
     private const string Marker = "# Created by GrayMoon.Agent";
     private const string BackupSuffix = ".replaced-by-graymoon";
 
-    private static readonly string[] GrayMoonHooks = ["post-commit", "post-checkout", "post-merge", "pre-push"];
+    private static readonly string[] GrayMoonHooks = ["post-commit", "post-checkout", "post-merge", "pre-push", "reference-transaction"];
 
     private readonly TempGitRepositoryFixture _repo = new();
     private readonly CapturingLogger<GitService> _logger = new();
@@ -100,6 +100,7 @@ public sealed class GitServiceSyncHooksTests : IDisposable
         AssertIsGrayMoonHook(HookPath("post-checkout"), "checkout");
         AssertIsGrayMoonHook(HookPath("post-merge"), "merge");
         AssertIsGrayMoonHook(HookPath("pre-push"), "push");
+        AssertIsGrayMoonHook(HookPath("reference-transaction"), "refs");
         Assert.False(File.Exists(HookPath("post-update")));
         Assert.Empty(Directory.GetFiles(HooksDir, "*" + BackupSuffix + "*"));
     }

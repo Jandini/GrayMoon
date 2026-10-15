@@ -31,7 +31,7 @@ public sealed class GetBranchesCommand(IGitService git, IGitRepositoryReader rea
             : null;
         if (token != null)
         {
-            var (fetchSuccess, fetchError) = await git.FetchAsync(repoPath, includeTags: true, bearerToken: token, cancellationToken);
+            var (fetchSuccess, fetchError) = await git.FetchAsync(repoPath, includeTags: true, bearerToken: token, cancellationToken, skipHooks: true);
             if (!fetchSuccess)
             {
                 return new GetBranchesResponse

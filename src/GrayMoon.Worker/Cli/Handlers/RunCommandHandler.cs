@@ -206,6 +206,7 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<CommitHookSyncCommand>();
         builder.Services.AddSingleton<MergeHookSyncCommand>();
         builder.Services.AddSingleton<PushHookSyncCommand>();
+        builder.Services.AddSingleton<RefsHookSyncCommand>();
         builder.Services.AddSingleton<INotifySyncHandler, HookSyncDispatcher>();
 
         builder.Services.AddHostedService<SignalRConnectionHostedService>();
