@@ -1268,15 +1268,17 @@ export function clear(elementId) {
     updateFindUi(entry);
 }
 
-export function goToNextChange(elementId) {
+// Both return false, without moving, when already on the last (next) / first (previous) change and
+// wrap is off, so the caller can continue into the adjacent file instead of circling in this one.
+export function goToNextChange(elementId, wrap) {
     const entry = viewers.get(elementId);
     if (!entry) {
-        return;
+        return false;
     }
 
     const nodes = collectChangeNodes(entry.el).filter((n) => n.isConnected);
-    if (nodes.length === 0) {
-        return;
+    if (nodes.length === 0 || (!wrap && entry.changeIndex >= nodes.length - 1)) {
+        return false;
     }
 
     entry.changeIndex = (entry.changeIndex + 1) % nodes.length;
@@ -1287,17 +1289,19 @@ export function goToNextChange(elementId) {
     } catch {
         /* ignore - preview must stay usable even if a change node is odd */
     }
+
+    return true;
 }
 
-export function goToPreviousChange(elementId) {
+export function goToPreviousChange(elementId, wrap) {
     const entry = viewers.get(elementId);
     if (!entry) {
-        return;
+        return false;
     }
 
     const nodes = collectChangeNodes(entry.el).filter((n) => n.isConnected);
-    if (nodes.length === 0) {
-        return;
+    if (nodes.length === 0 || (!wrap && entry.changeIndex === 0)) {
+        return false;
     }
 
     entry.changeIndex = entry.changeIndex <= 0 ? nodes.length - 1 : entry.changeIndex - 1;
@@ -1308,6 +1312,8 @@ export function goToPreviousChange(elementId) {
     } catch {
         /* ignore - preview must stay usable even if a change node is odd */
     }
+
+    return true;
 }
 
 export function dispose(elementId) {

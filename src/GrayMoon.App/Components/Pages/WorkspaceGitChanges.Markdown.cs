@@ -358,52 +358,6 @@ public sealed partial class WorkspaceGitChanges
         }
     }
 
-    private async Task NavigateNextChangeAsync()
-    {
-        if (!CanNavigateDiffChanges)
-        {
-            return;
-        }
-
-        if (IsMarkdownFile && _mdSurface == MdSurface.Preview)
-        {
-            if (_markdownViewerRef != null)
-            {
-                await _markdownViewerRef.GoToNextChangeAsync();
-            }
-
-            return;
-        }
-
-        if (_diffViewerRef != null)
-        {
-            await _diffViewerRef.GoToNextChangeAsync();
-        }
-    }
-
-    private async Task NavigatePreviousChangeAsync()
-    {
-        if (!CanNavigateDiffChanges)
-        {
-            return;
-        }
-
-        if (IsMarkdownFile && _mdSurface == MdSurface.Preview)
-        {
-            if (_markdownViewerRef != null)
-            {
-                await _markdownViewerRef.GoToPreviousChangeAsync();
-            }
-
-            return;
-        }
-
-        if (_diffViewerRef != null)
-        {
-            await _diffViewerRef.GoToPreviousChangeAsync();
-        }
-    }
-
     private async Task ClearMarkdownViewerAsync()
     {
         _markdownPreviewError = null;
