@@ -39,6 +39,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     [Inject] private ILogger<WorkspaceGitChanges> Logger { get; set; } = default!;
     [Inject] private IBackgroundJobService JobService { get; set; } = default!;
     [Inject] private WorkspaceGitChangesSelectionMemory SelectionMemory { get; set; } = default!;
+    [Inject] private IGitChangesFileOrdering FileOrdering { get; set; } = default!;
     [Inject] private WorkspaceGitChangesCommitMessageMemory CommitMessageMemory { get; set; } = default!;
     [Inject] private WorkspaceGitChangesPushAfterCommitMemory PushAfterCommitMemory { get; set; } = default!;
     [Inject] private IScopedServiceExecutor ScopedExecutor { get; set; } = default!;

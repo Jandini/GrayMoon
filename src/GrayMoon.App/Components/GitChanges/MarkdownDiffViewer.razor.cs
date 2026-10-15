@@ -79,16 +79,22 @@ public sealed partial class MarkdownDiffViewer : IAsyncDisposable
         }
     }
 
-    public async Task GoToNextChangeAsync()
+    /// <summary>Moves to the next change. False when already on the last one and <paramref name="wrap"/> is off.</summary>
+    public Task<bool> GoToNextChangeAsync(bool wrap = false) => StepChangeAsync("goToNextChange", wrap);
+
+    /// <summary>Moves to the previous change. False when already on the first one and <paramref name="wrap"/> is off.</summary>
+    public Task<bool> GoToPreviousChangeAsync(bool wrap = false) => StepChangeAsync("goToPreviousChange", wrap);
+
+    private async Task<bool> StepChangeAsync(string jsFunction, bool wrap)
     {
         if (!await EnsureReadyAsync())
         {
-            return;
+            return true;
         }
 
         try
         {
-            await _module!.InvokeVoidAsync("goToNextChange", _elementId);
+            return await _module!.InvokeAsync<bool>(jsFunction, _elementId, wrap);
         }
         catch (JSDisconnectedException)
         {
@@ -96,25 +102,8 @@ public sealed partial class MarkdownDiffViewer : IAsyncDisposable
         catch (InvalidOperationException)
         {
         }
-    }
 
-    public async Task GoToPreviousChangeAsync()
-    {
-        if (!await EnsureReadyAsync())
-        {
-            return;
-        }
-
-        try
-        {
-            await _module!.InvokeVoidAsync("goToPreviousChange", _elementId);
-        }
-        catch (JSDisconnectedException)
-        {
-        }
-        catch (InvalidOperationException)
-        {
-        }
+        return true;
     }
 
     private async Task<bool> EnsureReadyAsync()

@@ -61,7 +61,8 @@ public sealed partial class GitDiffViewer : IAsyncDisposable
         }
     }
 
-    public async Task SetDiffAsync(GitDiffDocument document)
+    /// <param name="revealLast">Lands on the last change instead of the first once the diff is computed.</param>
+    public async Task SetDiffAsync(GitDiffDocument document, bool revealLast = false)
     {
         if (!await EnsureReadyAsync())
         {
@@ -75,7 +76,8 @@ public sealed partial class GitDiffViewer : IAsyncDisposable
                 _elementId,
                 document.OriginalContent ?? string.Empty,
                 document.ModifiedContent ?? string.Empty,
-                document.LanguageId ?? "plaintext");
+                document.LanguageId ?? "plaintext",
+                revealLast);
         }
         catch (JSDisconnectedException)
         {
@@ -129,16 +131,22 @@ public sealed partial class GitDiffViewer : IAsyncDisposable
         }
     }
 
-    public async Task GoToNextChangeAsync()
+    /// <summary>Moves to the next change. False when already on the last one and <paramref name="wrap"/> is off.</summary>
+    public Task<bool> GoToNextChangeAsync(bool wrap = false) => StepChangeAsync("goToNextChange", wrap);
+
+    /// <summary>Moves to the previous change. False when already on the first one and <paramref name="wrap"/> is off.</summary>
+    public Task<bool> GoToPreviousChangeAsync(bool wrap = false) => StepChangeAsync("goToPreviousChange", wrap);
+
+    private async Task<bool> StepChangeAsync(string jsFunction, bool wrap)
     {
         if (!await EnsureReadyAsync())
         {
-            return;
+            return true;
         }
 
         try
         {
-            await _module!.InvokeVoidAsync("goToNextChange", _elementId);
+            return await _module!.InvokeAsync<bool>(jsFunction, _elementId, wrap);
         }
         catch (JSDisconnectedException)
         {
@@ -148,27 +156,8 @@ public sealed partial class GitDiffViewer : IAsyncDisposable
         {
             // Circuit tearing down mid-call.
         }
-    }
 
-    public async Task GoToPreviousChangeAsync()
-    {
-        if (!await EnsureReadyAsync())
-        {
-            return;
-        }
-
-        try
-        {
-            await _module!.InvokeVoidAsync("goToPreviousChange", _elementId);
-        }
-        catch (JSDisconnectedException)
-        {
-            // Circuit already gone.
-        }
-        catch (InvalidOperationException)
-        {
-            // Circuit tearing down mid-call.
-        }
+        return true;
     }
 
     public async Task ClearAsync()

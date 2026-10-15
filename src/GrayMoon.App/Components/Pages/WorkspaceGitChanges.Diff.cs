@@ -146,7 +146,7 @@ public sealed partial class WorkspaceGitChanges
         _diffReviewEscDotNetRef = null;
     }
 
-    private async Task LoadDiffAsync(GitChangesTreeRow row)
+    private async Task LoadDiffAsync(GitChangesTreeRow row, DiffLanding landing = DiffLanding.Default)
     {
         var requestVersion = ++_diffRequestVersion;
 
@@ -234,12 +234,17 @@ public sealed partial class WorkspaceGitChanges
 
                 if (_diffViewerRef != null)
                 {
-                    await _diffViewerRef.SetDiffAsync(_selectedDiff);
+                    await _diffViewerRef.SetDiffAsync(_selectedDiff, landing == DiffLanding.Last);
                 }
 
                 if (IsMarkdownPath(row.FilePath!) && _mdSurface == MdSurface.Preview)
                 {
                     await PushMarkdownPreviewAsync();
+
+                    if (landing != DiffLanding.Default && requestVersion == _diffRequestVersion && CanNavigateDiffChanges)
+                    {
+                        await StepWithinFileAsync(landing == DiffLanding.First, wrap: false);
+                    }
                 }
             }
         }

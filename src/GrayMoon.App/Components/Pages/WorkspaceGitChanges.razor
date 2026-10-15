@@ -24,7 +24,7 @@
                            OnRefresh="ManualRefreshAsync"
                            OnPreviousChange="NavigatePreviousChangeAsync"
                            OnNextChange="NavigateNextChangeAsync"
-                           IsChangeNavDisabled="@(!CanNavigateDiffChanges)"
+                           IsChangeNavDisabled="@(!CanWalkChanges)"
                            IsScanRunning="@(IsScanRunning && ChangedRepositoryCount > 0)"
                            ScanStatusText="@ScanStatus"
                            OnAbortScan="AbortScan" />
