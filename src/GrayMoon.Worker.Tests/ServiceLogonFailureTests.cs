@@ -30,4 +30,15 @@ public sealed class SelfUpdateLaunchTests
         Assert.Contains("-NonInteractive", arguments, StringComparison.Ordinal);
         Assert.Contains("irm 'http://localhost:8384/api/worker/install' | iex", arguments, StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData("http://localhost:8384/x'; calc; '")]
+    [InlineData("http://localhost:8384/x\" & calc & \"")]
+    [InlineData("http://localhost:8384/%COMSPEC%")]
+    [InlineData("file:///C:/install.ps1")]
+    [InlineData("not a url")]
+    public void Launch_rejects_urls_that_could_break_out_of_the_command_line(string installUrl)
+    {
+        Assert.Throws<ArgumentException>(() => SelfUpdateCommand.BuildLaunchArguments(installUrl));
+    }
 }

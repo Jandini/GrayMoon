@@ -17,6 +17,9 @@ public sealed class HookListenerHostedService(
     ILogger<HookListenerHostedService> logger) : IHostedService, IAsyncDisposable
 {
     private readonly WorkerOptions _options = options.Value;
+    private const int MaxConcurrentRequests = 64;
+
+    private readonly SemaphoreSlim _inFlight = new(MaxConcurrentRequests, MaxConcurrentRequests);
     private HttpListener? _listener;
     private CancellationTokenSource? _cts;
     private Task? _listenTask;
@@ -25,7 +28,19 @@ public sealed class HookListenerHostedService(
     {
         _listener = new HttpListener();
         _listener.Prefixes.Add($"http://127.0.0.1:{_options.ListenPort}/hook/");
-        _listener.Start();
+        try
+        {
+            _listener.Start();
+        }
+        catch (HttpListenerException ex)
+        {
+            logger.LogError(ex,
+                "Could not start the git hook listener on 127.0.0.1:{Port}. Another program may be using that port; free it or change the Worker listen port.",
+                _options.ListenPort);
+            _listener.Close();
+            _listener = null;
+            throw;
+        }
         logger.LogInformation("Hook listener started on http://127.0.0.1:{Port}/", _options.ListenPort);
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -40,7 +55,15 @@ public sealed class HookListenerHostedService(
             try
             {
                 var context = await _listener.GetContextAsync().WaitAsync(ct);
-                _ = HandleRequestAsync(context, ct);
+                if (!_inFlight.Wait(0, CancellationToken.None))
+                {
+                    // Hooks are tiny local POSTs; this many in flight means something is flooding the port.
+                    context.Response.StatusCode = 503;
+                    context.Response.Close();
+                    continue;
+                }
+
+                _ = HandleThenReleaseAsync(context, ct);
             }
             catch (OperationCanceledException)
             {
@@ -50,6 +73,18 @@ public sealed class HookListenerHostedService(
             {
                 logger.LogError(ex, "Error in hook listener");
             }
+        }
+    }
+
+    private async Task HandleThenReleaseAsync(HttpListenerContext context, CancellationToken ct)
+    {
+        try
+        {
+            await HandleRequestAsync(context, ct);
+        }
+        finally
+        {
+            _inFlight.Release();
         }
     }
 
@@ -129,8 +164,17 @@ public sealed class HookListenerHostedService(
     public async ValueTask DisposeAsync()
     {
         _cts?.Cancel();
-        if (_listenTask != null)
-            await _listenTask;
         _listener?.Close();
+        if (_listenTask != null)
+        {
+            try
+            {
+                await _listenTask;
+            }
+            catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or HttpListenerException)
+            {
+                // Expected while the listener is being closed.
+            }
+        }
     }
 }
