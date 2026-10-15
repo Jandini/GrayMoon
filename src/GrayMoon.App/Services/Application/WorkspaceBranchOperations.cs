@@ -680,20 +680,7 @@ public sealed class WorkspaceBranchOperations(
             if (!success)
                 return BranchHttpOutcome.Ok(new CreateBranchApiResult { Success = false, Error = errorMessage ?? "Failed to create branch" });
 
-            var exists = await dbContext.RepositoryBranches
-                .AnyAsync(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && rb.BranchName == newBranchName && !rb.IsRemote, cancellationToken);
-            if (!exists)
-            {
-                dbContext.RepositoryBranches.Add(new RepositoryBranch
-                {
-                    WorkspaceRepositoryId = wr.WorkspaceRepositoryId,
-                    BranchName = newBranchName,
-                    IsRemote = false,
-                    LastSeenAt = DateTime.UtcNow,
-                    IsDefault = false
-                });
-                await dbContext.SaveChangesAsync(cancellationToken);
-            }
+            await workspaceGitService.EnsureLocalBranchPersistedAsync(wr.WorkspaceRepositoryId, newBranchName, cancellationToken);
 
             if (!string.IsNullOrWhiteSpace(wr.CheckedOutTag))
             {
@@ -757,21 +744,7 @@ public sealed class WorkspaceBranchOperations(
             if (!success)
                 return BranchHttpOutcome.Ok(new CreateBranchApiResult { Success = false, Error = errorMessage ?? "Failed to set upstream" });
 
-            var remoteBranchName = branchName.StartsWith("origin/", StringComparison.OrdinalIgnoreCase) ? branchName : "origin/" + branchName;
-            var exists = await dbContext.RepositoryBranches
-                .AnyAsync(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && rb.IsRemote && rb.BranchName == remoteBranchName, cancellationToken);
-            if (!exists)
-            {
-                dbContext.RepositoryBranches.Add(new RepositoryBranch
-                {
-                    WorkspaceRepositoryId = wr.WorkspaceRepositoryId,
-                    BranchName = remoteBranchName,
-                    IsRemote = true,
-                    LastSeenAt = DateTime.UtcNow,
-                    IsDefault = false
-                });
-                await dbContext.SaveChangesAsync(cancellationToken);
-            }
+            await workspaceGitService.EnsureRemoteBranchRowPersistedAsync(wr.WorkspaceRepositoryId, branchName, cancellationToken);
 
             await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
 
@@ -842,14 +815,7 @@ public sealed class WorkspaceBranchOperations(
             if (!success)
                 return BranchHttpOutcome.Ok(new DeleteBranchApiResult { Success = false, Error = errorMessage ?? "Failed to delete branch" });
 
-            var toRemove = await dbContext.RepositoryBranches
-                .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && rb.IsRemote == isRemote && rb.BranchName == branchName)
-                .ToListAsync(cancellationToken);
-            if (toRemove.Count > 0)
-            {
-                dbContext.RepositoryBranches.RemoveRange(toRemove);
-                await dbContext.SaveChangesAsync(cancellationToken);
-            }
+            await workspaceGitService.RemoveBranchPersistedAsync(wr.WorkspaceRepositoryId, branchName, isRemote, cancellationToken);
 
             if (isRemote && string.Equals(await GetCurrentBranchAsync(workspaceId, contextId, wr.WorkspaceRepositoryId, cancellationToken), branchName, StringComparison.OrdinalIgnoreCase))
             {

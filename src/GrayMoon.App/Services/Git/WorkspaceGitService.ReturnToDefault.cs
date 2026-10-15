@@ -149,14 +149,7 @@ public sealed partial class WorkspaceGitService
         {
             // The worker reported no branch lists, so the writer cannot replace them. Remove at least the
             // branch that was just deleted locally.
-            var toRemove = await _dbContext.RepositoryBranches
-                .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && !rb.IsRemote && rb.BranchName == currentBranchName)
-                .ToListAsync(cancellationToken);
-            if (toRemove.Count > 0)
-            {
-                _dbContext.RepositoryBranches.RemoveRange(toRemove);
-                await _dbContext.SaveChangesAsync(cancellationToken);
-            }
+            await _branchWriter.RemoveBranchAsync(wr.WorkspaceRepositoryId, currentBranchName, isRemote: false, cancellationToken);
         }
 
         // One authoritative write of branch, version, counts, upstream, branch rows, projects and the PR

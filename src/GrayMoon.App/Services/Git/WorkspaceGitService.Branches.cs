@@ -280,42 +280,18 @@ public sealed partial class WorkspaceGitService
         => EnsureLocalBranchesPersistedAsync([(workspaceRepositoryId, branchName)], cancellationToken);
 
     /// <summary>Adds every missing local branch in one query and one save.</summary>
-    public async Task EnsureLocalBranchesPersistedAsync(
+    public Task EnsureLocalBranchesPersistedAsync(
         IReadOnlyList<(int WorkspaceRepositoryId, string BranchName)> branches,
         CancellationToken cancellationToken = default)
-    {
-        var wanted = branches
-            .Where(b => !string.IsNullOrWhiteSpace(b.BranchName))
-            .Select(b => (b.WorkspaceRepositoryId, BranchName: b.BranchName.Trim()))
-            .Distinct()
-            .ToList();
-        if (wanted.Count == 0)
-            return;
+        => _branchWriter.AddLocalBranchesAsync(branches, cancellationToken);
 
-        var wrlIds = wanted.Select(b => b.WorkspaceRepositoryId).Distinct().ToList();
-        var existing = await _dbContext.RepositoryBranches
-            .Where(rb => wrlIds.Contains(rb.WorkspaceRepositoryId) && !rb.IsRemote)
-            .Select(rb => new { rb.WorkspaceRepositoryId, rb.BranchName })
-            .ToListAsync(cancellationToken);
-        var existingSet = existing.Select(rb => (rb.WorkspaceRepositoryId, rb.BranchName)).ToHashSet();
-        var now = DateTime.UtcNow;
-        var toAdd = wanted
-            .Where(b => !existingSet.Contains((b.WorkspaceRepositoryId, b.BranchName)))
-            .Select(b => new RepositoryBranch
-            {
-                WorkspaceRepositoryId = b.WorkspaceRepositoryId,
-                BranchName = b.BranchName,
-                IsRemote = false,
-                LastSeenAt = now,
-                IsDefault = false
-            })
-            .ToList();
-        if (toAdd.Count == 0)
-            return;
+    /// <summary>Ensures a remote branch row (<c>origin/&lt;name&gt;</c>) exists for the workspace repository. Unlike <see cref="EnsureRemoteBranchPersistedAsync"/> it leaves BranchHasUpstream alone, for branches that are not necessarily the checked-out one.</summary>
+    public Task EnsureRemoteBranchRowPersistedAsync(int workspaceRepositoryId, string branchName, CancellationToken cancellationToken = default)
+        => _branchWriter.AddRemoteBranchAsync(workspaceRepositoryId, branchName, cancellationToken);
 
-        _dbContext.RepositoryBranches.AddRange(toAdd);
-        await _dbContext.SaveChangesAsync(cancellationToken);
-    }
+    /// <summary>Removes a branch that git no longer has from RepositoryBranches. A remote branch may be passed with or without the <c>origin/</c> prefix. Does not touch the checked-out branch or upstream state of the workspace repository.</summary>
+    public Task RemoveBranchPersistedAsync(int workspaceRepositoryId, string branchName, bool isRemote, CancellationToken cancellationToken = default)
+        => _branchWriter.RemoveBranchAsync(workspaceRepositoryId, branchName, isRemote, cancellationToken);
 
     /// <summary>Adds the given branch as a remote branch to persistence and sets BranchHasUpstream on the workspace repository link. Used after a successful push so the branch appears in Remotes without calling refresh branches.</summary>
     public async Task EnsureRemoteBranchPersistedAsync(int workspaceId, int repositoryId, string branchName, CancellationToken cancellationToken = default)
@@ -326,20 +302,7 @@ public sealed partial class WorkspaceGitService
             .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId, cancellationToken);
         if (wr == null)
             return;
-        var remoteBranchName = branchName.StartsWith("origin/", StringComparison.OrdinalIgnoreCase) ? branchName : "origin/" + branchName;
-        var exists = await _dbContext.RepositoryBranches
-            .AnyAsync(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && rb.IsRemote && rb.BranchName == remoteBranchName, cancellationToken);
-        if (!exists)
-        {
-            _dbContext.RepositoryBranches.Add(new RepositoryBranch
-            {
-                WorkspaceRepositoryId = wr.WorkspaceRepositoryId,
-                BranchName = remoteBranchName,
-                IsRemote = true,
-                LastSeenAt = DateTime.UtcNow,
-                IsDefault = false
-            });
-        }
+        await _branchWriter.AddRemoteBranchAsync(wr.WorkspaceRepositoryId, branchName, cancellationToken);
         wr.BranchHasUpstream = true;
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
