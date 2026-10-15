@@ -192,12 +192,12 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
 
 
 
-    public async Task<(bool Success, string? ErrorMessage)> FetchAsync(string repoPath, bool includeTags, string? bearerToken, CancellationToken ct)
+    public async Task<(bool Success, string? ErrorMessage)> FetchAsync(string repoPath, bool includeTags, string? bearerToken, CancellationToken ct, bool skipHooks = false)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
             return (true, null);
 
-        var args = includeTags ? "fetch origin --prune --tags" : "fetch origin --prune";
+        var args = GetHooksConfigPrefix(skipHooks) + (includeTags ? "fetch origin --prune --tags" : "fetch origin --prune");
         var sw = Stopwatch.StartNew();
         var (exitCode, stdout, stderr) = await runner.RunRemoteAsync(GitRemoteOperation.Fetch, args, repoPath, bearerToken, ct);
         sw.Stop();

@@ -59,7 +59,7 @@ public sealed class ReturnToDefaultBranchCommandTests
             return Task.FromResult<(bool, string?)>((true, null));
         }
 
-        public Task<(bool Success, string? ErrorMessage)> FetchAsync(string repoPath, bool includeTags, string? bearerToken, CancellationToken ct)
+        public Task<(bool Success, string? ErrorMessage)> FetchAsync(string repoPath, bool includeTags, string? bearerToken, CancellationToken ct, bool skipHooks = false)
             => Task.FromResult<(bool, string?)>((true, null));
 
         public Task<(bool Success, string? ErrorMessage)> CheckoutBranchAsync(string repoPath, string branchName, CancellationToken ct, bool skipHooks = false)

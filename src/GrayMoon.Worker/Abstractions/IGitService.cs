@@ -20,8 +20,12 @@ public interface IGitService
     /// specific commit (e.g. tip of <c>origin/main</c>) without checking it out.
     /// </summary>
     Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, bool nonNormalize, string? commitSha, CancellationToken ct);
-    /// <summary>Fetches from origin; when <paramref name="includeTags"/> is true, fetches tags as well. Returns (success, errorMessage).</summary>
-    Task<(bool Success, string? ErrorMessage)> FetchAsync(string repoPath, bool includeTags, string? bearerToken, CancellationToken ct);
+    /// <summary>
+    /// Fetches from origin; when <paramref name="includeTags"/> is true, fetches tags as well. Returns (success, errorMessage).
+    /// <paramref name="skipHooks"/> runs git without the repository hooks: pass it when the caller reads and reports the branches
+    /// itself afterwards, so the reference-transaction hook does not report the same refs a second time.
+    /// </summary>
+    Task<(bool Success, string? ErrorMessage)> FetchAsync(string repoPath, bool includeTags, string? bearerToken, CancellationToken ct, bool skipHooks = false);
     /// <summary>
     /// Fetches only the refs needed for commit counts: the current branch and the default origin branch (when available),
     /// instead of fetching all remote branches and tags. Returns (success, errorMessage).
