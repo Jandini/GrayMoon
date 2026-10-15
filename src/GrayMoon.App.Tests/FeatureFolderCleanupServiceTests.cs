@@ -7,6 +7,7 @@ using GrayMoon.Application.Features;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Tests;
 
@@ -110,10 +111,11 @@ public sealed class FeatureFolderCleanupServiceTests
         }
     }
 
-    private static FeatureFolderCleanupService NewService(AsyncServiceScope scope) => new(
+    private static FeatureFolderCleanupService NewService(AsyncServiceScope scope, int maxParallel = 2) => new(
         scope.ServiceProvider.GetRequiredService<IServiceScopeFactory>(),
         scope.ServiceProvider.GetRequiredService<WorkerConnectionTracker>(),
         scope.ServiceProvider.GetRequiredService<IWorkspaceOperationLock>(),
+        Options.Create(new WorkspaceOptions { MaxParallelOperations = maxParallel }),
         NullLogger<FeatureFolderCleanupService>.Instance);
 
     private static object? GetArg(object args, string name) => args.GetType().GetProperty(name)?.GetValue(args);

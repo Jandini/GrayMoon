@@ -1,9 +1,11 @@
 using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Data;
+using GrayMoon.App.Models;
 using GrayMoon.App.Services.Worker;
 using GrayMoon.Application.Features;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services.Features;
 
@@ -29,6 +31,7 @@ public sealed class FeatureFolderCleanupService(
     IServiceScopeFactory scopeFactory,
     WorkerConnectionTracker connectionTracker,
     IWorkspaceOperationLock operationLock,
+    IOptions<WorkspaceOptions> workspaceOptions,
     ILogger<FeatureFolderCleanupService> logger) : IFeatureFolderCleanupService, IHostedService
 {
     private readonly object _throttleLock = new();
@@ -95,8 +98,29 @@ public sealed class FeatureFolderCleanupService(
                 .ToListAsync(cancellationToken);
         }
 
-        foreach (var workspaceId in workspaceIds)
-            await SweepWorkspaceAsync(workspaceId, cancellationToken);
+        // Workspaces are independent: SweepWorkspaceAsync claims/throttles per Workspace and uses its own scope.
+        using var gate = new SemaphoreSlim(Math.Max(1, workspaceOptions.Value.MaxParallelOperations));
+        var tasks = workspaceIds.Select(async workspaceId =>
+        {
+            await gate.WaitAsync(cancellationToken);
+            try
+            {
+                await SweepWorkspaceAsync(workspaceId, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Feature folder cleanup failed. WorkspaceId={WorkspaceId}", workspaceId);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        });
+        await Task.WhenAll(tasks);
     }
 
     /// <summary>One sweep of one Workspace; returns false when it was skipped (throttled, busy, no Worker or no storage root).</summary>

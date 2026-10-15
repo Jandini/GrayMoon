@@ -103,6 +103,64 @@ public sealed class WorkspaceContextPathResolver(
         return WorkerPath.Combine(contextRoot, repoName);
     }
 
+    public async Task<IReadOnlyDictionary<int, string>> GetRepositoryPathsAsync(
+        WorkspaceFeatureContextId contextId,
+        IReadOnlyCollection<int> workspaceRepositoryIds,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(workspaceRepositoryIds);
+        var ids = workspaceRepositoryIds.Distinct().ToList();
+        var result = new Dictionary<int, string>(ids.Count);
+        if (ids.Count == 0)
+            return result;
+
+        var info = await contextResolver.GetRequiredAsync(contextId, cancellationToken: cancellationToken);
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        var links = await db.WorkspaceRepositories
+            .AsNoTracking()
+            .Include(l => l.Repository)
+            .Where(l => l.WorkspaceId == info.WorkspaceId && ids.Contains(l.WorkspaceRepositoryId))
+            .ToListAsync(cancellationToken);
+        var linkById = links.ToDictionary(l => l.WorkspaceRepositoryId);
+
+        var worktreeById = new Dictionary<int, string?>();
+        if (!info.IsSpecialWorkspace)
+        {
+            var featureRepos = await db.WorkspaceFeatureRepositories
+                .AsNoTracking()
+                .Where(r => r.WorkspaceFeatureContextId == contextId.Value && ids.Contains(r.WorkspaceRepositoryId))
+                .ToListAsync(cancellationToken);
+            foreach (var featureRepo in featureRepos)
+                worktreeById[featureRepo.WorkspaceRepositoryId] = featureRepo.WorktreePath;
+        }
+
+        string? contextRoot = null;
+        async Task<string> RootAsync() => contextRoot ??= await GetContextRootAsync(contextId, cancellationToken);
+
+        foreach (var id in ids)
+        {
+            if (!linkById.TryGetValue(id, out var link))
+                throw new InvalidOperationException(
+                    $"WorkspaceRepository {id} was not found in workspace {info.WorkspaceId}.");
+
+            var repoName = link.Repository?.RepositoryName
+                ?? throw new InvalidOperationException($"Repository name missing for WorkspaceRepository {id}.");
+
+            worktreeById.TryGetValue(id, out var worktreePath);
+            var useWorktree = !info.IsSpecialWorkspace && !string.IsNullOrWhiteSpace(worktreePath);
+
+            if (useWorktree)
+                result[id] = WorkerPath.Normalize(worktreePath!);
+            else if (link.Role == WorkspaceRepositoryRole.Workspace)
+                result[id] = await RootAsync();
+            else
+                result[id] = WorkerPath.Combine(await RootAsync(), repoName);
+        }
+
+        return result;
+    }
+
     public async Task<WorkerWorkspaceArgs> GetWorkerArgsAsync(
         WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken = default)

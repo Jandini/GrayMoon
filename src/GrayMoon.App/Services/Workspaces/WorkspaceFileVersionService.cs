@@ -12,6 +12,7 @@ using GrayMoon.Application.Workspaces;
 using GrayMoon.Common.FileVersions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services.Workspaces;
 
@@ -36,8 +37,17 @@ public sealed class WorkspaceFileVersionService(
     IWorkspaceContextPathResolver pathResolver,
     IWorkspaceFeatureContextResolver contextResolver,
     IWorkspaceCapabilitiesResolver capabilitiesResolver,
-    ILogger<WorkspaceFileVersionService> logger)
+    ILogger<WorkspaceFileVersionService> logger,
+    IOptions<WorkspaceOptions>? workspaceOptions = null)
 {
+    /// <summary>
+    /// Fan-out bound used by <c>UpdateAllVersionsAsync</c> when no <see cref="WorkspaceOptions"/> is supplied;
+    /// equals the <see cref="WorkspaceOptions.MaxParallelOperations"/> default.
+    /// </summary>
+    private const int DefaultMaxParallelOperations = 16;
+
+    private int MaxParallel => Math.Max(1, workspaceOptions?.Value?.MaxParallelOperations ?? DefaultMaxParallelOperations);
+
     /// <summary>Why a <c>{@Repo}</c> token is rejected in a workspace without repository versioning.</summary>
     public const string RepositoryVersioningRequiredMessage =
         "requires repository versioning (GitVersion) to be enabled for this workspace";
@@ -207,11 +217,12 @@ public sealed class WorkspaceFileVersionService(
         var tokenValues = await ResolveTokenValuesAsync(
             workspace, contextId, capabilities.UsesRepositoryVersioning, workspaceRoot, workspaceFolderName, workspaceRepositoryName, patternsForResolve, cancellationToken);
 
-        // Update each configured file
-        var totalUpdated = 0;
-        var totalFailed = 0;
-        var updatedFiles = new List<(int RepositoryId, string RepoName, string FilePath)>();
-
+        // Collect the files to update. Configs that target the SAME file (same repository + path) form one group
+        // and run in order: the Worker edits a file in place, so two concurrent edits of it would race. Distinct
+        // files fan out, bounded by WorkspaceOptions.MaxParallelOperations. Nothing in the fan-out touches the
+        // shared scoped DbContext: the configs are detached (AsNoTracking) and only read here.
+        var groups = new Dictionary<string, List<FileUpdateWork>>(StringComparer.OrdinalIgnoreCase);
+        var order = 0;
         foreach (var cfg in configs)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -231,53 +242,104 @@ public sealed class WorkspaceFileVersionService(
                 if (string.IsNullOrWhiteSpace(versionPatternToSend)) continue;
             }
 
-            try
-            {
-                var resp = await workerBridge.SendCommandAsync("UpdateFileVersions", new
-                {
-                    workspaceName = workspaceFolderName,
-                    repositoryName = file.Repository.RepositoryName,
-                    filePath = file.FilePath,
-                    versionPattern = versionPatternToSend,
-                    tokenValues,
-                    workspaceRoot,
-                    workspaceRepositoryName
-                }, cancellationToken);
-
-                if (resp.Success && resp.Data != null)
-                {
-                    var result = WorkerResponseJson.DeserializeWorkerResponse<WorkerUpdateFileVersionsResponse>(resp.Data);
-                    var updatedForFile = result?.UpdatedCount ?? 0;
-                    totalUpdated += updatedForFile;
-                    if (updatedForFile > 0 && file.FilePath != null)
-                    {
-                        if (onFileUpdated != null)
-                            onFileUpdated(file.FilePath);
-                        updatedFiles.Add((file.RepositoryId, file.Repository.RepositoryName ?? "", file.FilePath));
-                    }
-                    if (result?.ErrorMessage != null)
-                    {
-                        if (result.ErrorMessage.StartsWith("File not found:", StringComparison.OrdinalIgnoreCase))
-                            logger.LogDebug("UpdateFileVersions skipped missing file {FilePath}", file.FilePath);
-                        else
-                            logger.LogWarning("UpdateFileVersions warning for {FilePath}: {Msg}", file.FilePath, result.ErrorMessage);
-                    }
-                }
-                else
-                {
-                    totalFailed++;
-                    logger.LogWarning("UpdateFileVersions failed for {FilePath}: {Error}", file.FilePath, resp.Error);
-                }
-            }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception ex)
-            {
-                totalFailed++;
-                logger.LogError(ex, "Unexpected error updating versions in {FilePath}", file.FilePath);
-            }
+            var groupKey = $"{file.RepositoryId}|{file.FilePath}";
+            if (!groups.TryGetValue(groupKey, out var group))
+                groups[groupKey] = group = [];
+            group.Add(new FileUpdateWork(order++, file, versionPatternToSend));
         }
 
+        var totalUpdated = 0;
+        var totalFailed = 0;
+        var updatedEntries = new List<(int Order, (int RepositoryId, string RepoName, string FilePath) Entry)>();
+        var callbackGate = new object();
+
+        await RunGroupsBoundedAsync(
+            groups.Values.Select(g => (IReadOnlyList<FileUpdateWork>)g).ToList(),
+            MaxParallel,
+            async (work, ct) =>
+            {
+                var file = work.File;
+                try
+                {
+                    var resp = await workerBridge.SendCommandAsync("UpdateFileVersions", new
+                    {
+                        workspaceName = workspaceFolderName,
+                        repositoryName = file.Repository!.RepositoryName,
+                        filePath = file.FilePath,
+                        versionPattern = work.Pattern,
+                        tokenValues,
+                        workspaceRoot,
+                        workspaceRepositoryName
+                    }, ct);
+
+                    if (resp.Success && resp.Data != null)
+                    {
+                        var result = WorkerResponseJson.DeserializeWorkerResponse<WorkerUpdateFileVersionsResponse>(resp.Data);
+                        var updatedForFile = result?.UpdatedCount ?? 0;
+                        Interlocked.Add(ref totalUpdated, updatedForFile);
+                        if (updatedForFile > 0 && file.FilePath != null)
+                        {
+                            // The caller's callback and the result list are not thread-safe; serialize them.
+                            lock (callbackGate)
+                            {
+                                onFileUpdated?.Invoke(file.FilePath);
+                                updatedEntries.Add((work.Order, (file.RepositoryId, file.Repository.RepositoryName ?? "", file.FilePath)));
+                            }
+                        }
+                        if (result?.ErrorMessage != null)
+                        {
+                            if (result.ErrorMessage.StartsWith("File not found:", StringComparison.OrdinalIgnoreCase))
+                                logger.LogDebug("UpdateFileVersions skipped missing file {FilePath}", file.FilePath);
+                            else
+                                logger.LogWarning("UpdateFileVersions warning for {FilePath}: {Msg}", file.FilePath, result.ErrorMessage);
+                        }
+                    }
+                    else
+                    {
+                        Interlocked.Increment(ref totalFailed);
+                        logger.LogWarning("UpdateFileVersions failed for {FilePath}: {Error}", file.FilePath, resp.Error);
+                    }
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    Interlocked.Increment(ref totalFailed);
+                    logger.LogError(ex, "Unexpected error updating versions in {FilePath}", file.FilePath);
+                }
+            },
+            cancellationToken);
+
+        // Config order, not completion order, so the result is deterministic.
+        var updatedFiles = updatedEntries.OrderBy(e => e.Order).Select(e => e.Entry).ToList();
+
         return (totalUpdated, totalFailed, null, updatedFiles);
+    }
+
+    /// <summary>One configured file to update: its config order, the file and the pattern to send.</summary>
+    private sealed record FileUpdateWork(int Order, WorkspaceFile File, string Pattern);
+
+    /// <summary>
+    /// Runs <paramref name="body"/> for every item. Groups run concurrently, at most <paramref name="maxParallel"/>
+    /// at a time; items inside one group run sequentially, in order. <see cref="OperationCanceledException"/>
+    /// propagates; the body owns any per-item error handling.
+    /// </summary>
+    internal static Task RunGroupsBoundedAsync<T>(
+        IReadOnlyList<IReadOnlyList<T>> groups,
+        int maxParallel,
+        Func<T, CancellationToken, Task> body,
+        CancellationToken cancellationToken)
+    {
+        return Parallel.ForEachAsync(
+            groups,
+            new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, maxParallel), CancellationToken = cancellationToken },
+            async (group, token) =>
+            {
+                foreach (var item in group)
+                {
+                    token.ThrowIfCancellationRequested();
+                    await body(item, token);
+                }
+            });
     }
 
     /// <summary>Extracts structured file-version tokens from a version pattern string.</summary>

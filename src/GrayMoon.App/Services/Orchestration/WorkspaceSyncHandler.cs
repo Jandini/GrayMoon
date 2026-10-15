@@ -82,16 +82,14 @@ public sealed partial class WorkspaceSyncHandler(
             var scanner = scope.ServiceProvider.GetRequiredService<IGitChangesWorkspaceScanner>();
             if (repositoryIds is { Count: > 0 })
             {
-                foreach (var repositoryId in repositoryIds.Distinct())
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    await scanner.ScanWorkspaceAsync(
-                        workspaceId,
-                        contextId,
-                        cancellationToken,
-                        repositoryId: repositoryId,
-                        persistImmediately: true);
-                }
+                // One scanner call for the whole id set; the scanner bounds its own fan-out
+                // (GitChangesOptions.MaxParallelRepositoryOperations).
+                await scanner.ScanRepositoriesAsync(
+                    workspaceId,
+                    contextId,
+                    repositoryIds.Distinct().ToList(),
+                    cancellationToken,
+                    persistImmediately: true);
             }
             else
             {
@@ -213,12 +211,12 @@ public sealed partial class WorkspaceSyncHandler(
             prRefreshFailed = true;
         }
 
+        var snapshots = await query.GetSnapshotsAsync(workspaceId, ids, contextId, isSpecialWorkspace, cancellationToken);
         var repoPlans = new List<ReturnToDefaultRepositoryPlan>(ids.Count);
         foreach (var repoId in ids)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var dto = await query.GetSnapshotAsync(workspaceId, repoId, contextId, isSpecialWorkspace, cancellationToken: cancellationToken);
-            if (dto == null)
+            if (!snapshots.TryGetValue(repoId, out var dto))
                 return ReturnToDefaultPlan.Failed(workspaceId, "Repository state could not be read. Return to default was aborted.");
 
             repoPlans.Add(ClassifyRepository(dto));
@@ -263,12 +261,12 @@ public sealed partial class WorkspaceSyncHandler(
         var repoErrors = new ConcurrentDictionary<int, string>();
         var skippedAlreadyOnDefault = 0;
 
+        var snapshots = await query.GetSnapshotsAsync(workspaceId, ids, contextId, isSpecialWorkspace, cancellationToken);
         foreach (var repoId in ids)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var dto = await query.GetSnapshotAsync(workspaceId, repoId, contextId, isSpecialWorkspace, cancellationToken: cancellationToken);
-            if (dto == null)
+            if (!snapshots.TryGetValue(repoId, out var dto))
             {
                 repoErrors[repoId] = "Repository state could not be read.";
                 continue;

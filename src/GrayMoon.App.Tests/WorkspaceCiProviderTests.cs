@@ -13,6 +13,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -270,19 +271,27 @@ public sealed class WorkspaceCiProviderTests
                     connectorRepository,
                     new GitHubRepositoryRepository(dbContext, new RecordingGitChangesNotifier(), NullLogger<GitHubRepositoryRepository>.Instance),
                     GitHub,
+                    Options.Create(new WorkspaceOptions()),
                     NullLogger<GitHubRepositoryService>.Instance),
                 GitHub,
                 _memoryCache,
+                Options.Create(new WorkspaceOptions()),
                 NullLogger<GitHubActionsService>.Instance);
+            var liveFeed = new GhaWorkflowLiveFeedService(
+                GitHub,
+                connectorRepository,
+                new GitHubRateLimitTracker(),
+                new GhaLiveFeedJobsCache(),
+                NullLogger<GhaWorkflowLiveFeedService>.Instance);
+            var scopeFactory = new ServiceCollection()
+                .AddSingleton(gitHubActions)
+                .AddSingleton(liveFeed)
+                .BuildServiceProvider()
+                .GetRequiredService<IServiceScopeFactory>();
             var gitHubActionsProvider = new GitHubActionsCiProvider(
                 new WorkspaceActionService(new WorkspaceActionRepository(new TestDbContextFactory(new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options), NullLogger<WorkspaceActionRepository>.Instance), gitHubActions),
-                gitHubActions,
-                new GhaWorkflowLiveFeedService(
-                    GitHub,
-                    connectorRepository,
-                    new GitHubRateLimitTracker(),
-                    new GhaLiveFeedJobsCache(),
-                    NullLogger<GhaWorkflowLiveFeedService>.Instance),
+                scopeFactory,
+                Options.Create(new WorkspaceOptions()),
                 NullLogger<GitHubActionsCiProvider>.Instance);
 
             Resolver = new WorkspaceCiProviderResolver(
