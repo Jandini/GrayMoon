@@ -1,4 +1,5 @@
 using GrayMoon.App.Data;
+using GrayMoon.App.Models;
 using GrayMoon.Application.Features;
 using GrayMoon.Common.Git;
 using Microsoft.EntityFrameworkCore;
@@ -26,6 +27,29 @@ public interface IGitChangesWorkspaceScanner
         bool includeLineStats = false,
         int? repositoryId = null,
         bool persistImmediately = false);
+
+    /// <summary>
+    /// Scans the given repositories (by Repository id) in one call, bounded by the scanner's own
+    /// parallelism limit. The default implementation falls back to one sequential call per id.
+    /// </summary>
+    async Task ScanRepositoriesAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        IReadOnlyCollection<int> repositoryIds,
+        CancellationToken cancellationToken,
+        bool persistImmediately = false)
+    {
+        foreach (var repositoryId in repositoryIds)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await ScanWorkspaceAsync(
+                workspaceId,
+                contextId,
+                cancellationToken,
+                repositoryId: repositoryId,
+                persistImmediately: persistImmediately);
+        }
+    }
 }
 
 public sealed class GitChangesWorkspaceScanner(
@@ -33,7 +57,7 @@ public sealed class GitChangesWorkspaceScanner(
     IOptions<GitChangesOptions> gitChangesOptions,
     ILogger<GitChangesWorkspaceScanner> logger) : IGitChangesWorkspaceScanner
 {
-    public async Task ScanWorkspaceAsync(
+    public Task ScanWorkspaceAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken,
@@ -41,6 +65,38 @@ public sealed class GitChangesWorkspaceScanner(
         bool includeLineStats = false,
         int? repositoryId = null,
         bool persistImmediately = false)
+        => ScanCoreAsync(
+            workspaceId,
+            contextId,
+            repositoryId.HasValue ? [repositoryId.Value] : null,
+            cancellationToken,
+            onProgress,
+            includeLineStats,
+            persistImmediately);
+
+    public Task ScanRepositoriesAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        IReadOnlyCollection<int> repositoryIds,
+        CancellationToken cancellationToken,
+        bool persistImmediately = false)
+        => ScanCoreAsync(
+            workspaceId,
+            contextId,
+            repositoryIds,
+            cancellationToken,
+            onProgress: null,
+            includeLineStats: false,
+            persistImmediately);
+
+    private async Task ScanCoreAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        IReadOnlyCollection<int>? repositoryIds,
+        CancellationToken cancellationToken,
+        Action<GitChangesWorkspaceScanProgress>? onProgress,
+        bool includeLineStats,
+        bool persistImmediately)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var workerBridge = scope.ServiceProvider.GetRequiredService<IWorkerBridge>();
@@ -56,9 +112,10 @@ public sealed class GitChangesWorkspaceScanner(
 
         var linksQuery = dbContext.WorkspaceRepositories
             .Where(l => l.WorkspaceId == workspaceId);
-        if (repositoryId.HasValue)
+        if (repositoryIds is not null)
         {
-            linksQuery = linksQuery.Where(l => l.RepositoryId == repositoryId.Value);
+            var idList = repositoryIds.Distinct().ToList();
+            linksQuery = linksQuery.Where(l => idList.Contains(l.RepositoryId));
         }
 
         var links = await linksQuery
@@ -73,24 +130,18 @@ public sealed class GitChangesWorkspaceScanner(
         var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
 
         var targets = new List<MonitorTarget>();
-        foreach (var link in links)
+        var scannable = string.IsNullOrWhiteSpace(root)
+            ? new List<WorkspaceRepositoryLink>()
+            : links.Where(l => l.Workspace != null && l.Repository != null).ToList();
+        var repositoryPaths = await pathResolver.GetRepositoryPathsAsync(
+            contextId, scannable.Select(l => l.WorkspaceRepositoryId).ToList(), cancellationToken);
+        foreach (var link in scannable)
         {
-            if (link.Workspace == null || link.Repository == null)
-            {
-                continue;
-            }
-
-            if (string.IsNullOrWhiteSpace(root))
-            {
-                continue;
-            }
-
-            var repositoryPath = await pathResolver.GetRepositoryPathAsync(
-                contextId, link.WorkspaceRepositoryId, cancellationToken);
+            var repositoryPath = repositoryPaths[link.WorkspaceRepositoryId];
             targets.Add(new MonitorTarget(
                 root,
                 workspaceFolderName,
-                link.Repository.RepositoryName,
+                link.Repository!.RepositoryName,
                 workspaceRepositoryName,
                 link.WorkspaceId,
                 link.RepositoryId,

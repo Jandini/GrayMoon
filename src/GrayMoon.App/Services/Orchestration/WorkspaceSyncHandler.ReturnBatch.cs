@@ -165,12 +165,17 @@ public sealed partial class WorkspaceSyncHandler
         await using (var readScope = serviceScopeFactory.CreateAsyncScope())
         {
             var query = readScope.ServiceProvider.GetRequiredService<IWorkspaceRepositoryLinkListQueryService>();
+            var snapshots = await query.GetSnapshotsAsync(
+                workspaceId,
+                pending.Select(index => orderedIds[index]).Distinct().ToList(),
+                contextId,
+                isSpecialWorkspace: true,
+                cancellationToken: cancellationToken);
             foreach (var index in pending)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var repositoryId = orderedIds[index];
-                var dto = await query.GetSnapshotAsync(workspaceId, repositoryId, contextId, isSpecialWorkspace: true, cancellationToken: cancellationToken);
-                if (dto == null)
+                if (!snapshots.TryGetValue(repositoryId, out var dto))
                 {
                     results[index] = Failed(repositoryId, StateUnreadableMessage, UnattendedReturnFailureStage.Eligibility, false, false);
                     ReportSettled(repositoryId, success: false, repositoryName: null);

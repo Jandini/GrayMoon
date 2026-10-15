@@ -443,6 +443,33 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
             .FirstOrDefaultAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlyDictionary<int, WorkspaceRepositoryLinkListItemDto>> GetSnapshotsAsync(
+        int workspaceId,
+        IReadOnlyCollection<int> repositoryIds,
+        WorkspaceFeatureContextId? contextId = null,
+        bool isSpecialWorkspace = true,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(repositoryIds);
+        var result = new Dictionary<int, WorkspaceRepositoryLinkListItemDto>();
+        if (repositoryIds.Count == 0)
+            return result;
+
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var idList = repositoryIds.Distinct().ToList();
+        var rows = await Project(
+                db.WorkspaceRepositories.AsNoTracking()
+                    .Where(wr => wr.WorkspaceId == workspaceId && idList.Contains(wr.RepositoryId)),
+                db,
+                contextId,
+                isSpecialWorkspace)
+            .ToListAsync(cancellationToken);
+
+        foreach (var row in rows)
+            result.TryAdd(row.RepositoryId, row);
+        return result;
+    }
+
     private static IQueryable<WorkspaceRepositoryLink> ApplyFilters(
         IQueryable<WorkspaceRepositoryLink> query,
         WorkspaceRepositoryLinkListFilter filter)

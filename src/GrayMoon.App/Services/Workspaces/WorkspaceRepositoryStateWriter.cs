@@ -151,7 +151,7 @@ public sealed class WorkspaceRepositoryStateWriter(
             await ApplyProjectsAsync(contextId, workspaceId, repositoryId, wr, state, isSpecialWorkspace, snapshot, cancellationToken);
 
         if (options.ReconcilePullRequest)
-            await ReconcilePullRequestAsync(contextId, workspaceId, repositoryId, wr, state, previousBranch, isSpecialWorkspace, cancellationToken);
+            await ReconcilePullRequestsAsync(contextId, workspaceId, [(wr, state, previousBranch)], isSpecialWorkspace, cancellationToken);
 
         return true;
     }
@@ -270,54 +270,58 @@ public sealed class WorkspaceRepositoryStateWriter(
             cancellationToken);
     }
 
-    private async Task ReconcilePullRequestAsync(
+    /// <summary>
+    /// Reconciles the persisted pull request of every staged repository against the branch now checked out.
+    /// All GitHub lookups go out in one refresh call so they fan out in parallel (bounded by
+    /// <see cref="WorkspaceOptions.MaxParallelOperations"/>) instead of one repository at a time.
+    /// </summary>
+    private async Task ReconcilePullRequestsAsync(
         WorkspaceFeatureContextId contextId,
         int workspaceId,
-        int repositoryId,
-        WorkspaceRepositoryLink wr,
-        WorkspaceRepositoryContextState state,
-        string? previousBranch,
+        IReadOnlyList<(WorkspaceRepositoryLink Wr, WorkspaceRepositoryContextState State, string? PreviousBranch)> staged,
         bool isSpecialWorkspace,
         CancellationToken cancellationToken)
     {
-        var branchChanged = !string.Equals(previousBranch, state.BranchName, StringComparison.Ordinal);
-        if (branchChanged)
-            pullRequestService.EvictCacheForRepository(repositoryId);
-
-        var branch = state.BranchName;
-        var isOnDefault = !Blank(branch) && !Blank(wr.DefaultBranchName)
-            && string.Equals(branch, wr.DefaultBranchName, StringComparison.OrdinalIgnoreCase);
-
-        if (!isSpecialWorkspace)
+        var branchByRepositoryId = new Dictionary<int, string?>();
+        foreach (var (wr, state, previousBranch) in staged)
         {
-            // A Feature context's own PR projection (§17) is refreshed against its own checked-out branch and
-            // written only to WorkspaceRepositoryContextPullRequests - never to wr.BranchName or the legacy
-            // per-link PR row, which stay reserved for the special Workspace (see the data-corruption note this
-            // guard replaced: a Feature sync used to silently overwrite the Workspace's own branch/PR display).
-            if (Blank(branch) || isOnDefault)
+            // Evicting the cached lookup is what forces a fresh GitHub call for a repository whose branch
+            // changed, so the batched refresh below does not need a per-repository force flag.
+            if (!string.Equals(previousBranch, state.BranchName, StringComparison.Ordinal))
+                pullRequestService.EvictCacheForRepository(wr.RepositoryId);
+
+            var branch = state.BranchName;
+            var isOnDefault = !Blank(branch) && !Blank(wr.DefaultBranchName)
+                && string.Equals(branch, wr.DefaultBranchName, StringComparison.OrdinalIgnoreCase);
+
+            if (!isSpecialWorkspace)
             {
-                await pullRequestService.ClearContextPullRequestAsync(contextId.Value, wr.WorkspaceRepositoryId, cancellationToken);
-                return;
+                // A Feature context's own PR projection (§17) is refreshed against its own checked-out branch and
+                // written only to WorkspaceRepositoryContextPullRequests - never to wr.BranchName or the legacy
+                // per-link PR row, which stay reserved for the special Workspace (see the data-corruption note this
+                // guard replaced: a Feature sync used to silently overwrite the Workspace's own branch/PR display).
+                if (Blank(branch) || isOnDefault)
+                    await pullRequestService.ClearContextPullRequestAsync(contextId.Value, wr.WorkspaceRepositoryId, cancellationToken);
+                else
+                    branchByRepositoryId[wr.RepositoryId] = branch;
+                continue;
             }
 
-            await pullRequestService.RefreshContextPullRequestsAsync(
-                workspaceId,
-                contextId.Value,
-                new Dictionary<int, string?> { [repositoryId] = branch },
-                force: branchChanged,
-                cancellationToken);
-            return;
+            wr.BranchName = state.BranchName;
+
+            if (Blank(branch) || isOnDefault)
+                await pullRequestService.ClearPullRequestAsync(workspaceId, wr.RepositoryId, cancellationToken);
+            else
+                branchByRepositoryId[wr.RepositoryId] = branch;
         }
 
-        wr.BranchName = state.BranchName;
-
-        if (Blank(branch) || isOnDefault)
-        {
-            await pullRequestService.ClearPullRequestAsync(workspaceId, repositoryId, cancellationToken);
+        if (branchByRepositoryId.Count == 0)
             return;
-        }
 
-        await pullRequestService.RefreshPullRequestsAsync(workspaceId, [repositoryId], force: branchChanged, cancellationToken);
+        if (isSpecialWorkspace)
+            await pullRequestService.RefreshPullRequestsAsync(workspaceId, branchByRepositoryId.Keys.ToList(), force: false, cancellationToken);
+        else
+            await pullRequestService.RefreshContextPullRequestsAsync(workspaceId, contextId.Value, branchByRepositoryId, force: false, cancellationToken);
     }
 
     /// <summary>Dominant project type for the repository: Service &gt; Package &gt; Executable &gt; Library &gt; Test.</summary>
@@ -455,13 +459,7 @@ public sealed class WorkspaceRepositoryStateWriter(
         }
 
         if (options.ReconcilePullRequest)
-        {
-            foreach (var (wr, state, previousBranch) in staged)
-            {
-                await ReconcilePullRequestAsync(
-                    contextId, workspaceId, wr.RepositoryId, wr, state, previousBranch, isSpecialWorkspace, cancellationToken);
-            }
-        }
+            await ReconcilePullRequestsAsync(contextId, workspaceId, staged, isSpecialWorkspace, cancellationToken);
     }
 
     /// <summary>Mutates the tracked context state and, for the special Workspace, the link. Does not save.</summary>

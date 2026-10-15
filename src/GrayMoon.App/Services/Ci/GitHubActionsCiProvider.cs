@@ -2,6 +2,7 @@ using GrayMoon.Abstractions.Workspaces;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services.Ui;
 using GrayMoon.Application.Features;
+using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services.Ci;
 
@@ -9,12 +10,12 @@ namespace GrayMoon.App.Services.Ci;
 /// The provider for <see cref="WorkspaceCiProvider.GitHubActions"/>. A thin adapter over the existing,
 /// deliberately GitHub-specific services - <see cref="WorkspaceActionService"/> (fetch, coalesce, persist),
 /// <see cref="GitHubActionsService"/> (workflow statuses) and <see cref="GhaWorkflowLiveFeedService"/> (run jobs
-/// feed) - so behaviour is exactly what those services did before the boundary existed.
+/// feed, both resolved per parallel call from their own scope by the push run watch) - so behaviour is exactly what those services did before the boundary existed.
 /// </summary>
 public sealed class GitHubActionsCiProvider(
     WorkspaceActionService actionService,
-    GitHubActionsService gitHubActionsService,
-    GhaWorkflowLiveFeedService liveFeedService,
+    IServiceScopeFactory scopeFactory,
+    IOptions<WorkspaceOptions> workspaceOptions,
     ILogger<GitHubActionsCiProvider> logger) : IWorkspaceCiProvider
 {
     public WorkspaceCiProvider Kind => WorkspaceCiProvider.GitHubActions;
@@ -42,5 +43,5 @@ public sealed class GitHubActionsCiProvider(
     public IPushCiRunWatch CreatePushRunWatch(OverlayCommandTerminalService? overlayTerminal)
         => overlayTerminal == null
             ? NoOpPushCiRunWatch.Instance
-            : new GitHubActionsPushRunWatch(gitHubActionsService, liveFeedService, overlayTerminal, logger);
+            : new GitHubActionsPushRunWatch(scopeFactory, workspaceOptions, overlayTerminal, logger);
 }

@@ -23,12 +23,15 @@ public sealed class WorkspaceNativeLaunchService(
             .Where(l => l.WorkspaceId == info.WorkspaceId)
             .ToListAsync(cancellationToken);
 
+        var linkedIds = links.Where(l => l.Repository is not null).Select(l => l.WorkspaceRepositoryId).ToList();
+        var paths = await pathResolver.GetRepositoryPathsAsync(contextId, linkedIds, cancellationToken);
+
         var repos = new List<NativeLaunchRepositoryPath>();
         foreach (var link in links)
         {
             if (link.Repository is null)
                 continue;
-            var path = await pathResolver.GetRepositoryPathAsync(contextId, link.WorkspaceRepositoryId, cancellationToken);
+            var path = paths[link.WorkspaceRepositoryId];
             repos.Add(new NativeLaunchRepositoryPath
             {
                 WorkspaceRepositoryId = link.WorkspaceRepositoryId,

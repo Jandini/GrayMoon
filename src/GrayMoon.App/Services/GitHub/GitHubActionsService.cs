@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services.GitHub;
 
@@ -10,6 +11,7 @@ public sealed class GitHubActionsService(
     GitHubRepositoryService repositoryService,
     GitHubService gitHubService,
     IMemoryCache memoryCache,
+    IOptions<WorkspaceOptions> workspaceOptions,
     ILogger<GitHubActionsService> logger)
 {
     /// <summary>Workflow list rarely changes; short TTL so new/removed workflows still show up promptly.</summary>
@@ -19,65 +21,86 @@ public sealed class GitHubActionsService(
     private static readonly TimeSpan WorkflowDispatchSupportCacheTtl = TimeSpan.FromHours(12);
     public async Task<List<GitHubActionEntry>> GetLatestActionsAsync()
     {
-        var results = new List<GitHubActionEntry>();
         var connectors = await connectorRepository.GetAllAsync();
         var repositories = await repositoryService.GetRepositoriesAsync();
 
+        var work = new List<(Connector Connector, GitHubRepositoryEntry Repository)>();
         foreach (var connector in connectors)
         {
-            var connectorRepos = repositories
-                .Where(repo => repo.ConnectorName == connector.ConnectorName)
-                .ToList();
-
-            foreach (var repository in connectorRepos)
+            foreach (var repository in repositories.Where(repo => repo.ConnectorName == connector.ConnectorName))
             {
                 if (string.IsNullOrWhiteSpace(repository.OrgName) || string.IsNullOrWhiteSpace(repository.RepositoryName))
                 {
                     continue;
                 }
 
-                try
-                {
-                    var run = await gitHubService.GetLatestWorkflowRunAsync(
-                        connector,
-                        repository.OrgName,
-                        repository.RepositoryName);
-
-                    if (run == null)
-                    {
-                        continue;
-                    }
-
-                    results.Add(new GitHubActionEntry
-                    {
-                        RunId = run.Id,
-                        WorkflowId = run.WorkflowId,
-                        ConnectorName = connector.ConnectorName,
-                        Owner = repository.OrgName ?? string.Empty,
-                        RepositoryName = repository.RepositoryName,
-                        WorkflowName = run.Name,
-                        Event = run.Event,
-                        Status = run.Status,
-                        Conclusion = run.Conclusion,
-                        UpdatedAt = run.UpdatedAt,
-                        HtmlUrl = RepositoryUrlHelper.GetWorkflowRunWebUrl(
-                                      repository.CloneUrl,
-                                      repository.OrgName,
-                                      repository.RepositoryName,
-                                      run.Id,
-                                      connector.ApiBaseUrl)
-                                  ?? run.HtmlUrl,
-                        HeadBranch = run.HeadBranch
-                    });
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "Error loading latest action for {Owner}/{Repo}", repository.OrgName, repository.RepositoryName);
-                }
+                work.Add((connector, repository));
             }
         }
 
-        return results;
+        // Indexed slots keep the original connector/repository order regardless of completion order.
+        var entries = new GitHubActionEntry?[work.Count];
+        using var gate = CreateGate();
+        await Task.WhenAll(work.Select(async (item, index) =>
+        {
+            await gate.WaitAsync();
+            try
+            {
+                entries[index] = await LoadLatestActionAsync(item.Connector, item.Repository);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }));
+
+        return entries.OfType<GitHubActionEntry>().ToList();
+    }
+
+    private SemaphoreSlim CreateGate() => new(Math.Max(1, workspaceOptions.Value.MaxParallelOperations));
+
+    /// <summary>Loads the latest run for one repository; failures are logged and yield null so siblings are unaffected.</summary>
+    private async Task<GitHubActionEntry?> LoadLatestActionAsync(Connector connector, GitHubRepositoryEntry repository)
+    {
+        try
+        {
+            var run = await gitHubService.GetLatestWorkflowRunAsync(
+                connector,
+                repository.OrgName!,
+                repository.RepositoryName);
+
+            if (run == null)
+            {
+                return null;
+            }
+
+            return new GitHubActionEntry
+            {
+                RunId = run.Id,
+                WorkflowId = run.WorkflowId,
+                ConnectorName = connector.ConnectorName,
+                Owner = repository.OrgName ?? string.Empty,
+                RepositoryName = repository.RepositoryName,
+                WorkflowName = run.Name,
+                Event = run.Event,
+                Status = run.Status,
+                Conclusion = run.Conclusion,
+                UpdatedAt = run.UpdatedAt,
+                HtmlUrl = RepositoryUrlHelper.GetWorkflowRunWebUrl(
+                              repository.CloneUrl,
+                              repository.OrgName,
+                              repository.RepositoryName,
+                              run.Id,
+                              connector.ApiBaseUrl)
+                          ?? run.HtmlUrl,
+                HeadBranch = run.HeadBranch
+            };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Error loading latest action for {Owner}/{Repo}", repository.OrgName, repository.RepositoryName);
+            return null;
+        }
     }
 
     public async Task<GitHubActionEntry?> GetLatestActionAsync(GitHubRepositoryEntry repository)
@@ -208,33 +231,47 @@ public sealed class GitHubActionsService(
         }
         else
         {
-            foreach (var run in latestByWorkflowId.Values.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase))
+            var orderedRuns = latestByWorkflowId.Values
+                .OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var statuses = new ActionStatusInfo[orderedRuns.Count];
+            using var gate = CreateGate();
+            await Task.WhenAll(orderedRuns.Select(async (run, index) =>
             {
-                var meta = await gitHubService.GetWorkflowByIdAsync(connector, owner, repoName, run.WorkflowId, cancellationToken);
-                var supportsDispatch = string.IsNullOrWhiteSpace(meta?.Path)
-                    ? false
-                    : await GetCachedDispatchSupportAsync(connector, owner, repoName, run.WorkflowId, meta.Path, cancellationToken);
-                var workflowPageUrl = RepositoryUrlHelper.BuildWorkflowPageUrl(
-                    meta?.HtmlUrl,
-                    repository.CloneUrl,
-                    owner,
-                    repoName,
-                    run.WorkflowId,
-                    meta?.Path,
-                    connector.ApiBaseUrl);
-                result.Add(ToPerWorkflowActionStatus(
-                    branch,
-                    run.WorkflowId,
-                    run.Name,
-                    run,
-                    supportsDispatch,
-                    workflowPageUrl,
-                    meta?.Path,
-                    owner,
-                    repoName,
-                    repository.CloneUrl,
-                    connector.ApiBaseUrl));
-            }
+                await gate.WaitAsync(cancellationToken);
+                try
+                {
+                    var meta = await gitHubService.GetWorkflowByIdAsync(connector, owner, repoName, run.WorkflowId, cancellationToken);
+                    var supportsDispatch = string.IsNullOrWhiteSpace(meta?.Path)
+                        ? false
+                        : await GetCachedDispatchSupportAsync(connector, owner, repoName, run.WorkflowId, meta.Path, cancellationToken);
+                    var workflowPageUrl = RepositoryUrlHelper.BuildWorkflowPageUrl(
+                        meta?.HtmlUrl,
+                        repository.CloneUrl,
+                        owner,
+                        repoName,
+                        run.WorkflowId,
+                        meta?.Path,
+                        connector.ApiBaseUrl);
+                    statuses[index] = ToPerWorkflowActionStatus(
+                        branch,
+                        run.WorkflowId,
+                        run.Name,
+                        run,
+                        supportsDispatch,
+                        workflowPageUrl,
+                        meta?.Path,
+                        owner,
+                        repoName,
+                        repository.CloneUrl,
+                        connector.ApiBaseUrl);
+                }
+                finally
+                {
+                    gate.Release();
+                }
+            }));
+            result.AddRange(statuses);
         }
 
         return result;

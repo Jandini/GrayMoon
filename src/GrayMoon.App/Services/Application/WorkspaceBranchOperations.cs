@@ -531,13 +531,21 @@ public sealed class WorkspaceBranchOperations(
         var localBranchSets = new List<HashSet<string>>();
         var remoteBranchSets = new List<HashSet<string>>();
         var defaultBranchNames = new List<string>();
+        // One query for every link (instead of one per link), grouped by WorkspaceRepositoryId.
+        var linkIds = links.Select(wr => wr.WorkspaceRepositoryId).ToList();
+        var branchRows = await db.RepositoryBranches
+            .AsNoTracking()
+            .Where(rb => linkIds.Contains(rb.WorkspaceRepositoryId) && !rb.IsTag)
+            .Select(rb => new { rb.WorkspaceRepositoryId, rb.BranchName, rb.IsRemote, rb.IsDefault })
+            .ToListAsync(cancellationToken);
+        var branchesByLink = branchRows
+            .GroupBy(rb => rb.WorkspaceRepositoryId)
+            .ToDictionary(g => g.Key, g => g.ToList());
         foreach (var wr in links)
         {
-            var branches = await db.RepositoryBranches
-                .AsNoTracking()
-                .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && !rb.IsTag)
-                .Select(rb => new { rb.BranchName, rb.IsRemote, rb.IsDefault })
-                .ToListAsync(cancellationToken);
+            var branches = branchesByLink.TryGetValue(wr.WorkspaceRepositoryId, out var linkBranches)
+                ? linkBranches
+                : [];
 
             localBranchSets.Add(
                 branches

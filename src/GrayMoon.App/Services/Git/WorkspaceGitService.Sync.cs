@@ -361,22 +361,36 @@ public sealed partial class WorkspaceGitService
         var workspaceFolderName = workerArgs.WorkspaceFolderName;
         var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
         var capabilities = await ResolveRepositoryOperationCapabilitiesAsync(workspaceId, cancellationToken);
-        foreach (var wr in workspaceRepos)
+        // Worker round trips only (the links are already loaded and read-only here), so they fan out bounded by
+        // _maxConcurrent instead of one repository at a time. onProgress can now fire from several threads.
+        var statuses = new ConcurrentDictionary<int, RepoSyncStatus>();
+        using var semaphore = new SemaphoreSlim(_maxConcurrent, _maxConcurrent);
+        await Task.WhenAll(workspaceRepos.Select(async wr =>
         {
-            cancellationToken.ThrowIfCancellationRequested();
             var repo = wr.Repository;
-            if (repo == null) continue;
+            if (repo == null) return;
 
-            var response = await _workerBridge.SendCommandAsync("GetRepositoryVersion", new { workspaceName = workspaceFolderName, repositoryName = repo.RepositoryName, workspaceRoot, workspaceRepositoryName, capabilities }, cancellationToken);
-            RepoSyncStatus status;
-            if (!response.Success || response.Data == null)
-                status = RepoSyncStatus.Error;
-            else
-                status = ParseGetRepositoryVersionToStatus(response.Data, wr.GitVersion, wr.BranchName);
+            await semaphore.WaitAsync(cancellationToken);
+            try
+            {
+                var response = await _workerBridge.SendCommandAsync("GetRepositoryVersion", new { workspaceName = workspaceFolderName, repositoryName = repo.RepositoryName, workspaceRoot, workspaceRepositoryName, capabilities }, cancellationToken);
+                RepoSyncStatus status;
+                if (!response.Success || response.Data == null)
+                    status = RepoSyncStatus.Error;
+                else
+                    status = ParseGetRepositoryVersionToStatus(response.Data, wr.GitVersion, wr.BranchName);
 
-            result[repo.RepositoryId] = status;
-            onProgress?.Invoke(repo.RepositoryId, status);
-        }
+                statuses[repo.RepositoryId] = status;
+                onProgress?.Invoke(repo.RepositoryId, status);
+            }
+            finally
+            {
+                semaphore.Release();
+            }
+        }));
+
+        foreach (var (repositoryId, status) in statuses)
+            result[repositoryId] = status;
 
         var isInSync = result.Values.All(v => v == RepoSyncStatus.InSync);
         await _workspaceRepository.UpdateIsInSyncAsync(workspaceId, isInSync);
@@ -522,32 +536,51 @@ public sealed partial class WorkspaceGitService
         var workspaceRoot = workerArgs.WorkspaceRoot;
         var workspaceFolderName = workerArgs.WorkspaceFolderName;
         var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
-        foreach (var link in links)
+        // Probe every merged repository in parallel (each launches GitVersion in the worker, the slow part);
+        // only the worker calls fan out, the shared scoped DbContext is touched sequentially below.
+        using var semaphore = new SemaphoreSlim(_maxConcurrent, _maxConcurrent);
+        var probes = await Task.WhenAll(links.Select(async link =>
         {
             var repoName = link.Repository?.RepositoryName;
             if (string.IsNullOrWhiteSpace(repoName))
-                continue;
+                return (Link: link, RepoName: repoName, Payload: (DefaultTipVersionWorkerResponse?)null);
 
-            var response = await _workerBridge.SendCommandAsync(
-                "GetGitVersionAtDefaultTip",
-                new { workspaceName = workspaceFolderName, repositoryName = repoName, workspaceRoot, workspaceRepositoryName },
-                cancellationToken);
-            if (!response.Success || response.Data == null)
+            await semaphore.WaitAsync(cancellationToken);
+            try
             {
-                _logger.LogDebug(
-                    "GetGitVersionAtDefaultTip failed for {Repo} in Feature context {ContextId}: {Error}",
-                    repoName, contextId.Value, response.Error);
-                continue;
-            }
+                var response = await _workerBridge.SendCommandAsync(
+                    "GetGitVersionAtDefaultTip",
+                    new { workspaceName = workspaceFolderName, repositoryName = repoName, workspaceRoot, workspaceRepositoryName },
+                    cancellationToken);
+                if (!response.Success || response.Data == null)
+                {
+                    _logger.LogDebug(
+                        "GetGitVersionAtDefaultTip failed for {Repo} in Feature context {ContextId}: {Error}",
+                        repoName, contextId.Value, response.Error);
+                    return (Link: link, RepoName: repoName, Payload: (DefaultTipVersionWorkerResponse?)null);
+                }
 
-            var payload = WorkerResponseJson.DeserializeWorkerResponse<DefaultTipVersionWorkerResponse>(response.Data);
-            if (payload is not { Success: true } || string.IsNullOrWhiteSpace(payload.Version))
-            {
-                _logger.LogDebug(
-                    "GetGitVersionAtDefaultTip returned no version for {Repo}: {Error}",
-                    repoName, payload?.ErrorMessage);
-                continue;
+                var payload = WorkerResponseJson.DeserializeWorkerResponse<DefaultTipVersionWorkerResponse>(response.Data);
+                if (payload is not { Success: true } || string.IsNullOrWhiteSpace(payload.Version))
+                {
+                    _logger.LogDebug(
+                        "GetGitVersionAtDefaultTip returned no version for {Repo}: {Error}",
+                        repoName, payload?.ErrorMessage);
+                    return (Link: link, RepoName: repoName, Payload: (DefaultTipVersionWorkerResponse?)null);
+                }
+
+                return (Link: link, RepoName: repoName, Payload: payload);
             }
+            finally
+            {
+                semaphore.Release();
+            }
+        }));
+
+        foreach (var (link, repoName, payload) in probes)
+        {
+            if (payload is null)
+                continue;
 
             var state = await _dbContext.WorkspaceRepositoryContextStates
                 .FirstOrDefaultAsync(
