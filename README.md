@@ -67,6 +67,8 @@ Desktop checks for updates on startup from the same release repository.
 
 ### Docker
 
+The Docker image is the **web app only**: you use it from a browser. GrayMoon Desktop does not connect to a Docker container - Desktop always runs its own GrayMoon App alongside it.
+
 GrayMoon is two small pieces - keep both running:
 
 - **GrayMoon App** - the web UI and orchestration engine, runs in Docker.

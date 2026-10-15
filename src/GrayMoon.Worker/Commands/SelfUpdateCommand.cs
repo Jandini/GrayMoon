@@ -11,9 +11,22 @@ public sealed class SelfUpdateCommand(ILogger<SelfUpdateCommand> logger) : IComm
     /// <summary>Set by the hidden self-update PowerShell so the install script does not wait for a password.</summary>
     internal const string NonInteractiveVariable = "GRAYMOON_WORKER_NONINTERACTIVE";
 
-    internal static string BuildLaunchArguments(string installUrl) =>
-        "/c start \"\" /b powershell.exe -NoProfile -NonInteractive -Command \""
-        + "$env:" + NonInteractiveVariable + "='1'; irm '" + installUrl + "' | iex\"";
+    // The URL is embedded in a PowerShell single-quoted string inside a cmd.exe double-quoted argument, so any
+    // character that is special to either parser (or to PowerShell variable expansion) would let it break out.
+    private static readonly char[] UnsafeUrlCharacters = ['\'', '"', '%', '^', '`', '$', '&', '|', '<', '>', ';', '(', ')', '\r', '\n'];
+
+    internal static string BuildLaunchArguments(string installUrl)
+    {
+        if (!Uri.TryCreate(installUrl, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+            || installUrl.IndexOfAny(UnsafeUrlCharacters) >= 0)
+        {
+            throw new ArgumentException("InstallUrl must be an http(s) URL without quotes or shell special characters.");
+        }
+
+        return "/c start \"\" /b powershell.exe -NoProfile -NonInteractive -Command \""
+            + "$env:" + NonInteractiveVariable + "='1'; irm '" + installUrl + "' | iex\"";
+    }
 
     public Task<SelfUpdateResponse> ExecuteAsync(SelfUpdateRequest request, CancellationToken cancellationToken = default)
     {

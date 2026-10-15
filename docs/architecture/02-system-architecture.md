@@ -36,7 +36,10 @@ flowchart TB
 
 This separation is foundational.
 
-GrayMoon.App normally runs in Docker and cannot assume access to the developer's local repository paths.
+GrayMoon.App in Docker mode cannot assume access to the developer's local repository paths.
+GrayMoon.App is deployed in one of two mutually exclusive modes. In Docker it runs as the web app only and is reached from a browser. With GrayMoon.Desktop, the App is always started by Desktop as a child process on loopback and runs alongside it; Desktop never connects to a Docker-hosted App.
+
+
 
 GrayMoon.Worker (the Worker, packaged as `graymoon-worker`) runs on the developer host and performs operations against the real working copies.
 

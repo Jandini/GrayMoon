@@ -52,6 +52,15 @@ GrayMoon is a **two-process** system - never combine them:
 - **GrayMoon.Application** (`src/GrayMoon.Application`) - Application-layer contracts used by Blazor pages, thin REST endpoints, and later automation: `IWorkspace*Operations` facades, `OperationProgress` / `OperationResult`, and shared operation DTOs. Does not reference `GrayMoon.App`. Implementations live in `src/GrayMoon.App/Services/Application/`.
 - **GrayMoon.Common** (`src/GrayMoon.Common`) - Shared utilities including `CommandLineService` (process execution wrapper) and `Search/FilterSearchExpression` (boolean expression parser used by every UI grid).
 
+### Deployment modes
+
+There are exactly two ways GrayMoon.App is deployed, and they never mix:
+
+- **Docker (web app only):** GrayMoon.App runs alone in a container and is used from a browser at `http://<host>:8384`. The container hosts only the App; the Worker still runs on the developer's host and connects in over SignalR. GrayMoon.Desktop is not part of this mode and never connects to a Docker container.
+- **Desktop (App runs alongside):** GrayMoon.Desktop always starts its own GrayMoon.App child process on `127.0.0.1` with an OS-assigned port (`--desktop <pipe-name>`) and hosts it in WebView2. Desktop never attaches to an App it did not start, local or remote. `/hubs/desktop` is mapped only in this mode.
+
+Consequences: code that is Desktop-only (`/hubs/desktop`, `DesktopNotificationHub`, `IsDesktopMode`, native launch/"Open in") may assume the App and Desktop share one machine, one user and a loopback address. Code reachable in Docker mode must not assume that, and must not depend on Desktop being present (`IHubContext<DesktopNotificationHub>` sends to no one in Docker mode by design).
+
 ### App → Worker command flow
 
 The App sends commands to the Worker over SignalR using a `requestId` (GUID). `WorkerBridge` calls `WorkerResponseDelivery.WaitAsync(requestId)` (a `TaskCompletionSource`) then fires `RequestCommand` to the Worker. The Worker enqueues a `JobEnvelope` into one of three bounded `Channel<JobEnvelope>` pools (main/read/diff, selected by command name), runs it on that pool's dedicated workers, and calls back `ResponseCommand` with the same `requestId`. `WorkerResponseDelivery.Complete` resolves the TCS, unblocking the App's awaiter. Intermediate output streams via `CommandOutput` events for the loading overlay terminal.
@@ -147,7 +156,7 @@ Never delete a `Migrate*Async` method once it has shipped - some user's database
 
 ### DbContext lifetime
 
-`AppDbContext` is registered twice in `Program.cs` (~line 95-96): as a scoped service and, separately, via `AddDbContextFactory<AppDbContext>` - `AddDbContext` + `AddDbContextFactory` together fails on EF Core 10, so the scoped registration is built from the factory. In Blazor Server, one circuit (one open browser tab) is one DI scope, so an injected scoped `AppDbContext` is a single shared instance for everything that page/circuit does - including background work resolved from the same scope. See `GrayMoon/AGENTS.md` for the rule this exists to prevent (concurrent `SaveChangesAsync` on that shared instance throws and can leave the whole circuit's database access broken, not just the operation that caused it).
+`AppDbContext` is registered twice in `Program.cs` (the `AddDbContextFactory` call and the scoped factory-backed registration right after it): as a scoped service and, separately, via `AddDbContextFactory<AppDbContext>` - `AddDbContext` + `AddDbContextFactory` together fails on EF Core 10, so the scoped registration is built from the factory. In Blazor Server, one circuit (one open browser tab) is one DI scope, so an injected scoped `AppDbContext` is a single shared instance for everything that page/circuit does - including background work resolved from the same scope. See `GrayMoon/AGENTS.md` for the rule this exists to prevent (concurrent `SaveChangesAsync` on that shared instance throws and can leave the whole circuit's database access broken, not just the operation that caused it).
 
 ### Background job system
 
