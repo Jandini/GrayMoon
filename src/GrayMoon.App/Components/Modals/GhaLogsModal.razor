@@ -1,7 +1,9 @@
 @using GrayMoon.App.Repositories
+@using Microsoft.Extensions.Options
 @inject GitHubService GitHubService
 @inject ConnectorRepository ConnectorRepository
 @inject IJSRuntime JS
+@inject IOptions<WorkspaceOptions> WorkspaceOptions
 
 @if (IsVisible)
 {
@@ -266,13 +268,32 @@
                 .ThenBy(j => j.Id)
                 .ToList();
 
+            // All job logs download in parallel (bounded by MaxParallelOperations); they are still added in job
+            // order, so the first job renders as soon as its own log arrives and the rest stream in behind it.
+            var maxParallel = Math.Max(1, WorkspaceOptions.Value.MaxParallelOperations);
+            // Not disposed: if one download throws, the others may still be releasing it.
+            var gate = new SemaphoreSlim(maxParallel, maxParallel);
+            var logTasks = jobs.Select(async job =>
+            {
+                await gate.WaitAsync();
+                try
+                {
+                    var rawLog = await GitHubService.GetJobLogsAsync(connector, Owner, RepositoryName, job.Id);
+                    List<GhaLogEntry> entries = rawLog != null
+                        ? GhaLogParser.ParseJobLog(rawLog)
+                        : [new GhaLogLineEntry(GhaLogLineKind.Normal, "Log not available.")];
+                    return (RawLog: rawLog, Entries: entries);
+                }
+                finally
+                {
+                    gate.Release();
+                }
+            }).ToList();
+
             for (int jobIdx = 0; jobIdx < jobs.Count; jobIdx++)
             {
                 var job = jobs[jobIdx];
-                var rawLog = await GitHubService.GetJobLogsAsync(connector, Owner, RepositoryName, job.Id);
-                var entries = rawLog != null
-                    ? GhaLogParser.ParseJobLog(rawLog)
-                    : [new GhaLogLineEntry(GhaLogLineKind.Normal, "Log not available.")];
+                var (rawLog, entries) = await logTasks[jobIdx];
                 _jobs.Add(new JobLogEntry(job, entries, rawLog));
                 AutoSelectJob();
 
