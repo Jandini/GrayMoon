@@ -942,6 +942,29 @@
     word-break: break-word;
 }
 
+::deep .repo-sso-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 0.15rem;
+}
+
+::deep a.repo-sso-action,
+::deep button.repo-sso-action {
+    font: inherit;
+    color: #fff;
+    background: transparent;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    text-decoration: underline;
+}
+
+::deep button.repo-sso-action:disabled {
+    cursor: default;
+    opacity: 0.65;
+}
+
 .page-error-callout {
     margin-top: 0.5rem;
     white-space: nowrap;

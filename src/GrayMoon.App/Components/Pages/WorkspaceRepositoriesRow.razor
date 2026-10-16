@@ -449,7 +449,42 @@
             </div>
         </td>
     </tr>
-    @if (RepositoryError != null)
+    @if (Sso != null)
+    {
+        <tr class="repo-error-row">
+            <td colspan="@ColSpan" class="p-0">
+                <div class="repo-error-line" role="alert">
+                    <strong>@Sso.Heading</strong>
+                    <div>
+                        @if (Sso.OAuthApplication != null && Sso.Organization != null)
+                        {
+                            <span>Reauthorize <strong>@Sso.OAuthApplication</strong> to access <strong>@Sso.Organization</strong>. Complete authorization in your browser, then retry cloning.</span>
+                        }
+                        else if (Sso.Organization != null)
+                        {
+                            <span>Reauthorize access to <strong>@Sso.Organization</strong>. Complete authorization in your browser, then retry cloning.</span>
+                        }
+                        else if (Sso.OAuthApplication != null)
+                        {
+                            <span>Reauthorize <strong>@Sso.OAuthApplication</strong>. Complete authorization in your browser, then retry cloning.</span>
+                        }
+                        else
+                        {
+                            <span>@Sso.Explanation</span>
+                        }
+                    </div>
+                    <div class="repo-sso-actions">
+                        @if (Sso.ShowsAuthorize)
+                        {
+                            <a href="@Sso.AuthorizationUrl" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" class="repo-sso-action">Authorize SSO</a>
+                        }
+                        <button type="button" class="repo-sso-action" @onclick="OnSyncClick" disabled="@IsSyncing">Retry</button>
+                    </div>
+                </div>
+            </td>
+        </tr>
+    }
+    else if (RepositoryError != null)
     {
         <tr class="repo-error-row">
             <td colspan="@ColSpan" class="p-0">
@@ -483,6 +518,8 @@
     [Parameter] public bool IsVersionClicked { get; set; }
     [Parameter] public bool IsDependencyBadgeClicked { get; set; }
     [Parameter] public string? RepositoryError { get; set; }
+    /// <summary>GitHub SSO row for this repository. When set, it replaces <see cref="RepositoryError"/> so the authorization URL is not rendered as text.</summary>
+    [Parameter] public RepositorySsoPresentation? Sso { get; set; }
     [Parameter] public bool IsSyncing { get; set; }
     [Parameter] public bool IsUpdating { get; set; }
     [Parameter] public bool ActionsDisabled { get; set; }

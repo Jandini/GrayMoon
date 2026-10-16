@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using GrayMoon.Common.Git;
 
 namespace GrayMoon.Worker.Services;
 
@@ -85,8 +86,17 @@ internal static class GitRemoteAuth
 
     /// <summary>
     /// Prefixes <paramref name="output"/> with <see cref="AuthFailureHint"/> when it looks like an authentication
-    /// failure, so the UI shows an actionable message above the raw git output.
+    /// failure, so the UI shows an actionable message above the raw git output. A GitHub SSO refusal replaces that
+    /// hint: the connector token is not the cause, and the authorization URL is not included.
     /// </summary>
     internal static string? WithAuthHint(string? output)
-        => IsAuthFailure(output) ? AuthFailureHint + "\n" + output : output;
+    {
+        if (string.IsNullOrWhiteSpace(output))
+            return output;
+        if (GitHubSsoAuthorization.IsSsoRequired(output))
+            return GitHubSsoAuthorization.Describe(128, null, output).DisplayMessage;
+
+        var redacted = GitHubSsoAuthorization.Redact(output);
+        return IsAuthFailure(redacted) ? AuthFailureHint + "\n" + redacted : redacted;
+    }
 }

@@ -85,13 +85,38 @@ public sealed class SyncRepositoryCommand(
         Directory.CreateDirectory(workspacePath);
 
         var clonedNow = false;
-        if (!Directory.Exists(repoPath) && !string.IsNullOrWhiteSpace(cloneUrl))
+        if (!IsWorkspaceRoot(repoPath, workspacePath) && !WorkerRepositoryPaths.HasGitMetadata(repoPath))
         {
-            var ok = await git.CloneAsync(workspacePath, cloneUrl, bearerToken, cancellationToken);
-            if (ok)
+            // A folder that is already there is not clone residue. An empty one still goes through fetch so a
+            // plain folder inside the Workspace repository is not reported as the Workspace's own checkout.
+            // Anything else is left untouched: this command did not create it.
+            if (Directory.Exists(repoPath))
             {
+                if (!IsSafeCloneResidue(repoPath))
+                {
+                    return NotCloned(
+                        "This folder is not a Git repository and still has other files, so it was left in place. Move those files aside and retry.");
+                }
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(cloneUrl))
+                    return NotCloned("This repository has no clone URL, so it cannot be cloned.");
+
+                var clone = await git.CloneAsync(workspacePath, cloneUrl, bearerToken, cancellationToken);
+                if (!clone.Success || !WorkerRepositoryPaths.HasGitMetadata(repoPath))
+                {
+                    var leftInPlace = Directory.Exists(repoPath) && !TryRemoveSafeCloneResidue(workspacePath, repoPath);
+                    var message = clone.Success
+                        ? "Git clone reported success but did not create a repository."
+                        : clone.ErrorMessage ?? "Git clone failed.";
+                    if (leftInPlace)
+                        message += " The incomplete folder still has other files, so it was left in place. Move those files aside and retry.";
+                    return CloneFailed(clone, message);
+                }
+
                 await git.AddSafeDirectoryAsync(repoPath, cancellationToken);
-                clonedNow = Directory.Exists(repoPath);
+                clonedNow = true;
             }
         }
 
@@ -314,17 +339,82 @@ public sealed class SyncRepositoryCommand(
             };
         }
 
-        return new SyncRepositoryResponse
+        return NotCloned(string.IsNullOrWhiteSpace(cloneUrl)
+            ? "This repository has no clone URL, so it cannot be cloned."
+            : "This repository is not cloned.");
+    }
+
+    private static bool IsWorkspaceRoot(string repoPath, string workspacePath)
+        => string.Equals(Path.GetFullPath(repoPath), Path.GetFullPath(workspacePath), StringComparison.OrdinalIgnoreCase);
+
+    private static SyncRepositoryResponse NotCloned(string message) => new()
+    {
+        Success = false,
+        NotCloned = true,
+        ErrorMessage = message,
+        Version = "-",
+        Branch = "-"
+    };
+
+    private static SyncRepositoryResponse CloneFailed(GitCloneResult clone, string message) => new()
+    {
+        Success = false,
+        NotCloned = true,
+        ErrorMessage = message,
+        FailureKind = clone.FailureKind,
+        SsoAuthorizationUrl = clone.AuthorizationUrl,
+        SsoOAuthApplication = clone.OAuthApplication,
+        SsoOrganization = clone.Organization,
+        Version = "-",
+        Branch = "-"
+    };
+
+    /// <summary>True when the folder is empty or contains only <c>.git</c>. A pre-existing empty folder is not deleted.</summary>
+    private static bool IsSafeCloneResidue(string repoPath)
+    {
+        if (!Directory.Exists(repoPath))
+            return true;
+
+        foreach (var entry in Directory.EnumerateFileSystemEntries(repoPath))
         {
-            Success = true,
-            Version = version,
-            Branch = branch,
-            Projects = projects,
-            OutgoingCommits = outgoingCommits,
-            IncomingCommits = incomingCommits,
-            GitVersionError = versionError,
-            GitFetchError = fetchError
-        };
+            if (!string.Equals(Path.GetFileName(entry), ".git", StringComparison.OrdinalIgnoreCase))
+                return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Deletes a folder created by a failed clone when it contains nothing but an optional <c>.git</c> directory.
+    /// Returns true when the folder is gone. Never deletes the workspace root, a folder outside it, or any other files.
+    /// </summary>
+    private bool TryRemoveSafeCloneResidue(string workspacePath, string repoPath)
+    {
+        var clone = Path.GetFullPath(repoPath);
+        var workspace = Path.GetFullPath(workspacePath);
+        if (string.Equals(clone, workspace, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var prefix = Path.TrimEndingDirectorySeparator(workspace) + Path.DirectorySeparatorChar;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (!clone.StartsWith(prefix, comparison) || !Directory.Exists(clone))
+            return !Directory.Exists(clone);
+
+        if (!IsSafeCloneResidue(clone))
+            return false;
+
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(clone, "*", SearchOption.AllDirectories))
+                File.SetAttributes(file, FileAttributes.Normal);
+            Directory.Delete(clone, recursive: true);
+            return !Directory.Exists(clone);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger?.LogWarning(ex, "Could not remove an incomplete clone. Path={RepoPath}", clone);
+            return false;
+        }
     }
 
     /// <summary>

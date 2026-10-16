@@ -25,7 +25,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
     private static string CloneLongPathsPrefix => OperatingSystem.IsWindows() ? "-c core.longpaths=true " : "";
 
 
-    public async Task<bool> CloneAsync(string workingDir, string cloneUrl, string? bearerToken, CancellationToken ct)
+    public async Task<GitCloneResult> CloneAsync(string workingDir, string cloneUrl, string? bearerToken, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(workingDir))
             throw new ArgumentException("Working directory is required.", nameof(workingDir));
@@ -37,16 +37,17 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
 
         var args = $"{CloneLongPathsPrefix}clone \"{cloneUrl}\"";
         var sw = Stopwatch.StartNew();
-        var (exitCode, stdout, stderr) = await runner.RunRemoteAsync(GitRemoteOperation.Clone, args, workingDir, bearerToken, ct);
+        var run = await runner.RunRemoteAsync(GitRemoteOperation.Clone, args, workingDir, bearerToken, ct);
         sw.Stop();
-        if (exitCode != 0)
+        if (run.ExitCode != 0)
         {
-            LogIfAuthFailure("clone", workingDir, stdout, stderr);
-            logger.LogError("Git clone failed after retries in {ElapsedMs}ms. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", sw.ElapsedMilliseconds, exitCode, stdout, stderr);
-            return false;
+            var failure = GitHubSsoAuthorization.Describe(run.ExitCode, run.Stdout, run.Stderr, run.AuthorizationUrl);
+            LogIfAuthFailure("clone", workingDir, run.Stdout, run.Stderr);
+            logger.LogError("Git clone failed after retries in {ElapsedMs}ms. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", sw.ElapsedMilliseconds, run.ExitCode, run.Stdout, run.Stderr);
+            return GitCloneResult.FromFailure(failure);
         }
         logger.LogInformation("Git clone completed in {ElapsedMs}ms: {Url} -> {Dir}", sw.ElapsedMilliseconds, cloneUrl, workingDir);
-        return true;
+        return GitCloneResult.Succeeded(run.ExitCode);
     }
 
     public async Task AddSafeDirectoryAsync(string repoPath, CancellationToken ct)
@@ -952,7 +953,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         return (true, null);
     }
 
-    public async Task<bool> CloneIntoAsync(string targetDir, string cloneUrl, string? bearerToken, CancellationToken ct)
+    public async Task<GitCloneResult> CloneIntoAsync(string targetDir, string cloneUrl, string? bearerToken, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(targetDir))
             throw new ArgumentException("Target directory is required.", nameof(targetDir));
@@ -964,16 +965,17 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
 
         var args = $"{CloneLongPathsPrefix}clone \"{cloneUrl}\" .";
         var sw = Stopwatch.StartNew();
-        var (exitCode, stdout, stderr) = await runner.RunRemoteAsync(GitRemoteOperation.Clone, args, targetDir, bearerToken, ct);
+        var run = await runner.RunRemoteAsync(GitRemoteOperation.Clone, args, targetDir, bearerToken, ct);
         sw.Stop();
-        if (exitCode != 0)
+        if (run.ExitCode != 0)
         {
-            LogIfAuthFailure("clone", targetDir, stdout, stderr);
-            logger.LogError("Git clone into {Dir} failed after retries in {ElapsedMs}ms. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", targetDir, sw.ElapsedMilliseconds, exitCode, stdout, stderr);
-            return false;
+            var failure = GitHubSsoAuthorization.Describe(run.ExitCode, run.Stdout, run.Stderr, run.AuthorizationUrl);
+            LogIfAuthFailure("clone", targetDir, run.Stdout, run.Stderr);
+            logger.LogError("Git clone into {Dir} failed after retries in {ElapsedMs}ms. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", targetDir, sw.ElapsedMilliseconds, run.ExitCode, run.Stdout, run.Stderr);
+            return GitCloneResult.FromFailure(failure);
         }
         logger.LogInformation("Git clone completed in {ElapsedMs}ms: {Url} -> {Dir}", sw.ElapsedMilliseconds, cloneUrl, targetDir);
-        return true;
+        return GitCloneResult.Succeeded(run.ExitCode);
     }
 
     public async Task<(bool Success, string? Error)> InitAsync(string repoPath, CancellationToken ct)
@@ -1373,7 +1375,14 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
 
     private void LogIfAuthFailure(string operation, string path, string? stdout, string? stderr)
     {
-        if (GitRemoteAuth.IsAuthFailure(CombineOutput(stdout, stderr)))
+        var output = CombineOutput(stdout, stderr);
+        if (GitHubSsoAuthorization.IsSsoRequired(output))
+        {
+            logger.LogWarning("Git {Operation} requires GitHub SSO reauthorization for {Path}.", operation, path);
+            return;
+        }
+
+        if (GitRemoteAuth.IsAuthFailure(output))
             logger.LogWarning("Git {Operation} failed authentication for {Path}. {Hint}", operation, path, GitRemoteAuth.AuthFailureHint);
     }
 

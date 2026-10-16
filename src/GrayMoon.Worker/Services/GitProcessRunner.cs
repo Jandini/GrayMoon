@@ -114,7 +114,7 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, IOptions<G
     /// method applies authentication, the operation's resilience pipeline, and non-interactive behaviour, so no
     /// individual caller can forget or hand-roll auth.
     /// </summary>
-    internal async Task<(int ExitCode, string? Stdout, string? Stderr)> RunRemoteAsync(
+    internal async Task<GitRemoteResult> RunRemoteAsync(
         GitRemoteOperation operation,
         string arguments,
         string workingDirectory,
@@ -137,17 +137,23 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, IOptions<G
         // Taking it would serialize all first-time clones of a Workspace behind that one folder lock.
         var intent = operation == GitRemoteOperation.Clone ? GitLockIntent.Read : GitLockIntent.Write;
 
+        (int ExitCode, string? Stdout, string? Stderr) raw;
         if (string.IsNullOrWhiteSpace(bearerToken))
-            return await pipeline.ExecuteAsync(async c => await RunAsync("git", arguments, workingDirectory, c, intent: intent), ct);
-
-        if (await SupportsEnvConfigAsync())
+            raw = await pipeline.ExecuteAsync(async c => await RunAsync("git", arguments, workingDirectory, c, intent: intent), ct);
+        else if (await SupportsEnvConfigAsync())
         {
             using var _ = new GitProcessEnvironmentScope(GitRemoteAuth.BuildEnvironment(bearerToken, GitRemoteAuth.ReadExistingConfigCount()));
-            return await pipeline.ExecuteAsync(async c => await RunAsync("git", arguments, workingDirectory, c, intent: intent), ct);
+            raw = await pipeline.ExecuteAsync(async c => await RunAsync("git", arguments, workingDirectory, c, intent: intent), ct);
+        }
+        else
+        {
+            var authedArguments = $"{GitRemoteAuth.BuildArgumentPrefix(bearerToken)} {arguments}";
+            raw = await pipeline.ExecuteAsync(async c => await RunAsync("git", authedArguments, workingDirectory, c, intent: intent), ct);
         }
 
-        var authedArguments = $"{GitRemoteAuth.BuildArgumentPrefix(bearerToken)} {arguments}";
-        return await pipeline.ExecuteAsync(async c => await RunAsync("git", authedArguments, workingDirectory, c, intent: intent), ct);
+        // Stdout and stderr are redacted before any caller can log them. The authorization URL, when valid, is
+        // held only on AuthorizationUrl for the pending browser action.
+        return GitRemoteResult.Sanitize(raw);
     }
 
     internal async Task<(int ExitCode, string? Stdout, string? Stderr)> RunAsync(
@@ -312,6 +318,7 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, IOptions<G
 
     internal void ReportOverlayStderr(string message)
     {
+        message = GitHubSsoAuthorization.Redact(message) ?? message;
         var sink = CommandLineStreamAmbient.Current.Value;
         if (sink == null || string.IsNullOrWhiteSpace(message))
             return;
@@ -452,4 +459,31 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, IOptions<G
 
         return false;
     }
+}
+
+/// <summary>
+/// Remote git process result. Deconstructs to redacted stdout and stderr. <see cref="AuthorizationUrl"/> is set
+/// only for a validated GitHub SSO URL taken from the raw output before redaction.
+/// </summary>
+internal readonly record struct GitRemoteResult(int ExitCode, string? Stdout, string? Stderr, string? AuthorizationUrl)
+{
+    public static GitRemoteResult Sanitize((int ExitCode, string? Stdout, string? Stderr) raw)
+    {
+        var url = GitHubSsoAuthorization.TryExtractAuthorizationUrl(raw.Stdout, raw.Stderr);
+        return new GitRemoteResult(
+            raw.ExitCode,
+            GitHubSsoAuthorization.Redact(raw.Stdout),
+            GitHubSsoAuthorization.Redact(raw.Stderr),
+            url);
+    }
+
+    public void Deconstruct(out int exitCode, out string? stdout, out string? stderr)
+    {
+        exitCode = ExitCode;
+        stdout = Stdout;
+        stderr = Stderr;
+    }
+
+    public static implicit operator (int ExitCode, string? Stdout, string? Stderr)(GitRemoteResult result)
+        => (result.ExitCode, result.Stdout, result.Stderr);
 }

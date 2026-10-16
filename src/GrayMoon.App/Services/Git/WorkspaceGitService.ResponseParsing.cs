@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using GrayMoon.Abstractions.Worker;
+using GrayMoon.Common.Git;
 using GrayMoon.Abstractions.Exceptions;
 using GrayMoon.Abstractions.Notifications;
 using GrayMoon.App.Data;
@@ -37,9 +38,30 @@ public sealed partial class WorkspaceGitService
     private static RepoGitVersionInfo ParseSyncRepositoryResponse(WorkerCommandResponse response)
     {
         if (!response.Success || response.Data == null)
-            return new RepoGitVersionInfo { Version = "-", Branch = "-", ErrorMessage = response.Error ?? "Sync failed" };
+        {
+            var transportError = GitHubSsoAuthorization.Redact(response.Error) ?? "Sync failed";
+            return new RepoGitVersionInfo
+            {
+                Version = "-",
+                Branch = "-",
+                ErrorMessage = transportError,
+                FatalSyncFailure = true,
+                Snapshot = new RepositoryStateSnapshot
+                {
+                    ErrorMessage = transportError,
+                    FatalSyncFailure = true,
+                }
+            };
+        }
 
-        var (version, branch, tag, gitVersionError, gitFetchError, commandSucceeded, commit) = GetVersionBranch(response.Data);
+        var payload = ReadSyncPayload(response.Data);
+        var version = payload.Version;
+        var branch = payload.Branch;
+        var tag = payload.Tag;
+        var gitVersionError = payload.GitVersionError;
+        var gitFetchError = payload.GitFetchError;
+        var commandSucceeded = payload.CommandSucceeded;
+        var commit = payload.Commit;
         var projectsCount = GetProjects(response.Data);
         var projectsDetail = GetProjectsDetail(response.Data);
         var (outgoingCommits, incomingCommits, defaultBehind, defaultAhead) = GetCommitCounts(response.Data);
@@ -47,7 +69,16 @@ public sealed partial class WorkspaceGitService
         var (hasUpstream, upstreamProbed) = GetUpstream(response.Data);
         // Prefer Tag from the top-level response, fall back to currentTag from the branches block.
         var resolvedTag = !string.IsNullOrWhiteSpace(tag) ? tag : currentTag;
-        var combinedError = CombineRepoErrors(gitFetchError, gitVersionError);
+        var combinedError = GitHubSsoAuthorization.Redact(CombineRepoErrors(payload.ErrorMessage, gitFetchError, gitVersionError));
+        var fatal = !commandSucceeded;
+        if (fatal && string.IsNullOrWhiteSpace(combinedError))
+            combinedError = "Sync failed.";
+
+        var authorizationUrl = GitHubSsoAuthorization.TryValidateAuthorizationUrl(payload.SsoAuthorizationUrl);
+        var sso = string.Equals(payload.FailureKind, GitRemoteFailureKind.SsoAuthorizationRequired, StringComparison.Ordinal)
+            || GitHubSsoAuthorization.IsSsoRequired(combinedError);
+        if (!sso)
+            authorizationUrl = null;
 
         // The transport envelope only says the command ran; the payload says whether it did its job.
         // When it bailed out (a failed fetch, say) every field below is absent rather than genuinely
@@ -73,6 +104,12 @@ public sealed partial class WorkspaceGitService
             RemoteBranches = remoteBranches,
             DefaultBranch = defaultBranch,
             ErrorMessage = combinedError,
+            FatalSyncFailure = fatal,
+            NotCloned = fatal && payload.NotCloned,
+            SsoAuthorizationRequired = sso,
+            SsoAuthorizationUrl = authorizationUrl,
+            SsoOAuthApplication = sso ? GitHubSsoAuthorization.CleanLabel(payload.SsoOAuthApplication) : null,
+            SsoOrganization = sso ? GitHubSsoAuthorization.CleanLabel(payload.SsoOrganization) : null,
             Snapshot = new RepositoryStateSnapshot
             {
                 BranchName = branch,
@@ -89,6 +126,8 @@ public sealed partial class WorkspaceGitService
                 Tags = tags?.ToList(),
                 Projects = HasProjectsBlock(response.Data) ? ToProjectNotifications(projectsDetail) ?? [] : null,
                 ErrorMessage = combinedError,
+                FatalSyncFailure = fatal,
+                NotCloned = fatal && payload.NotCloned,
                 IdentityProbed = probed,
                 // A reported GitVersion failure is a probe result too: it clears the stored version, which the
                 // grid then shows as unresolved, instead of leaving a stale number from before the failure.
@@ -166,25 +205,81 @@ public sealed partial class WorkspaceGitService
 
     private static (string version, string branch, string? tag, string? gitVersionError, string? gitFetchError, bool commandSucceeded, string? commit) GetVersionBranch(object data)
     {
+        var payload = ReadSyncPayload(data);
+        return (payload.Version, payload.Branch, payload.Tag, payload.GitVersionError, payload.GitFetchError, payload.CommandSucceeded, payload.Commit);
+    }
+
+    private sealed class SyncCommandPayload
+    {
+        public string Version { get; init; } = "-";
+        public string Branch { get; init; } = "-";
+        public string? Tag { get; init; }
+        public string? Commit { get; init; }
+        public string? GitVersionError { get; init; }
+        public string? GitFetchError { get; init; }
+        public string? ErrorMessage { get; init; }
+        public bool CommandSucceeded { get; init; } = true;
+        public string? FailureKind { get; init; }
+        public string? SsoAuthorizationUrl { get; init; }
+        public string? SsoOAuthApplication { get; init; }
+        public string? SsoOrganization { get; init; }
+        public bool NotCloned { get; init; }
+    }
+
+    private static SyncCommandPayload ReadSyncPayload(object data)
+    {
         var r = WorkerResponseJson.DeserializeWorkerResponse<WorkerVersionBranchResponse>(data);
         // Commands that do not report their own result are treated as successful, which is what they were before.
         var commandSucceeded = r?.Success ?? true;
         var tag = string.IsNullOrWhiteSpace(r?.Tag) ? null : r!.Tag;
-        var commit = GrayMoon.Common.Git.WorkspaceDefinitionTagPin.IsFullCommitHash(r?.Commit)
+        var commit = WorkspaceDefinitionTagPin.IsFullCommitHash(r?.Commit)
             ? r!.Commit!.Trim().ToLowerInvariant()
             : null;
-        return (r?.Version ?? "-", r?.Branch ?? "-", tag, r?.GitVersionError, r?.GitFetchError, commandSucceeded, commit);
+        return new SyncCommandPayload
+        {
+            Version = r?.Version ?? "-",
+            Branch = r?.Branch ?? "-",
+            Tag = tag,
+            Commit = commit,
+            GitVersionError = r?.GitVersionError,
+            GitFetchError = r?.GitFetchError,
+            ErrorMessage = r?.ErrorMessage,
+            CommandSucceeded = commandSucceeded,
+            FailureKind = r?.FailureKind,
+            SsoAuthorizationUrl = r?.SsoAuthorizationUrl,
+            SsoOAuthApplication = r?.SsoOAuthApplication,
+            SsoOrganization = r?.SsoOrganization,
+            NotCloned = r?.NotCloned ?? false,
+        };
     }
 
     private static string? CombineRepoErrors(string? fetchError, string? versionError)
+        => CombineRepoErrors(null, fetchError, versionError);
+
+    private static string? CombineRepoErrors(string? primary, string? fetchError, string? versionError)
     {
-        if (string.IsNullOrWhiteSpace(fetchError) && string.IsNullOrWhiteSpace(versionError))
+        var parts = new List<string>(3);
+        void Add(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return;
+            var trimmed = value.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').Trim();
+            if (trimmed.Length == 0)
+                return;
+            if (parts.Any(existing => existing.Contains(trimmed, StringComparison.Ordinal) || trimmed.Contains(existing, StringComparison.Ordinal)))
+                return;
+            parts.Add(trimmed);
+        }
+
+        Add(primary);
+        Add(fetchError);
+        Add(versionError);
+        if (parts.Count == 0)
             return null;
-        if (string.IsNullOrWhiteSpace(fetchError))
-            return versionError;
-        if (string.IsNullOrWhiteSpace(versionError))
-            return fetchError;
-        return $"{fetchError.Trim()}. {versionError.Trim()}";
+
+        var text = string.Join("\n", parts);
+        const int max = 500;
+        return text.Length <= max ? text : text[..max] + "...";
     }
 
     private static int? GetProjects(object data)

@@ -88,6 +88,7 @@ public sealed partial class WorkspaceRepositories
     private IReadOnlyDictionary<int, IReadOnlyList<string>> _customDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<string>>();
     private readonly HashSet<int> _tooltipLoadedRepoIds = new();
     private Dictionary<int, string> repositoryErrors = new();
+    private readonly Dictionary<int, RepositorySsoPresentation> repositorySso = new();
     private Dictionary<int, string> levelErrors = new();
     private HashSet<string> clickedVersions = new();
     private HashSet<int> clickedDependencyBadges = new();

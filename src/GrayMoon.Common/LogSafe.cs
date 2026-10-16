@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using GrayMoon.Common.Git;
 
 namespace GrayMoon.Common;
 
@@ -23,7 +24,7 @@ public static class LogSafe
             s = RedactHttpExtraHeader(s);
         if (s.IndexOf("Authorization:", StringComparison.OrdinalIgnoreCase) >= 0)
             s = AuthorizationHeaderRegex.Replace(s, "${prefix}" + Replacement);
-        return s;
+        return GitHubSsoAuthorization.Redact(s) ?? s;
     }
 
     // Covers a header echoed outside the http.extraHeader="..." form (GIT_TRACE_CURL output, GIT_CONFIG_VALUE_n dumps, etc.).

@@ -42,9 +42,7 @@ public sealed partial class WorkspaceSyncHandler(
                 onProgress: (completed, total, repoId, info) =>
                 {
                     progress.Report($"Synchronized {completed} of {total}", completed, total);
-                    var status = !string.IsNullOrWhiteSpace(info.ErrorMessage) || info.Version != "-" || info.Branch != "-"
-                        ? RepoSyncStatus.InSync
-                        : RepoSyncStatus.Error;
+                    var status = info.ToProgressStatus();
                     setRepoSyncStatus(repoId, status);
                     updateRepoGitInfo(repoId, info);
                 },

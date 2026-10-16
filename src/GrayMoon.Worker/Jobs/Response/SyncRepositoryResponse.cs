@@ -64,4 +64,25 @@ public sealed class SyncRepositoryResponse
     /// <summary>True when <see cref="HasUpstream"/> was actually resolved, so the app may replace the persisted flag with it.</summary>
     [JsonPropertyName("upstreamProbed")]
     public bool UpstreamProbed { get; set; }
+
+    /// <summary>Classified clone or sync failure. Absent from workers that predate it. See <c>GitRemoteFailureKind</c>.</summary>
+    [JsonPropertyName("failureKind")]
+    public string? FailureKind { get; set; }
+
+    /// <summary>
+    /// Validated GitHub SSO URL for the pending browser action. Never copied into <see cref="ErrorMessage"/>.
+    /// Absent when GitHub did not supply an acceptable URL.
+    /// </summary>
+    [JsonPropertyName("ssoAuthorizationUrl")]
+    public string? SsoAuthorizationUrl { get; set; }
+
+    [JsonPropertyName("ssoOAuthApplication")]
+    public string? SsoOAuthApplication { get; set; }
+
+    [JsonPropertyName("ssoOrganization")]
+    public string? SsoOrganization { get; set; }
+
+    /// <summary>True when this attempt left no checkout (clone failed, or there is nothing to clone).</summary>
+    [JsonPropertyName("notCloned")]
+    public bool NotCloned { get; set; }
 }

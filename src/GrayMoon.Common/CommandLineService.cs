@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
 using GrayMoon.Abstractions.Worker;
+using GrayMoon.Common.Git;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -353,7 +354,7 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
                     ? string.Concat(raw.AsSpan(0, MaxMirrorLineLength), " …")
                     : raw;
 
-                ReportAmbient(new CommandLineStreamEvent(WorkerCommandStreamKind.Stderr, line));
+                ReportAmbient(new CommandLineStreamEvent(WorkerCommandStreamKind.Stderr, GitHubSsoAuthorization.Redact(line) ?? line));
             }
         }
     }
@@ -643,7 +644,7 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
             return;
         }
 
-        ReportAmbient(new CommandLineStreamEvent(kind, segment));
+        ReportAmbient(new CommandLineStreamEvent(kind, GitHubSsoAuthorization.Redact(segment) ?? segment));
     }
 
     private static void ReportAmbient(CommandLineStreamEvent e)
@@ -651,6 +652,10 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
         var sink = CommandLineStreamAmbient.Current.Value;
         if (sink == null)
             return;
+
+        var text = GitHubSsoAuthorization.Redact(e.Text);
+        if (!string.Equals(text, e.Text, StringComparison.Ordinal))
+            e = new CommandLineStreamEvent(e.Kind, text ?? "");
 
         try
         {

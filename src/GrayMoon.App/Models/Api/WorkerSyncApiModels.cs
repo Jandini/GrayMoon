@@ -38,6 +38,24 @@ public sealed class WorkerVersionBranchResponse
     [JsonPropertyName("upstreamProbed")]
     public bool UpstreamProbed { get; set; }
 
+    /// <summary>Classified failure such as <c>ssoAuthorizationRequired</c>. Absent from older workers.</summary>
+    [JsonPropertyName("failureKind")]
+    public string? FailureKind { get; set; }
+
+    /// <summary>Validated GitHub SSO URL. Not an error string and not stored on the repository row.</summary>
+    [JsonPropertyName("ssoAuthorizationUrl")]
+    public string? SsoAuthorizationUrl { get; set; }
+
+    [JsonPropertyName("ssoOAuthApplication")]
+    public string? SsoOAuthApplication { get; set; }
+
+    [JsonPropertyName("ssoOrganization")]
+    public string? SsoOrganization { get; set; }
+
+    /// <summary>True when the attempt left no checkout. Absent (false) from older workers.</summary>
+    [JsonPropertyName("notCloned")]
+    public bool NotCloned { get; set; }
+
     [JsonPropertyName("remoteBranches")]
     public List<string>? RemoteBranches { get; set; }
 
