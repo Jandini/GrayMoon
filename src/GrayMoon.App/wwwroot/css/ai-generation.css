@@ -244,9 +244,11 @@
 
 .gm-ai-error__close {
     flex-shrink: 0;
-    width: 0.6rem;
-    height: 0.6rem;
-    margin-top: 0.15rem;
+    width: 0.5rem;
+    height: 0.5rem;
+    align-self: center;
+    margin: 0;
+    padding: 0;
     filter: invert(1);
     opacity: 0.6;
 }

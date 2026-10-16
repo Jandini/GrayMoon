@@ -127,6 +127,17 @@ public sealed class AiCliRunnerTests : IDisposable
         Assert.Null(outcome.Json);
     }
 
+    [Theory]
+    [InlineData("{\"title\":\"t\",\"description\":\"d\"}", true)]
+    [InlineData("I'll read `request.md` and return only the JSON.{\"title\":\"t\",\"description\":\"d\"}", true)]
+    [InlineData("Narration {not json} first.\n{\"title\":\"t\"}", true)]
+    [InlineData("{\"title\":\"t\"} and then more words", false)]
+    [InlineData("No JSON here", false)]
+    public void Cursor_narration_before_the_json_object_is_dropped(string text, bool expected)
+    {
+        Assert.Equal(expected, CursorCliAdapter.ExtractAnswer(text) is not null);
+    }
+
     [Fact]
     public async Task A_slow_cli_is_killed_at_the_timeout()
     {
