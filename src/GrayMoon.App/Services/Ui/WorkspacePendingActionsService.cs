@@ -1,5 +1,6 @@
-using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
+using GrayMoon.App.Services.Queries;
+using GrayMoon.Application.Features;
 namespace GrayMoon.App.Services.Ui;
 public sealed record NotificationRepo(
     int RepositoryId,
@@ -21,7 +22,10 @@ public sealed record WorkspaceNotification(
     IReadOnlyList<NotificationRepo> Repos,
     int? LowestLevelNeedingWork,
     int TotalActionRepoCount);
-public sealed class WorkspacePendingActionsService
+public sealed class WorkspacePendingActionsService(
+    IWorkspaceSelectedFeatureContextService selectedContextService,
+    IWorkspaceFeatureContextResolver contextResolver,
+    IWorkspaceRepositoryLinkListQueryService linkListQuery)
 {
     public const int MaxListedActionRepos = 100;
     private readonly List<WorkspaceNotification> _notifications = new();
@@ -43,7 +47,7 @@ public sealed class WorkspacePendingActionsService
         _notifications.RemoveAll(n => n.WorkspaceId == workspaceId);
         Changed?.Invoke();
     }
-    /// <summary>Reloads the workspace's current repository links and recomputes the notification for it immediately, so callers that just changed repository membership (e.g. removing a repository from a workspace) don't have to wait for the next Worker-driven WorkspaceSynced hub event.</summary>
+    /// <summary>Reloads the workspace's repository state for the selected context (the special Workspace or a Feature) and recomputes the notification for it immediately, so callers that just changed repository membership (e.g. removing a repository from a workspace) don't have to wait for the next Worker-driven WorkspaceSynced hub event.</summary>
     public async Task RefreshAsync(int workspaceId, WorkspaceRepository workspaceRepository, WorkspaceProjectRepository workspaceProjectRepository)
     {
         var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
@@ -52,8 +56,21 @@ public sealed class WorkspacePendingActionsService
             OnWorkspaceSynced(null, workspaceId);
             return;
         }
-        var links = workspace.Repositories.ToList();
-        var mismatchPayloads = await workspaceProjectRepository.GetSyncDependenciesPayloadAsync(workspaceId);
+        var contextId = await selectedContextService.GetSelectedAsync(workspaceId)
+            ?? await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId);
+        WorkspaceFeatureContextInfo contextInfo;
+        try
+        {
+            contextInfo = await contextResolver.GetRequiredAsync(contextId, workspaceId);
+        }
+        catch (InvalidOperationException)
+        {
+            // The persisted selection points at a context that no longer exists (e.g. a removed Feature).
+            contextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId);
+            contextInfo = await contextResolver.GetRequiredAsync(contextId, workspaceId);
+        }
+        var links = await linkListQuery.GetAllSnapshotsAsync(workspaceId, contextId, contextInfo.IsSpecialWorkspace);
+        var mismatchPayloads = await workspaceProjectRepository.GetSyncDependenciesPayloadAsync(workspaceId, contextId.Value);
         var mismatchedDeps = mismatchPayloads.ToDictionary(
             p => p.RepoId,
             p => (IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)>)p.ProjectUpdates
@@ -67,25 +84,25 @@ public sealed class WorkspacePendingActionsService
     public static WorkspaceNotification? ComputeNotification(
         int workspaceId,
         string workspaceName,
-        IReadOnlyList<WorkspaceRepositoryLink> links,
+        IReadOnlyList<WorkspaceRepositoryLinkListItemDto> links,
         IReadOnlyDictionary<int, IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)>>? mismatchedDeps = null)
     {
-        bool hasUnmatched = links.Any(wr => !wr.IsOnTag && ((wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0));
-        bool isPushRecommended = links.Any(wr => !wr.IsOnTag && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false));
+        bool hasUnmatched = links.Any(wr => !IsOnTag(wr) && ((wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0));
+        bool isPushRecommended = links.Any(wr => !IsOnTag(wr) && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false));
         bool hasIncoming = links.Any(wr =>
-            !wr.IsOnTag
+            !IsOnTag(wr)
             && (wr.IncomingCommits ?? 0) > 0);
         if (!hasUnmatched && !isPushRecommended && !hasIncoming)
             return null;
         var actionLinks = links
-            .Where(wr => !wr.IsOnTag && (
+            .Where(wr => !IsOnTag(wr) && (
                 (wr.UnmatchedDeps ?? 0) > 0 ||
                 (wr.OutOfDateFileRepos ?? 0) > 0 ||
                 (wr.OutgoingCommits ?? 0) > 0 ||
                 wr.BranchHasUpstream == false ||
                 (wr.IncomingCommits ?? 0) > 0))
             .OrderBy(wr => wr.DependencyLevel ?? 0)
-            .ThenBy(wr => wr.Repository?.RepositoryName ?? string.Empty)
+            .ThenBy(wr => wr.RepositoryName)
             .ToList();
         var totalActionRepoCount = actionLinks.Count;
         var repos = actionLinks
@@ -97,7 +114,7 @@ public sealed class WorkspacePendingActionsService
                     : (IReadOnlyList<(string, string, string)>)Array.Empty<(string, string, string)>();
                 return new NotificationRepo(
                     wr.RepositoryId,
-                    wr.Repository?.RepositoryName ?? $"Repo {wr.RepositoryId}",
+                    wr.RepositoryName,
                     wr.UnmatchedDeps ?? 0,
                     wr.Dependencies ?? 0,
                     wr.OutgoingCommits ?? 0,
@@ -109,8 +126,8 @@ public sealed class WorkspacePendingActionsService
             })
             .ToList();
         var lowestLevel = links
-            .Where(wr => !wr.IsOnTag && ((wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0))
-            .Min(wr => (int?)wr.DependencyLevel);
+            .Where(wr => !IsOnTag(wr) && ((wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0))
+            .Min(wr => wr.DependencyLevel);
         return new WorkspaceNotification(
             workspaceId,
             workspaceName,
@@ -121,4 +138,5 @@ public sealed class WorkspacePendingActionsService
             lowestLevel,
             totalActionRepoCount);
     }
+    private static bool IsOnTag(WorkspaceRepositoryLinkListItemDto link) => !string.IsNullOrWhiteSpace(link.CheckedOutTag);
 }

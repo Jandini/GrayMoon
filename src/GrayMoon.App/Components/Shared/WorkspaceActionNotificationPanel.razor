@@ -504,8 +504,29 @@
             }
         });
 
+        // Feature contexts raise only the Context* events (the legacy WorkspaceSynced is Workspace-context only).
+        _hubConnection.On<int, int>("ContextSynced", (workspaceId, contextId) => RefreshForSelectedContextAsync(workspaceId, contextId));
+        _hubConnection.On<int, int, int>("ContextRepositorySynced", (workspaceId, contextId, _) => RefreshForSelectedContextAsync(workspaceId, contextId));
+
         try { await _hubConnection.StartAsync(); }
         catch (Exception ex) { Logger.LogDebug(ex, "Notification panel hub connection failed"); }
+    }
+
+    private async Task RefreshForSelectedContextAsync(int workspaceId, int syncedContextId)
+    {
+        try
+        {
+            await using var scope = ServiceScopeFactory.CreateAsyncScope();
+            var selected = await ResolveOperationContextAsync(scope.ServiceProvider, workspaceId, CancellationToken.None);
+            if (selected.Value != syncedContextId) return;
+            var workspaceRepo = scope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
+            var projectRepo = scope.ServiceProvider.GetRequiredService<WorkspaceProjectRepository>();
+            await PendingActionsService.RefreshAsync(workspaceId, workspaceRepo, projectRepo);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to process context sync for workspace {WorkspaceId} context {ContextId}", workspaceId, syncedContextId);
+        }
     }
 
     private void OnServiceChanged()
@@ -524,6 +545,27 @@
         _tooltipHideCts = null;
         _hoveredDepBadge = null;
         _ = InvokeAsync(StateHasChanged);
+        _ = RefreshForLocationAsync(e.Location);
+    }
+
+    /// <summary>Switching Feature context navigates within the same workspace, so recompute its notification for the newly selected context.</summary>
+    private async Task RefreshForLocationAsync(string location)
+    {
+        var segments = new Uri(location).AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length < 2 || !string.Equals(segments[0], "workspaces", StringComparison.OrdinalIgnoreCase)
+            || !int.TryParse(segments[1], out var workspaceId))
+            return;
+        try
+        {
+            await using var scope = ServiceScopeFactory.CreateAsyncScope();
+            var workspaceRepo = scope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
+            var projectRepo = scope.ServiceProvider.GetRequiredService<WorkspaceProjectRepository>();
+            await PendingActionsService.RefreshAsync(workspaceId, workspaceRepo, projectRepo);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to refresh notification on navigation for workspace {WorkspaceId}", workspaceId);
+        }
     }
 
     public void Dispose()
