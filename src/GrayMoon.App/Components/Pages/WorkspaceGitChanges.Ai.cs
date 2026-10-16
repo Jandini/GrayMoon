@@ -1,3 +1,4 @@
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Services.Ai;
 using GrayMoon.App.Services.GitChanges;
 using GrayMoon.Application.Ai;
@@ -8,12 +9,16 @@ namespace GrayMoon.App.Components.Pages;
 
 /// <summary>
 /// The AI segment of the Commit control: writes the one shared commit message for the commit the Commit button
-/// currently offers. It only ever fills the message box; staging, committing, pushing and the Push committed choice stay
-/// with the existing Commit flow, which keeps working whatever the AI does.
+/// currently offers. Clicking the provider segment only fills the message box. With the menu's "Generate commit message"
+/// ticked, Commit with an empty box also writes the message first, as the opening step of the commit job (see
+/// <see cref="GenerateCommitMessageInJobAsync"/>); a message the user typed is always committed as typed.
 /// </summary>
 public sealed partial class WorkspaceGitChanges
 {
+    private const string AiTerminalLabel = "ai";
+
     [Inject] private IWorkspaceAiGenerationOperations AiOperations { get; set; } = default!;
+    [Inject] private WorkspaceGitChangesGenerateMessageOnCommitMemory GenerateMessageOnCommitMemory { get; set; } = default!;
 
     private AiProviderMenu? _aiMenu;
     private bool _aiGenerating;
@@ -22,6 +27,86 @@ public sealed partial class WorkspaceGitChanges
     private CommitSuggestion? _aiSuggestion;
 
     private sealed record CommitSuggestion(string Message, string ProviderLabel, string? Reason);
+
+    /// <summary>A commit started with an empty box: the provider and the exact scope captured when the commit started.</summary>
+    private sealed record CommitMessageGeneration(AiProviderOption Provider, AiCommitScope Scope);
+
+    /// <summary>The menu's "Generate commit message" option, remembered per workspace like "Push committed".</summary>
+    private bool GenerateMessageOnCommit
+    {
+        get => GenerateMessageOnCommitMemory.Get(WorkspaceId);
+        set => GenerateMessageOnCommitMemory.Set(WorkspaceId, value);
+    }
+
+    private void OnGenerateMessageOnCommitChanged(bool value) => GenerateMessageOnCommit = value;
+
+    /// <summary>
+    /// The provider that writes the message when Commit is pressed with an empty box: only with the option ticked, a
+    /// pinned provider that is available, and no generation from the provider segment already in flight. Null otherwise.
+    /// </summary>
+    private AiProviderOption? CommitMessageWriter =>
+        GenerateMessageOnCommit && !_aiGenerating && _aiMenu?.Pinned is { IsAvailable: true } provider ? provider : null;
+
+    /// <summary>True when the next Commit will write the message first (the box is empty and a writer is ready).</summary>
+    private bool CommitGeneratesMessage =>
+        string.IsNullOrWhiteSpace(_workspaceCommitMessage) && CommitMessageWriter is not null;
+
+    private bool IsSameAiScope(AiCommitScope scope) => scope.WorkspaceId == WorkspaceId && scope.ContextId == _selectedContextId;
+
+    private AiCommitScope BuildAiCommitScope(WorkspaceCommitMode mode, IEnumerable<WorkspaceGitChangesRepositoryView> targets) =>
+        new(
+            WorkspaceId,
+            RequireSelectedContextId(),
+            mode == WorkspaceCommitMode.Staged ? GitCommitEvidenceMode.Staged : GitCommitEvidenceMode.All,
+            targets.Select(r => new AiCommitRepository(r.RepositoryId, r.BranchName)).ToList());
+
+    /// <summary>
+    /// The opening step of a commit job started with an empty message box: writes the message for exactly the commit's
+    /// mode and repositories, echoing each step into the job's terminal (the Worker adds the provider CLI call and its
+    /// outcome). The message lands in the box and the circuit memory before anything is committed, so if the commit then
+    /// fails it is still there to review or retry. Returns null when nothing was written; the caller then commits nothing.
+    /// </summary>
+    private async Task<string?> GenerateCommitMessageInJobAsync(
+        BackgroundJobHandle job,
+        CommitMessageGeneration generation,
+        CancellationToken cancellationToken)
+    {
+        var (provider, scope) = generation;
+        var terminal = job.Terminal;
+        var progress = new SynchronousProgress(message =>
+        {
+            job.ReportProgress(message);
+            terminal.Append(AiTerminalLabel, WorkerCommandStreamKind.Stdout, message);
+        });
+
+        var result = await AiOperations.GenerateCommitMessageAsync(scope, provider.Id, progress, cancellationToken);
+        if (!result.Success)
+        {
+            var reason = result.Failure!.Message;
+            terminal.Append(AiTerminalLabel, WorkerCommandStreamKind.Stderr, $"Nothing was committed: {reason}");
+            SafeInvoke(() =>
+            {
+                if (IsSameAiScope(scope))
+                    _aiError = reason;
+                ToastService.ShowError($"{provider.Label} could not write the commit message, so nothing was committed.");
+            });
+            return null;
+        }
+
+        var message = result.Value!.Message;
+        terminal.Append(AiTerminalLabel, WorkerCommandStreamKind.Stdout, $"Commit message by {provider.Label}:");
+        foreach (var line in message.Split('\n'))
+            terminal.Append(AiTerminalLabel, WorkerCommandStreamKind.Stdout, $"  {line.TrimEnd('\r')}");
+
+        // Memory first: SafeInvoke no-ops once the page is gone, and the message must survive navigating away mid-job.
+        CommitMessageMemory.Set(scope.WorkspaceId, message);
+        SafeInvoke(() =>
+        {
+            if (IsSameAiScope(scope))
+                ApplyCommitMessage(message);
+        });
+        return message;
+    }
 
     private async Task LoadAiMenuAsync(bool refresh = false)
     {
@@ -111,14 +196,9 @@ public sealed partial class WorkspaceGitChanges
         }
 
         var workspaceId = WorkspaceId;
-        var contextId = RequireSelectedContextId();
         var messageAtClick = _workspaceCommitMessage;
         var fingerprint = AiTextApplyPolicy.CommitScopeFingerprint(mode, targets);
-        var scope = new AiCommitScope(
-            workspaceId,
-            contextId,
-            mode == WorkspaceCommitMode.Staged ? GitCommitEvidenceMode.Staged : GitCommitEvidenceMode.All,
-            targets.Select(r => new AiCommitRepository(r.RepositoryId, r.BranchName)).ToList());
+        var scope = BuildAiCommitScope(mode, targets);
 
         using var cts = new CancellationTokenSource();
         _aiCts = cts;
@@ -129,8 +209,8 @@ public sealed partial class WorkspaceGitChanges
 
         try
         {
-            var result = await AiOperations.GenerateCommitMessageAsync(scope, provider.Id, cts.Token);
-            if (_disposed || cts.IsCancellationRequested || workspaceId != WorkspaceId || _selectedContextId != contextId)
+            var result = await AiOperations.GenerateCommitMessageAsync(scope, provider.Id, progress: null, cts.Token);
+            if (_disposed || cts.IsCancellationRequested || !IsSameAiScope(scope))
                 return;
 
             if (!result.Success)
