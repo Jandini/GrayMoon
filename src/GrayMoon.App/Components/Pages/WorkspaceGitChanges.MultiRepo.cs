@@ -80,6 +80,12 @@ public sealed partial class WorkspaceGitChanges
         return $"{writer}{action} Ctrl+Enter from the message box.";
     }
 
+    /// <summary>
+    /// While the message box is empty (nothing typed or written by the AI yet), the Commit control sits at the box's
+    /// right edge as one control and saves a row; any message moves it back below the box.
+    /// </summary>
+    private bool CommitControlAttached => !_workspaceCommitMessageHasContent;
+
     private string CommitMessagePlaceholder =>
         GenerateMessageOnCommit && _aiMenu?.Pinned is { IsAvailable: true } provider
             ? $"Commit message (leave empty and {provider.Label} writes it on Commit)"

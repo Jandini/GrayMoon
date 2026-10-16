@@ -279,7 +279,7 @@
     flex: 0 0 auto;
     padding: 0.45rem 0.5rem 0.5rem;
     border-bottom: 1px solid var(--border-color);
-    /* Narrow-left-panel label swap for "Push committed" → "Push" (see @container below). */
+    /* Query container: the Commit control joins an empty message box only when the pane is wide enough (see @container below). */
     container-type: inline-size;
     container-name: git-changes-commit;
     /* The container is its own stacking context; lift it so the AI provider menu opens over the file tree below. */
@@ -376,6 +376,54 @@
 /* The pinned provider segment shows its icon only; its title and aria-label still name the provider. */
 .git-changes-workspace-commit__buttons .gm-ai-segment__label {
     display: none;
+}
+
+/* Empty message box: the Commit control joins the box's right edge as one control, like a search box with its button,
+   so the commit area takes a single row. Below 20rem the box would be too narrow to type in, so it stays stacked. */
+@container git-changes-commit (min-width: 20rem) {
+    .git-changes-workspace-commit__composer--attached {
+        display: flex;
+        align-items: stretch;
+    }
+
+    .git-changes-workspace-commit__composer--attached > form {
+        display: flex;
+        flex: 1 1 0%;
+        min-width: 0;
+    }
+
+    .git-changes-workspace-commit__composer--attached .git-changes-workspace-commit__message {
+        border-top-right-radius: 0;
+        border-bottom-right-radius: 0;
+    }
+
+    /* No query container here: in a row it would size to nothing. The AI menu's 100cqw then measures the whole
+       commit area, which it fits exactly since it opens from the area's right edge (below). */
+    .git-changes-workspace-commit__composer--attached .git-changes-workspace-commit__actions {
+        flex: 0 0 auto;
+        align-items: stretch;
+        margin-top: 0;
+        container-type: normal;
+    }
+
+    /* Stretch to the box's height and overlap its right border, as Bootstrap's input-group does. */
+    .git-changes-workspace-commit__composer--attached .git-changes-workspace-commit__buttons {
+        align-items: stretch;
+        margin-left: -1px;
+    }
+
+    .git-changes-workspace-commit__composer--attached .git-changes-workspace-commit__buttons > .btn:first-of-type {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        border-top-left-radius: 0;
+        border-bottom-left-radius: 0;
+    }
+
+    .git-changes-workspace-commit__composer--attached .gm-ai-menu--start {
+        left: auto;
+        right: 0;
+    }
 }
 
 .git-changes-diff-placeholder {

@@ -74,6 +74,12 @@
                 @if (ChangedRepositoryCount > 0)
                 {
                     <div class="git-changes-workspace-commit">
+                        @*
+                          Only a class changes between the attached and stacked layouts, never the element order, so
+                          the textarea keeps focus and caret when the first typed character moves the Commit control
+                          below it.
+                        *@
+                        <div class="git-changes-workspace-commit__composer @(CommitControlAttached ? "git-changes-workspace-commit__composer--attached" : null)">
                         <form autocomplete="off" @onsubmit:preventDefault="true">
                         <textarea id="git-changes-commit-message"
                                   @key="_commitMessageBoxKey"
@@ -163,6 +169,7 @@
                                     </Options>
                                 </AiProviderControl>
                             </div>
+                        </div>
                         </div>
                         @if (_aiError is not null)
                         {
