@@ -170,7 +170,9 @@ public sealed partial class WorkspaceGitService
             // A workspace that does not version its repositories has no version to be missing, so holding it
             // to "every row resolved a version" would leave it permanently out of sync.
             isInSync = results.All(r =>
-                (!capabilities.ShouldCalculateVersion || r.info.Version != "-") && r.info.Branch != "-");
+                !r.info.FatalSyncFailure
+                && (!capabilities.ShouldCalculateVersion || r.info.Version != "-")
+                && r.info.Branch != "-");
         }
         await _workspaceRepository.UpdateSyncMetadataAsync(workspaceId, DateTime.UtcNow, isInSync);
 

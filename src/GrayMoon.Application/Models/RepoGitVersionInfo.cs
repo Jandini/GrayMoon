@@ -30,8 +30,39 @@ public class RepoGitVersionInfo
     public string? DefaultBranch { get; init; }
     /// <summary>True if current branch has an upstream (remote) branch. Set from RefreshRepositoryVersion / SyncCommand.</summary>
     public bool? HasUpstream { get; init; }
-    /// <summary>Error message when sync failed for this repo.</summary>
+    /// <summary>Error message when sync failed for this repo. Never contains an SSO authorization URL.</summary>
     public string? ErrorMessage { get; init; }
+
+    /// <summary>True when this sync attempt failed (clone or fetch). A GitVersion warning leaves this false.</summary>
+    public bool FatalSyncFailure { get; init; }
+
+    /// <summary>True when <see cref="FatalSyncFailure"/> left no checkout.</summary>
+    public bool NotCloned { get; init; }
+
+    /// <summary>True when git reported GitHub SAML SSO. The row can offer authorization when <see cref="SsoAuthorizationUrl"/> is set.</summary>
+    public bool SsoAuthorizationRequired { get; init; }
+
+    /// <summary>Ephemeral validated GitHub SSO URL. Not copied onto <see cref="Snapshot"/>.</summary>
+    public string? SsoAuthorizationUrl { get; init; }
+
+    public string? SsoOAuthApplication { get; init; }
+
+    public string? SsoOrganization { get; init; }
+
+    /// <summary>
+    /// Live grid status for this attempt. A fatal failure is never in sync just because <see cref="ErrorMessage"/> is set.
+    /// A successful attempt with a branch or version is in sync, including a nonfatal version warning.
+    /// </summary>
+    public RepoSyncStatus ToProgressStatus()
+    {
+        if (FatalSyncFailure)
+            return NotCloned ? RepoSyncStatus.NotCloned : RepoSyncStatus.Error;
+        if (!string.IsNullOrWhiteSpace(Branch) && Branch != "-")
+            return RepoSyncStatus.InSync;
+        if (!string.IsNullOrWhiteSpace(Version) && Version != "-")
+            return RepoSyncStatus.InSync;
+        return RepoSyncStatus.Error;
+    }
 
     /// <summary>
     /// The same state expressed with per-group probe markers, for persistence through

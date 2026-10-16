@@ -1,6 +1,7 @@
 using GrayMoon.Abstractions.Notifications;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services;
+using GrayMoon.App.Services.Workspaces;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace GrayMoon.App.Tests;
@@ -431,5 +432,79 @@ public sealed class WorkspaceRepositoryStateWriterTests
         var applied = await writer.ApplyAsync(ctx.WorkspaceId, repositoryId: 99999, new RepositoryStateSnapshot());
 
         Assert.False(applied);
+    }
+
+    [Fact]
+    public async Task Fatal_sync_failure_keeps_the_branch_and_is_not_in_sync()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+
+        await ApplyAsync(
+            ctx,
+            new RepositoryStateSnapshot
+            {
+                ErrorMessage = "Git fetch failed.",
+                FatalSyncFailure = true,
+            },
+            new RepositoryStateWriteOptions { SyncStatus = SyncStatusWrite.Derive });
+
+        var after = await ctx.ReadLinkAsync();
+        Assert.Equal(RepoSyncStatus.Error, after.SyncStatus);
+        Assert.Equal("feature/x", after.BranchName);
+        Assert.Equal("1.0.0", after.GitVersion);
+    }
+
+    [Fact]
+    public async Task Fatal_uncloned_sync_is_not_cloned_and_keeps_the_previous_identity()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+
+        await ApplyAsync(
+            ctx,
+            new RepositoryStateSnapshot
+            {
+                ErrorMessage = "GitHub SSO authorization required.",
+                FatalSyncFailure = true,
+                NotCloned = true,
+            },
+            new RepositoryStateWriteOptions { SyncStatus = SyncStatusWrite.Derive });
+
+        var after = await ctx.ReadLinkAsync();
+        Assert.Equal(RepoSyncStatus.NotCloned, after.SyncStatus);
+        Assert.Equal("feature/x", after.BranchName);
+        Assert.Equal("1.0.0", after.GitVersion);
+    }
+
+    [Fact]
+    public async Task Hook_error_still_counts_as_in_sync()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+
+        await ApplyAsync(
+            ctx,
+            new RepositoryStateSnapshot { ErrorMessage = "GitVersion could not determine a version." },
+            new RepositoryStateWriteOptions { SyncStatus = SyncStatusWrite.Derive, ErrorMessageForcesInSync = true });
+
+        var after = await ctx.ReadLinkAsync();
+        Assert.Equal(RepoSyncStatus.InSync, after.SyncStatus);
+        Assert.Equal("feature/x", after.BranchName);
+    }
+
+    [Fact]
+    public async Task Hook_flag_still_forces_in_sync_when_a_fatal_marker_is_also_set()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+
+        await ApplyAsync(
+            ctx,
+            new RepositoryStateSnapshot
+            {
+                ErrorMessage = "nonblocking warning",
+                FatalSyncFailure = true,
+            },
+            new RepositoryStateWriteOptions { SyncStatus = SyncStatusWrite.Derive, ErrorMessageForcesInSync = true });
+
+        var after = await ctx.ReadLinkAsync();
+        Assert.Equal(RepoSyncStatus.InSync, after.SyncStatus);
     }
 }

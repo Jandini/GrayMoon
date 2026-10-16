@@ -6,7 +6,8 @@ namespace GrayMoon.Worker.Abstractions;
 
 public interface IGitService
 {
-    Task<bool> CloneAsync(string workingDir, string cloneUrl, string? bearerToken, CancellationToken ct);
+    /// <summary>Clones <paramref name="cloneUrl"/> into a new folder under <paramref name="workingDir"/>. Failure carries a sanitized message; a GitHub SSO URL, when valid, is separate from that message.</summary>
+    Task<GitCloneResult> CloneAsync(string workingDir, string cloneUrl, string? bearerToken, CancellationToken ct);
     Task AddSafeDirectoryAsync(string repoPath, CancellationToken ct);
     Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, CancellationToken ct);
     /// <summary>
@@ -67,8 +68,8 @@ public interface IGitService
     Task<(bool Success, bool Committed, string? ErrorMessage)> StageAndCommitAsync(string repoPath, IReadOnlyList<string> pathsToStage, string commitMessage, CancellationToken ct, bool skipHooks = false);
     /// <summary>Resets the current branch to origin/<paramref name="branchName"/>. When <paramref name="keepChanges"/> is true uses --mixed (changes remain in working tree); otherwise --hard. If the remote branch does not exist, pushes it upstream first using <paramref name="bearerToken"/>. Returns (success, errorMessage).</summary>
     Task<(bool Success, string? ErrorMessage)> ResetToRemoteAsync(string repoPath, string branchName, bool keepChanges, string? bearerToken, CancellationToken ct);
-    /// <summary>Runs <c>git clone &lt;url&gt; .</c> inside <paramref name="targetDir"/> (an empty directory), so the repository root is that directory. Returns success.</summary>
-    Task<bool> CloneIntoAsync(string targetDir, string cloneUrl, string? bearerToken, CancellationToken ct);
+    /// <summary>Runs <c>git clone &lt;url&gt; .</c> inside <paramref name="targetDir"/> (an empty directory), so the repository root is that directory. Failure carries a sanitized message.</summary>
+    Task<GitCloneResult> CloneIntoAsync(string targetDir, string cloneUrl, string? bearerToken, CancellationToken ct);
     /// <summary>Runs <c>git init</c> in <paramref name="repoPath"/>.</summary>
     Task<(bool Success, string? Error)> InitAsync(string repoPath, CancellationToken ct);
     /// <summary>Runs <c>git remote add &lt;name&gt; &lt;url&gt;</c>.</summary>

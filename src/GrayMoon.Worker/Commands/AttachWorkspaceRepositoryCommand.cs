@@ -71,9 +71,13 @@ public sealed class AttachWorkspaceRepositoryCommand(
         if (!Directory.EnumerateFileSystemEntries(path).Any())
         {
             var cloned = await git.CloneIntoAsync(path, cloneUrl, bearerToken, cancellationToken);
-            if (!cloned)
+            if (!cloned.Success || !WorkerRepositoryPaths.HasGitMetadata(path))
             {
-                return Fail("Git clone failed.");
+                RemoveFailedCloneIntoContents(path);
+                var message = cloned.Success
+                    ? "Git clone reported success but did not create a repository."
+                    : cloned.ErrorMessage ?? "Git clone failed.";
+                return Fail(message);
             }
 
             await FinishAsync(request, path, cancellationToken);
@@ -151,4 +155,43 @@ public sealed class AttachWorkspaceRepositoryCommand(
 
     private static AttachWorkspaceRepositoryResponse Fail(string message) =>
         new() { Success = false, ErrorMessage = message };
+
+    /// <summary>
+    /// A clone into an empty workspace root that did not produce a repository may leave a partial <c>.git</c>.
+    /// Remove only that residue so a retry can clone again. Never removes other files and never removes the root.
+    /// </summary>
+    private static void RemoveFailedCloneIntoContents(string path)
+    {
+        if (!Directory.Exists(path))
+            return;
+
+        var gitDir = Path.Combine(path, ".git");
+        if (!Directory.Exists(gitDir) && !File.Exists(gitDir))
+            return;
+
+        foreach (var entry in Directory.EnumerateFileSystemEntries(path))
+        {
+            if (!string.Equals(Path.GetFileName(entry), ".git", StringComparison.OrdinalIgnoreCase))
+                return;
+        }
+
+        try
+        {
+            if (Directory.Exists(gitDir))
+            {
+                foreach (var file in Directory.EnumerateFiles(gitDir, "*", SearchOption.AllDirectories))
+                    File.SetAttributes(file, FileAttributes.Normal);
+                Directory.Delete(gitDir, recursive: true);
+            }
+            else if (File.Exists(gitDir))
+            {
+                File.SetAttributes(gitDir, FileAttributes.Normal);
+                File.Delete(gitDir);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // The caller still reports the clone failure. The root and any other files stay.
+        }
+    }
 }

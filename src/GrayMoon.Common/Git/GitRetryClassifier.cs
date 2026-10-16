@@ -75,6 +75,10 @@ public static class GitRetryClassifier
         if (string.IsNullOrWhiteSpace(text))
             return false;
 
+        // An explicit GitHub SSO refusal is definitive even when the same output also mentions a transient fault.
+        if (GitHubSsoAuthorization.IsSsoRequired(text))
+            return false;
+
         if (ContainsAny(text, TransientMarkers))
             return true;
 

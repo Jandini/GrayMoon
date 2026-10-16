@@ -160,6 +160,8 @@ public sealed partial class WorkspaceRepositories
                             // Context switched while this job was running — don't clobber the new grid.
                             if (jobContextGeneration != _contextGeneration)
                                 return;
+                            if (info.FatalSyncFailure)
+                                return;
                             if (_linkByRepoId.TryGetValue(repoId, out var wr))
                             {
                                 wr.GitVersion = info.Version == "-" ? null : info.Version;
@@ -184,12 +186,7 @@ public sealed partial class WorkspaceRepositories
                     await ReloadWorkspaceDataFromFreshScopeAsync();
                     ApplySyncStateFromLoadedItems();
                     foreach (var (repoId, info) in repoGitInfos)
-                    {
-                        if (!string.IsNullOrWhiteSpace(info.ErrorMessage))
-                            SetRepositoryError(repoId, info.ErrorMessage);
-                        else
-                            ClearRepositoryError(repoId);
-                    }
+                        ApplyRepositorySyncResult(repoId, info);
                     StateHasChanged();
                 });
             }

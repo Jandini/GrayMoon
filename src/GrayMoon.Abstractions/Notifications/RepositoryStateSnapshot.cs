@@ -49,8 +49,18 @@ public sealed class RepositoryStateSnapshot
     /// <summary>Projects discovered in the working tree. An empty list with <see cref="ProjectsProbed"/> set means "this branch genuinely has no projects" and prunes.</summary>
     public List<RepositorySyncProjectNotification>? Projects { get; init; }
 
-    /// <summary>Non-fatal error to surface on the row (e.g. fetch failed) while the rest of the snapshot still applies.</summary>
+    /// <summary>Safe error text for this attempt. Never an authorization URL.</summary>
     public string? ErrorMessage { get; init; }
+
+    /// <summary>
+    /// True when this sync attempt failed fatally (clone or fetch). Older payloads omit it, so it defaults to false
+    /// and cannot turn a version warning or a hook update into a failure. Probe markers stay false, so prior
+    /// branch and version columns are left in place.
+    /// </summary>
+    public bool FatalSyncFailure { get; init; }
+
+    /// <summary>With <see cref="FatalSyncFailure"/>, the repository has no checkout. Status becomes not cloned.</summary>
+    public bool NotCloned { get; init; }
 
     /// <summary>Branch name and tag state were determined.</summary>
     public bool IdentityProbed { get; init; }

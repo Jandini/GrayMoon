@@ -25,7 +25,7 @@ public class GitRetryClassifierTests
     {
         const string stderr =
             """
-            From https://github.com/Consilio-SARB/auroraverityreview-ingestion-index-service
+            From https://github.com/acme-labs/auroraverityreview-ingestion-index-service
              * branch            main       -> FETCH_HEAD
             error: Your local changes to the following files would be overwritten by merge:
             	src/AuroraVerityReview.Ingestion.Index.Service/AuroraVerityReview.Ingestion.Index.Service.csproj
@@ -107,6 +107,24 @@ public class GitRetryClassifierTests
     public void Transient_errors_are_retryable(string stderr)
     {
         Assert.True(GitRetryClassifier.IsRetryable(1, null, stderr));
+    }
+
+    [Fact]
+    public void Sso_refusal_is_not_retryable_even_when_a_transient_phrase_is_also_present()
+    {
+        const string stderr =
+            "remote: The 'acme-labs' organization has enabled or enforced SAML SSO.\n" +
+            "fatal: unable to access 'https://github.com/acme-labs/cifx.git/': Connection timed out\n" +
+            "fatal: unable to access 'https://github.com/acme-labs/cifx.git/': The requested URL returned error: 403";
+
+        Assert.False(GitRetryClassifier.IsRetryable(128, null, stderr));
+    }
+
+    [Fact]
+    public void Http_403_without_sso_text_is_not_retryable()
+    {
+        const string stderr = "fatal: unable to access 'https://github.com/acme/repo.git/': The requested URL returned error: 403";
+        Assert.False(GitRetryClassifier.IsRetryable(128, null, stderr));
     }
 
     [Fact]

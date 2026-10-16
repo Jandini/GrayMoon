@@ -155,6 +155,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         ApplySelectedContext(info);
         _boundContextQuery = BoundContextQueryFromSelection();
         Interlocked.Increment(ref _contextGeneration);
+        ClearRepositoryErrors();
         // Drop Feature/Workspace rows immediately so the selector label and grid cannot disagree
         // while LoadWorkspaceAsync is still queued (InvokeAsync runs after the current turn).
         // Keep header action flags so Branch/Create PR does not flash during the reload.

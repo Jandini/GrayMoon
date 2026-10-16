@@ -278,6 +278,7 @@
                                                                   IsVersionClicked="@(wr.GitVersion != null && clickedVersions.Contains(wr.GitVersion))"
                                                                   IsDependencyBadgeClicked="@clickedDependencyBadges.Contains(wr.RepositoryId)"
                                                                   RepositoryError="@GetRepositoryError(wr.RepositoryId)"
+                                                                  Sso="@GetRepositorySso(wr.RepositoryId)"
                                                                   IsSyncing="@IsJobRunning"
                                                                   IsUpdating="@IsJobRunning"
                                                                   ColSpan="@TableColSpan"

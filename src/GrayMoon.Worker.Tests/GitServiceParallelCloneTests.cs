@@ -30,7 +30,7 @@ public sealed class GitServiceParallelCloneTests : IDisposable
 
         var results = await Task.WhenAll(clones).WaitAsync(TimeSpan.FromSeconds(20));
 
-        Assert.All(results, Assert.True);
+        Assert.All(results, result => Assert.True(result.Success));
         Assert.Equal(cloneCount, commandLine.MaxConcurrent);
     }
 

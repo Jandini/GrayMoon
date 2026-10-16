@@ -215,6 +215,14 @@ public sealed class WorkspaceRepositoryStateWriter(
             return;
         }
 
+        // A failed clone or fetch must not be derived back to InSync from a branch that was already on the row.
+        // Hook notifications set ErrorMessageForcesInSync and do not set FatalSyncFailure, so they stay above.
+        if (snapshot.FatalSyncFailure)
+        {
+            state.SyncStatus = snapshot.NotCloned ? RepoSyncStatus.NotCloned : RepoSyncStatus.Error;
+            return;
+        }
+
         // A repository is known once it has a branch or a tag. The GitVersion result is deliberately not part
         // of that: when GitVersion cannot compute a version (an empty repository, a broken config) the row shows
         // the version as unresolved, and the repository and the Workspace carry on as normal.

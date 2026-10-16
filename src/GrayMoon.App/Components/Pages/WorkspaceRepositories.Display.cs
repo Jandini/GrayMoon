@@ -132,7 +132,7 @@ public sealed partial class WorkspaceRepositories
     }
 
     private bool HasAnyCalloutErrors =>
-        repositoryErrors.Count > 0 || levelErrors.Count > 0 || !string.IsNullOrWhiteSpace(errorMessage);
+        repositoryErrors.Count > 0 || repositorySso.Count > 0 || levelErrors.Count > 0 || !string.IsNullOrWhiteSpace(errorMessage);
 
     private void ClearRepositoryErrors()
     {
@@ -140,18 +140,31 @@ public sealed partial class WorkspaceRepositories
             return;
 
         repositoryErrors.Clear();
+        repositorySso.Clear();
         levelErrors.Clear();
         errorMessage = null;
         StateHasChanged();
     }
 
-    private void ClearRepositoryError(int repositoryId) =>
+    private void ClearRepositoryError(int repositoryId)
+    {
         repositoryErrors.Remove(repositoryId);
+        repositorySso.Remove(repositoryId);
+    }
+
+    private void ApplyRepositorySyncResult(int repositoryId, RepoGitVersionInfo info) =>
+        RepositorySyncAlert.Apply(repositoryErrors, repositorySso, repositoryId, info);
+
+    private RepositorySsoPresentation? GetRepositorySso(int repositoryId) =>
+        repositorySso.TryGetValue(repositoryId, out var presentation) ? presentation : null;
 
     private void ClearRepositoryErrorsFor(IEnumerable<int> repositoryIds)
     {
         foreach (var repositoryId in repositoryIds)
+        {
             repositoryErrors.Remove(repositoryId);
+            repositorySso.Remove(repositoryId);
+        }
     }
 
     private void SetRepositoryError(int repositoryId, string? message)
