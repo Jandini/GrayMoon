@@ -86,10 +86,7 @@ public sealed partial class WorkspaceGitChanges
     /// </summary>
     private bool CommitControlAttached => !_workspaceCommitMessageHasContent;
 
-    private string CommitMessagePlaceholder =>
-        GenerateMessageOnCommit && _aiMenu?.Pinned is { IsAvailable: true } provider
-            ? $"Commit message (leave empty and {provider.Label} writes it on Commit)"
-            : "Commit message (applies to all repositories below)";
+    private const string CommitMessagePlaceholder = "Commit message";
 
     /// <summary>"Push committed" checkbox state, remembered per-workspace via <see cref="PushAfterCommitMemory"/>
     /// so it survives navigating away and back within the same browser session.</summary>

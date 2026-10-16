@@ -304,12 +304,13 @@
     scrollbar-color: #5a5a5a transparent;
 }
 
-/* No focus ring or focus border color: the box looks the same focused or not. */
+/* No focus ring or focus border color: the box looks the same focused or not.
+   !important beats the global .form-control:focus frame in app.css. */
 .git-changes-workspace-commit__message:focus,
 .git-changes-workspace-commit__message:focus-visible {
     outline: none;
     box-shadow: none;
-    border-color: var(--border-input);
+    border-color: var(--border-input) !important;
     background: var(--bg-input);
     color: var(--text-primary);
 }
@@ -418,6 +419,12 @@
         gap: 0.25rem;
         border-top-left-radius: 0;
         border-bottom-left-radius: 0;
+    }
+
+    /* Same dark frame as the message box, so the buttons sit flush with it instead of standing out with a lighter
+       blue or gray edge. Hover keeps its own border as feedback. */
+    .git-changes-workspace-commit__composer--attached .git-changes-workspace-commit__buttons > .btn:not(:hover) {
+        border-color: var(--border-input);
     }
 
     .git-changes-workspace-commit__composer--attached .gm-ai-menu--start {
