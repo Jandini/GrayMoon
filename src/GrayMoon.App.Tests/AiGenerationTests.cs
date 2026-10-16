@@ -197,7 +197,7 @@ public sealed class AiGenerationTests
         Assert.Equal("haiku", generation.GetProperty("model").GetString());
         var menu = await h.Operations.GetProvidersAsync(h.Workspace.WorkspaceId, refresh: false, CancellationToken.None);
         Assert.Equal("haiku", menu.Options.Single(o => o.Id == AiProviderIds.Claude).Model);
-        Assert.Equal("grok", menu.Options.Single(o => o.Id == AiProviderIds.Cursor).Model);
+        Assert.Equal("grok-4.7-low-fast", menu.Options.Single(o => o.Id == AiProviderIds.Cursor).Model);
     }
 
     [Fact]

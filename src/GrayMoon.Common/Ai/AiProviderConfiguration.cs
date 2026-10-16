@@ -56,7 +56,7 @@ public static partial class AiProviderConfiguration
     public static string? DefaultModel(string providerId) => providerId switch
     {
         AiProviderIds.Claude => "haiku",
-        AiProviderIds.Cursor => "grok",
+        AiProviderIds.Cursor => "grok-4.7-low-fast",
         _ => null,
     };
 

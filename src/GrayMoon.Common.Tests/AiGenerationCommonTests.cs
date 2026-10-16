@@ -79,11 +79,11 @@ public sealed class AiManifestTests
         var ai = new WorkspaceManifestAi([new("Claude", "sonnet"), new("codex"), new("cursor", " ")]);
 
         Assert.Equal("sonnet", AiProviderConfiguration.Resolve(ai, AiProviderIds.Claude).Model);
-        Assert.Equal("grok", AiProviderConfiguration.Resolve(ai, AiProviderIds.Cursor).Model);
+        Assert.Equal("grok-4.7-low-fast", AiProviderConfiguration.Resolve(ai, AiProviderIds.Cursor).Model);
         // Codex has no inexpensive model every account accepts, so it keeps the CLI default.
         Assert.Null(AiProviderConfiguration.Resolve(ai, AiProviderIds.Codex).Model);
         Assert.Equal("haiku", AiProviderConfiguration.Resolve(null, AiProviderIds.Claude).Model);
-        Assert.Equal("grok", AiProviderConfiguration.Resolve(null, AiProviderIds.Cursor).Model);
+        Assert.Equal("grok-4.7-low-fast", AiProviderConfiguration.Resolve(null, AiProviderIds.Cursor).Model);
         Assert.True(AiProviderConfiguration.Resolve(null, AiProviderIds.Cursor).IsValid);
         Assert.All(AiProviderIds.All.Select(AiProviderConfiguration.DefaultModel).OfType<string>(), m => Assert.True(AiProviderConfiguration.IsValidModel(m)));
     }
