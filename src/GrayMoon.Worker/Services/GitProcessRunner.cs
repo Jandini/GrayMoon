@@ -132,17 +132,22 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, IOptions<G
             _ => throw new ArgumentOutOfRangeException(nameof(operation), operation, null),
         };
 
+        // A clone's working directory is the parent (Workspace) folder shared by every repository being cloned, and the
+        // repository it creates does not exist yet, so there is nothing for the per-repository write lock to protect.
+        // Taking it would serialize all first-time clones of a Workspace behind that one folder lock.
+        var intent = operation == GitRemoteOperation.Clone ? GitLockIntent.Read : GitLockIntent.Write;
+
         if (string.IsNullOrWhiteSpace(bearerToken))
-            return await pipeline.ExecuteAsync(async c => await RunAsync("git", arguments, workingDirectory, c), ct);
+            return await pipeline.ExecuteAsync(async c => await RunAsync("git", arguments, workingDirectory, c, intent: intent), ct);
 
         if (await SupportsEnvConfigAsync())
         {
             using var _ = new GitProcessEnvironmentScope(GitRemoteAuth.BuildEnvironment(bearerToken, GitRemoteAuth.ReadExistingConfigCount()));
-            return await pipeline.ExecuteAsync(async c => await RunAsync("git", arguments, workingDirectory, c), ct);
+            return await pipeline.ExecuteAsync(async c => await RunAsync("git", arguments, workingDirectory, c, intent: intent), ct);
         }
 
         var authedArguments = $"{GitRemoteAuth.BuildArgumentPrefix(bearerToken)} {arguments}";
-        return await pipeline.ExecuteAsync(async c => await RunAsync("git", authedArguments, workingDirectory, c), ct);
+        return await pipeline.ExecuteAsync(async c => await RunAsync("git", authedArguments, workingDirectory, c, intent: intent), ct);
     }
 
     internal async Task<(int ExitCode, string? Stdout, string? Stderr)> RunAsync(

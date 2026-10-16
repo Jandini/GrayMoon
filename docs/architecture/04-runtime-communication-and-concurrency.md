@@ -110,6 +110,8 @@ project refresh
 
 Parallelism is deliberate and bounded.
 
+Sync must always run in parallel, including when repositories are cloned for the first time (a new Workspace, or repositories just added to one). The clone happens inside the same per-repository `SyncRepository` command, so first-time clones fan out like fetches do. A clone must never take the per-repository git write lock (`GitProcessRunner.RepoLocks`): its working directory is the Workspace folder shared by every clone, so locking on it would serialize them one after another. `GitProcessRunner.RunRemoteAsync` therefore runs `GitRemoteOperation.Clone` with `GitLockIntent.Read`. Do not add any other Workspace-wide or process-wide gate around clone.
+
 Do not replace it with unrestricted `Task.WhenAll` across arbitrarily large Workspaces.
 
 ---
