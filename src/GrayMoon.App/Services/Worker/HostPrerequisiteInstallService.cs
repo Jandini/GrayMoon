@@ -218,7 +218,7 @@ public sealed class HostPrerequisiteInstallService(
             var dto = JsonSerializer.Deserialize<HostInfoDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             return dto is null
                 ? null
-                : new HostPrerequisiteVersions(dto.DotnetVersion, dto.GitVersion, dto.GitVersionToolVersion);
+                : new HostPrerequisiteVersions(dto.DotnetVersion, dto.GitVersion, dto.GitVersionToolVersion, dto.CursorAgentVersion);
         }
         catch (Exception ex)
         {
@@ -257,5 +257,5 @@ public sealed class HostPrerequisiteInstallService(
         return message ?? "Host prerequisite installation did not complete successfully.";
     }
 
-    private sealed record HostInfoDto(string? DotnetVersion, string? GitVersion, string? GitVersionToolVersion);
+    private sealed record HostInfoDto(string? DotnetVersion, string? GitVersion, string? GitVersionToolVersion, string? CursorAgentVersion = null);
 }

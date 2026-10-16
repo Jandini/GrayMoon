@@ -22,7 +22,7 @@ public sealed class HostPrerequisiteRequirementsTests
     private static readonly WorkspaceCapabilities DotNetNone =
         new(WorkspaceType.DotNetDependency, WorkspaceVersioningMode.None, WorkspaceCiProvider.None);
 
-    private static readonly HostPrerequisiteVersions GitOnlyInstalled = new(null, "2.47.0", null);
+    private static readonly HostPrerequisiteVersions GitOnlyInstalled = new(null, "2.47.0", null, "1.0.0");
 
     [Fact]
     public void Basic_without_versioning_requires_only_git()
@@ -122,7 +122,7 @@ public sealed class HostPrerequisiteRequirementsTests
     [Fact]
     public void Missing_git_is_always_attention_even_with_no_workspaces()
     {
-        var versions = new HostPrerequisiteVersions("10.0.100", null, "5.12.0");
+        var versions = new HostPrerequisiteVersions("10.0.100", null, "5.12.0", "1.0.0");
 
         Assert.True(HostPrerequisiteState.AnyRequiredMissing(versions, HostPrerequisiteRequirements.GitOnly));
     }
@@ -130,7 +130,7 @@ public sealed class HostPrerequisiteRequirementsTests
     [Fact]
     public void A_single_optional_missing_tool_reads_in_the_singular()
     {
-        var versions = new HostPrerequisiteVersions("10.0.100", "2.47.0", null);
+        var versions = new HostPrerequisiteVersions("10.0.100", "2.47.0", null, "1.0.0");
 
         Assert.Equal(
             "All required prerequisites are installed. GitVersion is optional: no workspace uses it.",
@@ -140,7 +140,7 @@ public sealed class HostPrerequisiteRequirementsTests
     [Fact]
     public void Install_outcome_is_judged_against_the_requested_tools_only()
     {
-        var versions = new HostPrerequisiteVersions(null, "2.47.0", null);
+        var versions = new HostPrerequisiteVersions(null, "2.47.0", null, "1.0.0");
 
         Assert.Empty(HostPrerequisiteInstallService.StillMissing(versions, [HostPrerequisiteIds.Git]));
         Assert.Equal(

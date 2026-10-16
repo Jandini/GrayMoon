@@ -277,7 +277,8 @@ public sealed class HomeNavAttentionMonitor : IDisposable
             return new HostPrerequisiteVersions(
                 dto.DotnetVersion,
                 dto.GitVersion,
-                dto.GitVersionToolVersion);
+                dto.GitVersionToolVersion,
+                dto.CursorAgentVersion);
         }
         catch (Exception)
         {
@@ -293,5 +294,5 @@ public sealed class HomeNavAttentionMonitor : IDisposable
         Changed?.Invoke();
     }
 
-    private sealed record HostInfoDto(string? DotnetVersion, string? GitVersion, string? GitVersionToolVersion);
+    private sealed record HostInfoDto(string? DotnetVersion, string? GitVersion, string? GitVersionToolVersion, string? CursorAgentVersion = null);
 }

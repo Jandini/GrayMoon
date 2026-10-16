@@ -125,6 +125,8 @@
                                         <span>@PrerequisiteCell(hostInfo.GitVersionToolVersion, HostPrerequisiteInstallCommands.GitVersion)</span>
                                         <span class="text-muted" title="Optional. Features get their own CodeGraph index when the Workspace definition has &quot;codegraph&quot;: true.">CodeGraph</span>
                                         <span>@VersionBadge(hostInfo.CodeGraphVersion)</span>
+                                        <span class="text-muted">@PrerequisiteLabel(HostPrerequisiteIds.CursorAgent)</span>
+                                        <span>@PrerequisiteCell(hostInfo.CursorAgentVersion, HostPrerequisiteInstallCommands.CursorAgent)</span>
                                     </div>
                                     <p class="small text-muted mt-3 mb-0">@HostPrerequisiteState.Note(CurrentHostVersions, hostRequirements)</p>
                                 }
@@ -173,7 +175,7 @@
 @code {
     private const string WorkerDotnet10RuntimeUrl = "https://aka.ms/dotnet-core-applaunch?framework=Microsoft.NETCore.App&framework_version=10.0.0&arch=x64&rid=win-x64&os=win10";
 
-    private sealed record HostInfoDto(string? DotnetVersion, string? GitVersion, string? GitVersionToolVersion, string? CodeGraphVersion = null);
+    private sealed record HostInfoDto(string? DotnetVersion, string? GitVersion, string? GitVersionToolVersion, string? CodeGraphVersion = null, string? CursorAgentVersion = null);
 
     private string installCommand = string.Empty;
     private string uninstallCommand = string.Empty;
@@ -337,7 +339,7 @@
     };
 
     private HostPrerequisiteVersions CurrentHostVersions =>
-        new(hostInfo?.DotnetVersion, hostInfo?.GitVersion, hostInfo?.GitVersionToolVersion);
+        new(hostInfo?.DotnetVersion, hostInfo?.GitVersion, hostInfo?.GitVersionToolVersion, hostInfo?.CursorAgentVersion);
 
     private bool HostTabMissingPrerequisites =>
         hostInfo != null && HostPrerequisiteState.AnyRequiredMissing(CurrentHostVersions, hostRequirements);
@@ -348,13 +350,6 @@
     private RenderFragment PrerequisiteLabel(string id) => builder =>
     {
         builder.AddContent(0, HostPrerequisiteState.DisplayName(id));
-        if (hostRequirements.IsRequired(id))
-            return;
-
-        builder.AddContent(1, " ");
-        builder.OpenElement(2, "small");
-        builder.AddContent(3, "(optional)");
-        builder.CloseElement();
     };
 
     private bool ShowHostInstallAllFooter =>
