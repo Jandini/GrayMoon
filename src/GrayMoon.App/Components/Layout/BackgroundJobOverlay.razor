@@ -10,7 +10,8 @@
                     PageScoped="true"
                     Message="@_job.DisplayMessage"
                     TerminalBuffer="@_job.Terminal"
-                    OnAbort="@HandleAbort" />
+                    OnAbort="@HandleAbort"
+                    OnBackground="@(_job.CanRunInBackground ? EventCallback.Factory.Create(this, HandleBackground) : default)" />
 }
 
 @code {
@@ -48,6 +49,8 @@
     }
 
     private void HandleAbort() => _job?.Abort();
+
+    private void HandleBackground() => _job?.RunInBackground();
 
     public void Dispose()
     {

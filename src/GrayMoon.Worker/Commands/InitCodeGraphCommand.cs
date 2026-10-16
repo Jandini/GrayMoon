@@ -6,24 +6,21 @@ using GrayMoon.Worker.Services;
 namespace GrayMoon.Worker.Commands;
 
 /// <summary>
-/// Gives a new Feature root a CodeGraph index when the Workspace root has one. Returns as soon as the build has
-/// started; the build itself runs in the background (see <see cref="CodeGraphCli"/>).
+/// Gives a Feature root its own CodeGraph index. Returns as soon as the build has started; the build itself runs in
+/// the background (see <see cref="CodeGraphCli"/>) and is built from scratch, so the Workspace root needs no index.
 /// </summary>
 public sealed class InitCodeGraphCommand(CodeGraphCli codeGraph)
     : ICommandHandler<InitCodeGraphRequest, InitCodeGraphResponse>
 {
     public Task<InitCodeGraphResponse> ExecuteAsync(InitCodeGraphRequest request, CancellationToken cancellationToken = default)
     {
-        var sourceRoot = request.SourceRoot ?? throw new ArgumentException("sourceRoot required");
         var targetRoot = request.TargetRoot ?? throw new ArgumentException("targetRoot required");
 
-        return Task.FromResult(new InitCodeGraphResponse { Outcome = Start(sourceRoot, targetRoot) });
+        return Task.FromResult(new InitCodeGraphResponse { Outcome = Start(targetRoot) });
     }
 
-    private string Start(string sourceRoot, string targetRoot)
+    private string Start(string targetRoot)
     {
-        if (!CodeGraphCli.IsInitialized(sourceRoot))
-            return "SourceNotInitialized";
         if (!Directory.Exists(targetRoot))
             return "TargetMissing";
         if (codeGraph.IsInitRunning(targetRoot))

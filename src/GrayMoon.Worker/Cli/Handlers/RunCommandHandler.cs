@@ -202,6 +202,7 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<CodeGraphCli>();
         builder.Services.AddSingleton<ICommandHandler<InitCodeGraphRequest, InitCodeGraphResponse>, InitCodeGraphCommand>();
         builder.Services.AddSingleton<ICommandHandler<UninitCodeGraphRequest, UninitCodeGraphResponse>, UninitCodeGraphCommand>();
+        builder.Services.AddSingleton<ICommandHandler<WatchCodeGraphInitRequest, WatchCodeGraphInitResponse>, WatchCodeGraphInitCommand>();
         builder.Services.AddSingleton<CheckoutHookSyncCommand>();
         builder.Services.AddSingleton<CommitHookSyncCommand>();
         builder.Services.AddSingleton<MergeHookSyncCommand>();

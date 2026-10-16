@@ -57,6 +57,7 @@ public sealed class CommandDispatcher(
     ICommandHandler<WriteRepositoryFileRequest, WriteRepositoryFileResponse> writeRepositoryFileCommand,
     ICommandHandler<InitCodeGraphRequest, InitCodeGraphResponse> initCodeGraphCommand,
     ICommandHandler<UninitCodeGraphRequest, UninitCodeGraphResponse> uninitCodeGraphCommand,
+    ICommandHandler<WatchCodeGraphInitRequest, WatchCodeGraphInitResponse> watchCodeGraphInitCommand,
     IWorkspaceCapabilityProvider capabilityProvider) : ICommandDispatcher
     {
     private readonly IReadOnlyDictionary<string, Func<object, CancellationToken, Task<object?>>> _executors = new Dictionary<string, Func<object, CancellationToken, Task<object?>>>(StringComparer.Ordinal)
@@ -112,6 +113,7 @@ public sealed class CommandDispatcher(
         [WorkerHubMethods.WriteRepositoryFile] = async (req, ct) => await writeRepositoryFileCommand.ExecuteAsync((WriteRepositoryFileRequest)req, ct),
         [WorkerHubMethods.InitCodeGraph] = async (req, ct) => await initCodeGraphCommand.ExecuteAsync((InitCodeGraphRequest)req, ct),
         [WorkerHubMethods.UninitCodeGraph] = async (req, ct) => await uninitCodeGraphCommand.ExecuteAsync((UninitCodeGraphRequest)req, ct),
+        [WorkerHubMethods.WatchCodeGraphInit] = async (req, ct) => await watchCodeGraphInitCommand.ExecuteAsync((WatchCodeGraphInitRequest)req, ct),
     };
 
     public Task<object?> ExecuteAsync(string commandName, object request, CancellationToken cancellationToken = default)

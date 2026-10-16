@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.Common;
 using GrayMoon.Worker.Commands;
 using GrayMoon.Worker.Jobs.Requests;
@@ -15,14 +16,11 @@ public sealed class CodeGraphCommandTests : IDisposable
     private const string Executable = @"C:\tools\codegraph.cmd";
 
     private readonly string _root = Path.Combine(Path.GetTempPath(), "graymoon-codegraph-" + Guid.NewGuid().ToString("N"));
-    private readonly string _source;
     private readonly string _target;
 
     public CodeGraphCommandTests()
     {
-        _source = Path.Combine(_root, "ws");
         _target = Path.Combine(_root, "features", "feat");
-        Directory.CreateDirectory(_source);
         Directory.CreateDirectory(_target);
     }
 
@@ -33,27 +31,26 @@ public sealed class CodeGraphCommandTests : IDisposable
     }
 
     [Fact]
-    public async Task Init_does_nothing_when_the_workspace_root_has_no_index()
+    public async Task Init_builds_where_only_the_committed_gitignore_exists()
     {
         var commandLine = new ScriptedCommandLine();
         // A committed .codegraph/.gitignore alone is not an index.
-        Directory.CreateDirectory(Path.Combine(_source, ".codegraph"));
-        File.WriteAllText(Path.Combine(_source, ".codegraph", ".gitignore"), "*\n");
+        Directory.CreateDirectory(Path.Combine(_target, ".codegraph"));
+        File.WriteAllText(Path.Combine(_target, ".codegraph", ".gitignore"), "*\n");
 
         var response = await new InitCodeGraphCommand(CreateCli(commandLine))
-            .ExecuteAsync(new InitCodeGraphRequest { SourceRoot = _source, TargetRoot = _target });
+            .ExecuteAsync(new InitCodeGraphRequest { TargetRoot = _target });
+        await commandLine.NextCallAsync();
 
-        Assert.Equal("SourceNotInitialized", response.Outcome);
-        Assert.Empty(commandLine.Calls);
+        Assert.Equal("Started", response.Outcome);
     }
 
     [Fact]
     public async Task Init_reports_a_missing_feature_root()
     {
-        CreateIndex(_source);
 
         var response = await new InitCodeGraphCommand(CreateCli(new ScriptedCommandLine()))
-            .ExecuteAsync(new InitCodeGraphRequest { SourceRoot = _source, TargetRoot = Path.Combine(_root, "gone") });
+            .ExecuteAsync(new InitCodeGraphRequest { TargetRoot = Path.Combine(_root, "gone") });
 
         Assert.Equal("TargetMissing", response.Outcome);
     }
@@ -61,12 +58,11 @@ public sealed class CodeGraphCommandTests : IDisposable
     [Fact]
     public async Task Init_leaves_an_existing_feature_index_alone()
     {
-        CreateIndex(_source);
         CreateIndex(_target);
         var commandLine = new ScriptedCommandLine();
 
         var response = await new InitCodeGraphCommand(CreateCli(commandLine))
-            .ExecuteAsync(new InitCodeGraphRequest { SourceRoot = _source, TargetRoot = _target });
+            .ExecuteAsync(new InitCodeGraphRequest { TargetRoot = _target });
 
         Assert.Equal("AlreadyInitialized", response.Outcome);
         Assert.Empty(commandLine.Calls);
@@ -75,10 +71,9 @@ public sealed class CodeGraphCommandTests : IDisposable
     [Fact]
     public async Task Init_reports_when_codegraph_is_not_installed()
     {
-        CreateIndex(_source);
 
         var response = await new InitCodeGraphCommand(CreateCli(new ScriptedCommandLine(), executable: null))
-            .ExecuteAsync(new InitCodeGraphRequest { SourceRoot = _source, TargetRoot = _target });
+            .ExecuteAsync(new InitCodeGraphRequest { TargetRoot = _target });
 
         Assert.Equal("NotInstalled", response.Outcome);
     }
@@ -86,23 +81,83 @@ public sealed class CodeGraphCommandTests : IDisposable
     [Fact]
     public async Task Init_starts_a_background_build_in_the_feature_root()
     {
-        CreateIndex(_source);
         var commandLine = new ScriptedCommandLine { Block = true };
         var cli = CreateCli(commandLine);
         var command = new InitCodeGraphCommand(cli);
 
-        var first = await command.ExecuteAsync(new InitCodeGraphRequest { SourceRoot = _source, TargetRoot = _target });
+        var first = await command.ExecuteAsync(new InitCodeGraphRequest { TargetRoot = _target });
         var call = await commandLine.NextCallAsync();
-        var second = await command.ExecuteAsync(new InitCodeGraphRequest { SourceRoot = _source, TargetRoot = _target });
+        var second = await command.ExecuteAsync(new InitCodeGraphRequest { TargetRoot = _target });
 
         Assert.Equal("Started", first.Outcome);
         Assert.Equal("AlreadyRunning", second.Outcome);
         Assert.Equal(Executable, call.FileName);
-        Assert.Equal(["init", "-y", _target], call.Arguments);
+        Assert.Equal(["init", "-y", "-v", _target], call.Arguments);
         Assert.Equal(_target, call.WorkingDirectory);
 
         Assert.True(await cli.StopInitAsync(_target, CancellationToken.None));
         Assert.False(cli.IsInitRunning(_target));
+    }
+
+    [Fact]
+    public async Task Watch_reports_no_build_where_none_was_started()
+    {
+        var response = await new WatchCodeGraphInitCommand(CreateCli(new ScriptedCommandLine()))
+            .ExecuteAsync(new WatchCodeGraphInitRequest { Root = _target });
+
+        Assert.Equal("NotRunning", response.Outcome);
+        Assert.Equal(0, response.Next);
+    }
+
+    [Fact]
+    public async Task Watch_streams_a_running_build_and_resumes_where_it_stopped()
+    {
+        var commandLine = new ScriptedCommandLine { Block = true, Output = ["[0.1s] Phase: scanning", "[0.4s]   1/2 (50%)"] };
+        var cli = CreateCli(commandLine, watchWait: TimeSpan.FromMilliseconds(50));
+        await new InitCodeGraphCommand(cli).ExecuteAsync(new InitCodeGraphRequest { TargetRoot = _target });
+        await commandLine.NextCallAsync();
+
+        var first = await WatchAsync(cli, 0);
+        await cli.StopInitAsync(_target, CancellationToken.None);
+        var second = await WatchAsync(cli, first.Response.Next);
+
+        Assert.Equal("Running", first.Response.Outcome);
+        Assert.Contains("[0.1s] Phase: scanning", first.Lines);
+        Assert.Contains("[0.4s]   1/2 (50%)", first.Lines);
+        Assert.Equal("Stopped", second.Response.Outcome);
+        Assert.DoesNotContain("[0.1s] Phase: scanning", second.Lines);
+    }
+
+    [Fact]
+    public async Task Watch_gets_the_output_of_a_build_that_already_finished()
+    {
+        var commandLine = new ScriptedCommandLine { Output = ["done"] };
+        var cli = CreateCli(commandLine);
+        await new InitCodeGraphCommand(cli).ExecuteAsync(new InitCodeGraphRequest { TargetRoot = _target });
+        await commandLine.NextCallAsync();
+        while (cli.IsInitRunning(_target))
+            await Task.Delay(10);
+
+        var watched = await WatchAsync(cli, 0);
+
+        Assert.Equal("Completed", watched.Response.Outcome);
+        Assert.Contains("done", watched.Lines);
+    }
+
+    [Fact]
+    public async Task Cancelling_a_watch_leaves_the_build_running()
+    {
+        var commandLine = new ScriptedCommandLine { Block = true };
+        var cli = CreateCli(commandLine);
+        await new InitCodeGraphCommand(cli).ExecuteAsync(new InitCodeGraphRequest { TargetRoot = _target });
+        await commandLine.NextCallAsync();
+        using var background = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            new WatchCodeGraphInitCommand(cli).ExecuteAsync(new WatchCodeGraphInitRequest { Root = _target }, background.Token));
+
+        Assert.True(cli.IsInitRunning(_target));
+        await cli.StopInitAsync(_target, CancellationToken.None);
     }
 
     [Fact]
@@ -135,10 +190,9 @@ public sealed class CodeGraphCommandTests : IDisposable
     [Fact]
     public async Task Uninit_stops_a_running_build_first()
     {
-        CreateIndex(_source);
         var commandLine = new ScriptedCommandLine { Block = true };
         var cli = CreateCli(commandLine);
-        await new InitCodeGraphCommand(cli).ExecuteAsync(new InitCodeGraphRequest { SourceRoot = _source, TargetRoot = _target });
+        await new InitCodeGraphCommand(cli).ExecuteAsync(new InitCodeGraphRequest { TargetRoot = _target });
         await commandLine.NextCallAsync();
         // The cancelled build had already created its index folder.
         CreateIndex(_target);
@@ -267,12 +321,26 @@ public sealed class CodeGraphCommandTests : IDisposable
     public void ParsePid_reads_bare_and_json_pid_files(string text, int? expected) =>
         Assert.Equal(expected, CodeGraphCli.ParsePid(text));
 
+    /// <summary>Runs one watch the way the Worker does, collecting the lines it streams.</summary>
+    private async Task<(WatchCodeGraphInitResponse Response, List<string> Lines)> WatchAsync(CodeGraphCli cli, int from)
+    {
+        var lines = new List<string>();
+        using var stream = new CommandLineStreamScope(e => lines.Add(e.Text));
+        var response = await new WatchCodeGraphInitCommand(cli).ExecuteAsync(new WatchCodeGraphInitRequest { Root = _target, From = from });
+        return (response, lines);
+    }
+
     /// <summary>Records killed pids in <paramref name="killed"/> instead of killing, unless <paramref name="realProcesses"/>.</summary>
     private static CodeGraphCli CreateCli(
-        ICommandLineService commandLine, string? executable = Executable, List<int>? killed = null, bool realProcesses = false) =>
+        ICommandLineService commandLine,
+        string? executable = Executable,
+        List<int>? killed = null,
+        bool realProcesses = false,
+        TimeSpan? watchWait = null) =>
         new(commandLine, new StubLifetime(), NullLogger<CodeGraphCli>.Instance)
         {
             ExecutableResolver = () => executable,
+            WatchWait = watchWait ?? TimeSpan.FromSeconds(10),
             ProcessKiller = realProcesses
                 ? CodeGraphCli.KillCodeGraphProcessAsync
                 : (pid, _, _) =>
@@ -312,6 +380,9 @@ public sealed class CodeGraphCommandTests : IDisposable
 
         public CommandLineResult Result { get; init; } = new(0, "", "");
 
+        /// <summary>Stdout lines each call streams to the ambient sink.</summary>
+        public IReadOnlyList<string> Output { get; init; } = [];
+
         public IReadOnlyCollection<Call> Calls => _calls;
 
         public async Task<Call> NextCallAsync()
@@ -342,6 +413,9 @@ public sealed class CodeGraphCommandTests : IDisposable
             TimeSpan? timeout = null)
         {
             var block = Block;
+            // Streamed like CommandLineService does, before the call is announced, so a test sees it once started.
+            foreach (var line in Output)
+                CommandLineStreamAmbient.Current.Value?.Invoke(new CommandLineStreamEvent(WorkerCommandStreamKind.Stdout, line));
             _calls.Enqueue(new Call(fileName, arguments.ToList(), workingDirectory));
             _called.Release();
             if (block)

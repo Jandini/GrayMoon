@@ -9,7 +9,7 @@ namespace GrayMoon.Common.Manifest;
 /// </summary>
 /// <param name="CodeGraph">
 /// <c>codegraph</c>: true lets GrayMoon maintain <c>codegraph.json</c> in the Workspace repository and give each Feature
-/// its own CodeGraph index when the Workspace root has one. Owned by the file, not the database: GrayMoon keeps it on
+/// its own CodeGraph index. Owned by the file, not the database: GrayMoon keeps it on
 /// rewrite and drift detection ignores it. Null (absent) means off.
 /// </param>
 /// <param name="VersionFiles">
