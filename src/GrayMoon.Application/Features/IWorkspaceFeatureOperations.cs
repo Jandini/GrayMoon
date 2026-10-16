@@ -189,6 +189,31 @@ public sealed class RemoveFeatureRepositoryPlan
     public string? FeatureBranchSha { get; init; }
 
     /// <summary>
+    /// Head commit of the merged pull request for this Feature branch, from the refresh that built this plan.
+    /// Null when the pull request is not merged, the refresh did not return it, or it is unknown.
+    /// </summary>
+    public string? MergedPullRequestHeadSha { get; init; }
+
+    /// <summary>
+    /// True when the Feature branch tip is the commit a merged pull request merged. Squash and rebase
+    /// merges are not ancestors of the default branch, but this commit is exactly what landed.
+    /// </summary>
+    public bool LocalBranchCoveredByMergedPullRequest =>
+        PullRequestMerged == true
+        && FeatureBranchSha is { Length: > 0 } local
+        && MergedPullRequestHeadSha is { Length: > 0 } head
+        && string.Equals(local, head, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// True when Remove must ask before deleting this local Feature branch. A merged pull request covers
+    /// the branch only when the refresh succeeded and the local tip is that pull request's head; any other
+    /// commits ahead of the default branch still need an explicit force delete.
+    /// </summary>
+    public bool NeedsForceDeleteAuthorization(bool pullRequestStatusUnknown) =>
+        (EffectiveAheadOfDefault ?? 0) > 0
+        && (pullRequestStatusUnknown || !LocalBranchCoveredByMergedPullRequest);
+
+    /// <summary>
     /// Commits ahead of the default branch for whichever branch Remove will actually delete: the
     /// Feature branch for a non-pinned repository (even when the worktree has drifted to another
     /// branch), or this repository's own <see cref="AheadOfDefault"/> when there is no Feature branch

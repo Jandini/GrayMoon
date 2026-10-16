@@ -1,9 +1,11 @@
+using System.Text.Json;
 using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Components.Features;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services.Features;
 using GrayMoon.App.Services.GitHub;
+using GrayMoon.Application;
 using GrayMoon.Application.Features;
 using GrayMoon.Common.Git;
 using Microsoft.EntityFrameworkCore;
@@ -1035,6 +1037,69 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
         Assert.Contains("force-deleting", result.Error, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.RemoveGitWorktree);
     }
+
+    [Fact]
+    public async Task Remove_force_deletes_a_squash_merged_branch_when_the_tip_is_the_merged_commit()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var worktreePath = @"C:\gm-test-root\.graymoon\test-ws\features\feat-refresh\graymoon-api";
+        var featureContextId = await SeedMergedFeatureWithWorktreeAsync(ctx, worktreePath);
+        ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new { success = true });
+        ctx.WorkerBridge.Respond("DeleteBranch", new { success = true });
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var result = await ops.RemoveFeatureAsync(
+            featureContextId,
+            new RemoveFeatureOptions { AnalyzedPlan = SquashMergedPlan(ctx.WorkspaceRepositoryId, "abc123", "abc123") });
+
+        Assert.True(result.Success, result.Error);
+        var delete = Assert.Single(ctx.WorkerBridge.Calls, c => c.Command == "DeleteBranch");
+        Assert.True(JsonSerializer.SerializeToElement(delete.Args).GetProperty("force").GetBoolean());
+        var report = Assert.Single(result.RemoveFeatureReport!);
+        Assert.Equal(RemoveFeatureBranchOutcome.Deleted, report.BranchOutcome);
+    }
+
+    [Fact]
+    public async Task Remove_keeps_asking_when_a_merged_pull_request_does_not_cover_the_local_tip()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var worktreePath = @"C:\gm-test-root\.graymoon\test-ws\features\feat-refresh\graymoon-api";
+        var featureContextId = await SeedMergedFeatureWithWorktreeAsync(ctx, worktreePath);
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var result = await ops.RemoveFeatureAsync(
+            featureContextId,
+            new RemoveFeatureOptions { AnalyzedPlan = SquashMergedPlan(ctx.WorkspaceRepositoryId, "local-tip", "merged-head") });
+
+        Assert.False(result.Success);
+        Assert.Contains("force-deleting", result.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(ctx.WorkerBridge.Calls, c => c.Command == "DeleteBranch");
+    }
+
+    private static RemoveFeaturePlan SquashMergedPlan(int workspaceRepositoryId, string localTip, string mergedHead) => new()
+    {
+        Success = true,
+        Classification = RemoveFeatureClassification.Completed,
+        Repositories =
+        [
+            new RemoveFeatureRepositoryPlan
+            {
+                WorkspaceRepositoryId = workspaceRepositoryId,
+                RepositoryName = "graymoon-api",
+                WorktreeExists = true,
+                LiveStatusEstablished = true,
+                FeatureBranchName = "feat-refresh",
+                FeatureBranchExists = true,
+                FeatureBranchAheadOfDefault = 3,
+                FeatureBranchSha = localTip,
+                MergedPullRequestHeadSha = mergedHead,
+                PullRequestMerged = true,
+                PullRequestNumber = 42,
+            }
+        ]
+    };
 
     // ---- 09 SB-2: analysis must judge the Feature branch, not the current checkout -----------------
 

@@ -203,13 +203,17 @@ public sealed class WorkspacePullRequestService(
     /// <paramref name="branchByRepositoryId"/> or with a blank branch have their context PR row cleared.
     /// Returns the outcome per repository (keyed by RepositoryId) so callers can tell "there is no PR"
     /// apart from "we could not find out" (<see cref="PullRequestRefreshOutcome.Failed"/>).
+    /// When <paramref name="mergedHeadShaByRepositoryId"/> is supplied, it receives the merged pull request's
+    /// head commit for each repository whose refresh returned one (keyed by RepositoryId). That commit is the
+    /// feature tip GitHub merged, including after a squash or rebase.
     /// </summary>
     public async Task<IReadOnlyDictionary<int, PullRequestRefreshOutcome>> RefreshContextPullRequestsAsync(
         int workspaceId,
         int contextId,
         IReadOnlyDictionary<int, string?> branchByRepositoryId,
         bool force = false,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IDictionary<int, string?>? mergedHeadShaByRepositoryId = null)
     {
         var outcomes = new Dictionary<int, PullRequestRefreshOutcome>();
         if (branchByRepositoryId.Count == 0) return outcomes;
@@ -276,7 +280,13 @@ public sealed class WorkspacePullRequestService(
             // Workspace RefreshPullRequestsAsync above): a cache warmed by one context must still be
             // written into a different context's row the first time that context asks for it.
             if (result.Outcome is PullRequestRefreshOutcome.Refreshed or PullRequestRefreshOutcome.CacheHit)
+            {
                 mutations.Add((result.Wr.WorkspaceRepositoryId, result.Pr));
+                if (mergedHeadShaByRepositoryId != null
+                    && result.Pr?.IsMerged == true
+                    && !string.IsNullOrWhiteSpace(result.Pr.HeadSha))
+                    mergedHeadShaByRepositoryId[result.Wr.RepositoryId] = result.Pr.HeadSha;
+            }
         }
 
         await pullRequestRepository.UpsertContextManyAsync(contextId, mutations, cancellationToken);
