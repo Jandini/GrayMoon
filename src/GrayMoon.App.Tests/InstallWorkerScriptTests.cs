@@ -47,4 +47,35 @@ public sealed class InstallWorkerScriptTests
         Assert.Contains("\"reason\":\"logon-password\"", script, StringComparison.Ordinal);
         Assert.Contains("Report-WorkerInstallFailure", script, StringComparison.Ordinal);
     }
+    [Fact]
+    public void InstallScript_SerializesInstallsAndVerifiesTheExtract()
+    {
+        var assembly = typeof(WorkerInstallService).Assembly;
+        using var stream = assembly.GetManifestResourceStream("GrayMoon.App.Resources.install-worker.ps1");
+        Assert.NotNull(stream);
+
+        using var reader = new StreamReader(stream!);
+        var script = reader.ReadToEnd();
+
+        // Two overlapping installs delete each other's extracted files (a Worker without git2-*.dll), so the lock
+        // must be taken before the service is stopped and the folder wiped, and released on every path.
+        var lockTaken = script.IndexOf(@"Global\GrayMoonWorkerInstall", StringComparison.Ordinal);
+        var serviceStopped = script.IndexOf("Stop-Service", StringComparison.Ordinal);
+        var folderWiped = script.IndexOf("Remove-Item -Recurse -Force", StringComparison.Ordinal);
+        Assert.True(lockTaken >= 0);
+        Assert.True(serviceStopped > lockTaken);
+        Assert.True(folderWiped > lockTaken);
+        Assert.Contains("AbandonedMutexException", script, StringComparison.Ordinal);
+        Assert.Contains("ReleaseMutex()", script, StringComparison.Ordinal);
+
+        // A shared archive path lets one run overwrite or delete the other's zip.
+        Assert.DoesNotContain("'graymoon-worker-windows-install.zip'", script, StringComparison.Ordinal);
+        Assert.Contains("NewGuid()", script, StringComparison.Ordinal);
+
+        // Every archive entry must be on disk before the service is installed.
+        var verified = script.IndexOf("The worker extract is incomplete", StringComparison.Ordinal);
+        var installed = script.IndexOf("& $workerExe install", StringComparison.Ordinal);
+        Assert.True(verified >= 0);
+        Assert.True(installed > verified);
+    }
 }
