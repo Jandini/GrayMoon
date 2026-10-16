@@ -8,6 +8,7 @@ using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
+using GrayMoon.App.Services.Ai;
 using GrayMoon.App.Services.Ci;
 using GrayMoon.App.Services.Worker;
 using GrayMoon.App.Services.Connectors;
@@ -21,6 +22,7 @@ using GrayMoon.App.Services.Security;
 using GrayMoon.App.Services.Ui;
 using GrayMoon.App.Services.Features;
 using GrayMoon.App.Services.Workspaces;
+using GrayMoon.Application.Ai;
 using GrayMoon.Application.Features;
 using GrayMoon.Application.Workspaces;
 using GrayMoon.Common;
@@ -78,6 +80,7 @@ try
     builder.Services.Configure<WorkerBridgeOptions>(builder.Configuration.GetSection(WorkerBridgeOptions.LegacySectionName));
     builder.Services.Configure<WorkerBridgeOptions>(builder.Configuration.GetSection(WorkerBridgeOptions.SectionName));
     builder.Services.Configure<SecurityOptions>(builder.Configuration.GetSection(SecurityOptions.SectionName));
+    builder.Services.Configure<AiGenerationOptions>(builder.Configuration.GetSection(AiGenerationOptions.SectionName));
 
     // Add services to the container.
     builder.Services.AddRazorComponents()
@@ -213,6 +216,9 @@ try
     builder.Services.AddScoped<IWorkspacePullRequestOperations, WorkspacePullRequestOperations>();
     builder.Services.AddScoped<IWorkspaceFileOperations, WorkspaceFileOperations>();
     builder.Services.AddScoped<IWorkspaceGitChangesOperations, WorkspaceGitChangesOperations>();
+    builder.Services.AddSingleton<AiProviderAvailabilityCache>();
+    builder.Services.AddScoped<WorkspaceAiProviderPins>();
+    builder.Services.AddScoped<IWorkspaceAiGenerationOperations, WorkspaceAiGenerationOperations>();
     builder.Services.AddSingleton<IWorkspaceManifestFile, WorkspaceManifestFile>();
     builder.Services.AddScoped<GrayMoon.Application.WorkspaceManifest.IWorkspaceManifestService, GrayMoon.App.Services.WorkspaceManifest.WorkspaceManifestService>();
     builder.Services.AddScoped<GrayMoon.App.Services.WorkspaceManifest.IRemoteWorkspaceManifestReader, GrayMoon.App.Services.WorkspaceManifest.GitHubRemoteWorkspaceManifestReader>();

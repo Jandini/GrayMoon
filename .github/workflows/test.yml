@@ -30,8 +30,17 @@ jobs:
       - name: Restore
         run: dotnet restore GrayMoon.slnx
 
+      # GitVersion runs once here instead of per project: GitVersion.MsBuild in the App and the Worker building in
+      # parallel race on its named mutex on Linux ("cannot open the device or file specified").
+      - name: Compute version
+        id: gitversion
+        run: |
+          VERSION=$(dotnet gitversion /nofetch /verbosity quiet /showvariable InformationalVersion)
+          test -n "$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
       - name: Build
-        run: dotnet build GrayMoon.slnx --configuration Release --no-restore
+        run: dotnet build GrayMoon.slnx --configuration Release --no-restore -p:Version=${{ steps.gitversion.outputs.version }} -p:DisableGitVersionTask=true
 
       - name: Test
         run: dotnet test GrayMoon.slnx --configuration Release --no-build --logger "trx;LogFileName=test-results.trx"

@@ -552,3 +552,11 @@
 .new-pr-body::-webkit-scrollbar-thumb:hover {
     background-color: rgba(148, 152, 158, 0.8);
 }
+
+/* AI title/description selector at the right end of the tab row (never in the Create buttons). */
+.new-pr-tabs__ai {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    padding-bottom: 0.25rem;
+}

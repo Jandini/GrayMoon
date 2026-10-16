@@ -54,5 +54,12 @@ public class Workspace
     /// <summary>Set when the Workspace repository definition file (graymoon.json) was last found to differ from this Workspace; null when in agreement or never checked. Reconciliation state, not Git state.</summary>
     public DateTime? ManifestDriftDetectedAt { get; set; }
 
+    /// <summary>
+    /// The AI provider (<c>claude</c>, <c>codex</c>, <c>cursor</c>) pinned on this machine for generating commit messages and
+    /// pull request text in this Workspace; null when none is pinned. Local state only: never written to graymoon.json.
+    /// </summary>
+    [MaxLength(32)]
+    public string? PinnedAiProviderId { get; set; }
+
     public ICollection<WorkspaceRepositoryLink> Repositories { get; set; } = new List<WorkspaceRepositoryLink>();
 }

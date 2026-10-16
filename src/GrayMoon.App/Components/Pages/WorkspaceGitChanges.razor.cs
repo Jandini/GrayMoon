@@ -82,6 +82,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         ApplyIncomingFilterQuery();
         EnsureActivitySubscription();
         RestoreWorkspaceCommitMessage();
+        _ = LoadAiMenuAsync();
         return ResolveContextAndStartLoadAsync();
     }
 
@@ -155,6 +156,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         _loadedWorkspaceId = WorkspaceId;
         _loadedContextQuery = ContextQuery;
         RestoreWorkspaceCommitMessage();
+        ResetAiForScopeChange(reloadMenu: workspaceChanged);
         await ResolveContextAndStartLoadAsync();
     }
 
@@ -767,6 +769,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         }
 
         _disposed = true;
+        _aiCts?.Cancel();
         JobService.Changed -= OnJobServiceChanged;
         ReleaseActivitySubscription();
         await UnbindDiffReviewEscListenerAsync();
@@ -794,6 +797,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         // blocked via IsOwnPageJobRunning on the selector instead (RequireSelectedContextId
         // mid-commit would retarget writes).
         AbortScan();
+        ResetAiForScopeChange(reloadMenu: false);
         _selectedContextId = contextId;
         _loadedContextQuery = contextId.Value;
         StartInitialLoadJob();

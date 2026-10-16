@@ -1,10 +1,14 @@
+@using GrayMoon.App.Components.Ai
 @using GrayMoon.App.Models
 @using GrayMoon.App.Services
+@using GrayMoon.App.Services.Ai
 @using GrayMoon.Application
+@using GrayMoon.Application.Ai
 @using GrayMoon.Application.Features
 @using Microsoft.Extensions.Options
 @implements IDisposable
 @inject IPullRequestService PullRequestService
+@inject IWorkspaceAiGenerationOperations AiOperations
 @inject IWorkspacePushOperations PushOperations
 @inject IWorkspaceBranchOperations BranchOperations
 @inject IOptions<WorkspaceOptions> WorkspaceOptions
@@ -61,11 +65,52 @@
                                 Review
                             </button>
                         </li>
+                        @* One title and one description for every pull request in the dialog; Create and Push & Create are unchanged. *@
+                        <li class="nav-item new-pr-tabs__ai" role="presentation">
+                            <div class="gm-split-control" role="group" aria-label="AI pull request text">
+                                <AiProviderControl Menu="_aiMenu"
+                                                   IsGenerating="_aiGenerating"
+                                                   IsDisabled="IsBusy"
+                                                   Subject="the title and description"
+                                                   UnpinnedLabel="AI"
+                                                   OnGenerate="GeneratePullRequestTextAsync"
+                                                   OnCancel="CancelAiGeneration"
+                                                   OnPin="OnAiPinAsync"
+                                                   OnRefresh="OnAiRefreshAsync" />
+                            </div>
+                        </li>
                     </ul>
 
                     <div class="new-pr-tab-panels">
                         <div class="@TabPanelClass("details")"
                              aria-hidden="@(_activeTab != "details")">
+                            @if (_aiError is not null)
+                            {
+                                <div class="gm-ai-error mb-2" role="alert">
+                                    <span class="gm-ai-error__text">@_aiError</span>
+                                    <button type="button" class="btn-close gm-ai-error__close" aria-label="Dismiss" @onclick="() => _aiError = null"></button>
+                                </div>
+                            }
+                            @if (_aiSuggestion is { } suggestion)
+                            {
+                                <div class="mb-2">
+                                    <AiSuggestionPanel ProviderLabel="@suggestion.ProviderLabel"
+                                                       Reason="@suggestion.Reason"
+                                                       CopyText="@($"{suggestion.Text.Title}\n\n{suggestion.Text.Description}")"
+                                                       OnReplace="ReplaceWithAiSuggestion"
+                                                       OnDismiss="() => _aiSuggestion = null">
+                                        <div class="gm-ai-suggestion__title-line">@suggestion.Text.Title</div>
+                                        <pre class="gm-ai-suggestion__text">@suggestion.Text.Description</pre>
+                                    </AiSuggestionPanel>
+                                </div>
+                            }
+                            else if (IsAiTextStale)
+                            {
+                                <div class="gm-ai-stale mb-2" role="status">
+                                    <i class="bi bi-info-circle" aria-hidden="true"></i>
+                                    The title and description were written for a different branch selection.
+                                </div>
+                            }
                             <div class="mb-3">
                                 <label class="form-label" for="new-pr-title">Title</label>
                                 <input id="new-pr-title"
@@ -393,6 +438,7 @@
 
             _reviewersRequested = false;
             _refreshingBranches = false;
+            ResetAiOnOpen();
 
             _ = LoadTargetBranchesAsync();
             _ = CheckUnpushedCommitsAsync();
@@ -430,6 +476,7 @@
             _branchesCts?.Cancel();
             _branchesCts?.Dispose();
             _branchesCts = null;
+            CancelAiOnClose();
         }
         else if (IsVisible && !_wasVisible)
         {
@@ -456,6 +503,7 @@
     public void Dispose()
     {
         _dotNetRef?.Dispose();
+        _aiCts?.Cancel();
         _pushCheckCts?.Cancel();
         _pushCheckCts?.Dispose();
         _branchesCts?.Cancel();

@@ -48,6 +48,13 @@ public interface IWorkspaceManifestService
     Task<bool> IsCodeGraphEnabledAsync(int workspaceId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// The <c>ai</c> section of the Workspace definition (<c>graymoon.json</c> of the special Workspace): per-provider
+    /// model choices. Null with no error when there is no Workspace repository, no definition or no <c>ai</c> section;
+    /// an error when the definition exists but cannot be read or parsed, so the caller never silently ignores a broken file.
+    /// </summary>
+    Task<(WorkspaceManifestAi? Ai, string? Error)> ReadAiAsync(int workspaceId, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Writes <c>codegraph.json</c> (its <c>include</c> lists every source repository folder) into the Workspace
     /// repository of <paramref name="contextId"/>, or of the special Workspace when null. Does not check the
     /// <c>codegraph</c> setting; does nothing when the Workspace has no Workspace repository.
