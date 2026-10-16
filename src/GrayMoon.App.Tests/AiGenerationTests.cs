@@ -3,6 +3,7 @@ using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services.Ai;
 using GrayMoon.App.Services.GitChanges;
+using GrayMoon.App.Services.Orchestration;
 using GrayMoon.App.Services.Worker;
 using GrayMoon.Application.Ai;
 using GrayMoon.Application.Features;
@@ -164,7 +165,7 @@ public sealed class AiGenerationTests
         var scope = new AiCommitScope(h.Workspace.WorkspaceId, Context, GitCommitEvidenceMode.Staged,
             [new(h.RepositoryIds["Api"], "feature/x"), new(h.RepositoryIds["Web"], "feature/x")]);
 
-        var result = await h.Operations.GenerateCommitMessageAsync(scope, AiProviderIds.Claude, CancellationToken.None);
+        var result = await h.Operations.GenerateCommitMessageAsync(scope, AiProviderIds.Claude, progress: null, CancellationToken.None);
 
         Assert.True(result.Success, result.Failure?.Message);
         Assert.Equal("Add the feature\n\nDetails.", result.Value!.Message);
@@ -190,7 +191,7 @@ public sealed class AiGenerationTests
         h.Evidence = request => EvidenceFor(request);
         var scope = new AiCommitScope(h.Workspace.WorkspaceId, Context, GitCommitEvidenceMode.All, [new(h.RepositoryIds["Api"], "main")]);
 
-        var result = await h.Operations.GenerateCommitMessageAsync(scope, AiProviderIds.Claude, CancellationToken.None);
+        var result = await h.Operations.GenerateCommitMessageAsync(scope, AiProviderIds.Claude, progress: null, CancellationToken.None);
 
         Assert.True(result.Success, result.Failure?.Message);
         var generation = Assert.Single(h.Sent, s => s.Command == WorkerHubMethods.GenerateAiText).Args;
@@ -270,13 +271,30 @@ public sealed class AiGenerationTests
     }
 
     [Fact]
+    public async Task Commit_message_reports_each_step_in_order_for_the_overlay()
+    {
+        await using var h = await CreateHarnessAsync(new WorkspaceManifestAi([new("claude", "sonnet")]));
+        h.Evidence = request => EvidenceFor(request);
+        var scope = new AiCommitScope(h.Workspace.WorkspaceId, Context, GitCommitEvidenceMode.All,
+            [new(h.RepositoryIds["Api"], "main"), new(h.RepositoryIds["Web"], "main")]);
+        var steps = new List<string>();
+
+        var result = await h.Operations.GenerateCommitMessageAsync(scope, AiProviderIds.Claude, new SynchronousProgress(steps.Add), CancellationToken.None);
+
+        Assert.True(result.Success, result.Failure?.Message);
+        Assert.Equal(
+            ["Collecting the changes of 2 repositories...", "Writing the commit message with Claude (sonnet)..."],
+            steps);
+    }
+
+    [Fact]
     public async Task A_cli_that_is_not_installed_fails_before_collecting_evidence()
     {
         await using var h = await CreateHarnessAsync();
         h.ClaudeInstalled = false;
         var scope = new AiCommitScope(h.Workspace.WorkspaceId, Context, GitCommitEvidenceMode.All, [new(h.RepositoryIds["Api"], "main")]);
 
-        var result = await h.Operations.GenerateCommitMessageAsync(scope, AiProviderIds.Claude, CancellationToken.None);
+        var result = await h.Operations.GenerateCommitMessageAsync(scope, AiProviderIds.Claude, progress: null, CancellationToken.None);
 
         Assert.Equal(AiGenerationErrorKind.NotInstalled, result.Failure!.Kind);
         Assert.DoesNotContain(h.Sent, s => s.Command == WorkerHubMethods.CollectGitEvidence);
@@ -288,7 +306,7 @@ public sealed class AiGenerationTests
         await using var h = await CreateHarnessAsync(new WorkspaceManifestAi([new("claude", "sonnet & calc")]));
         var scope = new AiCommitScope(h.Workspace.WorkspaceId, Context, GitCommitEvidenceMode.All, [new(h.RepositoryIds["Api"], "main")]);
 
-        var result = await h.Operations.GenerateCommitMessageAsync(scope, AiProviderIds.Claude, CancellationToken.None);
+        var result = await h.Operations.GenerateCommitMessageAsync(scope, AiProviderIds.Claude, progress: null, CancellationToken.None);
 
         Assert.Equal(AiGenerationErrorKind.Configuration, result.Failure!.Kind);
         Assert.DoesNotContain(h.Sent, s => s.Command is WorkerHubMethods.CollectGitEvidence or WorkerHubMethods.GenerateAiText);
@@ -307,7 +325,7 @@ public sealed class AiGenerationTests
         });
         var scope = new AiCommitScope(h.Workspace.WorkspaceId, Context, GitCommitEvidenceMode.Staged, [new(h.RepositoryIds["Api"], "main")]);
 
-        var result = await h.Operations.GenerateCommitMessageAsync(scope, AiProviderIds.Claude, CancellationToken.None);
+        var result = await h.Operations.GenerateCommitMessageAsync(scope, AiProviderIds.Claude, progress: null, CancellationToken.None);
 
         Assert.Equal(AiGenerationErrorKind.NothingToDescribe, result.Failure!.Kind);
         Assert.DoesNotContain(h.Sent, s => s.Command == WorkerHubMethods.GenerateAiText);
@@ -321,7 +339,7 @@ public sealed class AiGenerationTests
         h.Generation = new { success = true, json = """{"title":"wrong shape"}""", errorKind = "None" };
         var scope = new AiCommitScope(h.Workspace.WorkspaceId, Context, GitCommitEvidenceMode.Staged, [new(h.RepositoryIds["Api"], "main")]);
 
-        var result = await h.Operations.GenerateCommitMessageAsync(scope, AiProviderIds.Claude, CancellationToken.None);
+        var result = await h.Operations.GenerateCommitMessageAsync(scope, AiProviderIds.Claude, progress: null, CancellationToken.None);
 
         Assert.Equal(AiGenerationErrorKind.InvalidOutput, result.Failure!.Kind);
     }
@@ -334,7 +352,7 @@ public sealed class AiGenerationTests
         h.Generation = new { success = false, errorKind = "NotAuthenticated", errorMessage = "The CLI is not signed in." };
         var scope = new AiCommitScope(h.Workspace.WorkspaceId, Context, GitCommitEvidenceMode.Staged, [new(h.RepositoryIds["Api"], "main")]);
 
-        var result = await h.Operations.GenerateCommitMessageAsync(scope, AiProviderIds.Claude, CancellationToken.None);
+        var result = await h.Operations.GenerateCommitMessageAsync(scope, AiProviderIds.Claude, progress: null, CancellationToken.None);
 
         Assert.Equal(AiGenerationErrorKind.NotAuthenticated, result.Failure!.Kind);
         Assert.Equal("The CLI is not signed in.", result.Failure.Message);

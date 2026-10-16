@@ -75,7 +75,16 @@
                     }
                 </button>
             }
+        }
+        <div class="gm-ai-menu__divider" role="separator"></div>
+        @if (Options is not null)
+        {
+            @* Host options are usable while the providers are still being checked; they need not depend on AI. *@
+            @Options
             <div class="gm-ai-menu__divider" role="separator"></div>
+        }
+        @if (Menu is not null)
+        {
             @if (Pinned is { } current)
             {
                 <button type="button" role="menuitem" class="gm-ai-menu__item gm-ai-menu__item--action" @onclick="() => PinAsync(null)">
@@ -119,6 +128,12 @@
     [Parameter] public EventCallback<string?> OnPin { get; set; }
 
     [Parameter] public EventCallback OnRefresh { get; set; }
+
+    /// <summary>
+    /// Optional host entries shown under the providers, usually <see cref="AiMenuCheckItem"/>s (Changes: what Commit
+    /// does - "Generate commit message", "Push committed"). The host owns their state and what they mean.
+    /// </summary>
+    [Parameter] public RenderFragment? Options { get; set; }
 
     /// <summary>"end" (default) opens the menu toward the left from the chevron; "start" opens it from the control's left edge.</summary>
     [Parameter] public string MenuAlign { get; set; } = "end";

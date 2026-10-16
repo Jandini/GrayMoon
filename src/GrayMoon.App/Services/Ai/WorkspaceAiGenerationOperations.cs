@@ -73,6 +73,7 @@ public sealed class WorkspaceAiGenerationOperations(
     public async Task<AiGenerationResult<GeneratedCommitMessage>> GenerateCommitMessageAsync(
         AiCommitScope scope,
         string providerId,
+        IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken)
     {
         if (scope.Repositories.Count == 0)
@@ -92,6 +93,8 @@ public sealed class WorkspaceAiGenerationOperations(
             providerId,
             AiPromptBudget.Commit,
             perFileBytes: 1_500,
+            "the commit message",
+            progress,
             evidence =>
             {
                 foreach (var repository in evidence)
@@ -140,6 +143,8 @@ public sealed class WorkspaceAiGenerationOperations(
             providerId,
             AiPromptBudget.PullRequest,
             perFileBytes: 1_200,
+            "the pull request text",
+            progress: null,
             evidence => AiPromptBuilder.BuildPullRequest(evidence, AiPromptBudget.PullRequest),
             cancellationToken);
         if (run.Failure is not null)
@@ -159,6 +164,8 @@ public sealed class WorkspaceAiGenerationOperations(
         string providerId,
         AiPromptBudget budget,
         int perFileBytes,
+        string subject,
+        IProgress<OperationProgress>? progress,
         Func<IReadOnlyList<RepositoryGitEvidence>, PreparedAiPrompt> buildPrompt,
         CancellationToken cancellationToken)
     {
@@ -201,6 +208,7 @@ public sealed class WorkspaceAiGenerationOperations(
             MaxInventoryFiles = repositories.Count > 10 ? 60 : 200,
         };
 
+        progress.Report($"Collecting the changes of {repositories.Count} repositor{(repositories.Count == 1 ? "y" : "ies")}...");
         var evidenceResponse = await workerBridge.SendCommandAsync(
             WorkerHubMethods.CollectGitEvidence,
             new
@@ -240,6 +248,8 @@ public sealed class WorkspaceAiGenerationOperations(
         var prompt = buildPrompt(evidence.Repositories);
         var promptMs = (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
 
+        var model = choice.Model is null ? string.Empty : $" ({choice.Model})";
+        progress.Report($"Writing {subject} with {AiProviderIds.DisplayName(providerId)}{model}...");
         var generation = await workerBridge.SendCommandAsync(
             WorkerHubMethods.GenerateAiText,
             new

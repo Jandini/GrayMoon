@@ -63,7 +63,8 @@
                                        InputId="workspace-files-search"
                                        InputAdditionalClass="workspace-grid-search"
                                        Placeholder="Search file name, path, or repository..."
-                                       Disabled="@(isLoading || files.Count == 0)"
+                                       Disabled="@isLoading"
+                                       AutoFocus="true"
                                        OnKeyDown="OnSearchKeyDown"
                                        OnClear="ClearSearchFilter" />
                 </WorkspaceContextBar>

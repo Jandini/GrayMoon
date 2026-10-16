@@ -19,9 +19,14 @@ public interface IWorkspaceAiGenerationOperations
     /// <summary>Pins <paramref name="providerId"/> for this Workspace on this machine, or unpins with null. Never generates.</summary>
     Task PinProviderAsync(int workspaceId, string? providerId, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// <paramref name="progress"/> receives each step (collecting the changes, calling the provider) so a caller running
+    /// inside an overlay job can show what is happening; the Worker streams the provider CLI call itself to the job terminal.
+    /// </summary>
     Task<AiGenerationResult<GeneratedCommitMessage>> GenerateCommitMessageAsync(
         AiCommitScope scope,
         string providerId,
+        IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken);
 
     Task<AiGenerationResult<GeneratedPullRequestText>> GeneratePullRequestTextAsync(
