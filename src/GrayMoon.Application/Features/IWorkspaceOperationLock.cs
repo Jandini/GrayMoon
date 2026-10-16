@@ -40,4 +40,12 @@ public interface IWorkspaceLockedOperation
     Task WhenCompleted { get; }
     CancellationToken CancellationToken { get; }
     void ReportProgress(string message);
+
+    /// <summary>
+    /// Runs <paramref name="work"/> as a phase the user may send to the background: while it runs the overlay offers
+    /// Background instead of Abort. Background cancels only the token passed to <paramref name="work"/>, and this
+    /// returns normally, so the operation completes and its overlay closes. <paramref name="work"/> must therefore
+    /// only watch something that keeps going on its own (such as a Worker build).
+    /// </summary>
+    Task RunBackgroundableAsync(Func<CancellationToken, Task> work);
 }

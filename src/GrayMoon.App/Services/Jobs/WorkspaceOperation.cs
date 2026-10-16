@@ -13,6 +13,7 @@ public sealed class WorkspaceOperation : IWorkspaceLockedOperation
     private string _displayMessage;
     private BackgroundJobState _state = BackgroundJobState.Running;
     private Exception? _fault;
+    private CancellationTokenSource? _backgroundCts;
 
     public Guid Id { get; } = Guid.NewGuid();
     public int WorkspaceId { get; }
@@ -58,6 +59,47 @@ public sealed class WorkspaceOperation : IWorkspaceLockedOperation
     {
         _displayMessage = message;
         Changed?.Invoke();
+    }
+
+    /// <summary>True while a <see cref="RunBackgroundableAsync"/> phase runs: the overlay shows Background instead of Abort.</summary>
+    public bool CanRunInBackground => Volatile.Read(ref _backgroundCts) is not null && _state == BackgroundJobState.Running;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// One way only for now: once in the background, the work is out of sight. At some point background jobs may be
+    /// listed somewhere the user can come back to and watch again (e.g. the CodeGraph build's terminal), but not yet.
+    /// </remarks>
+    public async Task RunBackgroundableAsync(Func<CancellationToken, Task> work)
+    {
+        using var background = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+        Volatile.Write(ref _backgroundCts, background);
+        Changed?.Invoke();
+        try
+        {
+            await work(background.Token);
+        }
+        catch (OperationCanceledException) when (background.IsCancellationRequested && !_cts.IsCancellationRequested)
+        {
+            // Sent to the background: the work goes on without us watching.
+        }
+        finally
+        {
+            Volatile.Write(ref _backgroundCts, null);
+            Changed?.Invoke();
+        }
+    }
+
+    /// <summary>Stops watching the current <see cref="RunBackgroundableAsync"/> phase; no-op outside one.</summary>
+    public void RunInBackground()
+    {
+        try
+        {
+            Volatile.Read(ref _backgroundCts)?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The phase ended meanwhile.
+        }
     }
 
     public void Abort()

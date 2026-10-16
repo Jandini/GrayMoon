@@ -175,7 +175,7 @@ public sealed class CodeGraphWorkspaceTests
         var sent = Assert.Single(bridge.Sent);
         Assert.Equal(WorkerHubMethods.InitCodeGraph, sent.Command);
         var args = ManifestTestFixture.ToJson(sent.Args);
-        Assert.Equal(@"C:\work\ws", args.GetProperty("sourceRoot").GetString());
+        Assert.False(args.TryGetProperty("sourceRoot", out _));
         Assert.Equal(@"C:\features\ws\feat", args.GetProperty("targetRoot").GetString());
     }
 
@@ -206,7 +206,6 @@ public sealed class CodeGraphWorkspaceTests
         manifest,
         bridge,
         new RootPathResolver(),
-        new FakeFeatureContextResolver(),
         NullLogger<FeatureCodeGraphService>.Instance);
 
     /// <summary>Context 1 is the special Workspace; any other context is the Feature <c>feat</c>.</summary>

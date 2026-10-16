@@ -134,6 +134,8 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid InitCodeGraph args"),
             WorkerHubMethods.UninitCodeGraph => JsonSerializer.Deserialize<UninitCodeGraphRequest>(json, options)
                 ?? throw new ArgumentException("Invalid UninitCodeGraph args"),
+            WorkerHubMethods.WatchCodeGraphInit => JsonSerializer.Deserialize<WatchCodeGraphInitRequest>(json, options)
+                ?? throw new ArgumentException("Invalid WatchCodeGraphInit args"),
             _ => throw new NotSupportedException($"Unknown command: {command}")
         };
     }

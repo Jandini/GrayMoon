@@ -66,6 +66,12 @@ public sealed class BackgroundJobHandle
     public IProgress<OperationProgress> ToOperationProgress()
         => new Progress<OperationProgress>(p => ReportProgress(p.Message));
 
+    /// <summary>True while the bound operation runs a phase the user may send to the background.</summary>
+    public bool CanRunInBackground => _operation?.CanRunInBackground ?? false;
+
+    /// <summary>Stops watching the bound operation's background-able phase; the operation then completes.</summary>
+    public void RunInBackground() => _operation?.RunInBackground();
+
     public void Abort()
     {
         if (_operation != null)

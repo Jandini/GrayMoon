@@ -75,6 +75,8 @@ public sealed class WorkspaceFeatureOperations(
                         "Create", workspaceId, result.WorkspaceFeatureId, result.ContextId?.Value, name, startedAt,
                         result.Success ? "Succeeded" : result.Condition ?? "Failed", result.Error);
                     tcs.TrySetResult(result);
+                    if (result.Success && result.ContextId is { } createdContextId)
+                        await WatchCodeGraphAsync(op, workspaceId, createdContextId, overlayProgress, linked.Token);
                 }
                 catch (Exception ex)
                 {
@@ -1227,7 +1229,7 @@ public sealed class WorkspaceFeatureOperations(
 
     /// <summary>
     /// Asks the Worker to start a CodeGraph index for a Feature that just became Ready, when the Workspace definition
-    /// turns CodeGraph on and the Workspace root has an index. Optional: never throws, never fails the operation; the
+    /// turns CodeGraph on. Optional: never throws, never fails the operation; the
     /// Feature is already Ready, so not even an Abort here may turn it into a failure.
     /// </summary>
     private async Task InitializeCodeGraphAsync(
@@ -1246,6 +1248,35 @@ public sealed class WorkspaceFeatureOperations(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "CodeGraph init failed. WorkspaceId={WorkspaceId} ContextId={ContextId}", workspaceId, featureContextId.Value);
+        }
+    }
+
+    /// <summary>
+    /// Shows the Feature's CodeGraph index build in the overlay terminal until it ends. The overlay offers Background
+    /// instead of Abort: it leaves the build running on the Worker and lets the operation finish. Optional like the
+    /// rest of CodeGraph: never throws, since the Feature is already Ready.
+    /// </summary>
+    private async Task WatchCodeGraphAsync(
+        IWorkspaceLockedOperation op,
+        int workspaceId,
+        WorkspaceFeatureContextId featureContextId,
+        IProgress<OperationProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        if (codeGraph is null)
+            return;
+
+        try
+        {
+            await op.RunBackgroundableAsync(async background =>
+            {
+                using var watch = CancellationTokenSource.CreateLinkedTokenSource(background, cancellationToken);
+                await codeGraph.WatchInitializeAsync(workspaceId, featureContextId, progress, watch.Token);
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Watching the CodeGraph index build failed. WorkspaceId={WorkspaceId} ContextId={ContextId}", workspaceId, featureContextId.Value);
         }
     }
 
@@ -1672,8 +1703,11 @@ public sealed class WorkspaceFeatureOperations(
                 try
                 {
                     using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, cancellationToken);
-                    var result = await RepairFeatureCoreAsync(featureContextId, info, BindOverlayProgress(op, progress), linked.Token);
+                    var overlayProgress = BindOverlayProgress(op, progress);
+                    var result = await RepairFeatureCoreAsync(featureContextId, info, overlayProgress, linked.Token);
                     tcs.TrySetResult(result);
+                    if (result.Success)
+                        await WatchCodeGraphAsync(op, info.WorkspaceId, featureContextId, overlayProgress, linked.Token);
                 }
                 catch (Exception ex)
                 {

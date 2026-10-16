@@ -1,4 +1,5 @@
 using System.Reflection;
+using GrayMoon.Abstractions.Worker;
 
 namespace GrayMoon.Worker.Hosted;
 
@@ -7,6 +8,10 @@ internal static class CommandJobStreamLabel
 {
     public static string? Resolve(string command, object request)
     {
+        // Its output is the CodeGraph build's, not the watch command's.
+        if (command == WorkerHubMethods.WatchCodeGraphInit)
+            return "codegraph";
+
         if (TryStringProperty(request, "RepositoryName", out var repo) && !string.IsNullOrWhiteSpace(repo))
             return repo.Trim();
 
