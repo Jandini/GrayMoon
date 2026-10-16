@@ -76,6 +76,23 @@
                 </button>
             }
             <div class="gm-ai-menu__divider" role="separator"></div>
+            @if (AutoGenerateLabel is not null)
+            {
+                var canAutoGenerate = Pinned is { IsAvailable: true };
+                <button type="button"
+                        role="menuitemcheckbox"
+                        aria-checked="@AutoGenerate"
+                        class="gm-ai-menu__item @(AutoGenerate ? "gm-ai-menu__item--checked" : null)"
+                        disabled="@(!canAutoGenerate)"
+                        @onclick="ToggleAutoGenerateAsync">
+                    <i class="bi @(AutoGenerate ? "bi-check-square-fill" : "bi-square") gm-ai-menu__glyph" aria-hidden="true"></i>
+                    <span class="gm-ai-menu__text">
+                        <span class="gm-ai-menu__name">@AutoGenerateLabel</span>
+                        <span class="gm-ai-menu__meta">@(canAutoGenerate ? AutoGenerateHint : "Pin an available provider first.")</span>
+                    </span>
+                </button>
+                <div class="gm-ai-menu__divider" role="separator"></div>
+            }
             @if (Pinned is { } current)
             {
                 <button type="button" role="menuitem" class="gm-ai-menu__item gm-ai-menu__item--action" @onclick="() => PinAsync(null)">
@@ -119,6 +136,20 @@
     [Parameter] public EventCallback<string?> OnPin { get; set; }
 
     [Parameter] public EventCallback OnRefresh { get; set; }
+
+    /// <summary>
+    /// Label of an optional checkbox item in the menu that lets the host generate as part of its own action (Changes:
+    /// "Generate commit message" on Commit). Null hides the item. It can be ticked only while an available provider is
+    /// pinned; the host decides what ticked means and must still check for a pinned provider when it acts.
+    /// </summary>
+    [Parameter] public string? AutoGenerateLabel { get; set; }
+
+    /// <summary>One line under <see cref="AutoGenerateLabel"/> saying what ticking it does.</summary>
+    [Parameter] public string? AutoGenerateHint { get; set; }
+
+    [Parameter] public bool AutoGenerate { get; set; }
+
+    [Parameter] public EventCallback<bool> AutoGenerateChanged { get; set; }
 
     /// <summary>"end" (default) opens the menu toward the left from the chevron; "start" opens it from the control's left edge.</summary>
     [Parameter] public string MenuAlign { get; set; } = "end";
@@ -207,6 +238,9 @@
         _open = false;
         await OnPin.InvokeAsync(providerId);
     }
+
+    // A checkbox item: the menu stays open so the new state is visible.
+    private Task ToggleAutoGenerateAsync() => AutoGenerateChanged.InvokeAsync(!AutoGenerate);
 
     private async Task RefreshAsync()
     {
