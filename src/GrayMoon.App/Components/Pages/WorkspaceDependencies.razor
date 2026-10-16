@@ -60,7 +60,8 @@
                                            InputId="workspace-dependencies-search"
                                            InputAdditionalClass="workspace-grid-search"
                                            Placeholder="Search repositories (shows each match and its dependency tree)..."
-                                           Disabled="@(isLoading || graph == null || graph.Nodes.Count == 0)"
+                                           Disabled="@(isLoading || graph == null)"
+                                           AutoFocus="true"
                                            OnKeyDown="OnSearchKeyDown"
                                            OnClear="ClearSearchFilter" />
                     </WorkspaceContextBar>
