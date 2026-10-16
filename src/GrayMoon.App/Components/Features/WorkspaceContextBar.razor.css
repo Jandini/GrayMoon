@@ -12,10 +12,6 @@
     overflow: visible;
 }
 
-.workspace-context-search:focus-within {
-    border-color: var(--focus-ring-outer);
-}
-
 .workspace-context-search__field {
     display: flex;
     align-items: stretch;

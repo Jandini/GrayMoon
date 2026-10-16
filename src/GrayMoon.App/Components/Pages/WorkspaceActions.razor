@@ -145,7 +145,8 @@
                                            InputId="workspace-actions-search"
                                            InputAdditionalClass="workspace-grid-search"
                                            Placeholder="Search repository or workflow..."
-                                           Disabled="@(isLoading || rows.Count == 0)"
+                                           Disabled="@isLoading"
+                                           AutoFocus="true"
                                            OnKeyDown="OnSearchKeyDown"
                                            OnClear="ClearSearchFilter" />
                     </WorkspaceContextBar>

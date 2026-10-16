@@ -51,6 +51,7 @@
                                            InputAdditionalClass="workspace-grid-search"
                                            Placeholder="Search project name or file..."
                                            Disabled="@(isInitialLoading && !hasLoadedOnce)"
+                                           AutoFocus="true"
                                            OnKeyDown="OnSearchKeyDown"
                                            OnClear="ClearSearchFilter" />
                     </WorkspaceContextBar>

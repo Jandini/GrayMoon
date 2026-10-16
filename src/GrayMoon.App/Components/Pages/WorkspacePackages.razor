@@ -51,7 +51,8 @@
                                            InputId="workspace-packages-search"
                                            InputAdditionalClass="workspace-grid-search"
                                            Placeholder="Search package id..."
-                                           Disabled="@(isLoading || packages.Count == 0)"
+                                           Disabled="@isLoading"
+                                           AutoFocus="true"
                                            OnKeyDown="OnSearchKeyDown"
                                            OnClear="ClearSearchFilter" />
                     </WorkspaceContextBar>

@@ -82,6 +82,14 @@
     [Parameter] public EventCallback<KeyboardEventArgs> OnKeyDown { get; set; }
     [Parameter] public EventCallback OnClear { get; set; }
 
+    /// <summary>
+    /// Places the cursor in this box once, the first time it is rendered and not disabled.
+    /// A box that starts disabled (the page is still loading) is focused when it becomes enabled.
+    /// </summary>
+    [Parameter] public bool AutoFocus { get; set; }
+
+    private bool _didAutoFocus;
+
     private bool IsSearchSyntaxValid
     {
         get
@@ -118,6 +126,23 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (AutoFocus && !_didAutoFocus && !Disabled)
+        {
+            try
+            {
+                await FocusAsync();
+                _didAutoFocus = true;
+            }
+            catch (JSException)
+            {
+                // Input not in the document yet.
+            }
+            catch (InvalidOperationException)
+            {
+                // JavaScript interop is not available during prerender.
+            }
+        }
+
         if (!ShowSearchHighlight || _lastSyncedValue == _liveValue)
         {
             return;
