@@ -97,7 +97,8 @@ public sealed class AiCliRunnerTests : IDisposable
     public async Task Claude_error_result_about_the_model_is_classified()
     {
         const string json = """{"type":"result","is_error":true,"result":"There's an issue with the selected model (nope). It may not exist or you may not have access to it."}""";
-        FakeCli("claude", $"echo {json}", $"cat >/dev/null; echo '{json}'");
+        // The apostrophe in "There's" would end the single-quoted sh string, so it is written as '\''.
+        FakeCli("claude", $"echo {json}", $"cat >/dev/null; echo '{json.Replace("'", @"'\''")}'");
 
         var outcome = await Runner().GenerateAsync(AiProviderIds.Claude, Request, TimeSpan.FromSeconds(30), CancellationToken.None);
 
