@@ -7,6 +7,10 @@ public sealed class WorkerWorkspaceRepositoriesResponse
 {
     [JsonPropertyName("repositoryInfos")]
     public List<WorkerRepositoryInfoDto>? RepositoryInfos { get; set; }
+
+    /// <summary>Set when the workspace folder itself is a Git repository.</summary>
+    [JsonPropertyName("workspaceRepository")]
+    public WorkerRepositoryInfoDto? WorkspaceRepository { get; set; }
 }
 
 /// <summary>Repository info element.</summary>

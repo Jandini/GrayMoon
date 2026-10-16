@@ -191,6 +191,8 @@
                WorkspacePath="@GetWorkspacePath()"
                DirectoryAlreadyExists="@(editingWorkspaceId == null && directoryExists)"
                ExistingRepositoryCount="@existingRepositoryCount"
+               FolderIsWorkspaceRepository="@folderIsWorkspaceRepository"
+               WorkspaceRepositoryImported="@folderWorkspaceRepositoryImported"
                IsNameDisabled="@(editingWorkspaceId != null && editingWorkspaceHasFeatures)"
                NameDisabledHint="@(editingWorkspaceHasFeatures ? "Rename and root changes are not possible while Features exist. Remove Features first." : null)"
                Type="@editorType"
@@ -224,6 +226,7 @@
 
 <WorkspaceImportModal IsVisible="@showImportModal"
                       MatchingCount="@importMatchingCount"
+                      ImportsVersionFiles="@adoptedExistingWorkspaceRepository"
                       OnConfirm="@ConfirmImportAsync"
                       OnCancel="@CancelImportAsync" />
 
@@ -388,6 +391,12 @@
     private JobTerminalBuffer? _fetchTerminal;
     private bool directoryExists;
     private int existingRepositoryCount;
+    private bool folderIsWorkspaceRepository;
+    private bool folderWorkspaceRepositoryImported;
+    private int? detectedWorkspaceRepositoryId;
+    private int? _autoSelectedWorkspaceRepositoryId;
+    private bool adoptedExistingWorkspaceRepository;
+    private IReadOnlyList<WorkspaceOnDiskRepository> existingRepositoryInfos = [];
     private CancellationTokenSource? _directoryInfoCts;
     private CancellationTokenSource? _directoryInfoDebounceCts;
     private bool isLoadingDirectoryInfo;
@@ -492,6 +501,8 @@
         workspaceName = string.Empty;
         directoryExists = false;
         existingRepositoryCount = 0;
+        ResetExistingFolderState(clearAutoSelection: true);
+        adoptedExistingWorkspaceRepository = false;
         isDirectoryInfoDirty = false;
         isLoadingDirectoryInfo = false;
 
@@ -562,6 +573,8 @@
 
         directoryExists = false;
         existingRepositoryCount = 0;
+        ResetExistingFolderState(clearAutoSelection: false);
+        adoptedExistingWorkspaceRepository = false;
         isDirectoryInfoDirty = false;
         isLoadingDirectoryInfo = false;
         showEditorModal = true;
@@ -665,6 +678,8 @@
                     editorUseGitHubActions ? WorkspaceCiProvider.GitHubActions : WorkspaceCiProvider.None);
                 editingWorkspaceId = workspace.WorkspaceId;
 
+                var adoptingExistingRepository = detectedWorkspaceRepositoryId is int detectedId
+                    && editorWorkspaceRepositoryId == detectedId;
                 var createWorkspaceRepositoryError = await ApplyWorkspaceRepositoryChangeAsync(workspace.WorkspaceId);
                 if (createWorkspaceRepositoryError is not null)
                 {
@@ -673,8 +688,13 @@
                     return;
                 }
 
+                adoptedExistingWorkspaceRepository = adoptingExistingRepository;
+
                 if (existingRepositoryCount > 0)
                     await TrySuggestImportsAsync(workspace.WorkspaceId, workspace.Name);
+
+                if (!showImportModal && adoptedExistingWorkspaceRepository)
+                    await ImportVersionFilesAsync(workspace.WorkspaceId);
             }
             else
             {
@@ -1064,6 +1084,7 @@
         {
             directoryExists = false;
             existingRepositoryCount = 0;
+            ResetExistingFolderState(clearAutoSelection: true);
             isLoadingDirectoryInfo = false;
             isDirectoryInfoDirty = false;
             StateHasChanged();
@@ -1079,9 +1100,13 @@
         {
             isLoadingDirectoryInfo = true;
             var existsTask = WorkspaceService.DirectoryExistsAsync(workspaceName, editingWorkspaceRootPath, ct);
-            var countTask = WorkspaceService.GetRepositoryCountAsync(workspaceName, editingWorkspaceRootPath, ct);
+            var infosTask = WorkspaceService.GetWorkspaceRepositoryInfosAsync(workspaceName, editingWorkspaceRootPath, ct);
             directoryExists = await existsTask;
-            existingRepositoryCount = await countTask;
+            var onDisk = await infosTask;
+            existingRepositoryInfos = onDisk.Repositories;
+            existingRepositoryCount = onDisk.Repositories.Count;
+            folderIsWorkspaceRepository = onDisk.WorkspaceRepository is not null;
+            await ApplyDetectedWorkspaceRepositoryAsync(onDisk.WorkspaceRepository?.OriginUrl, ct);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -1091,6 +1116,7 @@
             {
                 directoryExists = false;
                 existingRepositoryCount = 0;
+                ResetExistingFolderState(clearAutoSelection: true);
             }
         }
         finally
@@ -1104,11 +1130,62 @@
         }
     }
 
+    private async Task ApplyDetectedWorkspaceRepositoryAsync(string? originUrl, CancellationToken cancellationToken)
+    {
+        int? matched = null;
+        if (!string.IsNullOrWhiteSpace(originUrl))
+        {
+            await using var db = await DbContextFactory.CreateDbContextAsync(cancellationToken);
+            var rows = await db.Repositories.AsNoTracking()
+                .Select(r => new { r.RepositoryId, r.CloneUrl })
+                .ToListAsync(cancellationToken);
+            matched = ExistingWorkspaceFolder.MatchRepositoryId(
+                originUrl, rows.Select(r => (r.RepositoryId, r.CloneUrl)));
+        }
+
+        var selectable = matched is int id && editorWorkspaceRepositoryChoices.Any(c => c.RepositoryId == id)
+            ? matched
+            : null;
+        detectedWorkspaceRepositoryId = matched;
+        folderWorkspaceRepositoryImported = selectable is not null;
+
+        if (selectable is int selected && (editorWorkspaceRepositoryId is null || editorWorkspaceRepositoryId == _autoSelectedWorkspaceRepositoryId))
+        {
+            editorWorkspaceRepositoryId = selected;
+            _autoSelectedWorkspaceRepositoryId = selected;
+            return;
+        }
+
+        if (selectable is null && editorWorkspaceRepositoryId == _autoSelectedWorkspaceRepositoryId)
+        {
+            editorWorkspaceRepositoryId = null;
+            _autoSelectedWorkspaceRepositoryId = null;
+        }
+    }
+
+    private void ResetExistingFolderState(bool clearAutoSelection)
+    {
+        folderIsWorkspaceRepository = false;
+        folderWorkspaceRepositoryImported = false;
+        detectedWorkspaceRepositoryId = null;
+        existingRepositoryInfos = [];
+        if (clearAutoSelection && editorWorkspaceRepositoryId == _autoSelectedWorkspaceRepositoryId)
+            editorWorkspaceRepositoryId = null;
+        _autoSelectedWorkspaceRepositoryId = null;
+    }
+
+    private async Task ImportVersionFilesAsync(int workspaceId)
+    {
+        var merged = await ManifestService.MergeVersionFilesFromDefinitionAsync(workspaceId);
+        if (!merged.Success)
+            ToastService.ShowError(merged.Error ?? "Could not import version files.");
+    }
+
     private async Task TrySuggestImportsAsync(int workspaceId, string workspaceName)
     {
         try
         {
-            var infos = await WorkspaceService.GetWorkspaceRepositoryInfosAsync(workspaceName, editingWorkspaceRootPath);
+            var infos = existingRepositoryInfos;
             if (infos.Count == 0)
                 return;
 
@@ -1122,13 +1199,18 @@
             if (urls.Count == 0)
                 return;
 
-            var byUrl = await RepositoryListQueryService.GetIdsByCloneUrlsAsync(urls);
+            await using var db = await DbContextFactory.CreateDbContextAsync();
+            var rows = await db.Repositories.AsNoTracking()
+                .Select(r => new { r.RepositoryId, r.CloneUrl })
+                .ToListAsync();
+            var catalog = rows.Select(r => (r.RepositoryId, r.CloneUrl)).ToList();
 
             var matchedIds = new HashSet<int>();
             foreach (var url in urls)
             {
-                if (byUrl.TryGetValue(url, out var repoId))
-                    matchedIds.Add(repoId);
+                var repoId = ExistingWorkspaceFolder.MatchRepositoryId(url, catalog);
+                if (repoId is int id && id != detectedWorkspaceRepositoryId)
+                    matchedIds.Add(id);
             }
 
             if (matchedIds.Count == 0)
@@ -1158,7 +1240,10 @@
         try
         {
             await WorkspaceRepository.AddRepositoriesAsync(editingWorkspaceId.Value, importRepositoryIds);
-            await SyncWorkspaceDefinitionAsync(editingWorkspaceId.Value);
+            if (adoptedExistingWorkspaceRepository)
+                await ImportVersionFilesAsync(editingWorkspaceId.Value);
+            else
+                await SyncWorkspaceDefinitionAsync(editingWorkspaceId.Value);
         }
         catch (Exception ex)
         {

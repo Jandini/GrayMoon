@@ -114,6 +114,24 @@ public sealed class WorkspaceRepositoryOperationsTests
     }
 
     [Fact]
+    public async Task Enable_leaves_an_existing_workspace_repository_definition_unchanged()
+    {
+        await using var fixture = await OperationsFixture.CreateAsync();
+        var (workspace, root) = await fixture.SeedEnableScenarioAsync();
+        fixture.Bridge.Handler = (command, _) => command == "AttachWorkspaceRepository"
+            ? new WorkerCommandResponse(true, new { success = true, adoptedExisting = true }, null)
+            : new WorkerCommandResponse(true, new { success = true }, null);
+
+        var result = await fixture.Operations.EnableWorkspaceRepositoryAsync(workspace.WorkspaceId, root.RepositoryId);
+
+        Assert.True(result.Success, result.Error);
+        Assert.Empty(fixture.Manifest.Calls);
+        var link = Assert.Single(await fixture.GetLinksAsync(workspace.WorkspaceId));
+        Assert.Equal(WorkspaceRepositoryRole.Workspace, link.Role);
+        Assert.Equal(root.RepositoryId, link.RepositoryId);
+    }
+
+    [Fact]
     public async Task Disable_refused_while_features_exist()
     {
         await using var fixture = await OperationsFixture.CreateAsync();

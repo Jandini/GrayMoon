@@ -63,7 +63,9 @@ public sealed class AttachWorkspaceRepositoryCommand(
             }
 
             await FinishAsync(request, path, cancellationToken);
-            return await SuccessAsync(path, cancellationToken);
+            var adopted = await SuccessAsync(path, cancellationToken);
+            adopted.AdoptedExisting = true;
+            return adopted;
         }
 
         if (!Directory.EnumerateFileSystemEntries(path).Any())

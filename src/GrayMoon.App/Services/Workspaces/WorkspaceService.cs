@@ -122,32 +122,35 @@ public sealed class WorkspaceService(IWorkerBridge workerBridge, ILogger<Workspa
         return data?.Repositories?.Count ?? 0;
     }
 
-    public async Task<IReadOnlyList<(string Name, string? OriginUrl)>> GetWorkspaceRepositoryInfosAsync(
+    public async Task<WorkspaceOnDiskRepositories> GetWorkspaceRepositoryInfosAsync(
         string workspaceName,
         string? rootOverride = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(workspaceName))
-            return Array.Empty<(string, string?)>();
+            return WorkspaceOnDiskRepositories.Empty;
 
         var root = !string.IsNullOrWhiteSpace(rootOverride) ? rootOverride : await GetRootPathAsync(cancellationToken);
         var maxParallel = Math.Max(1, workspaceOptions.Value.MaxParallelOperations);
         var response = await workerBridge.SendCommandAsync("GetWorkspaceRepositories", new { workspaceName, workspaceRoot = root, maxParallelOperations = maxParallel }, cancellationToken);
         if (!response.Success || response.Data == null)
-            return Array.Empty<(string, string?)>();
+            return WorkspaceOnDiskRepositories.Empty;
 
         var data = WorkerResponseJson.DeserializeWorkerResponse<WorkerWorkspaceRepositoriesResponse>(response.Data);
-        var infos = data?.RepositoryInfos;
-        if (infos == null)
-            return Array.Empty<(string, string?)>();
-
-        var list = new List<(string Name, string? OriginUrl)>();
-        foreach (var el in infos)
+        var list = new List<WorkspaceOnDiskRepository>();
+        foreach (var el in data?.RepositoryInfos ?? [])
         {
             if (string.IsNullOrWhiteSpace(el.Name)) continue;
-            list.Add((el.Name, el.OriginUrl));
+            list.Add(new WorkspaceOnDiskRepository(el.Name, el.OriginUrl));
         }
-        return list;
+
+        var rootInfo = data?.WorkspaceRepository;
+        WorkspaceOnDiskRepository? workspaceRepository = rootInfo is null
+            || (string.IsNullOrWhiteSpace(rootInfo.Name) && string.IsNullOrWhiteSpace(rootInfo.OriginUrl))
+            ? null
+            : new WorkspaceOnDiskRepository(rootInfo.Name ?? string.Empty, rootInfo.OriginUrl);
+
+        return new WorkspaceOnDiskRepositories(list, workspaceRepository);
     }
 
     public async Task CreateDirectoryAsync(string workspaceName, string? rootOverride = null, CancellationToken cancellationToken = default)
@@ -322,3 +325,14 @@ public sealed class WorkspaceService(IWorkerBridge workerBridge, ILogger<Workspa
 
 /// <summary>Workspace folder state as seen by the Worker (see <see cref="WorkspaceService.GetDirectoryStateAsync"/>).</summary>
 public sealed record WorkspaceDirectoryState(bool Exists, bool? IsEmpty, string? Error);
+
+/// <summary>Git repositories already inside a workspace folder, plus the folder itself when it is a Git repository.</summary>
+public sealed record WorkspaceOnDiskRepositories(
+    IReadOnlyList<WorkspaceOnDiskRepository> Repositories,
+    WorkspaceOnDiskRepository? WorkspaceRepository)
+{
+    public static WorkspaceOnDiskRepositories Empty { get; } = new([], null);
+}
+
+/// <summary>One Git repository found on disk: its folder name and <c>origin</c> URL.</summary>
+public sealed record WorkspaceOnDiskRepository(string Name, string? OriginUrl);

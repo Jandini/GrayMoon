@@ -16,4 +16,11 @@ public sealed class GetWorkspaceRepositoriesResponse
     /// </summary>
     [JsonPropertyName("repositoryInfos")]
     public WorkspaceRepositoryInfo[] RepositoryInfos { get; set; } = [];
+
+    /// <summary>
+    /// Set when the workspace folder itself is a Git repository (the Workspace repository). Null when it is not.
+    /// Not included in <see cref="Repositories"/>.
+    /// </summary>
+    [JsonPropertyName("workspaceRepository")]
+    public WorkspaceRepositoryInfo? WorkspaceRepository { get; set; }
 }
