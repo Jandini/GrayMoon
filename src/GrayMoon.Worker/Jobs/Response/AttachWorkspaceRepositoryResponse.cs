@@ -16,4 +16,8 @@ public sealed class AttachWorkspaceRepositoryResponse
     /// <summary>True when the checked-out branch has no commit yet (the remote was empty).</summary>
     [JsonPropertyName("isUnborn")]
     public bool IsUnborn { get; set; }
+
+    /// <summary>True when the folder was already this repository, so its files were left unchanged.</summary>
+    [JsonPropertyName("adoptedExisting")]
+    public bool AdoptedExisting { get; set; }
 }

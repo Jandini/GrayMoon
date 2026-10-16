@@ -60,6 +60,27 @@ public sealed class GetWorkspaceRepositoriesCommandTests : IDisposable
         Assert.DoesNotContain(_recorder.Calls, c =>
             c.WorkingDirectory != null
             && c.WorkingDirectory.Replace('\\', '/').TrimEnd('/').EndsWith("/.work", StringComparison.OrdinalIgnoreCase));
+        Assert.Null(response.WorkspaceRepository);
+    }
+
+    [Fact]
+    public async Task Reports_the_workspace_folder_when_it_is_a_git_repository()
+    {
+        var workspaceName = "ws";
+        var workspacePath = Path.Combine(_root, workspaceName);
+        Directory.CreateDirectory(Path.Combine(workspacePath, ".git"));
+        Directory.CreateDirectory(Path.Combine(workspacePath, "AVR", ".git"));
+
+        var response = await _command.ExecuteAsync(new GetWorkspaceRepositoriesRequest
+        {
+            WorkspaceRoot = _root,
+            WorkspaceName = workspaceName,
+        });
+
+        var only = Assert.Single(response.Repositories);
+        Assert.Equal("AVR", only);
+        Assert.NotNull(response.WorkspaceRepository);
+        Assert.Equal(workspaceName, response.WorkspaceRepository.Name);
     }
 
     private sealed class RecordingCommandLineService(ICommandLineService inner) : ICommandLineService

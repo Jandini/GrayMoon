@@ -147,11 +147,13 @@ public sealed class AttachWorkspaceRepositoryCommandTests : IDisposable
         var remote = CreateRemote(withCommit: true);
         var first = await _command.ExecuteAsync(NewRequest(remote));
         Assert.True(first.Success, first.ErrorMessage);
+        Assert.False(first.AdoptedExisting);
         var headBefore = RunGit(RootPath, "rev-parse", "HEAD").Stdout.Trim();
 
         var second = await _command.ExecuteAsync(NewRequest(remote));
 
         Assert.True(second.Success, second.ErrorMessage);
+        Assert.True(second.AdoptedExisting);
         Assert.Equal("main", second.Branch);
         Assert.False(second.IsUnborn);
         Assert.Equal(headBefore, RunGit(RootPath, "rev-parse", "HEAD").Stdout.Trim());

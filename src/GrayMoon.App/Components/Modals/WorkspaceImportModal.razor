@@ -19,6 +19,12 @@
                     <p>
                         Do you want to import these matching repositories into this workspace?
                     </p>
+                    @if (ImportsVersionFiles)
+                    {
+                        <p class="mb-0">
+                            Version files from graymoon.json will be imported. That file is left unchanged.
+                        </p>
+                    }
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" @onclick="OnCancel">No</button>
@@ -32,6 +38,7 @@
 @code {
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public int MatchingCount { get; set; }
+    [Parameter] public bool ImportsVersionFiles { get; set; }
     [Parameter] public EventCallback OnConfirm { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
 

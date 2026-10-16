@@ -14,6 +14,7 @@ public sealed class GetWorkspaceRepositoriesCommand(IGitRepositoryReader reader)
     {
         var workspaceName = request.WorkspaceName ?? throw new ArgumentException("workspaceName required");
         var path = WorkerRepositoryPaths.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
+        var workspaceRepository = await ReadWorkspaceRepositoryAsync(path, cancellationToken);
         var repositories = WorkerRepositoryPaths.GetDirectoryNames(path)
             .Where(name => WorkerRepositoryPaths.HasGitMetadata(Path.Combine(path, name)))
             .ToArray();
@@ -23,7 +24,8 @@ public sealed class GetWorkspaceRepositoriesCommand(IGitRepositoryReader reader)
             return new GetWorkspaceRepositoriesResponse
             {
                 Repositories = [],
-                RepositoryInfos = []
+                RepositoryInfos = [],
+                WorkspaceRepository = workspaceRepository
             };
         }
 
@@ -40,7 +42,8 @@ public sealed class GetWorkspaceRepositoriesCommand(IGitRepositoryReader reader)
         return new GetWorkspaceRepositoriesResponse
         {
             Repositories = repositories,
-            RepositoryInfos = infos
+            RepositoryInfos = infos,
+            WorkspaceRepository = workspaceRepository
         };
 
         async Task FetchInfoAsync(int index, string name, string workspacePath, WorkspaceRepositoryInfo[] target, CancellationToken ct)
@@ -62,5 +65,19 @@ public sealed class GetWorkspaceRepositoriesCommand(IGitRepositoryReader reader)
                 semaphore.Release();
             }
         }
+    }
+
+    /// <summary>The workspace folder itself, when it is a Git repository. Children are listed separately.</summary>
+    private async Task<WorkspaceRepositoryInfo?> ReadWorkspaceRepositoryAsync(string path, CancellationToken cancellationToken)
+    {
+        if (!WorkerRepositoryPaths.HasGitMetadata(path))
+            return null;
+
+        var originUrl = await reader.GetRemoteOriginUrlAsync(path, cancellationToken);
+        return new WorkspaceRepositoryInfo
+        {
+            Name = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)),
+            OriginUrl = originUrl
+        };
     }
 }

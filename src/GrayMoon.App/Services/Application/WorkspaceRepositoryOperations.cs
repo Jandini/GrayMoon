@@ -201,22 +201,33 @@ public sealed class WorkspaceRepositoryOperations(
         if (!attach.Success)
             return OperationResult.Fail(attach.Error ?? "Attaching the Workspace repository failed.");
 
-        // (g) .gitignore first, then the Workspace definition. The link and the attached repository stay in place on
-        // failure: the drift banner offers "Write Workspace definition to disk" to repair the definition later.
-        progress.Report("Writing .gitignore...");
-        var gitIgnore = await manifestService.WriteManagedGitIgnoreAsync(workspaceId, cancellationToken);
-        if (!gitIgnore.Success)
+        // A folder that is already this repository keeps its graymoon.json. Rewriting it from the database
+        // would drop version files and repositories that have not been imported yet.
+        if (!attach.AdoptedExisting)
         {
-            return OperationResult.Fail(
-                $"The Workspace repository was attached, but .gitignore could not be updated: {gitIgnore.Error}");
-        }
+            // (g) .gitignore first, then the Workspace definition. The link and the attached repository stay in place on
+            // failure: the drift banner offers "Write Workspace definition to disk" to repair the definition later.
+            progress.Report("Writing .gitignore...");
+            var gitIgnore = await manifestService.WriteManagedGitIgnoreAsync(workspaceId, cancellationToken);
+            if (!gitIgnore.Success)
+            {
+                return OperationResult.Fail(
+                    $"The Workspace repository was attached, but .gitignore could not be updated: {gitIgnore.Error}");
+            }
 
-        progress.Report("Writing Workspace definition...");
-        var manifest = await manifestService.WriteAuthoritativeManifestAsync(workspaceId, cancellationToken);
-        if (!manifest.Success)
+            progress.Report("Writing Workspace definition...");
+            var manifest = await manifestService.WriteAuthoritativeManifestAsync(workspaceId, cancellationToken);
+            if (!manifest.Success)
+            {
+                return OperationResult.Fail(
+                    $"The Workspace repository was attached, but the Workspace definition could not be written: {manifest.Error}");
+            }
+        }
+        else
         {
-            return OperationResult.Fail(
-                $"The Workspace repository was attached, but the Workspace definition could not be written: {manifest.Error}");
+            logger.LogInformation(
+                "Workspace repository already occupied the folder. graymoon.json was left unchanged. WorkspaceId={WorkspaceId} RepositoryId={RepositoryId}",
+                workspaceId, repositoryId);
         }
 
         // Clone plus the .gitignore and definition writes leave uncommitted files. Scan now so the
@@ -522,7 +533,7 @@ public sealed class WorkspaceRepositoryOperations(
     /// Adds the Workspace-role link (<c>Role = Workspace</c>) and attaches the repository to the Workspace root
     /// (D4). On any failure the link is removed again and the error is returned.
     /// </summary>
-    private async Task<OperationResult> LinkAndAttachAsync(
+    private async Task<LinkAttachResult> LinkAndAttachAsync(
         int workspaceId,
         int repositoryId,
         IProgress<OperationProgress>? progress,
@@ -541,7 +552,7 @@ public sealed class WorkspaceRepositoryOperations(
                 .Include(r => r.Connector)
                 .FirstOrDefaultAsync(r => r.RepositoryId == repositoryId, cancellationToken);
             if (repository is null)
-                return OperationResult.Fail("Repository not found.");
+                return LinkAttachResult.Failed("Repository not found.");
 
             var link = new WorkspaceRepositoryLink
             {
@@ -558,7 +569,7 @@ public sealed class WorkspaceRepositoryOperations(
             catch (DbUpdateException ex)
             {
                 logger.LogWarning(ex, "Could not add the Workspace-role link. WorkspaceId={WorkspaceId}", workspaceId);
-                return OperationResult.Fail("This Workspace already has a Workspace repository.");
+                return LinkAttachResult.Failed("This Workspace already has a Workspace repository.");
             }
 
             workspaceRepositoryId = link.WorkspaceRepositoryId;
@@ -567,10 +578,11 @@ public sealed class WorkspaceRepositoryOperations(
         }
 
         string? error;
+        var adoptedExisting = false;
         try
         {
             progress.Report(attachMessage);
-            error = await AttachAsync(workspaceId, repositoryId, cloneUrl, bearerToken, requireEmptyRoot, cancellationToken);
+            (error, adoptedExisting) = await AttachAsync(workspaceId, repositoryId, cloneUrl, bearerToken, requireEmptyRoot, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -584,13 +596,20 @@ public sealed class WorkspaceRepositoryOperations(
         }
 
         if (error is null)
-            return OperationResult.Ok();
+            return LinkAttachResult.Ok(adoptedExisting);
 
         await RemoveLinkAsync(workspaceRepositoryId, repositoryId, workspaceId);
-        return OperationResult.Fail(error);
+        return LinkAttachResult.Failed(error);
     }
 
-    private async Task<string?> AttachAsync(
+    private sealed record LinkAttachResult(bool Success, string? Error, bool AdoptedExisting)
+    {
+        public static LinkAttachResult Failed(string error) => new(false, error, false);
+
+        public static LinkAttachResult Ok(bool adoptedExisting) => new(true, null, adoptedExisting);
+    }
+
+    private async Task<(string? Error, bool AdoptedExisting)> AttachAsync(
         int workspaceId,
         int repositoryId,
         string cloneUrl,
@@ -615,15 +634,15 @@ public sealed class WorkspaceRepositoryOperations(
             cancellationToken);
 
         if (!response.Success)
-            return response.Error ?? "Attaching the Workspace repository failed.";
+            return (response.Error ?? "Attaching the Workspace repository failed.", false);
 
         var data = WorkerResponseJson.DeserializeWorkerResponse<AttachWorkspaceRepositoryWorkerResponse>(response.Data);
         if (data is null)
-            return "The Worker returned an unreadable response for the attach.";
+            return ("The Worker returned an unreadable response for the attach.", false);
         if (!data.Success)
-            return data.ErrorMessage ?? "Attaching the Workspace repository failed.";
+            return (data.ErrorMessage ?? "Attaching the Workspace repository failed.", false);
 
-        return null;
+        return (null, data.AdoptedExisting);
     }
 
     private async Task RemoveLinkAsync(int workspaceRepositoryId, int repositoryId, int workspaceId)
@@ -696,6 +715,9 @@ public sealed class WorkspaceRepositoryOperations(
 
         [System.Text.Json.Serialization.JsonPropertyName("isUnborn")]
         public bool IsUnborn { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("adoptedExisting")]
+        public bool AdoptedExisting { get; set; }
     }
 
     private sealed class DiscardWorkspaceRootWorkerResponse
