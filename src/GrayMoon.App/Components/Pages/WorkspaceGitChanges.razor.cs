@@ -444,6 +444,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         }
 
         await ClearMarkdownViewerAsync();
+        await SyncDiffReviewEscListenerAsync();
     }
 
     private async Task ScrollSelectionIntoViewIfPendingAsync()

@@ -68,7 +68,7 @@
     }
     else
     {
-        <div class="graymoon-splitter git-changes-splitter @(_diffReviewExpanded ? "git-changes-splitter--review-expanded" : null)" id="git-changes-splitter" data-workspace-id="@WorkspaceId">
+        <div class="graymoon-splitter git-changes-splitter @(DiffReviewHidesFileTree ? "git-changes-splitter--review-expanded" : null)" id="git-changes-splitter" data-workspace-id="@WorkspaceId">
             <div class="graymoon-splitter__left git-changes-splitter__left">
                 @if (ChangedRepositoryCount > 0)
                 {

@@ -19,6 +19,14 @@ public sealed partial class WorkspaceGitChanges
     /// <summary>When true, the file tree column is hidden so the diff/preview can use full width.</summary>
     private bool _diffReviewExpanded;
     private bool _diffReviewExpandedLoaded;
+
+    /// <summary>
+    /// Wider review hides the file tree only while a file is selected. With no file, the empty
+    /// "Select a file" pane has no control to bring the tree back (that button lives on the diff).
+    /// </summary>
+    private bool DiffReviewHidesFileTree =>
+        _diffReviewExpanded && _selectedRow is { Kind: GitChangesTreeRowKind.File };
+
     private DotNetObjectReference<WorkspaceGitChanges>? _diffReviewEscDotNetRef;
 
     // Normal/NewFile/DeletedFile all have valid Original/Modified content (one side may simply be
@@ -94,7 +102,7 @@ public sealed partial class WorkspaceGitChanges
 
         try
         {
-            if (_diffReviewExpanded)
+            if (DiffReviewHidesFileTree)
             {
                 _diffReviewEscDotNetRef ??= DotNetObjectReference.Create(this);
                 await Js.InvokeVoidAsync("graymoonGitChangesBindDiffReviewEscape", _diffReviewEscDotNetRef);
@@ -166,6 +174,9 @@ public sealed partial class WorkspaceGitChanges
             await ClearMarkdownViewerAsync();
             await EnsureMdPreferenceLoadedAsync();
             await EnsureDiffReviewExpandedLoadedAsync();
+            // Preference load syncs Escape only the first time. A later file selection has to
+            // re-bind it after an empty selection unbound it while the tree was forced visible.
+            await SyncDiffReviewEscListenerAsync();
 
             await using var db = await DbContextFactory.CreateDbContextAsync();
             var link = await db.WorkspaceRepositories
