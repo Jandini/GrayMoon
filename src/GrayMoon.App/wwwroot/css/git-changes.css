@@ -506,6 +506,14 @@
     overflow: hidden;
 }
 
+/* Monaco does not form its own stacking context (position:relative, z-index:auto).
+   Folded unchanged regions, the sticky line, and overlay widgets then use z-index
+   values up to 10001 in the page, so they paint over the feature selector's
+   Open in menu. A zero here keeps every Monaco layer inside the diff. */
+.git-diff-viewer .monaco-diff-editor {
+    z-index: 0;
+}
+
 /* Tree scrolls inside the left column; flex-basis 0 keeps overflow-y active when rows exceed panel height. */
 .git-changes-tree {
     flex: 1 1 0;
