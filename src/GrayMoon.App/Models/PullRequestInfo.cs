@@ -8,6 +8,8 @@ public sealed class PullRequestInfo
     public bool IsMerged => MergedAt.HasValue;
     public bool IsClosed => string.Equals(State, "closed", StringComparison.OrdinalIgnoreCase);
     public DateTimeOffset? MergedAt { get; set; }
+    /// <summary>Commit the pull request merged (<c>head.sha</c>). For a squash or rebase this is the feature tip, not the commit added to the base branch.</summary>
+    public string? HeadSha { get; set; }
     public string HtmlUrl { get; set; } = string.Empty;
     public int? ChangedFiles { get; set; }
     /// <summary>True = mergeable, false = conflict, null = unknown.</summary>

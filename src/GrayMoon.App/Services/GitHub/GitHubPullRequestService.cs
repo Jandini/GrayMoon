@@ -31,6 +31,7 @@ public sealed class GitHubPullRequestService(
             var mergeableState = dto.MergeableState;
             var changedFiles = dto.ChangedFiles;
 
+            var headSha = dto.Head?.Sha;
             if (string.Equals(dto.State, "open", StringComparison.OrdinalIgnoreCase) &&
                 (mergeable == null || string.Equals(mergeableState, "unknown", StringComparison.OrdinalIgnoreCase)))
             {
@@ -40,10 +41,12 @@ public sealed class GitHubPullRequestService(
                     mergeable = fullPr.Mergeable;
                     mergeableState = fullPr.MergeableState;
                     changedFiles = fullPr.ChangedFiles ?? changedFiles;
+                    if (!string.IsNullOrWhiteSpace(fullPr.Head?.Sha))
+                        headSha = fullPr.Head.Sha;
                 }
             }
 
-            return Map(dto, mergeable, mergeableState, changedFiles);
+            return Map(dto, mergeable, mergeableState, changedFiles, headSha);
         }
         catch (Exception ex)
         {
@@ -82,7 +85,7 @@ public sealed class GitHubPullRequestService(
                 && !string.Equals(dto.Head.Ref, headBranch, StringComparison.OrdinalIgnoreCase))
                 return null;
 
-            return Map(dto, dto.Mergeable, dto.MergeableState, dto.ChangedFiles);
+            return Map(dto, dto.Mergeable, dto.MergeableState, dto.ChangedFiles, dto.Head?.Sha);
         }
         catch (Exception ex)
         {
@@ -91,11 +94,12 @@ public sealed class GitHubPullRequestService(
         }
     }
 
-    private static PullRequestInfo Map(GitHubPullRequestDto dto, bool? mergeable, string? mergeableState, int? changedFiles) => new()
+    private static PullRequestInfo Map(GitHubPullRequestDto dto, bool? mergeable, string? mergeableState, int? changedFiles, string? headSha) => new()
     {
         Number = dto.Number,
         State = dto.State ?? string.Empty,
         MergedAt = dto.MergedAt,
+        HeadSha = string.IsNullOrWhiteSpace(headSha) ? null : headSha.Trim(),
         HtmlUrl = dto.HtmlUrl ?? string.Empty,
         Mergeable = mergeable,
         MergeableState = mergeableState,

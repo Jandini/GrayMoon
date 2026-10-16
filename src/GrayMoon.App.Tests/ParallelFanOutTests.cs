@@ -52,6 +52,58 @@ public sealed class ParallelFanOutTests
     }
 
     [Fact]
+    public async Task Remove_deletes_source_branches_in_parallel_within_the_limit_and_the_root_last()
+    {
+        await using var ctx = await CreateContextAsync();
+        await ctx.MutateLinkAsync(link => link.Role = WorkspaceRepositoryRole.Workspace);
+        var names = new[] { "src-a", "src-b", "src-c", "src-d" };
+        var sourceIds = await AddLinksAsync(ctx, names);
+        var rows = new List<(int, string)> { (ctx.WorkspaceRepositoryId, FeatureRoot) };
+        for (var i = 0; i < names.Length; i++)
+            rows.Add((sourceIds[i], FeatureRoot + @"\" + names[i]));
+        var featureContextId = await SeedFeatureAsync(ctx, rows);
+
+        var probe = new FanOutProbe();
+        ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new { success = true });
+        ctx.WorkerBridge.RespondAsync("DeleteBranch", async (args, ct) =>
+        {
+            var name = JsonSerializer.SerializeToElement(args).GetProperty("repositoryName").GetString();
+            var isRoot = name == "graymoon-api";
+            if (isRoot)
+                probe.MarkRootStarted();
+            await probe.EnterAsync(ct);
+            if (!isRoot)
+                probe.MarkSourceFinished();
+            return new WorkerCommandResponse(true, new { success = true }, null);
+        });
+
+        var plan = new RemoveFeaturePlan
+        {
+            Success = true,
+            Classification = RemoveFeatureClassification.Completed,
+            Repositories = rows.Select(row => new RemoveFeatureRepositoryPlan
+            {
+                WorkspaceRepositoryId = row.Item1,
+                WorktreeExists = true,
+                LiveStatusEstablished = true,
+                FeatureBranchName = FeatureName,
+                FeatureBranchExists = true,
+                FeatureBranchAheadOfDefault = 0,
+            }).ToList()
+        };
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var result = await ops.RemoveFeatureAsync(featureContextId, new RemoveFeatureOptions { AnalyzedPlan = plan });
+
+        Assert.True(result.Success, result.Error);
+        Assert.Equal(Limit, probe.MaxActive);
+        Assert.Equal(1, probe.ActiveWhenRootStarted);
+        Assert.Equal(names.Length, probe.SourcesFinishedWhenRootStarted);
+        Assert.Equal(names.Length + 1, ctx.WorkerBridge.Calls.Count(c => c.Command == "DeleteBranch"));
+    }
+
+    [Fact]
     public async Task Rollback_keeps_the_root_when_any_parallel_source_failed()
     {
         await using var ctx = await CreateContextAsync();

@@ -87,11 +87,27 @@ public sealed class RemoveFeatureModalCheckboxTests
     }
 
     [Fact]
-    public void HasUnmergedBranchAheadOfDefault_false_when_pull_request_merged()
+    public void HasUnmergedBranchAheadOfDefault_true_when_merged_but_tip_is_not_the_merged_commit()
     {
         var repo = MakeRepo(aheadOfDefault: 3, pullRequestMerged: true);
 
+        Assert.True(RemoveFeatureModal.HasUnmergedBranchAheadOfDefault(repo));
+    }
+
+    [Fact]
+    public void HasUnmergedBranchAheadOfDefault_false_when_merged_tip_matches_the_pull_request_head()
+    {
+        var repo = new RemoveFeatureRepositoryPlan
+        {
+            FeatureBranchName = "feature",
+            FeatureBranchAheadOfDefault = 3,
+            PullRequestMerged = true,
+            FeatureBranchSha = "abc123",
+            MergedPullRequestHeadSha = "ABC123",
+        };
+
         Assert.False(RemoveFeatureModal.HasUnmergedBranchAheadOfDefault(repo));
+        Assert.True(RemoveFeatureModal.HasUnmergedBranchAheadOfDefault(repo, pullRequestStatusUnknown: true));
     }
 
     [Fact]

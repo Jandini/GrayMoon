@@ -492,7 +492,7 @@ public sealed class WorkspaceFeatureOperations(
             featureContextId, cancellationToken);
         await Task.WhenAll(pullRequestRefreshTask, pathArgsTask);
 
-        var pullRequestStatusUnknown = await pullRequestRefreshTask;
+        var (pullRequestStatusUnknown, mergedHeadShaByRepositoryId) = await pullRequestRefreshTask;
         var (featureWorkspaceRoot, featureWorkspaceFolder, featureWorkspaceRepositoryName) = await pathArgsTask;
 
         var prs = await db.WorkspaceRepositoryContextPullRequests
@@ -536,6 +536,13 @@ public sealed class WorkspaceFeatureOperations(
                     var isOffFeatureBranch = featureBranchName != null
                         && !string.Equals(checkedOutBranch, featureBranchName, StringComparison.Ordinal);
 
+                    var repositoryId = row.WorkspaceRepository?.RepositoryId;
+                    string? mergedHeadSha = null;
+                    if (pr?.MergedAt is not null
+                        && repositoryId is int repoId
+                        && mergedHeadShaByRepositoryId.TryGetValue(repoId, out var headSha))
+                        mergedHeadSha = headSha;
+
                     planSlots[index] = new RemoveFeatureRepositoryPlan
                     {
                         WorkspaceRepositoryId = row.WorkspaceRepositoryId,
@@ -565,7 +572,8 @@ public sealed class WorkspaceFeatureOperations(
                         FeatureBranchAheadOfDefault = disk.StatusUnknown ? null : disk.FeatureBranchAheadOfDefault,
                         FeatureBranchHasUpstream = disk.StatusUnknown ? null : disk.FeatureBranchHasUpstream,
                         FeatureBranchAheadOfUpstream = disk.StatusUnknown ? null : disk.FeatureBranchAheadOfUpstream,
-                        FeatureBranchSha = disk.StatusUnknown ? null : disk.FeatureBranchSha
+                        FeatureBranchSha = disk.StatusUnknown ? null : disk.FeatureBranchSha,
+                        MergedPullRequestHeadSha = mergedHeadSha
                     };
                 }
                 finally
@@ -593,22 +601,24 @@ public sealed class WorkspaceFeatureOperations(
         };
     }
 
-    private async Task<bool> RefreshPullRequestsForRemoveAnalysisAsync(
+    private async Task<(bool Unknown, IReadOnlyDictionary<int, string?> HeadShaByRepositoryId)> RefreshPullRequestsForRemoveAnalysisAsync(
         int workspaceId,
         int featureContextId,
         IReadOnlyDictionary<int, string?> branchByRepositoryId,
         CancellationToken cancellationToken)
     {
+        var mergedHeadShaByRepositoryId = new Dictionary<int, string?>();
         try
         {
             var outcomes = await workspacePullRequestService.RefreshContextPullRequestsAsync(
-                workspaceId, featureContextId, branchByRepositoryId, force: false, cancellationToken);
-            return outcomes.Values.Any(o => o == PullRequestRefreshOutcome.Failed);
+                workspaceId, featureContextId, branchByRepositoryId, force: false, cancellationToken,
+                mergedHeadShaByRepositoryId);
+            return (outcomes.Values.Any(o => o == PullRequestRefreshOutcome.Failed), mergedHeadShaByRepositoryId);
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Pull request refresh failed for Feature remove analysis.");
-            return true;
+            return (true, mergedHeadShaByRepositoryId);
         }
     }
 
@@ -692,8 +702,7 @@ public sealed class WorkspaceFeatureOperations(
             // (A3, I1).
             var needsDiscard = plan.Repositories.Any(r =>
                 r.HasUncommittedChanges || r.HasStagedChanges || r.HasConflicts);
-            var needsForce = plan.Repositories.Any(r =>
-                (r.EffectiveAheadOfDefault ?? 0) > 0 && r.PullRequestMerged != true);
+            var needsForce = plan.Repositories.Any(r => r.NeedsForceDeleteAuthorization(plan.PullRequestStatusUnknown));
             var needsUnlock = plan.Repositories.Any(r => r.IsLocked);
 
             if (needsDiscard && !options.AllowDiscardUncommitted)
@@ -893,6 +902,11 @@ public sealed class WorkspaceFeatureOperations(
                     }
                     else
                     {
+                        // A merged pull request whose head is this exact tip is deleted even when the tip
+                        // is not an ancestor of the default branch (squash and rebase). Each repository
+                        // decides that for itself, inside this parallel per-repository removal.
+                        var forceLocal = options.AllowForceDeleteLocalBranches
+                            || (planRow?.LocalBranchCoveredByMergedPullRequest == true && !plan.PullRequestStatusUnknown);
                         var deleteLocal = await workerBridge.SendCommandAsync(
                             "DeleteBranch",
                             new
@@ -902,7 +916,7 @@ public sealed class WorkspaceFeatureOperations(
                                 workspaceRepositoryName,
                                 branchName,
                                 isRemote = false,
-                                force = options.AllowForceDeleteLocalBranches,
+                                force = forceLocal,
                                 workspaceRoot
                             },
                             cancellationToken);
@@ -917,9 +931,9 @@ public sealed class WorkspaceFeatureOperations(
                             branchMessage = string.IsNullOrWhiteSpace(deleteLocal.Error)
                                 ? "Local branch delete failed."
                                 : deleteLocal.Error;
-                            // A non-force delete is refused by Git only for unmerged commits; a force
-                            // delete that still fails is a real failure, not an expected refusal.
-                            branchOutcome = options.AllowForceDeleteLocalBranches
+                            // A non-force delete is refused when the tip is not contained in HEAD or
+                            // origin/<default>. A force delete that still fails is a real failure.
+                            branchOutcome = forceLocal
                                 ? RemoveFeatureBranchOutcome.Failed
                                 : RemoveFeatureBranchOutcome.KeptUnmerged;
                             logger.LogWarning(

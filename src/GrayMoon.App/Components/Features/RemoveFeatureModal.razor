@@ -278,9 +278,9 @@
     /// <summary>Shown only when at least one repository is actually dirty (D3, fixes U-17).</summary>
     private bool ShowDiscardCheckbox => DirtyRepositories.Count > 0;
 
-    /// <summary>Repositories with live commits ahead of the default branch and no merged pull request (D3). Drives the force-delete-branch checkbox.</summary>
+    /// <summary>Repositories whose Feature branch is ahead of the default branch and is not the commit a merged pull request merged. Drives the force-delete checkbox.</summary>
     private IReadOnlyList<RemoveFeatureRepositoryPlan> BranchesNotInDefaultRepositories =>
-        _plan?.Repositories.Where(HasUnmergedBranchAheadOfDefault).ToList() ?? [];
+        _plan?.Repositories.Where(r => HasUnmergedBranchAheadOfDefault(r, _plan.PullRequestStatusUnknown)).ToList() ?? [];
 
     /// <summary>Shown only when at least one repository actually has unmerged commits ahead of the default branch (D3, fixes U-17).</summary>
     private bool ShowForceCheckbox => BranchesNotInDefaultRepositories.Count > 0;
@@ -449,8 +449,8 @@
     internal static bool IsRepositoryDirty(RemoveFeatureRepositoryPlan repo) =>
         repo.HasUncommittedChanges || repo.HasStagedChanges || repo.HasConflicts;
 
-    internal static bool HasUnmergedBranchAheadOfDefault(RemoveFeatureRepositoryPlan repo) =>
-        (repo.EffectiveAheadOfDefault ?? 0) > 0 && repo.PullRequestMerged != true;
+    internal static bool HasUnmergedBranchAheadOfDefault(RemoveFeatureRepositoryPlan repo, bool pullRequestStatusUnknown = false) =>
+        repo.NeedsForceDeleteAuthorization(pullRequestStatusUnknown);
 
     internal static bool HasLockedWorktree(RemoveFeatureRepositoryPlan repo) => repo.IsLocked;
 
