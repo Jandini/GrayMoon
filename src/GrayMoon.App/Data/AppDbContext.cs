@@ -162,6 +162,9 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
                 .HasMaxLength(1000);
 
             entity.Property(workspace => workspace.ManifestDriftDetectedAt);
+
+            entity.Property(workspace => workspace.PinnedAiProviderId)
+                .HasMaxLength(32);
         });
 
         modelBuilder.Entity<WorkspaceRepositoryLink>(entity =>

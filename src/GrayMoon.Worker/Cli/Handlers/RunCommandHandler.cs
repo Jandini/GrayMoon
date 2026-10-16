@@ -12,7 +12,9 @@ using GrayMoon.Worker.Logging;
 using GrayMoon.Worker.Platform.Windows;
 using GrayMoon.Worker.Queue;
 using GrayMoon.Worker.Services;
+using GrayMoon.Worker.Services.Ai;
 using GrayMoon.Worker.Services.GitChanges;
+using GrayMoon.Worker.Services.GitEvidence;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -203,6 +205,18 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<ICommandHandler<InitCodeGraphRequest, InitCodeGraphResponse>, InitCodeGraphCommand>();
         builder.Services.AddSingleton<ICommandHandler<UninitCodeGraphRequest, UninitCodeGraphResponse>, UninitCodeGraphCommand>();
         builder.Services.AddSingleton<ICommandHandler<WatchCodeGraphInitRequest, WatchCodeGraphInitResponse>, WatchCodeGraphInitCommand>();
+        builder.Services.AddSingleton<BoundedProcessRunner>();
+        builder.Services.AddSingleton<IBoundedProcessRunner>(sp => new RepositoryAccessBoundedProcessRunner(
+            sp.GetRequiredService<BoundedProcessRunner>(), sp.GetRequiredService<IRepositoryAccess>()));
+        builder.Services.AddSingleton<GitEvidenceCollector>();
+        builder.Services.AddSingleton<IAiCliAdapter, ClaudeCliAdapter>();
+        builder.Services.AddSingleton<IAiCliAdapter, CodexCliAdapter>();
+        builder.Services.AddSingleton<IAiCliAdapter, CursorCliAdapter>();
+        builder.Services.AddSingleton<IAiCliExecutableLocator, PathAiCliExecutableLocator>();
+        builder.Services.AddSingleton<AiCliRunner>();
+        builder.Services.AddSingleton<ICommandHandler<CollectGitEvidenceRequest, CollectGitEvidenceResponse>, CollectGitEvidenceCommand>();
+        builder.Services.AddSingleton<ICommandHandler<GetAiProvidersRequest, GetAiProvidersResponse>, GetAiProvidersCommand>();
+        builder.Services.AddSingleton<ICommandHandler<GenerateAiTextRequest, GenerateAiTextResponse>, GenerateAiTextCommand>();
         builder.Services.AddSingleton<CheckoutHookSyncCommand>();
         builder.Services.AddSingleton<CommitHookSyncCommand>();
         builder.Services.AddSingleton<MergeHookSyncCommand>();

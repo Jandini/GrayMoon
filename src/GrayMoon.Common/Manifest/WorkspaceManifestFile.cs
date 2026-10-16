@@ -119,6 +119,12 @@ public sealed class WorkspaceManifestFile : IWorkspaceManifestFile
                 return false;
             }
 
+            if (!TryNormalizeAi(parsed.Ai, out var ai, out var aiError))
+            {
+                error = aiError;
+                return false;
+            }
+
             manifest = new WorkspaceManifest(
                 schemaVersion,
                 new WorkspaceManifestWorkspace(
@@ -133,7 +139,8 @@ public sealed class WorkspaceManifestFile : IWorkspaceManifestFile
                     .ToList(),
                 repositories,
                 parsed.CodeGraph,
-                versionFiles);
+                versionFiles,
+                ai);
             return true;
         }
         catch (JsonException ex)
@@ -326,6 +333,39 @@ public sealed class WorkspaceManifestFile : IWorkspaceManifestFile
         }
 
         versionFiles = byKey.Values.ToList();
+        return true;
+    }
+
+    /// <summary>
+    /// Shapes the <c>ai</c> section: every provider entry needs a <c>provider</c> id. Ids and models are trimmed and an
+    /// empty model becomes null (the provider default). Entries keep their order and are never dropped, not even unknown or
+    /// duplicate ids: those are reported where the configuration is used, so a rewrite keeps what the user wrote.
+    /// </summary>
+    private static bool TryNormalizeAi(WorkspaceManifestAi? section, out WorkspaceManifestAi? ai, out string? error)
+    {
+        ai = null;
+        error = null;
+        if (section is null)
+            return true;
+
+        var providers = new List<WorkspaceManifestAiProvider>();
+        foreach (var entry in section.Providers ?? [])
+        {
+            if (entry is null)
+                continue;
+
+            var provider = entry.Provider?.Trim() ?? string.Empty;
+            if (provider.Length == 0)
+            {
+                error = "An ai.providers entry has no provider";
+                return false;
+            }
+
+            var model = string.IsNullOrWhiteSpace(entry.Model) ? null : entry.Model.Trim();
+            providers.Add(new WorkspaceManifestAiProvider(provider, model));
+        }
+
+        ai = new WorkspaceManifestAi(providers);
         return true;
     }
 

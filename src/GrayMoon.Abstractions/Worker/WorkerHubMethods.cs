@@ -79,4 +79,13 @@ public static class WorkerHubMethods
 
     /// <summary>App → Worker: stream the output of the CodeGraph index build running in a Feature root until it ends or a bounded wait passes; cancelling stops only the watch.</summary>
     public const string WatchCodeGraphInit = "WatchCodeGraphInit";
+
+    /// <summary>App → Worker: read-only, bounded Git evidence for an AI commit message or pull request text, for every repository of one generation.</summary>
+    public const string CollectGitEvidence = "CollectGitEvidence";
+
+    /// <summary>App → Worker: which AI CLIs (Claude, Codex, Cursor Agent) the Worker's account can run.</summary>
+    public const string GetAiProviders = "GetAiProviders";
+
+    /// <summary>App → Worker: one AI CLI call for a complete prepared prompt, run without tools in an empty folder.</summary>
+    public const string GenerateAiText = "GenerateAiText";
 }

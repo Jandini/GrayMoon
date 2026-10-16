@@ -58,6 +58,9 @@ public sealed class CommandDispatcher(
     ICommandHandler<InitCodeGraphRequest, InitCodeGraphResponse> initCodeGraphCommand,
     ICommandHandler<UninitCodeGraphRequest, UninitCodeGraphResponse> uninitCodeGraphCommand,
     ICommandHandler<WatchCodeGraphInitRequest, WatchCodeGraphInitResponse> watchCodeGraphInitCommand,
+    ICommandHandler<CollectGitEvidenceRequest, CollectGitEvidenceResponse> collectGitEvidenceCommand,
+    ICommandHandler<GetAiProvidersRequest, GetAiProvidersResponse> getAiProvidersCommand,
+    ICommandHandler<GenerateAiTextRequest, GenerateAiTextResponse> generateAiTextCommand,
     IWorkspaceCapabilityProvider capabilityProvider) : ICommandDispatcher
     {
     private readonly IReadOnlyDictionary<string, Func<object, CancellationToken, Task<object?>>> _executors = new Dictionary<string, Func<object, CancellationToken, Task<object?>>>(StringComparer.Ordinal)
@@ -114,6 +117,9 @@ public sealed class CommandDispatcher(
         [WorkerHubMethods.InitCodeGraph] = async (req, ct) => await initCodeGraphCommand.ExecuteAsync((InitCodeGraphRequest)req, ct),
         [WorkerHubMethods.UninitCodeGraph] = async (req, ct) => await uninitCodeGraphCommand.ExecuteAsync((UninitCodeGraphRequest)req, ct),
         [WorkerHubMethods.WatchCodeGraphInit] = async (req, ct) => await watchCodeGraphInitCommand.ExecuteAsync((WatchCodeGraphInitRequest)req, ct),
+        [WorkerHubMethods.CollectGitEvidence] = async (req, ct) => await collectGitEvidenceCommand.ExecuteAsync((CollectGitEvidenceRequest)req, ct),
+        [WorkerHubMethods.GetAiProviders] = async (req, ct) => await getAiProvidersCommand.ExecuteAsync((GetAiProvidersRequest)req, ct),
+        [WorkerHubMethods.GenerateAiText] = async (req, ct) => await generateAiTextCommand.ExecuteAsync((GenerateAiTextRequest)req, ct),
     };
 
     public Task<object?> ExecuteAsync(string commandName, object request, CancellationToken cancellationToken = default)

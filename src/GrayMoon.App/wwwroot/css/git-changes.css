@@ -282,6 +282,9 @@
     /* Narrow-left-panel label swap for "Push committed" → "Push" (see @container below). */
     container-type: inline-size;
     container-name: git-changes-commit;
+    /* The container is its own stacking context; lift it so the AI provider menu opens over the file tree below. */
+    position: relative;
+    z-index: 2;
 }
 
 .git-changes-workspace-commit__message {
@@ -415,6 +418,11 @@
 
     .git-changes-workspace-commit__push-label-short {
         display: inline;
+    }
+
+    /* The pinned provider segment shows its icon only; its title and aria-label still name the provider. */
+    .git-changes-workspace-commit__buttons .gm-ai-segment__label {
+        display: none;
     }
 }
 

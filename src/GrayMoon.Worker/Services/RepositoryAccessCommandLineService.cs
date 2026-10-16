@@ -21,7 +21,8 @@ public sealed class RepositoryAccessCommandLineService(ICommandLineService inner
         bool streamStderrAsStdout = false,
         bool mirrorFailureOutputAsStderr = false,
         TimeSpan? timeout = null)
-        => RunGuardedAsync(
+        => RepositoryAccessGuard.RunAsync(
+            access,
             workingDirectory,
             GitAccessClassifier.Classify(fileName, arguments),
             cancellationToken,
@@ -36,17 +37,38 @@ public sealed class RepositoryAccessCommandLineService(ICommandLineService inner
         bool streamStderrAsStdout = false,
         bool mirrorFailureOutputAsStderr = false,
         TimeSpan? timeout = null)
-        => RunGuardedAsync(
+        => RepositoryAccessGuard.RunAsync(
+            access,
             workingDirectory,
             GitAccessClassifier.Classify(fileName, arguments),
             cancellationToken,
             ct => inner.RunAsync(fileName, arguments, workingDirectory, stdinBytes, ct, streamStderrAsStdout, mirrorFailureOutputAsStderr, timeout));
+}
 
-    private async Task<CommandLineResult> RunGuardedAsync(
+/// <summary>
+/// The bounded runner behind the same lease as <see cref="RepositoryAccessCommandLineService"/>: a process started in a
+/// folder holds a shared lease on it for its whole life, and a folder being removed refuses or evicts it.
+/// </summary>
+public sealed class RepositoryAccessBoundedProcessRunner(IBoundedProcessRunner inner, IRepositoryAccess access) : IBoundedProcessRunner
+{
+    public Task<BoundedProcessResult> RunAsync(BoundedProcessRequest request, CancellationToken cancellationToken)
+        => RepositoryAccessGuard.RunAsync(
+            access,
+            request.WorkingDirectory,
+            GitAccessClassifier.Classify(request.FileName, request.Arguments),
+            cancellationToken,
+            ct => inner.RunAsync(request, ct));
+}
+
+/// <summary>Runs a process launch under a shared <see cref="IRepositoryAccess"/> lease on its working directory.</summary>
+internal static class RepositoryAccessGuard
+{
+    public static async Task<T> RunAsync<T>(
+        IRepositoryAccess access,
         string? workingDirectory,
         RepositoryAccessKind kind,
         CancellationToken cancellationToken,
-        Func<CancellationToken, Task<CommandLineResult>> run)
+        Func<CancellationToken, Task<T>> run)
     {
         if (string.IsNullOrWhiteSpace(workingDirectory))
         {

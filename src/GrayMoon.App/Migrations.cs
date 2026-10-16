@@ -41,6 +41,7 @@ public static partial class Migrations
         (7, "Workspace recent Open-in tools", dbContext => MigrateWorkspaceOpenInRecentToolsAsync(dbContext)),
         (8, "Feature context state GitVersionPending", dbContext => MigrateContextStateGitVersionPendingAsync(dbContext)),
         (9, "SQLite read indexes", dbContext => MigrateSqliteReadIndexesAsync(dbContext)),
+        (10, "Workspace pinned AI provider column", dbContext => MigrateWorkspacePinnedAiProviderColumnAsync(dbContext)),
     };
 
     public static async Task RunAllAsync(AppDbContext dbContext, ILogger? logger = null)
@@ -488,6 +489,19 @@ public static partial class Migrations
             await conn.OpenAsync();
 
         await AddNullableTextColumnIfMissingAsync(conn, "Workspaces", "ManifestDriftDetectedAt");
+    }
+
+    /// <summary>
+    /// Adds Workspaces.PinnedAiProviderId (nullable TEXT): the AI provider pinned on this machine for the Workspace.
+    /// Strict step 10: no try/catch, a failure propagates to <see cref="RunStrictStepAsync"/>. Idempotent.
+    /// </summary>
+    public static async Task MigrateWorkspacePinnedAiProviderColumnAsync(AppDbContext dbContext, ILogger? logger = null)
+    {
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != ConnectionState.Open)
+            await conn.OpenAsync();
+
+        await AddNullableTextColumnIfMissingAsync(conn, "Workspaces", "PinnedAiProviderId");
     }
 
     /// <summary>

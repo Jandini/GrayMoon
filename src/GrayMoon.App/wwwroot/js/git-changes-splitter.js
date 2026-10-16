@@ -105,9 +105,9 @@
         });
     }
 
-    // Ctrl/Cmd+Enter in the commit textarea clicks the visible primary Commit button (Commit Staged
-    // when staged files exist, otherwise Commit All). The primary is the first enabled button in
-    // .git-changes-workspace-commit__buttons. Capture-phase preventDefault stops the newline before
+    // Ctrl/Cmd+Enter in the commit textarea clicks the one primary Commit button (Commit Staged when
+    // staged files exist, otherwise Commit All), marked data-primary-commit - never the AI segments or
+    // the provider menu that share its control. Capture-phase preventDefault stops the newline before
     // Blazor Server can see the key; a C# @onkeydown handler would be too late and would also
     // round-trip every keystroke.
     function initCommitMessageShortcut(el) {
@@ -117,7 +117,7 @@
             if (e.repeat || !((e.ctrlKey || e.metaKey) && e.key === 'Enter')) return;
             e.preventDefault();
             const button = el.closest('.git-changes-workspace-commit')
-                ?.querySelector('.git-changes-workspace-commit__buttons button:not([disabled])');
+                ?.querySelector('button[data-primary-commit]:not([disabled])');
             button?.click();
         }, true);
     }
@@ -174,4 +174,4 @@
             handler = null;
         }
     };
-})();
+})();

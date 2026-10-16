@@ -870,6 +870,9 @@ internal sealed class RecordingManifestService(IWorkspaceManifestService? inner 
     public Task<bool> IsCodeGraphEnabledAsync(int workspaceId, CancellationToken cancellationToken = default) =>
         Task.FromResult(CodeGraphEnabled);
 
+    public Task<(GrayMoon.Common.Manifest.WorkspaceManifestAi? Ai, string? Error)> ReadAiAsync(int workspaceId, CancellationToken cancellationToken = default) =>
+        inner?.ReadAiAsync(workspaceId, cancellationToken) ?? Task.FromResult<(GrayMoon.Common.Manifest.WorkspaceManifestAi?, string?)>((null, null));
+
     public Task<GrayMoon.Application.OperationResult> WriteCodeGraphConfigAsync(
         int workspaceId,
         WorkspaceFeatureContextId? contextId = null,

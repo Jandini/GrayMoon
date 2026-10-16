@@ -1,5 +1,6 @@
 @page "/workspaces/{WorkspaceId:int}/changes"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using GrayMoon.App.Components.Ai
 @using GrayMoon.App.Components.GitChanges
 @using GrayMoon.App.Components.Modals
 @using GrayMoon.App.Components.Shared
@@ -90,24 +91,25 @@
                         </form>
                         <div class="git-changes-workspace-commit__actions">
                             @{
-                                // Staged presence only chooses whether Commit Staged is shown beside
-                                // Commit All. Commit All itself always binds WorkspaceCommitMode.All.
-                                var showExplicitCommitAll = OfferedCommitMode == WorkspaceCommitMode.Staged;
+                                var primaryCommitClass = string.IsNullOrWhiteSpace(_workspaceCommitMessage)
+                                    ? "btn btn-sm btn-outline-primary text-nowrap"
+                                    : "btn btn-sm btn-primary text-nowrap";
                             }
-                            <div class="git-changes-workspace-commit__buttons">
+                            <div class="git-changes-workspace-commit__buttons gm-split-control" role="group" aria-label="Commit">
                                 @*
-                                  Commit All keeps a stable @key and always binds WorkspaceCommitMode.All.
-                                  Blazor reuses event-handler IDs across re-renders; if the primary button
-                                  morphs from All → Staged when a watcher refresh arrives mid-click, the
-                                  in-flight click would execute Commit Staged. Keeping Commit All as its
-                                  own keyed element prevents that (and preserves an in-flight All click
-                                  when the Staged primary appears beside it).
+                                  One visible primary Commit button, two mutually exclusive keyed alternatives, each
+                                  binding its own constant mode. Blazor reuses event-handler IDs across re-renders: if one
+                                  button morphed from Commit All to Commit Staged when a watcher refresh lands mid-click,
+                                  the in-flight click would run the other mode. A different @key makes the swap a new
+                                  element, so a click dispatched to the old one can never run the new mode.
+                                  data-primary-commit marks the only target of Ctrl/Cmd+Enter (never the AI segments).
                                 *@
-                                @if (showExplicitCommitAll)
+                                @if (OfferedCommitMode == WorkspaceCommitMode.Staged)
                                 {
                                     <button type="button"
                                             @key="@("commit-primary-staged")"
-                                            class="@(string.IsNullOrWhiteSpace(_workspaceCommitMessage) ? "btn btn-sm btn-outline-primary" : "btn btn-sm btn-primary")"
+                                            data-primary-commit
+                                            class="@primaryCommitClass"
                                             disabled="@IsCommitButtonDisabled"
                                             title="@(PushAfterCommit
                                                         ? "Commits only already-staged changes, then pushes exactly the repositories that committed successfully. Ctrl+Enter from the message box."
@@ -117,19 +119,30 @@
                                         Commit Staged
                                     </button>
                                 }
-                                <button type="button"
-                                        @key="@("commit-all")"
-                                        class="@(showExplicitCommitAll
-                                                    ? "btn btn-sm btn-outline-primary"
-                                                    : string.IsNullOrWhiteSpace(_workspaceCommitMessage) ? "btn btn-sm btn-outline-primary" : "btn btn-sm btn-primary")"
-                                        disabled="@IsCommitButtonDisabled"
-                                        title="@(PushAfterCommit
-                                                    ? "Stages all changes, commits, then pushes the repositories that committed successfully."
-                                                    : "Stages all changes (git add --all) then commits in each repository with changes.")"
-                                        aria-keyshortcuts="@(showExplicitCommitAll ? null : "Control+Enter")"
-                                        @onclick="() => CommitWorkspaceAsync(WorkspaceCommitMode.All, PushAfterCommit)">
-                                    Commit All
-                                </button>
+                                else
+                                {
+                                    <button type="button"
+                                            @key="@("commit-primary-all")"
+                                            data-primary-commit
+                                            class="@primaryCommitClass"
+                                            disabled="@IsCommitButtonDisabled"
+                                            title="@(PushAfterCommit
+                                                        ? "Stages all changes, commits, then pushes the repositories that committed successfully. Ctrl+Enter from the message box."
+                                                        : "Stages all changes (git add --all) then commits in each repository with changes. Ctrl+Enter from the message box.")"
+                                            aria-keyshortcuts="Control+Enter"
+                                            @onclick="() => CommitWorkspaceAsync(WorkspaceCommitMode.All, PushAfterCommit)">
+                                        Commit All
+                                    </button>
+                                }
+                                <AiProviderControl Menu="_aiMenu"
+                                                   IsGenerating="_aiGenerating"
+                                                   Subject="the commit message"
+                                                   ButtonClass="btn-outline-primary"
+                                                   MenuAlign="start"
+                                                   OnGenerate="GenerateCommitMessageAsync"
+                                                   OnCancel="CancelAiGeneration"
+                                                   OnPin="OnAiPinAsync"
+                                                   OnRefresh="OnAiRefreshAsync" />
                             </div>
                             <div class="form-check git-changes-workspace-commit__push-check @(IsCommitButtonDisabled ? "git-changes-workspace-commit__push-check--inactive" : "")">
                                 <label class="form-check-label" for="git-changes-push-after-commit" title="Push committed">
@@ -143,6 +156,23 @@
                                        @onchange="OnPushAfterCommitChanged" />
                             </div>
                         </div>
+                        @if (_aiError is not null)
+                        {
+                            <div class="gm-ai-error" role="alert">
+                                <span class="gm-ai-error__text">@_aiError</span>
+                                <button type="button" class="btn-close gm-ai-error__close" aria-label="Dismiss" @onclick="DismissAiError"></button>
+                            </div>
+                        }
+                        @if (_aiSuggestion is { } suggestion)
+                        {
+                            <AiSuggestionPanel ProviderLabel="@suggestion.ProviderLabel"
+                                               Reason="@suggestion.Reason"
+                                               CopyText="@suggestion.Message"
+                                               OnReplace="ReplaceWithAiSuggestion"
+                                               OnDismiss="DismissAiSuggestion">
+                                <pre class="gm-ai-suggestion__text">@suggestion.Message</pre>
+                            </AiSuggestionPanel>
+                        }
                     </div>
                 }
 

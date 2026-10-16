@@ -17,6 +17,11 @@ namespace GrayMoon.Common.Manifest;
 /// on Restore the file is the source of truth and its entries are merged into the database. Drift detection ignores it.
 /// Null (absent) when there are none, so a Workspace without version files keeps its definition unchanged.
 /// </param>
+/// <param name="Ai">
+/// <c>ai</c>: optional per-provider model choices for AI-generated commit messages and pull request text. Owned by the
+/// file like <see cref="CodeGraph"/>: GrayMoon keeps it on rewrite, drift detection ignores it, and nothing local (the
+/// pinned provider, credentials, executable paths) is ever written into it. Null (absent) means no overrides.
+/// </param>
 public sealed record WorkspaceManifest(
     [property: JsonPropertyName("version")] int SchemaVersion,
     WorkspaceManifestWorkspace Workspace,
@@ -28,7 +33,23 @@ public sealed record WorkspaceManifest(
     bool? CodeGraph = null,
     [property: JsonPropertyName("versionFiles")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    IReadOnlyList<WorkspaceManifestVersionFile>? VersionFiles = null);
+    IReadOnlyList<WorkspaceManifestVersionFile>? VersionFiles = null,
+    [property: JsonPropertyName("ai")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    WorkspaceManifestAi? Ai = null);
+
+/// <summary>
+/// The <c>ai</c> section. <c>providers</c> lists provider ids (<c>claude</c>, <c>codex</c>, <c>cursor</c>) each with an
+/// optional model; a provider that is not listed uses GrayMoon's fast default model for it. Entries are kept exactly as
+/// written, including ids this GrayMoon does not know, so a rewrite never loses one; validation happens where the
+/// configuration is used (<see cref="GrayMoon.Common.Ai.AiProviderConfiguration"/>).
+/// </summary>
+public sealed record WorkspaceManifestAi(IReadOnlyList<WorkspaceManifestAiProvider> Providers);
+
+/// <summary>One <c>ai.providers</c> entry. <c>model</c> absent or empty means GrayMoon's default for the provider (see <see cref="GrayMoon.Common.Ai.AiProviderConfiguration.DefaultModel"/>).</summary>
+public sealed record WorkspaceManifestAiProvider(
+    string Provider,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Model = null);
 
 /// <summary>Reads a JSON boolean, or the strings <c>"true"</c> / <c>"false"</c>, so a hand-edited value still works.</summary>
 public sealed class LenientBooleanJsonConverter : JsonConverter<bool?>

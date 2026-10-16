@@ -1,0 +1,52 @@
+@using GrayMoon.App.Services
+@inject IJSRuntime JS
+@inject IToastService ToastService
+@*
+    A generated text that was not applied by itself: the user had their own text, or the changes moved on while the
+    provider was writing. Nothing is replaced until the user chooses Replace.
+*@
+
+<div class="gm-ai-suggestion" role="region" aria-label="AI suggestion">
+    <div class="gm-ai-suggestion__header">
+        <i class="bi bi-stars" aria-hidden="true"></i>
+        <span class="gm-ai-suggestion__title text-nowrap">Suggested by @ProviderLabel</span>
+        @if (!string.IsNullOrEmpty(Reason))
+        {
+            <span class="gm-ai-suggestion__reason" title="@Reason">@Reason</span>
+        }
+        <button type="button" class="btn-close gm-ai-suggestion__close" aria-label="Dismiss suggestion" title="Dismiss" @onclick="OnDismiss"></button>
+    </div>
+    <div class="gm-ai-suggestion__body">@ChildContent</div>
+    <div class="gm-ai-suggestion__actions">
+        <button type="button" class="btn btn-sm btn-primary text-nowrap" @onclick="OnReplace">Replace</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary text-nowrap" @onclick="CopyAsync">Copy</button>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string ProviderLabel { get; set; } = string.Empty;
+
+    /// <summary>Why the suggestion was not applied directly.</summary>
+    [Parameter] public string? Reason { get; set; }
+
+    [Parameter, EditorRequired] public string CopyText { get; set; } = string.Empty;
+
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    [Parameter] public EventCallback OnReplace { get; set; }
+
+    [Parameter] public EventCallback OnDismiss { get; set; }
+
+    private async Task CopyAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", CopyText);
+            ToastService.Show("Copied.");
+        }
+        catch (JSException)
+        {
+            ToastService.ShowError("Clipboard access was denied by the browser.");
+        }
+    }
+}

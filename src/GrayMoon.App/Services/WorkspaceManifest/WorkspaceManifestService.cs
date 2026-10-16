@@ -315,7 +315,8 @@ public sealed class WorkspaceManifestService(
                 && existing is not null)
             {
                 manifest = WorkspaceRepositoryTagPins.CopyOnto(manifest, existing);
-                manifest = manifest with { CodeGraph = existing.CodeGraph };
+                // File-owned sections: the database has no copy of them, so the file's value is kept.
+                manifest = manifest with { CodeGraph = existing.CodeGraph, Ai = existing.Ai };
 
                 // Version files of repositories that are not linked here could not be imported; keep them in the file.
                 await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -424,6 +425,24 @@ public sealed class WorkspaceManifestService(
             logger.LogWarning(ex, "Reading the codegraph setting failed. WorkspaceId={WorkspaceId}", workspaceId);
             return false;
         }
+    }
+
+    public async Task<(WorkspaceManifestAi? Ai, string? Error)> ReadAiAsync(int workspaceId, CancellationToken cancellationToken = default)
+    {
+        var (_, args) = await GetSpecialContextArgsAsync(workspaceId, cancellationToken);
+        if (args.WorkspaceRepositoryName is null)
+            return (null, null);
+
+        var read = await WorkspaceRepositoryFileAccess.ReadAsync(
+            workerBridge, args, manifestFile.FileName, cancellationToken);
+        if (read.Error is not null)
+            return (null, $"Could not read {manifestFile.FileName}: {read.Error}");
+        if (!read.Found || string.IsNullOrWhiteSpace(read.Content))
+            return (null, null);
+        if (!manifestFile.TryParse(read.Content, out var manifest, out var parseError) || manifest is null)
+            return (null, $"{manifestFile.FileName} could not be read: {parseError}");
+
+        return (manifest.Ai, null);
     }
 
     public async Task<OperationResult> WriteCodeGraphConfigAsync(

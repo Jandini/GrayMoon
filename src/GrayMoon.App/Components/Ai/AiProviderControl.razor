@@ -1,0 +1,222 @@
+@using GrayMoon.Application.Ai
+@implements IDisposable
+@inject IJSRuntime JS
+@*
+    The AI part of a joined control: [ pinned provider ][ chevron ]. It renders no wrapper of its own, so the host places
+    it inside a .gm-split-control next to its own button (Changes: the Commit button) and the segments join into one
+    control. Clicking the provider segment generates; choosing in the menu only pins (never generates).
+*@
+
+@if (Pinned is { } pinned)
+{
+    <button type="button"
+            class="btn btn-sm @ButtonClass gm-ai-segment gm-ai-segment--main text-nowrap"
+            disabled="@(IsDisabled || !pinned.IsAvailable)"
+            title="@MainTitle(pinned)"
+            aria-label="@MainTitle(pinned)"
+            aria-busy="@IsGenerating"
+            @onclick="OnMainClickAsync">
+        @if (IsGenerating)
+        {
+            <span class="spinner-border spinner-border-sm gm-ai-segment__spinner" aria-hidden="true"></span>
+        }
+        else
+        {
+            <img src="@pinned.IconSrc" alt="" class="gm-ai-segment__icon" aria-hidden="true" />
+        }
+        <span class="gm-ai-segment__label">@pinned.Label</span>
+    </button>
+}
+<button type="button"
+        class="btn btn-sm @ButtonClass gm-ai-segment gm-ai-segment--chevron text-nowrap"
+        disabled="@IsDisabled"
+        title="@(Pinned is null ? "Choose an AI provider" : "Change or unpin the AI provider")"
+        aria-label="@(Pinned is null ? "Choose an AI provider" : "Change or unpin the AI provider")"
+        aria-haspopup="menu"
+        aria-expanded="@_open"
+        @onclick="Toggle">
+    @if (Pinned is null && UnpinnedLabel is not null)
+    {
+        <i class="bi bi-stars gm-ai-segment__glyph" aria-hidden="true"></i>
+        <span class="gm-ai-segment__unpinned-label">@UnpinnedLabel</span>
+    }
+    <i class="bi bi-chevron-down gm-ai-segment__chevron" aria-hidden="true"></i>
+</button>
+@if (_open)
+{
+    <div class="gm-ai-menu @(MenuAlign == "start" ? "gm-ai-menu--start" : null)" role="menu" aria-label="AI provider" tabindex="-1" @onkeydown="OnMenuKeyDown" @onkeydown:stopPropagation="true" @ref="_menu">
+        <div class="gm-ai-menu__header">AI provider</div>
+        @if (Menu is null)
+        {
+            <div class="gm-ai-menu__status text-muted">
+                <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Checking AI CLIs...
+            </div>
+        }
+        else
+        {
+            @foreach (var option in Menu.Options)
+            {
+                var isPinned = string.Equals(option.Id, Menu.PinnedProviderId, StringComparison.Ordinal);
+                <button type="button"
+                        role="menuitemradio"
+                        aria-checked="@isPinned"
+                        class="gm-ai-menu__item @(isPinned ? "gm-ai-menu__item--pinned" : null)"
+                        disabled="@(!option.IsAvailable)"
+                        title="@OptionTitle(option)"
+                        @onclick="() => PinAsync(option.Id)">
+                    <img src="@option.IconSrc" alt="" class="gm-ai-menu__icon" aria-hidden="true" />
+                    <span class="gm-ai-menu__text">
+                        <span class="gm-ai-menu__name">@option.Label</span>
+                        <span class="gm-ai-menu__meta">@OptionMeta(option)</span>
+                    </span>
+                    @if (isPinned)
+                    {
+                        <i class="bi bi-pin-angle-fill gm-ai-menu__check" aria-hidden="true"></i>
+                    }
+                </button>
+            }
+            <div class="gm-ai-menu__divider" role="separator"></div>
+            @if (Pinned is { } current)
+            {
+                <button type="button" role="menuitem" class="gm-ai-menu__item gm-ai-menu__item--action" @onclick="() => PinAsync(null)">
+                    <i class="bi bi-x-lg gm-ai-menu__glyph" aria-hidden="true"></i>
+                    <span class="gm-ai-menu__name">Unpin @current.Label</span>
+                </button>
+            }
+            <button type="button" role="menuitem" class="gm-ai-menu__item gm-ai-menu__item--action" @onclick="RefreshAsync">
+                <i class="bi bi-arrow-clockwise gm-ai-menu__glyph" aria-hidden="true"></i>
+                <span class="gm-ai-menu__name">Check CLIs again</span>
+            </button>
+            @if (!string.IsNullOrEmpty(Menu.Notice))
+            {
+                <div class="gm-ai-menu__notice">@Menu.Notice</div>
+            }
+        }
+    </div>
+}
+
+@code {
+    /// <summary>Null while the providers are still being checked.</summary>
+    [Parameter] public AiProviderMenu? Menu { get; set; }
+
+    [Parameter] public bool IsGenerating { get; set; }
+
+    [Parameter] public bool IsDisabled { get; set; }
+
+    /// <summary>What the provider segment produces, e.g. "the commit message".</summary>
+    [Parameter] public string Subject { get; set; } = "the text";
+
+    /// <summary>Bootstrap button variant for every segment, so they read as one control.</summary>
+    [Parameter] public string ButtonClass { get; set; } = "btn-outline-secondary";
+
+    /// <summary>Label shown on the chevron when nothing is pinned; null shows the chevron alone.</summary>
+    [Parameter] public string? UnpinnedLabel { get; set; }
+
+    [Parameter] public EventCallback OnGenerate { get; set; }
+
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    [Parameter] public EventCallback<string?> OnPin { get; set; }
+
+    [Parameter] public EventCallback OnRefresh { get; set; }
+
+    /// <summary>"end" (default) opens the menu toward the left from the chevron; "start" opens it from the control's left edge.</summary>
+    [Parameter] public string MenuAlign { get; set; } = "end";
+
+    private bool _open;
+    private bool _menuRendered;
+    private ElementReference _menu;
+    private DotNetObjectReference<AiProviderControl>? _self;
+
+    private AiProviderOption? Pinned => Menu?.Pinned;
+
+    private string MainTitle(AiProviderOption option) =>
+        IsGenerating
+            ? $"Writing {Subject} with {option.Label}... Click to cancel."
+            : !option.IsAvailable
+                ? $"{option.Label} is not available: {option.Problem}"
+                : $"Write {Subject} with {option.Label}{(option.Model is null ? "" : $" ({option.Model})")}";
+
+    private static string OptionMeta(AiProviderOption option)
+    {
+        if (!option.IsAvailable)
+            return option.Problem ?? "Not available";
+        var model = option.Model ?? "CLI default model";
+        return option.HasNoTools ? model : $"{model}, read-only mode";
+    }
+
+    private static string OptionTitle(AiProviderOption option)
+    {
+        if (!option.IsAvailable)
+            return option.Problem ?? "Not available";
+        var version = option.Version is null ? "" : $" {option.Version}";
+        var isolation = option.HasNoTools
+            ? "runs without tools in an empty folder"
+            : "runs in its read-only ask mode in an empty folder (this CLI cannot switch its file-reading tools off)";
+        return $"Pin {option.Label}{version}: {isolation}. Pinning does not generate.";
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // A newly opened menu takes focus (keyboard users land in it) and starts listening for outside presses.
+        if (_open && !_menuRendered)
+        {
+            _menuRendered = true;
+            try
+            {
+                _self ??= DotNetObjectReference.Create(this);
+                await _menu.FocusAsync();
+                await JS.InvokeVoidAsync("gmAiMenu.watch", _menu, _self);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or JSException or JSDisconnectedException or TaskCanceledException)
+            {
+                // The menu closed, or the circuit went away, before it could be wired up.
+            }
+        }
+        else if (!_open)
+        {
+            _menuRendered = false;
+        }
+    }
+
+    /// <summary>Called by gm-ai-menu.js when the user presses anywhere outside the control.</summary>
+    [JSInvokable]
+    public void CloseMenuFromOutside()
+    {
+        if (!_open)
+            return;
+        _open = false;
+        StateHasChanged();
+    }
+
+    public void Dispose() => _self?.Dispose();
+
+    private async Task OnMainClickAsync()
+    {
+        _open = false;
+        if (IsGenerating)
+            await OnCancel.InvokeAsync();
+        else
+            await OnGenerate.InvokeAsync();
+    }
+
+    // The first open of a page may still be checking the CLIs; the menu says so until Menu arrives.
+    private void Toggle() => _open = !_open;
+
+    private async Task PinAsync(string? providerId)
+    {
+        _open = false;
+        await OnPin.InvokeAsync(providerId);
+    }
+
+    private async Task RefreshAsync()
+    {
+        await OnRefresh.InvokeAsync();
+    }
+
+    private void OnMenuKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+            _open = false;
+    }
+}

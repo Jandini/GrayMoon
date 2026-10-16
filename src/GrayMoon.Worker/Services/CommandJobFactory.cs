@@ -136,6 +136,12 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid UninitCodeGraph args"),
             WorkerHubMethods.WatchCodeGraphInit => JsonSerializer.Deserialize<WatchCodeGraphInitRequest>(json, options)
                 ?? throw new ArgumentException("Invalid WatchCodeGraphInit args"),
+            WorkerHubMethods.CollectGitEvidence => JsonSerializer.Deserialize<CollectGitEvidenceRequest>(json, options)
+                ?? throw new ArgumentException("Invalid CollectGitEvidence args"),
+            WorkerHubMethods.GetAiProviders => JsonSerializer.Deserialize<GetAiProvidersRequest>(json, options)
+                ?? throw new ArgumentException("Invalid GetAiProviders args"),
+            WorkerHubMethods.GenerateAiText => JsonSerializer.Deserialize<GenerateAiTextRequest>(json, options)
+                ?? throw new ArgumentException("Invalid GenerateAiText args"),
             _ => throw new NotSupportedException($"Unknown command: {command}")
         };
     }
