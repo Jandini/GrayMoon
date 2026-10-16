@@ -100,7 +100,7 @@ $workerPath   = Join-Path $env:ProgramFiles 'GrayMoon'
 $workerExe    = Join-Path $workerPath 'graymoon-worker.exe'
 $downloadUrl = '{DOWNLOAD_URL}'
 $hubUrl      = '{HUB_URL}'
-$zipPath     = Join-Path $env:TEMP 'graymoon-worker-windows-install.zip'
+$zipPath     = Join-Path $env:TEMP "graymoon-worker-windows-install-$([guid]::NewGuid().ToString('N')).zip"
 $baseUrl     = '{BASE_URL}'
 
 # The worker secret lives outside the install folder so updating the worker keeps it.
@@ -146,61 +146,102 @@ if (-not ($hasSecret -and $env:GRAYMOON_DESKTOP_INSTALL -eq '1')) {
     }
 }
 
-# Stop any running service before replacing files so the executable is not locked.
-foreach ($name in @($serviceName, $legacyServiceName)) {
-    $svc = Get-Service -Name $name -ErrorAction SilentlyContinue
-    if ($svc -and $svc.Status -eq 'Running') {
-        Write-Host "Stopping running service '$name'..." -ForegroundColor Yellow
-        Stop-Service -Name $name -Force -ErrorAction Stop | Out-Null
-        Start-Sleep -Seconds 2
-        Write-Host "Service '$name' stopped." -ForegroundColor Green
-    }
+# Only one install may touch the install folder at a time. The automatic self-update, the Install Worker button and a
+# manual run all execute this script; two overlapping delete each other's freshly extracted files and leave a Worker
+# without its native git2 library. A later runner waits, then performs its own full clean install.
+$installLock = New-Object System.Threading.Mutex($false, 'Global\GrayMoonWorkerInstall')
+$lockHeld = $false
+try {
+    Write-Host 'Waiting for any other Worker install to finish...' -ForegroundColor Yellow
+    $lockHeld = $installLock.WaitOne([TimeSpan]::FromMinutes(10))
 }
-
-# Prepare installation directory.
-Write-Host 'Preparing installation directory...' -ForegroundColor Yellow
-if (Test-Path -LiteralPath $workerPath) {
-    Get-ChildItem -LiteralPath $workerPath -Force | Remove-Item -Recurse -Force -ErrorAction Stop
-} else {
-    New-Item -ItemType Directory -Path $workerPath -Force | Out-Null
+catch [System.Threading.AbandonedMutexException] {
+    # The previous installer was killed while holding the lock; it is ours now.
+    $lockHeld = $true
 }
-
-# Download worker archive.
-Write-Host 'Downloading worker from {BASE_URL}...' -ForegroundColor Yellow
-(New-Object System.Net.WebClient).DownloadFile($downloadUrl, $zipPath)
-Write-Host 'Download completed.' -ForegroundColor Green
-
-# Extract worker.
-Write-Host 'Extracting worker...' -ForegroundColor Yellow
-Expand-Archive -LiteralPath $zipPath -DestinationPath $workerPath -Force
-Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
-
-if (-not (Test-Path -LiteralPath $workerExe)) {
-    Write-Host "ERROR: graymoon-worker.exe not found under $workerPath after extract. Install .NET 10 Runtime if the app fails to start." -ForegroundColor Red
+if (-not $lockHeld) {
+    $installLock.Dispose()
+    Write-Host 'ERROR: Another Worker install is still running. Wait for it to finish, then run the install again.' -ForegroundColor Red
     Complete-WorkerInstall -Code 1
     return 1
 }
 
-# Delegate all service management (create/update, rights grant, start) to the worker.
-# Unattended self-update must not wait on a hidden password prompt.
-Enable-UnattendedWorkerInstall
-Write-Host 'Installing service...' -ForegroundColor Yellow
-if ($env:GRAYMOON_WORKER_NONINTERACTIVE -eq '1') {
-    & $workerExe install --hub-url $hubUrl --non-interactive
-} else {
-    & $workerExe install --hub-url $hubUrl
-}
-$installExit = $LASTEXITCODE
-if ($installExit -ne 0) {
-    if ($installExit -eq 2) {
-        Write-Host 'The Windows password stored for the Worker service is no longer valid. Install again from GrayMoon and enter the current password.' -ForegroundColor Red
-        Report-WorkerInstallFailure
+try {
+    # Stop any running service before replacing files so the executable is not locked.
+    foreach ($name in @($serviceName, $legacyServiceName)) {
+        $svc = Get-Service -Name $name -ErrorAction SilentlyContinue
+        if ($svc -and $svc.Status -eq 'Running') {
+            Write-Host "Stopping running service '$name'..." -ForegroundColor Yellow
+            Stop-Service -Name $name -Force -ErrorAction Stop | Out-Null
+            Start-Sleep -Seconds 2
+            Write-Host "Service '$name' stopped." -ForegroundColor Green
+        }
     }
-    Write-Host "Installation failed. Correct any errors above and run the script again." -ForegroundColor Red
-    Complete-WorkerInstall -Code $installExit
-    return
+
+    # Prepare installation directory.
+    Write-Host 'Preparing installation directory...' -ForegroundColor Yellow
+    if (Test-Path -LiteralPath $workerPath) {
+        Get-ChildItem -LiteralPath $workerPath -Force | Remove-Item -Recurse -Force -ErrorAction Stop
+    } else {
+        New-Item -ItemType Directory -Path $workerPath -Force | Out-Null
+    }
+
+    # Download worker archive.
+    Write-Host 'Downloading worker from {BASE_URL}...' -ForegroundColor Yellow
+    (New-Object System.Net.WebClient).DownloadFile($downloadUrl, $zipPath)
+    Write-Host 'Download completed.' -ForegroundColor Green
+
+    # Extract worker.
+    Write-Host 'Extracting worker...' -ForegroundColor Yellow
+    Expand-Archive -LiteralPath $zipPath -DestinationPath $workerPath -Force
+    # A complete extract has every archive entry on disk. Anything less is a damaged install (a missing git2 library
+    # only shows up later as "type initializer for LibGit2Sharp.Core.NativeMethods" on every repository).
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
+    try {
+        $missingEntries = @($archive.Entries | Where-Object { $_.Name -and -not (Test-Path -LiteralPath (Join-Path $workerPath $_.FullName)) } | ForEach-Object { $_.FullName })
+    }
+    finally {
+        $archive.Dispose()
+    }
+    Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
+    if ($missingEntries.Count -gt 0) {
+        Write-Host "ERROR: The worker extract is incomplete. Missing: $($missingEntries -join ', ')" -ForegroundColor Red
+        Complete-WorkerInstall -Code 1
+        return 1
+    }
+
+    if (-not (Test-Path -LiteralPath $workerExe)) {
+        Write-Host "ERROR: graymoon-worker.exe not found under $workerPath after extract. Install .NET 10 Runtime if the app fails to start." -ForegroundColor Red
+        Complete-WorkerInstall -Code 1
+        return 1
+    }
+
+    # Delegate all service management (create/update, rights grant, start) to the worker.
+    # Unattended self-update must not wait on a hidden password prompt.
+    Enable-UnattendedWorkerInstall
+    Write-Host 'Installing service...' -ForegroundColor Yellow
+    if ($env:GRAYMOON_WORKER_NONINTERACTIVE -eq '1') {
+        & $workerExe install --hub-url $hubUrl --non-interactive
+    } else {
+        & $workerExe install --hub-url $hubUrl
+    }
+    $installExit = $LASTEXITCODE
+    if ($installExit -ne 0) {
+        if ($installExit -eq 2) {
+            Write-Host 'The Windows password stored for the Worker service is no longer valid. Install again from GrayMoon and enter the current password.' -ForegroundColor Red
+            Report-WorkerInstallFailure
+        }
+        Write-Host "Installation failed. Correct any errors above and run the script again." -ForegroundColor Red
+        Complete-WorkerInstall -Code $installExit
+        return
+    }
+    Write-Host ''
+    Write-Host 'Installation completed!' -ForegroundColor Green
+    Write-Host ''
+    Complete-WorkerInstall -Code 0
 }
-Write-Host ''
-Write-Host 'Installation completed!' -ForegroundColor Green
-Write-Host ''
-Complete-WorkerInstall -Code 0
+finally {
+    try { $installLock.ReleaseMutex() } catch { }
+    $installLock.Dispose()
+}
