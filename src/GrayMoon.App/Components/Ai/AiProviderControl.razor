@@ -141,8 +141,7 @@
     {
         if (!option.IsAvailable)
             return option.Problem ?? "Not available";
-        var model = option.Model ?? "CLI default model";
-        return option.HasNoTools ? model : $"{model}, read-only mode";
+        return option.Model ?? "CLI default model";
     }
 
     private static string OptionTitle(AiProviderOption option)

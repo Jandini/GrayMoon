@@ -91,6 +91,14 @@ public sealed class AiCliRunner(IEnumerable<IAiCliAdapter> adapters, IAiCliExecu
                 "AI CLI call finished. Provider={Provider} ModelSet={ModelSet} PromptChars={PromptChars} ElapsedMs={ElapsedMs} ExitCode={ExitCode} Outcome={Outcome}",
                 providerId, request.Model is not null, request.SystemPrompt.Length + request.UserPrompt.Length,
                 (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds, result.ExitCode, outcome.Error);
+
+            // The prompt is never logged, but a reply the adapter could not read is the one thing that explains the failure:
+            // log its size and a short, single-line start and end of what the CLI printed (the model's answer, not the input).
+            if (outcome.Error is AiGenerationErrorKind.InvalidOutput or AiGenerationErrorKind.ProviderFailed)
+                logger.LogWarning(
+                    "AI CLI reply was not usable. Provider={Provider} Error={Error} ExitCode={ExitCode} StdoutChars={StdoutChars} StdoutTruncated={Truncated} StderrChars={StderrChars} Stderr={Stderr} StdoutHead={Head} StdoutTail={Tail}",
+                    providerId, outcome.Error, result.ExitCode, result.StdoutText.Length, result.StdoutTruncated, result.Stderr.Length,
+                    Preview(result.Stderr, 300), Preview(result.StdoutText, 600), Preview(result.StdoutText.Length > 600 ? result.StdoutText[^300..] : string.Empty, 300));
             return outcome;
         }
         finally
@@ -131,6 +139,12 @@ public sealed class AiCliRunner(IEnumerable<IAiCliAdapter> adapters, IAiCliExecu
 
         _probeCache[adapter.ProviderId] = (availability, DateTimeOffset.UtcNow);
         return availability;
+    }
+
+    private static string Preview(string text, int maxChars)
+    {
+        var oneLine = text.Replace("\r", "").Replace("\n", "\\n");
+        return oneLine.Length <= maxChars ? oneLine : oneLine[..maxChars] + "...";
     }
 
     private void TryDelete(string directory)

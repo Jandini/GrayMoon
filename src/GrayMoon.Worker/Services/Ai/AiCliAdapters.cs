@@ -216,7 +216,7 @@ public sealed class CursorCliAdapter : IAiCliAdapter
     private const string RequestFile = "request.md";
 
     internal const string Instruction =
-        "Read the file request.md in the workspace root and follow its instructions exactly. Reply with only the JSON object it asks for.";
+        "Read the file request.md in the workspace root and follow its instructions exactly. Reply with only the JSON object it asks for, with no other text before or after it.";
 
     /// <summary>Platforms where Cursor Agent CLI has its command sandbox ("Sandbox requires macOS or Linux").</summary>
     internal static bool SupportsSandbox => OperatingSystem.IsMacOS() || OperatingSystem.IsLinux();
@@ -255,6 +255,35 @@ public sealed class CursorCliAdapter : IAiCliAdapter
         return new AiCliInvocation(arguments, null, new Dictionary<string, string> { [RequestFile] = document });
     }
 
+    /// <summary>
+    /// Cursor runs with its read tools and often narrates before answering ("I'll read request.md...") ahead of the JSON object.
+    /// The strict parse comes first; otherwise the object must be the whole remainder of the text from some opening brace, so
+    /// the narration is dropped but anything after the object is still rejected.
+    /// </summary>
+    internal static string? ExtractAnswer(string? text)
+    {
+        if (AiGeneratedTextParser.ExtractJsonObject(text) is { } strict)
+            return strict;
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+
+        for (var start = text.IndexOf('{'); start >= 0; start = text.IndexOf('{', start + 1))
+        {
+            var candidate = text[start..].Trim();
+            try
+            {
+                using var document = JsonDocument.Parse(candidate);
+                if (document.RootElement.ValueKind == JsonValueKind.Object)
+                    return candidate;
+            }
+            catch (JsonException)
+            {
+            }
+        }
+
+        return null;
+    }
+
     public AiCliOutcome Interpret(BoundedProcessResult result, string workDirectory)
     {
         // On failure Cursor prints no JSON and writes the error to stderr.
@@ -270,7 +299,7 @@ public sealed class CursorCliAdapter : IAiCliAdapter
             if (element.TryGetProperty("is_error", out var flag) && flag.ValueKind == JsonValueKind.True)
                 return AiCliErrors.Classify(text ?? result.Stderr);
 
-            return AiGeneratedTextParser.ExtractJsonObject(text) is { } json
+            return ExtractAnswer(text) is { } json
                 ? AiCliOutcome.Success(json)
                 : AiCliOutcome.Failure(AiGenerationErrorKind.InvalidOutput, "Cursor did not answer with the expected JSON.");
         }

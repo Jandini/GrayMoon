@@ -41,6 +41,21 @@
     gap: 0.35rem;
 }
 
+/* No thick focus ring (click or Tab): the focused, pressed or menu-open segment gets a darker fill instead. */
+.gm-ai-segment:focus,
+.gm-ai-segment:focus-visible,
+.gm-ai-segment:active,
+.gm-ai-segment:active:focus-visible {
+    outline: none;
+    box-shadow: none;
+}
+
+.gm-ai-segment:focus-visible,
+.gm-ai-segment:active,
+.gm-ai-segment[aria-expanded="true"] {
+    background-color: var(--bg-tertiary);
+}
+
 .gm-ai-segment--chevron {
     padding-left: 0.4rem;
     padding-right: 0.4rem;
@@ -127,6 +142,24 @@
     outline: none;
 }
 
+/* Clicked or Tab-focused menu entries get the fill only, never a ring. */
+.gm-ai-menu:focus,
+.gm-ai-menu__item:focus,
+.gm-ai-menu__item:focus-visible,
+.gm-ai-menu__item:active {
+    outline: none;
+}
+
+.gm-ai-menu__item:focus,
+.gm-ai-menu__item:focus-visible,
+.gm-ai-menu__item:active {
+    box-shadow: none;
+}
+
+.gm-ai-menu__item:active:not(:disabled) {
+    background: var(--bg-hover);
+}
+
 .gm-ai-menu__item:disabled {
     color: var(--text-muted);
     cursor: not-allowed;
@@ -211,9 +244,11 @@
 
 .gm-ai-error__close {
     flex-shrink: 0;
-    width: 0.6rem;
-    height: 0.6rem;
-    margin-top: 0.15rem;
+    width: 0.5rem;
+    height: 0.5rem;
+    align-self: center;
+    margin: 0;
+    padding: 0;
     filter: invert(1);
     opacity: 0.6;
 }

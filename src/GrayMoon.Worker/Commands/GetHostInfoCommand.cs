@@ -4,10 +4,12 @@ using GrayMoon.Worker.Jobs.Requests;
 using GrayMoon.Worker.Jobs.Response;
 using GrayMoon.Worker.Services;
 using GrayMoon.Common;
+using GrayMoon.Common.Ai;
+using GrayMoon.Worker.Services.Ai;
 
 namespace GrayMoon.Worker.Commands;
 
-public sealed class GetHostInfoCommand(ICommandLineService commandLine, CodeGraphCli codeGraph) : ICommandHandler<GetHostInfoRequest, GetHostInfoResponse>
+public sealed class GetHostInfoCommand(ICommandLineService commandLine, CodeGraphCli codeGraph, AiCliRunner aiCli) : ICommandHandler<GetHostInfoRequest, GetHostInfoResponse>
 {
     public async Task<GetHostInfoResponse> ExecuteAsync(GetHostInfoRequest request, CancellationToken cancellationToken = default)
     {
@@ -15,6 +17,8 @@ public sealed class GetHostInfoCommand(ICommandLineService commandLine, CodeGrap
         var gitVersion = await GetVersionAsync("git", "--version", null, cancellationToken);
         var gitVersionToolVersion = await GetVersionAsync("dotnet", "gitversion version", null, cancellationToken);
         var codeGraphVersion = await codeGraph.GetVersionAsync(cancellationToken);
+        var cursorAgentVersion = (await aiCli.ProbeAsync(refresh: true, cancellationToken))
+            .FirstOrDefault(p => p.ProviderId == AiProviderIds.Cursor && p.IsInstalled)?.Version;
 
         var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         if (string.IsNullOrWhiteSpace(userProfile))
@@ -28,6 +32,7 @@ public sealed class GetHostInfoCommand(ICommandLineService commandLine, CodeGrap
             GitVersion = gitVersion,
             GitVersionToolVersion = gitVersionToolVersion,
             CodeGraphVersion = codeGraphVersion,
+            CursorAgentVersion = cursorAgentVersion,
             UserProfilePath = userProfile,
         };
     }

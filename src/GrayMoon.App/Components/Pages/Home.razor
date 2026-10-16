@@ -211,7 +211,7 @@ else
             if (dto is null)
                 return false;
 
-            var versions = new HostPrerequisiteVersions(dto.DotnetVersion, dto.GitVersion, dto.GitVersionToolVersion);
+            var versions = new HostPrerequisiteVersions(dto.DotnetVersion, dto.GitVersion, dto.GitVersionToolVersion, dto.CursorAgentVersion);
             if (!HostPrerequisiteState.AnyMissing(versions))
                 return false;
 
@@ -224,7 +224,7 @@ else
         }
     }
 
-    private sealed record HostInfoDto(string? DotnetVersion, string? GitVersion, string? GitVersionToolVersion);
+    private sealed record HostInfoDto(string? DotnetVersion, string? GitVersion, string? GitVersionToolVersion, string? CursorAgentVersion = null);
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {

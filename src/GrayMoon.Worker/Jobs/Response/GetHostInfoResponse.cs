@@ -17,6 +17,10 @@ public sealed class GetHostInfoResponse
     [JsonPropertyName("codeGraphVersion")]
     public string? CodeGraphVersion { get; set; }
 
+    /// <summary>Optional Cursor Agent CLI version (<c>agent</c> or <c>cursor-agent</c>); null when it is not installed. Only the Cursor AI provider needs it.</summary>
+    [JsonPropertyName("cursorAgentVersion")]
+    public string? CursorAgentVersion { get; set; }
+
     /// <summary>Worker host user profile directory (e.g. C:\Users\name). Used to default Feature worktree storage.</summary>
     [JsonPropertyName("userProfilePath")]
     public string? UserProfilePath { get; set; }
