@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using GrayMoon.Common;
 using GrayMoon.Worker.Commands;
 using GrayMoon.Worker.Jobs.Requests;
+using GrayMoon.Worker.Jobs.Response;
 using GrayMoon.Worker.Services;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -150,20 +152,147 @@ public sealed class CodeGraphCommandTests : IDisposable
     }
 
     [Fact]
-    public async Task Uninit_reports_a_failed_uninit()
+    public async Task Uninit_kills_the_processes_named_in_the_index_before_uninit()
     {
         CreateIndex(_target);
-        var commandLine = new ScriptedCommandLine { Result = new CommandLineResult(1, "", "database is locked\nmore") };
+        var folder = Path.Combine(_target, CodeGraphCli.DataFolderName);
+        File.WriteAllText(Path.Combine(folder, "daemon.pid"),
+            """{ "pid": 17400, "version": "1.6.2", "socketPath": "\\\\.\\pipe\\codegraph-x", "startedAt": 1 }""");
+        File.WriteAllText(Path.Combine(folder, "writer.pid"), """{"pid":17400,"mode":"daemon","startedAt":1}""");
+        File.WriteAllText(Path.Combine(folder, CodeGraphCli.LockFileName), "16948");
+        var commandLine = new ScriptedCommandLine();
+        var killed = new List<int>();
+
+        var response = await new UninitCodeGraphCommand(CreateCli(commandLine, killed: killed))
+            .ExecuteAsync(new UninitCodeGraphRequest { Root = _target });
+
+        Assert.Equal("Removed", response.Outcome);
+        Assert.Equal([17400, 16948], killed);
+        Assert.Single(commandLine.Calls);
+    }
+
+    [Fact]
+    public async Task Uninit_deletes_the_index_itself_when_uninit_fails()
+    {
+        CreateIndex(_target);
+        var commandLine = new ScriptedCommandLine { Result = new CommandLineResult(1, "", "EBUSY: resource busy or locked\nmore") };
 
         var response = await new UninitCodeGraphCommand(CreateCli(commandLine))
             .ExecuteAsync(new UninitCodeGraphRequest { Root = _target });
 
-        Assert.Equal("Failed", response.Outcome);
-        Assert.Equal("database is locked", response.Message);
+        Assert.Equal("Removed", response.Outcome);
+        Assert.False(Directory.Exists(Path.Combine(_target, CodeGraphCli.DataFolderName)));
     }
 
-    private static CodeGraphCli CreateCli(ICommandLineService commandLine, string? executable = Executable) =>
-        new(commandLine, new StubLifetime(), NullLogger<CodeGraphCli>.Instance) { ExecutableResolver = () => executable };
+    [Fact]
+    public async Task Uninit_deletes_the_index_when_codegraph_is_not_installed()
+    {
+        CreateIndex(_target);
+
+        var response = await new UninitCodeGraphCommand(CreateCli(new ScriptedCommandLine(), executable: null))
+            .ExecuteAsync(new UninitCodeGraphRequest { Root = _target });
+
+        Assert.Equal("Removed", response.Outcome);
+        Assert.False(Directory.Exists(Path.Combine(_target, CodeGraphCli.DataFolderName)));
+    }
+
+    [Fact]
+    public async Task Uninit_reports_an_index_that_stays_held()
+    {
+        // Only Windows refuses to delete a file another handle has open.
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        CreateIndex(_target);
+        var commandLine = new ScriptedCommandLine { Result = new CommandLineResult(1, "", "EBUSY: resource busy or locked\nmore") };
+        var database = Path.Combine(_target, CodeGraphCli.DataFolderName, CodeGraphCli.DatabaseFileName);
+
+        UninitCodeGraphResponse response;
+        using (new FileStream(database, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            response = await new UninitCodeGraphCommand(CreateCli(commandLine))
+                .ExecuteAsync(new UninitCodeGraphRequest { Root = _target });
+        }
+
+        Assert.Equal("Failed", response.Outcome);
+        Assert.Equal("EBUSY: resource busy or locked", response.Message);
+    }
+
+    [Fact]
+    public async Task Killing_spares_a_process_that_is_not_codegraph()
+    {
+        CreateIndex(_target);
+        // A reused pid: this test host is not CodeGraph's node.
+        File.WriteAllText(Path.Combine(_target, CodeGraphCli.DataFolderName, "daemon.pid"), $$"""{"pid":{{Environment.ProcessId}}}""");
+
+        var killed = await CreateCli(new ScriptedCommandLine(), realProcesses: true).KillIndexProcessesAsync(_target, CancellationToken.None);
+
+        Assert.Equal(0, killed);
+    }
+
+    [Fact]
+    public async Task Killing_ends_the_node_process_that_holds_the_lock()
+    {
+        var node = FindNode();
+        if (node is null)
+            return;
+
+        CreateIndex(_target);
+        using var holder = Process.Start(new ProcessStartInfo(node, ["-e", "setTimeout(() => {}, 60000)"]) { UseShellExecute = false })!;
+        try
+        {
+            File.WriteAllText(Path.Combine(_target, CodeGraphCli.DataFolderName, CodeGraphCli.LockFileName), holder.Id.ToString());
+
+            var killed = await CreateCli(new ScriptedCommandLine(), realProcesses: true).KillIndexProcessesAsync(_target, CancellationToken.None);
+
+            Assert.Equal(1, killed);
+            Assert.True(holder.HasExited);
+        }
+        finally
+        {
+            if (!holder.HasExited)
+                holder.Kill();
+        }
+    }
+
+    [Theory]
+    [InlineData("16948", 16948)]
+    [InlineData(" 16948\n", 16948)]
+    [InlineData("""{"pid":17400,"version":"1.6.2"}""", 17400)]
+    [InlineData("""{"pid":0}""", null)]
+    [InlineData("-5", null)]
+    [InlineData("", null)]
+    [InlineData("not a pid", null)]
+    [InlineData("[17400]", null)]
+    public void ParsePid_reads_bare_and_json_pid_files(string text, int? expected) =>
+        Assert.Equal(expected, CodeGraphCli.ParsePid(text));
+
+    /// <summary>Records killed pids in <paramref name="killed"/> instead of killing, unless <paramref name="realProcesses"/>.</summary>
+    private static CodeGraphCli CreateCli(
+        ICommandLineService commandLine, string? executable = Executable, List<int>? killed = null, bool realProcesses = false) =>
+        new(commandLine, new StubLifetime(), NullLogger<CodeGraphCli>.Instance)
+        {
+            ExecutableResolver = () => executable,
+            ProcessKiller = realProcesses
+                ? CodeGraphCli.KillCodeGraphProcessAsync
+                : (pid, _, _) =>
+                {
+                    killed?.Add(pid);
+                    return Task.FromResult(true);
+                },
+            DeleteAttempts = 2,
+            DeleteRetryDelay = TimeSpan.Zero,
+        };
+
+    /// <summary><c>node</c> on PATH, or null; the test that needs a real node process is skipped without one.</summary>
+    private static string? FindNode()
+    {
+        var name = OperatingSystem.IsWindows() ? "node.exe" : "node";
+        return (Environment.GetEnvironmentVariable("PATH") ?? "")
+            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Select(dir => Path.Combine(dir.Trim().Trim('"'), name))
+            .FirstOrDefault(File.Exists);
+    }
 
     private static void CreateIndex(string root)
     {
