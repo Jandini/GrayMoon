@@ -93,7 +93,7 @@ public sealed partial class WorkspaceGitChanges
         set => PushAfterCommitMemory.Set(WorkspaceId, value);
     }
 
-    private void OnPushAfterCommitChanged(ChangeEventArgs e) => PushAfterCommit = e.Value is bool value && value;
+    private void OnPushAfterCommitChanged(bool value) => PushAfterCommit = value;
 
     /// <summary>
     /// Commits with one shared message across every applicable repository. Not atomic: each repository

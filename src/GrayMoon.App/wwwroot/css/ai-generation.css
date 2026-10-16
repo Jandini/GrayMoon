@@ -101,6 +101,26 @@
     box-shadow: 0 0.5rem 1.25rem rgba(0, 0, 0, 0.45);
     white-space: normal;
     outline: none;
+    /* gm-ai-menu.js sets the cap to the space left below the menu; the entries scroll when they need more. */
+    max-height: var(--gm-ai-menu-max-height, none);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: #5a5a5a transparent;
+}
+
+.gm-ai-menu::-webkit-scrollbar {
+    width: 6px;
+}
+
+.gm-ai-menu::-webkit-scrollbar-track {
+    background: transparent;
+    margin-block: 0.375rem;
+}
+
+.gm-ai-menu::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 3px;
 }
 
 .gm-ai-menu--start {
@@ -204,6 +224,10 @@
     color: var(--text-muted);
     white-space: normal;
     overflow-wrap: anywhere;
+}
+
+.gm-ai-menu__item--checked .gm-ai-menu__glyph {
+    color: var(--accent-blue);
 }
 
 .gm-ai-menu__check {

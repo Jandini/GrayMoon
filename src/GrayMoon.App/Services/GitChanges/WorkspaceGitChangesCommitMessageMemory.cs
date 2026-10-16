@@ -1,9 +1,11 @@
 namespace GrayMoon.App.Services.GitChanges;
 
 /// <summary>
-/// Circuit-scoped memory of the in-progress workspace commit message per workspace so SPA navigation
-/// away and back can restore the textarea contents without localStorage or DB persistence. Mirrors
-/// <see cref="WorkspaceGitChangesSelectionMemory"/>.
+/// App-wide (singleton) memory of the in-progress workspace commit message per workspace, typed or
+/// AI-written, so the textarea contents survive SPA navigation away and back and a browser reload
+/// (F5 / Ctrl+F5 starts a new circuit, so circuit-scoped state would be lost). Kept until a commit
+/// succeeds or the user empties the box; not persisted across App restarts. Thread-safe, since every
+/// circuit and background commit job shares the one instance.
 /// </summary>
 public sealed class WorkspaceGitChangesCommitMessageMemory
 {

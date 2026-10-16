@@ -12,6 +12,10 @@ internal static class CommandJobStreamLabel
         if (command == WorkerHubMethods.WatchCodeGraphInit)
             return "codegraph";
 
+        // The provider CLI's own name (claude, codex, cursor), not the command name.
+        if (command == WorkerHubMethods.GenerateAiText && TryStringProperty(request, "ProviderId", out var provider) && !string.IsNullOrWhiteSpace(provider))
+            return provider.Trim();
+
         if (TryStringProperty(request, "RepositoryName", out var repo) && !string.IsNullOrWhiteSpace(repo))
             return repo.Trim();
 

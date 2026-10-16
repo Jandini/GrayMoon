@@ -40,6 +40,11 @@ public sealed partial class WorkspaceGitChanges
 
     private void OnGenerateMessageOnCommitChanged(bool value) => GenerateMessageOnCommit = value;
 
+    private string GenerateMessageOnCommitHint =>
+        _aiMenu?.Pinned is { IsAvailable: true } provider
+            ? $"When empty, by {provider.Label}"
+            : "Pin a provider first";
+
     /// <summary>
     /// The provider that writes the message when Commit is pressed with an empty box: only with the option ticked, a
     /// pinned provider that is available, and no generation from the provider segment already in flight. Null otherwise.
