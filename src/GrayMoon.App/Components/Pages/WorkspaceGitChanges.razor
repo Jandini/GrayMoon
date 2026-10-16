@@ -80,7 +80,7 @@
                                   class="form-control git-changes-workspace-commit__message"
                                   rows="1"
                                   maxlength="10000"
-                                  placeholder="Commit message (applies to all repositories below)"
+                                  placeholder="@CommitMessagePlaceholder"
                                   title="Ctrl+Enter commits with the visible Commit button"
                                   autocomplete="off"
                                   autocorrect="off"
@@ -91,7 +91,8 @@
                         </form>
                         <div class="git-changes-workspace-commit__actions">
                             @{
-                                var primaryCommitClass = string.IsNullOrWhiteSpace(_workspaceCommitMessage)
+                                var generatesMessage = CommitGeneratesMessage;
+                                var primaryCommitClass = string.IsNullOrWhiteSpace(_workspaceCommitMessage) && !generatesMessage
                                     ? "btn btn-sm btn-outline-primary text-nowrap"
                                     : "btn btn-sm btn-primary text-nowrap";
                             }
@@ -111,11 +112,13 @@
                                             data-primary-commit
                                             class="@primaryCommitClass"
                                             disabled="@IsCommitButtonDisabled"
-                                            title="@(PushAfterCommit
-                                                        ? "Commits only already-staged changes, then pushes exactly the repositories that committed successfully. Ctrl+Enter from the message box."
-                                                        : "Commits only already-staged changes in each applicable repository. Ctrl+Enter from the message box.")"
+                                            title="@PrimaryCommitTitle(WorkspaceCommitMode.Staged)"
                                             aria-keyshortcuts="Control+Enter"
                                             @onclick="() => CommitWorkspaceAsync(WorkspaceCommitMode.Staged, PushAfterCommit)">
+                                        @if (generatesMessage)
+                                        {
+                                            <i class="bi bi-stars" aria-hidden="true"></i>
+                                        }
                                         Commit Staged
                                     </button>
                                 }
@@ -126,34 +129,39 @@
                                             data-primary-commit
                                             class="@primaryCommitClass"
                                             disabled="@IsCommitButtonDisabled"
-                                            title="@(PushAfterCommit
-                                                        ? "Stages all changes, commits, then pushes the repositories that committed successfully. Ctrl+Enter from the message box."
-                                                        : "Stages all changes (git add --all) then commits in each repository with changes. Ctrl+Enter from the message box.")"
+                                            title="@PrimaryCommitTitle(WorkspaceCommitMode.All)"
                                             aria-keyshortcuts="Control+Enter"
                                             @onclick="() => CommitWorkspaceAsync(WorkspaceCommitMode.All, PushAfterCommit)">
+                                        @if (generatesMessage)
+                                        {
+                                            <i class="bi bi-stars" aria-hidden="true"></i>
+                                        }
                                         Commit All
                                     </button>
                                 }
                                 <AiProviderControl Menu="_aiMenu"
                                                    IsGenerating="_aiGenerating"
+                                                   IsDisabled="@IsJobRunning"
                                                    Subject="the commit message"
                                                    ButtonClass="btn-outline-primary"
                                                    MenuAlign="start"
                                                    OnGenerate="GenerateCommitMessageAsync"
                                                    OnCancel="CancelAiGeneration"
                                                    OnPin="OnAiPinAsync"
-                                                   OnRefresh="OnAiRefreshAsync" />
-                            </div>
-                            <div class="form-check git-changes-workspace-commit__push-check @(IsCommitButtonDisabled ? "git-changes-workspace-commit__push-check--inactive" : "")">
-                                <label class="form-check-label" for="git-changes-push-after-commit" title="Push committed">
-                                    <span class="git-changes-workspace-commit__push-label-full">Push committed</span>
-                                    <span class="git-changes-workspace-commit__push-label-short" aria-hidden="true">Push</span>
-                                </label>
-                                <input class="form-check-input" type="checkbox" id="git-changes-push-after-commit"
-                                       disabled="@IsJobRunning"
-                                       checked="@PushAfterCommit"
-                                       aria-label="Push committed"
-                                       @onchange="OnPushAfterCommitChanged" />
+                                                   OnRefresh="OnAiRefreshAsync">
+                                    <Options>
+                                        <div class="gm-ai-menu__header">On Commit</div>
+                                        <AiMenuCheckItem Label="Generate commit message"
+                                                         Hint="@GenerateMessageOnCommitHint"
+                                                         Checked="@GenerateMessageOnCommit"
+                                                         IsDisabled="@(_aiMenu?.Pinned is not { IsAvailable: true })"
+                                                         CheckedChanged="OnGenerateMessageOnCommitChanged" />
+                                        <AiMenuCheckItem Label="Push committed"
+                                                         Hint="Successful commits only"
+                                                         Checked="@PushAfterCommit"
+                                                         CheckedChanged="OnPushAfterCommitChanged" />
+                                    </Options>
+                                </AiProviderControl>
                             </div>
                         </div>
                         @if (_aiError is not null)

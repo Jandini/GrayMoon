@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.Common;
 using GrayMoon.Common.Ai;
 using GrayMoon.Worker.Services.Ai;
@@ -114,6 +115,47 @@ public sealed class AiCliRunnerTests : IDisposable
         var outcome = await Runner().GenerateAsync(AiProviderIds.Claude, Request, TimeSpan.FromSeconds(30), CancellationToken.None);
 
         Assert.Equal(AiGenerationErrorKind.NotAuthenticated, outcome.Error);
+    }
+
+    [Fact]
+    public async Task The_cli_call_and_its_outcome_stream_to_the_overlay_without_the_prompt()
+    {
+        FakeCli("claude", $"echo {ClaudeSuccessJson}", $"cat >/dev/null; echo '{ClaudeSuccessJson}'");
+        var lines = new List<CommandLineStreamEvent>();
+
+        using (new CommandLineStreamScope(lines.Add))
+            await Runner().GenerateAsync(AiProviderIds.Claude, Request, TimeSpan.FromSeconds(30), CancellationToken.None);
+
+        Assert.Equal(2, lines.Count);
+        Assert.Equal(WorkerCommandStreamKind.CommandLine, lines[0].Kind);
+        Assert.StartsWith($"$ {Path.GetFileName(_locator.Paths["claude"])} -p --output-format json --tools \"\" ", lines[0].Text);
+        Assert.Equal(WorkerCommandStreamKind.Stdout, lines[1].Kind);
+        Assert.StartsWith("Claude answered in ", lines[1].Text);
+        Assert.DoesNotContain(lines, l => l.Text.Contains("System rules") || l.Text.Contains("<evidence>"));
+    }
+
+    [Fact]
+    public async Task A_failed_cli_call_streams_the_reason_as_stderr()
+    {
+        FakeCli("claude", "echo Not logged in. Please run /login 1>&2\nexit /b 1", "cat >/dev/null; echo 'Not logged in. Please run /login' >&2; exit 1");
+        var lines = new List<CommandLineStreamEvent>();
+
+        using (new CommandLineStreamScope(lines.Add))
+            await Runner().GenerateAsync(AiProviderIds.Claude, Request, TimeSpan.FromSeconds(30), CancellationToken.None);
+
+        var outcome = lines[^1];
+        Assert.Equal(WorkerCommandStreamKind.Stderr, outcome.Kind);
+        Assert.StartsWith("Claude failed after ", outcome.Text);
+        Assert.Contains("not signed in", outcome.Text);
+    }
+
+    [Theory]
+    [InlineData(new[] { "-p", "--tools", "" }, "-p --tools \"\"")]
+    [InlineData(new[] { "--workspace", @"C:\Temp\my folder" }, @"--workspace ""C:\Temp\my folder""")]
+    [InlineData(new[] { "--json-schema", """{"type":"object"}""" }, "--json-schema \"{\\\"type\\\":\\\"object\\\"}\"")]
+    public void Echoed_arguments_read_as_typed(string[] arguments, string expected)
+    {
+        Assert.Equal(expected, AiCliRunner.FormatArguments(arguments));
     }
 
     [Fact]

@@ -1,0 +1,33 @@
+@*
+    A checkbox entry for AiProviderControl's Options slot. Toggling keeps the menu open so the new state stays visible.
+*@
+<button type="button"
+        role="menuitemcheckbox"
+        aria-checked="@Checked"
+        class="gm-ai-menu__item @(Checked ? "gm-ai-menu__item--checked" : null)"
+        disabled="@IsDisabled"
+        @onclick="ToggleAsync">
+    <i class="bi @(Checked ? "bi-check-square-fill" : "bi-square") gm-ai-menu__glyph" aria-hidden="true"></i>
+    <span class="gm-ai-menu__text">
+        <span class="gm-ai-menu__name">@Label</span>
+        @if (!string.IsNullOrEmpty(Hint))
+        {
+            <span class="gm-ai-menu__meta">@Hint</span>
+        }
+    </span>
+</button>
+
+@code {
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+
+    /// <summary>One line under the label saying what ticking it does, or why it cannot be ticked now.</summary>
+    [Parameter] public string? Hint { get; set; }
+
+    [Parameter] public bool Checked { get; set; }
+
+    [Parameter] public bool IsDisabled { get; set; }
+
+    [Parameter] public EventCallback<bool> CheckedChanged { get; set; }
+
+    private Task ToggleAsync() => CheckedChanged.InvokeAsync(!Checked);
+}

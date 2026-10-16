@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.Common;
 using GrayMoon.Common.Ai;
 using Microsoft.Extensions.Logging;
@@ -69,6 +70,8 @@ public sealed class AiCliRunner(IEnumerable<IAiCliAdapter> adapters, IAiCliExecu
             foreach (var (name, content) in invocation.Files)
                 await File.WriteAllTextAsync(Path.Combine(workDirectory, name), content, new UTF8Encoding(false), cancellationToken);
 
+            // The arguments never carry the prompt (it goes through stdin or a file), so the call itself can be shown.
+            ReportToOverlay(WorkerCommandStreamKind.CommandLine, $"$ {Path.GetFileName(executable)} {FormatArguments(invocation.Arguments)}");
             var result = await runner.RunAsync(new BoundedProcessRequest(executable, invocation.Arguments)
             {
                 WorkingDirectory = workDirectory,
@@ -86,6 +89,13 @@ public sealed class AiCliRunner(IEnumerable<IAiCliAdapter> adapters, IAiCliExecu
                 { StdoutTruncated: true } => AiCliOutcome.Failure(AiGenerationErrorKind.InvalidOutput, $"{AiProviderIds.DisplayName(providerId)} answered with more output than expected."),
                 _ => adapter.Interpret(result, workDirectory),
             };
+
+            var seconds = Stopwatch.GetElapsedTime(started).TotalSeconds;
+            ReportToOverlay(
+                outcome.Error == AiGenerationErrorKind.None ? WorkerCommandStreamKind.Stdout : WorkerCommandStreamKind.Stderr,
+                outcome.Error == AiGenerationErrorKind.None
+                    ? $"{AiProviderIds.DisplayName(providerId)} answered in {seconds:0.0} s."
+                    : $"{AiProviderIds.DisplayName(providerId)} failed after {seconds:0.0} s: {outcome.Message}");
 
             logger.LogInformation(
                 "AI CLI call finished. Provider={Provider} ModelSet={ModelSet} PromptChars={PromptChars} ElapsedMs={ElapsedMs} ExitCode={ExitCode} Outcome={Outcome}",
@@ -140,6 +150,17 @@ public sealed class AiCliRunner(IEnumerable<IAiCliAdapter> adapters, IAiCliExecu
         _probeCache[adapter.ProviderId] = (availability, DateTimeOffset.UtcNow);
         return availability;
     }
+
+    /// <summary>Streams a line to the overlay terminal of the App job that sent the command, when there is one.</summary>
+    private static void ReportToOverlay(WorkerCommandStreamKind kind, string text) =>
+        CommandLineStreamAmbient.Current.Value?.Invoke(new CommandLineStreamEvent(kind, text));
+
+    /// <summary>Shell-like echo of an argument list: empty or spaced arguments are quoted so the line reads as typed.</summary>
+    internal static string FormatArguments(IEnumerable<string> arguments) =>
+        LogSafe.ForLog(string.Join(' ', arguments.Select(a =>
+            a.Length == 0 || a.Any(c => char.IsWhiteSpace(c) || c == '"')
+                ? $"\"{a.Replace("\"", "\\\"")}\""
+                : a)));
 
     private static string Preview(string text, int maxChars)
     {

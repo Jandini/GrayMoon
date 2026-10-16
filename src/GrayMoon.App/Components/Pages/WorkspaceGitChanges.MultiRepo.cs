@@ -61,7 +61,29 @@ public sealed partial class WorkspaceGitChanges
     private WorkspaceCommitMode OfferedCommitMode =>
         WorkspaceCommitModeHelper.ResolveOfferedMode(StagedRepositoryCount > 0);
 
-    private bool IsCommitButtonDisabled => IsJobRunning || string.IsNullOrWhiteSpace(_workspaceCommitMessage);
+    /// <summary>An empty message box blocks Commit unless the AI will write the message first (<see cref="CommitGeneratesMessage"/>).</summary>
+    private bool IsCommitButtonDisabled =>
+        IsJobRunning || (string.IsNullOrWhiteSpace(_workspaceCommitMessage) && !CommitGeneratesMessage);
+
+    private string PrimaryCommitTitle(WorkspaceCommitMode mode)
+    {
+        var action = (mode, PushAfterCommit) switch
+        {
+            (WorkspaceCommitMode.Staged, true) => "Commits only already-staged changes, then pushes exactly the repositories that committed successfully.",
+            (WorkspaceCommitMode.Staged, false) => "Commits only already-staged changes in each applicable repository.",
+            (_, true) => "Stages all changes, commits, then pushes the repositories that committed successfully.",
+            _ => "Stages all changes (git add --all) then commits in each repository with changes.",
+        };
+        var writer = string.IsNullOrWhiteSpace(_workspaceCommitMessage) && CommitMessageWriter is { } provider
+            ? $"The message box is empty, so {provider.Label} writes the commit message first. "
+            : string.Empty;
+        return $"{writer}{action} Ctrl+Enter from the message box.";
+    }
+
+    private string CommitMessagePlaceholder =>
+        GenerateMessageOnCommit && _aiMenu?.Pinned is { IsAvailable: true } provider
+            ? $"Commit message (leave empty and {provider.Label} writes it on Commit)"
+            : "Commit message (applies to all repositories below)";
 
     /// <summary>"Push committed" checkbox state, remembered per-workspace via <see cref="PushAfterCommitMemory"/>
     /// so it survives navigating away and back within the same browser session.</summary>
@@ -71,7 +93,7 @@ public sealed partial class WorkspaceGitChanges
         set => PushAfterCommitMemory.Set(WorkspaceId, value);
     }
 
-    private void OnPushAfterCommitChanged(ChangeEventArgs e) => PushAfterCommit = e.Value is bool value && value;
+    private void OnPushAfterCommitChanged(bool value) => PushAfterCommit = value;
 
     /// <summary>
     /// Commits with one shared message across every applicable repository. Not atomic: each repository
@@ -84,12 +106,14 @@ public sealed partial class WorkspaceGitChanges
     /// repositories and run commit hooks, unlike the fast single-file/folder stage/unstage actions.
     /// When <paramref name="pushAfterCommit"/> is true, a push of exactly the repositories that
     /// committed successfully runs immediately afterward, inside the same job/terminal.
+    /// With an empty message box and <see cref="CommitGeneratesMessage"/>, the job first writes the message with the
+    /// pinned AI provider (same overlay/terminal), then commits and pushes exactly as with a typed message.
     /// <paramref name="mode"/> must be the value captured when the command was rendered/chosen - never
     /// recompute from mutable <c>_view</c> here.
     /// </summary>
     private void CommitWorkspaceAsync(WorkspaceCommitMode mode, bool pushAfterCommit)
     {
-        if (string.IsNullOrWhiteSpace(_workspaceCommitMessage))
+        if (string.IsNullOrWhiteSpace(_workspaceCommitMessage) && !CommitGeneratesMessage)
         {
             ToastService.ShowError("Enter a commit message.");
             return;
@@ -146,12 +170,40 @@ public sealed partial class WorkspaceGitChanges
             return;
         }
 
-        var message = _workspaceCommitMessage;
+        // Decided here, when the commit actually starts (after any default-branch confirmation), from the box as it is now:
+        // a typed message is committed as typed; an empty one only when the AI writes it as the job's first step.
+        var typedMessage = _workspaceCommitMessage;
+        CommitMessageGeneration? generation = null;
+        if (string.IsNullOrWhiteSpace(typedMessage))
+        {
+            if (CommitMessageWriter is not { } writer)
+            {
+                ToastService.ShowError("Enter a commit message.");
+                return;
+            }
+
+            generation = new CommitMessageGeneration(writer, BuildAiCommitScope(mode, targets));
+        }
+
         var stageAllFirst = WorkspaceCommitModeHelper.StageAllFirst(mode);
-        var label = $"Committing in {targets.Count} repositor{(targets.Count == 1 ? "y" : "ies")}...";
+        var committingLabel = $"Committing in {targets.Count} repositor{(targets.Count == 1 ? "y" : "ies")}...";
+        var label = generation is null ? committingLabel : $"Writing the commit message with {generation.Provider.Label}...";
 
         StartPageJob(label, async (job, ct) =>
         {
+            var message = generation is null
+                ? typedMessage
+                : await GenerateCommitMessageInJobAsync(job, generation, ct);
+            if (message is null)
+            {
+                return;
+            }
+
+            if (generation is not null)
+            {
+                job.ReportProgress(committingLabel);
+            }
+
             var succeeded = new List<(string RepositoryName, int RepositoryId)>();
             var failed = new List<(string Repository, string Error)>();
             var completed = 0;
