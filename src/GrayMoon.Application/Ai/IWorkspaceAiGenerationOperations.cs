@@ -11,12 +11,12 @@ namespace GrayMoon.Application.Ai;
 public interface IWorkspaceAiGenerationOperations
 {
     /// <summary>
-    /// The providers for the menus: which CLIs the Worker can run, the model each uses (from <c>graymoon.json</c>), and the
-    /// one pinned locally for this Workspace. <paramref name="refresh"/> checks the CLIs again instead of using the cache.
+    /// The providers for the menus: which CLIs the startup host check found, the model each uses (from <c>graymoon.json</c>),
+    /// and the one pinned locally for this Workspace. Does not probe the CLIs.
     /// </summary>
-    Task<AiProviderMenu> GetProvidersAsync(int workspaceId, bool refresh, CancellationToken cancellationToken);
+    Task<AiProviderMenu> GetProvidersAsync(int workspaceId, CancellationToken cancellationToken);
 
-    /// <summary>Pins <paramref name="providerId"/> for this Workspace on this machine, or unpins with null. Never generates.</summary>
+    /// <summary>Pins <paramref name="providerId"/> for this Workspace on this machine, or clears the pin when it is null. Never generates.</summary>
     Task PinProviderAsync(int workspaceId, string? providerId, CancellationToken cancellationToken);
 
     /// <summary>

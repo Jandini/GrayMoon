@@ -113,12 +113,12 @@ public sealed partial class WorkspaceGitChanges
         return message;
     }
 
-    private async Task LoadAiMenuAsync(bool refresh = false)
+    private async Task LoadAiMenuAsync()
     {
         var workspaceId = WorkspaceId;
         try
         {
-            var menu = await AiOperations.GetProvidersAsync(workspaceId, refresh, CancellationToken.None);
+            var menu = await AiOperations.GetProvidersAsync(workspaceId, CancellationToken.None);
             if (!_disposed && workspaceId == WorkspaceId)
             {
                 _aiMenu = menu;
@@ -153,6 +153,9 @@ public sealed partial class WorkspaceGitChanges
 
     private async Task OnAiPinAsync(string? providerId)
     {
+        if (providerId is not null && string.Equals(_aiMenu?.PinnedProviderId, providerId, StringComparison.Ordinal))
+            providerId = null;
+
         try
         {
             await AiOperations.PinProviderAsync(WorkspaceId, providerId, CancellationToken.None);
@@ -164,12 +167,6 @@ public sealed partial class WorkspaceGitChanges
             Logger.LogWarning(ex, "Pinning the AI provider failed. WorkspaceId={WorkspaceId}", WorkspaceId);
             ToastService.ShowError("Could not pin the AI provider.");
         }
-    }
-
-    private Task OnAiRefreshAsync()
-    {
-        _aiMenu = null;
-        return LoadAiMenuAsync(refresh: true);
     }
 
     private void CancelAiGeneration() => _aiCts?.Cancel();

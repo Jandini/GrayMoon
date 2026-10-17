@@ -1,7 +1,6 @@
 @page "/worker"
 @page "/agent"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
-@using System.Text.Json
 @using GrayMoon.Abstractions.Worker
 @using GrayMoon.App.Services
 @using GrayMoon.App.Services.Worker
@@ -14,6 +13,7 @@
 @inject IToastService ToastService
 @inject HostPrerequisiteInstallService HostPrerequisiteInstall
 @inject HostPrerequisiteRequirementsProvider HostRequirementsProvider
+@inject HostInfoCache HostInfo
 @inject WorkerInstallService WorkerInstall
 @inject WorkerSecretService WorkerSecret
 @inject WorkerPairingService WorkerPairing
@@ -118,15 +118,19 @@
                                         <span class="text-muted">Worker</span>
                                         <span>@VersionBadge(WorkerConnectionTracker.WorkerSemVer)</span>
                                         <span class="text-muted">@PrerequisiteLabel(HostPrerequisiteIds.DotnetSdk)</span>
-                                        <span>@PrerequisiteCell(hostInfo.DotnetVersion, HostPrerequisiteInstallCommands.DotnetSdk)</span>
+                                        <span>@PrerequisiteCell(hostInfo.Versions.DotnetSdkVersion, HostPrerequisiteInstallCommands.DotnetSdk)</span>
                                         <span class="text-muted">@PrerequisiteLabel(HostPrerequisiteIds.Git)</span>
-                                        <span>@PrerequisiteCell(hostInfo.GitVersion, HostPrerequisiteInstallCommands.Git)</span>
+                                        <span>@PrerequisiteCell(hostInfo.Versions.GitVersion, HostPrerequisiteInstallCommands.Git)</span>
                                         <span class="text-muted">@PrerequisiteLabel(HostPrerequisiteIds.GitVersion)</span>
-                                        <span>@PrerequisiteCell(hostInfo.GitVersionToolVersion, HostPrerequisiteInstallCommands.GitVersion)</span>
+                                        <span>@PrerequisiteCell(hostInfo.Versions.GitVersionToolVersion, HostPrerequisiteInstallCommands.GitVersion)</span>
                                         <span class="text-muted" title="Optional. Features get their own CodeGraph index when the Workspace definition has &quot;codegraph&quot;: true.">CodeGraph</span>
                                         <span>@VersionBadge(hostInfo.CodeGraphVersion)</span>
+                                        <span class="text-muted">@PrerequisiteLabel(HostPrerequisiteIds.Claude)</span>
+                                        <span>@PrerequisiteCell(hostInfo.Versions.ClaudeVersion, HostPrerequisiteInstallCommands.Claude)</span>
+                                        <span class="text-muted">@PrerequisiteLabel(HostPrerequisiteIds.Codex)</span>
+                                        <span>@PrerequisiteCell(hostInfo.Versions.CodexVersion, HostPrerequisiteInstallCommands.Codex)</span>
                                         <span class="text-muted">@PrerequisiteLabel(HostPrerequisiteIds.CursorAgent)</span>
-                                        <span>@PrerequisiteCell(hostInfo.CursorAgentVersion, HostPrerequisiteInstallCommands.CursorAgent)</span>
+                                        <span>@PrerequisiteCell(hostInfo.Versions.CursorAgentVersion, HostPrerequisiteInstallCommands.CursorAgent)</span>
                                     </div>
                                     <p class="small text-muted mt-3 mb-0">@HostPrerequisiteState.Note(CurrentHostVersions, hostRequirements)</p>
                                 }
@@ -175,12 +179,10 @@
 @code {
     private const string WorkerDotnet10RuntimeUrl = "https://aka.ms/dotnet-core-applaunch?framework=Microsoft.NETCore.App&framework_version=10.0.0&arch=x64&rid=win-x64&os=win10";
 
-    private sealed record HostInfoDto(string? DotnetVersion, string? GitVersion, string? GitVersionToolVersion, string? CodeGraphVersion = null, string? CursorAgentVersion = null);
-
     private string installCommand = string.Empty;
     private string uninstallCommand = string.Empty;
     private string ActiveTab = "install";
-    private HostInfoDto? hostInfo;
+    private HostInfoRead? hostInfo;
     private HostPrerequisiteRequirements hostRequirements = HostPrerequisiteRequirements.All;
     private string? hostInfoLoadError;
     private bool _isUpdating;
@@ -266,35 +268,27 @@
             return;
         }
         hostInfoLoadError = null;
-        var response = await WorkerBridge.SendCommandAsync("GetHostInfo", new { }, CancellationToken.None);
-        if (!response.Success || response.Data == null)
+        var query = await HostInfo.GetAsync(WorkerBridge, refresh: true, CancellationToken.None);
+        hostRequirements = await HostRequirementsProvider.GetAsync();
+        if (query.Read is null)
         {
-            hostInfoLoadError = response.Error ?? "Failed to load host info.";
+            hostInfoLoadError = query.Error ?? "Failed to load host info.";
             hostInfo = null;
             return;
         }
-        try
-        {
-            var json = response.Data is JsonElement je ? je.GetRawText() : JsonSerializer.Serialize(response.Data);
-            var dto = JsonSerializer.Deserialize<HostInfoDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-            hostRequirements = await HostRequirementsProvider.GetAsync();
-            hostInfo = dto ?? new HostInfoDto(null, null, null);
 
-            // Confirms the reconnected worker is actually responsive (not just SignalR-connected)
-            // and reports the matching version, so the overlay never closes prematurely.
-            if (_waitingForReconnect
-                && WorkerConnectionTracker.State == WorkerConnectionState.Online
-                && !WorkerConnectionTracker.IsSelfUpdateInProgress)
-            {
-                _isUpdating = false;
-                _waitingForReconnect = false;
-            }
-        }
-        catch
+        hostInfo = query.Read;
+
+        // Confirms the reconnected worker is actually responsive (not just SignalR-connected)
+        // and reports the matching version, so the overlay never closes prematurely.
+        if (_waitingForReconnect
+            && WorkerConnectionTracker.State == WorkerConnectionState.Online
+            && !WorkerConnectionTracker.IsSelfUpdateInProgress)
         {
-            hostInfoLoadError = "Failed to parse host info.";
-            hostInfo = null;
+            _isUpdating = false;
+            _waitingForReconnect = false;
         }
+
         await InvokeAsync(StateHasChanged);
     }
 
@@ -339,7 +333,7 @@
     };
 
     private HostPrerequisiteVersions CurrentHostVersions =>
-        new(hostInfo?.DotnetVersion, hostInfo?.GitVersion, hostInfo?.GitVersionToolVersion, hostInfo?.CursorAgentVersion);
+        hostInfo?.Versions ?? new HostPrerequisiteVersions(null, null, null);
 
     private bool HostTabMissingPrerequisites =>
         hostInfo != null && HostPrerequisiteState.AnyRequiredMissing(CurrentHostVersions, hostRequirements);

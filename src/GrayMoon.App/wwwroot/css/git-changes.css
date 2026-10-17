@@ -421,10 +421,15 @@
         border-bottom-left-radius: 0;
     }
 
-    /* Same dark frame as the message box, so the buttons sit flush with it instead of standing out with a lighter
-       blue or gray edge. Hover keeps its own border as feedback. */
-    .git-changes-workspace-commit__composer--attached .git-changes-workspace-commit__buttons > .btn:not(:hover) {
+    /* Same dark frame as the message box, including while a segment is hovered, so the hover fill stays
+       inside that frame instead of a brighter border sticking out. */
+    .git-changes-workspace-commit__composer--attached .git-changes-workspace-commit__buttons.gm-split-control > .btn,
+    .git-changes-workspace-commit__composer--attached .git-changes-workspace-commit__buttons.gm-split-control > .btn:hover:not(:disabled),
+    .git-changes-workspace-commit__composer--attached .git-changes-workspace-commit__buttons.gm-split-control > .btn:focus:not(:disabled),
+    .git-changes-workspace-commit__composer--attached .git-changes-workspace-commit__buttons.gm-split-control > .btn:focus-visible:not(:disabled),
+    .git-changes-workspace-commit__composer--attached .git-changes-workspace-commit__buttons.gm-split-control > .btn:active:not(:disabled) {
         border-color: var(--border-input);
+        box-shadow: none;
     }
 
     .git-changes-workspace-commit__composer--attached .gm-ai-menu--start {

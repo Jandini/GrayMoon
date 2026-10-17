@@ -1,4 +1,3 @@
-using System.Text.Json;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services.Worker;
 using GrayMoon.App.Services.Connectors;
@@ -20,6 +19,7 @@ public sealed class HomeNavAttentionMonitor : IDisposable
     private readonly ConnectorHealthService _connectorHealthService;
     private readonly HostPrerequisiteInstallService _hostPrerequisiteInstall;
     private readonly HostPrerequisiteRequirementsProvider _hostPrerequisiteRequirements;
+    private readonly HostInfoCache _hostInfo;
     private readonly NavigationManager _navigationManager;
     private readonly ILogger<HomeNavAttentionMonitor> _logger;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
@@ -39,6 +39,7 @@ public sealed class HomeNavAttentionMonitor : IDisposable
         ConnectorHealthService connectorHealthService,
         HostPrerequisiteInstallService hostPrerequisiteInstall,
         HostPrerequisiteRequirementsProvider hostPrerequisiteRequirements,
+        HostInfoCache hostInfo,
         NavigationManager navigationManager,
         ILogger<HomeNavAttentionMonitor> logger)
     {
@@ -48,6 +49,7 @@ public sealed class HomeNavAttentionMonitor : IDisposable
         _connectorHealthService = connectorHealthService;
         _hostPrerequisiteInstall = hostPrerequisiteInstall;
         _hostPrerequisiteRequirements = hostPrerequisiteRequirements;
+        _hostInfo = hostInfo;
         _navigationManager = navigationManager;
         _logger = logger;
     }
@@ -259,31 +261,8 @@ public sealed class HomeNavAttentionMonitor : IDisposable
         if (!_workerBridge.IsWorkerConnected)
             return null;
 
-        try
-        {
-            var response = await _workerBridge.SendCommandAsync("GetHostInfo", new { }, CancellationToken.None);
-            if (!response.Success || response.Data is null)
-                return null;
-
-            var json = response.Data is JsonElement element
-                ? element.GetRawText()
-                : JsonSerializer.Serialize(response.Data);
-            var dto = JsonSerializer.Deserialize<HostInfoDto>(
-                json,
-                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-            if (dto is null)
-                return null;
-
-            return new HostPrerequisiteVersions(
-                dto.DotnetVersion,
-                dto.GitVersion,
-                dto.GitVersionToolVersion,
-                dto.CursorAgentVersion);
-        }
-        catch (Exception)
-        {
-            return null;
-        }
+        var query = await _hostInfo.GetAsync(_workerBridge, refresh: true, CancellationToken.None);
+        return query.Read?.Versions;
     }
 
     private void RaiseChanged()
@@ -293,6 +272,4 @@ public sealed class HomeNavAttentionMonitor : IDisposable
 
         Changed?.Invoke();
     }
-
-    private sealed record HostInfoDto(string? DotnetVersion, string? GitVersion, string? GitVersionToolVersion, string? CursorAgentVersion = null);
 }

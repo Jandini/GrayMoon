@@ -230,11 +230,13 @@ Install tab       labelled "Update" and shown red while the state is VersionMism
 Uninstall tab
 Host tab          only while Online or VersionMismatch; Worker version, .NET SDK, Git, GitVersion,
                   CodeGraph (codeGraphVersion, optional, informational only),
+                  Claude (claudeVersion; listed with its install command, never required),
+                  Codex (codexVersion; listed with its install command, never required),
                   Cursor Agent (cursorAgentVersion; listed with its install command, never required)
                   footer: "Install All" for missing prerequisites in Desktop mode
 ```
 
-`GetHostInfo` (one of the two commands allowed on a version mismatch) supplies the host versions. Required prerequisites follow the Workspace profiles (`HostPrerequisiteRequirements.For`): Git always, GitVersion when any Workspace uses it, the .NET SDK when any Workspace uses GitVersion, package restore or dependency-aware update. Missing optional tools are labelled "(optional)" and never raise the attention badge; Cursor Agent counts as missing but is never required.
+`GetHostInfo` (one of the two commands allowed on a version mismatch) supplies the host versions and which AI CLIs are installed. Required prerequisites follow the Workspace profiles (`HostPrerequisiteRequirements.For`): Git always, GitVersion when any Workspace uses it, the .NET SDK when any Workspace uses GitVersion, package restore or dependency-aware update. Missing optional tools are labelled "(optional)" and never raise the attention badge; Claude, Codex and Cursor Agent count as missing but are never required.
 
 ### Install script guards
 
@@ -1362,7 +1364,8 @@ Changes page      click the provider segment of the Commit control to write ONE 
                   tick "Generate commit message" (On Commit) so Commit writes the message first when the box is empty
 New PR dialog     click the provider selector at the right of the tab bar to write ONE title and ONE Markdown
                   description shared by every PR in the dialog
-both              pick a provider in the menu (pins it for the Workspace on this machine; never generates)
+both              pick a provider in the menu (pins it for the Workspace on this machine; choosing the
+                  provider that is already pinned removes it until another is pinned; never generates)
 ```
 
 Providers are Claude (`claude`), Codex (`codex`) and Cursor Agent (`agent`, then `cursor-agent`; the editor's `cursor` command is not the agent). Each CLI must be installed and signed in for the Worker's user. Credentials never go in `graymoon.json`.
@@ -1393,7 +1396,7 @@ failures             stay inside the AI control as one redacted line (not signed
 ### Flow
 
 ```text
-resolve provider and model, check availability (Worker GetAiProviders; App cache 2 minutes)
+resolve provider and model, check availability (the startup GetHostInfo; menus do not probe)
 Worker CollectGitEvidence   one request for all repositories, bounded fan-out, never mutates or fetches
 AiPromptBuilder             one prompt under a hard budget (commit 4,000 / PR 8,000 estimated tokens),
                             secrets redacted, evidence wrapped as untrusted data

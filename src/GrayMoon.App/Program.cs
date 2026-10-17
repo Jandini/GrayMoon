@@ -216,6 +216,7 @@ try
     builder.Services.AddScoped<IWorkspacePullRequestOperations, WorkspacePullRequestOperations>();
     builder.Services.AddScoped<IWorkspaceFileOperations, WorkspaceFileOperations>();
     builder.Services.AddScoped<IWorkspaceGitChangesOperations, WorkspaceGitChangesOperations>();
+    builder.Services.AddSingleton<HostInfoCache>();
     builder.Services.AddSingleton<AiProviderAvailabilityCache>();
     builder.Services.AddScoped<WorkspaceAiProviderPins>();
     builder.Services.AddScoped<IWorkspaceAiGenerationOperations, WorkspaceAiGenerationOperations>();

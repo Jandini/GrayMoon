@@ -46,10 +46,10 @@ AiGeneratedTextParser       strict JSON check; AiGenerationResult<T> is never pa
 ```
 
 - The App never runs git or an AI CLI. The Worker runs both, because it runs as the signed-in user and in Docker mode it is the only process on the host. The Worker refreshes PATH from the user environment at start (`HostEnvironmentPath.RefreshProcessPath`).
-- `CollectGitEvidence`, `GetAiProviders` and `GenerateAiText` (`WorkerHubMethods` constants) run on the Worker main pool; there is no AI-specific queue.
+- `CollectGitEvidence`, `GetAiProviders` and `GenerateAiText` (`WorkerHubMethods` constants) run on the Worker main pool; there is no AI-specific queue. The App reads CLI availability from `GetHostInfo` and does not call `GetAiProviders`.
 - Both `GitEvidenceCollector` and `AiCliRunner` launch processes through `BoundedProcessRunner` (Common: argument list, stdout cap, logs only executable, timing and sizes), wrapped in the Worker by `RepositoryAccessBoundedProcessRunner` (section 2A).
 - `AiCliRunner`: availability probe `<exe> --version` with a 15 s timeout, cached 5 min in the Worker; answer cap 256 KiB, stderr cap 16 KiB; each run gets its own empty folder `%TEMP%\graymoon-ai\<guid>`, deleted afterwards.
-- App side: `AiProviderAvailabilityCache` (singleton) caches availability for 2 min, bypassed on refresh or when no Worker is reachable. Generation timeout `AiGeneration:TimeoutSeconds` (default 120, clamped 10..600).
+- App side: `HostInfoCache` (singleton) holds the startup host check, including which AI CLIs are installed. Menus read that snapshot and do not probe. Generation timeout `AiGeneration:TimeoutSeconds` (default 120, clamped 10..600).
 - Commit generation runs inside the Git Changes commit job (overlay step label "ai", never the prompt); pull request generation runs without an overlay job.
 
 ---
