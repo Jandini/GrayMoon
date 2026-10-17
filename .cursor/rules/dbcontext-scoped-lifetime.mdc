@@ -47,3 +47,10 @@ instance can stay broken/disposed for the rest of the tab's lifetime.
   DbContext-touching method sits inside that fan-out.
 - If a Blazor page injects `AppDbContext` directly, fix it in the same change
   - it's a silent hazard for every other feature sharing that circuit.
+
+## Schema changes
+
+A model change in `AppDbContext` also needs a guarded, idempotent
+`Migrate*Async` method appended to `Migrations.StrictSteps` with the next free
+version number (SQLite `user_version`, one transaction per step). Never edit,
+renumber or delete a shipped step. See "Database schema" in `CLAUDE.md`.

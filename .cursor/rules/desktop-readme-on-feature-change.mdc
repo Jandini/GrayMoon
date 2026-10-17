@@ -13,7 +13,8 @@ section in the same turn (that file lives in the Desktop repo, not this one).
 - **Existing feature** - edit the matching bullet instead of adding a
   duplicate.
 - Match the existing style: `- **Short title** - one paragraph of what the
-  user sees and how it works.`
+  user sees and how it works.` The separator is ` - ` (ASCII hyphen), never
+  an em or en dash. Do not list files.
 - Skip internal-only refactors, tests, docs-only edits, or plumbing with no
   user-visible behavior change.
 - Do not create a Desktop commit unless the user asks. If that README

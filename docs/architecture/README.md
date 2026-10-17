@@ -1,12 +1,10 @@
 # GrayMoon Current Architecture
 
-**State documented:** GrayMoon with worktree-backed Features  
-**Code baseline reviewed through:** `b10994375a8fd7711a92e34dc4f82070e992ea46` (original set); Feature updates reviewed against `a06fe3344b4bfe10f282fd667b39fdcbd56f41fc`  
+**State documented:** GrayMoon with worktree-backed Features, Workspace profiles, the Workspace repository (`graymoon.json`) and AI-generated commit/PR text  
+**Code baseline reviewed through:** `e4385f4a86e388f8af80e4a7f3ff5ba828ec0f6b`  
 **Runtime:** .NET 10, ASP.NET Core / Blazor Server, EF Core 10, SQLite, GrayMoon.Worker .NET 10
 
-This folder is the current-state architecture reference for GrayMoon.
-
-It replaces the older collection of feature design notes, implementation prompts, point-in-time analyses, and narrow implementation documents that accumulated under `docs/`.
+This folder is the current-state architecture reference for GrayMoon, and the only documentation folder in the repository. Design notes, implementation prompts, reviews and analyses are not kept; their still-relevant content has been folded into these documents.
 
 The purpose is to answer four questions for a developer joining the project:
 
@@ -22,26 +20,24 @@ A Workspace has one main checkout per repository (the special **Workspace** cont
 Read these documents in order:
 
 1. [01 - Product Model and User Workflows](01-product-model-and-user-workflows.md)  
-   Why GrayMoon exists, its terminology, its pages, and the main end-to-end workflows.
+   Why GrayMoon exists, its terminology, Workspace profiles, its pages, the Workspace repository and `graymoon.json` from the user's view, AI commit/PR text, Feature lifecycle and recovery, and the main end-to-end workflows.
 
 2. [02 - System Architecture](02-system-architecture.md)  
-   Process boundaries, project layout, service layering, connectors, REST/Application boundaries, and Desktop integration.
+   Process boundaries, project layout, service layering, connectors and token handling, Workspace capabilities, the App/Worker version lock, Worker Git/AI services and the repository access broker, REST/Application boundaries, and Desktop integration.
 
 3. [03 - Data Model and Persistence](03-data-model-and-persistence.md)  
-   SQLite ownership, Workspace repository state, projects/dependencies, PR/Actions/Git Changes persistence, file configuration, and migration conventions.
+   SQLite ownership and the numbered migration steps, Workspace fields, the `graymoon.json` schema and ownership rules, projects/packaging/dependencies, PR/Actions/Git Changes persistence, file configuration, secrets, and Feature context tables.
 
 4. [04 - Runtime Communication and Concurrency](04-runtime-communication-and-concurrency.md)  
-   App-Worker SignalR, hook-driven synchronization, Git Changes watchers, background jobs, browser broadcasts, locking, polling, and cancellation.
+   App-Worker SignalR and job pools, the repository access broker, operation locking, the Sync pipeline, Feature create/remove/reconcile internals, hook install and hook-driven synchronization, Git Changes watchers, Worker caches, browser broadcasts, polling, and cancellation.
 
 5. [05 - User Capability Reference](05-user-capability-reference.md)  
-   A page-by-page and operation-by-operation reference of current user functionality and the code paths behind it.
+   A page-by-page and operation-by-operation reference of current user functionality and the code paths behind it, including Features, local network security and AI generation.
 
 6. [06 - Developer Extension Guide](06-developer-extension-guide.md)  
-   Rules for adding or changing functionality without violating GrayMoon architecture.
+   Rules for adding or changing functionality without violating GrayMoon architecture, plus the list of known gaps and open review findings.
 
-The worktree Feature design and review notes under `docs/worktree/` are historical design records, not current-state references. Where they disagree with this folder or the code, the code wins.
-
-The Workspace repository design documents under `docs/workspace-repository/` (`GrayMoon-Workspace-As-Git-Repository-Design-v3.md` and `Workspace-Repository-Design-Supplement-v3.1.md`) are historical design records, not current-state references. Where they disagree with this folder or the code, the code wins.
+The companion Desktop shell is documented in `GrayMoon.Desktop/docs/architecture/` in the sibling repository.
 
 ## GrayMoon in one paragraph
 
@@ -150,12 +146,15 @@ The Repositories page is the main operational dashboard. The remaining pages pro
 
 GrayMoon's differentiating workflows are:
 
+- Workspace profiles (Basic Git-only vs .NET dependency, optional GitVersion and GitHub Actions) that gate pages and workflows;
+- an optional Workspace repository whose `graymoon.json` makes the Workspace definition portable and restorable;
 - coordinated Workspace branch preparation;
 - dependency-aware updates across many repositories;
 - synchronized push ordered by dependency level;
 - package availability waiting before downstream pushes;
 - configured version-file validation and update;
 - multi-repository Git Changes;
+- AI-generated commit messages and pull request text through locally installed CLIs (Claude, Codex, Cursor Agent) run by the Worker;
 - PR creation and merge across repositories;
 - live GitHub Actions visibility;
 - hook-driven local state synchronization;
@@ -163,13 +162,14 @@ GrayMoon's differentiating workflows are:
 
 ## Documentation policy going forward
 
-This folder should remain a **current-state reference**, not a historical archive.
+This folder is a **current-state reference**, not a historical archive, and it is the only documentation kept in the repository.
 
 When functionality changes:
 
-- update the relevant current-state document;
-- do not add a second "design v2", "implementation notes", or "analysis" document for the same feature unless it is a temporary proposal outside this architecture folder;
-- delete or archive temporary implementation prompts once the feature is shipped;
-- keep future proposals under a clearly separate proposal location until they become current behavior.
+- update the relevant document here in the same change as the code;
+- do not add design, prompt, plan, review or analysis documents anywhere under `docs/` (or the workspace root);
+- record still-open problems in the "Known gaps" section of the relevant document (06 section 24 collects the cross-cutting ones), and remove them when fixed;
+- write current behavior only - no "was", "used to", PR numbers or plan unit ids;
+- cite these documents by file name from code comments, `CLAUDE.md` and `AGENTS.md`.
 
 The goal is one coherent description of what GrayMoon is now.

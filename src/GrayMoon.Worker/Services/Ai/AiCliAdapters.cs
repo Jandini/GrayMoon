@@ -20,8 +20,8 @@ public sealed record AiCliOutcome(string? Json, AiGenerationErrorKind Error, str
 }
 
 /// <summary>
-/// How a provider's CLI is run without tools. Each adapter uses only options verified against the installed CLI (see
-/// docs/ai-pull-commit/GrayMoon-AI-Generation-Implementation-Log.md): a JSON output flag is not a sandbox, so every adapter
+/// How a provider's CLI is run without tools. Each adapter uses only options verified against the installed CLI: a
+/// JSON output flag is not a sandbox, so every adapter
 /// also switches tools off (or, where the CLI cannot, to its read-only mode) and runs in an empty folder.
 /// </summary>
 public interface IAiCliAdapter

@@ -71,6 +71,15 @@ DI scope. That means:
   as part of the same change, not a followup - it is a silent hazard for every
   other feature sharing that circuit, not just the one you are working on.
 
+## Database schema changes
+
+Every schema change needs the `AppDbContext` model update **and** a new guarded,
+idempotent `Migrate*Async` method appended to `Migrations.StrictSteps` with the
+next free version number (tracked in SQLite `PRAGMA user_version`; each step runs
+in its own transaction). Never edit, renumber or delete a shipped step, and never
+add to the legacy baseline. Pre-release is not an exception: everyone's existing
+`graymoon.db` needs it. See "Database schema" in `CLAUDE.md`.
+
 ## Feature-context scoping (worktree Features)
 
 This has caused a real cross-context data-corruption bug: a Feature's dependency
@@ -158,11 +167,18 @@ section in the same turn (that file lives in the Desktop repo, not this one).
 - **New feature** - add a bullet at the top of the list.
 - **Existing feature** - edit the matching bullet instead of adding a duplicate.
 - Match the existing style: `- **Short title** - one paragraph of what the
-  user sees and how it works.`
+  user sees and how it works.` The separator is ` - ` (ASCII hyphen), never
+  an em or en dash.
 - Skip internal-only refactors, tests, docs-only edits, or plumbing with no
   user-visible behavior change.
 - Do not create a Desktop commit unless the user asks. If that README changed,
   give a second short commit message labeled for GrayMoon.Desktop.
+
+## Architecture docs stay current
+
+`docs/architecture/` is the only documentation folder. Update the relevant
+architecture doc in the same change as the behavior it describes, and do not
+add design, plan, prompt or analysis documents under `docs/`.
 
 ## Never commit or push - always give a commit message instead
 
