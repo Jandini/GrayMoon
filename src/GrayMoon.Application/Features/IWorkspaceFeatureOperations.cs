@@ -4,12 +4,18 @@ namespace GrayMoon.Application.Features;
 
 public interface IWorkspaceFeatureOperations
 {
+    /// <summary>
+    /// <paramref name="createCodeGraphIndex"/> starts a CodeGraph index in the new Feature root even when
+    /// <c>graymoon.json</c> does not turn CodeGraph on. The New Feature dialog passes its checkbox. Repair still
+    /// follows the definition switch.
+    /// </summary>
     Task<CreateFeatureResult> CreateFeatureAsync(
         int workspaceId,
         string featureName,
         WorkspaceFeatureBaseKindApplication baseKind,
         IProgress<OperationProgress>? progress = null,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        bool createCodeGraphIndex = false);
 
     Task<RemoveFeaturePlan> AnalyzeRemoveFeatureAsync(
         WorkspaceFeatureContextId featureContextId,

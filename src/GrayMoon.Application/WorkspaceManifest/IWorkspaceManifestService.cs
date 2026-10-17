@@ -43,9 +43,17 @@ public interface IWorkspaceManifestService
 
     /// <summary>
     /// True when the Workspace definition (<c>graymoon.json</c> of the special Workspace) has <c>"codegraph": true</c>.
-    /// False when there is no Workspace repository, no definition, or it cannot be read. Never throws.
+    /// False when the property is false or absent, when there is no Workspace repository, or when it cannot be read.
+    /// Never throws.
     /// </summary>
     Task<bool> IsCodeGraphEnabledAsync(int workspaceId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The workspace-wide CodeGraph switch from <c>graymoon.json</c>. <c>true</c> or <c>false</c> when the definition
+    /// sets <c>codegraph</c>. Null when the property is absent, there is no Workspace repository, no definition, or it
+    /// cannot be read. Never throws. An explicit false turns the integration off; null does not.
+    /// </summary>
+    Task<bool?> GetCodeGraphSwitchAsync(int workspaceId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// The <c>ai</c> section of the Workspace definition (<c>graymoon.json</c> of the special Workspace): per-provider

@@ -407,23 +407,27 @@ public sealed class WorkspaceManifestService(
     }
 
     public async Task<bool> IsCodeGraphEnabledAsync(int workspaceId, CancellationToken cancellationToken = default)
+        => await GetCodeGraphSwitchAsync(workspaceId, cancellationToken) == true;
+
+    public async Task<bool?> GetCodeGraphSwitchAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
         try
         {
             var (_, args) = await GetSpecialContextArgsAsync(workspaceId, cancellationToken);
             if (args.WorkspaceRepositoryName is null)
-                return false;
+                return null;
 
             var read = await WorkspaceRepositoryFileAccess.ReadAsync(
                 workerBridge, args, manifestFile.FileName, cancellationToken);
-            return read.Found
-                && manifestFile.TryParse(read.Content ?? string.Empty, out var manifest, out _)
-                && manifest?.CodeGraph == true;
+            if (!read.Found || !manifestFile.TryParse(read.Content ?? string.Empty, out var manifest, out _))
+                return null;
+
+            return manifest?.CodeGraph;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogWarning(ex, "Reading the codegraph setting failed. WorkspaceId={WorkspaceId}", workspaceId);
-            return false;
+            return null;
         }
     }
 

@@ -1186,8 +1186,10 @@ seed the new context from the Workspace: checkout structure, projects, dependenc
   GitVersion is left empty and marked pending (GitVersionPending) until the Feature's own first GitVersion probe,
   and dependency edges into a pending repository show as pending, not matched or mismatched
 select the new Feature
-optional: start the CodeGraph index build when graymoon.json has "codegraph": true
-  (overlay offers Background instead of Abort)
+optional: start the CodeGraph index build when New Feature's "Create CodeGraph index" is ticked
+  (shown when the CodeGraph CLI is installed, including with no Workspace repository and no graymoon.json;
+  hidden when graymoon.json has "codegraph": false; ticked by default;
+  overlay offers Background instead of Abort)
 ```
 
 Uncommitted Workspace changes are not copied. If any repository fails, or the create is aborted after the intent is committed, the Feature is kept in **NeedsRepair** with the error.

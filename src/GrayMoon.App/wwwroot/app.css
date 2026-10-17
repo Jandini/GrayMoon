@@ -881,6 +881,11 @@ select:disabled,
     max-height: calc(100vh - 3.5rem);
 }
 
+/* New Feature is a short form. A little wider than the default modal so the note and the CodeGraph option fit. */
+.modal-dialog.create-feature-dialog {
+    max-width: 40rem;
+}
+
 .modal-dialog > .modal-content {
     max-height: 100%;
     overflow: hidden;
