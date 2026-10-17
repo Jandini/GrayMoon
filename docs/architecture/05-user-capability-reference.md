@@ -878,7 +878,7 @@ use Ctrl/Cmd+Enter commit shortcut
 
 ### Commit control
 
-There is one primary Commit button: **Commit Staged** when any repository has staged content, otherwise **Commit All** (`WorkspaceCommitModeHelper.ResolveOfferedMode`). The keyed alternatives carry the captured mode, so a watcher refresh that flips the label mid-click cannot commit the wrong set. The button is joined to an AI provider segment and a chevron menu (`[Commit Staged|All][provider][chevron]`). The menu's **On Commit** header holds **Generate commit message** and **Push committed**, both remembered per Workspace across a reload (F5 or Ctrl+F5) until the App restarts. Ctrl/Cmd+Enter targets only the primary commit element, never the AI segment or the chevron. While the message box is empty the control attaches to the right edge of the box; below about 20rem it stays under the box.
+There is one primary Commit button: **Commit Staged** when any repository has staged content, otherwise **Commit All** (`WorkspaceCommitModeHelper.ResolveOfferedMode`). The keyed alternatives carry the captured mode, so a watcher refresh that flips the label mid-click cannot commit the wrong set. The button is joined to an AI provider segment and a chevron menu (`[Commit Staged|All][provider][chevron]`). The menu's **On Commit** header holds **Generate commit message** and **Push committed**, both remembered per Workspace across a reload (F5 or Ctrl+F5) until the App restarts. **Generate commit message** starts ticked until you change it; **Push committed** starts unticked. Ctrl/Cmd+Enter targets only the primary commit element, never the AI segment or the chevron. While the message box is empty the control attaches to the right edge of the box; below about 20rem it stays under the box.
 
 ### Directory rows
 
@@ -1361,7 +1361,7 @@ Desktop: WorkerInstaller (secret hand-off)
 ```text
 Changes page      click the provider segment of the Commit control to write ONE commit message for exactly
                   what the button would commit (Commit Staged or Commit All); it only fills the message box
-                  tick "Generate commit message" (On Commit) so Commit writes the message first when the box is empty
+                  "Generate commit message" (On Commit) starts ticked, so Commit writes the message first when the box is empty; untick it to stop that
 New PR dialog     click the provider selector at the right of the tab bar to write ONE title and ONE Markdown
                   description shared by every PR in the dialog
 both              pick a provider in the menu (pins it for the Workspace on this machine; choosing the
@@ -1382,7 +1382,7 @@ survives navigation  clicking the provider keeps writing when you leave Changes,
                      its own message (typed or written); Cancel stops only the context on screen. While that
                      context is still on screen and the scope has not moved, the text goes straight into the box;
                      otherwise it is kept for that context (the message, or a suggestion if the box was edited)
-checkboxes           Generate commit message and Push committed stay as set across F5 and Ctrl+F5 until the App restarts
+checkboxes           Generate commit message starts ticked and Push committed starts unticked; both stay as set across F5 and Ctrl+F5 until the App restarts
 PR comparison        each repository compares its head with the target selected in the Branch tab, never the
                      default branch; PR generation does not run in an overlay job
 apply policy         AiTextApplyPolicy.Decide: text goes straight into the field only if the field was empty at

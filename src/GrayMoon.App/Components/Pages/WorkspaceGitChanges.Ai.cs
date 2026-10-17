@@ -26,7 +26,7 @@ public sealed partial class WorkspaceGitChanges
     private AiProviderMenu? _aiMenu;
     private string? _aiLocalError;
 
-    /// <summary>The menu's "Generate commit message" option, remembered per workspace like "Push committed".</summary>
+    /// <summary>The menu's "Generate commit message" option. Starts ticked until the user changes it, then remembered per workspace like "Push committed".</summary>
     private bool GenerateMessageOnCommit
     {
         get => GenerateMessageOnCommitMemory.Get(WorkspaceId);
