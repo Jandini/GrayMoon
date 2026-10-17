@@ -273,8 +273,8 @@
                                                     }
                                                     else
                                                     {
-                                                        <div class="d-flex align-items-center justify-content-between">
-                                                            <span class="text-danger small">
+                                                        <div class="d-flex align-items-center justify-content-between gap-3">
+                                                            <span class="text-danger small flex-grow-1 min-w-0">
                                                                 @deleteConfirmMessage
                                                                 @if (IsFeatureContext)
                                                                 {
@@ -419,8 +419,8 @@
                                             </div>
                                             @if (branchToDelete == branch && deleteIsRemote)
                                             {
-                                                <div class="branch-delete-confirm d-flex align-items-center justify-content-between px-2 py-2" @ref="deleteConfirmElementRef">
-                                                    <span class="text-danger small">
+                                                <div class="branch-delete-confirm d-flex align-items-center justify-content-between gap-3 px-2 py-2" @ref="deleteConfirmElementRef">
+                                                    <span class="text-danger small flex-grow-1 min-w-0">
                                                         @deleteConfirmMessage
                                                         @if (IsFeatureContext)
                                                         {
