@@ -288,7 +288,7 @@ RootWorktree      the Workspace-role repository alone and first (D10); its workt
 SourceWorktrees   only when the root succeeded; SemaphoreSlim(MaxParallelOperations); each row Ready/NeedsRepair
                   saved in its own AppDbContext; Sources live inside the root
 SeedProjections   SeedInitialFeatureProjectionsAsync (idempotent), then Feature Ready
-CodeGraph         InitializeCodeGraphAsync, then the watch (section 5F), both optional
+CodeGraph         when Create asked for an index: InitializeCodeGraphAsync (the definition switch is not required), then the watch (section 5F)
 ```
 
 - Worktree paths are built from the persisted `ManagedFeatureStorageRoot` with `WorkerPath.Combine`. Do not call the path resolver inside the intent transaction: it opens a second `AppDbContext` and deadlocks SQLite against this write and against `WorkspaceGitChangesWriteQueue`.
@@ -344,11 +344,11 @@ It compares paths only, so a drifted branch stays Ready. Any Worker failure (`Li
 
 ### 5F. CodeGraph background build
 
-Optional, when the Workspace definition has `"codegraph": true` (`FeatureCodeGraphService`):
+Optional (`FeatureCodeGraphService`). `"codegraph": true` in the Workspace definition is the workspace-wide switch for maintaining `codegraph.json` and the managed `.gitignore` entry, and for Repair. Create follows the New Feature checkbox instead.
 
-- At the end of Create / Repair Feature, `InitCodeGraph` makes the Worker's `CodeGraphCli` start `codegraph init -v` in the Feature root in the background (its own full build; up to 1 h). The build outlives the App's command timeout.
-- The operation then watches it with repeated `WatchCodeGraphInit` calls, each following the build for at most 60 s (`CodeGraphCli.WatchWait`) and replaying the buffered output from a line offset into the overlay terminal. The watch runs inside `IWorkspaceLockedOperation.RunBackgroundableAsync`, so the overlay shows Background instead of Abort; Background stops only the watch, the build continues and the operation (and its structural lock) completes.
-- At the start of Remove / Roll back Feature, before any worktree goes, `UninitCodeGraph` stops a running build and the CodeGraph processes named in `.codegraph` pid files (only while still a `node` process started before its pid file), runs `codegraph uninit`, and deletes `.codegraph` when that fails.
+- At the end of Create Feature, only when the dialog asked for an index, `InitCodeGraph` makes the Worker's `CodeGraphCli` start `codegraph init -v` in the Feature root in the background (its own full build; up to 1 h). The build outlives the App's command timeout. The same init runs at the end of Repair Feature only when the switch is on.
+- The operation then watches it with repeated `WatchCodeGraphInit` calls, each following the build for at most 60 s (`CodeGraphCli.WatchWait`) and replaying the buffered output from a line offset into the overlay terminal. The watch runs inside `IWorkspaceLockedOperation.RunBackgroundableAsync`, so the overlay shows Background instead of Abort; Background stops only the watch, the build continues and the operation (and its structural lock) completes. Create watches only when it asked for the index, and that watch does not require the switch.
+- At the start of Remove / Roll back Feature, before any worktree goes, `UninitCodeGraph` always runs: it stops a running build and the CodeGraph processes named in `.codegraph` pid files (only while still a `node` process started before its pid file), runs `codegraph uninit`, and deletes `.codegraph` when that fails. A Feature with no index returns `NotInitialized`.
 - Every CodeGraph failure is logged only and never fails the Feature operation.
 
 ---

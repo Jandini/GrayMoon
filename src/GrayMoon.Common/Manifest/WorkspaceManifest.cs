@@ -8,9 +8,11 @@ namespace GrayMoon.Common.Manifest;
 /// through <see cref="IWorkspaceManifestFile"/>.
 /// </summary>
 /// <param name="CodeGraph">
-/// <c>codegraph</c>: true lets GrayMoon maintain <c>codegraph.json</c> in the Workspace repository and give each Feature
-/// its own CodeGraph index. Owned by the file, not the database: GrayMoon keeps it on
-/// rewrite and drift detection ignores it. Null (absent) means off.
+/// <c>codegraph</c>: the workspace-wide switch. True makes GrayMoon maintain <c>codegraph.json</c> and
+/// <c>/.codegraph/</c> in the managed <c>.gitignore</c>, and Repair Feature starts an index. False turns that
+/// off, including the New Feature checkbox. Null (absent) leaves that maintenance off, and the New Feature
+/// dialog can still offer an index when the CodeGraph CLI is installed. Owned by the file, not the database:
+/// GrayMoon keeps it on rewrite and drift detection ignores it.
 /// </param>
 /// <param name="VersionFiles">
 /// <c>versionFiles</c>: the Workspace files that have a version configuration (Files page). Written from the database;

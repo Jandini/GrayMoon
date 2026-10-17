@@ -357,7 +357,7 @@ workspace.profile   type / versioning / ci
 connectors          GitHub connector URLs of the Source repositories
 repositories        Source repositories by URL and connector, with an optional tag + commit pin
 versionFiles        configured version files and their patterns (section 13)
-codegraph           optional, turns on the CodeGraph integration (section 22C)
+codegraph           optional workspace-wide switch (section 22C)
 ai                  optional, AI providers and models for commit/PR text (section 18A)
 ```
 
@@ -919,10 +919,12 @@ A Feature keeps every repository on its Feature branch (the Feature name), or de
 
 ### 22C. Optional CodeGraph integration
 
-When `graymoon.json` contains `"codegraph": true`, GrayMoon maintains `codegraph.json` in the Workspace repository (its `include` lists every Source folder, since they are Git-ignored there) and adds `/.codegraph/` to the managed `.gitignore` section. Each Feature then gets its own CodeGraph index:
+`"codegraph"` in `graymoon.json` is the workspace-wide switch. When it is `true`, GrayMoon maintains `codegraph.json` in the Workspace repository (its `include` lists every Source folder, since they are Git-ignored there) and adds `/.codegraph/` to the managed `.gitignore` section. `false` turns that maintenance off and hides the New Feature checkbox. An absent property leaves the maintenance off.
 
-- At the end of Create and Repair, the Worker starts `codegraph init` in the Feature root in the background. The overlay shows its output with a Background button instead of Abort; Background stops only the watching, the build continues and the operation completes.
-- At the start of Remove and Roll back, before any worktree goes, GrayMoon stops a running build, ends the CodeGraph processes recorded in the Feature's `.codegraph` folder (typically an AI tool's MCP daemon that keeps the database open), runs `codegraph uninit` and deletes `.codegraph` if that fails.
+Creating a Feature does not require that switch. When the CodeGraph CLI is installed, the New Feature dialog shows **Create CodeGraph index**, ticked by default, even when the Workspace has no Workspace repository and no `graymoon.json`. Unticking it skips the index for that Feature even when the switch is on. An explicit `"codegraph": false` hides the box.
+
+- At the end of Create, when the box is ticked, and at the end of Repair when the switch is on, the Worker starts `codegraph init` in the Feature root in the background. The overlay shows its output with a Background button instead of Abort; Background stops only the watching, the build continues and the operation completes.
+- At the start of Remove and Roll back, before any worktree goes, GrayMoon stops a running build, ends the CodeGraph processes recorded in the Feature's `.codegraph` folder (typically an AI tool's MCP daemon that keeps the database open), runs `codegraph uninit` and deletes `.codegraph` if that fails. This runs even when the switch is off, because a ticked box can leave an index behind, and a leftover index blocks removing the worktree.
 - Every CodeGraph failure is only logged and never fails the Feature operation. CodeGraph is not a host prerequisite; the Worker page shows its version when installed.
 
 ### 22D. Known gaps

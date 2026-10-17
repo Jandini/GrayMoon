@@ -179,6 +179,9 @@ public sealed class WorkspaceManifestDriftTriggerTests
         public Task<bool> IsCodeGraphEnabledAsync(int workspaceId, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
+        public Task<bool?> GetCodeGraphSwitchAsync(int workspaceId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
         public Task<(GrayMoon.Common.Manifest.WorkspaceManifestAi? Ai, string? Error)> ReadAiAsync(int workspaceId, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 

@@ -118,6 +118,20 @@ public sealed class CodeGraphWorkspaceTests
         Assert.Equal(expected, await service.IsCodeGraphEnabledAsync(workspace.WorkspaceId));
     }
 
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    [InlineData(null, null)]
+    public async Task Codegraph_switch_keeps_an_explicit_false_distinct_from_absent(bool? codeGraph, bool? expected)
+    {
+        await using var fixture = await ManifestTestFixture.CreateAsync();
+        var workspace = await fixture.SeedWorkspaceWithRootRepositoryAsync();
+        var service = fixture.CreateService();
+        fixture.Bridge.RespondWithFile(new WorkspaceManifestFile().Serialize(await service.BuildFromDatabaseAsync(workspace.WorkspaceId) with { CodeGraph = codeGraph }));
+
+        Assert.Equal(expected, await service.GetCodeGraphSwitchAsync(workspace.WorkspaceId));
+    }
+
     [Fact]
     public async Task Write_codegraph_config_creates_the_file_in_the_workspace_repository()
     {
@@ -157,8 +171,41 @@ public sealed class CodeGraphWorkspaceTests
         var service = CreateFeatureService(new RecordingManifestService { CodeGraphEnabled = false }, bridge);
 
         Assert.Equal(FeatureCodeGraphService.Disabled, await service.InitializeAsync(7, new WorkspaceFeatureContextId(2)));
-        Assert.Equal(FeatureCodeGraphService.Disabled, await service.UninitializeAsync(7, new WorkspaceFeatureContextId(2)));
         Assert.Empty(bridge.Sent);
+    }
+
+    [Fact]
+    public async Task Feature_init_runs_when_create_asked_even_if_the_switch_is_off()
+    {
+        var manifest = new RecordingManifestService { CodeGraphEnabled = false };
+        var bridge = new ScriptedWorkerBridge { Handler = (_, _) => new WorkerCommandResponse(true, new { outcome = "Started" }, null) };
+        var service = CreateFeatureService(manifest, bridge);
+
+        var outcome = await service.InitializeAsync(7, new WorkspaceFeatureContextId(2), honorDefinitionSwitch: false);
+
+        Assert.Equal("Started", outcome);
+        Assert.Equal(["codegraph", "codegraph"], manifest.Calls);
+        Assert.Equal(WorkerHubMethods.InitCodeGraph, Assert.Single(bridge.Sent).Command);
+    }
+
+    [Fact]
+    public async Task Feature_watch_follows_a_create_that_ignored_the_switch()
+    {
+        var bridge = new ScriptedWorkerBridge { Handler = (_, _) => new WorkerCommandResponse(true, new { outcome = "NotRunning", next = 0 }, null) };
+        var service = CreateFeatureService(new RecordingManifestService { CodeGraphEnabled = false }, bridge);
+
+        Assert.Equal("NotRunning", await service.WatchInitializeAsync(7, new WorkspaceFeatureContextId(2), honorDefinitionSwitch: false));
+        Assert.Equal(WorkerHubMethods.WatchCodeGraphInit, Assert.Single(bridge.Sent).Command);
+    }
+
+    [Fact]
+    public async Task Feature_uninit_removes_the_index_even_when_the_switch_is_off()
+    {
+        var bridge = new ScriptedWorkerBridge { Handler = (_, _) => new WorkerCommandResponse(true, new { outcome = "NotInitialized" }, null) };
+        var service = CreateFeatureService(new RecordingManifestService { CodeGraphEnabled = false }, bridge);
+
+        Assert.Equal("NotInitialized", await service.UninitializeAsync(7, new WorkspaceFeatureContextId(2)));
+        Assert.Equal(WorkerHubMethods.UninitCodeGraph, Assert.Single(bridge.Sent).Command);
     }
 
     [Fact]

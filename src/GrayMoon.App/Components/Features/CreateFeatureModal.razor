@@ -1,7 +1,12 @@
 @using GrayMoon.Application
 @using GrayMoon.Application.Features
+@using GrayMoon.Application.WorkspaceManifest
+@using GrayMoon.App.Services.Worker
 @using GrayMoon.Common.Features
 @inject IWorkspaceFeatureOperations FeatureOperations
+@inject IWorkspaceManifestService ManifestService
+@inject HostInfoCache HostInfo
+@inject IWorkerBridge WorkerBridge
 @inject ILogger<CreateFeatureModal> Logger
 
 @if (IsVisible)
@@ -11,7 +16,7 @@
         <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: 1085;"
              @onkeydown="HandleKeyDown"
              @ref="_modalElement">
-            <div class="modal-dialog modal-dialog-centered @(HasBranchCollisions ? "modal-lg" : null)">
+            <div class="modal-dialog modal-dialog-centered @(HasBranchCollisions ? "modal-lg" : "create-feature-dialog")">
                 <div class="modal-content">
                     <div class="modal-header">
                         <h5 class="modal-title">New Feature <small class="text-muted fw-normal">worktree</small></h5>
@@ -71,6 +76,14 @@
                                 <text>The Feature starts from the current committed state. Uncommitted changes in Workspace are not copied and remain in Workspace.</text>
                             }
                         </div>
+                        @if (_offerCodeGraphIndex)
+                        {
+                            <div class="form-check mt-3 mb-1">
+                                <input class="form-check-input" type="checkbox" id="create-feature-codegraph" @bind="_createCodeGraphIndex" />
+                                <label class="form-check-label" for="create-feature-codegraph">Create CodeGraph index</label>
+                            </div>
+                            <div class="form-text text-muted mb-0">Indexes this Feature's code for CodeGraph. The build starts from scratch in this Feature.</div>
+                        }
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-outline-secondary" @onclick="Cancel">Cancel</button>
@@ -104,6 +117,10 @@
     private bool _busy;
     private bool _wasVisible;
     private bool _focusPending;
+    private bool _offerCodeGraphIndex;
+    private bool _createCodeGraphIndex = true;
+    private int _codeGraphCheck;
+    private Task _codeGraphCheckTask = Task.CompletedTask;
 
     private bool HasBranchCollisions => _branchCollisions is { Count: > 0 };
 
@@ -131,10 +148,39 @@
             _error = null;
             _branchCollisions = null;
             _totalRepositoryCount = 0;
+            _createCodeGraphIndex = true;
+            _offerCodeGraphIndex = false;
             _focusPending = true;
+            _codeGraphCheckTask = LoadCodeGraphOfferAsync(++_codeGraphCheck);
         }
 
         _wasVisible = IsVisible;
+    }
+
+    /// <summary>
+    /// The checkbox is offered when the CodeGraph CLI is installed, including when this Workspace has no Workspace
+    /// repository and no <c>graymoon.json</c>. An explicit <c>"codegraph": false</c> is the workspace-wide off switch.
+    /// </summary>
+    private async Task LoadCodeGraphOfferAsync(int generation)
+    {
+        try
+        {
+            var installedTask = HostInfo.GetAsync(WorkerBridge, refresh: false, CancellationToken.None);
+            var switchTask = ManifestService.GetCodeGraphSwitchAsync(WorkspaceId);
+            var installedRead = await installedTask;
+            var codeGraphSwitch = await switchTask;
+            if (generation != _codeGraphCheck)
+                return;
+
+            var installed = installedRead.Read is { } read
+                && !HostPrerequisiteState.IsMissing(read.CodeGraphVersion);
+            _offerCodeGraphIndex = installed && codeGraphSwitch != false;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogDebug(ex, "Could not tell whether to offer a CodeGraph index.");
+        }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -161,10 +207,12 @@
         _totalRepositoryCount = 0;
         try
         {
+            await _codeGraphCheckTask;
             var result = await FeatureOperations.CreateFeatureAsync(
                 WorkspaceId,
                 _name.Trim(),
-                WorkspaceFeatureBaseKindApplication.CurrentWorkspace);
+                WorkspaceFeatureBaseKindApplication.CurrentWorkspace,
+                createCodeGraphIndex: _offerCodeGraphIndex && _createCodeGraphIndex);
             if (!result.Success)
             {
                 if (string.Equals(result.Condition, "BranchExists", StringComparison.Ordinal)
