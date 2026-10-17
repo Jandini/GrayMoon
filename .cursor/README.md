@@ -23,4 +23,4 @@ This folder contains rules and instructions for Cursor when working on this repo
 | `desktop-readme-on-feature-change.mdc` | Update the Desktop README "Recent GrayMoon changes" list |
 | `no-commit-or-push.mdc` | Never commit or push; propose a commit message instead |
 
-The same conventions are described in more detail in `CLAUDE.md` and `AGENTS.md` in the repository root.
+The same conventions are described in more detail in `CLAUDE.md` and `AGENTS.md` in the repository root. The architecture (current state only) is in `docs/architecture/`; update the relevant file there in the same change as the behavior.

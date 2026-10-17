@@ -1,4 +1,4 @@
 - When you complete a task, write a single sentence about the completed task.
 - **Line endings:** Always use **Windows (CRLF)** in generated or edited code. Do not use LF-only.
 - **Hyphens only:** Never use em dash or en dash; ASCII hyphen-minus (`-`) only.
-- Full coding conventions and architecture notes: `CLAUDE.md` and `AGENTS.md` in the repository root, and `docs/architecture/`.
+- Full coding conventions and architecture notes: `CLAUDE.md` and `AGENTS.md` in the repository root, and `docs/architecture/` (the only docs folder; update it in the same change as the behavior it describes).
