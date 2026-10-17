@@ -116,20 +116,20 @@ public sealed class WorkspaceGitChangesCommitGenerationTests
     }
 
     [Fact]
-    public void Generate_commit_message_and_push_committed_default_unticked_and_are_per_workspace()
+    public void Generate_commit_message_starts_ticked_until_changed_and_push_committed_starts_unticked_per_workspace()
     {
         var generate = new WorkspaceGitChangesGenerateMessageOnCommitMemory();
         var push = new WorkspaceGitChangesPushAfterCommitMemory();
 
-        Assert.False(generate.Get(1));
+        Assert.True(generate.Get(1));
         Assert.False(push.Get(1));
 
-        generate.Set(1, true);
+        generate.Set(1, false);
         push.Set(1, true);
 
-        Assert.True(generate.Get(1));
+        Assert.False(generate.Get(1));
         Assert.True(push.Get(1));
-        Assert.False(generate.Get(2));
+        Assert.True(generate.Get(2));
         Assert.False(push.Get(2));
     }
 

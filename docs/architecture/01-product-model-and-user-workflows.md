@@ -756,7 +756,7 @@ copy path
 keyboard shortcuts
 ```
 
-There is one Commit button. It reads "Commit Staged" when any repository has staged content (commits only what is staged) and "Commit All" otherwise (stages everything, then commits) (`WorkspaceCommitModeHelper.ResolveOfferedMode`). The mode is captured when the button is rendered, never re-inferred at click time. The button is joined to an AI provider segment and a chevron menu; the menu's "On Commit" header holds "Generate commit message" and "Push committed" (both remembered per Workspace across a reload, F5 or Ctrl+F5, until GrayMoon restarts). Ctrl/Cmd+Enter triggers only the Commit button.
+There is one Commit button. It reads "Commit Staged" when any repository has staged content (commits only what is staged) and "Commit All" otherwise (stages everything, then commits) (`WorkspaceCommitModeHelper.ResolveOfferedMode`). The mode is captured when the button is rendered, never re-inferred at click time. The button is joined to an AI provider segment and a chevron menu; the menu's "On Commit" header holds "Generate commit message" (starts ticked, until you change it) and "Push committed" (starts unticked). Both are remembered per Workspace across a reload, F5 or Ctrl+F5, until GrayMoon restarts. Ctrl/Cmd+Enter triggers only the Commit button.
 
 A nested, non-ignored Git repository shows as one "untracked folder" row with no diff and no stage or undo actions.
 
