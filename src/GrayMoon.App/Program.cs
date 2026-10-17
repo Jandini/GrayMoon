@@ -216,6 +216,7 @@ try
     builder.Services.AddScoped<IWorkspacePullRequestOperations, WorkspacePullRequestOperations>();
     builder.Services.AddScoped<IWorkspaceFileOperations, WorkspaceFileOperations>();
     builder.Services.AddScoped<IWorkspaceGitChangesOperations, WorkspaceGitChangesOperations>();
+    builder.Services.AddSingleton<HostInfoCache>();
     builder.Services.AddSingleton<AiProviderAvailabilityCache>();
     builder.Services.AddScoped<WorkspaceAiProviderPins>();
     builder.Services.AddScoped<IWorkspaceAiGenerationOperations, WorkspaceAiGenerationOperations>();
@@ -249,8 +250,9 @@ try
     builder.Services.AddScoped<WorkspaceGitChangesSelectionMemory>();
     builder.Services.AddSingleton<IGitChangesFileOrdering, TreeGitChangesFileOrdering>();
     builder.Services.AddSingleton<WorkspaceGitChangesCommitMessageMemory>();
-    builder.Services.AddScoped<WorkspaceGitChangesPushAfterCommitMemory>();
-    builder.Services.AddScoped<WorkspaceGitChangesGenerateMessageOnCommitMemory>();
+    builder.Services.AddSingleton<WorkspaceGitChangesPushAfterCommitMemory>();
+    builder.Services.AddSingleton<WorkspaceGitChangesGenerateMessageOnCommitMemory>();
+    builder.Services.AddSingleton<WorkspaceGitChangesCommitGeneration>();
     builder.Services.AddSingleton<IWorkspaceGitChangesActivityTracker, WorkspaceGitChangesActivityTracker>();
     builder.Services.AddSingleton<IWorkspaceGitChangesMonitoringPause, WorkspaceGitChangesMonitoringPause>();
     builder.Services.AddSingleton<IGitChangesWorkspaceScanner, GitChangesWorkspaceScanner>();

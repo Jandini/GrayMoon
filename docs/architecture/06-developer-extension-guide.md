@@ -463,7 +463,7 @@ To add one:
 3. Register it in `Cli/Handlers/RunCommandHandler.cs` (`AddSingleton<IAiCliAdapter, ...>`); `AiCliRunner` discovers adapters by `ProviderId`.
 4. App: add the icon mapping in `WorkspaceAiGenerationOperations.IconFor` and the SVG under `wwwroot/icons/`.
 5. Tests in `GrayMoon.Worker.Tests/AiCliRunnerTests.cs`.
-6. Optional host prerequisite (as Cursor Agent): a `HostPrerequisiteIds` entry that is never required.
+6. Optional host prerequisite (as Claude, id `claudeCli`, or Codex, id `codexCli`): a `HostPrerequisiteIds` entry that is never required, listed on the Worker Host tab, and installed by Desktop from the same allowlist.
 
 Adapter rules:
 

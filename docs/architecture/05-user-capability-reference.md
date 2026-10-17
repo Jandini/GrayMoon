@@ -230,11 +230,13 @@ Install tab       labelled "Update" and shown red while the state is VersionMism
 Uninstall tab
 Host tab          only while Online or VersionMismatch; Worker version, .NET SDK, Git, GitVersion,
                   CodeGraph (codeGraphVersion, optional, informational only),
+                  Claude (claudeVersion; listed with its install command, never required),
+                  Codex (codexVersion; listed with its install command, never required),
                   Cursor Agent (cursorAgentVersion; listed with its install command, never required)
                   footer: "Install All" for missing prerequisites in Desktop mode
 ```
 
-`GetHostInfo` (one of the two commands allowed on a version mismatch) supplies the host versions. Required prerequisites follow the Workspace profiles (`HostPrerequisiteRequirements.For`): Git always, GitVersion when any Workspace uses it, the .NET SDK when any Workspace uses GitVersion, package restore or dependency-aware update. Missing optional tools are labelled "(optional)" and never raise the attention badge; Cursor Agent counts as missing but is never required.
+`GetHostInfo` (one of the two commands allowed on a version mismatch) supplies the host versions and which AI CLIs are installed. Required prerequisites follow the Workspace profiles (`HostPrerequisiteRequirements.For`): Git always, GitVersion when any Workspace uses it, the .NET SDK when any Workspace uses GitVersion, package restore or dependency-aware update. Missing optional tools are labelled "(optional)" and never raise the attention badge; Claude, Codex and Cursor Agent count as missing but are never required.
 
 ### Install script guards
 
@@ -876,7 +878,7 @@ use Ctrl/Cmd+Enter commit shortcut
 
 ### Commit control
 
-There is one primary Commit button: **Commit Staged** when any repository has staged content, otherwise **Commit All** (`WorkspaceCommitModeHelper.ResolveOfferedMode`). The keyed alternatives carry the captured mode, so a watcher refresh that flips the label mid-click cannot commit the wrong set. The button is joined to an AI provider segment and a chevron menu (`[Commit Staged|All][provider][chevron]`). The menu's **On Commit** header holds **Generate commit message** and **Push committed**, both remembered per Workspace for the circuit. Ctrl/Cmd+Enter targets only the primary commit element, never the AI segment or the chevron. While the message box is empty the control attaches to the right edge of the box; below about 20rem it stays under the box.
+There is one primary Commit button: **Commit Staged** when any repository has staged content, otherwise **Commit All** (`WorkspaceCommitModeHelper.ResolveOfferedMode`). The keyed alternatives carry the captured mode, so a watcher refresh that flips the label mid-click cannot commit the wrong set. The button is joined to an AI provider segment and a chevron menu (`[Commit Staged|All][provider][chevron]`). The menu's **On Commit** header holds **Generate commit message** and **Push committed**, both remembered per Workspace across a reload (F5 or Ctrl+F5) until the App restarts. Ctrl/Cmd+Enter targets only the primary commit element, never the AI segment or the chevron. While the message box is empty the control attaches to the right edge of the box; below about 20rem it stays under the box.
 
 ### Directory rows
 
@@ -1362,7 +1364,8 @@ Changes page      click the provider segment of the Commit control to write ONE 
                   tick "Generate commit message" (On Commit) so Commit writes the message first when the box is empty
 New PR dialog     click the provider selector at the right of the tab bar to write ONE title and ONE Markdown
                   description shared by every PR in the dialog
-both              pick a provider in the menu (pins it for the Workspace on this machine; never generates)
+both              pick a provider in the menu (pins it for the Workspace on this machine; choosing the
+                  provider that is already pinned removes it until another is pinned; never generates)
 ```
 
 Providers are Claude (`claude`), Codex (`codex`) and Cursor Agent (`agent`, then `cursor-agent`; the editor's `cursor` command is not the agent). Each CLI must be installed and signed in for the Worker's user. Credentials never go in `graymoon.json`.
@@ -1374,6 +1377,12 @@ generate on commit   with "Generate commit message" ticked, a provider pinned an
                      writes the message, then commits, then pushes if "Push committed" is ticked; the overlay
                      terminal shows each step labelled "ai" (the CLI call, never the prompt); if the provider
                      fails nothing is committed; a typed message is always committed as typed
+survives navigation  clicking the provider keeps writing when you leave Changes, reload, or switch Feature /
+                     Workspace; a Feature and the Workspace can be written at the same time; each context keeps
+                     its own message (typed or written); Cancel stops only the context on screen. While that
+                     context is still on screen and the scope has not moved, the text goes straight into the box;
+                     otherwise it is kept for that context (the message, or a suggestion if the box was edited)
+checkboxes           Generate commit message and Push committed stay as set across F5 and Ctrl+F5 until the App restarts
 PR comparison        each repository compares its head with the target selected in the Branch tab, never the
                      default branch; PR generation does not run in an overlay job
 apply policy         AiTextApplyPolicy.Decide: text goes straight into the field only if the field was empty at
@@ -1393,7 +1402,7 @@ failures             stay inside the AI control as one redacted line (not signed
 ### Flow
 
 ```text
-resolve provider and model, check availability (Worker GetAiProviders; App cache 2 minutes)
+resolve provider and model, check availability (the startup GetHostInfo; menus do not probe)
 Worker CollectGitEvidence   one request for all repositories, bounded fan-out, never mutates or fetches
 AiPromptBuilder             one prompt under a hard budget (commit 4,000 / PR 8,000 estimated tokens),
                             secrets redacted, evidence wrapped as untrusted data
@@ -1409,6 +1418,9 @@ All three Worker commands run on the main pool. The App never runs git or an AI 
 ```text
 Components/Ai: AiProviderControl, AiMenuCheckItem, AiSuggestionPanel; wwwroot/css/ai-generation.css, js/gm-ai-menu.js
 WorkspaceGitChanges.Ai.cs / NewPullRequestModal.Ai.cs
+WorkspaceGitChangesCommitGeneration   click-to-write runs outside the page, one run per Workspace and Feature context
+WorkspaceGitChangesCommitMessageMemory   the message, per Workspace and Feature context
+WorkspaceGitChangesPushAfterCommitMemory / WorkspaceGitChangesGenerateMessageOnCommitMemory   the two On Commit checkboxes, per Workspace
 IWorkspaceAiGenerationOperations -> WorkspaceAiGenerationOperations
 AiTextApplyPolicy, AiPromptBuilder, AiGeneratedTextParser (Common)
 Worker: GitEvidenceCollector, AiCliRunner, AiCliAdapters

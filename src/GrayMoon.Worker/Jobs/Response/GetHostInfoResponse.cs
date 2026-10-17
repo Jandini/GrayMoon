@@ -21,6 +21,21 @@ public sealed class GetHostInfoResponse
     [JsonPropertyName("cursorAgentVersion")]
     public string? CursorAgentVersion { get; set; }
 
+    /// <summary>Optional Claude Code CLI version (<c>claude</c>); null when it is not installed. Only the Claude AI provider needs it.</summary>
+    [JsonPropertyName("claudeVersion")]
+    public string? ClaudeVersion { get; set; }
+
+    /// <summary>Optional Codex CLI version (<c>codex</c>); null when it is not installed. Only the Codex AI provider needs it.</summary>
+    [JsonPropertyName("codexVersion")]
+    public string? CodexVersion { get; set; }
+
+    /// <summary>
+    /// Every AI CLI this Worker can run, from the same probe as <see cref="ClaudeVersion"/>, <see cref="CodexVersion"/> and <see cref="CursorAgentVersion"/>.
+    /// Commit and New Pull Request read this instead of probing again.
+    /// </summary>
+    [JsonPropertyName("aiProviders")]
+    public List<AiProviderAvailabilityDto> AiProviders { get; set; } = [];
+
     /// <summary>Worker host user profile directory (e.g. C:\Users\name). Used to default Feature worktree storage.</summary>
     [JsonPropertyName("userProfilePath")]
     public string? UserProfilePath { get; set; }

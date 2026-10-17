@@ -44,11 +44,11 @@ public partial class NewPullRequestModal
         _aiGenerating = false;
     }
 
-    private async Task LoadAiMenuAsync(bool refresh = false)
+    private async Task LoadAiMenuAsync()
     {
         try
         {
-            _aiMenu = await AiOperations.GetProvidersAsync(WorkspaceId, refresh, CancellationToken.None);
+            _aiMenu = await AiOperations.GetProvidersAsync(WorkspaceId, CancellationToken.None);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -61,6 +61,9 @@ public partial class NewPullRequestModal
 
     private async Task OnAiPinAsync(string? providerId)
     {
+        if (providerId is not null && string.Equals(_aiMenu?.PinnedProviderId, providerId, StringComparison.Ordinal))
+            providerId = null;
+
         try
         {
             await AiOperations.PinProviderAsync(WorkspaceId, providerId, CancellationToken.None);
@@ -72,12 +75,6 @@ public partial class NewPullRequestModal
             Logger.LogWarning(ex, "Pinning the AI provider failed. WorkspaceId={WorkspaceId}", WorkspaceId);
             _aiError = "Could not pin the AI provider.";
         }
-    }
-
-    private Task OnAiRefreshAsync()
-    {
-        _aiMenu = null;
-        return LoadAiMenuAsync(refresh: true);
     }
 
     private void CancelAiGeneration() => _aiCts?.Cancel();

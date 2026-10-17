@@ -29,9 +29,9 @@ public sealed class WorkspaceAiGenerationOperations(
     IOptions<AiGenerationOptions> aiOptions,
     ILogger<WorkspaceAiGenerationOperations> logger) : IWorkspaceAiGenerationOperations
 {
-    public async Task<AiProviderMenu> GetProvidersAsync(int workspaceId, bool refresh, CancellationToken cancellationToken)
+    public async Task<AiProviderMenu> GetProvidersAsync(int workspaceId, CancellationToken cancellationToken)
     {
-        var installed = await availability.GetAsync(workerBridge, refresh, cancellationToken);
+        var installed = await availability.GetAsync(workerBridge, cancellationToken);
         var pinned = await pins.GetAsync(workspaceId, cancellationToken);
 
         WorkspaceManifestAiRead ai;
@@ -182,7 +182,7 @@ public sealed class WorkspaceAiGenerationOperations(
         var choice = AiProviderConfiguration.Resolve(ai.Section, providerId);
         if (!choice.IsValid)
             return GenerationRun.Fail(AiGenerationErrorKind.Configuration, choice.Error!);
-        var cli = (await availability.GetAsync(workerBridge, refresh: false, cancellationToken)).First(p => p.ProviderId == providerId);
+        var cli = (await availability.GetAsync(workerBridge, cancellationToken)).First(p => p.ProviderId == providerId);
         if (!cli.IsInstalled)
             return GenerationRun.Fail(AiGenerationErrorKind.NotInstalled, cli.Problem ?? $"{AiProviderIds.DisplayName(providerId)} CLI is not available on the Worker.");
 

@@ -1,4 +1,3 @@
-using System.Text.Json;
 using GrayMoon.App.Services.Ui;
 using Microsoft.JSInterop;
 
@@ -12,6 +11,7 @@ public sealed class HostPrerequisiteInstallService(
     IJSRuntime jsRuntime,
     IWorkerBridge workerBridge,
     WorkerConnectionTracker workerConnectionTracker,
+    HostInfoCache hostInfoCache,
     IToastService toastService,
     ILogger<HostPrerequisiteInstallService> logger) : IAsyncDisposable
 {
@@ -208,23 +208,8 @@ public sealed class HostPrerequisiteInstallService(
         if (!workerBridge.IsWorkerConnected)
             return null;
 
-        var response = await workerBridge.SendCommandAsync("GetHostInfo", new { }, CancellationToken.None);
-        if (!response.Success || response.Data is null)
-            return null;
-
-        try
-        {
-            var json = response.Data is JsonElement je ? je.GetRawText() : JsonSerializer.Serialize(response.Data);
-            var dto = JsonSerializer.Deserialize<HostInfoDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-            return dto is null
-                ? null
-                : new HostPrerequisiteVersions(dto.DotnetVersion, dto.GitVersion, dto.GitVersionToolVersion, dto.CursorAgentVersion);
-        }
-        catch (Exception ex)
-        {
-            logger.LogDebug(ex, "Failed to parse GetHostInfo after Host prerequisite install");
-            return null;
-        }
+        var query = await hostInfoCache.GetAsync(workerBridge, refresh: true, CancellationToken.None);
+        return query.Read?.Versions;
     }
 
     /// <summary>
@@ -256,6 +241,4 @@ public sealed class HostPrerequisiteInstallService(
             return $"Failed to install: {string.Join(", ", namedFailures)}.";
         return message ?? "Host prerequisite installation did not complete successfully.";
     }
-
-    private sealed record HostInfoDto(string? DotnetVersion, string? GitVersion, string? GitVersionToolVersion, string? CursorAgentVersion = null);
 }

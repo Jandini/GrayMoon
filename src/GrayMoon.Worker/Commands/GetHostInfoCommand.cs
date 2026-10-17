@@ -17,8 +17,9 @@ public sealed class GetHostInfoCommand(ICommandLineService commandLine, CodeGrap
         var gitVersion = await GetVersionAsync("git", "--version", null, cancellationToken);
         var gitVersionToolVersion = await GetVersionAsync("dotnet", "gitversion version", null, cancellationToken);
         var codeGraphVersion = await codeGraph.GetVersionAsync(cancellationToken);
-        var cursorAgentVersion = (await aiCli.ProbeAsync(refresh: true, cancellationToken))
-            .FirstOrDefault(p => p.ProviderId == AiProviderIds.Cursor && p.IsInstalled)?.Version;
+        var aiProviders = await aiCli.ProbeAsync(refresh: true, cancellationToken);
+        string? InstalledVersion(string providerId) =>
+            aiProviders.FirstOrDefault(p => p.ProviderId == providerId && p.IsInstalled)?.Version;
 
         var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         if (string.IsNullOrWhiteSpace(userProfile))
@@ -32,7 +33,17 @@ public sealed class GetHostInfoCommand(ICommandLineService commandLine, CodeGrap
             GitVersion = gitVersion,
             GitVersionToolVersion = gitVersionToolVersion,
             CodeGraphVersion = codeGraphVersion,
-            CursorAgentVersion = cursorAgentVersion,
+            CursorAgentVersion = InstalledVersion(AiProviderIds.Cursor),
+            ClaudeVersion = InstalledVersion(AiProviderIds.Claude),
+            CodexVersion = InstalledVersion(AiProviderIds.Codex),
+            AiProviders = aiProviders.Select(p => new AiProviderAvailabilityDto
+            {
+                ProviderId = p.ProviderId,
+                IsInstalled = p.IsInstalled,
+                Version = p.Version,
+                HasNoTools = p.HasNoTools,
+                Problem = p.Problem,
+            }).ToList(),
             UserProfilePath = userProfile,
         };
     }
