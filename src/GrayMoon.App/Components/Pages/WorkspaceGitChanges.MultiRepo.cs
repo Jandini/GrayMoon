@@ -17,14 +17,15 @@ public sealed partial class WorkspaceGitChanges
     private string? _ignoreStaleCommitMessage;
 
     /// <summary>
-    /// Restores the in-progress commit message for the current WorkspaceId from the circuit-scoped
-    /// memory. Called on initial load and whenever the page switches to a different workspace, so
-    /// navigating away and back (or between workspaces) never loses an unsubmitted message.
+    /// Restores the in-progress commit message for the current Workspace and Feature context. Called once the
+    /// context is known, including after a reload, so a Feature and the Workspace each show their own text.
     /// </summary>
     private void RestoreWorkspaceCommitMessage()
     {
-        _workspaceCommitMessage = CommitMessageMemory.Get(WorkspaceId);
-        _workspaceCommitMessageHasContent = !string.IsNullOrWhiteSpace(_workspaceCommitMessage);
+        if (_selectedContextId is not { } contextId)
+            return;
+
+        ShowCommitMessage(CommitMessageMemory.Get(WorkspaceId, contextId.Value));
     }
 
     private void OnWorkspaceCommitMessageInput(ChangeEventArgs e)
@@ -40,7 +41,8 @@ public sealed partial class WorkspaceGitChanges
         var hasContent = !string.IsNullOrWhiteSpace(newValue);
         _workspaceCommitMessage = newValue;
         _workspaceCommitMessageHasContent = hasContent;
-        CommitMessageMemory.Set(WorkspaceId, newValue);
+        if (_selectedContextId is { } contextId)
+            CommitMessageMemory.Set(WorkspaceId, contextId.Value, newValue);
 
         if (hadContent != hasContent)
         {
@@ -88,8 +90,8 @@ public sealed partial class WorkspaceGitChanges
 
     private const string CommitMessagePlaceholder = "Commit message";
 
-    /// <summary>"Push committed" checkbox state, remembered per-workspace via <see cref="PushAfterCommitMemory"/>
-    /// so it survives navigating away and back within the same browser session.</summary>
+    /// <summary>"Push committed" checkbox state, remembered per workspace via <see cref="PushAfterCommitMemory"/>
+    /// so it survives leaving Changes and a reload (F5 / Ctrl+F5).</summary>
     private bool PushAfterCommit
     {
         get => PushAfterCommitMemory.Get(WorkspaceId);
@@ -176,6 +178,7 @@ public sealed partial class WorkspaceGitChanges
         // Decided here, when the commit actually starts (after any default-branch confirmation), from the box as it is now:
         // a typed message is committed as typed; an empty one only when the AI writes it as the job's first step.
         var typedMessage = _workspaceCommitMessage;
+        var committedContextId = RequireSelectedContextId();
         CommitMessageGeneration? generation = null;
         if (string.IsNullOrWhiteSpace(typedMessage))
         {
@@ -234,7 +237,7 @@ public sealed partial class WorkspaceGitChanges
                         mode, repo.RepositoryName, stageAllFirst);
 
                     var result = await GitChangesOperations.CommitAsync(
-                        WorkspaceId, RequireSelectedContextId(), resolved.Value.RepositoryId, message, stageAllFirst, ct);
+                        WorkspaceId, committedContextId, resolved.Value.RepositoryId, message, stageAllFirst, ct);
 
                     await PersistMutationResultAsync(repo.WorkspaceRepositoryId, resolved.Value.RepositoryId, result.Success, result.Snapshot, result.ErrorMessage, reload: false);
 
@@ -270,13 +273,15 @@ public sealed partial class WorkspaceGitChanges
 
             if (succeeded.Count > 0)
             {
-                // Clear circuit memory even if the page was disposed (user navigated away mid-commit).
+                // Clear this context's message even if the page was disposed (user navigated away mid-commit).
                 // SafeInvoke no-ops when disposed, which previously left the message in memory so it
-                // came back the next time Git Changes was opened.
-                CommitMessageMemory.Clear(WorkspaceId);
+                // came back the next time Git Changes was opened. Another context's message stays.
+                CommitMessageMemory.Clear(WorkspaceId, committedContextId.Value);
                 _ignoreStaleCommitMessage = message;
                 SafeInvoke(() =>
                 {
+                    if (_selectedContextId != committedContextId)
+                        return;
                     _workspaceCommitMessage = string.Empty;
                     _workspaceCommitMessageHasContent = false;
                     _commitMessageBoxKey++;

@@ -1,16 +1,25 @@
 namespace GrayMoon.App.Services.GitChanges;
 
 /// <summary>
-/// Circuit-scoped memory of the AI menu's "Generate commit message" option per workspace: when ticked (and a provider
-/// is pinned), Commit with an empty message box writes the message with that provider first. Mirrors
-/// <see cref="WorkspaceGitChangesPushAfterCommitMemory"/>, so it lives exactly as long as the "Push committed" choice
-/// it runs with. Missing entries default to unticked.
+/// App-wide (singleton) memory of the "Generate commit message" option per workspace. When ticked (and a provider
+/// is pinned), Commit with an empty message box writes the message with that provider first. Lives as long as
+/// <see cref="WorkspaceGitChangesPushAfterCommitMemory"/>, including across F5 / Ctrl+F5, and not across an App
+/// restart. Missing entries default to unticked. Thread-safe.
 /// </summary>
 public sealed class WorkspaceGitChangesGenerateMessageOnCommitMemory
 {
     private readonly Dictionary<int, bool> _byWorkspace = new();
+    private readonly object _gate = new();
 
-    public void Set(int workspaceId, bool generateMessageOnCommit) => _byWorkspace[workspaceId] = generateMessageOnCommit;
+    public void Set(int workspaceId, bool generateMessageOnCommit)
+    {
+        lock (_gate)
+            _byWorkspace[workspaceId] = generateMessageOnCommit;
+    }
 
-    public bool Get(int workspaceId) => _byWorkspace.GetValueOrDefault(workspaceId, false);
+    public bool Get(int workspaceId)
+    {
+        lock (_gate)
+            return _byWorkspace.GetValueOrDefault(workspaceId, false);
+    }
 }

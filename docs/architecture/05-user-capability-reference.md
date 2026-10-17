@@ -878,7 +878,7 @@ use Ctrl/Cmd+Enter commit shortcut
 
 ### Commit control
 
-There is one primary Commit button: **Commit Staged** when any repository has staged content, otherwise **Commit All** (`WorkspaceCommitModeHelper.ResolveOfferedMode`). The keyed alternatives carry the captured mode, so a watcher refresh that flips the label mid-click cannot commit the wrong set. The button is joined to an AI provider segment and a chevron menu (`[Commit Staged|All][provider][chevron]`). The menu's **On Commit** header holds **Generate commit message** and **Push committed**, both remembered per Workspace for the circuit. Ctrl/Cmd+Enter targets only the primary commit element, never the AI segment or the chevron. While the message box is empty the control attaches to the right edge of the box; below about 20rem it stays under the box.
+There is one primary Commit button: **Commit Staged** when any repository has staged content, otherwise **Commit All** (`WorkspaceCommitModeHelper.ResolveOfferedMode`). The keyed alternatives carry the captured mode, so a watcher refresh that flips the label mid-click cannot commit the wrong set. The button is joined to an AI provider segment and a chevron menu (`[Commit Staged|All][provider][chevron]`). The menu's **On Commit** header holds **Generate commit message** and **Push committed**, both remembered per Workspace across a reload (F5 or Ctrl+F5) until the App restarts. Ctrl/Cmd+Enter targets only the primary commit element, never the AI segment or the chevron. While the message box is empty the control attaches to the right edge of the box; below about 20rem it stays under the box.
 
 ### Directory rows
 
@@ -1377,6 +1377,12 @@ generate on commit   with "Generate commit message" ticked, a provider pinned an
                      writes the message, then commits, then pushes if "Push committed" is ticked; the overlay
                      terminal shows each step labelled "ai" (the CLI call, never the prompt); if the provider
                      fails nothing is committed; a typed message is always committed as typed
+survives navigation  clicking the provider keeps writing when you leave Changes, reload, or switch Feature /
+                     Workspace; a Feature and the Workspace can be written at the same time; each context keeps
+                     its own message (typed or written); Cancel stops only the context on screen. While that
+                     context is still on screen and the scope has not moved, the text goes straight into the box;
+                     otherwise it is kept for that context (the message, or a suggestion if the box was edited)
+checkboxes           Generate commit message and Push committed stay as set across F5 and Ctrl+F5 until the App restarts
 PR comparison        each repository compares its head with the target selected in the Branch tab, never the
                      default branch; PR generation does not run in an overlay job
 apply policy         AiTextApplyPolicy.Decide: text goes straight into the field only if the field was empty at
@@ -1412,6 +1418,9 @@ All three Worker commands run on the main pool. The App never runs git or an AI 
 ```text
 Components/Ai: AiProviderControl, AiMenuCheckItem, AiSuggestionPanel; wwwroot/css/ai-generation.css, js/gm-ai-menu.js
 WorkspaceGitChanges.Ai.cs / NewPullRequestModal.Ai.cs
+WorkspaceGitChangesCommitGeneration   click-to-write runs outside the page, one run per Workspace and Feature context
+WorkspaceGitChangesCommitMessageMemory   the message, per Workspace and Feature context
+WorkspaceGitChangesPushAfterCommitMemory / WorkspaceGitChangesGenerateMessageOnCommitMemory   the two On Commit checkboxes, per Workspace
 IWorkspaceAiGenerationOperations -> WorkspaceAiGenerationOperations
 AiTextApplyPolicy, AiPromptBuilder, AiGeneratedTextParser (Common)
 Worker: GitEvidenceCollector, AiCliRunner, AiCliAdapters
