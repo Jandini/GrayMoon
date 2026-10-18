@@ -1405,9 +1405,17 @@ failures             stay inside the AI control as one redacted line (not signed
 
 ```text
 resolve provider and model, check availability (the startup GetHostInfo; menus do not probe)
-Worker CollectGitEvidence   one request for all repositories, bounded fan-out, never mutates or fetches
+Worker CollectGitEvidence   one request for all repositories, bounded fan-out, never mutates or fetches;
+                            PR: also every commit's subject and shortstat, oldest first (git log --reverse
+                            --shortstat, no bodies), up to 200 per repository (60 above 10 repositories);
+                            a longer branch keeps its oldest and newest halves and counts the middle
+CommitHistoryCondenser      PR: folds fixup!/squash!/amend! into their commit, drops reverted pairs, merges a
+                            subject committed in several repositories into one line, marks small low-signal
+                            commits, redacts subjects, orders by committer time
 AiPromptBuilder             one prompt under a hard budget (commit 4,000 / PR 8,000 estimated tokens),
-                            secrets redacted, evidence wrapped as untrusted data
+                            secrets redacted, evidence wrapped as untrusted data; PR splits it into headers
+                            and facts (45%), history (20%, low-signal then small middle commits dropped first,
+                            the first and last 10 kept longest) and excerpts (the rest)
 Worker GenerateAiText       one CLI process in its own empty temp folder, no tools (Cursor: read-only ask mode),
                             timeout AiGeneration:TimeoutSeconds (default 120)
 AiGeneratedTextParser       strict JSON check; the result is never partial
@@ -1424,6 +1432,6 @@ WorkspaceGitChangesCommitGeneration   click-to-write runs outside the page, one 
 WorkspaceGitChangesCommitMessageMemory   the message, per Workspace and Feature context
 WorkspaceGitChangesPushAfterCommitMemory / WorkspaceGitChangesGenerateMessageOnCommitMemory   the two On Commit checkboxes, per Workspace
 IWorkspaceAiGenerationOperations -> WorkspaceAiGenerationOperations
-AiTextApplyPolicy, AiPromptBuilder, AiGeneratedTextParser (Common)
+AiTextApplyPolicy, AiPromptBuilder, CommitHistoryCondenser, GitCommitLogParser, AiGeneratedTextParser (Common)
 Worker: GitEvidenceCollector, AiCliRunner, AiCliAdapters
 ```

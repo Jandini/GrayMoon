@@ -201,7 +201,10 @@ public sealed class GitEvidenceCollectorTests : IDisposable
         Assert.Equal("origin/release/2.0", evidence.BaseRef);
         Assert.Equal(featureHead, evidence.HeadOid);
         Assert.Equal(2, evidence.CommitCount);
-        Assert.Equal(["F2 feature finish", "F1 feature start"], evidence.CommitSubjects);
+        Assert.Equal(["F1 feature start", "F2 feature finish"], evidence.Commits.Select(c => c.Subject));
+        Assert.Equal(featureHead, evidence.Commits[^1].Oid);
+        Assert.All(evidence.Commits, c => Assert.Equal((1, 1), (c.FilesChanged, c.Added)));
+        Assert.Equal(0, evidence.CommitsOmitted);
         var file = Assert.Single(evidence.Files);
         Assert.Equal("src/Feature.cs", file.Path);
         Assert.DoesNotContain(evidence.Files, f => f.Path is "release.txt" or "main.txt");
@@ -210,6 +213,27 @@ public sealed class GitEvidenceCollectorTests : IDisposable
         var againstMain = await PullRequestEvidence("feature/BAM-2874", "main");
         Assert.Equal(4, againstMain.CommitCount);
         Assert.Contains(againstMain.Files, f => f.Path == "release.txt");
+    }
+
+    [Fact]
+    public async Task Pull_request_history_of_a_long_branch_keeps_the_oldest_and_newest_halves()
+    {
+        _repo.CommitInitial("base.txt", "base\n");
+        Publish("main");
+        _repo.RunGit("checkout", "-q", "-b", "feature/long");
+        var content = new StringBuilder();
+        for (var i = 1; i <= 7; i++)
+        {
+            content.Append(i).Append('\n');
+            Commit("src/Long.cs", content.ToString(), $"Step {i}");
+        }
+
+        var evidence = await PullRequestEvidence("feature/long", "main", new GitEvidenceLimits { MaxHistoryCommits = 4 });
+
+        Assert.True(evidence.Success, evidence.ErrorMessage);
+        Assert.Equal(7, evidence.CommitCount);
+        Assert.Equal(["Step 1", "Step 2", "Step 6", "Step 7"], evidence.Commits.Select(c => c.Subject));
+        Assert.Equal(3, evidence.CommitsOmitted);
     }
 
     [Fact]

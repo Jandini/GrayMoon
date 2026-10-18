@@ -176,9 +176,9 @@ section in the same turn (that file lives in the Desktop repo, not this one).
 
 ## Architecture docs stay current
 
-`docs/architecture/` is the only documentation folder. Update the relevant
-architecture doc in the same change as the behavior it describes, and do not
-add design, plan, prompt or analysis documents under `docs/`.
+`docs/architecture/` describes the current state. Update the relevant
+architecture doc in the same change as the behavior it describes. Proposals
+and design notes for work not yet built go in `docs/todo/`.
 
 ## Never commit or push - always give a commit message instead
 

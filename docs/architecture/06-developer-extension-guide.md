@@ -684,17 +684,9 @@ Architecture docs do not replace those coding rules.
 
 ## 23. Documentation rule
 
-`GrayMoon/docs/architecture/` is the only documentation location in the repository. Update it in the same change as the behavior it describes; a change that alters current behavior without updating these documents is incomplete.
+`GrayMoon/docs/architecture/` is the current-state reference. Update it in the same change as the behavior it describes; a change that alters current behavior without updating these documents is incomplete.
 
-Do not add other documents under `GrayMoon/docs` - no design records, plans, reviews, prompts or analyses such as:
-
-```text
-Feature-X-Design-v7
-Analysis-final-final
-Implementation-Plan-2
-```
-
-Design work in progress lives outside the repository (or in the pull request description); shipped behavior is folded into these documents. Design tags that remain in code comments (for example root-first worktree creation or the intent transaction) refer to concepts described here, not to separate documents.
+Proposals and design notes for work not yet built live in `GrayMoon/docs/todo/`. When the work ships, its behavior is folded into these documents and the proposal is removed or updated. Design tags that remain in code comments (for example root-first worktree creation or the intent transaction) refer to concepts described here, not to separate documents.
 
 The architecture folder should answer "how GrayMoon works now".
 
