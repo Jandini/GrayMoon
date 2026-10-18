@@ -413,7 +413,7 @@
         await using var scope = ServiceScopeFactory.CreateAsyncScope();
         var fileVersionService = scope.ServiceProvider.GetRequiredService<WorkspaceFileVersionService>();
         var recomputeScope = scope.ServiceProvider.GetRequiredService<WorkspaceStateRecomputeScope>();
-        await fileVersionService.CheckAndPersistFileVersionStatusAsync(WorkspaceId, _selectedContextId!.Value, forceFresh: true);
+        await fileVersionService.CheckAndPersistFileVersionStatusAsync(WorkspaceId, _selectedContextId!.Value);
         await recomputeScope.RecomputeDependencyStatsAsync(WorkspaceId, _selectedContextId!.Value);
         await LoadAsync();
     }

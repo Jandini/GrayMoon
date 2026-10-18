@@ -47,6 +47,7 @@ public sealed class UpdateAndPushOrchestrator(
         var channel = Channel.CreateUnbounded<DependencyLevelCompletion>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
 
         // The lane has its own scope (its own DbContext): it runs concurrently with the update, which owns the caller's.
+        // RunPushLaneAsync also gives every level a scope of its own, since the update rewrites rows between levels.
         var lane = Task.Run<int>(async () =>
         {
             await using var scope = scopeFactory.CreateAsyncScope();

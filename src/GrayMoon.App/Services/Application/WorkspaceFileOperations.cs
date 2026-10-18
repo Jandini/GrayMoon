@@ -142,7 +142,7 @@ public sealed class WorkspaceFileOperations(
         if (checkAfter)
         {
             progress.Report("Checking file versions...");
-            await fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, contextId, cancellationToken, forceFresh: true);
+            await fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, contextId, cancellationToken);
         }
 
         return new WorkspaceFileVersionUpdateResult(updated, failed, null, mappedFiles);

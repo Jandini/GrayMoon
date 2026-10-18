@@ -35,6 +35,7 @@ public sealed class WorkspacePushService(
     IWorkspaceFeatureContextResolver contextResolver,
     IWorkspaceContextPathResolver pathResolver,
     IWorkspaceCapabilitiesResolver capabilitiesResolver,
+    IServiceScopeFactory scopeFactory,
     ILogger<WorkspacePushService> logger,
     IHubContext<WorkspaceSyncHub>? hubContext = null,
     PackageRegistrySyncService? packageRegistrySyncService = null,
@@ -55,6 +56,7 @@ public sealed class WorkspacePushService(
     private readonly IWorkspaceFeatureContextResolver _contextResolver = contextResolver ?? throw new ArgumentNullException(nameof(contextResolver));
     private readonly IWorkspaceContextPathResolver _pathResolver = pathResolver ?? throw new ArgumentNullException(nameof(pathResolver));
     private readonly IWorkspaceCapabilitiesResolver _capabilitiesResolver = capabilitiesResolver ?? throw new ArgumentNullException(nameof(capabilitiesResolver));
+    private readonly IServiceScopeFactory _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
     private readonly ILogger<WorkspacePushService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly int _maxConcurrent = Math.Max(1, workspaceOptions?.Value?.MaxParallelOperations ?? 16);
     private readonly IHubContext<WorkspaceSyncHub>? _hubContext = hubContext;
@@ -592,43 +594,71 @@ public sealed class WorkspacePushService(
         {
             syncedRepoIds.UnionWith(done.SyncedRepoIds);
 
-            var payload = await _workspaceDependencyService.GetPushPlanPayloadAsync(workspaceId, contextId.Value, cancellationToken);
-            var needingPush = await _workspaceRepository.GetRepositoryIdsNeedingPushAsync(workspaceId, contextId.Value, done.RepoIds, cancellationToken);
-            var reposAtLevel = payload
-                .Where(p => done.RepoIds.Contains(p.RepoId)
-                    && !tagPinnedRepoIds.Contains(p.RepoId)
-                    && (needingPush.Contains(p.RepoId) || done.CommittedRepoIds.Contains(p.RepoId)))
-                .ToList();
-            _logger.LogInformation(
-                "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: push lane received Level {Level}: {PushCount} of {RepoCount} repo(s) to push: [{RepoIds}]",
-                runId, workspaceId, done.Level, reposAtLevel.Count, done.RepoIds.Count, string.Join(",", reposAtLevel.Select(r => r.RepoId)));
-            if (reposAtLevel.Count == 0)
-                continue;
-
-            var unmatchedPackages = reposAtLevel
-                .SelectMany(p => p.RequiredPackages)
-                .Where(r => !r.MatchedConnectorId.HasValue)
-                .DistinctBy(r => (r.PackageId, r.Version))
-                .Count();
-            if (unmatchedPackages > 0)
-            {
-                _logger.LogWarning("[PushOrchestrator {RunId}] Push lane: Level {Level} has {Count} required package mapping(s) with no registry.", runId, done.Level, unmatchedPackages);
-                onLevelError?.Invoke(done.Level, $"Synchronized push could not continue: {unmatchedPackages} required package mapping(s) have no registry. Check the NuGet connector configuration and token.");
-                return run.PushedRepos.Count;
-            }
-
-            cancellationToken.ThrowIfCancellationRequested();
-            if (!await PushLevelAsync(run, done.Level, reposAtLevel, isLastLevel: false, cancellationToken))
+            // Every level reads and writes through a DbContext of its own. The update lane keeps rewriting the higher
+            // levels' rows while this lane pushes, and a context kept from an earlier level hands back the entities it
+            // tracked then: an old GitVersion in the dependency recompute, and commit counts that never save because the
+            // stale value already equals the new one.
+            await using var levelScope = _scopeFactory.CreateAsyncScope();
+            var levelPushService = levelScope.ServiceProvider.GetRequiredService<WorkspacePushService>();
+            if (!await levelPushService.PushLaneLevelAsync(run, done, tagPinnedRepoIds, cancellationToken))
                 return run.PushedRepos.Count;
         }
 
         if (run.PushedRepos.Count > 0)
-            await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, contextId, run.PushedRepos, cancellationToken);
+        {
+            await using var finalScope = _scopeFactory.CreateAsyncScope();
+            await finalScope.ServiceProvider.GetRequiredService<WorkspacePushService>()
+                .UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, contextId, run.PushedRepos, cancellationToken);
+        }
 
         _logger.LogInformation(
             "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: push lane finished. TotalPushed={TotalPushed}",
             runId, workspaceId, run.PushedRepos.Count);
         return run.PushedRepos.Count;
+    }
+
+    /// <summary>
+    /// One push lane hand-off, run on a <see cref="WorkspacePushService"/> of the level's own scope: re-reads the push
+    /// plan, picks the level's repositories with something to push and pushes them. Returns false when the lane must stop
+    /// (already reported through the run's callbacks).
+    /// </summary>
+    private async Task<bool> PushLaneLevelAsync(
+        SynchronizedPushRun run,
+        DependencyLevelCompletion done,
+        IReadOnlySet<int> tagPinnedRepoIds,
+        CancellationToken cancellationToken)
+    {
+        var workspaceId = run.Workspace.WorkspaceId;
+        var contextId = run.ContextId;
+        var runId = run.RunId;
+
+        var payload = await _workspaceDependencyService.GetPushPlanPayloadAsync(workspaceId, contextId.Value, cancellationToken);
+        var needingPush = await _workspaceRepository.GetRepositoryIdsNeedingPushAsync(workspaceId, contextId.Value, done.RepoIds, cancellationToken);
+        var reposAtLevel = payload
+            .Where(p => done.RepoIds.Contains(p.RepoId)
+                && !tagPinnedRepoIds.Contains(p.RepoId)
+                && (needingPush.Contains(p.RepoId) || done.CommittedRepoIds.Contains(p.RepoId)))
+            .ToList();
+        _logger.LogInformation(
+            "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: push lane received Level {Level}: {PushCount} of {RepoCount} repo(s) to push: [{RepoIds}]",
+            runId, workspaceId, done.Level, reposAtLevel.Count, done.RepoIds.Count, string.Join(",", reposAtLevel.Select(r => r.RepoId)));
+        if (reposAtLevel.Count == 0)
+            return true;
+
+        var unmatchedPackages = reposAtLevel
+            .SelectMany(p => p.RequiredPackages)
+            .Where(r => !r.MatchedConnectorId.HasValue)
+            .DistinctBy(r => (r.PackageId, r.Version))
+            .Count();
+        if (unmatchedPackages > 0)
+        {
+            _logger.LogWarning("[PushOrchestrator {RunId}] Push lane: Level {Level} has {Count} required package mapping(s) with no registry.", runId, done.Level, unmatchedPackages);
+            run.OnLevelError?.Invoke(done.Level, $"Synchronized push could not continue: {unmatchedPackages} required package mapping(s) have no registry. Check the NuGet connector configuration and token.");
+            return false;
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        return await PushLevelAsync(run, done.Level, reposAtLevel, isLastLevel: false, cancellationToken);
     }
 
     /// <summary>Pushed a single repository's current branch with upstream (-u). Used when the user clicks the "not-upstreamed" badge.</summary>
