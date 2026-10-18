@@ -553,10 +553,59 @@
     background-color: rgba(148, 152, 158, 0.8);
 }
 
-/* AI title/description selector at the right end of the tab row (never in the Create buttons). */
+/* AI title/description selector at the right end of the tab row (never in the Create buttons).
+   Same frame as an unselected tab: dark fill, top corners only, bottom edge on the tab line. */
 .new-pr-tabs__ai {
     margin-left: auto;
     display: flex;
-    align-items: center;
-    padding-bottom: 0.25rem;
+    align-items: flex-end;
+}
+
+.new-pr-tabs__ai .gm-split-control {
+    margin-bottom: -1px;
+}
+
+.new-pr-tabs__ai ::deep .btn.gm-ai-segment {
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-bottom: none;
+    border-radius: 0 !important;
+    padding: 0.5rem 0.75rem;
+    font-size: inherit;
+    line-height: 1.5;
+    box-shadow: none;
+}
+
+.new-pr-tabs__ai ::deep .btn.gm-ai-segment:first-of-type {
+    border-top-left-radius: 0.375rem !important;
+}
+
+.new-pr-tabs__ai ::deep .btn.gm-ai-segment:last-of-type {
+    border-top-right-radius: 0.375rem !important;
+}
+
+.new-pr-tabs__ai ::deep .btn.gm-ai-segment--main + .btn.gm-ai-segment--chevron {
+    padding-left: 0.55rem;
+    padding-right: 0.55rem;
+}
+
+.new-pr-tabs__ai ::deep .btn.gm-ai-segment:hover:not(:disabled),
+.new-pr-tabs__ai ::deep .btn.gm-ai-segment:focus:not(:disabled),
+.new-pr-tabs__ai ::deep .btn.gm-ai-segment:focus-visible:not(:disabled),
+.new-pr-tabs__ai ::deep .btn.gm-ai-segment:active:not(:disabled),
+.new-pr-tabs__ai ::deep .btn.gm-ai-segment[aria-expanded="true"]:not(:disabled) {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+    border-color: var(--border-color);
+    border-bottom: none;
+    box-shadow: none;
+}
+
+.new-pr-tabs__ai ::deep .btn.gm-ai-segment:focus-visible:not(:disabled) {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+    border-color: var(--border-color);
+    border-bottom: none;
+    box-shadow: 0 0 0 1px var(--focus-ring-outer);
 }
