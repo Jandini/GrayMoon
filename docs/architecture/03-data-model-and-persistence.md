@@ -360,7 +360,7 @@ LastSeenAt
 
 This table is the persisted ref inventory. Remote rows are stored as `origin/<name>`.
 
-Unique: `WorkspaceRepositoryId + BranchName + IsRemote` (plus the non-unique `IX_RepositoryBranches_WorkspaceRepositoryId`).
+Unique: `WorkspaceRepositoryId + BranchName + IsRemote` (plus the non-unique `IX_RepositoryBranches_WorkspaceRepositoryId`). A workspace checkout runs every repository at once, and each checkout's hook sync can insert the same ref this checkout is inserting. The later insert loses the unique index, keeps the row already stored, and still writes its other branch changes, so that repository does not show a checkout failure. The checkouts stay parallel.
 
 `Services/Workspaces/RepositoryBranchWriter` is the single owner of branch row changes. `PersistAsync` is the authoritative full refresh; `AddLocalBranchesAsync`, `AddRemoteBranchAsync`, `RemoveBranchAsync`, `PruneRemoteBranchesAsync` and `ToRemoteBranchName` (the one place the `origin/` normalization happens) handle incremental changes and never touch tag rows. `WorkspaceGitService`, `WorkspaceBranchOperations` (create, set-upstream, delete) and Return to default delegate to it. `WorkspaceFeatureOperations` records the Feature branch after Create and Repair, and removes rows only after git confirms the delete (Remove local, Remove remote, roll back); Kept, KeptUnmerged and Failed leave the row. Each Feature write uses its own DI scope, and a failed row write is logged and reconciled by the next branch refresh, so it never fails an operation whose git work already succeeded.
 
