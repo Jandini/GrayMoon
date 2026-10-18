@@ -607,7 +607,7 @@ Uses dependency levels and package registry waiting (.NET Dependency). A Basic W
 
 ### Update and Push (two lanes)
 
-`UpdateAndPushOrchestrator` runs the update lane (`DependencyUpdateOrchestrator`, raising `onLevelCompleted` after every level, including levels with nothing to update) and the push lane (`WorkspacePushService.RunPushLaneAsync`, own DI scope and DbContext) connected by a single-reader channel, so level N is pushed while level N+1 is being updated and a level's CI/package wait overlaps later updates. `TwoLaneProgress` shows whichever lane reported last in the normal overlay. When `CanRunPushLaneAsync` fails nothing runs and the page falls back to the sequential update-then-push with its "Continue with normal push?" prompt. On an update exception the channel is completed, the push lane settles, and the exception is rethrown.
+`UpdateAndPushOrchestrator` runs the update lane (`DependencyUpdateOrchestrator`, raising `onLevelCompleted` after every level, including levels with nothing to update) and the push lane (`WorkspacePushService.RunPushLaneAsync`, own DI scope, plus a fresh scope and DbContext for every level it receives, so it never reads back entities it tracked before the update rewrote them) connected by a single-reader channel, so level N is pushed while level N+1 is being updated and a level's CI/package wait overlaps later updates. `TwoLaneProgress` shows whichever lane reported last in the normal overlay. When `CanRunPushLaneAsync` fails nothing runs and the page falls back to the sequential update-then-push with its "Continue with normal push?" prompt. On an update exception the channel is completed, the push lane settles, and the exception is rethrown.
 
 ### Implementation
 
