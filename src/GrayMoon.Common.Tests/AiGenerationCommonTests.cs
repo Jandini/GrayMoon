@@ -309,11 +309,21 @@ public sealed class AiPromptBuilderTests
         HeadRef = "feature/x",
         BaseRef = "origin/release/2.0",
         CommitCount = 2,
-        CommitSubjects = ["Add the thing", "Prepare the thing"],
+        Commits = [Commit("Prepare the thing", 1), Commit("Add the thing", 2)],
         TotalFiles = files.Length,
         TotalAdded = files.Sum(f => f.Added ?? 0),
         TotalDeleted = files.Sum(f => f.Deleted ?? 0),
         Files = [.. files],
+    };
+
+    private static GitEvidenceCommit Commit(string subject, long at, int added = 10, int deleted = 2, int files = 1) => new()
+    {
+        Oid = $"{at:x40}",
+        CommittedAt = at,
+        Subject = subject,
+        FilesChanged = files,
+        Added = added,
+        Deleted = deleted,
     };
 
     private static GitEvidenceFile Source(string path, int lines, string? marker = null) => new()
@@ -460,6 +470,71 @@ public sealed class AiPromptBuilderTests
     }
 
     [Fact]
+    public void Pull_request_history_lists_every_commit_oldest_first_with_its_size()
+    {
+        var repo = Repo("Api", 1, Source("src/A.cs", 3));
+        repo.Commits = [Commit("Lay the foundation", 1, added: 300, deleted: 12, files: 6), Commit("Finish the feature", 2)];
+        repo.CommitCount = 2;
+
+        var prompt = AiPromptBuilder.BuildPullRequest([repo], AiPromptBudget.PullRequest);
+
+        var history = prompt.UserPrompt.IndexOf("## history (oldest first", StringComparison.Ordinal);
+        Assert.True(history > 0);
+        var first = prompt.UserPrompt.IndexOf("- Lay the foundation (+300 -12, 6 files)\n", StringComparison.Ordinal);
+        var second = prompt.UserPrompt.IndexOf("- Finish the feature (+10 -2, 1 file)\n", StringComparison.Ordinal);
+        Assert.True(history < first && first < second);
+        Assert.Contains("2 commits in history (2 lines shown)", prompt.UserPrompt);
+        Assert.Equal(2, prompt.Coverage.HistoryCommits);
+        Assert.False(prompt.Coverage.IsPartial);
+    }
+
+    [Fact]
+    public void A_workspace_commit_in_several_repositories_is_one_history_line()
+    {
+        var api = Repo("Api", 1, Source("src/A.cs", 3));
+        var web = Repo("Web", 2, Source("src/W.cs", 3));
+        api.Commits = [Commit("Rename the setting", 1, added: 4, deleted: 4), Commit("Fix the API only", 3)];
+        web.Commits = [Commit("Rename the setting", 2, added: 6, deleted: 6)];
+
+        var prompt = AiPromptBuilder.BuildPullRequest([api, web], AiPromptBudget.PullRequest);
+
+        Assert.Single(prompt.UserPrompt.Split('\n'), l => l.StartsWith("- Rename the setting", StringComparison.Ordinal));
+        Assert.Contains("- Rename the setting (+10 -10, 2 files) [Api, Web]\n", prompt.UserPrompt);
+        Assert.Contains("- Fix the API only (+10 -2, 1 file) [Api]\n", prompt.UserPrompt);
+    }
+
+    [Fact]
+    public void A_long_history_keeps_its_start_and_end_and_says_what_was_left_out()
+    {
+        var repo = Repo("Api", 1, Source("src/A.cs", 3));
+        repo.Commits = Enumerable.Range(1, 400)
+            .Select(i => Commit($"Step {i:000} of a very long branch with a fairly descriptive subject line", i, added: i == 200 ? 5_000 : 3))
+            .ToList();
+        repo.CommitCount = 400;
+
+        var prompt = AiPromptBuilder.BuildPullRequest([repo], AiPromptBudget.PullRequest);
+
+        Assert.True(prompt.SystemPrompt.Length + prompt.JsonSchema.Length + prompt.UserPrompt.Length <= AiPromptBudget.PullRequest.MaxChars);
+        foreach (var i in new[] { 1, 10, 391, 400 })
+            Assert.Contains($"- Step {i:000} of", prompt.UserPrompt);
+        Assert.Contains("- Step 200 of", prompt.UserPrompt); // the largest commit in the middle outranks small ones
+        Assert.Contains("commits omitted\n", prompt.UserPrompt);
+        Assert.True(prompt.Coverage.IsPartial);
+        Assert.True(prompt.Coverage.HistoryShown < 400);
+        Assert.Contains("### src/A.cs", prompt.UserPrompt); // excerpts keep their own space
+    }
+
+    [Fact]
+    public void Commit_prompt_asks_for_a_subject_that_summarizes_the_whole_commit_and_has_no_history()
+    {
+        var prompt = AiPromptBuilder.BuildCommit([Repo("Api", 1, Source("src/A.cs", 3))], GitCommitEvidenceMode.All, AiPromptBudget.Commit);
+
+        Assert.Contains("summarize the entire commit", prompt.SystemPrompt);
+        Assert.DoesNotContain("## history", prompt.UserPrompt);
+        Assert.Equal(0, prompt.Coverage.HistoryCommits);
+    }
+
+    [Fact]
     public void Prompts_never_contain_typographic_dashes()
     {
         Assert.DoesNotContain((char)0x2014, AiPromptBuilder.CommitSystemPrompt + AiPromptBuilder.PullRequestSystemPrompt);
@@ -505,5 +580,121 @@ public sealed class AiGeneratedTextParserTests
         Assert.True(AiGeneratedTextParser.TryParsePullRequest("""{"title":"Add X","description":"## Changes\n- X"}""", out var text, out _));
         Assert.Equal("## Changes\n- X", text!.Description);
         Assert.False(AiGeneratedTextParser.TryParsePullRequest("""{"title":"Add X","description":" "}""", out _, out _));
+    }
+}
+
+public sealed class CommitHistoryTests
+{
+    private static GitEvidenceCommit Commit(string subject, long at, int added = 10, int deleted = 2) => new()
+    {
+        Oid = $"{at:x40}",
+        CommittedAt = at,
+        Subject = subject,
+        FilesChanged = 1,
+        Added = added,
+        Deleted = deleted,
+    };
+
+    private static RepositoryGitEvidence Repo(string name, params GitEvidenceCommit[] commits) => new()
+    {
+        RepositoryName = name,
+        Commits = [.. commits],
+    };
+
+    [Fact]
+    public void Log_parser_reads_subject_time_and_shortstat_and_drops_a_cut_record()
+    {
+        var a = new string('a', 40);
+        var b = new string('b', 40);
+        var c = new string('c', 40);
+        var output =
+            $"\u001e{a}\u001f1700000000\u001fAdd the thing\n\n 3 files changed, 10 insertions(+), 2 deletions(-)\n" +
+            $"\u001e{b}\u001f1700000100\u001fDelete only\n\n 1 file changed, 4 deletions(-)\n" +
+            $"\u001e{c}\u001f1700000200\u001fEmpty commit\n";
+
+        var commits = GitCommitLogParser.Parse(output, truncated: false);
+
+        Assert.Equal(3, commits.Count);
+        Assert.Equal((a, 1700000000L, "Add the thing", 3, 10, 2), (commits[0].Oid, commits[0].CommittedAt, commits[0].Subject, commits[0].FilesChanged, commits[0].Added, commits[0].Deleted));
+        Assert.Equal((1, 0, 4), (commits[1].FilesChanged, commits[1].Added, commits[1].Deleted));
+        Assert.Equal((0, 0, 0), (commits[2].FilesChanged, commits[2].Added, commits[2].Deleted));
+        Assert.Equal(2, GitCommitLogParser.Parse(output, truncated: true).Count);
+    }
+
+    [Fact]
+    public void Fixups_fold_into_their_commit_and_reverted_work_disappears()
+    {
+        var history = CommitHistoryCondenser.Condense([Repo("Api",
+            Commit("Add the cache", 1, added: 100),
+            Commit("Try a different store", 2),
+            Commit("fixup! Add the cache", 3, added: 5),
+            Commit("Revert \"Try a different store\"", 4),
+            Commit("squash! fixup! Add the cache", 5, added: 1))]);
+
+        var entry = Assert.Single(history.Entries);
+        Assert.Equal("Add the cache", entry.Subject);
+        Assert.Equal(106, entry.Added);
+        Assert.Equal(5, history.Commits);
+    }
+
+    [Fact]
+    public void A_fixup_of_a_commit_outside_the_branch_is_kept_as_low_signal()
+    {
+        var history = CommitHistoryCondenser.Condense([Repo("Api", Commit("fixup! Something on main", 1, added: 2))]);
+
+        var entry = Assert.Single(history.Entries);
+        Assert.Equal("Something on main", entry.Subject);
+        Assert.True(entry.IsLowSignal);
+    }
+
+    [Fact]
+    public void Same_subject_merges_across_repositories_but_not_within_one()
+    {
+        var history = CommitHistoryCondenser.Condense([
+            Repo("Api", Commit("Fix typo", 1, added: 1, deleted: 1), Commit("Fix typo", 3, added: 1, deleted: 1)),
+            Repo("Web", Commit("Fix typo", 2, added: 1, deleted: 1)),
+        ]);
+
+        Assert.Equal(2, history.Entries.Count);
+        Assert.Equal(["Api", "Web"], history.Entries[0].Repositories);
+        Assert.Equal(["Api"], history.Entries[1].Repositories);
+        Assert.All(history.Entries, e => Assert.True(e.IsLowSignal));
+    }
+
+    [Fact]
+    public void Entries_are_ordered_by_commit_time_across_repositories()
+    {
+        var history = CommitHistoryCondenser.Condense([
+            Repo("Api", Commit("Second", 20), Commit("Fourth", 40)),
+            Repo("Web", Commit("First", 10), Commit("Third", 30)),
+        ]);
+
+        Assert.Equal(["First", "Second", "Third", "Fourth"], history.Entries.Select(e => e.Subject));
+    }
+
+    [Theory]
+    [InlineData("WIP", true)]
+    [InlineData("wip: half done", true)]
+    [InlineData("Address review comments.", true)]
+    [InlineData("Fix the login redirect", false)]
+    [InlineData("Wipe the cache on logout", false)]
+    public void Low_signal_subjects_are_recognized(string subject, bool expected) =>
+        Assert.Equal(expected, CommitHistoryCondenser.IsLowSignalSubject(subject));
+
+    [Fact]
+    public void A_large_commit_is_never_low_signal_whatever_its_subject()
+    {
+        var history = CommitHistoryCondenser.Condense([Repo("Api", Commit("WIP", 1, added: 800))]);
+
+        Assert.False(Assert.Single(history.Entries).IsLowSignal);
+    }
+
+    [Fact]
+    public void Secrets_in_subjects_are_redacted()
+    {
+        var history = CommitHistoryCondenser.Condense([Repo("Api", Commit("Use token ghp_abcdefghijklmnopqrstuvwxyz0123", 1))]);
+
+        Assert.Equal(EvidenceRedactor.Placeholder, Assert.Single(history.Entries).Subject);
+        Assert.Equal(1, history.RedactedLines);
     }
 }

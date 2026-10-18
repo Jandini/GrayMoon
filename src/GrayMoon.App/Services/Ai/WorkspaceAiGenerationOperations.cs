@@ -206,6 +206,7 @@ public sealed class WorkspaceAiGenerationOperations(
             MaxPatchBytesPerFile = perFileBytes,
             MaxPatchBytesPerRepository = Math.Clamp(evidenceChars / repositories.Count, 1_200, 8_000),
             MaxInventoryFiles = repositories.Count > 10 ? 60 : 200,
+            MaxHistoryCommits = repositories.Count > 10 ? 60 : 200,
         };
 
         progress.Report($"Collecting the changes of {repositories.Count} repositor{(repositories.Count == 1 ? "y" : "ies")}...");
@@ -275,9 +276,9 @@ public sealed class WorkspaceAiGenerationOperations(
         };
 
         logger.LogInformation(
-            "AI generation. Kind={Kind} Provider={Provider} ModelSet={ModelSet} Repositories={Repositories} ChangedFiles={ChangedFiles} ExcerptFiles={ExcerptFiles} RedactedLines={RedactedLines} Partial={Partial} EstimatedTokens={EstimatedTokens} EvidenceMs={EvidenceMs} WorkerEvidenceMs={WorkerEvidenceMs} PromptMs={PromptMs} ProviderMs={ProviderMs} TotalMs={TotalMs} Outcome={Outcome}",
+            "AI generation. Kind={Kind} Provider={Provider} ModelSet={ModelSet} Repositories={Repositories} ChangedFiles={ChangedFiles} ExcerptFiles={ExcerptFiles} HistoryCommits={HistoryCommits} HistoryShown={HistoryShown} RedactedLines={RedactedLines} Partial={Partial} EstimatedTokens={EstimatedTokens} EvidenceMs={EvidenceMs} WorkerEvidenceMs={WorkerEvidenceMs} PromptMs={PromptMs} ProviderMs={ProviderMs} TotalMs={TotalMs} Outcome={Outcome}",
             kind, providerId, choice.Model is not null, prompt.Coverage.Repositories, prompt.Coverage.ChangedFiles, prompt.Coverage.FilesWithExcerpts,
-            prompt.Coverage.RedactedLines, prompt.Coverage.IsPartial, prompt.EstimatedTokens, evidenceMs, evidence.ElapsedMs, promptMs - evidenceMs,
+            prompt.Coverage.HistoryCommits, prompt.Coverage.HistoryShown, prompt.Coverage.RedactedLines, prompt.Coverage.IsPartial, prompt.EstimatedTokens, evidenceMs, evidence.ElapsedMs, promptMs - evidenceMs,
             answer?.ElapsedMs, (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds, outcome.Failure?.Kind ?? AiGenerationErrorKind.None);
         return outcome;
     }

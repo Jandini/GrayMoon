@@ -21,6 +21,8 @@ public sealed class GitEvidenceCollector(IBoundedProcessRunner runner)
     private const int MaxLargeFiles = 3;
     private const int MaxUntrackedStatFiles = 50;
     private const int MaxUntrackedStatBytes = 262_144;
+    // A history record is an oid, a time, a subject and a shortstat line: about 150 bytes, so this rarely stops early.
+    private const int HistoryBytesPerCommit = 400;
     private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(30);
 
     // Read-only, deterministic output: raw UTF-8 paths, no color, no external diff or textconv programs, no optional locks.
@@ -125,7 +127,7 @@ public sealed class GitEvidenceCollector(IBoundedProcessRunner runner)
 
         var commitRange = $"{evidence.BaseOid}..{evidence.HeadOid}";
         var countTask = GitAsync(repositoryPath, ["rev-list", "--count", commitRange], 1_024, cancellationToken);
-        var subjectsTask = GitAsync(repositoryPath, ["log", "--no-merges", "--format=%s", "-z", $"-n{Math.Max(1, limits.MaxCommitSubjects)}", commitRange], 65_536, cancellationToken);
+        var historyTask = ReadHistoryAsync(repositoryPath, commitRange, limits, cancellationToken);
         // Three-dot semantics, as on GitHub: the source tip against the merge base, so commits that are only on the
         // target (or older parent history) never show up as part of this change.
         string[] range = [evidence.MergeBaseOid, evidence.HeadOid];
@@ -136,8 +138,7 @@ public sealed class GitEvidenceCollector(IBoundedProcessRunner runner)
         if (evidence.CommitCount == 0)
             return Fail(evidence, GitEvidenceErrorCodes.NoCommitsAhead, $"{head} has no commits that origin/{target} does not have.");
 
-        var subjects = await subjectsTask;
-        evidence.CommitSubjects.AddRange(SplitNul(subjects.StdoutText).Select(s => s.Trim()).Where(s => s.Length > 0));
+        (evidence.Commits, evidence.CommitsOmitted) = await historyTask;
 
         var inventory = await inventoryTask;
         if (inventory.ExitCode != 0 && !inventory.StdoutTruncated)
@@ -148,6 +149,44 @@ public sealed class GitEvidenceCollector(IBoundedProcessRunner runner)
 
         await ReadPatchesAsync(repositoryPath, range, evidence, limits, cancellationToken);
         return evidence;
+    }
+
+    /// <summary>
+    /// The branch's commits without merges, oldest first, each with its subject and size; bodies are never read. The log is
+    /// read oldest first so the start of a long branch is never the part that is cut. A branch longer than the cap also
+    /// gets its newest half read separately, and the commits in between are only counted.
+    /// </summary>
+    private async Task<(List<GitEvidenceCommit> Commits, int Omitted)> ReadHistoryAsync(
+        string repositoryPath,
+        string commitRange,
+        GitEvidenceLimits limits,
+        CancellationToken cancellationToken)
+    {
+        var cap = Math.Max(2, limits.MaxHistoryCommits);
+        var maxBytes = cap * HistoryBytesPerCommit;
+        string[] log = ["log", "--no-merges", "--no-color", $"--format={GitCommitLogParser.Format}", "--shortstat"];
+
+        var oldest = await GitAsync(repositoryPath, [.. log, "--reverse", commitRange], maxBytes, cancellationToken);
+        var commits = oldest.ExitCode == 0 || oldest.StdoutTruncated
+            ? GitCommitLogParser.Parse(oldest.StdoutText, oldest.StdoutTruncated)
+            : [];
+        if (!oldest.StdoutTruncated && commits.Count <= cap)
+            return (commits, 0);
+
+        var half = cap / 2;
+        var newestTask = GitAsync(repositoryPath, [.. log, $"-n{cap - half}", commitRange], maxBytes, cancellationToken);
+        var totalTask = GitAsync(repositoryPath, ["rev-list", "--count", "--no-merges", commitRange], 1_024, cancellationToken);
+        var newest = await newestTask;
+        var tail = GitCommitLogParser.Parse(newest.StdoutText, newest.StdoutTruncated);
+        tail.Reverse();
+
+        var kept = commits.Take(half).ToList();
+        var seen = kept.Select(c => c.Oid).ToHashSet(StringComparer.Ordinal);
+        kept.AddRange(tail.Where(c => seen.Add(c.Oid)));
+
+        var total = await totalTask;
+        var all = int.TryParse(total.StdoutText.Trim(), out var counted) ? counted : kept.Count;
+        return (kept, Math.Max(0, all - kept.Count));
     }
 
     /// <summary>

@@ -4,7 +4,7 @@
 **Code baseline reviewed through:** `e4385f4a86e388f8af80e4a7f3ff5ba828ec0f6b`  
 **Runtime:** .NET 10, ASP.NET Core / Blazor Server, EF Core 10, SQLite, GrayMoon.Worker .NET 10
 
-This folder is the current-state architecture reference for GrayMoon, and the only documentation folder in the repository. Design notes, implementation prompts, reviews and analyses are not kept; their still-relevant content has been folded into these documents.
+This folder is the current-state architecture reference for GrayMoon. Proposals and design notes for work not yet built live in `docs/todo/`; once shipped, their behavior is folded into these documents.
 
 The purpose is to answer four questions for a developer joining the project:
 

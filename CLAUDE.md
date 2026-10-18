@@ -21,7 +21,7 @@ Never run `git commit` or `git push` (or stage, tag, amend, or open a pull reque
 
 ## Documentation
 
-`docs/architecture/` (`01`-`06` plus `README.md`) is the only documentation folder and describes the current state only. When a change alters behavior, data, a Worker command, a concurrency rule or an extension point, update the relevant architecture doc in the same change. Do not add design, prompt, plan, review or analysis documents under `docs/`; cite architecture docs by file name, not by section number.
+`docs/architecture/` (`01`-`06` plus `README.md`) describes the current state only. When a change alters behavior, data, a Worker command, a concurrency rule or an extension point, update the relevant architecture doc in the same change. Proposals and design notes for work not yet built go in `docs/todo/`. Cite architecture docs by file name, not by section number.
 
 ## Commands
 
