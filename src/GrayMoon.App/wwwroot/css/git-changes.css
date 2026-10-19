@@ -374,6 +374,33 @@
     white-space: nowrap;
 }
 
+/* The AI segments and their menu: the same dark fill as the New Pull Request AI tab. With the frame below, the
+   control looks the same attached to the message box or on its own row. */
+.git-changes-workspace-commit__buttons.gm-split-control > .btn.gm-ai-segment:not(:hover):not(:focus-visible):not(:active):not([aria-expanded="true"]),
+.git-changes-workspace-commit__buttons.gm-split-control > .btn.btn-outline-primary:not(.gm-ai-segment):not(:hover):not(:active),
+.git-changes-workspace-commit__buttons .gm-ai-menu {
+    background-color: var(--bg-primary);
+}
+
+/* One frame for the whole Commit control, attached or not: the message box's dark frame, also while a segment is
+   hovered or pressed, so the hover fill stays inside it instead of a brighter border sticking out. The blue Commit
+   button too: a blue frame makes it stick out of the control. */
+.git-changes-workspace-commit__actions .git-changes-workspace-commit__buttons.gm-split-control > .btn,
+.git-changes-workspace-commit__actions .git-changes-workspace-commit__buttons.gm-split-control > .btn:hover:not(:disabled),
+.git-changes-workspace-commit__actions .git-changes-workspace-commit__buttons.gm-split-control > .btn:focus:not(:disabled),
+.git-changes-workspace-commit__actions .git-changes-workspace-commit__buttons.gm-split-control > .btn:focus-visible:not(:disabled),
+.git-changes-workspace-commit__actions .git-changes-workspace-commit__buttons.gm-split-control > .btn:active:not(:disabled) {
+    border-color: var(--border-input);
+    box-shadow: none;
+}
+
+/* The Commit button is not blue only while it is disabled (empty box, nothing to write the message). Bootstrap fades a
+   disabled button as a whole, which also fades its frame, so it stopped matching the AI segments. Fade the label only. */
+.git-changes-workspace-commit__actions .git-changes-workspace-commit__buttons.gm-split-control > .btn.btn-outline-primary:disabled {
+    opacity: 1;
+    color: var(--text-muted) !important;
+}
+
 /* The pinned provider segment shows its icon only; its title and aria-label still name the provider. */
 .git-changes-workspace-commit__buttons .gm-ai-segment__label {
     display: none;
@@ -419,17 +446,6 @@
         gap: 0.25rem;
         border-top-left-radius: 0;
         border-bottom-left-radius: 0;
-    }
-
-    /* Same dark frame as the message box, including while a segment is hovered, so the hover fill stays
-       inside that frame instead of a brighter border sticking out. */
-    .git-changes-workspace-commit__composer--attached .git-changes-workspace-commit__buttons.gm-split-control > .btn,
-    .git-changes-workspace-commit__composer--attached .git-changes-workspace-commit__buttons.gm-split-control > .btn:hover:not(:disabled),
-    .git-changes-workspace-commit__composer--attached .git-changes-workspace-commit__buttons.gm-split-control > .btn:focus:not(:disabled),
-    .git-changes-workspace-commit__composer--attached .git-changes-workspace-commit__buttons.gm-split-control > .btn:focus-visible:not(:disabled),
-    .git-changes-workspace-commit__composer--attached .git-changes-workspace-commit__buttons.gm-split-control > .btn:active:not(:disabled) {
-        border-color: var(--border-input);
-        box-shadow: none;
     }
 
     .git-changes-workspace-commit__composer--attached .gm-ai-menu--start {

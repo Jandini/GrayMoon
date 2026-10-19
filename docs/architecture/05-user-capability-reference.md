@@ -1385,6 +1385,10 @@ survives navigation  clicking the provider keeps writing when you leave Changes,
                      context is still on screen and the scope has not moved, the text goes straight into the box;
                      otherwise it is kept for that context (the message, or a suggestion if the box was edited)
 checkboxes           Generate commit message starts ticked and Push committed starts unticked; both stay as set across F5 and Ctrl+F5 until the App restarts
+PR text remembered   the New PR title and description are kept per Workspace and Feature context across closing
+                     the dialog, leaving Repositories, F5 and Ctrl+F5 (not an App restart), until every PR of a
+                     Create succeeds or both fields are emptied; closing the dialog does not stop a write, and its
+                     text, suggestion or error shows when the dialog next opens for that context; Cancel stops it
 PR comparison        each repository compares its head with the target selected in the Branch tab, never the
                      default branch; PR generation does not run in an overlay job
 apply policy         AiTextApplyPolicy.Decide: text goes straight into the field only if the field was empty at
@@ -1428,7 +1432,10 @@ All three Worker commands run on the main pool. The App never runs git or an AI 
 ```text
 Components/Ai: AiProviderControl, AiMenuCheckItem, AiSuggestionPanel; wwwroot/css/ai-generation.css, js/gm-ai-menu.js
 WorkspaceGitChanges.Ai.cs / NewPullRequestModal.Ai.cs
-WorkspaceGitChangesCommitGeneration   click-to-write runs outside the page, one run per Workspace and Feature context
+AiTextGenerationRuns<TText>          app-wide click-to-write runs, one per Workspace and Feature context, outside any page or circuit
+WorkspaceGitChangesCommitGeneration   the commit message runs (stores into WorkspaceGitChangesCommitMessageMemory)
+WorkspacePullRequestTextGeneration    the New PR title and description runs (stores into WorkspacePullRequestDraftMemory)
+WorkspacePullRequestDraftMemory       the New PR title and description, per Workspace and Feature context
 WorkspaceGitChangesCommitMessageMemory   the message, per Workspace and Feature context
 WorkspaceGitChangesPushAfterCommitMemory / WorkspaceGitChangesGenerateMessageOnCommitMemory   the two On Commit checkboxes, per Workspace
 IWorkspaceAiGenerationOperations -> WorkspaceAiGenerationOperations

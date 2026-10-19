@@ -87,7 +87,7 @@
                             {
                                 <div class="gm-ai-error mb-2" role="alert">
                                     <span class="gm-ai-error__text">@_aiError</span>
-                                    <button type="button" class="btn-close gm-ai-error__close" aria-label="Dismiss" @onclick="() => _aiError = null"></button>
+                                    <button type="button" class="btn-close gm-ai-error__close" aria-label="Dismiss" @onclick="DismissAiError"></button>
                                 </div>
                             }
                             @if (_aiSuggestion is { } suggestion)
@@ -95,11 +95,11 @@
                                 <div class="mb-2">
                                     <AiSuggestionPanel ProviderLabel="@suggestion.ProviderLabel"
                                                        Reason="@suggestion.Reason"
-                                                       CopyText="@($"{suggestion.Text.Title}\n\n{suggestion.Text.Description}")"
+                                                       CopyText="@($"{suggestion.Text.Text.Title}\n\n{suggestion.Text.Text.Description}")"
                                                        OnReplace="ReplaceWithAiSuggestion"
-                                                       OnDismiss="() => _aiSuggestion = null">
-                                        <div class="gm-ai-suggestion__title-line">@suggestion.Text.Title</div>
-                                        <pre class="gm-ai-suggestion__text">@suggestion.Text.Description</pre>
+                                                       OnDismiss="DismissAiSuggestion">
+                                        <div class="gm-ai-suggestion__title-line">@suggestion.Text.Text.Title</div>
+                                        <pre class="gm-ai-suggestion__text">@suggestion.Text.Text.Description</pre>
                                     </AiSuggestionPanel>
                                 </div>
                             }
@@ -117,6 +117,7 @@
                                        class="form-control"
                                        @bind="_title"
                                        @bind:event="oninput"
+                                       @bind:after="SaveDraft"
                                        @ref="titleInput"
                                        disabled="@IsBusy" />
                             </div>
@@ -128,6 +129,7 @@
                                           rows="6"
                                           @bind="_body"
                                           @bind:event="oninput"
+                                          @bind:after="SaveDraft"
                                           disabled="@IsBusy"></textarea>
                                 <div class="form-text text-muted">
                                     If left empty, the repository pull request template will be used if available.
@@ -437,7 +439,7 @@
 
             _reviewersRequested = false;
             _refreshingBranches = false;
-            ResetAiOnOpen();
+            RestoreDraftOnOpen();
 
             _ = LoadTargetBranchesAsync();
             _ = CheckUnpushedCommitsAsync();
@@ -475,7 +477,6 @@
             _branchesCts?.Cancel();
             _branchesCts?.Dispose();
             _branchesCts = null;
-            CancelAiOnClose();
         }
         else if (IsVisible && !_wasVisible)
         {
@@ -495,6 +496,7 @@
         _body = string.IsNullOrWhiteSpace(rest)
             ? _body
             : (string.IsNullOrWhiteSpace(_body) ? rest : $"{_body}\n{rest}");
+        SaveDraft();
 
         StateHasChanged();
     }
@@ -502,7 +504,7 @@
     public void Dispose()
     {
         _dotNetRef?.Dispose();
-        _aiCts?.Cancel();
+        DisposeAi();
         _pushCheckCts?.Cancel();
         _pushCheckCts?.Dispose();
         _branchesCts?.Cancel();

@@ -554,7 +554,7 @@
 }
 
 /* AI title/description selector at the right end of the tab row (never in the Create buttons).
-   Same frame as an unselected tab: dark fill, top corners only, bottom edge on the tab line. */
+   Tab-like frame on all four sides with a dark fill, sitting on the tab line, with both right corners rounded. */
 .new-pr-tabs__ai {
     margin-left: auto;
     display: flex;
@@ -567,9 +567,8 @@
 
 .new-pr-tabs__ai ::deep .btn.gm-ai-segment {
     color: var(--text-secondary);
-    background: var(--bg-tertiary);
+    background: var(--bg-primary);
     border: 1px solid var(--border-color);
-    border-bottom: none;
     border-radius: 0 !important;
     padding: 0.5rem 0.75rem;
     font-size: inherit;
@@ -583,6 +582,12 @@
 
 .new-pr-tabs__ai ::deep .btn.gm-ai-segment:last-of-type {
     border-top-right-radius: 0.375rem !important;
+    border-bottom-right-radius: 0.375rem !important;
+}
+
+/* The provider menu shares the button's dark fill. */
+.new-pr-tabs__ai ::deep .gm-ai-menu {
+    background: var(--bg-primary);
 }
 
 .new-pr-tabs__ai ::deep .btn.gm-ai-segment--main + .btn.gm-ai-segment--chevron {
@@ -598,7 +603,6 @@
     color: var(--text-primary);
     background: var(--bg-hover);
     border-color: var(--border-color);
-    border-bottom: none;
     box-shadow: none;
 }
 
@@ -606,6 +610,5 @@
     color: var(--text-primary);
     background: var(--bg-hover);
     border-color: var(--border-color);
-    border-bottom: none;
     box-shadow: 0 0 0 1px var(--focus-ring-outer);
 }

@@ -1,6 +1,7 @@
 using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Services.Ai;
 using GrayMoon.App.Services.GitChanges;
+using GrayMoon.App.Services.Worker;
 using GrayMoon.Application.Ai;
 using GrayMoon.Common.Ai;
 using Microsoft.AspNetCore.Components;
@@ -22,9 +23,11 @@ public sealed partial class WorkspaceGitChanges
     [Inject] private IWorkspaceAiGenerationOperations AiOperations { get; set; } = default!;
     [Inject] private WorkspaceGitChangesGenerateMessageOnCommitMemory GenerateMessageOnCommitMemory { get; set; } = default!;
     [Inject] private WorkspaceGitChangesCommitGeneration CommitGeneration { get; set; } = default!;
+    [Inject] private WorkerConnectionTracker WorkerConnectionTracker { get; set; } = default!;
 
     private AiProviderMenu? _aiMenu;
     private string? _aiLocalError;
+    private WorkerConnectionState? _aiWorkerState;
 
     /// <summary>The menu's "Generate commit message" option. Starts ticked until the user changes it, then remembered per workspace like "Push committed".</summary>
     private bool GenerateMessageOnCommit
@@ -140,6 +143,20 @@ public sealed partial class WorkspaceGitChanges
                 await InvokeAsync(StateHasChanged);
             }
         }
+    }
+
+    /// <summary>
+    /// The menu is read from the Worker, so one read while it was offline shows only that error. When the Worker comes
+    /// back online the menu is read again. The first call is the tracker's current state and only records it.
+    /// </summary>
+    private void OnAiWorkerStateChanged(WorkerConnectionState state)
+    {
+        var previous = _aiWorkerState;
+        _aiWorkerState = state;
+        if (_disposed || state != WorkerConnectionState.Online || previous is null or WorkerConnectionState.Online)
+            return;
+
+        _ = InvokeAsync(LoadAiMenuAsync);
     }
 
     /// <summary>A workspace switch reloads the provider menu. An in-flight write for the previous scope keeps running.</summary>
@@ -278,9 +295,9 @@ public sealed partial class WorkspaceGitChanges
             var current = (_view?.Repositories ?? []).Where(r => WorkspaceCommitModeHelper.IsRepositoryTarget(mode, r.StagedCount, r.ChangedCount));
             var scopeChanged = OfferedCommitMode != mode
                                || !string.Equals(fingerprint, AiTextApplyPolicy.CommitScopeFingerprint(mode, current), StringComparison.Ordinal);
-            decision = AiTextApplyPolicy.Decide(outcome.MessageAtClick, _workspaceCommitMessage, scopeChanged, AiTextApplyPolicy.StaleChangesReason);
-            if (decision.ApplyDirectly && outcome.Message is not null)
-                ApplyCommitMessage(outcome.Message);
+            decision = AiTextApplyPolicy.Decide(outcome.TextAtClick, _workspaceCommitMessage, scopeChanged, AiTextApplyPolicy.StaleChangesReason);
+            if (decision.ApplyDirectly && outcome.Text is not null)
+                ApplyCommitMessage(outcome.Text);
         });
         return decision;
     }
@@ -305,7 +322,7 @@ public sealed partial class WorkspaceGitChanges
     {
         if (_aiSuggestion is not { } suggestion)
             return;
-        ApplyCommitMessage(suggestion.Message);
+        ApplyCommitMessage(suggestion.Text);
         if (CurrentCommitGenerationKey is { } key)
             CommitGeneration.DismissOffer(key);
     }

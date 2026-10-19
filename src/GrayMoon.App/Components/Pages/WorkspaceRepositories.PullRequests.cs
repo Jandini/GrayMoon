@@ -3,12 +3,17 @@ using GrayMoon.App.Components.Shared;
 using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Services;
+using GrayMoon.App.Services.Ai;
+using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
 
 namespace GrayMoon.App.Components.Pages;
 
 public sealed partial class WorkspaceRepositories
 {
+    [Inject] private WorkspacePullRequestDraftMemory PullRequestDrafts { get; set; } = default!;
+    [Inject] private WorkspacePullRequestTextGeneration PullRequestTextGeneration { get; set; } = default!;
+
     private NewPullRequestModalState _newPrModal = new();
 
     private async Task OpenPullRequestDialogForAllRepositoriesAsync()
@@ -229,6 +234,9 @@ public sealed partial class WorkspaceRepositories
             return Task.CompletedTask;
 
         var total = requests.Count;
+        var requestedTotal = total;
+        // The dialog remembers its title and description under this key (the same one it is opened with).
+        var draftContextId = (_selectedContextId ?? default).Value;
         _newPrModal = _newPrModal with { IsVisible = false };
 
         JobService.StartJob(PageJobKey, total == 1 ? "Creating 1 pull request..." : $"Creating {total} pull requests...", async (job, ct) =>
@@ -296,6 +304,13 @@ public sealed partial class WorkspaceRepositories
             }
 
             var successCount = results.Count(r => r.Success);
+
+            // Every pull request exists now, so the remembered text is spent. Any failure keeps it for the retry.
+            if (successCount == requestedTotal)
+            {
+                PullRequestDrafts.Clear(WorkspaceId, draftContextId);
+                PullRequestTextGeneration.DismissOffer(new WorkspacePullRequestTextGeneration.Key(WorkspaceId, draftContextId));
+            }
 
             SafeInvoke(() =>
             {

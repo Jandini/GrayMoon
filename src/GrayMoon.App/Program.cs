@@ -253,6 +253,8 @@ try
     builder.Services.AddSingleton<WorkspaceGitChangesPushAfterCommitMemory>();
     builder.Services.AddSingleton<WorkspaceGitChangesGenerateMessageOnCommitMemory>();
     builder.Services.AddSingleton<WorkspaceGitChangesCommitGeneration>();
+    builder.Services.AddSingleton<WorkspacePullRequestDraftMemory>();
+    builder.Services.AddSingleton<WorkspacePullRequestTextGeneration>();
     builder.Services.AddSingleton<IWorkspaceGitChangesActivityTracker, WorkspaceGitChangesActivityTracker>();
     builder.Services.AddSingleton<IWorkspaceGitChangesMonitoringPause, WorkspaceGitChangesMonitoringPause>();
     builder.Services.AddSingleton<IGitChangesWorkspaceScanner, GitChangesWorkspaceScanner>();
