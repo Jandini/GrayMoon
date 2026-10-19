@@ -55,7 +55,7 @@ public sealed class WorkspaceGitChangesCommitGenerationTests
         Assert.Equal("I typed this", memory.Get(1, 10));
         var offer = generation.OfferFor(Feature);
         Assert.NotNull(offer);
-        Assert.Equal("ai text", offer.Message);
+        Assert.Equal("ai text", offer.Text);
         Assert.Equal(AiTextApplyPolicy.EditedReason, offer.Reason);
     }
 

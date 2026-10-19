@@ -1,6 +1,8 @@
 using GrayMoon.App.Services.Ai;
+using GrayMoon.App.Services.Jobs;
 using GrayMoon.Application.Ai;
 using GrayMoon.Common.Ai;
+using Microsoft.AspNetCore.Components;
 
 namespace GrayMoon.App.Components.Modals;
 
@@ -8,41 +10,61 @@ namespace GrayMoon.App.Components.Modals;
 /// AI title and description for the dialog: one shared text for every pull request, from each repository's source
 /// branch compared with the target selected in the Branch tab. It only fills the Details fields; branches, reviewers,
 /// draft and the Create buttons are never touched.
+/// The title and description are remembered per Workspace and Feature context (<see cref="WorkspacePullRequestDraftMemory"/>),
+/// and a generation runs outside the dialog (<see cref="WorkspacePullRequestTextGeneration"/>): closing the dialog,
+/// leaving the page or reloading does not cancel it, and its text, suggestion or error shows when the dialog opens again.
 /// </summary>
 public partial class NewPullRequestModal
 {
-    private AiProviderMenu? _aiMenu;
-    private bool _aiGenerating;
-    private CancellationTokenSource? _aiCts;
-    private string? _aiError;
-    private PullRequestSuggestion? _aiSuggestion;
-    private string? _aiAppliedFingerprint;
+    [Inject] private WorkspacePullRequestDraftMemory Drafts { get; set; } = default!;
+    [Inject] private WorkspacePullRequestTextGeneration Generation { get; set; } = default!;
+    [Inject] private IScopedServiceExecutor ScopedExecutor { get; set; } = default!;
 
-    private sealed record PullRequestSuggestion(GeneratedPullRequestText Text, string ProviderLabel, string? Reason, string Fingerprint);
+    private AiProviderMenu? _aiMenu;
+    private string? _aiLocalError;
+    private string? _aiAppliedFingerprint;
+    private bool _disposed;
+
+    private WorkspacePullRequestTextGeneration.Key GenerationKey => new(WorkspaceId, ContextId.Value);
+
+    private bool _aiGenerating => Generation.IsRunning(GenerationKey);
+
+    private string? _aiError => _aiLocalError ?? Generation.Error(GenerationKey);
+
+    private WorkspacePullRequestTextGeneration.Offer? _aiSuggestion => Generation.OfferFor(GenerationKey);
 
     /// <summary>The fields hold AI text that was written for a branch selection other than the current one.</summary>
     private bool IsAiTextStale =>
         _aiAppliedFingerprint is not null
         && !string.Equals(_aiAppliedFingerprint, CurrentAiScope().Fingerprint(), StringComparison.Ordinal);
 
-    private void ResetAiOnOpen()
+    protected override void OnInitialized() => Generation.Changed += OnGenerationChanged;
+
+    /// <summary>Shows this context's remembered title and description, if any. A running generation is left running.</summary>
+    private void RestoreDraftOnOpen()
     {
-        _aiCts?.Cancel();
-        _aiCts = null;
-        _aiGenerating = false;
-        _aiError = null;
-        _aiSuggestion = null;
+        _aiLocalError = null;
         _aiAppliedFingerprint = null;
+        if (Drafts.Get(WorkspaceId, ContextId.Value) is { } draft)
+            ShowDraft(draft);
+
         _aiMenu = null;
         _ = LoadAiMenuAsync();
     }
 
-    private void CancelAiOnClose()
+    private void ShowDraft(PullRequestDraft draft)
     {
-        _aiCts?.Cancel();
-        _aiCts = null;
-        _aiGenerating = false;
+        _title = draft.TitleIsDefault ? ComputeDefaultTitle() : draft.Title;
+        _body = draft.Body;
+        _aiAppliedFingerprint = draft.AiFingerprint;
     }
+
+    /// <summary>Remembers the fields for this context, so they outlive the dialog, the page and a reload.</summary>
+    private void SaveDraft() => Drafts.Set(WorkspaceId, ContextId.Value, CurrentDraft());
+
+    private PullRequestDraft CurrentDraft() => new(_title, _body, IsTitleDefault, _aiAppliedFingerprint);
+
+    private bool IsTitleDefault => string.Equals(_title, ComputeDefaultTitle(), StringComparison.Ordinal);
 
     private async Task LoadAiMenuAsync()
     {
@@ -56,7 +78,8 @@ public partial class NewPullRequestModal
             _aiMenu = AiProviderMenu.Empty;
         }
 
-        await InvokeAsync(StateHasChanged);
+        if (!_disposed)
+            await InvokeAsync(StateHasChanged);
     }
 
     private async Task OnAiPinAsync(string? providerId)
@@ -73,11 +96,11 @@ public partial class NewPullRequestModal
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             Logger.LogWarning(ex, "Pinning the AI provider failed. WorkspaceId={WorkspaceId}", WorkspaceId);
-            _aiError = "Could not pin the AI provider.";
+            _aiLocalError = "Could not pin the AI provider.";
         }
     }
 
-    private void CancelAiGeneration() => _aiCts?.Cancel();
+    private void CancelAiGeneration() => Generation.Cancel(GenerationKey);
 
     /// <summary>The comparison the Create request would use right now: each source with its selected target.</summary>
     private AiPullRequestScope CurrentAiScope() => new(
@@ -86,22 +109,24 @@ public partial class NewPullRequestModal
         Targets.Select(t => new AiPullRequestRepository(t.RepositoryId, t.HeadBranch, GetRepoBranchState(t.RepositoryId).SelectedBase)).ToList());
 
     /// <summary>What the user wrote: the prefilled default title alone counts as nothing written yet.</summary>
-    private string UserWrittenText() =>
-        (string.Equals(_title, ComputeDefaultTitle(), StringComparison.Ordinal) ? string.Empty : _title) + "\n" + _body;
+    private string UserWrittenText() => PullRequestDraft.UserWritten(IsTitleDefault ? string.Empty : _title, _body);
 
-    private async Task GeneratePullRequestTextAsync()
+    /// <summary>
+    /// One click, one generation, for the Feature context or Workspace the dialog was opened for. The run is not tied
+    /// to the dialog: closing it, leaving the page or reloading does not cancel it.
+    /// </summary>
+    private Task GeneratePullRequestTextAsync()
     {
         if (_aiGenerating || IsBusy || _aiMenu?.Pinned is not { IsAvailable: true } provider)
-            return;
+            return Task.CompletedTask;
 
         if (_branchByRepoId.Values.Any(s => s.IsLoading))
         {
-            _aiError = "Wait for the target branches to load.";
+            _aiLocalError = "Wait for the target branches to load.";
             _activeTab = "details";
-            return;
+            return Task.CompletedTask;
         }
 
-        var scope = CurrentAiScope();
         var invalid = Targets.Where(t =>
         {
             var state = GetRepoBranchState(t.RepositoryId);
@@ -111,74 +136,132 @@ public partial class NewPullRequestModal
         }).Select(t => t.RepositoryName).ToList();
         if (invalid.Count > 0)
         {
-            _aiError = $"Choose a valid target branch first ({string.Join(", ", invalid)}).";
+            _aiLocalError = $"Choose a valid target branch first ({string.Join(", ", invalid)}).";
             _activeTab = "details";
-            return;
+            return Task.CompletedTask;
         }
 
+        var key = GenerationKey;
+        var scope = CurrentAiScope();
         var fingerprint = scope.Fingerprint();
-        var textAtClick = UserWrittenText().Trim();
+        var textAtClick = UserWrittenText();
+        _aiLocalError = null;
+        // The memory is the field once the dialog is gone; it must hold what the user had at the click.
+        SaveDraft();
 
-        using var cts = new CancellationTokenSource();
-        _aiCts = cts;
-        _aiGenerating = true;
-        _aiError = null;
-        _aiSuggestion = null;
-        StateHasChanged();
-
-        try
-        {
-            var result = await AiOperations.GeneratePullRequestTextAsync(scope, provider.Id, cts.Token);
-            if (cts.IsCancellationRequested || !IsVisible)
-                return;
-
-            _activeTab = "details";
-            if (!result.Success)
+        Generation.TryStart(
+            key,
+            async ct =>
             {
-                _aiError = result.Failure!.Message;
-                return;
-            }
+                try
+                {
+                    var result = await ScopedExecutor.ExecuteAsync<IWorkspaceAiGenerationOperations, AiGenerationResult<GeneratedPullRequestText>>(
+                        ops => ops.GeneratePullRequestTextAsync(scope, provider.Id, ct),
+                        ct);
+                    return result.Success
+                        ? WorkspacePullRequestTextGeneration.Outcome.Succeeded(new PullRequestAiText(result.Value!, fingerprint), provider.Label, textAtClick)
+                        : WorkspacePullRequestTextGeneration.Outcome.Failed(result.Failure!.Message, provider.Label, textAtClick);
+                }
+                catch (OperationCanceledException)
+                {
+                    return WorkspacePullRequestTextGeneration.Outcome.CancelledResult;
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex, "AI pull request text failed. WorkspaceId={WorkspaceId} ContextId={ContextId}", key.WorkspaceId, key.ContextId);
+                    return WorkspacePullRequestTextGeneration.Outcome.Failed("Writing the title and description failed - see logs.", provider.Label, textAtClick);
+                }
+            },
+            outcome => ConsultPullRequestApplyAsync(key, outcome));
+        return Task.CompletedTask;
+    }
 
-            var scopeChanged = !string.Equals(fingerprint, CurrentAiScope().Fingerprint(), StringComparison.Ordinal);
-            var decision = AiTextApplyPolicy.Decide(textAtClick, UserWrittenText().Trim(), scopeChanged, AiTextApplyPolicy.StaleBranchesReason);
+    private bool IsShowing(WorkspacePullRequestTextGeneration.Key key) => !_disposed && IsVisible && GenerationKey == key;
+
+    /// <summary>
+    /// The live branch-selection check, only while this dialog is still open for the context that was clicked.
+    /// Otherwise null, and the result is stored from that context's draft memory.
+    /// </summary>
+    private async Task<AiApplyDecision?> ConsultPullRequestApplyAsync(
+        WorkspacePullRequestTextGeneration.Key key,
+        WorkspacePullRequestTextGeneration.Outcome outcome)
+    {
+        if (!IsShowing(key) || outcome.Text is not { } generated)
+            return null;
+
+        AiApplyDecision? decision = null;
+        await InvokeAsync(() =>
+        {
+            if (!IsShowing(key))
+                return;
+
+            var scopeChanged = !string.Equals(generated.Fingerprint, CurrentAiScope().Fingerprint(), StringComparison.Ordinal);
+            decision = AiTextApplyPolicy.Decide(outcome.TextAtClick, UserWrittenText(), scopeChanged, AiTextApplyPolicy.StaleBranchesReason);
             if (decision.ApplyDirectly)
-                ApplyPullRequestText(result.Value!, fingerprint);
-            else
-                _aiSuggestion = new PullRequestSuggestion(result.Value!, provider.Label, decision.Reason, fingerprint);
-        }
-        catch (OperationCanceledException)
+                ApplyPullRequestText(generated);
+        });
+        return decision;
+    }
+
+    private void OnGenerationChanged(WorkspacePullRequestTextGeneration.Key key)
+    {
+        if (!IsShowing(key))
+            return;
+
+        _ = InvokeAsync(() =>
         {
-            // Cancelled by the user or by closing the dialog.
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "AI pull request text failed. WorkspaceId={WorkspaceId}", WorkspaceId);
-            _aiError = "Writing the title and description failed - see logs.";
-        }
-        finally
-        {
-            if (ReferenceEquals(_aiCts, cts))
+            if (!IsShowing(key))
+                return;
+
+            if (!Generation.IsRunning(key))
             {
-                _aiCts = null;
-                _aiGenerating = false;
+                // A run started before a reload, or finished while this dialog was closed, lands in the memory only.
+                if (Generation.OfferFor(key) is null
+                    && Drafts.Get(key.WorkspaceId, key.ContextId) is { } draft
+                    && draft != CurrentDraft())
+                    ShowDraft(draft);
+
+                if (Generation.OfferFor(key) is not null || Generation.Error(key) is not null)
+                    _activeTab = "details";
             }
 
             StateHasChanged();
-        }
+        });
     }
 
-    private void ApplyPullRequestText(GeneratedPullRequestText text, string fingerprint)
+    private void ApplyPullRequestText(PullRequestAiText text)
     {
-        _title = text.Title;
-        _body = text.Description;
-        _aiAppliedFingerprint = fingerprint;
+        _title = text.Text.Title;
+        _body = text.Text.Description;
+        _aiAppliedFingerprint = text.Fingerprint;
+        _activeTab = "details";
+        SaveDraft();
     }
 
     private void ReplaceWithAiSuggestion()
     {
-        if (_aiSuggestion is null)
+        if (_aiSuggestion is not { } suggestion)
             return;
-        ApplyPullRequestText(_aiSuggestion.Text, _aiSuggestion.Fingerprint);
-        _aiSuggestion = null;
+        ApplyPullRequestText(suggestion.Text);
+        Generation.DismissOffer(GenerationKey);
+    }
+
+    private void DismissAiSuggestion() => Generation.DismissOffer(GenerationKey);
+
+    private void DismissAiError()
+    {
+        if (_aiLocalError is not null)
+        {
+            _aiLocalError = null;
+            return;
+        }
+
+        Generation.DismissError(GenerationKey);
+    }
+
+    private void DisposeAi()
+    {
+        _disposed = true;
+        Generation.Changed -= OnGenerationChanged;
     }
 }

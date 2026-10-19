@@ -278,9 +278,9 @@ public sealed partial class WorkspaceGitChanges
             var current = (_view?.Repositories ?? []).Where(r => WorkspaceCommitModeHelper.IsRepositoryTarget(mode, r.StagedCount, r.ChangedCount));
             var scopeChanged = OfferedCommitMode != mode
                                || !string.Equals(fingerprint, AiTextApplyPolicy.CommitScopeFingerprint(mode, current), StringComparison.Ordinal);
-            decision = AiTextApplyPolicy.Decide(outcome.MessageAtClick, _workspaceCommitMessage, scopeChanged, AiTextApplyPolicy.StaleChangesReason);
-            if (decision.ApplyDirectly && outcome.Message is not null)
-                ApplyCommitMessage(outcome.Message);
+            decision = AiTextApplyPolicy.Decide(outcome.TextAtClick, _workspaceCommitMessage, scopeChanged, AiTextApplyPolicy.StaleChangesReason);
+            if (decision.ApplyDirectly && outcome.Text is not null)
+                ApplyCommitMessage(outcome.Text);
         });
         return decision;
     }
@@ -305,7 +305,7 @@ public sealed partial class WorkspaceGitChanges
     {
         if (_aiSuggestion is not { } suggestion)
             return;
-        ApplyCommitMessage(suggestion.Message);
+        ApplyCommitMessage(suggestion.Text);
         if (CurrentCommitGenerationKey is { } key)
             CommitGeneration.DismissOffer(key);
     }
