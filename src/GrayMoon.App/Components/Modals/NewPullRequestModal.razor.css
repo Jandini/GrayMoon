@@ -30,8 +30,19 @@
     overflow-y: auto;
 }
 
-/* Tabs — same pattern as Switch Branch / Branch modals */
+/* Tabs — same pattern as Switch Branch / Branch modals.
+   The list grows so its underline runs across the row and stops in the gap before the AI control. */
+.new-pr-tabbar {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
 .new-pr-tabs {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin-bottom: 0;
     border-bottom: 1px solid var(--border-color);
 }
 
@@ -554,15 +565,12 @@
 }
 
 /* AI title/description selector at the right end of the tab row (never in the Create buttons).
-   Tab-like frame on all four sides with a dark fill, sitting on the tab line, with both right corners rounded. */
+   Outside the tab list, so the underline finishes before it. Its bottom edge is the same edge as
+   that line (no extra pull-down): a full frame, dark fill, both right corners rounded. */
 .new-pr-tabs__ai {
-    margin-left: auto;
     display: flex;
     align-items: flex-end;
-}
-
-.new-pr-tabs__ai .gm-split-control {
-    margin-bottom: -1px;
+    flex: 0 0 auto;
 }
 
 .new-pr-tabs__ai ::deep .btn.gm-ai-segment {

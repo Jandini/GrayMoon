@@ -34,7 +34,9 @@
                     <button type="button" class="btn-close" aria-label="Close" @onclick="HandleCancelClick" disabled="@IsBusy"></button>
                 </div>
                 <div class="modal-body">
-                    <ul class="nav nav-tabs new-pr-tabs mb-3" role="tablist">
+                    @* The underline lives on the tab list and stops before the AI control, so the control's rounded corner cannot cross it. *@
+                    <div class="new-pr-tabbar">
+                    <ul class="nav nav-tabs new-pr-tabs" role="tablist">
                         <li class="nav-item" role="presentation">
                             <button type="button"
                                     class="nav-link @(_activeTab == "details" ? "active" : null)"
@@ -65,20 +67,21 @@
                                 Review
                             </button>
                         </li>
-                        @* One title and one description for every pull request in the dialog; Create and Push & Create are unchanged. *@
-                        <li class="nav-item new-pr-tabs__ai" role="presentation">
-                            <div class="gm-split-control" role="group" aria-label="AI pull request text">
-                                <AiProviderControl Menu="_aiMenu"
-                                                   IsGenerating="_aiGenerating"
-                                                   IsDisabled="IsBusy"
-                                                   Subject="the title and description"
-                                                   UnpinnedLabel="AI"
-                                                   OnGenerate="GeneratePullRequestTextAsync"
-                                                   OnCancel="CancelAiGeneration"
-                                                   OnPin="OnAiPinAsync" />
-                            </div>
-                        </li>
                     </ul>
+                    @* One title and one description for every pull request in the dialog; Create and Push & Create are unchanged. *@
+                    <div class="new-pr-tabs__ai">
+                        <div class="gm-split-control" role="group" aria-label="AI pull request text">
+                            <AiProviderControl Menu="_aiMenu"
+                                               IsGenerating="_aiGenerating"
+                                               IsDisabled="IsBusy"
+                                               Subject="the title and description"
+                                               UnpinnedLabel="AI"
+                                               OnGenerate="GeneratePullRequestTextAsync"
+                                               OnCancel="CancelAiGeneration"
+                                               OnPin="OnAiPinAsync" />
+                        </div>
+                    </div>
+                    </div>
 
                     <div class="new-pr-tab-panels">
                         <div class="@TabPanelClass("details")"
