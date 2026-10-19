@@ -1,5 +1,6 @@
 using GrayMoon.App.Services.Ai;
 using GrayMoon.App.Services.Jobs;
+using GrayMoon.App.Services.Worker;
 using GrayMoon.Application.Ai;
 using GrayMoon.Common.Ai;
 using Microsoft.AspNetCore.Components;
@@ -19,10 +20,12 @@ public partial class NewPullRequestModal
     [Inject] private WorkspacePullRequestDraftMemory Drafts { get; set; } = default!;
     [Inject] private WorkspacePullRequestTextGeneration Generation { get; set; } = default!;
     [Inject] private IScopedServiceExecutor ScopedExecutor { get; set; } = default!;
+    [Inject] private WorkerConnectionTracker WorkerConnectionTracker { get; set; } = default!;
 
     private AiProviderMenu? _aiMenu;
     private string? _aiLocalError;
     private string? _aiAppliedFingerprint;
+    private WorkerConnectionState? _aiWorkerState;
     private bool _disposed;
 
     private WorkspacePullRequestTextGeneration.Key GenerationKey => new(WorkspaceId, ContextId.Value);
@@ -38,7 +41,26 @@ public partial class NewPullRequestModal
         _aiAppliedFingerprint is not null
         && !string.Equals(_aiAppliedFingerprint, CurrentAiScope().Fingerprint(), StringComparison.Ordinal);
 
-    protected override void OnInitialized() => Generation.Changed += OnGenerationChanged;
+    protected override void OnInitialized()
+    {
+        Generation.Changed += OnGenerationChanged;
+        WorkerConnectionTracker.OnStateChanged(OnAiWorkerStateChanged);
+    }
+
+    /// <summary>
+    /// The menu is read from the Worker, so one read while it was offline shows only that error. When the Worker comes
+    /// back online while the dialog is open the menu is read again; a closed dialog reads it when it opens. The first
+    /// call is the tracker's current state and only records it.
+    /// </summary>
+    private void OnAiWorkerStateChanged(WorkerConnectionState state)
+    {
+        var previous = _aiWorkerState;
+        _aiWorkerState = state;
+        if (_disposed || !IsVisible || state != WorkerConnectionState.Online || previous is null or WorkerConnectionState.Online)
+            return;
+
+        _ = InvokeAsync(LoadAiMenuAsync);
+    }
 
     /// <summary>Shows this context's remembered title and description, if any. A running generation is left running.</summary>
     private void RestoreDraftOnOpen()
@@ -263,5 +285,6 @@ public partial class NewPullRequestModal
     {
         _disposed = true;
         Generation.Changed -= OnGenerationChanged;
+        WorkerConnectionTracker.RemoveStateChanged(OnAiWorkerStateChanged);
     }
 }

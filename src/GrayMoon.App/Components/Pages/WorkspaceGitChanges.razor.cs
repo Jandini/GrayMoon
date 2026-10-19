@@ -83,6 +83,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         ApplyIncomingFilterQuery();
         EnsureActivitySubscription();
         _ = LoadAiMenuAsync();
+        WorkerConnectionTracker.OnStateChanged(OnAiWorkerStateChanged);
         return ResolveContextAndStartLoadAsync();
     }
 
@@ -770,6 +771,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
         _disposed = true;
         CommitGeneration.Changed -= OnCommitGenerationChanged;
+        WorkerConnectionTracker.RemoveStateChanged(OnAiWorkerStateChanged);
         JobService.Changed -= OnJobServiceChanged;
         ReleaseActivitySubscription();
         await UnbindDiffReviewEscListenerAsync();
