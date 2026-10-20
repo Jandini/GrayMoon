@@ -694,7 +694,7 @@ whether explicit discard confirmation is needed
 
 ### UI policy
 
-Single-repository, level, and all-repositories flows render the appropriate existing GrayMoon confirmation UI.
+Single-repository (the yellow Return to {branch} button in the Branch dialog), level, and all-repositories flows run analysis under the page loading overlay, including the command terminal, then render the appropriate existing GrayMoon confirmation UI. When that single repository needs no confirmation, the return continues on the same overlay.
 
 ### Unattended policy
 
