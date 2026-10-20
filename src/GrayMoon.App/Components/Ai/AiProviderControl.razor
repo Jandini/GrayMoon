@@ -45,7 +45,13 @@
 @if (_open)
 {
     <div class="gm-ai-menu @(MenuAlign == "start" ? "gm-ai-menu--start" : null)" role="menu" aria-label="AI provider" tabindex="-1" @onkeydown="OnMenuKeyDown" @onkeydown:stopPropagation="true" @ref="_menu">
-        <div class="gm-ai-menu__header">AI provider</div>
+        @{
+            var available = Menu?.Options.Where(o => o.IsAvailable).ToList();
+        }
+        @if (Menu is null || available!.Count > 0)
+        {
+            <div class="gm-ai-menu__header">AI provider</div>
+        }
         @if (Menu is null)
         {
             <div class="gm-ai-menu__status text-muted">
@@ -54,14 +60,13 @@
         }
         else
         {
-            @foreach (var option in Menu.Options)
+            @foreach (var option in available!)
             {
                 var isPinned = string.Equals(option.Id, Menu.PinnedProviderId, StringComparison.Ordinal);
                 <button type="button"
                         role="menuitemradio"
                         aria-checked="@isPinned"
                         class="gm-ai-menu__item @(isPinned ? "gm-ai-menu__item--pinned" : null)"
-                        disabled="@(!option.IsAvailable)"
                         title="@OptionTitle(option)"
                         @onclick="() => PinAsync(option.Id)">
                     <img src="@option.IconSrc" alt="" class="gm-ai-menu__icon" aria-hidden="true" />
@@ -76,7 +81,11 @@
                 </button>
             }
         }
-        <div class="gm-ai-menu__divider" role="separator"></div>
+        @* The line under the providers separates them from On Commit (Changes) or Check CLIs again. With none available there is nothing to separate, so it is omitted. *@
+        @if (Menu is null || available!.Count > 0)
+        {
+            <div class="gm-ai-menu__divider" role="separator"></div>
+        }
         @if (Options is not null)
         {
             @* Host options are usable while the providers are still being checked; they need not depend on AI. *@

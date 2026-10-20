@@ -876,7 +876,7 @@ use Ctrl/Cmd+Enter commit shortcut
 
 ### Commit control
 
-There is one primary Commit button: **Commit Staged** when any repository has staged content, otherwise **Commit All** (`WorkspaceCommitModeHelper.ResolveOfferedMode`). The keyed alternatives carry the captured mode, so a watcher refresh that flips the label mid-click cannot commit the wrong set. The button is joined to an AI provider segment and a chevron menu (`[Commit Staged|All][provider][chevron]`). The menu's **On Commit** header holds **Generate commit message** and **Push committed**, both remembered per Workspace for the circuit. Ctrl/Cmd+Enter targets only the primary commit element, never the AI segment or the chevron. While the message box is empty the control attaches to the right edge of the box; below about 20rem it stays under the box.
+There is one primary Commit button: **Commit Staged** when any repository has staged content, otherwise **Commit All** (`WorkspaceCommitModeHelper.ResolveOfferedMode`). The keyed alternatives carry the captured mode, so a watcher refresh that flips the label mid-click cannot commit the wrong set. The button is joined to an AI provider segment and a chevron menu (`[Commit Staged|All][provider][chevron]`). The menu's **On Commit** header holds **Generate commit message** and **Push committed**, both remembered per Workspace for the circuit. Only providers the Worker can run are listed above that header; when none are available the divider above it is omitted. Ctrl/Cmd+Enter targets only the primary commit element, never the AI segment or the chevron. While the message box is empty the control attaches to the right edge of the box; below about 20rem it stays under the box.
 
 ### Directory rows
 
@@ -1362,7 +1362,9 @@ Changes page      click the provider segment of the Commit control to write ONE 
                   tick "Generate commit message" (On Commit) so Commit writes the message first when the box is empty
 New PR dialog     click the provider selector at the right of the tab bar to write ONE title and ONE Markdown
                   description shared by every PR in the dialog
-both              pick a provider in the menu (pins it for the Workspace on this machine; never generates)
+both              pick an available provider in the menu (pins it for the Workspace on this machine; never generates);
+                  a CLI that is not installed is omitted; when none are available the Changes menu opens on On Commit
+                  with no divider above it
 ```
 
 Providers are Claude (`claude`), Codex (`codex`) and Cursor Agent (`agent`, then `cursor-agent`; the editor's `cursor` command is not the agent). Each CLI must be installed and signed in for the Worker's user. Credentials never go in `graymoon.json`.
