@@ -109,90 +109,117 @@ public sealed partial class WorkspaceRepositories
             });
     }
 
-    private async Task ReturnToDefaultFromModalAsync((int RepositoryId, string? RepositoryName, string CurrentBranchName, string DefaultBranch) request)
+    private Task ReturnToDefaultFromModalAsync((int RepositoryId, string? RepositoryName, string CurrentBranchName, string DefaultBranch) request)
     {
         var (repositoryId, repositoryName, currentBranchName, defaultBranch) = request;
         if (workspace == null || IsJobRunning)
-            return;
+            return Task.CompletedTask;
         if (_isFeatureContext)
         {
             ToastService.Show(
                 "Return to Default is Workspace-only. Switch to Workspace, or Remove Feature when finished.");
             CloseSwitchBranchModal();
-            return;
+            return Task.CompletedTask;
         }
         if (string.IsNullOrWhiteSpace(repositoryName))
-            return;
+            return Task.CompletedTask;
         if (IsRepoOnTag(repositoryId))
         {
             ToastService.Show(TagBlockedActionMessage);
             CloseSwitchBranchModal();
-            return;
+            return Task.CompletedTask;
         }
 
         CloseSwitchBranchModal();
 
-        try
+        // Same overlay as a level or Return all: analysis fetches branch state through the Worker,
+        // and that output only reaches the loading-overlay terminal inside a page job.
+        JobService.StartJob(PageJobKey, "Fetching latest branch state...", async (job, ct) =>
         {
-            var plan = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, ReturnToDefaultPlan>(
-                svc => svc.AnalyzeReturnToDefaultAsync(WorkspaceId, RequireSelectedContextId(), [repositoryId], progress: null, CancellationToken.None));
-
-            if (plan.AnalysisFailed)
+            ReturnToDefaultRepositoryPlan? repo;
+            try
             {
-                ToastService.ShowError(plan.AnalysisError ?? "Failed to prepare return to default.");
-                return;
+                var plan = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, ReturnToDefaultPlan>(
+                    svc => svc.AnalyzeReturnToDefaultAsync(WorkspaceId, RequireSelectedContextId(), [repositoryId], job.ToOperationProgress(), ct));
+
+                if (plan.AnalysisFailed)
+                {
+                    SafeInvoke(() => ToastService.ShowError(plan.AnalysisError ?? "Failed to prepare return to default."));
+                    return;
+                }
+
+                repo = plan.Repositories.FirstOrDefault(r => r.RepositoryId == repositoryId);
+                if (repo == null || repo.IsAlreadyOnDefault)
+                {
+                    SafeInvoke(() => ToastService.Show("Repository is already on the default branch."));
+                    return;
+                }
+
+                if (repo.IsOnTag)
+                {
+                    SafeInvoke(() => ToastService.Show(TagBlockedActionMessage));
+                    return;
+                }
+
+                // Single-repo policy: skip when ahead without merged/closed PR (do not offer the destructive dialog).
+                if (repo.RequiresExplicitDiscardConfirmation)
+                {
+                    SafeInvoke(() => ToastService.Show("Skipped return to default: commits ahead of default branch and PR is not merged."));
+                    return;
+                }
             }
-
-            var repo = plan.Repositories.FirstOrDefault(r => r.RepositoryId == repositoryId);
-            if (repo == null || repo.IsAlreadyOnDefault)
+            catch (OperationCanceledException)
             {
-                ToastService.Show("Repository is already on the default branch.");
-                return;
+                SafeInvoke(() => ToastService.Show("Fetch cancelled."));
+                throw;
             }
-
-            if (repo.IsOnTag)
+            catch (Exception ex)
             {
-                ToastService.Show(TagBlockedActionMessage);
-                return;
-            }
-
-            // Single-repo policy: skip when ahead without merged/closed PR (do not offer the destructive dialog).
-            if (repo.RequiresExplicitDiscardConfirmation)
-            {
-                ToastService.Show("Skipped return to default: commits ahead of default branch and PR is not merged.");
-                return;
+                Logger.LogError(ex, "Error preparing return to default (repository {RepositoryId})", repositoryId);
+                SafeInvoke(() => ToastService.ShowError("Failed to prepare return to default."));
+                throw;
             }
 
             var branchName = repo.CurrentBranch ?? currentBranchName;
             if (repo.RemoteBranchCanBeDeleted || repo.CommitsAheadOfDefault > 0)
             {
-                ShowReturnToDefaultOptions(
-                    "This will checkout the default branch, remove the current branch locally, and pull the latest.",
-                    [new ReturnToDefaultRepoItem(repositoryName!, branchName, repo.RemoteBranchCanBeDeleted, repo.PullRequestState, repo.CommitsAheadOfDefault)],
-                    (deleteRemote, allowForce) => ReturnToDefaultSingleRepoAfterCheckAsync(
-                        repositoryId,
-                        repositoryName,
-                        branchName,
-                        deleteRemote && repo.RemoteBranchCanBeDeleted,
-                        defaultBranch,
-                        allowForce));
+                await InvokeAsync(() =>
+                {
+                    if (_disposed) return;
+                    ShowReturnToDefaultOptions(
+                        "This will checkout the default branch, remove the current branch locally, and pull the latest.",
+                        [new ReturnToDefaultRepoItem(repositoryName!, branchName, repo.RemoteBranchCanBeDeleted, repo.PullRequestState, repo.CommitsAheadOfDefault)],
+                        (deleteRemote, allowForce) => ReturnToDefaultSingleRepoAfterCheckAsync(
+                            repositoryId,
+                            repositoryName,
+                            branchName,
+                            deleteRemote && repo.RemoteBranchCanBeDeleted,
+                            defaultBranch,
+                            allowForce));
+                    StateHasChanged();
+                });
+                return;
             }
-            else
+
+            // No second job: this check is still the running page job, so IsJobRunning would skip a new one.
+            job.ReportProgress(ReturningToDefaultMessage(defaultBranch));
+            try
             {
-                await ReturnToDefaultSingleRepoAfterCheckAsync(
-                    repositoryId,
-                    repositoryName,
-                    branchName,
-                    deleteRemoteBranch: false,
-                    defaultBranch,
-                    allowForceDeleteLocalBranch: true);
+                await ExecuteReturnToDefaultSingleRepoCoreAsync(job, ct, repositoryId, deleteRemoteBranch: false, allowForceDeleteLocalBranch: true);
             }
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Error preparing return to default (repository {RepositoryId})", repositoryId);
-            ToastService.ShowError("Failed to prepare return to default.");
-        }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error returning to default branch for repository {RepositoryId}", repositoryId);
+                SafeInvoke(() => SetRepositoryError(repositoryId, "An error occurred while returning to default branch. The GrayMoon Worker may be offline."));
+                throw;
+            }
+        });
+
+        return Task.CompletedTask;
     }
 
     private Task ReturnToDefaultSingleRepoAfterCheckAsync(
@@ -206,44 +233,54 @@ public sealed partial class WorkspaceRepositories
         if (workspace == null || IsJobRunning)
             return Task.CompletedTask;
 
-        var message = string.IsNullOrWhiteSpace(defaultBranchName)
+        StartPageJob(ReturningToDefaultMessage(defaultBranchName), (job, ct) =>
+            ExecuteReturnToDefaultSingleRepoCoreAsync(job, ct, repositoryId, deleteRemoteBranch, allowForceDeleteLocalBranch),
+            new PageJobOptions
+            {
+                RefreshOnSuccess = false,
+                OnError = ex =>
+                {
+                    Logger.LogError(ex, "Error returning to default branch for repository {RepositoryId}", repositoryId);
+                    SafeInvoke(() => SetRepositoryError(repositoryId, "An error occurred while returning to default branch. The GrayMoon Worker may be offline."));
+                }
+            });
+
+        return Task.CompletedTask;
+    }
+
+    private static string ReturningToDefaultMessage(string? defaultBranchName)
+        => string.IsNullOrWhiteSpace(defaultBranchName)
             ? "Returning to default branch..."
             : $"Returning to {defaultBranchName}...";
 
-        StartPageJob(message, async (job, ct) =>
+    private async Task ExecuteReturnToDefaultSingleRepoCoreAsync(
+        BackgroundJobHandle job,
+        CancellationToken ct,
+        int repositoryId,
+        bool deleteRemoteBranch,
+        bool allowForceDeleteLocalBranch)
+    {
+        var options = new ReturnToDefaultOptions(
+            DeleteRemoteBranch: deleteRemoteBranch,
+            AllowForceDeleteLocalBranch: allowForceDeleteLocalBranch,
+            CloseOpenPullRequest: false);
+
+        var result = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, OperationResult>(
+            svc => svc.ExecuteReturnToDefaultAsync(WorkspaceId, RequireSelectedContextId(), [repositoryId], options, job.ToOperationProgress(), ct));
+
+        if (result.Success)
         {
-            var options = new ReturnToDefaultOptions(
-                DeleteRemoteBranch: deleteRemoteBranch,
-                AllowForceDeleteLocalBranch: allowForceDeleteLocalBranch,
-                CloseOpenPullRequest: false);
-
-            var result = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, OperationResult>(
-                svc => svc.ExecuteReturnToDefaultAsync(WorkspaceId, RequireSelectedContextId(), [repositoryId], options, job.ToOperationProgress(), ct));
-
-            if (result.Success)
-            {
-                SafeInvoke(() => repositoryErrors.Remove(repositoryId));
-                await InvokeAsync(async () => { if (_disposed) return; await RefreshFromSync(); });
-            }
-            else if (result.RepoErrors != null && result.RepoErrors.TryGetValue(repositoryId, out var errMsg))
-            {
-                SafeInvoke(() => SetRepositoryError(repositoryId, errMsg));
-            }
-            else if (!string.IsNullOrWhiteSpace(result.Error))
-            {
-                SafeInvoke(() => SetRepositoryError(repositoryId, result.Error));
-            }
-        }, new PageJobOptions
+            SafeInvoke(() => repositoryErrors.Remove(repositoryId));
+            await InvokeAsync(async () => { if (_disposed) return; await RefreshFromSync(); });
+        }
+        else if (result.RepoErrors != null && result.RepoErrors.TryGetValue(repositoryId, out var errMsg))
         {
-            RefreshOnSuccess = false,
-            OnError = ex =>
-            {
-                Logger.LogError(ex, "Error returning to default branch for repository {RepositoryId}", repositoryId);
-                SafeInvoke(() => SetRepositoryError(repositoryId, "An error occurred while returning to default branch. The GrayMoon Worker may be offline."));
-            }
-        });
-
-        return Task.CompletedTask;
+            SafeInvoke(() => SetRepositoryError(repositoryId, errMsg));
+        }
+        else if (!string.IsNullOrWhiteSpace(result.Error))
+        {
+            SafeInvoke(() => SetRepositoryError(repositoryId, result.Error));
+        }
     }
 
     private Task ReturnToDefaultLevelAsync(List<int> repositoryIds, bool deleteRemoteBranch = false, bool allowForceDeleteLocalBranch = true)
