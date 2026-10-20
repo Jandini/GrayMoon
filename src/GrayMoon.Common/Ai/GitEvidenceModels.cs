@@ -75,9 +75,12 @@ public sealed class GitEvidenceLimits
     [JsonPropertyName("maxUntrackedReadBytes")]
     public int MaxUntrackedReadBytes { get; set; } = 8_192;
 
-    /// <summary>Pull request: commit subjects listed per repository.</summary>
-    [JsonPropertyName("maxCommitSubjects")]
-    public int MaxCommitSubjects { get; set; } = 30;
+    /// <summary>
+    /// Pull request: commits read per repository for the history. A longer branch keeps its oldest and newest halves and
+    /// counts the rest in <see cref="RepositoryGitEvidence.CommitsOmitted"/>.
+    /// </summary>
+    [JsonPropertyName("maxHistoryCommits")]
+    public int MaxHistoryCommits { get; set; } = 200;
 
     /// <summary>Commit: recent HEAD subjects per repository, as a style reference.</summary>
     [JsonPropertyName("maxRecentSubjects")]
@@ -159,9 +162,13 @@ public sealed class RepositoryGitEvidence
     [JsonPropertyName("commitCount")]
     public int CommitCount { get; set; }
 
-    /// <summary>Pull request: subjects of those commits (merges left out), newest first, capped.</summary>
-    [JsonPropertyName("commitSubjects")]
-    public List<string> CommitSubjects { get; set; } = [];
+    /// <summary>Pull request: those commits (merges left out), oldest first, capped at <see cref="GitEvidenceLimits.MaxHistoryCommits"/>.</summary>
+    [JsonPropertyName("commits")]
+    public List<GitEvidenceCommit> Commits { get; set; } = [];
+
+    /// <summary>Pull request: commits (merges left out) between the oldest and newest halves of a branch longer than the cap.</summary>
+    [JsonPropertyName("commitsOmitted")]
+    public int CommitsOmitted { get; set; }
 
     /// <summary>Commit: recent subjects on HEAD, only as a style reference.</summary>
     [JsonPropertyName("recentSubjects")]
@@ -240,4 +247,33 @@ public sealed class GitEvidenceFile
 
     [JsonIgnore]
     public int Churn => (Added ?? 0) + (Deleted ?? 0);
+}
+
+/// <summary>
+/// One commit of a pull request's history: its subject (the first line, a summary of the whole commit) and its size.
+/// Bodies are never read.
+/// </summary>
+public sealed class GitEvidenceCommit
+{
+    [JsonPropertyName("oid")]
+    public string Oid { get; set; } = string.Empty;
+
+    /// <summary>Committer time in Unix seconds; orders the commits of several repositories into one history.</summary>
+    [JsonPropertyName("committedAt")]
+    public long CommittedAt { get; set; }
+
+    [JsonPropertyName("subject")]
+    public string Subject { get; set; } = string.Empty;
+
+    [JsonPropertyName("filesChanged")]
+    public int FilesChanged { get; set; }
+
+    [JsonPropertyName("added")]
+    public int Added { get; set; }
+
+    [JsonPropertyName("deleted")]
+    public int Deleted { get; set; }
+
+    [JsonIgnore]
+    public int Churn => Added + Deleted;
 }

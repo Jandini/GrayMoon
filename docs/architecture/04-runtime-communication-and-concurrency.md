@@ -46,10 +46,11 @@ AiGeneratedTextParser       strict JSON check; AiGenerationResult<T> is never pa
 ```
 
 - The App never runs git or an AI CLI. The Worker runs both, because it runs as the signed-in user and in Docker mode it is the only process on the host. The Worker refreshes PATH from the user environment at start (`HostEnvironmentPath.RefreshProcessPath`).
-- `CollectGitEvidence`, `GetAiProviders` and `GenerateAiText` (`WorkerHubMethods` constants) run on the Worker main pool; there is no AI-specific queue.
+- `CollectGitEvidence`, `GetAiProviders` and `GenerateAiText` (`WorkerHubMethods` constants) run on the Worker main pool; there is no AI-specific queue. The App reads CLI availability from `GetHostInfo` and does not call `GetAiProviders`.
 - Both `GitEvidenceCollector` and `AiCliRunner` launch processes through `BoundedProcessRunner` (Common: argument list, stdout cap, logs only executable, timing and sizes), wrapped in the Worker by `RepositoryAccessBoundedProcessRunner` (section 2A).
 - `AiCliRunner`: availability probe `<exe> --version` with a 15 s timeout, cached 5 min in the Worker; answer cap 256 KiB, stderr cap 16 KiB; each run gets its own empty folder `%TEMP%\graymoon-ai\<guid>`, deleted afterwards.
-- App side: `AiProviderAvailabilityCache` (singleton) caches availability for 2 min, bypassed on refresh or when no Worker is reachable. Generation timeout `AiGeneration:TimeoutSeconds` (default 120, clamped 10..600).
+- App side: `HostInfoCache` (singleton) holds the startup host check, including which AI CLIs are installed. Menus read that snapshot and do not probe. Generation timeout `AiGeneration:TimeoutSeconds` (default 120, clamped 10..600).
+- Click-to-write runs are not circuit work: `AiTextGenerationRuns<TText>` (singleton; `WorkspaceGitChangesCommitGeneration` for Changes, `WorkspacePullRequestTextGeneration` for New Pull Request) keeps at most one run per Workspace and Feature context, runs it in a fresh DI scope through `IScopedServiceExecutor`, and outlives the page, the dialog and the circuit (F5 / Ctrl+F5). Only Cancel for that context stops it. When it finishes, a page still showing that context does the live scope check and applies the text itself; otherwise the run decides against that context's memory (`WorkspaceGitChangesCommitMessageMemory`, `WorkspacePullRequestDraftMemory`) and stores the text, a suggestion or the error there. All of it is in memory and lost on App restart.
 - Commit generation runs inside the Git Changes commit job (overlay step label "ai", never the prompt); pull request generation runs without an overlay job.
 
 ---
@@ -272,7 +273,7 @@ FeatureRemovalQueue                          fixed at MaxConcurrentRemovals = 4 
 Worker DotnetRestoreCommand                  shared obj/ and NuGet cache
 ```
 
-`SyncBackgroundService` (the REST per-repository sync request queue behind `SyncEndpoints`, deduplicated per repository and Workspace) runs at most `DefaultMaxConcurrency` = 4 requests at once (`Sync:MaxConcurrency` overrides it) to bound SQLite writers. `SyncRecomputeCoalescer` (singleton, key `"{workspaceId}:{contextId}"`) lets a burst of hook syncs share the recompute that follows their state writes: at most one `WorkspaceStateRecomputeScope.RecomputeAsync` runs per key, a caller that arrives during a run waits for the next run (which starts after its own write), so a burst of N costs two runs and nothing written is left out.
+`SyncBackgroundService` (the REST per-repository sync request queue behind `SyncEndpoints`, deduplicated per repository and Workspace) runs at most `DefaultMaxConcurrency` = 4 requests at once (`Sync:MaxConcurrency` overrides it) to bound SQLite writers. `SyncRecomputeCoalescer` (singleton, key `"{workspaceId}:{contextId}"`) lets a burst of hook syncs share the recompute that follows their state writes: at most one `WorkspaceStateRecomputeScope.RecomputeAsync` runs per key, a caller that arrives during a run waits for the next run (which starts after its own write), so a burst of N costs two runs and nothing written is left out. `WorkspaceFileVersionService.CheckAndPersistFileVersionStatusAsync` gates the file-version check the same way with a private instance (the recompute above runs that check under the same key, so sharing the singleton would deadlock): checks of one context never overlap, and no caller goes on with a check that read the files or versions before its own writes. Two-lane Update and Push depends on this, because the push lane's and the post-push syncs' checks run while the update is still rewriting and committing the next level.
 
 ### 5C. Feature create pipeline
 
@@ -288,7 +289,7 @@ RootWorktree      the Workspace-role repository alone and first (D10); its workt
 SourceWorktrees   only when the root succeeded; SemaphoreSlim(MaxParallelOperations); each row Ready/NeedsRepair
                   saved in its own AppDbContext; Sources live inside the root
 SeedProjections   SeedInitialFeatureProjectionsAsync (idempotent), then Feature Ready
-CodeGraph         InitializeCodeGraphAsync, then the watch (section 5F), both optional
+CodeGraph         when Create asked for an index: InitializeCodeGraphAsync (the definition switch is not required), then the watch (section 5F)
 ```
 
 - Worktree paths are built from the persisted `ManagedFeatureStorageRoot` with `WorkerPath.Combine`. Do not call the path resolver inside the intent transaction: it opens a second `AppDbContext` and deadlocks SQLite against this write and against `WorkspaceGitChangesWriteQueue`.
@@ -344,11 +345,11 @@ It compares paths only, so a drifted branch stays Ready. Any Worker failure (`Li
 
 ### 5F. CodeGraph background build
 
-Optional, when the Workspace definition has `"codegraph": true` (`FeatureCodeGraphService`):
+Optional (`FeatureCodeGraphService`). `"codegraph": true` in the Workspace definition is the workspace-wide switch for maintaining `codegraph.json` and the managed `.gitignore` entry, and for Repair. Create follows the New Feature checkbox instead.
 
-- At the end of Create / Repair Feature, `InitCodeGraph` makes the Worker's `CodeGraphCli` start `codegraph init -v` in the Feature root in the background (its own full build; up to 1 h). The build outlives the App's command timeout.
-- The operation then watches it with repeated `WatchCodeGraphInit` calls, each following the build for at most 60 s (`CodeGraphCli.WatchWait`) and replaying the buffered output from a line offset into the overlay terminal. The watch runs inside `IWorkspaceLockedOperation.RunBackgroundableAsync`, so the overlay shows Background instead of Abort; Background stops only the watch, the build continues and the operation (and its structural lock) completes.
-- At the start of Remove / Roll back Feature, before any worktree goes, `UninitCodeGraph` stops a running build and the CodeGraph processes named in `.codegraph` pid files (only while still a `node` process started before its pid file), runs `codegraph uninit`, and deletes `.codegraph` when that fails.
+- At the end of Create Feature, only when the dialog asked for an index, `InitCodeGraph` makes the Worker's `CodeGraphCli` start `codegraph init -v` in the Feature root in the background (its own full build; up to 1 h). The build outlives the App's command timeout. The same init runs at the end of Repair Feature only when the switch is on.
+- The operation then watches it with repeated `WatchCodeGraphInit` calls, each following the build for at most 60 s (`CodeGraphCli.WatchWait`) and replaying the buffered output from a line offset into the overlay terminal. The watch runs inside `IWorkspaceLockedOperation.RunBackgroundableAsync`, so the overlay shows Background instead of Abort; Background stops only the watch, the build continues and the operation (and its structural lock) completes. Create watches only when it asked for the index, and that watch does not require the switch.
+- At the start of Remove / Roll back Feature, before any worktree goes, `UninitCodeGraph` always runs: it stops a running build and the CodeGraph processes named in `.codegraph` pid files (only while still a `node` process started before its pid file), runs `codegraph uninit`, and deletes `.codegraph` when that fails. A Feature with no index returns `NotInitialized`.
 - Every CodeGraph failure is logged only and never fails the Feature operation.
 
 ---

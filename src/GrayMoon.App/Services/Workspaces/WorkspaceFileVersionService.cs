@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Data;
@@ -61,8 +60,12 @@ public sealed class WorkspaceFileVersionService(
             ? []
             : FileVersionTokenParser.ExtractTokens(pattern).Where(t => t.Kind == FileVersionTokenKind.GitVersion).ToList();
 
-    private static readonly ConcurrentDictionary<string, object> CheckLocks = new(StringComparer.Ordinal);
-    private static readonly ConcurrentDictionary<string, Task?> InFlightChecks = new(StringComparer.Ordinal);
+    /// <summary>
+    /// Runs at most one check per (workspace, context) at a time, and every caller waits for a check that started
+    /// after it arrived. A separate instance from the hook syncs' <see cref="SyncRecomputeCoalescer"/> singleton,
+    /// whose recompute runs this check under the same key.
+    /// </summary>
+    private static readonly SyncRecomputeCoalescer Checks = new();
 
     private static string CheckKey(int workspaceId, int contextId) => $"{workspaceId}:{contextId}";
 
@@ -126,19 +129,6 @@ public sealed class WorkspaceFileVersionService(
             if (missingFlagsByFileId.TryGetValue(cfg.File.FileId, out var flag))
                 cfg.File.IsMissingOnDisk = flag;
         }
-    }
-
-    /// <summary>
-    /// Removes coalescing gates for every context of <paramref name="workspaceId"/>.
-    /// Call when a workspace is deleted.
-    /// </summary>
-    public static void RemoveWorkspaceCheckLock(int workspaceId)
-    {
-        var prefix = $"{workspaceId}:";
-        foreach (var key in CheckLocks.Keys.Where(k => k.StartsWith(prefix, StringComparison.Ordinal)).ToList())
-            CheckLocks.TryRemove(key, out _);
-        foreach (var key in InFlightChecks.Keys.Where(k => k.StartsWith(prefix, StringComparison.Ordinal)).ToList())
-            InFlightChecks.TryRemove(key, out _);
     }
 
     /// <summary>
@@ -533,79 +523,25 @@ public sealed class WorkspaceFileVersionService(
     /// Reads all configured version files via the worker, compares current values to expected repo GitVersions,
     /// and persists the results to WorkspaceFileLineStatuses and WorkspaceRepositoryLink file-config counters.
     /// Called at the same trigger points as csproj dependency stat recomputation.
-    /// Concurrent callers for the same workspace coalesce onto one in-flight check unless <paramref name="forceFresh"/> is true.
+    /// Checks of one context never overlap. A caller that arrives while a check runs waits for the next check, which
+    /// starts after the caller's own writes, and callers arriving meanwhile share it: no caller goes on with a result
+    /// read from files or versions older than its own writes (two-lane Update and Push runs the push lane's and the
+    /// post-push syncs' checks while the update is still rewriting and committing the next level).
     /// </summary>
-    public async Task CheckAndPersistFileVersionStatusAsync(int workspaceId, CancellationToken cancellationToken = default, bool forceFresh = false)
+    public async Task CheckAndPersistFileVersionStatusAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
         var contextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
-        await CheckAndPersistFileVersionStatusAsync(workspaceId, contextId, cancellationToken, forceFresh);
+        await CheckAndPersistFileVersionStatusAsync(workspaceId, contextId, cancellationToken);
     }
 
-    public async Task CheckAndPersistFileVersionStatusAsync(
+    public Task CheckAndPersistFileVersionStatusAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken = default,
-        bool forceFresh = false,
         bool deferDependencyRecompute = false)
-    {
-        var key = CheckKey(workspaceId, contextId.Value);
-        var gate = CheckLocks.GetOrAdd(key, _ => new object());
-
-        if (forceFresh)
-        {
-            Task? inFlight = null;
-            lock (gate)
-            {
-                if (InFlightChecks.TryGetValue(key, out var existing) && existing is { IsCompleted: false })
-                    inFlight = existing;
-            }
-            if (inFlight != null)
-            {
-                logger.LogDebug("CheckAndPersist forceFresh: awaiting prior in-flight check for workspace {WorkspaceId} context {ContextId}", workspaceId, contextId.Value);
-                try
-                {
-                    await inFlight.ConfigureAwait(false);
-                }
-                catch
-                {
-                    // Prior check failed; still run a fresh check below.
-                }
-            }
-        }
-
-        Task checkTask;
-        lock (gate)
-        {
-            if (!forceFresh && InFlightChecks.TryGetValue(key, out var existing) && existing is { IsCompleted: false })
-            {
-                logger.LogDebug("CheckAndPersist coalesced: joining in-flight check for workspace {WorkspaceId} context {ContextId}", workspaceId, contextId.Value);
-                checkTask = existing;
-            }
-            else
-            {
-                checkTask = CheckAndPersistFileVersionStatusCoreAsync(workspaceId, contextId, cancellationToken, deferDependencyRecompute);
-                InFlightChecks[key] = checkTask;
-            }
-        }
-
-        await AwaitAndClearInFlightAsync(key, checkTask, gate).ConfigureAwait(false);
-    }
-
-    private static async Task AwaitAndClearInFlightAsync(string key, Task checkTask, object gate)
-    {
-        try
-        {
-            await checkTask.ConfigureAwait(false);
-        }
-        finally
-        {
-            lock (gate)
-            {
-                if (InFlightChecks.TryGetValue(key, out var current) && ReferenceEquals(current, checkTask))
-                    InFlightChecks.TryRemove(key, out _);
-            }
-        }
-    }
+        => Checks.RunAsync(
+            CheckKey(workspaceId, contextId.Value),
+            () => CheckAndPersistFileVersionStatusCoreAsync(workspaceId, contextId, cancellationToken, deferDependencyRecompute));
 
     private async Task CheckAndPersistFileVersionStatusCoreAsync(
         int workspaceId,

@@ -37,8 +37,9 @@ public sealed class GetHostInfoCommand(ICommandLineService commandLine, CodeGrap
             probes,
             new ParallelOptions { MaxDegreeOfParallelism = AiCliRunner.MaxConcurrentProbes, CancellationToken = cancellationToken },
             async (probe, ct) => await probe(ct));
-
-        var cursorAgentVersion = providers.FirstOrDefault(p => p?.ProviderId == AiProviderIds.Cursor && p.IsInstalled)?.Version;
+        var aiProviders = providers.OfType<AiCliAvailability>().ToList();
+        string? InstalledVersion(string providerId) =>
+            aiProviders.FirstOrDefault(p => p.ProviderId == providerId && p.IsInstalled)?.Version;
 
         var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         if (string.IsNullOrWhiteSpace(userProfile))
@@ -52,7 +53,17 @@ public sealed class GetHostInfoCommand(ICommandLineService commandLine, CodeGrap
             GitVersion = gitVersion,
             GitVersionToolVersion = gitVersionToolVersion,
             CodeGraphVersion = codeGraphVersion,
-            CursorAgentVersion = cursorAgentVersion,
+            CursorAgentVersion = InstalledVersion(AiProviderIds.Cursor),
+            ClaudeVersion = InstalledVersion(AiProviderIds.Claude),
+            CodexVersion = InstalledVersion(AiProviderIds.Codex),
+            AiProviders = aiProviders.Select(p => new AiProviderAvailabilityDto
+            {
+                ProviderId = p.ProviderId,
+                IsInstalled = p.IsInstalled,
+                Version = p.Version,
+                HasNoTools = p.HasNoTools,
+                Problem = p.Problem,
+            }).ToList(),
             UserProfilePath = userProfile,
         };
     }

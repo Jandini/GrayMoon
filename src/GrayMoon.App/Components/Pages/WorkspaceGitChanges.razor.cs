@@ -79,10 +79,11 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     protected override Task OnInitializedAsync()
     {
         JobService.Changed += OnJobServiceChanged;
+        CommitGeneration.Changed += OnCommitGenerationChanged;
         ApplyIncomingFilterQuery();
         EnsureActivitySubscription();
-        RestoreWorkspaceCommitMessage();
         _ = LoadAiMenuAsync();
+        WorkerConnectionTracker.OnStateChanged(OnAiWorkerStateChanged);
         return ResolveContextAndStartLoadAsync();
     }
 
@@ -155,7 +156,6 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
         _loadedWorkspaceId = WorkspaceId;
         _loadedContextQuery = ContextQuery;
-        RestoreWorkspaceCommitMessage();
         ResetAiForScopeChange(reloadMenu: workspaceChanged);
         await ResolveContextAndStartLoadAsync();
     }
@@ -770,7 +770,8 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         }
 
         _disposed = true;
-        _aiCts?.Cancel();
+        CommitGeneration.Changed -= OnCommitGenerationChanged;
+        WorkerConnectionTracker.RemoveStateChanged(OnAiWorkerStateChanged);
         JobService.Changed -= OnJobServiceChanged;
         ReleaseActivitySubscription();
         await UnbindDiffReviewEscListenerAsync();
@@ -784,6 +785,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     {
         var info = await ContextNavigation.ResolveForPageAsync(WorkspaceId, ContextQuery);
         _selectedContextId = info.ContextId;
+        RestoreWorkspaceCommitMessage();
         StartInitialLoadJob();
     }
 
@@ -798,9 +800,10 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         // blocked via IsOwnPageJobRunning on the selector instead (RequireSelectedContextId
         // mid-commit would retarget writes).
         AbortScan();
-        ResetAiForScopeChange(reloadMenu: false);
         _selectedContextId = contextId;
         _loadedContextQuery = contextId.Value;
+        _aiLocalError = null;
+        RestoreWorkspaceCommitMessage();
         StartInitialLoadJob();
         await InvokeAsync(StateHasChanged);
     }

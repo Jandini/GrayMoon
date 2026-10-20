@@ -114,7 +114,7 @@ public sealed class AiGenerationTests
                 fixture.Factory,
                 new FakeWorkspacePathResolver(fixture.Factory),
                 manifestService,
-                new AiProviderAvailabilityCache(NullLogger<AiProviderAvailabilityCache>.Instance),
+                new AiProviderAvailabilityCache(new HostInfoCache(NullLogger<HostInfoCache>.Instance)),
                 new WorkspaceAiProviderPins(fixture.Factory),
                 Options.Create(new GitChangesOptions()),
                 Options.Create(new AiGenerationOptions()),
@@ -125,9 +125,14 @@ public sealed class AiGenerationTests
         fixture.Bridge.Handler = (command, args) => command switch
         {
             "GetFileContents" => new WorkerCommandResponse(true, new { content = harness.ManifestContent }, null),
-            WorkerHubMethods.GetAiProviders => new WorkerCommandResponse(true, new
+            WorkerHubMethods.GetHostInfo => new WorkerCommandResponse(true, new
             {
-                providers = AiProviderIds.All.Select(id => new
+                dotnetVersion = "10.0.0",
+                gitVersion = "2.47.0",
+                gitVersionToolVersion = "5.12.0",
+                claudeVersion = harness.ClaudeInstalled ? "1.0" : null,
+                cursorAgentVersion = (string?)null,
+                aiProviders = AiProviderIds.All.Select(id => new
                 {
                     providerId = id,
                     isInstalled = id == AiProviderIds.Claude && harness.ClaudeInstalled,
@@ -196,7 +201,7 @@ public sealed class AiGenerationTests
         Assert.True(result.Success, result.Failure?.Message);
         var generation = Assert.Single(h.Sent, s => s.Command == WorkerHubMethods.GenerateAiText).Args;
         Assert.Equal("haiku", generation.GetProperty("model").GetString());
-        var menu = await h.Operations.GetProvidersAsync(h.Workspace.WorkspaceId, refresh: false, CancellationToken.None);
+        var menu = await h.Operations.GetProvidersAsync(h.Workspace.WorkspaceId, CancellationToken.None);
         Assert.Equal("haiku", menu.Options.Single(o => o.Id == AiProviderIds.Claude).Model);
         Assert.Equal("grok-4.7-low-fast", menu.Options.Single(o => o.Id == AiProviderIds.Cursor).Model);
     }
@@ -364,7 +369,7 @@ public sealed class AiGenerationTests
         await using var h = await CreateHarnessAsync(new WorkspaceManifestAi([new("claude", "opus"), new("codex", "bad model!"), new("other")]));
 
         await h.Operations.PinProviderAsync(h.Workspace.WorkspaceId, AiProviderIds.Claude, CancellationToken.None);
-        var menu = await h.Operations.GetProvidersAsync(h.Workspace.WorkspaceId, refresh: false, CancellationToken.None);
+        var menu = await h.Operations.GetProvidersAsync(h.Workspace.WorkspaceId, CancellationToken.None);
 
         Assert.Equal(AiProviderIds.Claude, menu.PinnedProviderId);
         var claude = menu.Pinned!;
@@ -372,6 +377,10 @@ public sealed class AiGenerationTests
         Assert.Equal("opus", claude.Model);
         Assert.False(menu.Options.Single(o => o.Id == AiProviderIds.Cursor).IsAvailable);
         Assert.Contains("other", menu.Notice);
+
+        await h.Operations.GetProvidersAsync(h.Workspace.WorkspaceId, CancellationToken.None);
+        Assert.Single(h.Sent, s => s.Command == WorkerHubMethods.GetHostInfo);
+        Assert.DoesNotContain(h.Sent, s => s.Command == WorkerHubMethods.GetAiProviders);
     }
 
     // ---- Local pin: one per workspace, never in graymoon.json ----

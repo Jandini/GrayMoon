@@ -46,7 +46,8 @@ public sealed class WorkspaceFeatureOperations(
         string featureName,
         WorkspaceFeatureBaseKindApplication baseKind,
         IProgress<OperationProgress>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool createCodeGraphIndex = false)
     {
         var name = (featureName ?? string.Empty).Trim();
         var validationError = FeatureNameValidator.Validate(name);
@@ -70,13 +71,15 @@ public sealed class WorkspaceFeatureOperations(
                 {
                     using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, cancellationToken);
                     var overlayProgress = BindOverlayProgress(op, progress);
-                    var result = await CreateFeatureCoreAsync(workspaceId, name, overlayProgress, linked.Token);
+                    var result = await CreateFeatureCoreAsync(
+                        workspaceId, name, overlayProgress, linked.Token, createCodeGraphIndex);
                     logger.FeatureOperationFinished(
                         "Create", workspaceId, result.WorkspaceFeatureId, result.ContextId?.Value, name, startedAt,
                         result.Success ? "Succeeded" : result.Condition ?? "Failed", result.Error);
                     tcs.TrySetResult(result);
-                    if (result.Success && result.ContextId is { } createdContextId)
-                        await WatchCodeGraphAsync(op, workspaceId, createdContextId, overlayProgress, linked.Token);
+                    if (result.Success && createCodeGraphIndex && result.ContextId is { } createdContextId)
+                        await WatchCodeGraphAsync(
+                            op, workspaceId, createdContextId, overlayProgress, linked.Token, honorDefinitionSwitch: false);
                 }
                 catch (Exception ex)
                 {
@@ -105,7 +108,8 @@ public sealed class WorkspaceFeatureOperations(
         int workspaceId,
         string name,
         IProgress<OperationProgress>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool createCodeGraphIndex)
     {
         var stageStart = Stopwatch.GetTimestamp();
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -415,7 +419,8 @@ public sealed class WorkspaceFeatureOperations(
             }
 
             await selectedContextService.SetSelectedAsync(workspaceId, contextId, cancellationToken);
-            await InitializeCodeGraphAsync(workspaceId, contextId, progress, cancellationToken);
+            if (createCodeGraphIndex)
+                await InitializeCodeGraphAsync(workspaceId, contextId, progress, cancellationToken, honorDefinitionSwitch: false);
             progress?.Report(new OperationProgress($"Feature '{name}' is ready."));
             return new CreateFeatureResult
             {
@@ -1242,22 +1247,25 @@ public sealed class WorkspaceFeatureOperations(
     }
 
     /// <summary>
-    /// Asks the Worker to start a CodeGraph index for a Feature that just became Ready, when the Workspace definition
-    /// turns CodeGraph on. Optional: never throws, never fails the operation; the
-    /// Feature is already Ready, so not even an Abort here may turn it into a failure.
+    /// Asks the Worker to start a CodeGraph index for a Feature that just became Ready. Repair honors the definition
+    /// switch. Create passes <paramref name="honorDefinitionSwitch"/> false when the dialog asked for an index.
+    /// Optional: never throws, never fails the operation; the Feature is already Ready, so not even an Abort here may
+    /// turn it into a failure.
     /// </summary>
     private async Task InitializeCodeGraphAsync(
         int workspaceId,
         WorkspaceFeatureContextId featureContextId,
         IProgress<OperationProgress>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool honorDefinitionSwitch = true)
     {
         if (codeGraph is null)
             return;
 
         try
         {
-            await codeGraph.InitializeAsync(workspaceId, featureContextId, progress, cancellationToken);
+            await codeGraph.InitializeAsync(
+                workspaceId, featureContextId, progress, cancellationToken, honorDefinitionSwitch);
         }
         catch (Exception ex)
         {
@@ -1275,7 +1283,8 @@ public sealed class WorkspaceFeatureOperations(
         int workspaceId,
         WorkspaceFeatureContextId featureContextId,
         IProgress<OperationProgress>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool honorDefinitionSwitch = true)
     {
         if (codeGraph is null)
             return;
@@ -1285,7 +1294,8 @@ public sealed class WorkspaceFeatureOperations(
             await op.RunBackgroundableAsync(async background =>
             {
                 using var watch = CancellationTokenSource.CreateLinkedTokenSource(background, cancellationToken);
-                await codeGraph.WatchInitializeAsync(workspaceId, featureContextId, progress, watch.Token);
+                await codeGraph.WatchInitializeAsync(
+                    workspaceId, featureContextId, progress, watch.Token, honorDefinitionSwitch);
             });
         }
         catch (Exception ex)

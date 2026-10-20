@@ -321,6 +321,36 @@ public sealed class WorkspacePushStrategyTests
     }
 
     [Fact]
+    public async Task Push_lane_sees_what_the_update_wrote_after_the_previous_level_was_pushed()
+    {
+        await using var ctx = await CreateContextAsync(new RecordingNuGetHandler { PublishedVersions = ["0.9.0"] });
+        await ctx.UseDotNetDependencyProfileAsync();
+        var graph = await SeedDependencyGraphAsync(ctx, matchConnector: true);
+        RespondPushCommands(ctx);
+        await SetOutgoingCommitsAsync(ctx, graph.ConsumerId, 0);
+        var levels = new LevelHandOffs();
+
+        var lane = RunPushLaneAsync(ctx, levels);
+        levels.Writer.TryWrite(new DependencyLevelCompletion(1, Ids(graph.ProducerId), Ids(), Ids()));
+        await levels.FirstLevelDone.WaitAsync(TimeSpan.FromSeconds(30));
+
+        // The update commits level 2 while level 1 is out; after the push the Worker reports nothing outgoing again.
+        await SetOutgoingCommitsAsync(ctx, graph.ConsumerId, 1);
+        levels.Writer.TryWrite(new DependencyLevelCompletion(2, Ids(graph.ConsumerId), Ids(graph.ConsumerId), Ids(graph.ConsumerId)));
+        levels.Writer.TryComplete();
+        var pushed = await lane.WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.Equal(2, pushed.Count);
+        var special = await ctx.GetSpecialContextIdAsync();
+        await using var db = await ctx.Resolve<IDbContextFactory<AppDbContext>>().CreateDbContextAsync();
+        var link = await db.WorkspaceRepositories.SingleAsync(l => l.RepositoryId == graph.ConsumerId);
+        var state = await db.WorkspaceRepositoryContextStates.SingleAsync(s =>
+            s.WorkspaceRepositoryId == link.WorkspaceRepositoryId && s.WorkspaceFeatureContextId == special.Value);
+        Assert.Equal(0, link.OutgoingCommits);
+        Assert.Equal(0, state.OutgoingCommits);
+    }
+
+    [Fact]
     public async Task Push_lane_skips_a_level_with_nothing_to_push()
     {
         await using var ctx = await CreateContextAsync(new RecordingNuGetHandler { PublishedVersions = ["0.9.0"] });
@@ -406,6 +436,58 @@ public sealed class WorkspacePushStrategyTests
     private sealed record LaneResult(int Count, IReadOnlyDictionary<int, string> RepoErrors, IReadOnlyDictionary<int, string> LevelErrors);
 
     private static HashSet<int> Ids(params int[] ids) => ids.ToHashSet();
+
+    /// <summary>Hand-offs to the push lane that tell when the lane has finished its first level and asks for the next.</summary>
+    private sealed class LevelHandOffs : ChannelReader<DependencyLevelCompletion>
+    {
+        private readonly Channel<DependencyLevelCompletion> _channel = Channel.CreateUnbounded<DependencyLevelCompletion>();
+        private readonly TaskCompletionSource _firstLevelDone = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private bool _taken;
+
+        public ChannelWriter<DependencyLevelCompletion> Writer => _channel.Writer;
+
+        public Task FirstLevelDone => _firstLevelDone.Task;
+
+        public override bool TryRead(out DependencyLevelCompletion item)
+        {
+            if (_channel.Reader.TryRead(out item!))
+            {
+                _taken = true;
+                return true;
+            }
+
+            if (_taken)
+                _firstLevelDone.TrySetResult();
+            return false;
+        }
+
+        public override ValueTask<bool> WaitToReadAsync(CancellationToken cancellationToken = default)
+            => _channel.Reader.WaitToReadAsync(cancellationToken);
+    }
+
+    /// <summary>Writes a repository's outgoing count the way another scope (the update lane) does.</summary>
+    private static async Task SetOutgoingCommitsAsync(SyncStateTestContext ctx, int repositoryId, int outgoing)
+    {
+        var special = await ctx.GetSpecialContextIdAsync();
+        await using var db = await ctx.Resolve<IDbContextFactory<AppDbContext>>().CreateDbContextAsync();
+        var link = await db.WorkspaceRepositories.SingleAsync(l => l.RepositoryId == repositoryId);
+        var state = await db.WorkspaceRepositoryContextStates.SingleOrDefaultAsync(s =>
+            s.WorkspaceRepositoryId == link.WorkspaceRepositoryId && s.WorkspaceFeatureContextId == special.Value);
+        if (state is null)
+        {
+            state = new WorkspaceRepositoryContextState
+            {
+                WorkspaceFeatureContextId = special.Value,
+                WorkspaceRepositoryId = link.WorkspaceRepositoryId,
+                SyncStatus = link.SyncStatus,
+            };
+            db.WorkspaceRepositoryContextStates.Add(state);
+        }
+
+        link.OutgoingCommits = outgoing;
+        state.OutgoingCommits = outgoing;
+        await db.SaveChangesAsync();
+    }
 
     private static async Task<LaneResult> RunPushLaneAsync(SyncStateTestContext ctx, ChannelReader<DependencyLevelCompletion> levels)
     {

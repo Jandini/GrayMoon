@@ -28,11 +28,25 @@
     border-bottom-right-radius: 0;
 }
 
-/* The hovered/focused segment draws its full border above its neighbours. */
+/* Hover stays inside the shared frame. Raising the segment, or giving it a brighter border or a
+   1px ring, paints outside the control, so the AI segment and the chevron look a pixel bigger. */
 .gm-split-control > .btn:hover,
+.gm-split-control > .btn:focus,
 .gm-split-control > .btn:focus-visible,
 .gm-split-control > .btn:active {
-    z-index: 1;
+    outline: none;
+    box-shadow: none;
+}
+
+.gm-split-control > .btn.btn-outline-primary:hover:not(:disabled),
+.gm-split-control > .btn.btn-outline-primary:focus:not(:disabled),
+.gm-split-control > .btn.btn-outline-primary:focus-visible:not(:disabled),
+.gm-split-control > .btn.btn-outline-primary:active:not(:disabled),
+.gm-split-control > .btn.btn-outline-secondary:hover:not(:disabled),
+.gm-split-control > .btn.btn-outline-secondary:focus:not(:disabled),
+.gm-split-control > .btn.btn-outline-secondary:focus-visible:not(:disabled),
+.gm-split-control > .btn.btn-outline-secondary:active:not(:disabled) {
+    border-color: var(--border-light);
 }
 
 .gm-ai-segment {

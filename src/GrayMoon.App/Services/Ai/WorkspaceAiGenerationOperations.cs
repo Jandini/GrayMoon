@@ -29,9 +29,9 @@ public sealed class WorkspaceAiGenerationOperations(
     IOptions<AiGenerationOptions> aiOptions,
     ILogger<WorkspaceAiGenerationOperations> logger) : IWorkspaceAiGenerationOperations
 {
-    public async Task<AiProviderMenu> GetProvidersAsync(int workspaceId, bool refresh, CancellationToken cancellationToken)
+    public async Task<AiProviderMenu> GetProvidersAsync(int workspaceId, CancellationToken cancellationToken)
     {
-        var installed = await availability.GetAsync(workerBridge, refresh, cancellationToken);
+        var installed = await availability.GetAsync(workerBridge, cancellationToken);
         var pinned = await pins.GetAsync(workspaceId, cancellationToken);
 
         WorkspaceManifestAiRead ai;
@@ -182,7 +182,7 @@ public sealed class WorkspaceAiGenerationOperations(
         var choice = AiProviderConfiguration.Resolve(ai.Section, providerId);
         if (!choice.IsValid)
             return GenerationRun.Fail(AiGenerationErrorKind.Configuration, choice.Error!);
-        var cli = (await availability.GetAsync(workerBridge, refresh: false, cancellationToken)).First(p => p.ProviderId == providerId);
+        var cli = (await availability.GetAsync(workerBridge, cancellationToken)).First(p => p.ProviderId == providerId);
         if (!cli.IsInstalled)
             return GenerationRun.Fail(AiGenerationErrorKind.NotInstalled, cli.Problem ?? $"{AiProviderIds.DisplayName(providerId)} CLI is not available on the Worker.");
 
@@ -206,6 +206,7 @@ public sealed class WorkspaceAiGenerationOperations(
             MaxPatchBytesPerFile = perFileBytes,
             MaxPatchBytesPerRepository = Math.Clamp(evidenceChars / repositories.Count, 1_200, 8_000),
             MaxInventoryFiles = repositories.Count > 10 ? 60 : 200,
+            MaxHistoryCommits = repositories.Count > 10 ? 60 : 200,
         };
 
         progress.Report($"Collecting the changes of {repositories.Count} repositor{(repositories.Count == 1 ? "y" : "ies")}...");
@@ -275,9 +276,9 @@ public sealed class WorkspaceAiGenerationOperations(
         };
 
         logger.LogInformation(
-            "AI generation. Kind={Kind} Provider={Provider} ModelSet={ModelSet} Repositories={Repositories} ChangedFiles={ChangedFiles} ExcerptFiles={ExcerptFiles} RedactedLines={RedactedLines} Partial={Partial} EstimatedTokens={EstimatedTokens} EvidenceMs={EvidenceMs} WorkerEvidenceMs={WorkerEvidenceMs} PromptMs={PromptMs} ProviderMs={ProviderMs} TotalMs={TotalMs} Outcome={Outcome}",
+            "AI generation. Kind={Kind} Provider={Provider} ModelSet={ModelSet} Repositories={Repositories} ChangedFiles={ChangedFiles} ExcerptFiles={ExcerptFiles} HistoryCommits={HistoryCommits} HistoryShown={HistoryShown} RedactedLines={RedactedLines} Partial={Partial} EstimatedTokens={EstimatedTokens} EvidenceMs={EvidenceMs} WorkerEvidenceMs={WorkerEvidenceMs} PromptMs={PromptMs} ProviderMs={ProviderMs} TotalMs={TotalMs} Outcome={Outcome}",
             kind, providerId, choice.Model is not null, prompt.Coverage.Repositories, prompt.Coverage.ChangedFiles, prompt.Coverage.FilesWithExcerpts,
-            prompt.Coverage.RedactedLines, prompt.Coverage.IsPartial, prompt.EstimatedTokens, evidenceMs, evidence.ElapsedMs, promptMs - evidenceMs,
+            prompt.Coverage.HistoryCommits, prompt.Coverage.HistoryShown, prompt.Coverage.RedactedLines, prompt.Coverage.IsPartial, prompt.EstimatedTokens, evidenceMs, evidence.ElapsedMs, promptMs - evidenceMs,
             answer?.ElapsedMs, (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds, outcome.Failure?.Kind ?? AiGenerationErrorKind.None);
         return outcome;
     }

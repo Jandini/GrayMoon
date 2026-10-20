@@ -232,12 +232,14 @@ Install tab       labelled "Update" and shown red while the state is VersionMism
 Uninstall tab
 Host tab          only while Online or VersionMismatch; Worker version, .NET SDK, Git, GitVersion,
                   CodeGraph (codeGraphVersion, optional, informational only),
+                  Claude (claudeVersion; listed with its install command, never required),
+                  Codex (codexVersion; listed with its install command, never required),
                   Cursor Agent (cursorAgentVersion; listed with its install command, never required)
                   footer in Desktop: "Install Now" for missing prerequisites, and "Restart"
                   (restarts the Worker service so an AI agent installed afterwards is on its PATH)
 ```
 
-`GetHostInfo` (one of the two commands allowed on a version mismatch) supplies the host versions. It probes .NET, Git, GitVersion, CodeGraph, and each AI CLI together, at most four at a time. Required prerequisites follow the Workspace profiles (`HostPrerequisiteRequirements.For`): Git always, GitVersion when any Workspace uses it, the .NET SDK when any Workspace uses GitVersion, package restore or dependency-aware update. Missing optional tools are labelled "(optional)". The Home nav circle is red only while the Worker is down, and it clears as soon as the Worker is up; it does not check host prerequisites or connectors. Cursor Agent counts as missing but is never required.
+`GetHostInfo` (one of the two commands allowed on a version mismatch) supplies the host versions and which AI CLIs are installed. It probes .NET, Git, GitVersion, CodeGraph, and each AI CLI together, at most four at a time. Required prerequisites follow the Workspace profiles (`HostPrerequisiteRequirements.For`): Git always, GitVersion when any Workspace uses it, the .NET SDK when any Workspace uses GitVersion, package restore or dependency-aware update. Missing optional tools are labelled "(optional)". The Home nav circle is red only while the Worker is down, and it clears as soon as the Worker is up; it does not check host prerequisites or connectors. Claude, Codex and Cursor Agent count as missing but are never required.
 
 ### Install script guards
 
@@ -608,7 +610,7 @@ Uses dependency levels and package registry waiting (.NET Dependency). A Basic W
 
 ### Update and Push (two lanes)
 
-`UpdateAndPushOrchestrator` runs the update lane (`DependencyUpdateOrchestrator`, raising `onLevelCompleted` after every level, including levels with nothing to update) and the push lane (`WorkspacePushService.RunPushLaneAsync`, own DI scope and DbContext) connected by a single-reader channel, so level N is pushed while level N+1 is being updated and a level's CI/package wait overlaps later updates. `TwoLaneProgress` shows whichever lane reported last in the normal overlay. When `CanRunPushLaneAsync` fails nothing runs and the page falls back to the sequential update-then-push with its "Continue with normal push?" prompt. On an update exception the channel is completed, the push lane settles, and the exception is rethrown.
+`UpdateAndPushOrchestrator` runs the update lane (`DependencyUpdateOrchestrator`, raising `onLevelCompleted` after every level, including levels with nothing to update) and the push lane (`WorkspacePushService.RunPushLaneAsync`, own DI scope, plus a fresh scope and DbContext for every level it receives, so it never reads back entities it tracked before the update rewrote them) connected by a single-reader channel, so level N is pushed while level N+1 is being updated and a level's CI/package wait overlaps later updates. `TwoLaneProgress` shows whichever lane reported last in the normal overlay. When `CanRunPushLaneAsync` fails nothing runs and the page falls back to the sequential update-then-push with its "Continue with normal push?" prompt. On an update exception the channel is completed, the push lane settles, and the exception is rethrown.
 
 ### Implementation
 
@@ -879,7 +881,7 @@ use Ctrl/Cmd+Enter commit shortcut
 
 ### Commit control
 
-There is one primary Commit button: **Commit Staged** when any repository has staged content, otherwise **Commit All** (`WorkspaceCommitModeHelper.ResolveOfferedMode`). The keyed alternatives carry the captured mode, so a watcher refresh that flips the label mid-click cannot commit the wrong set. The button is joined to an AI provider segment and a chevron menu (`[Commit Staged|All][provider][chevron]`). The menu's **On Commit** header holds **Generate commit message** and **Push committed**, both remembered per Workspace for the circuit. Only providers the Worker can run are listed above that header; when none are available the divider above it is omitted. Ctrl/Cmd+Enter targets only the primary commit element, never the AI segment or the chevron. While the message box is empty the control attaches to the right edge of the box; below about 20rem it stays under the box.
+There is one primary Commit button: **Commit Staged** when any repository has staged content, otherwise **Commit All** (`WorkspaceCommitModeHelper.ResolveOfferedMode`). The keyed alternatives carry the captured mode, so a watcher refresh that flips the label mid-click cannot commit the wrong set. The button is joined to an AI provider segment and a chevron menu (`[Commit Staged|All][provider][chevron]`). The menu's **On Commit** header holds **Generate commit message** and **Push committed**, both remembered per Workspace across a reload (F5 or Ctrl+F5) until the App restarts. **Generate commit message** starts ticked until you change it; **Push committed** starts unticked. Only providers the Worker can run are listed above that header; when none are available the divider above it is omitted. Ctrl/Cmd+Enter targets only the primary commit element, never the AI segment or the chevron. While the message box is empty the control attaches to the right edge of the box; below about 20rem it stays under the box.
 
 ### Directory rows
 
@@ -1187,8 +1189,10 @@ seed the new context from the Workspace: checkout structure, projects, dependenc
   GitVersion is left empty and marked pending (GitVersionPending) until the Feature's own first GitVersion probe,
   and dependency edges into a pending repository show as pending, not matched or mismatched
 select the new Feature
-optional: start the CodeGraph index build when graymoon.json has "codegraph": true
-  (overlay offers Background instead of Abort)
+optional: start the CodeGraph index build when New Feature's "Create CodeGraph index" is ticked
+  (shown when the CodeGraph CLI is installed, including with no Workspace repository and no graymoon.json;
+  hidden when graymoon.json has "codegraph": false; ticked by default;
+  overlay offers Background instead of Abort)
 ```
 
 Uncommitted Workspace changes are not copied. If any repository fails, or the create is aborted after the intent is committed, the Feature is kept in **NeedsRepair** with the error.
@@ -1362,10 +1366,11 @@ Desktop: WorkerInstaller (secret hand-off)
 ```text
 Changes page      click the provider segment of the Commit control to write ONE commit message for exactly
                   what the button would commit (Commit Staged or Commit All); it only fills the message box
-                  tick "Generate commit message" (On Commit) so Commit writes the message first when the box is empty
+                  "Generate commit message" (On Commit) starts ticked, so Commit writes the message first when the box is empty; untick it to stop that
 New PR dialog     click the provider selector at the right of the tab bar to write ONE title and ONE Markdown
                   description shared by every PR in the dialog
-both              pick an available provider in the menu (pins it for the Workspace on this machine; never generates);
+both              pick an available provider in the menu (pins it for the Workspace on this machine; choosing the
+                  provider that is already pinned removes it until another is pinned; never generates);
                   a CLI that is not installed is omitted; when none are available the Changes menu opens on On Commit
                   with no divider above it
 ```
@@ -1379,6 +1384,16 @@ generate on commit   with "Generate commit message" ticked, a provider pinned an
                      writes the message, then commits, then pushes if "Push committed" is ticked; the overlay
                      terminal shows each step labelled "ai" (the CLI call, never the prompt); if the provider
                      fails nothing is committed; a typed message is always committed as typed
+survives navigation  clicking the provider keeps writing when you leave Changes, reload, or switch Feature /
+                     Workspace; a Feature and the Workspace can be written at the same time; each context keeps
+                     its own message (typed or written); Cancel stops only the context on screen. While that
+                     context is still on screen and the scope has not moved, the text goes straight into the box;
+                     otherwise it is kept for that context (the message, or a suggestion if the box was edited)
+checkboxes           Generate commit message starts ticked and Push committed starts unticked; both stay as set across F5 and Ctrl+F5 until the App restarts
+PR text remembered   the New PR title and description are kept per Workspace and Feature context across closing
+                     the dialog, leaving Repositories, F5 and Ctrl+F5 (not an App restart), until every PR of a
+                     Create succeeds or both fields are emptied; closing the dialog does not stop a write, and its
+                     text, suggestion or error shows when the dialog next opens for that context; Cancel stops it
 PR comparison        each repository compares its head with the target selected in the Branch tab, never the
                      default branch; PR generation does not run in an overlay job
 apply policy         AiTextApplyPolicy.Decide: text goes straight into the field only if the field was empty at
@@ -1398,10 +1413,18 @@ failures             stay inside the AI control as one redacted line (not signed
 ### Flow
 
 ```text
-resolve provider and model, check availability (Worker GetAiProviders; App cache 2 minutes)
-Worker CollectGitEvidence   one request for all repositories, bounded fan-out, never mutates or fetches
+resolve provider and model, check availability (the startup GetHostInfo; menus do not probe)
+Worker CollectGitEvidence   one request for all repositories, bounded fan-out, never mutates or fetches;
+                            PR: also every commit's subject and shortstat, oldest first (git log --reverse
+                            --shortstat, no bodies), up to 200 per repository (60 above 10 repositories);
+                            a longer branch keeps its oldest and newest halves and counts the middle
+CommitHistoryCondenser      PR: folds fixup!/squash!/amend! into their commit, drops reverted pairs, merges a
+                            subject committed in several repositories into one line, marks small low-signal
+                            commits, redacts subjects, orders by committer time
 AiPromptBuilder             one prompt under a hard budget (commit 4,000 / PR 8,000 estimated tokens),
-                            secrets redacted, evidence wrapped as untrusted data
+                            secrets redacted, evidence wrapped as untrusted data; PR splits it into headers
+                            and facts (45%), history (20%, low-signal then small middle commits dropped first,
+                            the first and last 10 kept longest) and excerpts (the rest)
 Worker GenerateAiText       one CLI process in its own empty temp folder, no tools (Cursor: read-only ask mode),
                             timeout AiGeneration:TimeoutSeconds (default 120)
 AiGeneratedTextParser       strict JSON check; the result is never partial
@@ -1414,7 +1437,13 @@ All three Worker commands run on the main pool. The App never runs git or an AI 
 ```text
 Components/Ai: AiProviderControl, AiMenuCheckItem, AiSuggestionPanel; wwwroot/css/ai-generation.css, js/gm-ai-menu.js
 WorkspaceGitChanges.Ai.cs / NewPullRequestModal.Ai.cs
+AiTextGenerationRuns<TText>          app-wide click-to-write runs, one per Workspace and Feature context, outside any page or circuit
+WorkspaceGitChangesCommitGeneration   the commit message runs (stores into WorkspaceGitChangesCommitMessageMemory)
+WorkspacePullRequestTextGeneration    the New PR title and description runs (stores into WorkspacePullRequestDraftMemory)
+WorkspacePullRequestDraftMemory       the New PR title and description, per Workspace and Feature context
+WorkspaceGitChangesCommitMessageMemory   the message, per Workspace and Feature context
+WorkspaceGitChangesPushAfterCommitMemory / WorkspaceGitChangesGenerateMessageOnCommitMemory   the two On Commit checkboxes, per Workspace
 IWorkspaceAiGenerationOperations -> WorkspaceAiGenerationOperations
-AiTextApplyPolicy, AiPromptBuilder, AiGeneratedTextParser (Common)
+AiTextApplyPolicy, AiPromptBuilder, CommitHistoryCondenser, GitCommitLogParser, AiGeneratedTextParser (Common)
 Worker: GitEvidenceCollector, AiCliRunner, AiCliAdapters
 ```

@@ -30,8 +30,19 @@
     overflow-y: auto;
 }
 
-/* Tabs — same pattern as Switch Branch / Branch modals */
+/* Tabs — same pattern as Switch Branch / Branch modals.
+   The list grows so its underline runs across the row and stops in the gap before the AI control. */
+.new-pr-tabbar {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
 .new-pr-tabs {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin-bottom: 0;
     border-bottom: 1px solid var(--border-color);
 }
 
@@ -553,10 +564,59 @@
     background-color: rgba(148, 152, 158, 0.8);
 }
 
-/* AI title/description selector at the right end of the tab row (never in the Create buttons). */
+/* AI title/description selector at the right end of the tab row (never in the Create buttons).
+   Outside the tab list, so the underline finishes before it. Its bottom edge is the same edge as
+   that line (no extra pull-down): a full frame, dark fill, both right corners rounded. */
 .new-pr-tabs__ai {
-    margin-left: auto;
     display: flex;
-    align-items: center;
-    padding-bottom: 0.25rem;
+    align-items: flex-end;
+    flex: 0 0 auto;
+}
+
+.new-pr-tabs__ai ::deep .btn.gm-ai-segment {
+    color: var(--text-secondary);
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 0 !important;
+    padding: 0.5rem 0.75rem;
+    font-size: inherit;
+    line-height: 1.5;
+    box-shadow: none;
+}
+
+.new-pr-tabs__ai ::deep .btn.gm-ai-segment:first-of-type {
+    border-top-left-radius: 0.375rem !important;
+}
+
+.new-pr-tabs__ai ::deep .btn.gm-ai-segment:last-of-type {
+    border-top-right-radius: 0.375rem !important;
+    border-bottom-right-radius: 0.375rem !important;
+}
+
+/* The provider menu shares the button's dark fill. */
+.new-pr-tabs__ai ::deep .gm-ai-menu {
+    background: var(--bg-primary);
+}
+
+.new-pr-tabs__ai ::deep .btn.gm-ai-segment--main + .btn.gm-ai-segment--chevron {
+    padding-left: 0.55rem;
+    padding-right: 0.55rem;
+}
+
+.new-pr-tabs__ai ::deep .btn.gm-ai-segment:hover:not(:disabled),
+.new-pr-tabs__ai ::deep .btn.gm-ai-segment:focus:not(:disabled),
+.new-pr-tabs__ai ::deep .btn.gm-ai-segment:focus-visible:not(:disabled),
+.new-pr-tabs__ai ::deep .btn.gm-ai-segment:active:not(:disabled),
+.new-pr-tabs__ai ::deep .btn.gm-ai-segment[aria-expanded="true"]:not(:disabled) {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+    border-color: var(--border-color);
+    box-shadow: none;
+}
+
+.new-pr-tabs__ai ::deep .btn.gm-ai-segment:focus-visible:not(:disabled) {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+    border-color: var(--border-color);
+    box-shadow: 0 0 0 1px var(--focus-ring-outer);
 }

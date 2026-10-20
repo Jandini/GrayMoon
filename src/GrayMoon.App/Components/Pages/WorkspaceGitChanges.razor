@@ -153,8 +153,7 @@
                                                    MenuAlign="start"
                                                    OnGenerate="GenerateCommitMessageAsync"
                                                    OnCancel="CancelAiGeneration"
-                                                   OnPin="OnAiPinAsync"
-                                                   OnRefresh="OnAiRefreshAsync">
+                                                   OnPin="OnAiPinAsync">
                                     <Options>
                                         <div class="gm-ai-menu__header">On Commit</div>
                                         <AiMenuCheckItem Label="Generate commit message"
@@ -182,10 +181,10 @@
                         {
                             <AiSuggestionPanel ProviderLabel="@suggestion.ProviderLabel"
                                                Reason="@suggestion.Reason"
-                                               CopyText="@suggestion.Message"
+                                               CopyText="@suggestion.Text"
                                                OnReplace="ReplaceWithAiSuggestion"
                                                OnDismiss="DismissAiSuggestion">
-                                <pre class="gm-ai-suggestion__text">@suggestion.Message</pre>
+                                <pre class="gm-ai-suggestion__text">@suggestion.Text</pre>
                             </AiSuggestionPanel>
                         }
                     </div>

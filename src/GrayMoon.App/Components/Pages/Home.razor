@@ -1,6 +1,5 @@
 @page "/"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
-@using System.Text.Json
 @using GrayMoon.App.Repositories
 @using GrayMoon.App.Services
 @inject WorkspaceRepository WorkspaceRepository
@@ -11,6 +10,7 @@
 @inject ConnectorHealthService ConnectorHealthService
 @inject ConnectorRepository ConnectorRepository
 @inject HostPrerequisiteRequirementsProvider HostRequirementsProvider
+@inject HostInfoCache HostInfo
 @inject WorkspaceContextNavigationService ContextNavigation
 @using GrayMoon.App.Services.Features
 <PageTitle>Home - GrayMoon</PageTitle>
@@ -198,21 +198,9 @@ else
 
         try
         {
-            var response = await WorkerBridge.SendCommandAsync("GetHostInfo", new { }, CancellationToken.None);
-            if (!response.Success || response.Data is null)
-                return false;
-
-            var json = response.Data is JsonElement element
-                ? element.GetRawText()
-                : JsonSerializer.Serialize(response.Data);
-            var dto = JsonSerializer.Deserialize<HostInfoDto>(
-                json,
-                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-            if (dto is null)
-                return false;
-
-            var versions = new HostPrerequisiteVersions(dto.DotnetVersion, dto.GitVersion, dto.GitVersionToolVersion, dto.CursorAgentVersion);
-            if (!HostPrerequisiteState.AnyMissing(versions))
+            var query = await HostInfo.GetAsync(WorkerBridge, refresh: true, CancellationToken.None);
+            var versions = query.Read?.Versions;
+            if (versions is null || !HostPrerequisiteState.AnyMissing(versions))
                 return false;
 
             var requirements = await HostRequirementsProvider.GetAsync();
@@ -223,8 +211,6 @@ else
             return false;
         }
     }
-
-    private sealed record HostInfoDto(string? DotnetVersion, string? GitVersion, string? GitVersionToolVersion, string? CursorAgentVersion = null);
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {

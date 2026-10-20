@@ -3,7 +3,8 @@ namespace GrayMoon.App.Services.Workspaces;
 /// <summary>
 /// Lets many hook syncs for one Feature context share the workspace-wide recompute that follows each of their state
 /// writes. Create Feature releases a sync per repository at about the same time, and each used to run the whole
-/// file-version check and dependency-stat recompute by itself, one after another.
+/// file-version check and dependency-stat recompute by itself, one after another. <see cref="WorkspaceFileVersionService"/>
+/// gates its file-version check with an instance of its own.
 /// </summary>
 /// <remarks>
 /// At most one run per key executes at a time. A caller that arrives while a run is in progress waits for the next run,

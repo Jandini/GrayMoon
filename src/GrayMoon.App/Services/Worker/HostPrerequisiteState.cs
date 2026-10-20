@@ -9,6 +9,8 @@ public static class HostPrerequisiteIds
     public const string DotnetSdk = "dotnetSdk";
     public const string Git = "git";
     public const string GitVersion = "gitVersion";
+    public const string Claude = "claudeCli";
+    public const string Codex = "codexCli";
     public const string CursorAgent = "cursorAgent";
 }
 
@@ -18,6 +20,8 @@ public static class HostPrerequisiteInstallCommands
     public const string DotnetSdk = "winget install Microsoft.DotNet.SDK.10 --source winget";
     public const string Git = "winget install -e --id Git.Git --source winget";
     public const string GitVersion = "dotnet tool install --global GitVersion.Tool --version 5.*";
+    public const string Claude = "irm 'https://claude.ai/install.ps1' | iex";
+    public const string Codex = "irm 'https://chatgpt.com/codex/install.ps1' | iex";
     public const string CursorAgent = "irm 'https://cursor.com/install?win32=true' | iex";
 }
 
@@ -26,7 +30,9 @@ public sealed record HostPrerequisiteVersions(
     string? DotnetSdkVersion,
     string? GitVersion,
     string? GitVersionToolVersion,
-    string? CursorAgentVersion = null);
+    string? CursorAgentVersion = null,
+    string? ClaudeVersion = null,
+    string? CodexVersion = null);
 
 /// <summary>
 /// Pure helpers for Host tab missing-state, notes, and Install All payload. <see cref="AnyMissing"/> and
@@ -41,17 +47,23 @@ public static class HostPrerequisiteState
         IsMissing(versions.DotnetSdkVersion)
         || IsMissing(versions.GitVersion)
         || IsMissing(versions.GitVersionToolVersion)
+        || IsMissing(versions.ClaudeVersion)
+        || IsMissing(versions.CodexVersion)
         || IsMissing(versions.CursorAgentVersion);
 
     public static IReadOnlyList<string> GetMissingIds(HostPrerequisiteVersions versions)
     {
-        var ids = new List<string>(4);
+        var ids = new List<string>(6);
         if (IsMissing(versions.DotnetSdkVersion))
             ids.Add(HostPrerequisiteIds.DotnetSdk);
         if (IsMissing(versions.GitVersion))
             ids.Add(HostPrerequisiteIds.Git);
         if (IsMissing(versions.GitVersionToolVersion))
             ids.Add(HostPrerequisiteIds.GitVersion);
+        if (IsMissing(versions.ClaudeVersion))
+            ids.Add(HostPrerequisiteIds.Claude);
+        if (IsMissing(versions.CodexVersion))
+            ids.Add(HostPrerequisiteIds.Codex);
         if (IsMissing(versions.CursorAgentVersion))
             ids.Add(HostPrerequisiteIds.CursorAgent);
         return ids;
@@ -82,7 +94,7 @@ public static class HostPrerequisiteState
             return "All prerequisites are installed.";
 
         var sentences = new List<string> { "All required prerequisites are installed." };
-        var unusedTools = optional.Where(id => id != HostPrerequisiteIds.CursorAgent).ToList();
+        var unusedTools = optional.Where(id => !IsAiCli(id)).ToList();
         if (unusedTools.Count > 0)
         {
             var names = string.Join(" and ", unusedTools.Select(DisplayName));
@@ -90,17 +102,31 @@ public static class HostPrerequisiteState
             sentences.Add($"{names} {verb} optional: no workspace uses {(unusedTools.Count == 1 ? "it" : "them")}.");
         }
 
-        if (optional.Contains(HostPrerequisiteIds.CursorAgent))
-            sentences.Add($"{DisplayName(HostPrerequisiteIds.CursorAgent)} is optional: it is only needed to write AI text with Cursor.");
+        foreach (var id in optional.Where(IsAiCli))
+            sentences.Add(AiCliNote(id));
 
         return string.Join(' ', sentences);
     }
+
+    /// <summary>Claude, Codex and Cursor Agent are for writing AI text. They are never required by a Workspace profile.</summary>
+    private static bool IsAiCli(string id) =>
+        id is HostPrerequisiteIds.Claude or HostPrerequisiteIds.Codex or HostPrerequisiteIds.CursorAgent;
+
+    private static string AiCliNote(string id) => id switch
+    {
+        HostPrerequisiteIds.Claude => "Claude is optional: it is only needed to write AI text with Claude.",
+        HostPrerequisiteIds.Codex => "Codex is optional: it is only needed to write AI text with Codex.",
+        HostPrerequisiteIds.CursorAgent => "Cursor Agent is optional: it is only needed to write AI text with Cursor.",
+        _ => $"{DisplayName(id)} is optional: it is only needed to write AI text.",
+    };
 
     public static string CommandFor(string id) => id switch
     {
         HostPrerequisiteIds.DotnetSdk => HostPrerequisiteInstallCommands.DotnetSdk,
         HostPrerequisiteIds.Git => HostPrerequisiteInstallCommands.Git,
         HostPrerequisiteIds.GitVersion => HostPrerequisiteInstallCommands.GitVersion,
+        HostPrerequisiteIds.Claude => HostPrerequisiteInstallCommands.Claude,
+        HostPrerequisiteIds.Codex => HostPrerequisiteInstallCommands.Codex,
         HostPrerequisiteIds.CursorAgent => HostPrerequisiteInstallCommands.CursorAgent,
         _ => throw new ArgumentOutOfRangeException(nameof(id), id, "Unknown Host prerequisite id.")
     };
@@ -110,6 +136,8 @@ public static class HostPrerequisiteState
         HostPrerequisiteIds.DotnetSdk => ".NET SDK",
         HostPrerequisiteIds.Git => "Git",
         HostPrerequisiteIds.GitVersion => "GitVersion",
+        HostPrerequisiteIds.Claude => "Claude",
+        HostPrerequisiteIds.Codex => "Codex",
         HostPrerequisiteIds.CursorAgent => "Cursor Agent",
         _ => id
     };

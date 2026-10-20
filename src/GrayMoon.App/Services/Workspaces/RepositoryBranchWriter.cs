@@ -1,5 +1,6 @@
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Services.Workspaces;
@@ -155,7 +156,7 @@ public sealed class RepositoryBranchWriter(AppDbContext dbContext, ILogger<Repos
         }
 
         if (save)
-            await dbContext.SaveChangesAsync(cancellationToken);
+            await SaveBranchChangesAsync(cancellationToken);
         logger.LogTrace("Persisted {Count} ref(s) for workspace repository {WorkspaceRepositoryId}", fetchedRefs.Count, workspaceRepositoryId);
     }
 
@@ -187,7 +188,7 @@ public sealed class RepositoryBranchWriter(AppDbContext dbContext, ILogger<Repos
         return trimmed.StartsWith("origin/", StringComparison.OrdinalIgnoreCase) ? trimmed : "origin/" + trimmed;
     }
 
-    /// <summary>Adds every missing local branch in one query and one save. Never removes or touches other rows. Returns the number of rows added.</summary>
+    /// <summary>Adds every missing local branch in one query and one save. Never removes or touches other rows. Returns the number of rows this call inserted. A row inserted by a parallel writer counts as already stored.</summary>
     public async Task<int> AddLocalBranchesAsync(
         IReadOnlyList<(int WorkspaceRepositoryId, string BranchName)> branches,
         CancellationToken cancellationToken = default)
@@ -223,8 +224,7 @@ public sealed class RepositoryBranchWriter(AppDbContext dbContext, ILogger<Repos
             return 0;
 
         dbContext.RepositoryBranches.AddRange(toAdd);
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return toAdd.Count;
+        return toAdd.Count - await SaveBranchChangesAsync(cancellationToken);
     }
 
     /// <summary>Adds a remote branch row (<c>origin/&lt;name&gt;</c>) when it is not persisted yet. Returns true when a row was added.</summary>
@@ -247,8 +247,7 @@ public sealed class RepositoryBranchWriter(AppDbContext dbContext, ILogger<Repos
             LastSeenAt = DateTime.UtcNow,
             IsDefault = false
         });
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return true;
+        return await SaveBranchChangesAsync(cancellationToken) == 0;
     }
 
     /// <summary>
@@ -270,5 +269,77 @@ public sealed class RepositoryBranchWriter(AppDbContext dbContext, ILogger<Repos
         dbContext.RepositoryBranches.RemoveRange(rows);
         await dbContext.SaveChangesAsync(cancellationToken);
         return rows.Count;
+    }
+
+    /// <summary>
+    /// Saves pending branch changes. Returns how many added branch rows were already stored by another writer.
+    /// A workspace checkout runs every repository at once, and each checkout's hook sync inserts the same local
+    /// branch this writer just decided to add. The unique index rejects the later insert. That row is already
+    /// stored, so it is dropped and the rest of this save is written. The checkouts stay parallel.
+    /// </summary>
+    private async Task<int> SaveBranchChangesAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return 0;
+        }
+        catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+        {
+            var alreadyStored = await DetachBranchesAlreadyStoredAsync(cancellationToken);
+            if (alreadyStored == 0)
+                throw;
+
+            logger.LogDebug("Branch row was already stored by a parallel writer; kept the existing row.");
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return alreadyStored;
+        }
+    }
+
+    /// <summary>Detaches added branch rows whose unique key is already committed. Returns how many were detached.</summary>
+    private async Task<int> DetachBranchesAlreadyStoredAsync(CancellationToken cancellationToken)
+    {
+        var added = dbContext.ChangeTracker.Entries<RepositoryBranch>()
+            .Where(entry => entry.State == EntityState.Added)
+            .Select(entry => entry.Entity)
+            .ToList();
+        if (added.Count == 0)
+            return 0;
+
+        var linkIds = added.Select(branch => branch.WorkspaceRepositoryId).Distinct().ToList();
+        var stored = await dbContext.RepositoryBranches
+            .AsNoTracking()
+            .Where(branch => linkIds.Contains(branch.WorkspaceRepositoryId))
+            .Select(branch => new { branch.WorkspaceRepositoryId, branch.BranchName, branch.IsRemote })
+            .ToListAsync(cancellationToken);
+        var storedKeys = stored
+            .Select(branch => (branch.WorkspaceRepositoryId, branch.BranchName, branch.IsRemote))
+            .ToHashSet();
+
+        var detached = 0;
+        foreach (var branch in added)
+        {
+            if (!storedKeys.Contains((branch.WorkspaceRepositoryId, branch.BranchName, branch.IsRemote)))
+                continue;
+
+            dbContext.Entry(branch).State = EntityState.Detached;
+            detached++;
+        }
+
+        return detached;
+    }
+
+    /// <summary>SQLite extended result SQLITE_CONSTRAINT_UNIQUE (2067), or the message EF surfaces when the numeric code is absent.</summary>
+    private static bool IsUniqueConstraintViolation(Exception exception)
+    {
+        for (var current = exception; current != null; current = current.InnerException)
+        {
+            if (current is SqliteException sqlite
+                && (sqlite.SqliteExtendedErrorCode == 2067
+                    || sqlite.Message.Contains("UNIQUE constraint failed", StringComparison.Ordinal)))
+                return true;
+        }
+
+        return false;
     }
 }

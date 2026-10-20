@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 
 namespace GrayMoon.Common.Ai;
@@ -224,5 +225,81 @@ public static class UnifiedDiffSplitter
         }
 
         return builder.ToString();
+    }
+}
+
+/// <summary>
+/// Process-free parser for <c>git log --format=%x1e%H%x1f%ct%x1f%s --shortstat</c>: one record per commit, started by
+/// <c>\x1e</c>, holding the header line and, unless the commit changes nothing, a shortstat line
+/// (<c> 3 files changed, 10 insertions(+), 2 deletions(-)</c>).
+/// </summary>
+public static class GitCommitLogParser
+{
+    public const string Format = "%x1e%H%x1f%ct%x1f%s";
+
+    /// <summary>Commits in output order. When the read stopped at its cap, the last record may be cut and is left out.</summary>
+    public static List<GitEvidenceCommit> Parse(string? output, bool truncated)
+    {
+        var commits = new List<GitEvidenceCommit>();
+        if (string.IsNullOrEmpty(output))
+            return commits;
+
+        var records = output.Split('\x1e', StringSplitOptions.RemoveEmptyEntries);
+        var count = truncated ? records.Length - 1 : records.Length;
+        for (var i = 0; i < count; i++)
+        {
+            var lines = records[i].Split('\n');
+            var header = lines[0].TrimEnd('\r').Split('\x1f');
+            if (header.Length < 3 || header[0].Length < 7)
+                continue;
+
+            var commit = new GitEvidenceCommit
+            {
+                Oid = header[0].Trim(),
+                CommittedAt = long.TryParse(header[1], out var time) ? time : 0,
+                Subject = header[2].Trim(),
+            };
+            foreach (var line in lines.Skip(1))
+            {
+                if (TryReadShortStat(line, commit))
+                    break;
+            }
+
+            commits.Add(commit);
+        }
+
+        return commits;
+    }
+
+    /// <summary>
+    /// Reads <c> 3 files changed, 10 insertions(+), 2 deletions(-)</c>; either count after the first may be missing.
+    /// False for any other line.
+    /// </summary>
+    private static bool TryReadShortStat(string line, GitEvidenceCommit commit)
+    {
+        var parts = line.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0 || !TryReadCount(parts[0], "changed", out var files))
+            return false;
+
+        commit.FilesChanged = files;
+        foreach (var part in parts.Skip(1))
+        {
+            if (TryReadCount(part, "(+)", out var added))
+                commit.Added = added;
+            else if (TryReadCount(part, "(-)", out var deleted))
+                commit.Deleted = deleted;
+        }
+
+        return true;
+    }
+
+    /// <summary>A part such as <c>10 insertions(+)</c>: a leading number and a part ending with <paramref name="suffix"/>.</summary>
+    private static bool TryReadCount(string part, string suffix, out int count)
+    {
+        count = 0;
+        var space = part.IndexOf(' ');
+        return space > 0
+               && part.EndsWith(suffix, StringComparison.Ordinal)
+               && int.TryParse(part.AsSpan(0, space), NumberStyles.None, CultureInfo.InvariantCulture, out count);
     }
 }

@@ -8,10 +8,14 @@ using GrayMoon.Application.WorkspaceManifest;
 namespace GrayMoon.App.Services.Features;
 
 /// <summary>
-/// CodeGraph support for Features, active only when the Workspace definition has <c>"codegraph": true</c>. Create
-/// Feature gives the new Feature root its own index (the Worker builds it in the background, from scratch: nothing
-/// is copied from the Workspace root, so that root needs no index of its own); Remove Feature removes that index before any worktree is removed. CodeGraph is optional: every
-/// failure is logged and never fails the Feature operation.
+/// CodeGraph support for Features. <c>"codegraph"</c> in <c>graymoon.json</c> is the workspace-wide switch: true
+/// maintains <c>codegraph.json</c> and the managed <c>.gitignore</c> entry, and Repair Feature starts an index.
+/// Create Feature does not read that switch. The New Feature dialog offers the index when the CodeGraph CLI is
+/// installed, including when the Workspace has no Workspace repository and no definition; an explicit
+/// <c>"codegraph": false</c> hides that offer. The Worker builds each index from scratch in the Feature root, so the
+/// Workspace root needs no index of its own. Remove and Roll back always drop a Feature index before any worktree
+/// goes, because a ticked box can leave one behind while the switch is off. CodeGraph is optional: every failure is
+/// logged and never fails the Feature operation.
 /// </summary>
 public sealed class FeatureCodeGraphService(
     IWorkspaceManifestService manifestService,
@@ -28,15 +32,17 @@ public sealed class FeatureCodeGraphService(
     /// <summary>
     /// Writes <c>codegraph.json</c> in the Workspace and Feature roots, then asks the Worker to start indexing the
     /// Feature root. Returns the Worker's outcome (<c>Started</c>, <c>AlreadyInitialized</c>, ...),
-    /// <see cref="Disabled"/> or <see cref="Failed"/>.
+    /// <see cref="Disabled"/> or <see cref="Failed"/>. When <paramref name="honorDefinitionSwitch"/> is false, an
+    /// explicit request (the New Feature checkbox) starts the index even though the definition switch is off or absent.
     /// </summary>
     public async Task<string> InitializeAsync(
         int workspaceId,
         WorkspaceFeatureContextId featureContextId,
         IProgress<OperationProgress>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool honorDefinitionSwitch = true)
     {
-        if (!await manifestService.IsCodeGraphEnabledAsync(workspaceId, cancellationToken))
+        if (honorDefinitionSwitch && !await manifestService.IsCodeGraphEnabledAsync(workspaceId, cancellationToken))
             return Disabled;
 
         progress?.Report(new OperationProgress("Starting CodeGraph index..."));
@@ -69,9 +75,10 @@ public sealed class FeatureCodeGraphService(
         int workspaceId,
         WorkspaceFeatureContextId featureContextId,
         IProgress<OperationProgress>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool honorDefinitionSwitch = true)
     {
-        if (!await manifestService.IsCodeGraphEnabledAsync(workspaceId, cancellationToken))
+        if (honorDefinitionSwitch && !await manifestService.IsCodeGraphEnabledAsync(workspaceId, cancellationToken))
             return Disabled;
 
         var root = await pathResolver.GetContextRootAsync(featureContextId, cancellationToken);
@@ -105,7 +112,9 @@ public sealed class FeatureCodeGraphService(
 
     /// <summary>
     /// Asks the Worker to remove the Feature root's index (stopping a build still running there). Returns the
-    /// Worker's outcome (<c>Removed</c>, <c>NotInitialized</c>, ...), <see cref="Disabled"/> or <see cref="Failed"/>.
+    /// Worker's outcome (<c>Removed</c>, <c>NotInitialized</c>, ...) or <see cref="Failed"/>. Runs even when the
+    /// definition switch is off: Create can start an index from the dialog without that switch, and a leftover index
+    /// blocks removing the worktree. <c>NotInitialized</c> is the no-op when there is nothing to remove.
     /// </summary>
     public async Task<string> UninitializeAsync(
         int workspaceId,
@@ -113,9 +122,6 @@ public sealed class FeatureCodeGraphService(
         IProgress<OperationProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        if (!await manifestService.IsCodeGraphEnabledAsync(workspaceId, cancellationToken))
-            return Disabled;
-
         progress?.Report(new OperationProgress("Removing CodeGraph index..."));
 
         var root = await pathResolver.GetContextRootAsync(featureContextId, cancellationToken);

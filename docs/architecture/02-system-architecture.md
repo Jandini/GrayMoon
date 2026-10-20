@@ -628,9 +628,9 @@ Worker GenerateAiText       exactly one CLI process (AiCliRunner)
 App: AiGeneratedTextParser validates the JSON answer strictly
 ```
 
-- Commands `CollectGitEvidence`, `GetAiProviders`, `GenerateAiText` run in the main pool; there is no separate queue.
+- Commands `CollectGitEvidence`, `GetAiProviders`, `GenerateAiText` run in the main pool; there is no separate queue. The App reads CLI availability from `GetHostInfo` and does not call `GetAiProviders`.
 - `Common/BoundedProcessRunner` runs from an argument list, stops a process at its stdout cap and logs only the executable, timing and sizes, never arguments or prompts. In the Worker it is behind the repository access lease (10B).
-- `AiCliRunner`: availability probe `<exe> --version` (15 s timeout, cached 5 min in the Worker; the App caches availability 2 min in `AiProviderAvailabilityCache`); answer cap 256 KiB, stderr cap 16 KiB; each run gets an empty `%TEMP%\graymoon-ai\<guid>` folder, deleted afterwards. Generation timeout `AiGeneration:TimeoutSeconds` (default 120).
+- `AiCliRunner`: availability probe `<exe> --version` (15 s timeout, cached 5 min in the Worker). The App takes the probe from the startup `GetHostInfo` (`HostInfoCache`) and does not probe again when a menu opens. Answer cap 256 KiB, stderr cap 16 KiB; each run gets an empty `%TEMP%\graymoon-ai\<guid>` folder, deleted afterwards. Generation timeout `AiGeneration:TimeoutSeconds` (default 120).
 - Provider adapters (`Worker/Services/Ai/AiCliAdapters.cs`, `IAiCliAdapter`): `ClaudeCliAdapter` (`claude -p`, JSON schema output, tools disabled), `CodexCliAdapter` (`codex exec`, read-only sandbox, tools and user config disabled), `CursorCliAdapter` (`agent`, then `cursor-agent`; ask mode, cannot remove its read tools). Model names are validated by `AiProviderConfiguration.IsValidModel` and no argument spans lines.
 - Errors are classified (`AiGenerationErrorKind`: not signed in, unsupported model, unsupported CLI options, timeout, invalid output) and shown as one redacted line inside the AI control; Commit and Create keep working.
 

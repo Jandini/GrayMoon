@@ -30,8 +30,8 @@
 <button type="button"
         class="btn btn-sm @ButtonClass gm-ai-segment gm-ai-segment--chevron text-nowrap"
         disabled="@IsDisabled"
-        title="@(Pinned is null ? "Choose an AI provider" : "Change or unpin the AI provider")"
-        aria-label="@(Pinned is null ? "Choose an AI provider" : "Change or unpin the AI provider")"
+        title="@(Pinned is null ? "Choose an AI provider" : "Change the AI provider")"
+        aria-label="@(Pinned is null ? "Choose an AI provider" : "Change the AI provider")"
         aria-haspopup="menu"
         aria-expanded="@_open"
         @onclick="Toggle">
@@ -67,8 +67,8 @@
                         role="menuitemradio"
                         aria-checked="@isPinned"
                         class="gm-ai-menu__item @(isPinned ? "gm-ai-menu__item--pinned" : null)"
-                        title="@OptionTitle(option)"
-                        @onclick="() => PinAsync(option.Id)">
+                        title="@OptionTitle(option, isPinned)"
+                        @onclick="() => PinAsync(option)">
                     <img src="@option.IconSrc" alt="" class="gm-ai-menu__icon" aria-hidden="true" />
                     <span class="gm-ai-menu__text">
                         <span class="gm-ai-menu__name">@option.Label</span>
@@ -81,34 +81,19 @@
                 </button>
             }
         }
-        @* The line under the providers separates them from On Commit (Changes) or Check CLIs again. With none available there is nothing to separate, so it is omitted. *@
-        @if (Menu is null || available!.Count > 0)
-        {
-            <div class="gm-ai-menu__divider" role="separator"></div>
-        }
         @if (Options is not null)
         {
             @* Host options are usable while the providers are still being checked; they need not depend on AI. *@
+            @if (Menu is null || available!.Count > 0)
+            {
+                <div class="gm-ai-menu__divider" role="separator"></div>
+            }
             @Options
-            <div class="gm-ai-menu__divider" role="separator"></div>
         }
-        @if (Menu is not null)
+        @if (!string.IsNullOrEmpty(Menu?.Notice))
         {
-            @if (Pinned is { } current)
-            {
-                <button type="button" role="menuitem" class="gm-ai-menu__item gm-ai-menu__item--action" @onclick="() => PinAsync(null)">
-                    <i class="bi bi-x-lg gm-ai-menu__glyph" aria-hidden="true"></i>
-                    <span class="gm-ai-menu__name">Unpin @current.Label</span>
-                </button>
-            }
-            <button type="button" role="menuitem" class="gm-ai-menu__item gm-ai-menu__item--action" @onclick="RefreshAsync">
-                <i class="bi bi-arrow-clockwise gm-ai-menu__glyph" aria-hidden="true"></i>
-                <span class="gm-ai-menu__name">Check CLIs again</span>
-            </button>
-            @if (!string.IsNullOrEmpty(Menu.Notice))
-            {
-                <div class="gm-ai-menu__notice">@Menu.Notice</div>
-            }
+            <div class="gm-ai-menu__divider" role="separator"></div>
+            <div class="gm-ai-menu__notice">@Menu.Notice</div>
         }
     </div>
 }
@@ -135,8 +120,6 @@
     [Parameter] public EventCallback OnCancel { get; set; }
 
     [Parameter] public EventCallback<string?> OnPin { get; set; }
-
-    [Parameter] public EventCallback OnRefresh { get; set; }
 
     /// <summary>
     /// Optional host entries shown under the providers, usually <see cref="AiMenuCheckItem"/>s (Changes: what Commit
@@ -168,8 +151,10 @@
         return option.Model ?? "CLI default model";
     }
 
-    private static string OptionTitle(AiProviderOption option)
+    private static string OptionTitle(AiProviderOption option, bool isPinned)
     {
+        if (isPinned)
+            return $"Remove {option.Label}. The provider button stays gone until another provider is pinned.";
         if (!option.IsAvailable)
             return option.Problem ?? "Not available";
         var version = option.Version is null ? "" : $" {option.Version}";
@@ -226,15 +211,14 @@
     // The first open of a page may still be checking the CLIs; the menu says so until Menu arrives.
     private void Toggle() => _open = !_open;
 
-    private async Task PinAsync(string? providerId)
+    private async Task PinAsync(AiProviderOption option)
     {
         _open = false;
+        // Choosing the provider that is already pinned clears it. The provider button stays gone until another is pinned.
+        var providerId = string.Equals(Menu?.PinnedProviderId, option.Id, StringComparison.Ordinal)
+            ? null
+            : option.Id;
         await OnPin.InvokeAsync(providerId);
-    }
-
-    private async Task RefreshAsync()
-    {
-        await OnRefresh.InvokeAsync();
     }
 
     private void OnMenuKeyDown(KeyboardEventArgs e)

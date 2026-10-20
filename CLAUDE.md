@@ -21,7 +21,7 @@ Never run `git commit` or `git push` (or stage, tag, amend, or open a pull reque
 
 ## Documentation
 
-`docs/architecture/` (`01`-`06` plus `README.md`) is the only documentation folder and describes the current state only. When a change alters behavior, data, a Worker command, a concurrency rule or an extension point, update the relevant architecture doc in the same change. Do not add design, prompt, plan, review or analysis documents under `docs/`; cite architecture docs by file name, not by section number.
+`docs/architecture/` (`01`-`06` plus `README.md`) describes the current state only. When a change alters behavior, data, a Worker command, a concurrency rule or an extension point, update the relevant architecture doc in the same change. Proposals and design notes for work not yet built go in `docs/todo/`. Cite architecture docs by file name, not by section number.
 
 ## Commands
 
@@ -101,7 +101,7 @@ A Workspace has a profile: `Type` (Basic / .NET Dependency), `VersioningMode` (N
 
 Four orchestrators coordinate multi-step workflows across repositories:
 - `DependencyUpdateOrchestrator` - drives level-by-level package version updates: updates `.csproj` files and version files, commits each level, then moves to the next. It never runs `dotnet restore`; restore only happens in `PushOrchestrator` (after each level's push) or from the manual restore actions.
-- `UpdateAndPushOrchestrator` - Update and Push as two lanes. The update lane (`DependencyUpdateOrchestrator`) raises `onLevelCompleted` after each dependency level (including levels with nothing to update, whose repos may still hold unpushed commits); the push lane (`WorkspacePushService.RunPushLaneAsync`, own DI scope and DbContext) reads those hand-offs from a channel and pushes each level while the update carries on with the higher ones, so a level's CI/package wait overlaps later updates. `CanRunPushLaneAsync` pre-checks that every required package has a registry mapping; if not, nothing runs and the page falls back to the sequential update-then-push (and its "continue with normal push?" prompt). `TwoLaneProgress` publishes whichever lane reported last, so the overlay keeps its single-operation layout and updates normally.
+- `UpdateAndPushOrchestrator` - Update and Push as two lanes. The update lane (`DependencyUpdateOrchestrator`) raises `onLevelCompleted` after each dependency level (including levels with nothing to update, whose repos may still hold unpushed commits); the push lane (`WorkspacePushService.RunPushLaneAsync`, own DI scope, and a fresh scope and DbContext per level because the update rewrites rows between levels) reads those hand-offs from a channel and pushes each level while the update carries on with the higher ones, so a level's CI/package wait overlaps later updates. `CanRunPushLaneAsync` pre-checks that every required package has a registry mapping; if not, nothing runs and the page falls back to the sequential update-then-push (and its "continue with normal push?" prompt). `TwoLaneProgress` publishes whichever lane reported last, so the overlay keeps its single-operation layout and updates normally.
 - `PushOrchestrator` - synchronized push: pushes level-by-level, waits for NuGet availability between levels so downstream consumers get the correct package version before their push starts.
 - `PrepareWorkspaceOrchestrator` - automates branch creation, optional dependency update, commit, and push across selected repositories in one workflow.
 
@@ -139,7 +139,7 @@ Connector tokens are AES-256-GCM encrypted at rest via `AesGcmTokenProtector`. T
 
 `WorkspaceFiles` (`/workspaces/{id}/files`) lets users pin arbitrary files from workspace repos. Each file can have a `WorkspaceFileVersionConfig` with a multi-line version pattern (`KEY={repositoryname}` per line) that maps file content tokens to workspace repo names.
 
-- **`WorkspaceFileVersionService`** - two main operations: `UpdateAllVersionsAsync` (calls `UpdateFileVersions` worker command to do in-place token substitution) and `CheckAndPersistFileVersionStatusAsync` (calls `CheckFileVersions` worker command, persists results to `WorkspaceFileLineStatuses`, updates `OutOfDateFileRepos`/`TotalFileConfigRepos` counters on `WorkspaceRepositories`). Concurrent callers for the same workspace coalesce onto one in-flight check unless `forceFresh: true`.
+- **`WorkspaceFileVersionService`** - two main operations: `UpdateAllVersionsAsync` (calls `UpdateFileVersions` worker command to do in-place token substitution) and `CheckAndPersistFileVersionStatusAsync` (calls `CheckFileVersions` worker command, persists results to `WorkspaceFileLineStatuses`, updates `OutOfDateFileRepos`/`TotalFileConfigRepos` counters on `WorkspaceRepositories`). Checks of one context never overlap; a caller that arrives during a check waits for the next one, which starts after its own writes (a private `SyncRecomputeCoalescer`).
 - **`WorkspaceFileLineStatuses`** - one row per out-of-date token per file. Stores `TokenName`, `CurrentValue`, `ExpectedValue`. Cleared and rebuilt on every check.
 - **`WorkspaceFile.IsMissingOnDisk`** - nullable bool set by `CheckFileVersions` when the file path no longer exists. Missing files are excluded from badge computation and version update.
 - Worker commands `CheckFileVersions` and `UpdateFileVersions` live in `src/GrayMoon.Worker/Commands/`.

@@ -286,6 +286,7 @@ public class SqlitePerformanceTests
                 sp.GetRequiredService<IWorkspaceFeatureContextResolver>(),
                 sp.GetRequiredService<IWorkspaceContextPathResolver>(),
                 sp.GetRequiredService<IWorkspaceCapabilitiesResolver>(),
+                sp.GetRequiredService<IServiceScopeFactory>(),
                 sp.GetRequiredService<ILogger<WorkspacePushService>>(),
                 ctx.HubContext);
             await push.UpdateCommitCountsAndUpstreamAfterPushAsync(
