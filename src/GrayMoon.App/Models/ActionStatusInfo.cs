@@ -10,6 +10,9 @@ public sealed class ActionStatusInfo
 
     public DateTimeOffset? UpdatedAt { get; set; }
 
+    /// <summary>When the latest run attempt started (<c>run_started_at</c>). Wall-clock duration is this to <see cref="UpdatedAt"/>, or to now while the run is still going.</summary>
+    public DateTimeOffset? RunStartedAt { get; set; }
+
     /// <summary>The branch this status was fetched for.</summary>
     public string? BranchName { get; set; }
 

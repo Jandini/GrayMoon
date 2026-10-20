@@ -360,6 +360,7 @@ public sealed class GitHubActionsService(
             Status = status,
             HtmlUrl = htmlUrl,
             UpdatedAt = run.UpdatedAt,
+            RunStartedAt = run.RunStartedAt,
             BranchName = branch,
             RunId = run.Id,
             WorkflowId = workflowId,

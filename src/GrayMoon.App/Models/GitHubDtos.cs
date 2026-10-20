@@ -97,6 +97,10 @@ public class GitHubWorkflowRunDto
     [JsonPropertyName("updated_at")]
     public DateTimeOffset? UpdatedAt { get; set; }
 
+    /// <summary>When this attempt started running. Null while the run is still queued. Resets on re-run.</summary>
+    [JsonPropertyName("run_started_at")]
+    public DateTimeOffset? RunStartedAt { get; set; }
+
     [JsonPropertyName("html_url")]
     public string HtmlUrl { get; set; } = string.Empty;
 }
