@@ -13,12 +13,32 @@ public sealed class GetHostInfoCommand(ICommandLineService commandLine, CodeGrap
 {
     public async Task<GetHostInfoResponse> ExecuteAsync(GetHostInfoRequest request, CancellationToken cancellationToken = default)
     {
-        var dotnetVersion = await GetVersionAsync("dotnet", "--version", null, cancellationToken);
-        var gitVersion = await GetVersionAsync("git", "--version", null, cancellationToken);
-        var gitVersionToolVersion = await GetVersionAsync("dotnet", "gitversion version", null, cancellationToken);
-        var codeGraphVersion = await codeGraph.GetVersionAsync(cancellationToken);
-        var cursorAgentVersion = (await aiCli.ProbeAsync(refresh: true, cancellationToken))
-            .FirstOrDefault(p => p.ProviderId == AiProviderIds.Cursor && p.IsInstalled)?.Version;
+        string? dotnetVersion = null;
+        string? gitVersion = null;
+        string? gitVersionToolVersion = null;
+        string? codeGraphVersion = null;
+        var providers = new AiCliAvailability?[AiProviderIds.All.Count];
+
+        var probes = new List<Func<CancellationToken, Task>>
+        {
+            async ct => dotnetVersion = await GetVersionAsync("dotnet", "--version", null, ct),
+            async ct => gitVersion = await GetVersionAsync("git", "--version", null, ct),
+            async ct => gitVersionToolVersion = await GetVersionAsync("dotnet", "gitversion version", null, ct),
+            async ct => codeGraphVersion = await codeGraph.GetVersionAsync(ct),
+        };
+        for (var i = 0; i < AiProviderIds.All.Count; i++)
+        {
+            var index = i;
+            var providerId = AiProviderIds.All[i];
+            probes.Add(async ct => providers[index] = await aiCli.ProbeProviderAsync(providerId, refresh: true, ct));
+        }
+
+        await Parallel.ForEachAsync(
+            probes,
+            new ParallelOptions { MaxDegreeOfParallelism = AiCliRunner.MaxConcurrentProbes, CancellationToken = cancellationToken },
+            async (probe, ct) => await probe(ct));
+
+        var cursorAgentVersion = providers.FirstOrDefault(p => p?.ProviderId == AiProviderIds.Cursor && p.IsInstalled)?.Version;
 
         var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         if (string.IsNullOrWhiteSpace(userProfile))

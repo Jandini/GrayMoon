@@ -222,19 +222,22 @@ cancel commands where supported
 ### Worker page
 
 ```text
-Install tab       labelled "Update" and shown red while the state is VersionMismatch (also red while Offline);
+Install tab       labelled "Update" and shown red while the state is VersionMismatch (also red while Offline,
+                  except during a Desktop restart);
                   shows the PowerShell install command (served by GET /api/worker/install),
                   the .NET 10 runtime note, the "Reinstall the Worker to finish securing GrayMoon" notice,
                   "Show pairing code", and a stale Windows service password notice
-                  footer: "Update Now" on a mismatch (sends SelfUpdate), "Install" in Desktop mode, "Download"
+                  footer: "Update Now" on a mismatch (sends SelfUpdate), "Install" in Desktop mode
+                  (gray "Installing" while that install runs, gray "Restarting" while a restart runs), "Download"
 Uninstall tab
 Host tab          only while Online or VersionMismatch; Worker version, .NET SDK, Git, GitVersion,
                   CodeGraph (codeGraphVersion, optional, informational only),
                   Cursor Agent (cursorAgentVersion; listed with its install command, never required)
-                  footer: "Install All" for missing prerequisites in Desktop mode
+                  footer in Desktop: "Install Now" for missing prerequisites, and "Restart"
+                  (restarts the Worker service so an AI agent installed afterwards is on its PATH)
 ```
 
-`GetHostInfo` (one of the two commands allowed on a version mismatch) supplies the host versions. Required prerequisites follow the Workspace profiles (`HostPrerequisiteRequirements.For`): Git always, GitVersion when any Workspace uses it, the .NET SDK when any Workspace uses GitVersion, package restore or dependency-aware update. Missing optional tools are labelled "(optional)" and never raise the attention badge; Cursor Agent counts as missing but is never required.
+`GetHostInfo` (one of the two commands allowed on a version mismatch) supplies the host versions. It probes .NET, Git, GitVersion, CodeGraph, and each AI CLI together, at most four at a time. Required prerequisites follow the Workspace profiles (`HostPrerequisiteRequirements.For`): Git always, GitVersion when any Workspace uses it, the .NET SDK when any Workspace uses GitVersion, package restore or dependency-aware update. Missing optional tools are labelled "(optional)". The Home nav circle is red only while the Worker is down, and it clears as soon as the Worker is up; it does not check host prerequisites or connectors. Cursor Agent counts as missing but is never required.
 
 ### Install script guards
 

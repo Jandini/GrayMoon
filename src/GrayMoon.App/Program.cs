@@ -124,6 +124,7 @@ try
     builder.Services.AddScoped<HostPrerequisiteInstallService>();
     builder.Services.AddScoped<HostPrerequisiteRequirementsProvider>();
     builder.Services.AddScoped<WorkerInstallService>();
+    builder.Services.AddScoped<WorkerRestartService>();
     builder.Services.AddHostedService<WorkerUpdateDesktopNotifier>();
     builder.Services.AddSingleton<WorkerQueueStateService>();
     builder.Services.AddSingleton<WorkerCommandCancelSender>();

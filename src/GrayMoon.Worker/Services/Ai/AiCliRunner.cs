@@ -21,6 +21,9 @@ public sealed record AiCliAvailability(string ProviderId, bool IsInstalled, stri
 public sealed class AiCliRunner(IEnumerable<IAiCliAdapter> adapters, IAiCliExecutableLocator locator, IBoundedProcessRunner runner, ILogger<AiCliRunner> logger)
 {
     internal const int MaxAnswerBytes = 262_144;
+
+    /// <summary>How many CLI version probes may run at once.</summary>
+    internal const int MaxConcurrentProbes = 4;
     private const int MaxStderrBytes = 16_384;
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan ProbeCacheLifetime = TimeSpan.FromMinutes(5);
@@ -43,10 +46,21 @@ public sealed class AiCliRunner(IEnumerable<IAiCliAdapter> adapters, IAiCliExecu
 
     public async Task<IReadOnlyList<AiCliAvailability>> ProbeAsync(bool refresh, CancellationToken cancellationToken)
     {
-        var tasks = AiProviderIds.All
-            .Where(_adapters.ContainsKey)
-            .Select(id => ProbeOneAsync(_adapters[id], refresh, cancellationToken));
-        return await Task.WhenAll(tasks);
+        var ids = AiProviderIds.All.Where(_adapters.ContainsKey).ToArray();
+        var results = new AiCliAvailability[ids.Length];
+        await Parallel.ForEachAsync(
+            Enumerable.Range(0, ids.Length),
+            new ParallelOptions { MaxDegreeOfParallelism = MaxConcurrentProbes, CancellationToken = cancellationToken },
+            async (index, ct) => results[index] = await ProbeOneAsync(_adapters[ids[index]], refresh, ct));
+        return results;
+    }
+
+    /// <summary>Probes one provider. Unknown ids return null. Used by host info so each CLI shares the host probe limit.</summary>
+    internal async Task<AiCliAvailability?> ProbeProviderAsync(string providerId, bool refresh, CancellationToken cancellationToken)
+    {
+        if (!_adapters.TryGetValue(providerId, out var adapter))
+            return null;
+        return await ProbeOneAsync(adapter, refresh, cancellationToken);
     }
 
     public async Task<AiCliOutcome> GenerateAsync(string providerId, AiCliRequest request, TimeSpan timeout, CancellationToken cancellationToken)

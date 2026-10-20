@@ -1,7 +1,6 @@
 using GrayMoon.Abstractions.Workspaces;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
-using GrayMoon.App.Services.Ui;
 using GrayMoon.App.Services.Worker;
 using GrayMoon.App.Services.Workspaces;
 using GrayMoon.Application.Workspaces;
@@ -93,10 +92,6 @@ public sealed class HostPrerequisiteRequirementsTests
 
         Assert.True(HostPrerequisiteState.AnyMissing(GitOnlyInstalled));
         Assert.False(HostPrerequisiteState.AnyRequiredMissing(GitOnlyInstalled, requirements));
-        Assert.False(HomeNavNotification.WorkerRequiresAttention(
-            WorkerConnectionState.Online,
-            selfUpdateInProgress: false,
-            hostPrerequisitesMissing: HostPrerequisiteState.AnyRequiredMissing(GitOnlyInstalled, requirements)));
         Assert.Equal(
             [HostPrerequisiteIds.DotnetSdk, HostPrerequisiteIds.GitVersion],
             HostPrerequisiteState.GetMissingOptionalIds(GitOnlyInstalled, requirements));
@@ -111,10 +106,6 @@ public sealed class HostPrerequisiteRequirementsTests
         var requirements = HostPrerequisiteRequirements.For([BasicNone, WorkspaceCapabilities.Legacy]);
 
         Assert.True(HostPrerequisiteState.AnyRequiredMissing(GitOnlyInstalled, requirements));
-        Assert.True(HomeNavNotification.WorkerRequiresAttention(
-            WorkerConnectionState.Online,
-            selfUpdateInProgress: false,
-            hostPrerequisitesMissing: HostPrerequisiteState.AnyRequiredMissing(GitOnlyInstalled, requirements)));
         Assert.Empty(HostPrerequisiteState.GetMissingOptionalIds(GitOnlyInstalled, requirements));
         Assert.Equal("Install the missing prerequisites above.", HostPrerequisiteState.Note(GitOnlyInstalled, requirements));
     }
