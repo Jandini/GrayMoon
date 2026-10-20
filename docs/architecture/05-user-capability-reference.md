@@ -1035,6 +1035,10 @@ bulk run/re-run
 open logs
 ```
 
+Last Run shows when that workflow last updated ("2 min ago", or the date and time after a week), and the wall-clock length of the run in a smaller gray font aligned to the right of the cell (for example "4m 12s"). When the column is too narrow for both, the relative time ellipsizes and the length stays visible. GitHub's run list has no duration field. The length is `updated_at` minus `run_started_at` once the run has finished, and now minus `run_started_at` while it is still running. A run that has not started yet shows only the relative time. Billable runner time is not requested.
+
+
+
 ### Status categories
 
 ```text

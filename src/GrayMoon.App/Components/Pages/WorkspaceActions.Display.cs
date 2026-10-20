@@ -142,4 +142,53 @@ public sealed partial class WorkspaceActions
         if (elapsed.TotalDays < 7) return $"{(int)elapsed.TotalDays} days ago";
         return updatedAt.Value.LocalDateTime.ToString("MMM d, h:mm tt");
     }
+
+    /// <summary>
+    /// Wall-clock length of the latest run. GitHub's run list has no duration field;
+    /// completed runs use <paramref name="updatedAt"/> minus <paramref name="runStartedAt"/>,
+    /// and a run still going uses <paramref name="utcNow"/>.
+    /// </summary>
+    internal static string? FormatRunElapsed(DateTimeOffset? runStartedAt, DateTimeOffset? updatedAt, string? status, DateTimeOffset utcNow)
+    {
+        if (runStartedAt == null)
+            return null;
+
+        DateTimeOffset end;
+        if (string.Equals(status, "running", StringComparison.OrdinalIgnoreCase))
+            end = utcNow;
+        else if (updatedAt == null)
+            return null;
+        else
+            end = updatedAt.Value;
+
+        var elapsed = end - runStartedAt.Value;
+        if (elapsed < TimeSpan.Zero)
+            return null;
+
+        return FormatDuration(elapsed);
+    }
+
+    private static string FormatDuration(TimeSpan elapsed)
+    {
+        if (elapsed.TotalSeconds < 1)
+            return "0s";
+        if (elapsed.TotalSeconds < 60)
+            return $"{(int)elapsed.TotalSeconds}s";
+        if (elapsed.TotalMinutes < 60)
+        {
+            var minutes = (int)elapsed.TotalMinutes;
+            var seconds = elapsed.Seconds;
+            return seconds == 0 ? $"{minutes}m" : $"{minutes}m {seconds}s";
+        }
+        if (elapsed.TotalHours < 24)
+        {
+            var hours = (int)elapsed.TotalHours;
+            var minutes = elapsed.Minutes;
+            return minutes == 0 ? $"{hours}h" : $"{hours}h {minutes}m";
+        }
+
+        var days = (int)elapsed.TotalDays;
+        var remHours = elapsed.Hours;
+        return remHours == 0 ? $"{days}d" : $"{days}d {remHours}h";
+    }
 }

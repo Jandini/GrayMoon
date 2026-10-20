@@ -587,6 +587,10 @@ WorkflowsJson
 LastCheckedAt
 ```
 
+Each workflow object inside `WorkflowsJson` also keeps `RunStartedAt` (GitHub `run_started_at`) next to `UpdatedAt`, so the Actions grid can show wall-clock duration without another API call or a new column.
+
+
+
 The persisted `BranchName` is used to verify that cached workflow state belongs to the repository's current branch.
 
 ---

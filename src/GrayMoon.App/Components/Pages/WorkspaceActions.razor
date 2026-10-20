@@ -341,11 +341,18 @@
                                                             <span class="text-muted">-</span>
                                                         }
                                                     </td>
-                                                    <td class="col-last-run text-muted">
+                                                    <td class="col-last-run">
                                                         @if (line.Action?.UpdatedAt != null)
                                                         {
                                                             var lastRunTooltip = line.Action.UpdatedAt.Value.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss");
-                                                            <span title="@lastRunTooltip">@FormatLastRun(line.Action.UpdatedAt)</span>
+                                                            var runElapsed = FormatRunElapsed(line.Action.RunStartedAt, line.Action.UpdatedAt, line.Action.Status, DateTimeOffset.UtcNow);
+                                                            <div class="last-run-line">
+                                                                <span class="last-run-when text-muted" title="@lastRunTooltip">@FormatLastRun(line.Action.UpdatedAt)</span>
+                                                                @if (!string.IsNullOrEmpty(runElapsed))
+                                                                {
+                                                                    <span class="last-run-elapsed" title="Elapsed @runElapsed">@runElapsed</span>
+                                                                }
+                                                            </div>
                                                         }
                                                         else
                                                         {
