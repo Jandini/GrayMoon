@@ -58,8 +58,7 @@ public sealed class WorktreeRemovalReleasesHandlesTests : IDisposable
         Assert.True(manager.TryGetCoverage(worktreePath, out _));
 
         // A process the Worker started inside the worktree, which would pin the folder for as long as it runs.
-        var sleeper = commandLine.RunAsync(
-            "ping", ["-n", "60", "127.0.0.1"], worktreePath, null, CancellationToken.None, false, false, null);
+        var sleeper = HoldDirectory(commandLine, worktreePath);
         await Task.Delay(500);
         Assert.False(sleeper.IsCompleted);
 
@@ -76,6 +75,15 @@ public sealed class WorktreeRemovalReleasesHandlesTests : IDisposable
         // Nothing may start there while the claim is held, and the claim is gone afterwards.
         Assert.False(access.IsUnderRemoval(worktreePath));
     }
+
+    /// <summary>
+    /// A process whose working directory is <paramref name="directory"/>, long enough that removal has to stop it.
+    /// Windows <c>ping -n</c> is a count; on Linux that flag is numeric-only and the process exits at once.
+    /// </summary>
+    private static Task HoldDirectory(ICommandLineService commandLine, string directory) =>
+        OperatingSystem.IsWindows()
+            ? commandLine.RunAsync("ping", ["-n", "60", "127.0.0.1"], directory, null, CancellationToken.None, false, false, null)
+            : commandLine.RunAsync("sleep", ["60"], directory, null, CancellationToken.None, false, false, null);
 
     private static async Task Git(string workingDirectory, string arguments)
     {

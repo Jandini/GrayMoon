@@ -222,21 +222,24 @@ cancel commands where supported
 ### Worker page
 
 ```text
-Install tab       labelled "Update" and shown red while the state is VersionMismatch (also red while Offline);
+Install tab       labelled "Update" and shown red while the state is VersionMismatch (also red while Offline,
+                  except during a Desktop restart);
                   shows the PowerShell install command (served by GET /api/worker/install),
                   the .NET 10 runtime note, the "Reinstall the Worker to finish securing GrayMoon" notice,
                   "Show pairing code", and a stale Windows service password notice
-                  footer: "Update Now" on a mismatch (sends SelfUpdate), "Install" in Desktop mode, "Download"
+                  footer: "Update Now" on a mismatch (sends SelfUpdate), "Install" in Desktop mode
+                  (gray "Installing" while that install runs, gray "Restarting" while a restart runs), "Download"
 Uninstall tab
 Host tab          only while Online or VersionMismatch; Worker version, .NET SDK, Git, GitVersion,
                   CodeGraph (codeGraphVersion, optional, informational only),
                   Claude (claudeVersion; listed with its install command, never required),
                   Codex (codexVersion; listed with its install command, never required),
                   Cursor Agent (cursorAgentVersion; listed with its install command, never required)
-                  footer: "Install All" for missing prerequisites in Desktop mode
+                  footer in Desktop: "Install Now" for missing prerequisites, and "Restart"
+                  (restarts the Worker service so an AI agent installed afterwards is on its PATH)
 ```
 
-`GetHostInfo` (one of the two commands allowed on a version mismatch) supplies the host versions and which AI CLIs are installed. Required prerequisites follow the Workspace profiles (`HostPrerequisiteRequirements.For`): Git always, GitVersion when any Workspace uses it, the .NET SDK when any Workspace uses GitVersion, package restore or dependency-aware update. Missing optional tools are labelled "(optional)" and never raise the attention badge; Claude, Codex and Cursor Agent count as missing but are never required.
+`GetHostInfo` (one of the two commands allowed on a version mismatch) supplies the host versions and which AI CLIs are installed. It probes .NET, Git, GitVersion, CodeGraph, and each AI CLI together, at most four at a time. Required prerequisites follow the Workspace profiles (`HostPrerequisiteRequirements.For`): Git always, GitVersion when any Workspace uses it, the .NET SDK when any Workspace uses GitVersion, package restore or dependency-aware update. Missing optional tools are labelled "(optional)". The Home nav circle is red only while the Worker is down, and it clears as soon as the Worker is up; it does not check host prerequisites or connectors. Claude, Codex and Cursor Agent count as missing but are never required.
 
 ### Install script guards
 
@@ -878,7 +881,7 @@ use Ctrl/Cmd+Enter commit shortcut
 
 ### Commit control
 
-There is one primary Commit button: **Commit Staged** when any repository has staged content, otherwise **Commit All** (`WorkspaceCommitModeHelper.ResolveOfferedMode`). The keyed alternatives carry the captured mode, so a watcher refresh that flips the label mid-click cannot commit the wrong set. The button is joined to an AI provider segment and a chevron menu (`[Commit Staged|All][provider][chevron]`). The menu's **On Commit** header holds **Generate commit message** and **Push committed**, both remembered per Workspace across a reload (F5 or Ctrl+F5) until the App restarts. **Generate commit message** starts ticked until you change it; **Push committed** starts unticked. Ctrl/Cmd+Enter targets only the primary commit element, never the AI segment or the chevron. While the message box is empty the control attaches to the right edge of the box; below about 20rem it stays under the box.
+There is one primary Commit button: **Commit Staged** when any repository has staged content, otherwise **Commit All** (`WorkspaceCommitModeHelper.ResolveOfferedMode`). The keyed alternatives carry the captured mode, so a watcher refresh that flips the label mid-click cannot commit the wrong set. The button is joined to an AI provider segment and a chevron menu (`[Commit Staged|All][provider][chevron]`). The menu's **On Commit** header holds **Generate commit message** and **Push committed**, both remembered per Workspace across a reload (F5 or Ctrl+F5) until the App restarts. **Generate commit message** starts ticked until you change it; **Push committed** starts unticked. Only providers the Worker can run are listed above that header; when none are available the divider above it is omitted. Ctrl/Cmd+Enter targets only the primary commit element, never the AI segment or the chevron. While the message box is empty the control attaches to the right edge of the box; below about 20rem it stays under the box.
 
 ### Directory rows
 
@@ -1366,8 +1369,10 @@ Changes page      click the provider segment of the Commit control to write ONE 
                   "Generate commit message" (On Commit) starts ticked, so Commit writes the message first when the box is empty; untick it to stop that
 New PR dialog     click the provider selector at the right of the tab bar to write ONE title and ONE Markdown
                   description shared by every PR in the dialog
-both              pick a provider in the menu (pins it for the Workspace on this machine; choosing the
-                  provider that is already pinned removes it until another is pinned; never generates)
+both              pick an available provider in the menu (pins it for the Workspace on this machine; choosing the
+                  provider that is already pinned removes it until another is pinned; never generates);
+                  a CLI that is not installed is omitted; when none are available the Changes menu opens on On Commit
+                  with no divider above it
 ```
 
 Providers are Claude (`claude`), Codex (`codex`) and Cursor Agent (`agent`, then `cursor-agent`; the editor's `cursor` command is not the agent). Each CLI must be installed and signed in for the Worker's user. Credentials never go in `graymoon.json`.

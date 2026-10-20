@@ -15,6 +15,7 @@
 @inject HostPrerequisiteRequirementsProvider HostRequirementsProvider
 @inject HostInfoCache HostInfo
 @inject WorkerInstallService WorkerInstall
+@inject WorkerRestartService WorkerRestart
 @inject WorkerSecretService WorkerSecret
 @inject WorkerPairingService WorkerPairing
 
@@ -141,7 +142,7 @@
                 @if (ActiveTab == "install")
                 {
                     <div class="card-footer card-footer-worker d-flex justify-content-between align-items-center">
-                        <small class="text-muted">@(ShowDesktopWorkerInstall ? "GrayMoon Desktop can install the worker automatically." : "You can download and run the worker executable manually.")</small>
+                        <small class="text-muted">@InstallFooterText</small>
                         <div class="d-flex align-items-center gap-2">
                             @if (ShowUpdateNowButton)
                             {
@@ -151,21 +152,29 @@
                             }
                             @if (ShowDesktopWorkerInstall)
                             {
-                                <button type="button" class="btn btn-danger" disabled="@WorkerInstall.IsInstalling" @onclick="InstallWorkerAsync">
-                                    @(WorkerInstall.IsInstalling ? "Installing..." : "Install")
+                                <button type="button" class="btn @(WorkerInstall.IsInstalling || WorkerRestart.IsRestarting ? "btn-secondary" : "btn-danger")" disabled="@(WorkerInstall.IsInstalling || WorkerRestart.IsRestarting)" @onclick="InstallWorkerAsync">
+                                    @(WorkerInstall.IsInstalling ? "Installing" : WorkerRestart.IsRestarting ? "Restarting" : "Install")
                                 </button>
                             }
                             <button type="button" class="btn btn-outline-secondary" @onclick="DownloadWorker">Download</button>
                         </div>
                     </div>
                 }
-                else if (ShowHostInstallAllFooter)
+                else if (ShowHostDesktopFooter)
                 {
                     <div class="card-footer card-footer-worker d-flex justify-content-between align-items-center">
-                        <small class="text-muted">@(HostTabMissingPrerequisites ? "GrayMoon Desktop can install the missing prerequisites automatically." : "GrayMoon Desktop can install the optional tools automatically.")</small>
-                        <button type="button" class="btn text-nowrap @(HostTabMissingPrerequisites ? "btn-danger" : "btn-outline-secondary")" disabled="@HostPrerequisiteInstall.IsInstalling" @onclick="InstallAllHostPrerequisitesAsync">
-                            @(HostPrerequisiteInstall.IsInstalling ? "Installing..." : "Install Now")
-                        </button>
+                        <small class="text-muted">@HostFooterText</small>
+                        <div class="d-flex align-items-center gap-2">
+                            @if (ShowHostInstallAllFooter)
+                            {
+                                <button type="button" class="btn text-nowrap @(HostTabMissingPrerequisites ? "btn-danger" : "btn-outline-secondary")" disabled="@(HostPrerequisiteInstall.IsInstalling || WorkerRestart.IsRestarting)" @onclick="InstallAllHostPrerequisitesAsync">
+                                    @(HostPrerequisiteInstall.IsInstalling ? "Installing..." : "Install Now")
+                                </button>
+                            }
+                            <button type="button" class="btn btn-outline-secondary text-nowrap" title="Restarts the Worker so it can find an AI agent that was just installed." disabled="@(WorkerRestart.IsRestarting || HostPrerequisiteInstall.IsInstalling)" @onclick="RestartWorkerAsync">
+                                @(WorkerRestart.IsRestarting ? "Restarting" : "Restart")
+                            </button>
+                        </div>
                     </div>
                 }
             </div>
@@ -201,11 +210,22 @@
         SetDefaultTab();
         HostPrerequisiteInstall.Changed += OnHostPrerequisiteInstallChanged;
         WorkerInstall.Changed += OnWorkerInstallChanged;
+        WorkerRestart.Changed += OnWorkerRestartChanged;
     }
 
     private void OnWorkerInstallChanged()
     {
         _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void OnWorkerRestartChanged()
+    {
+        _ = InvokeAsync(async () =>
+        {
+            if (!WorkerRestart.IsRestarting)
+                await LoadHostInfoAsync();
+            StateHasChanged();
+        });
     }
 
     private void OnHostPrerequisiteInstallChanged()
@@ -346,14 +366,33 @@
         builder.AddContent(0, HostPrerequisiteState.DisplayName(id));
     };
 
-    private bool ShowHostInstallAllFooter =>
+    private bool ShowHostDesktopFooter =>
         ActiveTab == "host"
         && _desktopHostDetected
-        && _isDesktopHost
+        && _isDesktopHost;
+
+    private bool ShowHostInstallAllFooter =>
+        ShowHostDesktopFooter
         && HostTabAnyMissing
         && hostInfoLoadError is null;
 
-    private bool InstallTabIsRed => WorkerConnectionTracker.State == WorkerConnectionState.Offline || WorkerConnectionTracker.State == WorkerConnectionState.VersionMismatch;
+    private string HostFooterText =>
+        ShowHostInstallAllFooter
+            ? HostTabMissingPrerequisites
+                ? "GrayMoon Desktop can install the missing prerequisites automatically."
+                : "GrayMoon Desktop can install the optional tools automatically."
+            : "Restart the Worker after an AI agent is installed so GrayMoon can find it.";
+
+    private bool InstallTabIsRed =>
+        !WorkerRestart.IsRestarting
+        && (WorkerConnectionTracker.State == WorkerConnectionState.Offline || WorkerConnectionTracker.State == WorkerConnectionState.VersionMismatch);
+
+    private string InstallFooterText =>
+        WorkerRestart.IsRestarting
+            ? "The Worker is restarting."
+            : ShowDesktopWorkerInstall
+                ? "GrayMoon Desktop can install the worker automatically."
+                : "You can download and run the worker executable manually.";
 
     private string InstallTabLabel => WorkerConnectionTracker.State == WorkerConnectionState.VersionMismatch ? "Update" : "Install";
 
@@ -375,9 +414,17 @@
         && _isDesktopHost
         && WorkerConnectionTracker.State == WorkerConnectionState.Offline;
 
+    private async Task RestartWorkerAsync()
+    {
+        if (WorkerRestart.IsRestarting || HostPrerequisiteInstall.IsInstalling || !_isDesktopHost)
+            return;
+
+        await WorkerRestart.StartAsync();
+    }
+
     private async Task InstallWorkerAsync()
     {
-        if (WorkerInstall.IsInstalling || !_isDesktopHost)
+        if (WorkerInstall.IsInstalling || WorkerRestart.IsRestarting || !_isDesktopHost)
             return;
 
         await WorkerInstall.StartAsync();
@@ -480,5 +527,6 @@
     {
         HostPrerequisiteInstall.Changed -= OnHostPrerequisiteInstallChanged;
         WorkerInstall.Changed -= OnWorkerInstallChanged;
+        WorkerRestart.Changed -= OnWorkerRestartChanged;
     }
 }

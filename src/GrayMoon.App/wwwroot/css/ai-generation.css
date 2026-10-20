@@ -245,7 +245,7 @@
 }
 
 .gm-ai-menu__check {
-    color: var(--accent-blue);
+    color: var(--text-secondary);
     flex-shrink: 0;
 }
 

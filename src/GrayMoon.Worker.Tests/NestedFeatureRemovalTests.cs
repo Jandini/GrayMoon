@@ -66,10 +66,9 @@ public sealed class NestedFeatureRemovalTests : IDisposable
 
         var sleepers = new List<Task>
         {
-            commandLine.RunAsync("ping", ["-n", "60", "127.0.0.1"], featureRoot, null, CancellationToken.None, false, false, null),
+            HoldDirectory(commandLine, featureRoot),
         };
-        sleepers.AddRange(sources.Select(s =>
-            commandLine.RunAsync("ping", ["-n", "60", "127.0.0.1"], s.Worktree, null, CancellationToken.None, false, false, null)));
+        sleepers.AddRange(sources.Select(s => HoldDirectory(commandLine, s.Worktree)));
         await Task.Delay(500);
 
         // The App removes every Source in parallel, passing the Feature root and storage root for residue cleanup.
@@ -95,6 +94,15 @@ public sealed class NestedFeatureRemovalTests : IDisposable
         foreach (var lease in leases)
             lease.Dispose();
     }
+
+    /// <summary>
+    /// A process whose working directory is <paramref name="directory"/>, long enough that removal has to stop it.
+    /// Windows <c>ping -n</c> is a count; on Linux that flag is numeric-only and the process exits at once.
+    /// </summary>
+    private static Task HoldDirectory(ICommandLineService commandLine, string directory) =>
+        OperatingSystem.IsWindows()
+            ? commandLine.RunAsync("ping", ["-n", "60", "127.0.0.1"], directory, null, CancellationToken.None, false, false, null)
+            : commandLine.RunAsync("sleep", ["60"], directory, null, CancellationToken.None, false, false, null);
 
     private static async Task InitRepo(string path)
     {
