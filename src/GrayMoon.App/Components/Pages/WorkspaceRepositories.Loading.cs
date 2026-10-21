@@ -276,13 +276,14 @@ public sealed partial class WorkspaceRepositories
     }
     private async Task AttachVirtualScrollAsync()
     {
-        if (_disposed || _virtualScrollAttached || _slots.Count == 0)
+        // A default ElementReference (tbody not rendered yet, e.g. under the loading overlay) reaches JS as a plain object.
+        if (_disposed || _virtualScrollAttached || _slots.Count == 0 || _tbodyRef.Id is null)
         {
             return;
         }
         try
         {
-            _virtualScrollDotNetRef ??= DotNetObjectReference.Create(this);
+            _virtualScrollDotNetRef ??=DotNetObjectReference.Create(this);
             await JSRuntime.InvokeVoidAsync(
                 "grayMoonVirtualScroll.attach",
                 _tbodyRef,
@@ -294,6 +295,10 @@ public sealed partial class WorkspaceRepositories
         }
         catch (JSDisconnectedException)
         {
+        }
+        catch (JSException)
+        {
+            // Stale element reference after a re-render; the next render retries. Must not escape OnAfterRenderAsync and kill the circuit.
         }
         catch (InvalidOperationException)
         {

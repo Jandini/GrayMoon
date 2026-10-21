@@ -50,7 +50,7 @@ window.grayMoonVirtualScroll = (function () {
 
     return {
         attach: function (tbody, dotNetRef, totalHeight, initialScrollTop, storageKey) {
-            if (!tbody) {
+            if (!tbody || typeof tbody.addEventListener !== 'function') {
                 return;
             }
             grayMoonVirtualScroll.detach(tbody);
