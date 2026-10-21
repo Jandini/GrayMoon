@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
+using GrayMoon.Abstractions.Logging;
 using GrayMoon.Application.Features;
+using Serilog.Context;
 
 namespace GrayMoon.App.Services.Jobs;
 
@@ -181,6 +183,9 @@ public sealed class WorkspaceOperationRunner(ILogger<WorkspaceOperationRunner> l
         Action onFinally)
         => Task.Run(async () =>
         {
+            var operationId = GrayMoonOperationContext.NewId();
+            using var operationScope = GrayMoonOperationContext.Begin(operationId);
+            using var operationProp = LogContext.PushProperty(GrayMoonLogProperties.OperationId, operationId);
             using var _ = TerminalSinkContext.Use(created.Terminal);
             try
             {

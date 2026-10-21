@@ -71,7 +71,7 @@ try
             path: Path.Combine(logDirectory, "graymoon-app-.log"),
             rollingInterval: RollingInterval.Day,
             retainedFileCountLimit: 14,
-            outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj}{NewLine}{Exception}"));
+            outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj} req={GrayMoonRequestId} op={GrayMoonOperationId}{NewLine}{Exception}"));
 
     builder.Services.Configure<WorkspaceOptions>(builder.Configuration.GetSection("Workspace"));
     builder.Services.Configure<GitChangesOptions>(builder.Configuration.GetSection("GitChanges"));

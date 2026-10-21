@@ -57,6 +57,8 @@ public sealed class DependencyUpdateOrchestrator(
         string? runId = null,
         Func<DependencyLevelCompletion, Task>? onLevelCompleted = null)
     {
+        runId = GrayMoon.Abstractions.Logging.GrayMoonOperationContext.EnsureId(runId);
+
         // Non-null empty set means the caller determined no repos need work.
         if (repoIdsToUpdate is { Count: 0 })
         {

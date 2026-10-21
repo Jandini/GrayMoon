@@ -1,8 +1,11 @@
+using System.Diagnostics;
 using System.Text.Json;
+using GrayMoon.Abstractions.Logging;
 using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Hubs;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
+using Serilog.Context;
 
 namespace GrayMoon.App.Services.Worker;
 
@@ -71,6 +74,7 @@ public sealed class WorkerBridge(
             connectionTracker.BeginSelfUpdate();
 
         var requestId = Guid.NewGuid().ToString("N");
+        var operationId = GrayMoonOperationContext.Current;
         var argsJson = args != null ? JsonSerializer.SerializeToElement(args) : (JsonElement?)null;
 
         var sink = TerminalSinkContext.Current;
@@ -79,12 +83,32 @@ public sealed class WorkerBridge(
         using var timeoutCts = new CancellationTokenSource(_commandTimeout);
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
         var task = WorkerResponseDelivery.WaitAsync(requestId, linkedCts.Token, onLine);
+        var sw = Stopwatch.StartNew();
 
+        using var requestProp = LogContext.PushProperty(GrayMoonLogProperties.RequestId, requestId);
+        using var operationProp = operationId is null
+            ? null
+            : LogContext.PushProperty(GrayMoonLogProperties.OperationId, operationId);
         try
         {
-            await hubContext.Clients.Client(connectionId).SendAsync(WorkerHubMethods.RequestCommand, requestId, command, argsJson, cancellationToken);
+            await hubContext.Clients.Client(connectionId).SendAsync(
+                WorkerHubMethods.RequestCommand, requestId, command, argsJson, operationId, cancellationToken);
             logger.LogDebug("Sent RequestCommand: {RequestId}, {Command}", requestId, command);
             var response = await task;
+            sw.Stop();
+            if (!response.Success)
+            {
+                logger.LogWarning(
+                    "Worker command {Command} ({RequestId}) failed: {Error}",
+                    command, requestId, response.Error);
+            }
+            else
+            {
+                logger.LogDebug(
+                    "Worker command {Command} ({RequestId}) completed in {ElapsedMs}ms",
+                    command, requestId, sw.ElapsedMilliseconds);
+            }
+
             if (isSelfUpdate && !response.Success)
                 EndSelfUpdateIfStillConnected();
             return response;
@@ -108,6 +132,7 @@ public sealed class WorkerBridge(
             // WaitAsync cancel registration also notifies the worker; send here too in case
             // RequestCommand was delivered before SendAsync observed cancellation.
             cancelSender.NotifyCancel(requestId);
+            logger.LogDebug("Worker command {Command} ({RequestId}) cancelled", command, requestId);
             if (isSelfUpdate)
                 EndSelfUpdateIfStillConnected();
             throw;
@@ -115,7 +140,7 @@ public sealed class WorkerBridge(
         catch (Exception ex)
         {
             WorkerResponseDelivery.Fail(requestId, ex);
-            logger.LogError(ex, "Failed to send command {Command} to worker", command);
+            logger.LogError(ex, "Failed to send command {Command} ({RequestId}) to worker", command, requestId);
             if (isSelfUpdate)
                 EndSelfUpdateIfStillConnected();
             return new WorkerCommandResponse(false, null, ex.Message);

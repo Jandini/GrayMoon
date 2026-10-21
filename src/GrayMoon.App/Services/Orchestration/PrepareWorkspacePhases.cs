@@ -103,5 +103,5 @@ public sealed class PrepareWorkspacePhases(
             commitMessage,
             includeDepsInCommitMessage: true,
             restorePackages: true,
-            runId: Guid.NewGuid().ToString("N")[..8]);
+            runId: GrayMoon.Abstractions.Logging.GrayMoonOperationContext.EnsureId());
 }

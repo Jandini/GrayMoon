@@ -168,6 +168,9 @@ public abstract class JobBackgroundService(
                 }
 
                 using (LogContext.PushProperty(WorkerLogProperties.RequestId, job.RequestId))
+                using (string.IsNullOrEmpty(job.OperationId)
+                    ? null
+                    : LogContext.PushProperty(WorkerLogProperties.OperationId, job.OperationId))
                 using (WorkerOverlayLogBridge.Register(job.RequestId, ForwardStream))
                 using (new CommandLineStreamScope(ForwardStream))
                 {

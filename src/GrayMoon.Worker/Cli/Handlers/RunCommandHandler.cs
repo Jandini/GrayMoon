@@ -83,7 +83,8 @@ internal static class RunCommandHandler
         // tier GitProcessRunner resolves for local/fast git operations.
         builder.Services.Configure<ProcessExecutionOptions>(builder.Configuration.GetSection($"{WorkerOptions.SectionName}:GitProcess"));
 
-        var logDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "GrayMoon", "logs");
+        // Same casing as the App (%ProgramData%\GrayMoon\Logs) so support greps one folder.
+        var logDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "GrayMoon", "Logs");
         Directory.CreateDirectory(logDirectory);
         var logFilePath = Path.Combine(logDirectory, "graymoon-worker-.log");
 
@@ -95,12 +96,12 @@ internal static class RunCommandHandler
             .WriteTo.Sink(new OverlayStreamSerilogSink(), Serilog.Events.LogEventLevel.Error)
             .WriteTo.Console(
                 theme: AnsiConsoleTheme.Code,
-                outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
+                outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj} req={GrayMoonRequestId} op={GrayMoonOperationId}{NewLine}{Exception}")
             .WriteTo.File(
                 path: logFilePath,
                 rollingInterval: RollingInterval.Day,
                 retainedFileCountLimit: 30,
-                outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} {Level:u3}] [{MachineName}] {Message:lj}{NewLine}{Exception}")
+                outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} {Level:u3}] [{MachineName}] {Message:lj} req={GrayMoonRequestId} op={GrayMoonOperationId}{NewLine}{Exception}")
             .CreateLogger(), dispose: true);
 
         builder.Services.AddSingleton<IHubConnectionProvider, HubConnectionProvider>();

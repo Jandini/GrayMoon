@@ -113,6 +113,7 @@ public sealed partial class WorkspacePushService(
         string? runId = null,
         bool restorePackages = true)
     {
+        runId = GrayMoon.Abstractions.Logging.GrayMoonOperationContext.EnsureId(runId);
         _logger.LogInformation(
             "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: RunPushAsync starting. Scope={Scope}",
             runId, workspaceId, repoIdsToPush == null ? "all repos" : $"{repoIdsToPush.Count} repo(s): [{string.Join(",", repoIdsToPush)}]");
@@ -653,6 +654,7 @@ public sealed partial class WorkspacePushService(
         string? runId = null,
         CancellationToken cancellationToken = default)
     {
+        runId = GrayMoon.Abstractions.Logging.GrayMoonOperationContext.EnsureId(runId);
         if (!_workerBridge.IsWorkerConnected)
             throw new InvalidOperationException("Worker not connected. Start the GrayMoon Worker to push.");
 

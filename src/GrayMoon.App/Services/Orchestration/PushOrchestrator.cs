@@ -1,3 +1,4 @@
+using GrayMoon.Abstractions.Logging;
 using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Services.Orchestration;
@@ -17,6 +18,7 @@ public sealed class PushOrchestrator(
         Action? onAppSideComplete = null,
         CancellationToken cancellationToken = default)
     {
+        run = run with { RunId = GrayMoonOperationContext.EnsureId(run.RunId) };
         logger.LogInformation(
             "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: starting push. Strategy={Strategy}, Mode={Mode}, RepoCount={RepoCount}, RequiredPackages={RequiredPackages}",
             run.RunId, run.WorkspaceId, strategy.GetType().Name, run.SynchronizedPush ? "synchronized" : "parallel", run.RepositoryIds.Count, run.RequiredPackageIds.Count);
