@@ -314,6 +314,7 @@ public sealed class WorkspacePushService(
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
             var linkedToken = linkedCts.Token;
             var deadline = DateTime.UtcNow + totalTimeout;
+            var waitWindow = totalTimeout;
             var foundByIndex = new bool[totalDeps];
             var foundLock = new object();
             var ciRunWatch = ciProvider.CreatePushRunWatch(_overlayCommandTerminalService);
@@ -330,8 +331,8 @@ public sealed class WorkspacePushService(
 
             void AbortPackageWaitTimeout()
             {
-                _logger.LogWarning("[PushOrchestrator {RunId}] Push wait: timed out after {TotalMinutes:F1} min. Found {Found} of {Total}.", runId, totalTimeout.TotalMinutes, getFoundCount(), totalDeps);
-                PackageWaitTimeout.Report(level, onLevelError, getFoundCount(), totalDeps, totalTimeout);
+                _logger.LogWarning("[PushOrchestrator {RunId}] Push wait: timed out after {TotalMinutes:F1} min. Found {Found} of {Total}.", runId, waitWindow.TotalMinutes, getFoundCount(), totalDeps);
+                PackageWaitTimeout.Report(level, onLevelError, getFoundCount(), totalDeps, waitWindow);
             }
 
             try
@@ -399,7 +400,11 @@ public sealed class WorkspacePushService(
                         {
                             var stillWaiting = totalDeps - nowFound;
                             if (stillWaiting > 0)
-                                deadline = DateTime.UtcNow + TimeSpan.FromMinutes(stillWaiting * minutesPerDep);
+                            {
+                                waitWindow = TimeSpan.FromMinutes(stillWaiting * minutesPerDep);
+                                deadline = DateTime.UtcNow + waitWindow;
+                                timeoutCts.CancelAfter(waitWindow);
+                            }
                         }
                         if (nowFound >= totalDeps)
                             _logger.LogInformation("[PushOrchestrator {RunId}] Push wait: all {Total} package(s) found for level {Level}, proceeding.", runId, totalDeps, level);
