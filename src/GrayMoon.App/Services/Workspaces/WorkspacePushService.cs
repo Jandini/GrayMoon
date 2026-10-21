@@ -22,7 +22,7 @@ namespace GrayMoon.App.Services.Workspaces;
 /// This service exists to isolate push-specific logic from the much larger <see cref="WorkspaceGitService"/>.
 /// Stateless (no UI state); caller owns CTS / progress / toast.
 /// </summary>
-public sealed class WorkspacePushService(
+public sealed partial class WorkspacePushService(
     IWorkerBridge workerBridge,
     WorkspaceService workspaceService,
     WorkspaceRepository workspaceRepository,
@@ -212,18 +212,26 @@ public sealed class WorkspacePushService(
             onProgressMessage,
             onRepoError,
             onLevelError,
-            onAppSideComplete);
+            onAppSideComplete)
+        {
+            FeatureLabel = await ResolveFeatureLabelAsync(workspaceId, contextId, cancellationToken)
+        };
+        run.Diagnostics.RememberPlan(payload);
         _logger.LogInformation(
             "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: {LevelCount} level(s) to push: {Levels}",
             runId, workspaceId, levelsAsc.Count,
             string.Join(", ", levelsAsc.Select(l => $"L{l}={payload.Count(p => (p.DependencyLevel ?? 0) == l)} repo(s)")));
+        await LogPushInvocationAsync(run, payload, cancellationToken);
         foreach (var level in levelsAsc)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var reposAtLevel = payload.Where(p => (p.DependencyLevel ?? 0) == level).ToList();
             if (reposAtLevel.Count == 0) continue;
-            if (!await PushLevelAsync(run, level, reposAtLevel, level == lastLevel, cancellationToken))
+            if (!await PushLevelAsync(run, level, reposAtLevel, level == lastLevel, levelsAsc.Count, skippedCount: 0, cancellationToken))
+            {
+                LogOperationSummary(run, pushSucceeded: false);
                 return;
+            }
         }
 
         await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, contextId, payload, cancellationToken);
@@ -231,6 +239,7 @@ public sealed class WorkspacePushService(
         _logger.LogInformation(
             "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: RunPushAsync finished. TotalPushed={TotalPushed}",
             runId, workspaceId, run.PushedRepos.Count);
+        LogOperationSummary(run, pushSucceeded: true);
     }
 
     /// <summary>
@@ -257,6 +266,12 @@ public sealed class WorkspacePushService(
     {
         /// <summary>Repositories pushed by the levels already finished; the CI watch reads it while the next level waits.</summary>
         public List<PushRepoPayload> PushedRepos { get; } = [];
+
+        /// <summary>Feature name when the context is a Feature; otherwise Workspace. Diagnostic only.</summary>
+        public string FeatureLabel { get; init; } = "Unknown";
+
+        /// <summary>Level outcomes already produced by this run, so the closing summary can name them.</summary>
+        public PushRunDiagnostics Diagnostics { get; } = new();
     }
 
     /// <summary>
@@ -269,8 +284,11 @@ public sealed class WorkspacePushService(
         int level,
         IReadOnlyList<PushRepoPayload> reposAtLevel,
         bool isLastLevel,
+        int totalLevels,
+        int skippedCount,
         CancellationToken cancellationToken)
     {
+        var levelClock = System.Diagnostics.Stopwatch.StartNew();
         var workspace = run.Workspace;
         var workspaceId = workspace.WorkspaceId;
         var contextId = run.ContextId;
@@ -287,6 +305,34 @@ public sealed class WorkspacePushService(
         var pushedRepos = run.PushedRepos;
         var onProgressMessage = run.OnProgressMessage;
         var levelProgress = onProgressMessage == null ? (Action<string>?)null : msg => onProgressMessage($"{msg}\nLevel {level}");
+        var totalDeps = 0;
+
+        void LogLevelOutcome(bool succeeded, int pushed, int failed, int blocked, string? category)
+        {
+            if (succeeded)
+                run.Diagnostics.CompletedLevels.Add(level);
+            else if (run.Diagnostics.FailedLevel == null)
+            {
+                run.Diagnostics.FailedLevel = level;
+                run.Diagnostics.FailureCategory = category;
+            }
+
+            PackageWaitDiagnostics.LogLevelOutcome(
+                _logger,
+                runId,
+                workspaceId,
+                level,
+                totalLevels,
+                reposAtLevel.Count,
+                pushed,
+                failed,
+                skippedCount,
+                blocked,
+                totalDeps,
+                levelClock.Elapsed.TotalSeconds,
+                succeeded,
+                category);
+        }
 
         _logger.LogInformation(
             "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: starting. RepoIds=[{RepoIds}]",
@@ -297,16 +343,10 @@ public sealed class WorkspacePushService(
             .DistinctBy(r => (r.PackageId, r.Version, r.MatchedConnectorId))
             .Where(r => r.MatchedConnectorId.HasValue)
             .ToList();
-        var totalDeps = requiredForLevel.Count;
+        totalDeps = requiredForLevel.Count;
 
         if (totalDeps > 0)
         {
-            _logger.LogInformation("[PushOrchestrator {RunId}] Push wait: level {Level}, waiting for {Count} package(s): {Packages}",
-                runId,
-                level,
-                totalDeps,
-                string.Join(", ", requiredForLevel.Select(r => r.PackageId + "@" + r.Version + " (connector " + r.MatchedConnectorId + ")")));
-
             var minutesPerDep = Math.Max(0.1, workspaceOptions.Value.PushWaitDependencyTimeoutMinutesPerDependency);
             var timeoutMinutes = totalDeps * minutesPerDep;
             var totalTimeout = TimeSpan.FromMinutes(timeoutMinutes);
@@ -316,6 +356,9 @@ public sealed class WorkspacePushService(
             var deadline = DateTime.UtcNow + totalTimeout;
             var waitWindow = totalTimeout;
             var foundByIndex = new bool[totalDeps];
+            var observations = new PackageWaitObservation[totalDeps];
+            for (var observationIndex = 0; observationIndex < totalDeps; observationIndex++)
+                observations[observationIndex] = new PackageWaitObservation();
             var foundLock = new object();
             var ciRunWatch = ciProvider.CreatePushRunWatch(_overlayCommandTerminalService);
             int getFoundCount()
@@ -323,16 +366,47 @@ public sealed class WorkspacePushService(
                 lock (foundLock) { return foundByIndex.Count(x => x); }
             }
             var lastPollUtc = DateTime.MinValue;
+            var waitStartedUtc = DateTime.UtcNow;
 
             // Prefetch all connectors for this level once to avoid concurrent DbContext reads in the polling loop
             var connectorByIdForLevel = new Dictionary<int, Connector?>();
             foreach (var cid in requiredForLevel.Select(r => r.MatchedConnectorId!.Value).Distinct())
                 connectorByIdForLevel[cid] = await _connectorRepository!.GetByIdAsync(cid);
 
-            void AbortPackageWaitTimeout()
+            // One read of producer/consumer metadata. The polling loop does not touch the graph again.
+            var producers = await LoadPackageProducersAsync(run, cancellationToken);
+            LogPackageWaitStarted(run, level, totalLevels, reposAtLevel.Count, totalDeps, totalTimeout, connectorByIdForLevel);
+            LogPackageExpectations(runId, level, requiredForLevel, producers);
+
+            async Task AbortPackageWaitTimeout()
             {
-                _logger.LogWarning("[PushOrchestrator {RunId}] Push wait: timed out after {TotalMinutes:F1} min. Found {Found} of {Total}.", runId, waitWindow.TotalMinutes, getFoundCount(), totalDeps);
-                PackageWaitTimeout.Report(level, onLevelError, getFoundCount(), totalDeps, waitWindow);
+                var found = getFoundCount();
+                _logger.LogWarning("[PushOrchestrator {RunId}] Push wait: timed out after {TotalMinutes:F1} min. Found {Found} of {Total}.", runId, waitWindow.TotalMinutes, found, totalDeps);
+                PackageWaitTimeout.Report(level, onLevelError, found, totalDeps, waitWindow);
+                run.Diagnostics.FailedLevel = level;
+                run.Diagnostics.FailureCategory = PackageWaitDiagnostics.FailurePackageWaitTimeout;
+                run.Diagnostics.BlockedRepositories.AddRange(reposAtLevel.Select(repo => repo.RepoName));
+                try
+                {
+                    await LogPackageWaitTimeoutAsync(
+                        run,
+                        level,
+                        totalLevels,
+                        reposAtLevel,
+                        requiredForLevel,
+                        observations,
+                        producers,
+                        connectorByIdForLevel,
+                        foundByIndex,
+                        waitStartedUtc,
+                        cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[PushOrchestrator {RunId}] Package wait diagnostics failed. WorkspaceId={WorkspaceId} Level={Level}", runId, workspaceId, level);
+                }
+
+                LogLevelOutcome(false, pushed: 0, failed: 0, blocked: reposAtLevel.Count, PackageWaitDiagnostics.FailurePackageWaitTimeout);
             }
 
             try
@@ -341,7 +415,7 @@ public sealed class WorkspacePushService(
                 {
                 if (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
                 {
-                    AbortPackageWaitTimeout();
+                    await AbortPackageWaitTimeout();
                     return false;
                 }
 
@@ -349,7 +423,7 @@ public sealed class WorkspacePushService(
                 var remaining = deadline - DateTime.UtcNow;
                 if (remaining <= TimeSpan.Zero)
                 {
-                    AbortPackageWaitTimeout();
+                    await AbortPackageWaitTimeout();
                     return false;
                 }
                 var found = getFoundCount();
@@ -363,7 +437,7 @@ public sealed class WorkspacePushService(
 
                 await ciRunWatch.TickAsync(pushedRepos, links, linkedToken);
 
-                if ((DateTime.UtcNow - lastPollUtc).TotalSeconds >= 2)
+                if ((DateTime.UtcNow - lastPollUtc).TotalSeconds >= PackageWaitDiagnostics.PollIntervalSeconds)
                 {
                     lastPollUtc = DateTime.UtcNow;
                     int[] toCheck;
@@ -382,13 +456,39 @@ public sealed class WorkspacePushService(
                                 connectorByIdForLevel.TryGetValue(req.MatchedConnectorId!.Value, out var connector);
                                 if (connector == null)
                                 {
-                                    _logger.LogWarning("[PushOrchestrator {RunId}] Push wait: package {PackageId} {Version} has no connector (MatchedConnectorId={ConnectorId}).", runId, req.PackageId, req.Version, req.MatchedConnectorId);
+                                    if (observations[i].Observe(PackageVersionLookupKind.Inconclusive, null, false, DateTime.UtcNow))
+                                    {
+                                        PackageWaitDiagnostics.LogLookupTransition(
+                                            _logger, runId, req.PackageId, req.Version, req.MatchedConnectorId, null, PackageVersionLookupKind.Inconclusive, null);
+                                    }
                                     return;
                                 }
-                                var exists = await _nuGetService.PackageVersionExistsAsync(connector, req.PackageId, req.Version, linkedToken);
-                                _logger.LogInformation("[PushOrchestrator {RunId}] Push wait: checking {PackageId} {Version} in registry {ConnectorName} (Id={ConnectorId}) -> {Result}",
-                                    runId, req.PackageId, req.Version, connector.ConnectorName, connector.ConnectorId, exists ? "found" : "not found");
-                                if (exists)
+
+                                PackageVersionLookupResult lookup;
+                                try
+                                {
+                                    lookup = await _nuGetService!.LookupPackageVersionAsync(connector, req.PackageId, req.Version, linkedToken);
+                                }
+                                catch (Exception ex) when (ex is not OperationCanceledException)
+                                {
+                                    var kind = ex is TimeoutException
+                                        ? PackageVersionLookupKind.RequestTimeout
+                                        : PackageVersionLookupKind.RegistryFailure;
+                                    if (observations[i].Observe(kind, null, false, DateTime.UtcNow))
+                                    {
+                                        PackageWaitDiagnostics.LogLookupTransition(
+                                            _logger, runId, req.PackageId, req.Version, connector.ConnectorId, connector.ConnectorName, kind, null);
+                                    }
+                                    throw;
+                                }
+
+                                var successfulQuery = lookup.StatusCode is >= 200 and <= 299;
+                                if (observations[i].Observe(lookup.Kind, lookup.StatusCode, successfulQuery, DateTime.UtcNow))
+                                {
+                                    PackageWaitDiagnostics.LogLookupTransition(
+                                        _logger, runId, req.PackageId, req.Version, connector.ConnectorId, connector.ConnectorName, lookup.Kind, lookup.StatusCode);
+                                }
+                                if (lookup.Exists)
                                 {
                                     lock (foundLock)
                                         foundByIndex[i] = true;
@@ -398,6 +498,9 @@ public sealed class WorkspacePushService(
                         var nowFound = getFoundCount();
                         if (nowFound > prevFound)
                         {
+                            _logger.LogInformation(
+                                "[PushOrchestrator {RunId}] Package readiness changed. WorkspaceId={WorkspaceId} Level={Level} Found={Found} Missing={Missing} RequiredPackages={RequiredPackages}",
+                                runId, workspaceId, level, nowFound, totalDeps - nowFound, totalDeps);
                             var stillWaiting = totalDeps - nowFound;
                             if (stillWaiting > 0)
                             {
@@ -418,13 +521,14 @@ public sealed class WorkspacePushService(
             }
             catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
             {
-                AbortPackageWaitTimeout();
+                await AbortPackageWaitTimeout();
                 return false;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _logger.LogError(ex, "[PushOrchestrator {RunId}] Push wait: level {Level} failed.", runId, level);
                 onLevelError?.Invoke(level, ex.Message);
+                LogLevelOutcome(false, pushed: 0, failed: 0, blocked: reposAtLevel.Count, PackageWaitDiagnostics.FailurePackageWaitFailed);
                 return false;
             }
         }
@@ -448,6 +552,7 @@ public sealed class WorkspacePushService(
         {
             _logger.LogError(ex, "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: push failed.", runId, workspaceId, level);
             onLevelError?.Invoke(level, ex.Message);
+            LogLevelOutcome(false, pushed: 0, failed: reposAtLevel.Count, blocked: 0, PackageWaitDiagnostics.FailureRepositoryPushFailed);
             return false;
         }
         await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, contextId, reposAtLevel, cancellationToken);
@@ -456,6 +561,7 @@ public sealed class WorkspacePushService(
             _logger.LogWarning(
                 "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: aborting synchronized push after {FailedCount} repository failure(s).",
                 runId, workspaceId, level, levelFailures.Count);
+            LogLevelOutcome(false, reposAtLevel.Count - levelFailures.Count, levelFailures.Count, blocked: 0, PackageWaitDiagnostics.FailureRepositoryPushFailed);
             return false;
         }
 
@@ -468,21 +574,22 @@ public sealed class WorkspacePushService(
                     ? await RestoreUpdatedReposAtLevelAsync(workspaceId, workspace.Name, workspaceRoot, workspaceRepositoryName, reposAtLevel, syncedRepoIds ?? new HashSet<int>(), onRepoError, cancellationToken)
                     : await TryRestoreReposAtLevelAsync(workspaceId, workspace.Name, workspaceRoot, workspaceRepositoryName, reposAtLevel, onRepoError, cancellationToken);
                 if (restoreFailed)
+                {
+                    LogLevelOutcome(false, reposAtLevel.Count, failed: 0, blocked: 0, PackageWaitDiagnostics.FailureRestoreFailed);
                     return false;
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _logger.LogError(ex, "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: restore failed.", runId, workspaceId, level);
                 onLevelError?.Invoke(level, ex.Message);
+                LogLevelOutcome(false, reposAtLevel.Count, failed: 0, blocked: 0, PackageWaitDiagnostics.FailureRestoreFailed);
                 return false;
             }
         }
 
         pushedRepos.AddRange(reposAtLevel);
-
-        _logger.LogInformation(
-            "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: completed. Pushed {PushedCount} repo(s).",
-            runId, workspaceId, level, reposAtLevel.Count);
+        LogLevelOutcome(true, reposAtLevel.Count, failed: 0, blocked: 0, category: null);
 
         return true;
     }
@@ -592,7 +699,10 @@ public sealed class WorkspacePushService(
             onProgressMessage,
             onRepoError,
             onLevelError,
-            OnAppSideComplete: null);
+            OnAppSideComplete: null)
+        {
+            FeatureLabel = await ResolveFeatureLabelAsync(workspaceId, contextId, cancellationToken)
+        };
 
         _logger.LogInformation("[PushOrchestrator {RunId}] Workspace {WorkspaceId}: push lane starting.", runId, workspaceId);
         await foreach (var done in completedLevels.ReadAllAsync(cancellationToken))
@@ -606,7 +716,10 @@ public sealed class WorkspacePushService(
             await using var levelScope = _scopeFactory.CreateAsyncScope();
             var levelPushService = levelScope.ServiceProvider.GetRequiredService<WorkspacePushService>();
             if (!await levelPushService.PushLaneLevelAsync(run, done, tagPinnedRepoIds, cancellationToken))
+            {
+                LogOperationSummary(run, pushSucceeded: false);
                 return run.PushedRepos.Count;
+            }
         }
 
         if (run.PushedRepos.Count > 0)
@@ -619,6 +732,7 @@ public sealed class WorkspacePushService(
         _logger.LogInformation(
             "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: push lane finished. TotalPushed={TotalPushed}",
             runId, workspaceId, run.PushedRepos.Count);
+        LogOperationSummary(run, pushSucceeded: true);
         return run.PushedRepos.Count;
     }
 
@@ -638,15 +752,30 @@ public sealed class WorkspacePushService(
         var runId = run.RunId;
 
         var payload = await _workspaceDependencyService.GetPushPlanPayloadAsync(workspaceId, contextId.Value, cancellationToken);
+        run.Diagnostics.RememberPlan(payload);
         var needingPush = await _workspaceRepository.GetRepositoryIdsNeedingPushAsync(workspaceId, contextId.Value, done.RepoIds, cancellationToken);
         var reposAtLevel = payload
             .Where(p => done.RepoIds.Contains(p.RepoId)
                 && !tagPinnedRepoIds.Contains(p.RepoId)
                 && (needingPush.Contains(p.RepoId) || done.CommittedRepoIds.Contains(p.RepoId)))
             .ToList();
+        var notSelected = done.RepoIds.Where(id => reposAtLevel.All(repo => repo.RepoId != id)).OrderBy(id => id).ToList();
+        var consideredComplete = done.RepoIds.Where(id => !needingPush.Contains(id)).OrderBy(id => id).ToList();
         _logger.LogInformation(
             "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: push lane received Level {Level}: {PushCount} of {RepoCount} repo(s) to push: [{RepoIds}]",
             runId, workspaceId, done.Level, reposAtLevel.Count, done.RepoIds.Count, string.Join(",", reposAtLevel.Select(r => r.RepoId)));
+        _logger.LogInformation(
+            "[PushOrchestrator {RunId}] Push invocation state. WorkspaceId={WorkspaceId} Feature={Feature} Level={Level} Algorithm={Algorithm} NeedingPush=[{NeedingPush}] CommittedThisUpdate=[{CommittedThisUpdate}] Selected=[{Selected}] NotSelected=[{NotSelected}] ConsideredCompleteByNeedingPushCheck=[{ConsideredComplete}]",
+            runId,
+            workspaceId,
+            run.FeatureLabel,
+            done.Level,
+            "PushNeedingOrCommittedThisUpdate",
+            FormatIds(needingPush.OrderBy(id => id)),
+            FormatIds(done.CommittedRepoIds.OrderBy(id => id)),
+            FormatIds(reposAtLevel.Select(repo => repo.RepoId).OrderBy(id => id)),
+            FormatIds(notSelected),
+            FormatIds(consideredComplete));
         if (reposAtLevel.Count == 0)
             return true;
 
@@ -663,7 +792,8 @@ public sealed class WorkspacePushService(
         }
 
         cancellationToken.ThrowIfCancellationRequested();
-        return await PushLevelAsync(run, done.Level, reposAtLevel, isLastLevel: false, cancellationToken);
+        var totalLevels = run.Diagnostics.PlannedLevels.Count > 0 ? run.Diagnostics.PlannedLevels.Count : 1;
+        return await PushLevelAsync(run, done.Level, reposAtLevel, isLastLevel: false, totalLevels, done.RepoIds.Count - reposAtLevel.Count, cancellationToken);
     }
 
     /// <summary>Pushed a single repository's current branch with upstream (-u). Used when the user clicks the "not-upstreamed" badge.</summary>

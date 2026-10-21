@@ -131,7 +131,7 @@ public sealed partial class GitHubService
     }
 
     /// <summary>Returns the most recent workflow runs for a specific branch (up to <paramref name="perPage"/> results).</summary>
-    public async Task<List<GitHubWorkflowRunDto>> GetWorkflowRunsForBranchAsync(Connector connector, string owner, string repo, string branch, int perPage = 20)
+    public async Task<List<GitHubWorkflowRunDto>> GetWorkflowRunsForBranchAsync(Connector connector, string owner, string repo, string branch, int perPage = 20, CancellationToken cancellationToken = default)
     {
         EnsureConnectorConfigured(connector);
 
@@ -146,7 +146,7 @@ public sealed partial class GitHubService
         var response = await GetETaggedAsync<GitHubWorkflowRunsResponse>(
             connector,
             $"repos/{owner}/{repo}/actions/runs?branch={encodedBranch}&per_page={perPage}",
-            default);
+            cancellationToken);
 
         return response?.WorkflowRuns ?? new List<GitHubWorkflowRunDto>();
     }
