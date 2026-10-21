@@ -1,6 +1,5 @@
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Services.Workspaces;
@@ -274,72 +273,14 @@ public sealed class RepositoryBranchWriter(AppDbContext dbContext, ILogger<Repos
     /// <summary>
     /// Saves pending branch changes. Returns how many added branch rows were already stored by another writer.
     /// A workspace checkout runs every repository at once, and each checkout's hook sync inserts the same local
-    /// branch this writer just decided to add. The unique index rejects the later insert. That row is already
-    /// stored, so it is dropped and the rest of this save is written. The checkouts stay parallel.
+    /// branch this writer just decided to add. The unique index rejects the later insert, and
+    /// <see cref="AppDbContext"/> drops that already-stored row and writes the rest, so the checkouts stay parallel.
     /// </summary>
     private async Task<int> SaveBranchChangesAsync(CancellationToken cancellationToken)
     {
-        try
-        {
-            await dbContext.SaveChangesAsync(cancellationToken);
-            return 0;
-        }
-        catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
-        {
-            var alreadyStored = await DetachBranchesAlreadyStoredAsync(cancellationToken);
-            if (alreadyStored == 0)
-                throw;
-
+        var alreadyStored = await dbContext.SaveChangesCountingStoredBranchRowsAsync(cancellationToken);
+        if (alreadyStored > 0)
             logger.LogDebug("Branch row was already stored by a parallel writer; kept the existing row.");
-            await dbContext.SaveChangesAsync(cancellationToken);
-            return alreadyStored;
-        }
-    }
-
-    /// <summary>Detaches added branch rows whose unique key is already committed. Returns how many were detached.</summary>
-    private async Task<int> DetachBranchesAlreadyStoredAsync(CancellationToken cancellationToken)
-    {
-        var added = dbContext.ChangeTracker.Entries<RepositoryBranch>()
-            .Where(entry => entry.State == EntityState.Added)
-            .Select(entry => entry.Entity)
-            .ToList();
-        if (added.Count == 0)
-            return 0;
-
-        var linkIds = added.Select(branch => branch.WorkspaceRepositoryId).Distinct().ToList();
-        var stored = await dbContext.RepositoryBranches
-            .AsNoTracking()
-            .Where(branch => linkIds.Contains(branch.WorkspaceRepositoryId))
-            .Select(branch => new { branch.WorkspaceRepositoryId, branch.BranchName, branch.IsRemote })
-            .ToListAsync(cancellationToken);
-        var storedKeys = stored
-            .Select(branch => (branch.WorkspaceRepositoryId, branch.BranchName, branch.IsRemote))
-            .ToHashSet();
-
-        var detached = 0;
-        foreach (var branch in added)
-        {
-            if (!storedKeys.Contains((branch.WorkspaceRepositoryId, branch.BranchName, branch.IsRemote)))
-                continue;
-
-            dbContext.Entry(branch).State = EntityState.Detached;
-            detached++;
-        }
-
-        return detached;
-    }
-
-    /// <summary>SQLite extended result SQLITE_CONSTRAINT_UNIQUE (2067), or the message EF surfaces when the numeric code is absent.</summary>
-    private static bool IsUniqueConstraintViolation(Exception exception)
-    {
-        for (var current = exception; current != null; current = current.InnerException)
-        {
-            if (current is SqliteException sqlite
-                && (sqlite.SqliteExtendedErrorCode == 2067
-                    || sqlite.Message.Contains("UNIQUE constraint failed", StringComparison.Ordinal)))
-                return true;
-        }
-
-        return false;
+        return alreadyStored;
     }
 }
