@@ -290,6 +290,7 @@ writes through a shared scoped AppDbContext
 WorkspaceFeatureReconciler apply phase
 Git Changes monitoring and line-stats sweeps (each scan is already bounded)
 single-reader queues                         WorkspaceGitChangesWriteQueue, WorkerSyncNotificationQueue
+sync barrier                                 IWorkerSyncNotificationBarrier (implemented by WorkerSyncNotificationQueue): DependencyUpdateOrchestrator.RunAsync awaits it before reading stored state, so hook syncs already received are applied before a run plans or selects push levels
 FeatureRemovalQueue                          fixed at MaxConcurrentRemovals = 4 workers, FIFO
 Worker DotnetRestoreCommand                  shared obj/ and NuGet cache
 ```

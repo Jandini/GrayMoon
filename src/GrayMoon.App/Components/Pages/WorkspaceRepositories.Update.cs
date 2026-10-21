@@ -1,6 +1,7 @@
 using GrayMoon.Abstractions.Exceptions;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services;
+using GrayMoon.App.Services.Orchestration;
 
 namespace GrayMoon.App.Components.Pages;
 
@@ -529,6 +530,19 @@ public sealed partial class WorkspaceRepositories
     {
         await ReloadWorkspaceDataFromFreshScopeAsync();
         _ = InvokeAsync(() => { if (!_disposed) { ApplySyncStateFromLoadedItems(); StateHasChanged(); } });
+
+        // The live callbacks reach the page only while it is alive and only as they happen; a push that waits
+        // minutes for a package can fail long after the user looked away. The returned result is the complete
+        // account (like the sequential push), so apply it and say that the push stopped.
+        if (result.Push is { Success: false } pushFailure)
+        {
+            SafeInvoke(() =>
+            {
+                ApplyRepositoryErrors(pushFailure.RepoErrors);
+                ApplyLevelErrors(pushFailure.LevelErrors);
+                ToastService.Show(PushOperationResult.Describe(pushFailure));
+            });
+        }
 
         if (result.Update.Success)
         {
