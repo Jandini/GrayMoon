@@ -35,6 +35,7 @@ public sealed class UpdateAndPushOrchestrator(
         bool restorePackages = true,
         string? runId = null)
     {
+        runId = GrayMoon.Abstractions.Logging.GrayMoonOperationContext.EnsureId(runId);
         if (!await workspacePushService.CanRunPushLaneAsync(workspaceId, contextId, maxLevel, cancellationToken))
         {
             logger.LogInformation("[UpdateAndPushOrchestrator {RunId}] Workspace {WorkspaceId}: push lane not possible, falling back to sequential.", runId, workspaceId);
@@ -115,9 +116,10 @@ public sealed class UpdateAndPushOrchestrator(
         var pushedCount = await lane;
 
         var push = PushOperationResult.FromErrors(pushRepoErrors, pushLevelErrors);
+        var failedPushLevel = pushLevelErrors.Count == 0 ? "none" : string.Join(",", pushLevelErrors.Keys.OrderBy(level => level));
         logger.LogInformation(
-            "[UpdateAndPushOrchestrator {RunId}] Workspace {WorkspaceId}: finished. UpdateSuccess={UpdateSuccess}, PushSuccess={PushSuccess}",
-            runId, workspaceId, update.Success, push.Success);
+            "[UpdateAndPushOrchestrator {RunId}] Workspace {WorkspaceId}: finished. UpdateSuccess={UpdateSuccess}, PushSuccess={PushSuccess}, PushedRepoCount={PushedRepoCount}, FailedPushLevel={FailedPushLevel}",
+            runId, workspaceId, update.Success, push.Success, pushedCount, failedPushLevel);
         return new UpdateAndPushResult(true, update, push, pushedCount);
     }
 

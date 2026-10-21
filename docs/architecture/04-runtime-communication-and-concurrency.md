@@ -16,7 +16,7 @@ sequenceDiagram
   participant Delivery as WorkerResponseDelivery
 
   UI->>Bridge: SendCommandAsync
-  Bridge->>Hub: RequestCommand(requestId, name, JSON)
+  Bridge->>Hub: RequestCommand(requestId, name, JSON, operationId?)
   Hub->>Queue: enqueue
   Queue->>Handler: execute
   Handler->>Hub: ResponseCommand(requestId, JSON)
@@ -52,6 +52,27 @@ AiGeneratedTextParser       strict JSON check; AiGenerationResult<T> is never pa
 - App side: `HostInfoCache` (singleton) holds the startup host check, including which AI CLIs are installed. Menus read that snapshot and do not probe. Generation timeout `AiGeneration:TimeoutSeconds` (default 120, clamped 10..600).
 - Click-to-write runs are not circuit work: `AiTextGenerationRuns<TText>` (singleton; `WorkspaceGitChangesCommitGeneration` for Changes, `WorkspacePullRequestTextGeneration` for New Pull Request) keeps at most one run per Workspace and Feature context, runs it in a fresh DI scope through `IScopedServiceExecutor`, and outlives the page, the dialog and the circuit (F5 / Ctrl+F5). Only Cancel for that context stops it. When it finishes, a page still showing that context does the live scope check and applies the text itself; otherwise the run decides against that context's memory (`WorkspaceGitChangesCommitMessageMemory`, `WorkspacePullRequestDraftMemory`) and stores the text, a suggestion or the error there. All of it is in memory and lost on App restart.
 - Commit generation runs inside the Git Changes commit job (overlay step label "ai", never the prompt); pull request generation runs without an overlay job.
+
+### 1B. Log correlation (App ↔ Worker)
+
+Two Serilog LogContext properties join App and Worker file logs for diagnosis. Names live in `GrayMoonLogProperties` (`GrayMoon.Abstractions`):
+
+| Property | Meaning | Lifetime |
+|---|---|---|
+| `GrayMoonRequestId` | Hub `requestId` | One `SendCommandAsync` / one Worker command job |
+| `GrayMoonOperationId` | Parent user/system mutation | One workspace overlay job (and Push/Update `RunId`) |
+
+`WorkerBridge` pushes both into LogContext for the send/wait. The Worker pushes `GrayMoonRequestId` (and `GrayMoonOperationId` when the optional 4th `RequestCommand` argument is set) for the execute scope. File sinks under `%ProgramData%\GrayMoon\Logs\` append `req={GrayMoonRequestId} op={GrayMoonOperationId}` so nested lines stay greppable. Desktop native-bridge request ids are a separate channel and are not `GrayMoonRequestId`.
+
+Typical support workflow:
+
+```text
+1. Grep graymoon-app-*.log for GrayMoonOperationId / [PushOrchestrator {RunId}]
+2. Within that window, collect GrayMoonRequestId values from WorkerBridge lines
+3. Grep graymoon-worker-*.log for those request ids (or the same operation id when on the wire)
+```
+
+Happy-path success stays at Debug on the App; failures, timeouts and Worker completion stay the loud signals. Do not invent a third hop Guid beside `requestId`.
 
 ---
 

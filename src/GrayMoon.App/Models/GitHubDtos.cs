@@ -88,6 +88,10 @@ public class GitHubWorkflowRunDto
     [JsonPropertyName("head_branch")]
     public string? HeadBranch { get; set; }
 
+    /// <summary>Commit SHA the run was started for. Used only to correlate a run with a known push commit.</summary>
+    [JsonPropertyName("head_sha")]
+    public string? HeadSha { get; set; }
+
     [JsonPropertyName("status")]
     public string Status { get; set; } = string.Empty;
 

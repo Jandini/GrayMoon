@@ -259,7 +259,7 @@ public sealed partial class WorkspaceRepositories
 
         JobService.StartJob(PageJobKey, $"Updating Level {level}...", async (job, ct) =>
         {
-            var runId = Guid.NewGuid().ToString("N")[..8];
+            var runId = GrayMoon.Abstractions.Logging.GrayMoonOperationContext.EnsureId();
             Logger.LogInformation("[PushUpdated {RunId}] Level-Only Update & Push starting for workspace {WorkspaceId}, up to level {Level}", runId, WorkspaceId, level);
 
             if (await TryRunPipelinedUpdateAndPushAsync(job, ct, runId, commitMessage, includeDepsInCommitMessage, level, restorePackages, $"Up to Level {level} updated. Nothing to push."))
@@ -367,7 +367,7 @@ public sealed partial class WorkspaceRepositories
 
         JobService.StartJob(PageJobKey, UpdateJobTitle, async (job, ct) =>
         {
-            var runId = Guid.NewGuid().ToString("N")[..8];
+            var runId = GrayMoon.Abstractions.Logging.GrayMoonOperationContext.EnsureId();
             Logger.LogInformation("[PushUpdated {RunId}] Update & Push starting for workspace {WorkspaceId}", runId, WorkspaceId);
 
             if (await TryRunPipelinedUpdateAndPushAsync(job, ct, runId, commitMessage, includeDepsInCommitMessage, maxLevel: null, restorePackages, "Update complete. Nothing to push."))

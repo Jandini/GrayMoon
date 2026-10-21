@@ -90,7 +90,7 @@ public sealed class SignalRConnectionHostedService(
             })
             .Build();
 
-        _connection.On<string, string, JsonElement?>(WorkerHubMethods.RequestCommand, async (requestId, command, args) =>
+        _connection.On<string, string, JsonElement?, string?>(WorkerHubMethods.RequestCommand, async (requestId, command, args, operationId) =>
         {
             logger.LogDebug("RequestCommand {RequestId} received: {Command}", requestId, command);
             logger.LogTrace("RequestCommand {RequestId} request content: {Args}", requestId, args.HasValue ? args.Value.GetRawText() : "null");
@@ -110,7 +110,7 @@ public sealed class SignalRConnectionHostedService(
                     return;
                 }
 
-                var envelope = commandJobFactory.CreateCommandJob(requestId, command, args);
+                var envelope = commandJobFactory.CreateCommandJob(requestId, command, args, operationId);
                 var targetQueue = DiffCommands.Contains(command)
                     ? (IJobQueue)diffJobQueue
                     : ReadOnlyCommands.Contains(command) ? (IJobQueue)readJobQueue : jobQueue;

@@ -47,27 +47,36 @@ public sealed class NuGetService : IConnectorService
 
     /// <summary>Checks whether a package with the given id and version exists in the registry.</summary>
     public async Task<bool> PackageVersionExistsAsync(Connector connector, string packageId, string version, CancellationToken cancellationToken = default)
+        => (await LookupPackageVersionAsync(connector, packageId, version, cancellationToken)).Exists;
+
+    /// <summary>
+    /// Same registry query as <see cref="PackageVersionExistsAsync"/>, plus why the version was or was not treated as present.
+    /// An HTTP success only means the package index responded; the version is present only when that index lists it.
+    /// Throws the same exceptions as the boolean check (network failures and cancellation are not turned into a negative result).
+    /// </summary>
+    internal async Task<PackageVersionLookupResult> LookupPackageVersionAsync(Connector connector, string packageId, string version, CancellationToken cancellationToken = default)
     {
         if (connector.ConnectorType != ConnectorType.NuGet)
             throw new InvalidOperationException($"Connector type {connector.ConnectorType} is not supported by NuGetService.");
         if (string.IsNullOrWhiteSpace(packageId) || string.IsNullOrWhiteSpace(version))
-            return false;
+            return PackageVersionLookupResult.Absent(PackageVersionLookupKind.Inconclusive);
 
         var baseAddress = await GetPackageBaseAddressAsync(connector, cancellationToken);
         if (string.IsNullOrEmpty(baseAddress))
-            return false;
+            return PackageVersionLookupResult.Absent(PackageVersionLookupKind.Inconclusive);
 
         var lowerId = packageId.Trim().ToLowerInvariant();
         var url = $"{baseAddress.TrimEnd('/')}/{lowerId}/index.json";
         using var request = CreateRequest(HttpMethod.Get, url, connector);
-        var response = await _httpClient.SendAsync(request, cancellationToken);
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        var statusCode = (int)response.StatusCode;
         if (!response.IsSuccessStatusCode)
-            return false;
+            return PackageVersionLookupResult.Absent(ClassifyLookupStatus(response.StatusCode), statusCode);
 
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
         if (!doc.RootElement.TryGetProperty("versions", out var versions) || versions.ValueKind != JsonValueKind.Array)
-            return false;
+            return PackageVersionLookupResult.Absent(PackageVersionLookupKind.UnexpectedResponse, statusCode);
 
         var versionNorm = version.Trim();
         foreach (var v in versions.EnumerateArray())
@@ -75,12 +84,22 @@ public sealed class NuGetService : IConnectorService
             var s = v.GetString();
             if (string.IsNullOrEmpty(s)) continue;
             if (string.Equals(s, versionNorm, StringComparison.OrdinalIgnoreCase))
-                return true;
+                return new PackageVersionLookupResult(true, PackageVersionLookupKind.Available, statusCode);
             if (NormalizeVersion(s) == NormalizeVersion(versionNorm))
-                return true;
+                return new PackageVersionLookupResult(true, PackageVersionLookupKind.Available, statusCode);
         }
-        return false;
+
+        return PackageVersionLookupResult.Absent(PackageVersionLookupKind.VersionNotFound, statusCode);
     }
+
+    private static PackageVersionLookupKind ClassifyLookupStatus(HttpStatusCode statusCode)
+        => statusCode switch
+        {
+            HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => PackageVersionLookupKind.AuthenticationFailed,
+            HttpStatusCode.RequestTimeout or HttpStatusCode.GatewayTimeout => PackageVersionLookupKind.RequestTimeout,
+            HttpStatusCode.NotFound => PackageVersionLookupKind.VersionNotFound,
+            _ => PackageVersionLookupKind.RegistryFailure
+        };
 
     /// <summary>Gets the PackageBaseAddress URL from the NuGet service index (e.g. https://api.nuget.org/v3-flatcontainer/).</summary>
     public async Task<string?> GetPackageBaseAddressAsync(Connector connector, CancellationToken cancellationToken = default)

@@ -84,7 +84,6 @@ public sealed partial class WorkspaceGitService
         var syncTasks = repos.Select(async repo =>
         {
             await semaphore.WaitAsync(cancellationToken);
-            var operationId = Guid.NewGuid().ToString("N");
             var repoStart = Stopwatch.GetTimestamp();
             var nowActive = Interlocked.Increment(ref activeCount);
             int snapshot;
@@ -95,9 +94,10 @@ public sealed partial class WorkspaceGitService
                     break;
             }
             while (Interlocked.CompareExchange(ref maxActive[0], nowActive, snapshot) != snapshot);
+            // Hop correlation is WorkerBridge's RequestId (LogContext / file template); do not invent a parallel Guid.
             _logger.LogDebug(
-                "SyncRepository dispatch WorkspaceId={WorkspaceId} ContextId={ContextId} RepositoryId={RepositoryId} OperationId={OperationId} Stage={Stage} ActiveCount={ActiveCount}",
-                workspaceId, contextId.Value, repo.RepositoryId, operationId, "dispatch", nowActive);
+                "SyncRepository dispatch WorkspaceId={WorkspaceId} ContextId={ContextId} RepositoryId={RepositoryId} Stage={Stage} ActiveCount={ActiveCount}",
+                workspaceId, contextId.Value, repo.RepositoryId, "dispatch", nowActive);
             try
             {
                 divergenceByRepoId.TryGetValue(repo.RepositoryId, out var divergenceBaseBranch);
@@ -118,8 +118,8 @@ public sealed partial class WorkspaceGitService
                 var response = await _workerBridge.SendCommandAsync("SyncRepository", args, cancellationToken);
                 var info = ParseSyncRepositoryResponse(response);
                 _logger.LogDebug(
-                    "SyncRepository response WorkspaceId={WorkspaceId} ContextId={ContextId} RepositoryId={RepositoryId} OperationId={OperationId} Stage={Stage} ElapsedMs={ElapsedMs} ActiveCount={ActiveCount}",
-                    workspaceId, contextId.Value, repo.RepositoryId, operationId, "response",
+                    "SyncRepository response WorkspaceId={WorkspaceId} ContextId={ContextId} RepositoryId={RepositoryId} Stage={Stage} ElapsedMs={ElapsedMs} ActiveCount={ActiveCount}",
+                    workspaceId, contextId.Value, repo.RepositoryId, "response",
                     (long)Stopwatch.GetElapsedTime(repoStart).TotalMilliseconds, nowActive);
                 var count = Interlocked.Increment(ref completedCount);
                 onProgress?.Invoke(count, totalCount, repo.RepositoryId, info);

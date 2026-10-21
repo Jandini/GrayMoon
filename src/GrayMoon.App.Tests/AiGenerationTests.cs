@@ -288,7 +288,7 @@ public sealed class AiGenerationTests
 
         Assert.True(result.Success, result.Failure?.Message);
         Assert.Equal(
-            ["Collecting the changes of 2 repositories...", "Writing the commit message with Claude (sonnet)..."],
+            ["Collecting the changes of 2 repositories...", "Writing the commit message with Claude..."],
             steps);
     }
 

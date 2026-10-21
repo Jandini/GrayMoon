@@ -57,6 +57,8 @@ public sealed class DependencyUpdateOrchestrator(
         string? runId = null,
         Func<DependencyLevelCompletion, Task>? onLevelCompleted = null)
     {
+        runId = GrayMoon.Abstractions.Logging.GrayMoonOperationContext.EnsureId(runId);
+
         // Non-null empty set means the caller determined no repos need work.
         if (repoIdsToUpdate is { Count: 0 })
         {
@@ -163,6 +165,16 @@ public sealed class DependencyUpdateOrchestrator(
             logger.LogInformation(
                 "[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: starting. TotalRepos={TotalRepos}, CsprojScope={CsprojScope}, HasFileWork={HasFileWork}",
                 runId, workspaceId, level, repoIds.Count, csprojScope.Count, hasFileWork);
+            var outOfDateIds = repoIds.Where(outOfDateFileRepoIds.Contains).OrderBy(id => id).ToList();
+            var currentFileIds = repoIds.Where(id => !outOfDateFileRepoIds.Contains(id)).OrderBy(id => id).ToList();
+            logger.LogInformation(
+                "[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: update invocation state. OutOfDateVersionFiles=[{OutOfDateVersionFiles}] NoOutOfDateVersionFiles=[{NoOutOfDateVersionFiles}] CsprojScope=[{CsprojScopeIds}]",
+                runId,
+                workspaceId,
+                level,
+                outOfDateIds.Count == 0 ? "none" : string.Join(",", outOfDateIds),
+                currentFileIds.Count == 0 ? "none" : string.Join(",", currentFileIds),
+                csprojScope.Count == 0 ? "none" : string.Join(",", csprojScope.OrderBy(id => id)));
 
             if (!hasFileWork && csprojScope.Count == 0)
             {

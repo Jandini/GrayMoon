@@ -249,7 +249,8 @@ public sealed class WorkspaceAiGenerationOperations(
         var prompt = buildPrompt(evidence.Repositories);
         var promptMs = (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
 
-        var model = choice.Model is null ? string.Empty : $" ({choice.Model})";
+        // The commit overlay names the provider only. The model is still sent to the CLI.
+        var model = kind == GitEvidenceKind.Commit || choice.Model is null ? string.Empty : $" ({choice.Model})";
         progress.Report($"Writing {subject} with {AiProviderIds.DisplayName(providerId)}{model}...");
         var generation = await workerBridge.SendCommandAsync(
             WorkerHubMethods.GenerateAiText,

@@ -10,10 +10,16 @@ namespace GrayMoon.Worker.Services;
 /// </summary>
 public sealed class CommandJobFactory
 {
-    public JobEnvelope CreateCommandJob(string requestId, string command, JsonElement? args)
+    public JobEnvelope CreateCommandJob(string requestId, string command, JsonElement? args, string? operationId = null)
     {
         var request = DeserializeRequest(command, args);
-        var commandJob = new CommandJob { RequestId = requestId, Command = command, Request = request };
+        var commandJob = new CommandJob
+        {
+            RequestId = requestId,
+            Command = command,
+            Request = request,
+            OperationId = string.IsNullOrEmpty(operationId) ? null : operationId
+        };
         return JobEnvelope.Command(commandJob);
     }
 

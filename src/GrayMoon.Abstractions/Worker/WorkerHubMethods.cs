@@ -5,7 +5,7 @@ namespace GrayMoon.Abstractions.Worker;
 /// </summary>
 public static class WorkerHubMethods
 {
-    /// <summary>App → Worker: send a command (requestId, command, args).</summary>
+    /// <summary>App → Worker: send a command (requestId, command, args, optional operationId).</summary>
     public const string RequestCommand = "RequestCommand";
 
     /// <summary>App → Worker: cancel a previously sent command (requestId). Used when the App aborts a background job.</summary>
