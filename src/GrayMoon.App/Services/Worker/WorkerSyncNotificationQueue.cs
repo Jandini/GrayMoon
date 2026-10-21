@@ -10,8 +10,12 @@ namespace GrayMoon.App.Services.Worker;
 /// </summary>
 public sealed class WorkerSyncNotificationQueue(
     IServiceScopeFactory scopeFactory,
-    ILogger<WorkerSyncNotificationQueue> logger) : BackgroundService
+    ILogger<WorkerSyncNotificationQueue> logger) : BackgroundService, IWorkerSyncNotificationBarrier
 {
+    private readonly object _pendingLock = new();
+    private readonly Dictionary<int, int> _pendingByWorkspace = new();
+    private readonly Dictionary<int, List<TaskCompletionSource>> _waitersByWorkspace = new();
+
     private readonly Channel<RepositorySyncNotification> _channel =
         Channel.CreateUnbounded<RepositorySyncNotification>(new UnboundedChannelOptions
         {
@@ -20,8 +24,76 @@ public sealed class WorkerSyncNotificationQueue(
         });
 
     /// <summary>Enqueues a notification for background processing. Always returns before any DB or worker work begins.</summary>
-    public bool Enqueue(RepositorySyncNotification notification) =>
-        _channel.Writer.TryWrite(notification);
+    public bool Enqueue(RepositorySyncNotification notification)
+    {
+        // Counted before the write so a barrier can never observe the notification as neither pending nor applied.
+        MarkPending(notification.WorkspaceId);
+        if (_channel.Writer.TryWrite(notification))
+            return true;
+
+        MarkApplied(notification.WorkspaceId);
+        return false;
+    }
+
+    public Task WaitForPendingAsync(int workspaceId, CancellationToken cancellationToken)
+    {
+        TaskCompletionSource waiter;
+        lock (_pendingLock)
+        {
+            if (!_pendingByWorkspace.TryGetValue(workspaceId, out var pending) || pending == 0)
+                return Task.CompletedTask;
+
+            waiter = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (!_waitersByWorkspace.TryGetValue(workspaceId, out var waiters))
+                _waitersByWorkspace[workspaceId] = waiters = [];
+            waiters.Add(waiter);
+        }
+
+        return waiter.Task.WaitAsync(cancellationToken);
+    }
+
+    private void MarkPending(int workspaceId)
+    {
+        lock (_pendingLock)
+            _pendingByWorkspace[workspaceId] = _pendingByWorkspace.GetValueOrDefault(workspaceId) + 1;
+    }
+
+    private void MarkApplied(int workspaceId)
+    {
+        List<TaskCompletionSource>? release = null;
+        lock (_pendingLock)
+        {
+            var remaining = _pendingByWorkspace.GetValueOrDefault(workspaceId) - 1;
+            if (remaining > 0)
+            {
+                _pendingByWorkspace[workspaceId] = remaining;
+                return;
+            }
+
+            _pendingByWorkspace.Remove(workspaceId);
+            if (_waitersByWorkspace.Remove(workspaceId, out var waiters))
+                release = waiters;
+        }
+
+        if (release is null)
+            return;
+        foreach (var waiter in release)
+            waiter.TrySetResult();
+    }
+
+    private void ReleaseAllWaiters()
+    {
+        List<TaskCompletionSource> release;
+        lock (_pendingLock)
+        {
+            release = _waitersByWorkspace.Values.SelectMany(w => w).ToList();
+            _waitersByWorkspace.Clear();
+            _pendingByWorkspace.Clear();
+        }
+
+        foreach (var waiter in release)
+            waiter.TrySetResult();
+    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -47,14 +119,20 @@ public sealed class WorkerSyncNotificationQueue(
                 logger.LogError(ex, "SyncNotification processing failed for workspace {WorkspaceId} repo {RepositoryId}",
                     notification.WorkspaceId, notification.RepositoryId);
             }
+            finally
+            {
+                MarkApplied(notification.WorkspaceId);
+            }
         }
 
+        ReleaseAllWaiters();
         logger.LogInformation("WorkerSyncNotificationQueue stopped");
     }
 
     public override Task StopAsync(CancellationToken cancellationToken)
     {
         _channel.Writer.TryComplete();
+        ReleaseAllWaiters();
         return base.StopAsync(cancellationToken);
     }
 }

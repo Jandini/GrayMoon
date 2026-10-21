@@ -12,6 +12,7 @@ using GrayMoon.App.Services.Connectors;
 using GrayMoon.App.Services.Git;
 using GrayMoon.App.Services.GitChanges;
 using GrayMoon.App.Services.Orchestration;
+using GrayMoon.App.Services.Worker;
 using GrayMoon.App.Services.Workspaces;
 using GrayMoon.Application;
 using GrayMoon.Application.Workspaces;
@@ -537,6 +538,8 @@ public sealed class WorkspacePushStrategyTests
             services.AddScoped<WorkspacePushStrategySelector>();
             services.AddScoped<IWorkspacePushOperations, WorkspacePushOperations>();
             services.AddScoped<WorkspaceUndoPushHandler>();
+            services.AddSingleton<WorkerSyncNotificationQueue>();
+            services.AddSingleton<IWorkerSyncNotificationBarrier>(sp => sp.GetRequiredService<WorkerSyncNotificationQueue>());
             services.AddScoped<DependencyUpdateOrchestrator>();
             services.AddScoped<UpdateAndPushOrchestrator>();
             services.AddScoped<IGitChangesWorkerClient, GitChangesWorkerClient>();

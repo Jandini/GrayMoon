@@ -1,6 +1,7 @@
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.Application.Features;
+using GrayMoon.App.Services.Worker;
 using GrayMoon.Application.Workspaces;
 using Microsoft.Extensions.Options;
 
@@ -20,6 +21,7 @@ public sealed class DependencyUpdateOrchestrator(
     IOptions<WorkspaceOptions> workspaceOptions,
     IServiceScopeFactory scopeFactory,
     IWorkspaceCapabilitiesResolver capabilitiesResolver,
+    IWorkerSyncNotificationBarrier syncNotificationBarrier,
     ILogger<DependencyUpdateOrchestrator> logger)
 {
     private readonly int _maxConcurrent = Math.Max(1, workspaceOptions?.Value?.MaxParallelOperations ?? 8);
@@ -71,6 +73,13 @@ public sealed class DependencyUpdateOrchestrator(
             maxLevel?.ToString() ?? "none");
 
         var setProgress = progress.ToMessageAction();
+
+        // Everything below decides from stored repository state (versions, unpushed commits, upstream). Hook syncs the
+        // App has already received but not yet applied would otherwise land mid-run: late enough to hide a repository's
+        // unpushed commit from the push plan, or to overwrite the state this run has just refreshed.
+        setProgress("Applying pending repository changes...");
+        await syncNotificationBarrier.WaitForPendingAsync(workspaceId, cancellationToken);
+
         var hadError = false;
         var allSyncedRepoIds = new HashSet<int>();
         var sink = new OperationErrorSink(workspaceId, logger, onRepoError, onLevelError);

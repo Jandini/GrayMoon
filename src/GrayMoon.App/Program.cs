@@ -280,6 +280,7 @@ try
     builder.Services.AddHostedService(sp => sp.GetRequiredService<SyncBackgroundService>());
     builder.Services.AddSingleton<WorkerSyncNotificationQueue>();
     builder.Services.AddHostedService(sp => sp.GetRequiredService<WorkerSyncNotificationQueue>());
+    builder.Services.AddSingleton<IWorkerSyncNotificationBarrier>(sp => sp.GetRequiredService<WorkerSyncNotificationQueue>());
     builder.Services.AddHostedService<TokenHealthBackgroundService>();
     builder.Services.AddSingleton<WorkspaceGitChangesWriteQueue>();
     builder.Services.AddHostedService(sp => sp.GetRequiredService<WorkspaceGitChangesWriteQueue>());
