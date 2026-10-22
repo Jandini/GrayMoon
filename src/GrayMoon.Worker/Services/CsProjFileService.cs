@@ -69,7 +69,43 @@ public sealed class CsProjFileService(
             if (r != null)
                 results.Add(r);
         }
+        WarnOnProjectNameCollisions(repoPath, results);
         return results;
+    }
+
+    /// <summary>
+    /// One Warning per project name shared by several discovered projects: the App stores one row per name. Counts distinct
+    /// package identities (non-blank PackageId) separately from ProjectType.Package, so classification is not read as identity.
+    /// Reports only what was discovered; which candidate the App keeps is its decision.
+    /// </summary>
+    private void WarnOnProjectNameCollisions(string repoPath, IReadOnlyList<CsProjFileInfo> projects)
+    {
+        if (projects.Count < 2)
+            return;
+
+        foreach (var group in projects
+                     .Where(p => !string.IsNullOrWhiteSpace(p.Name))
+                     .GroupBy(p => p.Name.Trim(), StringComparer.OrdinalIgnoreCase)
+                     .Where(g => g.Count() > 1))
+        {
+            var candidates = group
+                .OrderBy(p => (p.ProjectPath ?? "").Replace('\\', '/'), StringComparer.OrdinalIgnoreCase)
+                .ThenBy(p => (p.ProjectPath ?? "").Replace('\\', '/'), StringComparer.Ordinal)
+                .ToList();
+            var packageIdentityCount = candidates.Count(p => !string.IsNullOrWhiteSpace(p.PackageId));
+            var packageTypeCount = candidates.Count(p => p.ProjectType == ProjectType.Package);
+            var details = string.Join("; ", candidates.Select(p =>
+                $"{(p.ProjectPath ?? "").Replace('\\', '/')} (ProjectType={p.ProjectType}, PackageId={p.PackageId ?? "null"})"));
+
+            if (packageIdentityCount > 1)
+                logger.LogWarning(
+                    "Ambiguous package-producer project name collision in {RepoPath}: ProjectName={ProjectName}, Candidates={CandidateCount}, PackageIdentities={PackageIdentityCount}, PackageTypeCandidates={PackageTypeCount}. Only one row can be stored per project name, so dependency resolution may be incorrect. Candidates: {CandidateDetails}",
+                    repoPath, group.Key, candidates.Count, packageIdentityCount, packageTypeCount, details);
+            else
+                logger.LogWarning(
+                    "Project name collision in {RepoPath}: ProjectName={ProjectName}, Candidates={CandidateCount}, PackageIdentities={PackageIdentityCount}, PackageTypeCandidates={PackageTypeCount}. Only one row can be stored per project name; the App merge retains one row and prefers the package candidate. Candidates: {CandidateDetails}",
+                    repoPath, group.Key, candidates.Count, packageIdentityCount, packageTypeCount, details);
+        }
     }
 
     public Task<IReadOnlyList<string>> GetProjectPathsAsync(string repoPath, CancellationToken cancellationToken = default, int? maxParallel = null)

@@ -242,7 +242,8 @@ public sealed class WorkspaceFeatureContextOrphanCleanupTests
         var indexDefinitions = new List<string>();
         await using (var indexCmd = connection.CreateCommand())
         {
-            indexCmd.CommandText = "SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'WorkspaceProjects' AND sql IS NOT NULL";
+            indexCmd.CommandText = "SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'WorkspaceProjects' AND sql IS NOT NULL AND sql NOT LIKE '%ProjectIdentityKey%'";
+            // The rebuilt table simulates a database from before strict step 11, which has no identity column yet.
             await using var reader = await indexCmd.ExecuteReaderAsync();
             while (await reader.ReadAsync())
                 indexDefinitions.Add(reader.GetString(0));

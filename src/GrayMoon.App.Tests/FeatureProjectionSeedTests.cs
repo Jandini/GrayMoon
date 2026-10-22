@@ -201,7 +201,7 @@ public sealed class FeatureProjectionSeedTests
             db.WorkspaceProjects.Add(new WorkspaceProject
             {
                 WorkspaceId = f.Value.Ctx.WorkspaceId, WorkspaceFeatureContextId = f.Value.Feature.Value,
-                RepositoryId = f.Value.RepoA, ProjectName = "App", ProjectFilePath = "stale.csproj",
+                RepositoryId = f.Value.RepoA, ProjectName = "App", ProjectFilePath = "app\\App.csproj",
             });
             db.WorkspaceRepositoryContextStates.Add(new WorkspaceRepositoryContextState
             {
@@ -217,7 +217,7 @@ public sealed class FeatureProjectionSeedTests
         var apps = await verify.WorkspaceProjects.AsNoTracking()
             .Where(p => p.WorkspaceFeatureContextId == f.Value.Feature.Value && p.ProjectName == "App").ToListAsync();
         Assert.Single(apps);
-        Assert.Equal("App/App.csproj", apps[0].ProjectFilePath);
+        Assert.Equal("App/App.csproj", apps[0].ProjectFilePath); // the seed refreshes the path text of the same physical project
 
         var libState = await verify.WorkspaceRepositoryContextStates.AsNoTracking()
             .SingleAsync(s => s.WorkspaceFeatureContextId == f.Value.Feature.Value && s.WorkspaceRepositoryId == f.Value.LinkB);
@@ -232,13 +232,13 @@ public sealed class FeatureProjectionSeedTests
     }
 
     [Fact]
-    public async Task Seed_maps_source_projects_with_one_identity_onto_a_single_feature_project()
+    public async Task Seed_maps_source_projects_with_one_path_identity_onto_a_single_feature_project()
     {
         await using var f = new FixtureHolder(await CreateAsync((db, workspaceId, specialId) =>
             db.WorkspaceProjects.Add(new WorkspaceProject
             {
                 WorkspaceId = workspaceId, WorkspaceFeatureContextId = specialId, RepositoryId = f0RepoA(db),
-                ProjectName = "app", ProjectFilePath = "other/app.csproj",
+                ProjectName = "other", ProjectFilePath = "APP/app.csproj",
             })));
 
         await SeedAsync(f.Value);

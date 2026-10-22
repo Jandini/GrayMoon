@@ -328,6 +328,17 @@ public sealed partial class WorkspaceGitService
     /// empty list into null, which cannot be told apart from "the worker never scanned"; a probe marker needs
     /// exactly that distinction.
     /// </summary>
+    /// <summary>
+    /// Project list of a successful scan for reconciliation: null when the response carried no project list (not scanned,
+    /// so nothing may be pruned), an empty list when the scan ran and found none (authoritative, stale rows are removed).
+    /// </summary>
+    private static IReadOnlyList<SyncProjectInfo>? GetAuthoritativeProjectsDetail(object? data)
+    {
+        if (data == null || !HasProjectsBlock(data))
+            return null;
+        return GetProjectsDetail(data) ?? [];
+    }
+
     private static bool HasProjectsBlock(object data)
         => WorkerResponseJson.DeserializeWorkerResponse<WorkerSyncProjectsResponse>(data)?.Projects != null;
 

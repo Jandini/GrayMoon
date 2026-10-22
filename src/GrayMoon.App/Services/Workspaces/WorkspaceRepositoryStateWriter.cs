@@ -255,11 +255,6 @@ public sealed class WorkspaceRepositoryStateWriter(
     {
         var projects = ToSyncProjects(snapshot.Projects);
 
-        // An empty list from a probed scan is meaningful: the branch now checked out genuinely has no
-        // projects, so the previous branch's projects (and, by cascade, their dependency edges) go away.
-        await workspaceProjectRepository.MergeWorkspaceProjectsAsync(
-            workspaceId, repositoryId, projects, contextId.Value, cancellationToken);
-
         state.Projects = projects.Count;
         state.RepositoryType = ComputeRepositoryType(projects);
         if (isSpecialWorkspace)
@@ -268,12 +263,14 @@ public sealed class WorkspaceRepositoryStateWriter(
             wr.RepositoryType = state.RepositoryType;
         }
 
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        await workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(
+        // An empty list from a probed scan is meaningful: the branch now checked out genuinely has no
+        // projects, so the previous branch's projects (and, by cascade, their dependency edges) go away.
+        // The staged state above, the projects and the edges commit together.
+        await workspaceProjectRepository.ReconcileProjectSnapshotAsync(
             workspaceId,
-            [(repositoryId, (IReadOnlyList<SyncProjectInfo>?)projects)],
             contextId.Value,
+            [ProjectScanOutcome.Scanned(repositoryId, projects)],
+            mergeEdges: true,
             persistDependencyLevel: false,
             cancellationToken);
     }
@@ -457,9 +454,15 @@ public sealed class WorkspaceRepositoryStateWriter(
 
         if (projectBatch.Count > 0)
         {
-            // The batch merge saves this context, including the staged checkout rows and branch refs.
-            await workspaceProjectRepository.MergeWorkspaceProjectsBatchAsync(
-                workspaceId, projectBatch, contextId.Value, cancellationToken);
+            // Saves this context, including the staged checkout rows and branch refs, in the same transaction as the project merge.
+            // The edges are merged for the whole graph by the caller (see WorkspaceGitService.PersistVersionsAsync).
+            await workspaceProjectRepository.ReconcileProjectSnapshotAsync(
+                workspaceId,
+                contextId.Value,
+                projectBatch.Select(b => ProjectScanOutcome.Scanned(b.RepositoryId, b.Projects)).ToList(),
+                mergeEdges: false,
+                persistDependencyLevel: false,
+                cancellationToken);
         }
         else
         {

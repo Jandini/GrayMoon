@@ -389,6 +389,8 @@ Owns persisted Workspace projects and project dependency relationships.
 
 It also computes repository-level dependency information used by orchestration.
 
+Project snapshots enter through `ReconcileProjectSnapshotAsync`: projects are keyed by repository-relative path, packages resolve only by an unambiguous PackageId, and a failed scan never changes rows. The Worker's `RefreshRepositoryProjects` returns no project list when the repository folder is missing, which is a failed scan, not an empty one. Details in 03. Known gap: the batched sync merges projects in `WorkspaceRepositoryStateWriter` and edges in `PersistVersionsAsync` as two commits.
+
 ### WorkspaceFileVersionService
 
 Owns configured-file version validation and update planning.

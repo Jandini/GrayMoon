@@ -2295,6 +2295,10 @@ public sealed class WorkspaceFeatureOperations(
         return new RollbackFeatureResult(true, null, results);
     }
 
+    /// <summary>Physical identity of a project row for seeding; a row with no usable path (legacy) keeps its own id as identity.</summary>
+    private static string SeedProjectKey(WorkspaceProject p) =>
+        p.ProjectIdentityKey ?? ProjectIdentity.PhysicalKey(p.ProjectFilePath) ?? $"#{p.ProjectId}";
+
     private sealed class ProjectKeyComparer : IEqualityComparer<(int RepositoryId, string Name)>
     {
         public bool Equals((int RepositoryId, string Name) x, (int RepositoryId, string Name) y) =>
@@ -2453,8 +2457,8 @@ public sealed class WorkspaceFeatureOperations(
             await db.SaveChangesAsync(cancellationToken);
         }
 
-        // Same identity as WorkspaceProjectRepository's merge: trimmed name, ordinal-ignore-case. The database index
-        // is stricter (exact name), so two rows this key treats as one can never violate it.
+        // Same identity as WorkspaceProjectRepository's merge: the physical path key (never the project name). The database index
+        // is exact on the same key, so two rows this key treats as one can never violate it.
         var existingFeatureProjects = await db.WorkspaceProjects
             .Where(p => p.WorkspaceId == workspaceId
                         && p.WorkspaceFeatureContextId == contextId.Value
@@ -2464,7 +2468,7 @@ public sealed class WorkspaceFeatureOperations(
         var projectKeyComparer = new ProjectKeyComparer();
         var featureProjectsByKey = new Dictionary<(int RepositoryId, string Name), WorkspaceProject>(projectKeyComparer);
         foreach (var p in existingFeatureProjects)
-            featureProjectsByKey.TryAdd((p.RepositoryId, p.ProjectName.Trim()), p);
+            featureProjectsByKey.TryAdd((p.RepositoryId, SeedProjectKey(p)), p);
 
         // projectIdMap: special real ProjectId -> Feature-context project (cloned or Sync-preexisting).
         // Sources are visited in a fixed order, so when two sources share one identity the first always wins and the
@@ -2480,7 +2484,7 @@ public sealed class WorkspaceFeatureOperations(
                      .ThenBy(p => p.ProjectId))
         {
             var name = src.ProjectName.Trim();
-            var key = (src.RepositoryId, name);
+            var key = (src.RepositoryId, SeedProjectKey(src));
             if (featureProjectsByKey.TryGetValue(key, out var existing))
             {
                 var isNewThisRun = db.Entry(existing).State == EntityState.Added;
@@ -2500,6 +2504,7 @@ public sealed class WorkspaceFeatureOperations(
                 existing.ProjectFilePath = src.ProjectFilePath;
                 existing.TargetFramework = src.TargetFramework;
                 existing.PackageId = src.PackageId;
+                existing.RefreshIdentityKey();
                 projectIdMap[src.ProjectId] = existing;
                 continue;
             }
@@ -2516,6 +2521,7 @@ public sealed class WorkspaceFeatureOperations(
                 PackageId = src.PackageId,
                 IsGenerated = false
             };
+            clone.RefreshIdentityKey();
             db.WorkspaceProjects.Add(clone);
             featureProjectsByKey[key] = clone;
             projectIdMap[src.ProjectId] = clone;

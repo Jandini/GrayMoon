@@ -122,6 +122,7 @@ public sealed partial class WorkspaceProjectRepository
                 PackageId = key.PackageName,
                 IsGenerated = true
             };
+            newProject.RefreshIdentityKey();
             dbContext.WorkspaceProjects.Add(newProject);
             generatedByKey[key] = newProject;
         }
@@ -134,14 +135,15 @@ public sealed partial class WorkspaceProjectRepository
             .Where(p => p.WorkspaceId == workspaceId && !p.IsGenerated)
             .ToListAsync(cancellationToken);
         var realByRepoAndPath = realProjects
-            .Where(p => !string.IsNullOrWhiteSpace(p.ProjectFilePath))
-            .GroupBy(p => (p.RepositoryId, ProjectFilePath: NormalizeRepoRelativePath(p.ProjectFilePath)))
+            .Where(p => ProjectIdentity.PhysicalKey(p.ProjectFilePath) is not null)
+            .GroupBy(p => (p.RepositoryId, ProjectFilePath: ProjectIdentity.PhysicalKey(p.ProjectFilePath)!))
             .ToDictionary(g => g.Key, g => (IReadOnlyList<WorkspaceProject>)g.ToList());
 
         var desiredEdges = new Dictionary<(int DependentProjectId, int ReferencedProjectId), string?>();
         foreach (var r in distinctResolved)
         {
-            if (!realByRepoAndPath.TryGetValue((r.ConsumerRepositoryId, NormalizeRepoRelativePath(r.ConsumerProjectFilePath)), out var consumers)) continue;
+            if (ProjectIdentity.PhysicalKey(r.ConsumerProjectFilePath) is not { } consumerKey) continue;
+            if (!realByRepoAndPath.TryGetValue((r.ConsumerRepositoryId, consumerKey), out var consumers)) continue;
             if (!generatedByKey.TryGetValue((r.ProducerRepositoryId, r.PackageName), out var generatedProject)) continue;
             var version = string.IsNullOrWhiteSpace(r.Version) ? null : r.Version.Trim();
             foreach (var consumerProject in consumers)
@@ -195,7 +197,4 @@ public sealed partial class WorkspaceProjectRepository
             workspaceId, desiredGeneratedKeys.Count, addedEdges, updatedEdges, toRemoveEdges.Count);
     }
 
-    /// <summary>Repo-relative path identity: trim, unify separators to '/', case-insensitive.</summary>
-    private static string NormalizeRepoRelativePath(string path) =>
-        path.Trim().Replace('\\', '/').ToLowerInvariant();
 }

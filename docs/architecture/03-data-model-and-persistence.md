@@ -110,6 +110,8 @@ Current strict steps:
                                                            IX_WorkspaceFileLineStatuses_Workspace_Context_Repo,
                                                            IX_WorkspaceFeatureRepositories_WorkspaceRepositoryId)
 10  Workspace pinned AI provider column                    (Workspaces.PinnedAiProviderId)
+11  WorkspaceProjects identity key                         (ProjectIdentityKey column + backfill from path / package id; unique (context, repo, name) index becomes
+                                                           non-unique, unique IX_WorkspaceProjects_Context_Repo_Identity added; no rows deleted)
 ```
 
 A brand-new database also starts at `user_version` 0, so it runs the baseline and every strict step right after `EnsureCreated()`. Every step must therefore be a no-op against the current model's shape (guard with `pragma_table_info(...)`, `sqlite_master`, `CREATE ... IF NOT EXISTS`), and a backfill must run only on the branch that actually created the column (see `AddWorkspaceProfileColumnIfMissingAsync`).
@@ -380,13 +382,13 @@ Known gap: the unique index does not include `IsTag`, so a tag and a local branc
 
 `WorkspaceProjects` stores projects discovered in Workspace repositories, per Feature context.
 
-Current uniqueness (`IX_WorkspaceProjects_Context_Repo_Name`):
+Current uniqueness (`IX_WorkspaceProjects_Context_Repo_Identity`, partial: non-null key and context):
 
 ```text
-WorkspaceFeatureContextId + RepositoryId + ProjectName
+WorkspaceFeatureContextId + RepositoryId + IsGenerated + ProjectIdentityKey
 ```
 
-`WorkspaceId + RepositoryId + ProjectName` remains as a non-unique index (`IX_WorkspaceProjects_Workspace_Repo_Name`). Each Feature gets its own copy of the physical project rows and their `ProjectDependencies` edges when it is created; generated projects stay on the special Workspace context.
+`ProjectIdentityKey` is the case-folded normalized `ProjectFilePath` for a physical project (`ProjectIdentity.PhysicalKey`) and the case-folded `PackageId` for a generated row (`GeneratedKey`); `WorkspaceProject.RefreshIdentityKey()` maintains it. Project names are not unique. `WorkspaceFeatureContextId + RepositoryId + ProjectName` and `WorkspaceId + RepositoryId + ProjectName` remain as non-unique indexes (`IX_WorkspaceProjects_Context_Repo_Name`, `IX_WorkspaceProjects_Workspace_Repo_Name`). Each Feature gets its own copy of the physical project rows and their `ProjectDependencies` edges when it is created; generated projects stay on the special Workspace context.
 
 Project fields include:
 
@@ -446,7 +448,9 @@ ReferencedProjectId
 Version
 ```
 
-Only Workspace-internal package relationships become persisted project dependency edges. The package-target index (`IndexPackageTargets` in `WorkspaceProjectRepository.Merge.cs`) is keyed by non-empty `PackageId` only, with no `ProjectName` fallback, so a project that is not a package (section 6) is never a dependency target; edges to a project that lost its `PackageId` are dropped and levels recomputed. Generated package rows keep a `PackageId` and take part.
+Only Workspace-internal package relationships become persisted project dependency edges. The package-target index (`PackageTargetIndex` in `WorkspaceProjectRepository.Merge.cs`) is keyed by non-empty effective `PackageId` only, with no `ProjectName` fallback, so a project that is not a package (section 6) is never a dependency target. A physical producer wins over a generated row of the same id; more than one producer is ambiguous, creates no edge and logs a warning naming the producers. Dependents are matched to rows by physical path. Edges whose referenced project stopped being a unique producer are dropped (and logged as needing a consumer rescan) and levels recomputed. Generated package rows keep a `PackageId` and take part.
+
+Project snapshots reach the database through one entry point, `WorkspaceProjectRepository.ReconcileProjectSnapshotAsync` (`WorkspaceProjectRepository.Reconcile.cs`), used by the manual refresh (all repositories and a single repository), the sync state writer (single and batch). Each repository result is a `ProjectScanOutcome`: `Success`, `EmptySuccess` (an authoritative empty scan removes the repository's physical projects, never generated rows) or `Failure` (failed, cancelled or not scanned: its projects and edges are left untouched and its repository type is not changed). The call takes the projection gate once; when it merges both projects and edges it runs them in one database transaction (joining one the caller already opened) so a fault rolls back the whole projection, while a projects-only call is a single `SaveChanges`, already atomic, and stays off an explicit transaction because SQLite shared-cache table locks would otherwise make concurrent writers fail. Worker discovery always happens before the call. The batched sync still merges the whole edge graph in `WorkspaceGitService.PersistVersionsAsync` right after the projects commit, so its projects and edges are two commits.
 
 The project graph is later collapsed into repository-level relationships and dependency levels.
 
@@ -676,7 +680,7 @@ rebuild relevant dependency edges
 recompute repository graph metrics
 ```
 
-Projects are matched by name (local `PackageId` element, then `AssemblyName`, then file name), so a project whose classification changes (for example `IsPackable=false` added) is updated in place (type `Library`, `PackageId` null) on the next sync; no migration is involved.
+Projects are matched by physical path (the project identity key); the worker derives the PackageId from (local `PackageId` element, then `AssemblyName`, then file name), so a project whose classification changes (for example `IsPackable=false` added) is updated in place (type `Library`, `PackageId` null) on the next sync; no migration is involved.
 
 Only `DotNetDependency` Workspaces persist project rows: `WorkspaceRepositoryStateWriter` drops project data unless `WorkspaceCapabilities.DiscoversDotNetProjects`, and Workspace-wide recompute goes through `WorkspaceStateRecomputeScope.RecomputeDependencyStatsAsync`.
 
