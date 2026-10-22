@@ -414,8 +414,8 @@ public sealed partial class WorkspaceProjectRepository
         if (projects.Count == 0) return;
 
         var dependentKeyToProjectId = projects
-            .Where(p => !string.IsNullOrWhiteSpace(p.ProjectFilePath))
-            .GroupBy(p => (p.RepositoryId, ProjectPath: p.ProjectFilePath.Trim().ToLowerInvariant()))
+            .Where(p => !p.IsGenerated && ProjectIdentity.PhysicalKey(p.ProjectFilePath) is not null)
+            .GroupBy(p => (p.RepositoryId, ProjectPath: ProjectIdentity.PhysicalKey(p.ProjectFilePath)!))
             .ToDictionary(g => g.Key, g => g.First().ProjectId);
 
         var packageTargets = PackageTargetIndex.Build(projects);
@@ -432,8 +432,9 @@ public sealed partial class WorkspaceProjectRepository
             if (string.IsNullOrWhiteSpace(projectPath) || string.IsNullOrWhiteSpace(packageId) || string.IsNullOrWhiteSpace(newVersion))
                 continue;
 
-            var pathNorm = projectPath.Trim();
-            var depKey = (repoId, pathNorm.ToLowerInvariant());
+            if (ProjectIdentity.PhysicalKey(projectPath) is not { } pathKey)
+                continue;
+            var depKey = (repoId, pathKey);
             if (!dependentKeyToProjectId.TryGetValue(depKey, out var dependentProjectId))
                 continue;
             if (packageTargets.Resolve(packageId).ProjectId is not { } referencedProjectId)

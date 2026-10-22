@@ -10,7 +10,7 @@ Branch: `package-collision` (GrayMoon sub-repo), HEAD at audit start `937b5fb6`.
 | P0 audit and decisions | Done, approved |
 | P1 identity/schema/migration | Done, gate passed (1596 App tests green) |
 | P2 physical merge | Done, gate passed (1607 App, 817 Worker tests green) |
-| P3 graph identity/ambiguity | Not started |
+| P3 graph identity/ambiguity | Done, gate passed (1610 App tests green) |
 | P4 transactional reconciliation | Not started |
 | P5 diagnostics/perf | Not started |
 | P6 integration/docs | Not started |
@@ -94,3 +94,17 @@ Approved by the owner ("ok, let's start"): D1-D7 as proposed, with the D1/D2 ref
 - `WorkspaceRepositoryStateWriter` batch path already passes empty lists through the same merge; the edge merge there is still not run (P4 covers all entry points).
 - `UpdateProjectDependencyVersionsAsync` and `SyncGeneratedPackageDependenciesAsync` still use their own path normalizers (P3).
 - Next gated phase: P3. Waiting for a go-ahead.
+
+## P3 - graph identity and ambiguity (done, gate passed)
+
+**Audit result:** dependent lookup, target resolution, ambiguity handling and stale-edge invalidation landed with P2 (`MergeWorkspaceProjectDependenciesAsync`, `PackageTargetIndex`). No edge is created by project name anywhere.
+
+**Changed in P3**
+- `UpdateProjectDependencyVersionsAsync` and `SyncGeneratedPackageDependenciesAsync` now use `ProjectIdentity.PhysicalKey` (the former local `NormalizeRepoRelativePath` is removed); the version update ignores generated rows as dependents and skips unusable paths.
+- Tests (`ProjectIdentityGraphTests`): version update touches only the consumer at that path (differently formatted), an ambiguous package changes nothing, generated edges find the consumer whatever the path formatting. Other P3 scenarios (reported collision, same-named consumers, duplicate PackageId, nonpackable, PackageId change, producer-only refresh) are covered by `WorkspaceProjectRepositoryNameCollisionTests`.
+
+**Validation:** App tests 1610 passed / 0 failed.
+
+**Risks / next**
+- Dependency levels are recomputed from the full graph after each merge (unchanged); no incremental maintenance was added.
+- Next gated phase: P4 (transactional `ReconcileProjectSnapshotAsync`, all entry points). Waiting for a go-ahead.
