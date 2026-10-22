@@ -43,18 +43,18 @@ public sealed partial class WorkspaceProjectRepository(
             .ToListAsync(cancellationToken);
     }
 
-    /// <summary>Gets workspace packages whose PackageId (or ProjectName) is in the given set. Used to sync registries only for selected packages.</summary>
+    /// <summary>Gets workspace packages whose PackageId is in the given set (a project without a PackageId is never a package, whatever its name). Used to sync registries only for selected packages.</summary>
     public async Task<List<WorkspaceProject>> GetPackagesByWorkspaceIdAndPackageIdsAsync(int workspaceId, IReadOnlySet<string> packageIds, CancellationToken cancellationToken = default)
     {
         if (packageIds.Count == 0) return new List<WorkspaceProject>();
         var all = await dbContext.WorkspaceProjects
             .AsNoTracking()
             .Include(p => p.MatchedConnector)
-            .Where(p => p.WorkspaceId == workspaceId && (p.PackageId != null || p.ProjectName != null))
+            .Where(p => p.WorkspaceId == workspaceId && p.PackageId != null && p.PackageId != "")
             .ToListAsync(cancellationToken);
         return all.Where(p =>
         {
-            var id = (p.PackageId ?? p.ProjectName)?.Trim() ?? "";
+            var id = p.PackageId?.Trim() ?? "";
             return !string.IsNullOrEmpty(id) && packageIds.Contains(id);
         }).ToList();
     }
