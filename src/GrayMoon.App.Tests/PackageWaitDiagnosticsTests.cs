@@ -272,7 +272,8 @@ public sealed class PackageWaitDiagnosticsTests
         var nuget = new ScriptedNuGetHandler { PackageFailuresRemaining = 2, FailureStatus = HttpStatusCode.ServiceUnavailable };
         nuget.VersionsByPackage["found.a"] = ["1.2.3"];
         var logs = new CapturingLoggerProvider();
-        await using var ctx = await CreateContextAsync(nuget, logs);
+        // Two failures then a success needs a third poll (2 s apart); the default 6 s window is too tight on a loaded runner.
+        await using var ctx = await CreateContextAsync(nuget, logs, timeoutMinutesPerDependency: 0.5);
         await SeedGraphAsync(ctx,
             [new GraphRepo("producer-a", 1, "Found.A", "1.2.3"), new GraphRepo("consumer-one", 2, null, "2.0.0")],
             [new GraphEdge("consumer-one", "Found.A", "1.2.3")]);
@@ -380,7 +381,7 @@ public sealed class PackageWaitDiagnosticsTests
         return errors;
     }
 
-    private static Task<SyncStateTestContext> CreateContextAsync(ScriptedNuGetHandler nuget, CapturingLoggerProvider logs)
+    private static Task<SyncStateTestContext> CreateContextAsync(ScriptedNuGetHandler nuget, CapturingLoggerProvider logs, double timeoutMinutesPerDependency = 0.1)
         => SyncStateTestContext.CreateAsync(configureServices: services =>
         {
             services.AddLogging(builder =>
@@ -390,7 +391,7 @@ public sealed class PackageWaitDiagnosticsTests
             });
             services.AddSingleton(logs);
             services.AddSingleton<ILoggerProvider>(logs);
-            services.Configure<WorkspaceOptions>(options => options.PushWaitDependencyTimeoutMinutesPerDependency = 0.1);
+            services.Configure<WorkspaceOptions>(options => options.PushWaitDependencyTimeoutMinutesPerDependency = timeoutMinutesPerDependency);
             services.AddSingleton(new HttpClient(nuget));
             services.AddScoped<NuGetService>();
             services.AddScoped<PackageRegistrySyncService>();
