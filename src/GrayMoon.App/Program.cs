@@ -184,6 +184,7 @@ try
     builder.Services.AddScoped<WorkspaceRepositoryStateWriter>();
     builder.Services.AddScoped<WorkspaceStateRecomputeScope>();
     builder.Services.AddSingleton<SyncRecomputeCoalescer>();
+    builder.Services.AddSingleton<FileVersionCheckCoalescer>();
     builder.Services.AddSingleton<FeatureFinalizationCoordinator>();
     builder.Services.AddScoped<WorkspaceActionRepository>();
     builder.Services.AddScoped<WorkspaceActionService>();

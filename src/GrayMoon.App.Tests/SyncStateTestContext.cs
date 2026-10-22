@@ -119,6 +119,9 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddScoped<WorkspaceRepositoryStateWriter>();
         services.AddScoped<WorkspaceStateRecomputeScope>();
         services.AddScoped<WorkspaceDependencyService>();
+        // Per-host singleton: parallel tests seed workspace id 1 in separate DBs and must not share the process
+        // coalescer key, or one fixture can swallow the other's CheckFileVersions call.
+        services.AddSingleton<FileVersionCheckCoalescer>();
         services.AddScoped<WorkspaceFileVersionService>();
         services.AddSingleton<IWorkspaceManifestFile, WorkspaceManifestFile>();
         services.AddScoped<GrayMoon.Application.WorkspaceManifest.IWorkspaceManifestService, GrayMoon.App.Services.WorkspaceManifest.WorkspaceManifestService>();
