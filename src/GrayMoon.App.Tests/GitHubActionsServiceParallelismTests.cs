@@ -71,6 +71,36 @@ public sealed class GitHubActionsServiceParallelismTests
         AssertPeakBounded(context.Http.PeakConcurrency, limit);
     }
 
+    [Fact]
+    public async Task GetWorkflowStatusesForBranch_rereads_a_transient_empty_runs_list_when_workflows_exist()
+    {
+        await using var context = await ActionsTestContext.CreateAsync(limit: 1, repositoryCount: 1);
+        context.Http.HasActiveWorkflow = true;
+        context.Http.WorkflowCount = 1;
+        context.Http.EmptyRunsResponses = 1;
+
+        var statuses = await context.Service.GetWorkflowStatusesForBranchAsync(context.Repository, "main");
+
+        Assert.NotNull(statuses);
+        Assert.Equal("success", Assert.Single(statuses!).Status);
+        Assert.Equal(2, context.Http.RunsRequestCount);
+    }
+
+    [Fact]
+    public async Task GetWorkflowStatusesForBranch_reports_none_when_the_runs_list_stays_empty()
+    {
+        await using var context = await ActionsTestContext.CreateAsync(limit: 1, repositoryCount: 1);
+        context.Http.HasActiveWorkflow = true;
+        context.Http.WorkflowCount = 1;
+        context.Http.EmptyRunsResponses = int.MaxValue;
+
+        var statuses = await context.Service.GetWorkflowStatusesForBranchAsync(context.Repository, "main");
+
+        Assert.NotNull(statuses);
+        Assert.Equal("none", Assert.Single(statuses!).Status);
+        Assert.Equal(3, context.Http.RunsRequestCount);
+    }
+
     private static void AssertPeakBounded(int peak, int limit)
     {
         Assert.True(peak <= limit, $"Peak concurrency {peak} exceeded limit {limit}.");
@@ -85,15 +115,24 @@ public sealed class GitHubActionsServiceParallelismTests
         public int PeakConcurrency => Volatile.Read(ref _peak);
         public string? FailRepository { get; set; }
         public int WorkflowCount { get; set; }
+        public bool HasActiveWorkflow { get; set; }
+        public int EmptyRunsResponses { get; set; }
+        public int RunsRequestCount => Volatile.Read(ref _runsRequests);
+        private int _runsRequests;
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var uri = request.RequestUri!.PathAndQuery;
 
             if (uri.EndsWith("/actions/workflows", StringComparison.Ordinal))
-                return Json("""{"workflows":[]}""");
+                return Json(HasActiveWorkflow
+                    ? """{"workflows":[{"id":1,"name":"wf01","path":".github/workflows/wf01.yml","html_url":"","state":"active"}]}"""
+                    : """{"workflows":[]}""");
             if (uri.Contains("/actions/runs?branch=", StringComparison.Ordinal))
             {
+                if (Interlocked.Increment(ref _runsRequests) <= EmptyRunsResponses)
+                    return Json("""{"total_count":0,"workflow_runs":[]}""");
+
                 var runs = string.Join(",", Enumerable.Range(1, WorkflowCount).Select(i =>
                     $$"""{"id":{{i}},"workflow_id":{{i}},"name":"wf{{i:D2}}","event":"push","head_branch":"main","status":"completed","conclusion":"success","updated_at":"2026-10-06T00:00:00Z","html_url":""}"""));
                 return Json($$"""{"workflow_runs":[{{runs}}]}""");
