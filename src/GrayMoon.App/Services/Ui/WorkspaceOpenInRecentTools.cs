@@ -10,15 +10,23 @@ namespace GrayMoon.App.Services.Ui;
 /// The feature selector paints from <see cref="TryGetCached"/> so a later page can show the
 /// buttons with New Feature, then reads the database when this circuit has not loaded that Workspace.
 /// </summary>
-public sealed class WorkspaceOpenInRecentTools(IDbContextFactory<AppDbContext> dbContextFactory)
+public sealed class WorkspaceOpenInRecentTools(
+    IDbContextFactory<AppDbContext> dbContextFactory,
+    IHttpContextAccessor httpContextAccessor)
 {
+    /// <summary>
+    /// Token GrayMoon.Desktop appends to the WebView2 user agent. A normal browser on the same port lacks it.
+    /// </summary>
+    public const string DesktopUserAgentToken = "GrayMoonDesktop";
+
     private readonly Dictionary<int, IReadOnlyList<string>> _session = new();
 
     /// <summary>
     /// Whether this circuit runs inside the Desktop WebView, once the first page has probed it. Later pages
     /// read it so the buttons are in their first paint. Null until the probe has answered.
     /// </summary>
-    public bool? InDesktopWebView { get; set; }
+    public bool? InDesktopWebView { get; set; } = httpContextAccessor.HttpContext?.Request.Headers.UserAgent.ToString()
+        .Contains(DesktopUserAgentToken, StringComparison.Ordinal) == true ? true : null;
 
     public async Task<IReadOnlyList<string>> GetAsync(int workspaceId, CancellationToken cancellationToken = default)
     {

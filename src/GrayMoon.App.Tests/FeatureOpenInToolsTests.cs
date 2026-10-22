@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http;
 using GrayMoon.App;
 using GrayMoon.App.Components.Features;
 using GrayMoon.App.Data;
@@ -112,6 +113,16 @@ public sealed class FeatureOpenInToolsTests
 public sealed class WorkspaceOpenInRecentToolsDbTests
 {
     [Fact]
+    public async Task Desktop_user_agent_token_marks_the_circuit_as_the_desktop_window()
+    {
+        await using var db = await RecentToolsDb.CreateAsync();
+
+        Assert.True(db.CreateService("Mozilla/5.0 Edg/130 GrayMoonDesktop").InDesktopWebView);
+        Assert.Null(db.CreateService("Mozilla/5.0 Edg/130").InDesktopWebView);
+        Assert.Null(db.CreateService().InDesktopWebView);
+    }
+
+    [Fact]
     public async Task Record_appends_and_a_new_circuit_reads_the_same_order()
     {
         await using var db = await RecentToolsDb.CreateAsync();
@@ -208,7 +219,11 @@ public sealed class WorkspaceOpenInRecentToolsDbTests
             return new RecentToolsDb(connection, options);
         }
 
-        public WorkspaceOpenInRecentTools CreateService() => new(new Factory(_options));
+        public WorkspaceOpenInRecentTools CreateService() => new(new Factory(_options), new HttpContextAccessor());
+
+        public WorkspaceOpenInRecentTools CreateService(string userAgent) => new(
+            new Factory(_options),
+            new HttpContextAccessor { HttpContext = new DefaultHttpContext { Request = { Headers = { UserAgent = userAgent } } } });
 
         public AppDbContext CreateContext() => new(_options);
 

@@ -163,6 +163,7 @@ try
     builder.Services.AddScoped<WorkspaceContextNavigationService>();
     builder.Services.AddScoped<IWorkspaceExternalWorktreeOperations, WorkspaceExternalWorktreeOperations>();
     builder.Services.AddScoped<IWorkspaceNativeLaunchService, WorkspaceNativeLaunchService>();
+    builder.Services.AddHttpContextAccessor();
     builder.Services.AddScoped<WorkspaceOpenInRecentTools>();
     builder.Services.AddScoped<IWorkspaceBranchOccupancyService, WorkspaceBranchOccupancyService>();
     builder.Services.AddScoped<IFeatureBranchGuard, FeatureBranchGuard>();
