@@ -12,7 +12,7 @@ Branch: `package-collision` (GrayMoon sub-repo), HEAD at audit start `937b5fb6`.
 | P2 physical merge | Done, gate passed (1607 App, 817 Worker tests green) |
 | P3 graph identity/ambiguity | Done, gate passed (1610 App tests green) |
 | P4 transactional reconciliation | Done, gate passed (1616 App tests green) |
-| P5 diagnostics/perf | Not started |
+| P5 diagnostics/perf | Done, gate passed (1621 App tests green) |
 | P6 integration/docs | Not started |
 
 ## P0 findings (deviations from the design baseline `8e284e4`)
@@ -124,3 +124,23 @@ Approved by the owner ("ok, let's start"): D1-D7 as proposed, with the D1/D2 ref
 - The batched sync (`PersistVersionsAsync`) merges projects (state writer) and edges (afterwards) as two commits; folding them needs the edge merge moved into the state writer (touches capability gating), left for P6 if wanted.
 - Longer transactions on the single-repository path hold SQLite locks for the merge and level recompute (seconds at most).
 - Next gated phase: P5 (diagnostics and performance). Waiting for a go-ahead.
+
+## P5 - diagnostics and performance (done, gate passed)
+
+**Changed**
+- Structured diagnostics: `Category=DuplicateProjectName` (Warning, one per repository per scan, nothing when names are unique; bounded to 5 names and 5 paths each, resolution `KeptDistinctByPath`) and `Category=AmbiguousPackageProducer` (Warning; PackageId, ProducerCount, bounded producer list as `repo:path`, consumer reference count, `Resolution=NoEdge`). Unusable-path and conflicting-path warnings from P2 and the failed-scan warning from P4 remain.
+- `Project reconciliation:` Information summary per `ReconcileProjectSnapshotAsync` call (repositories, skipped, projects, whether edges were merged, `ElapsedMs`); the existing merge and edge-count lines carry the deltas. All diagnostics use repo-relative paths, ids and package ids only. No new disk traversal: everything groups the in-memory scan.
+- Tests (`ProjectIdentityDiagnosticsTests`, with a collecting logger on the test context): duplicate-name warning is single and bounded, repeated clean scans log no warnings, ambiguous-producer warning fields, skipped failed scan, and a 39-repository x 100-project workspace (3900 projects) for first, repeated and partial reconciliation.
+
+**Performance (same scenario, same machine, in-memory SQLite, ms; baseline = repository at `a8d7f519`, name-keyed merge + dependency merge)**
+
+| | first | repeat (unchanged) | partial (1 repo) |
+|---|---|---|---|
+| Baseline | 7534 - 8675 | 5109 - 5398 | 3835 - 3869 |
+| After P4/P5 | 7289 - 10533 | 5506 - 6237 | 4031 - 4109 |
+
+Within run-to-run noise, with the repeat scan perhaps up to about 10 percent slower. A partial scan costs almost as much as a full one in both versions: the time is the full-graph dependency level recompute, which is unchanged and out of scope (see the P3 note). The regression test only fails above 60 seconds (a sanity bound, not a benchmark).
+
+**Risks / next**
+- Duplicate-name warnings repeat on every scan of an affected repository by design; if that proves noisy, throttle per repository in P6.
+- Next gated phase: P6 (integration, migration hardening, final docs and report). Waiting for a go-ahead.

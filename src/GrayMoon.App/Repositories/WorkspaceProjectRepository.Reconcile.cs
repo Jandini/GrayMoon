@@ -37,6 +37,7 @@ public sealed partial class WorkspaceProjectRepository
         // Projects-only is one SaveChanges, already atomic in EF's own short transaction; an explicit one is for the multi-save projection
         // (projects, then edges), and is kept off the single-save path because SQLite shared-cache table locks make a long transaction
         // fail concurrent writers of the same tables instead of waiting for them.
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var ownsTransaction = mergeEdges && dbContext.Database.CurrentTransaction is null;
         await using var transaction = ownsTransaction ? await dbContext.Database.BeginTransactionAsync(cancellationToken) : null;
         try
@@ -59,6 +60,10 @@ public sealed partial class WorkspaceProjectRepository
 
             if (transaction is not null)
                 await transaction.CommitAsync(cancellationToken);
+
+            logger.LogInformation(
+                "Project reconciliation: WorkspaceId={WorkspaceId}, ContextId={ContextId}, Repositories={Repositories}, Skipped={Skipped}, Projects={Projects}, EdgesMerged={EdgesMerged}, ElapsedMs={ElapsedMs}",
+                workspaceId, workspaceFeatureContextId, authoritative.Count, failed, authoritative.Sum(o => o.Projects.Count), mergeEdges, stopwatch.ElapsedMilliseconds);
         }
         catch
         {

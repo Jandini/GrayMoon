@@ -116,6 +116,7 @@ public sealed partial class WorkspaceProjectRepository
         IReadOnlyList<WorkspaceProject> existing)
     {
         var incoming = IndexIncomingProjects(projects, workspaceFeatureContextId, repositoryId, logConflicts: true);
+        LogDuplicateProjectNames(workspaceId, repositoryId, workspaceFeatureContextId, incoming.Values);
 
         var matched = new Dictionary<string, WorkspaceProject>(StringComparer.Ordinal);
         var unmatched = new List<WorkspaceProject>();
@@ -185,6 +186,28 @@ public sealed partial class WorkspaceProjectRepository
         }
 
         return (toRemove.Count, incoming.Count);
+    }
+
+    private const int DiagnosticSampleSize = 5;
+
+    /// <summary>
+    /// Same-named projects at different paths are legitimate (each is its own project), so this is a diagnostic, not an
+    /// error: one bounded warning per repository per scan, nothing when every name is unique. Works on the in-memory scan only.
+    /// </summary>
+    private void LogDuplicateProjectNames(int workspaceId, int repositoryId, int workspaceFeatureContextId, IEnumerable<SyncProjectInfo> incoming)
+    {
+        var duplicates = incoming
+            .GroupBy(p => p.ProjectName.Trim(), StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Count() > 1)
+            .ToList();
+        if (duplicates.Count == 0)
+            return;
+
+        var sample = string.Join("; ", duplicates.Take(DiagnosticSampleSize).Select(g =>
+            $"{g.Key} x{g.Count()} [{string.Join(", ", g.Take(DiagnosticSampleSize).Select(p => p.ProjectFilePath))}]"));
+        logger.LogWarning(
+            "Project identity diagnostic: Category=DuplicateProjectName, WorkspaceId={WorkspaceId}, ContextId={ContextId}, RepositoryId={RepositoryId}, DuplicateNames={Count}, Sample={Sample}, Resolution=KeptDistinctByPath",
+            workspaceId, workspaceFeatureContextId, repositoryId, duplicates.Count, sample);
     }
 
     /// <summary>
@@ -350,8 +373,8 @@ public sealed partial class WorkspaceProjectRepository
 
         foreach (var (packageId, consumers) in ambiguousConsumers)
             logger.LogWarning(
-                "Ambiguous package producer: WorkspaceId={WorkspaceId}, ContextId={ContextId}, PackageId={PackageId}, Producers={Producers}, ConsumerReferences={Consumers}; no dependency edge created",
-                workspaceId, workspaceFeatureContextId, packageId, targets.DescribeProducers(packageId), consumers);
+                "Project identity diagnostic: Category=AmbiguousPackageProducer, WorkspaceId={WorkspaceId}, ContextId={ContextId}, PackageId={PackageId}, ProducerCount={ProducerCount}, Producers={Producers}, ConsumerReferences={Consumers}, Resolution=NoEdge",
+                workspaceId, workspaceFeatureContextId, packageId, targets.ProducerCount(packageId), targets.DescribeProducers(packageId), consumers);
 
         // An edge is valid only while its referenced project is the unique producer of a package. Producers can lose
         // that status (PackageId removed or changed, project removed, a second producer appeared) in a scan that does
@@ -527,6 +550,8 @@ public sealed partial class WorkspaceProjectRepository
                 return new Resolution(null, false);
             return list.Count == 1 ? new Resolution(list[0].ProjectId, false) : new Resolution(null, true);
         }
+
+        public int ProducerCount(string packageId) => _chosen.TryGetValue(packageId.Trim(), out var list) ? list.Count : 0;
 
         public string DescribeProducers(string packageId) =>
             _chosen.TryGetValue(packageId.Trim(), out var list)

@@ -304,13 +304,13 @@ public sealed class GeneratedPackageTestContext : IAsyncDisposable
         _provider = provider;
     }
 
-    public static async Task<GeneratedPackageTestContext> CreateAsync(Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor? interceptor = null)
+    public static async Task<GeneratedPackageTestContext> CreateAsync(Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor? interceptor = null, Microsoft.Extensions.Logging.ILoggerProvider? logProvider = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
 
         var services = new ServiceCollection();
-        services.AddLogging(b => b.SetMinimumLevel(LogLevel.Warning));
+        services.AddLogging(b => { b.SetMinimumLevel(logProvider is null ? LogLevel.Warning : LogLevel.Information); if (logProvider is not null) b.AddProvider(logProvider); });
         services.AddDbContext<AppDbContext>(o => { o.UseSqlite(connection); if (interceptor is not null) o.AddInterceptors(interceptor); }, ServiceLifetime.Scoped);
         services.AddDbContextFactory<AppDbContext>(o => o.UseSqlite(connection), ServiceLifetime.Singleton);
         services.AddScoped<WorkspaceFileVersionConfigRepository>();
