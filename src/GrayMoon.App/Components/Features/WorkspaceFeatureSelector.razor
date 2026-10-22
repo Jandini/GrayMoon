@@ -458,6 +458,9 @@
         if (_installedToolsDetected || string.IsNullOrEmpty(Configuration["Desktop:PipeName"]))
             return;
 
+        // An earlier page in this circuit already proved the WebView bridge, so paint the buttons straight away.
+        _desktopAvailable = OpenInRecentTools.InDesktopWebView == true;
+
         _installedTools = InstalledOpenInTools.Detect();
         _installedToolsDetected = true;
     }
@@ -516,6 +519,7 @@
         try
         {
             var inWebView = await JS.InvokeAsync<bool>("eval", "!!(window.graymoonDesktop && window.graymoonDesktop.isAvailable && window.graymoonDesktop.isAvailable())");
+            OpenInRecentTools.InDesktopWebView = inWebView;
             if (!inWebView)
             {
                 // A normal browser on the same port has no WebView bridge; the buttons were never shown.

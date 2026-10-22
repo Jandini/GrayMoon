@@ -14,6 +14,12 @@ public sealed class WorkspaceOpenInRecentTools(IDbContextFactory<AppDbContext> d
 {
     private readonly Dictionary<int, IReadOnlyList<string>> _session = new();
 
+    /// <summary>
+    /// Whether this circuit runs inside the Desktop WebView, once the first page has probed it. Later pages
+    /// read it so the buttons are in their first paint. Null until the probe has answered.
+    /// </summary>
+    public bool? InDesktopWebView { get; set; }
+
     public async Task<IReadOnlyList<string>> GetAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
         if (workspaceId <= 0)
