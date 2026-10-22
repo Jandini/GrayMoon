@@ -67,7 +67,16 @@ public sealed partial class WorkspaceProjectRepository
         if (repoProjects == null || repoProjects.Count == 0) return;
 
         using var projectionGate = await AcquireProjectionGateAsync(workspaceFeatureContextId, cancellationToken);
+        await MergeProjectsBatchCoreAsync(workspaceId, repoProjects, workspaceFeatureContextId, cancellationToken);
+    }
 
+    /// <summary>Batch project merge without the projection gate (the caller holds it). Saves once.</summary>
+    private async Task MergeProjectsBatchCoreAsync(
+        int workspaceId,
+        IReadOnlyList<(int RepositoryId, IReadOnlyList<SyncProjectInfo> Projects)> repoProjects,
+        int workspaceFeatureContextId,
+        CancellationToken cancellationToken = default)
+    {
         var repoIds = repoProjects.Select(r => r.RepositoryId).ToHashSet();
         var existingAll = await dbContext.WorkspaceProjects
             .Where(p => p.WorkspaceId == workspaceId
@@ -280,7 +289,17 @@ public sealed partial class WorkspaceProjectRepository
         CancellationToken cancellationToken = default)
     {
         using var projectionGate = await AcquireProjectionGateAsync(workspaceFeatureContextId, cancellationToken);
+        await MergeDependenciesCoreAsync(workspaceId, syncResults, workspaceFeatureContextId, persistDependencyLevel, cancellationToken);
+    }
 
+    /// <summary>Dependency merge without the projection gate (the caller holds it).</summary>
+    private async Task MergeDependenciesCoreAsync(
+        int workspaceId,
+        IReadOnlyList<(int RepoId, IReadOnlyList<SyncProjectInfo>? ProjectsDetail)> syncResults,
+        int workspaceFeatureContextId,
+        bool persistDependencyLevel,
+        CancellationToken cancellationToken)
+    {
         var workspaceProjects = await dbContext.WorkspaceProjects
             .AsNoTracking()
             .Where(p => p.WorkspaceId == workspaceId && p.WorkspaceFeatureContextId == workspaceFeatureContextId)

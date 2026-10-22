@@ -304,14 +304,14 @@ public sealed class GeneratedPackageTestContext : IAsyncDisposable
         _provider = provider;
     }
 
-    public static async Task<GeneratedPackageTestContext> CreateAsync()
+    public static async Task<GeneratedPackageTestContext> CreateAsync(Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor? interceptor = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
 
         var services = new ServiceCollection();
         services.AddLogging(b => b.SetMinimumLevel(LogLevel.Warning));
-        services.AddDbContext<AppDbContext>(o => o.UseSqlite(connection), ServiceLifetime.Scoped);
+        services.AddDbContext<AppDbContext>(o => { o.UseSqlite(connection); if (interceptor is not null) o.AddInterceptors(interceptor); }, ServiceLifetime.Scoped);
         services.AddDbContextFactory<AppDbContext>(o => o.UseSqlite(connection), ServiceLifetime.Singleton);
         services.AddScoped<WorkspaceFileVersionConfigRepository>();
         services.AddScoped<WorkspaceRepositoryCustomDependencyRepository>();

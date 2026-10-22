@@ -92,13 +92,6 @@ public sealed partial class WorkspaceGitService
             }
         }));
 
-        var repoProjectsToMerge = syncResults
-            .Where(r => r.ProjectsDetail is not null)
-            .Select(r => (r.RepositoryId, (IReadOnlyList<SyncProjectInfo>)r.ProjectsDetail!))
-            .ToList();
-        if (repoProjectsToMerge.Count > 0)
-            await _workspaceProjectRepository.MergeWorkspaceProjectsBatchAsync(workspaceId, repoProjectsToMerge, contextId.Value, cancellationToken);
-
         var repoIdsToUpdate = syncResults.Select(r => r.RepositoryId).ToList();
         var linksToUpdate = await _dbContext.WorkspaceRepositories
             .Where(wr => wr.WorkspaceId == workspaceId && repoIdsToUpdate.Contains(wr.RepositoryId))
@@ -109,10 +102,15 @@ public sealed partial class WorkspaceGitService
             if (link != null && r.ProjectsDetail is not null)
                 link.RepositoryType = ComputeRepositoryType(r.ProjectsDetail);
         }
-        await _dbContext.SaveChangesAsync(cancellationToken);
 
-        var resultsForDeps = syncResults.Select(r => (r.RepositoryId, r.ProjectsDetail)).ToList();
-        await _workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(workspaceId, resultsForDeps, contextId.Value, persistDependencyLevel: true, cancellationToken);
+        // Projects, edges, levels and the staged repository types commit together; a failed or unscanned repository is left as it was.
+        await _workspaceProjectRepository.ReconcileProjectSnapshotAsync(
+            workspaceId,
+            contextId.Value,
+            syncResults.Select(r => ProjectScanOutcome.FromProjectsDetail(r.RepositoryId, r.ProjectsDetail)).ToList(),
+            mergeEdges: true,
+            persistDependencyLevel: true,
+            cancellationToken);
 
         _logger.LogDebug("RefreshWorkspaceProjects completed for workspace {WorkspaceName}", workspace.Name);
     }
@@ -157,18 +155,19 @@ public sealed partial class WorkspaceGitService
         }
 
         var projectsDetail = GetAuthoritativeProjectsDetail(response.Data);
-        if (projectsDetail is not null)
-            await _workspaceProjectRepository.MergeWorkspaceProjectsAsync(workspaceId, repositoryId, projectsDetail, contextId.Value, cancellationToken);
 
         var link = await _dbContext.WorkspaceRepositories
             .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId, cancellationToken);
         if (link != null && projectsDetail is not null)
-        {
             link.RepositoryType = ComputeRepositoryType(projectsDetail);
-            await _dbContext.SaveChangesAsync(cancellationToken);
-        }
 
-        await _workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(workspaceId, [(repositoryId, projectsDetail)], contextId.Value, persistDependencyLevel: true, cancellationToken);
+        await _workspaceProjectRepository.ReconcileProjectSnapshotAsync(
+            workspaceId,
+            contextId.Value,
+            [ProjectScanOutcome.FromProjectsDetail(repositoryId, projectsDetail)],
+            mergeEdges: true,
+            persistDependencyLevel: true,
+            cancellationToken);
         _logger.LogDebug("RefreshSingleRepositoryProjects completed for workspace {WorkspaceName}, repo {RepositoryId}", workspace.Name, repositoryId);
         return true;
     }

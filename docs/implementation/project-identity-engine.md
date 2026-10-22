@@ -11,7 +11,7 @@ Branch: `package-collision` (GrayMoon sub-repo), HEAD at audit start `937b5fb6`.
 | P1 identity/schema/migration | Done, gate passed (1596 App tests green) |
 | P2 physical merge | Done, gate passed (1607 App, 817 Worker tests green) |
 | P3 graph identity/ambiguity | Done, gate passed (1610 App tests green) |
-| P4 transactional reconciliation | Not started |
+| P4 transactional reconciliation | Done, gate passed (1616 App tests green) |
 | P5 diagnostics/perf | Not started |
 | P6 integration/docs | Not started |
 
@@ -108,3 +108,19 @@ Approved by the owner ("ok, let's start"): D1-D7 as proposed, with the D1/D2 ref
 **Risks / next**
 - Dependency levels are recomputed from the full graph after each merge (unchanged); no incremental maintenance was added.
 - Next gated phase: P4 (transactional `ReconcileProjectSnapshotAsync`, all entry points). Waiting for a go-ahead.
+
+## P4 - transactional reconciliation and entry points (done, gate passed)
+
+**Changed**
+- New `ProjectScanOutcome` / `ProjectScanStatus` (`Success`, `EmptySuccess`, `Failure`) and `WorkspaceProjectRepository.ReconcileProjectSnapshotAsync` (`WorkspaceProjectRepository.Reconcile.cs`): one gate acquisition; projects of authoritative repositories merged, then (optionally) edges and levels, in one transaction (joins an ambient one; clears the change tracker on rollback). Failed repositories are skipped and logged. `Merge.cs` now has gate-free cores (`MergeProjectsBatchCoreAsync`, `MergeDependenciesCoreAsync`) behind the unchanged public methods.
+- Routed through it: `RefreshWorkspaceProjectsAsync`, `RefreshSingleRepositoryProjectsAsync` (repository type staged and committed with the projection) and `WorkspaceRepositoryStateWriter` (`ApplyProjectsAsync` with edges; `ApplyBatchAsync` projects only). Feature seed keeps its own transaction and gate coordination. Generated-package sync keeps its own save.
+- Tests (`ProjectSnapshotReconciliationTests`): injected fault on the edge save rolls back projects and edges; failed scans change nothing; mixed batch touches only successful repositories; empty success keeps generated rows; batch and per-repository calls give the same graph; joins an outer transaction. Test context takes an optional EF interceptor.
+
+**Validation:** App tests 1616 passed / 0 failed.
+
+**Decision to confirm:** the explicit transaction is used only when edges are merged. `BranchRowSaveRaceTests.Batch_state_write_with_projects_survives_a_racing_branch_refresh` failed ("database table is locked") with a transaction around the batch path; production uses `Cache=Shared`, where a long transaction makes other writers of the same tables fail instead of wait. The projects-only batch is one `SaveChanges` and stays atomic without it.
+
+**Risks / next**
+- The batched sync (`PersistVersionsAsync`) merges projects (state writer) and edges (afterwards) as two commits; folding them needs the edge merge moved into the state writer (touches capability gating), left for P6 if wanted.
+- Longer transactions on the single-repository path hold SQLite locks for the merge and level recompute (seconds at most).
+- Next gated phase: P5 (diagnostics and performance). Waiting for a go-ahead.
