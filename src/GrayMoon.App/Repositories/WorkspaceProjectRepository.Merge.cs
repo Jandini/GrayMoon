@@ -100,10 +100,7 @@ public sealed partial class WorkspaceProjectRepository
         IReadOnlyList<SyncProjectInfo> projects,
         IReadOnlyList<WorkspaceProject> existing)
     {
-        var byName = projects
-            .Where(p => !string.IsNullOrWhiteSpace(p.ProjectName))
-            .GroupBy(p => p.ProjectName.Trim(), StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        var byName = SelectProjectsByName(projects);
 
         var incomingNames = new HashSet<string>(byName.Keys, StringComparer.OrdinalIgnoreCase);
 
@@ -146,6 +143,27 @@ public sealed partial class WorkspaceProjectRepository
 
         return (toRemove.Count, byName.Count);
     }
+
+    /// <summary>
+    /// Picks one incoming project per trimmed, case-insensitive <c>ProjectName</c>, since only one row per name can be stored.
+    /// A candidate with a PackageId wins, then ProjectType.Package, then the normalized relative path (ordinal, ignoring case,
+    /// with an ordinal tie-break); an exact tie keeps discovery order. The Worker sets PackageId only for Package projects
+    /// (IsPackable=false is a Library with no PackageId), so a name-sharing non-package shell never hides the real producer.
+    /// </summary>
+    internal static Dictionary<string, SyncProjectInfo> SelectProjectsByName(IEnumerable<SyncProjectInfo> projects) =>
+        projects
+            .Where(p => !string.IsNullOrWhiteSpace(p.ProjectName))
+            .GroupBy(p => p.ProjectName.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderByDescending(p => !string.IsNullOrWhiteSpace(p.PackageId))
+                    .ThenByDescending(p => p.ProjectType == ProjectType.Package)
+                    .ThenBy(p => NormalizeProjectPath(p.ProjectFilePath), StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(p => NormalizeProjectPath(p.ProjectFilePath), StringComparer.Ordinal)
+                    .First(),
+                StringComparer.OrdinalIgnoreCase);
+
+    private static string NormalizeProjectPath(string? path) => (path ?? string.Empty).Replace('\\', '/');
 
     /// <summary>Serializes project/edge writers of one context with the Feature seed (see <see cref="GrayMoon.App.Services.Features.FeatureFinalizationCoordinator"/>). No-op without a coordinator.</summary>
     private async Task<IDisposable> AcquireProjectionGateAsync(int workspaceFeatureContextId, CancellationToken cancellationToken) =>
@@ -223,9 +241,10 @@ public sealed partial class WorkspaceProjectRepository
 
             var repoProjects = workspaceProjects.Where(p => p.WorkspaceId == workspaceId && p.RepositoryId == repoId).ToDictionary(p => p.ProjectName.Trim(), p => p.ProjectId, StringComparer.OrdinalIgnoreCase);
 
-            foreach (var info in projectsDetail)
+            // Only the candidate MergeProjectsForRepository persisted may contribute edges, so a discarded
+            // same-name shell's PackageReferences are not attributed to the retained row.
+            foreach (var info in SelectProjectsByName(projectsDetail).Values)
             {
-                if (string.IsNullOrWhiteSpace(info.ProjectName)) continue;
                 if (!repoProjects.TryGetValue(info.ProjectName.Trim(), out var dependentProjectId)) continue;
 
                 dependentProjectIds.Add(dependentProjectId);
