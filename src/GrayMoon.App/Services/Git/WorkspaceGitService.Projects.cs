@@ -320,8 +320,11 @@ public sealed partial class WorkspaceGitService
 
         await Task.WhenAll(repoTasks);
 
+        // Only a repo where the worker really changed a file may have its declared versions recorded. A repo the worker
+        // left untouched (0 updated) still differs from the referenced version on disk, so recording the target would
+        // show green until the next read of that repo's files turns it red again.
         var updatesToPersist = toSync
-            .Where(r => !failedRepoIds.ContainsKey(r.RepoId))
+            .Where(r => syncedRepoIds.ContainsKey(r.RepoId))
             .SelectMany(r => r.ProjectUpdates.SelectMany(p => p.PackageUpdates.Select(u => (r.RepoId, p.ProjectPath, u.PackageId, u.NewVersion))))
             .ToList();
         if (updatesToPersist.Count > 0)

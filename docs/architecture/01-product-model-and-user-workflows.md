@@ -294,6 +294,10 @@ generated package relationships
 custom user-declared dependencies
 ```
 
+A `PackageReference` with no `Version` uses central package management: its version is the `PackageVersion` entry in the
+nearest `Directory.Packages.props` inside the repository. The Worker reads it from there, rewrites that entry when
+dependency versions are updated, and stages the file with the project when the update is committed.
+
 ### Actions
 
 Shows GitHub Actions workflows for the current repository branches across the Workspace. Available only when the Workspace's CI provider is GitHub Actions.

@@ -40,7 +40,8 @@ public sealed class CsProjFileParser : ICsProjFileParser
             var doc = XDocument.Load(csprojPath);
             var root = ResolveRepositoryRoot(csprojPath, repositoryRoot);
             var packaging = ProjectPackagingResolver.Resolve(csprojPath, root);
-            var result = ParseCsProjDocument(doc, csprojPath, packaging);
+            var central = CentralPackageVersions.Read(CentralPackageVersions.FindPropsFile(csprojPath, root));
+            var result = ParseCsProjDocument(doc, csprojPath, packaging, central);
             return Task.FromResult(result);
         }
         catch
@@ -169,7 +170,11 @@ public sealed class CsProjFileParser : ICsProjFileParser
         return null;
     }
 
-    private static CsProjFileInfo? ParseCsProjDocument(XDocument doc, string csprojPath, ProjectPackagingResolver.PackagingProperties packaging)
+    private static CsProjFileInfo? ParseCsProjDocument(
+        XDocument doc,
+        string csprojPath,
+        ProjectPackagingResolver.PackagingProperties packaging,
+        IReadOnlyDictionary<string, string> centralVersions)
     {
         var root = doc.Root;
         if (root == null)
@@ -211,7 +216,12 @@ public sealed class CsProjFileParser : ICsProjFileParser
                 return (Include: include, Version: version);
             })
             .Where(t => !string.IsNullOrWhiteSpace(t.Include))
-            .Select(t => new NuGetPackageReference { Name = t.Include!, Version = t.Version })
+            .Select(t => new NuGetPackageReference
+            {
+                Name = t.Include!,
+                // Central package management: a reference without its own version takes the Directory.Packages.props one.
+                Version = string.IsNullOrWhiteSpace(t.Version) && centralVersions.TryGetValue(t.Include!, out var central) ? central : t.Version
+            })
             .ToList();
 
         var projectType = ResolveProjectType(sdk, outputType, packageRefs, packaging.PackageId, packaging.IsPackable);

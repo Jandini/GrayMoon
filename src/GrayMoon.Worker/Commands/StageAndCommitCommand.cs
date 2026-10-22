@@ -25,7 +25,22 @@ public sealed class StageAndCommitCommand(IGitService git, IGitRepositoryReader 
         if (checkedOutTag != null)
             return new StageAndCommitResponse { Success = true, Committed = false };
 
-        var (success, committed, errorMessage) = await git.StageAndCommitAsync(repoPath, pathsToStage.ToList(), commitMessage, cancellationToken, skipHooks: request.SkipHooks);
+        // A dependency update under central package management edits Directory.Packages.props, not the project, so the
+        // props file that governs each staged project is staged with it. Staging an unchanged file is a no-op.
+        var stagePaths = pathsToStage.ToList();
+        foreach (var path in pathsToStage.ToList())
+        {
+            if (string.IsNullOrWhiteSpace(path) || !path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+                continue;
+            var props = CentralPackageVersions.FindPropsFile(Path.Combine(repoPath, path), repoPath);
+            if (props == null)
+                continue;
+            var relative = Path.GetRelativePath(repoPath, props).Replace('\\', '/');
+            if (!stagePaths.Contains(relative, StringComparer.OrdinalIgnoreCase))
+                stagePaths.Add(relative);
+        }
+
+        var (success, committed, errorMessage) = await git.StageAndCommitAsync(repoPath, stagePaths, commitMessage, cancellationToken, skipHooks: request.SkipHooks);
         // Publish the post-commit Changes snapshot now. Waiting for the watcher (debounce + scan queue behind other
         // repositories) leaves the just-staged version files shown as staged long after the commit completed.
         try
