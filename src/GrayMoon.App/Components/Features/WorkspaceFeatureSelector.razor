@@ -1,4 +1,4 @@
-﻿@using System.Text.RegularExpressions
+@using System.Text.RegularExpressions
 @using GrayMoon.App.Services.Ui
 @implements IAsyncDisposable
 @using GrayMoon.Application
@@ -255,6 +255,7 @@
     private bool _open;
     private bool _loaded;
     private bool _desktopAvailable;
+    private bool _installedToolsDetected;
     private bool _desktopHostProbeStarted;
     private bool _toolAvailabilitySubscribed;
     private DotNetObjectReference<WorkspaceFeatureSelector>? _toolAvailabilityRef;
@@ -452,13 +453,13 @@
 
     private void ApplyDesktopOpenInState()
     {
-        if (_desktopAvailable || string.IsNullOrEmpty(Configuration["Desktop:PipeName"]))
+        // Desktop:PipeName is process-wide: a browser on the Desktop-launched App's port sees it too, so it cannot show
+        // the tools. It only says the installed-tool scan is worth doing; the buttons appear once this client's WebView bridge answers.
+        if (_installedToolsDetected || string.IsNullOrEmpty(Configuration["Desktop:PipeName"]))
             return;
 
-        // GrayMoon.Desktop launches this process with --desktop, on the same machine as the
-        // WebView, so installed tools are known before the first paint.
         _installedTools = InstalledOpenInTools.Detect();
-        _desktopAvailable = true;
+        _installedToolsDetected = true;
     }
 
     protected override async Task OnParametersSetAsync()
@@ -517,8 +518,7 @@
             var inWebView = await JS.InvokeAsync<bool>("eval", "!!(window.graymoonDesktop && window.graymoonDesktop.isAvailable && window.graymoonDesktop.isAvailable())");
             if (!inWebView)
             {
-                // Desktop mode painted the buttons up front. A normal browser on the same port has
-                // no WebView bridge, so take them back off.
+                // A normal browser on the same port has no WebView bridge; the buttons were never shown.
                 if (_desktopAvailable)
                 {
                     _desktopAvailable = false;

@@ -235,6 +235,7 @@ try
     builder.Services.AddScoped<IWorkspacePageService, WorkspacePageService>();
     builder.Services.AddScoped<IWorkspaceTopBarService, WorkspaceTopBarService>();
     builder.Services.AddSingleton<DesktopWorkspaceContextTracker>();
+    builder.Services.AddSingleton<WorkspaceOperationOutcomeStore>();
 
     builder.Services.AddScoped<IWorkspaceGitChangesReadService, WorkspaceGitChangesReadService>();
     builder.Services.AddScoped<IGitChangesWorkerClient, GitChangesWorkerClient>();

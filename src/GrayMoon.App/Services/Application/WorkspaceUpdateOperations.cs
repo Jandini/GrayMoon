@@ -1,4 +1,5 @@
 using GrayMoon.App.Models;
+using GrayMoon.App.Services.Orchestration;
 using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Services.Application;
@@ -6,7 +7,8 @@ namespace GrayMoon.App.Services.Application;
 public sealed class WorkspaceUpdateOperations(
     WorkspaceUpdateHandler updateHandler,
     UpdateAndPushOrchestrator updateAndPushOrchestrator,
-    WorkspaceGitService workspaceGitService) : IWorkspaceUpdateOperations
+    WorkspaceGitService workspaceGitService,
+    WorkspaceOperationOutcomeStore outcomes) : IWorkspaceUpdateOperations
 {
     public Task<(IReadOnlyList<SyncDependenciesRepoPayload> Payload, bool IsMultiLevel)> GetUpdatePlanAsync(
         int workspaceId,
@@ -27,18 +29,21 @@ public sealed class WorkspaceUpdateOperations(
         bool includeDepsInCommitMessage = true,
         int? maxLevel = null,
         string? runId = null)
-        => updateHandler.RunUpdateAsync(
+    {
+        var recorder = outcomes.Begin(workspaceId, contextId, "Update");
+        return updateHandler.RunUpdateAsync(
             workspaceId,
             contextId,
             cancellationToken,
             progress,
-            setRepositoryError,
-            setLevelError,
+            (repoId, message) => { recorder.Repository(repoId, message); setRepositoryError(repoId, message); },
+            (level, message) => { recorder.Level(level, message); setLevelError(level, message); },
             repoIdsToUpdate: repoIdsToUpdate,
             commitMessage: commitMessage,
             includeDepsInCommitMessage: includeDepsInCommitMessage,
             maxLevel: maxLevel,
             runId: runId);
+    }
 
     public Task<UpdateAndPushResult> UpdateAndPushAsync(
         int workspaceId,
@@ -52,18 +57,21 @@ public sealed class WorkspaceUpdateOperations(
         int? maxLevel = null,
         bool restorePackages = true,
         string? runId = null)
-        => updateAndPushOrchestrator.RunAsync(
+    {
+        var recorder = outcomes.Begin(workspaceId, contextId, "Update and Push");
+        return updateAndPushOrchestrator.RunAsync(
             workspaceId,
             contextId,
             cancellationToken,
             reportOverlay,
-            setRepositoryError,
-            setLevelError,
+            (repoId, message) => { recorder.Repository(repoId, message); setRepositoryError(repoId, message); },
+            (level, message) => { recorder.Level(level, message); setLevelError(level, message); },
             commitMessage,
             includeDepsInCommitMessage,
             maxLevel,
             restorePackages,
             runId);
+    }
 
     public Task<int> RestorePackagesAsync(
         int workspaceId,

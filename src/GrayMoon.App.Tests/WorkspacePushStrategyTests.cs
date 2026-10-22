@@ -537,6 +537,7 @@ public sealed class WorkspacePushStrategyTests
             services.AddScoped<DotNetDependencyPushStrategy>();
             services.AddScoped<WorkspacePushStrategySelector>();
             services.AddScoped<IWorkspacePushOperations, WorkspacePushOperations>();
+            services.AddSingleton<WorkspaceOperationOutcomeStore>();
             services.AddScoped<WorkspaceUndoPushHandler>();
             services.AddSingleton<WorkerSyncNotificationQueue>();
             services.AddSingleton<IWorkerSyncNotificationBarrier>(sp => sp.GetRequiredService<WorkerSyncNotificationQueue>());

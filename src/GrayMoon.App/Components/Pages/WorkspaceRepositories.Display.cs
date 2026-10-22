@@ -1,6 +1,7 @@
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
+using GrayMoon.App.Services.Orchestration;
 using GrayMoon.App.Services.Worker;
 using GrayMoon.App.Services.WorkspaceManifest;
 using Microsoft.AspNetCore.Components;
@@ -133,6 +134,33 @@ public sealed partial class WorkspaceRepositories
 
     private bool HasAnyCalloutErrors =>
         repositoryErrors.Count > 0 || repositorySso.Count > 0 || levelErrors.Count > 0 || !string.IsNullOrWhiteSpace(errorMessage);
+
+    /// <summary>The last Update / Push run's failure for this context, kept outside the page so it survives leaving the page or a reload.</summary>
+    private WorkspaceOperationOutcome? StoredOperationOutcome =>
+        _selectedContextId is { } contextId ? OperationOutcomes.Get(WorkspaceId, contextId) : null;
+
+    /// <summary>Banner text for a grouped grid; a flat grid already shows its level errors in one callout.</summary>
+    private string? OperationOutcomeBanner =>
+        _presentation.GroupByDependencyLevel ? StoredOperationOutcome?.Describe() : null;
+
+    /// <summary>Shows the stored failure in the row and level callouts, as if the page had been present when it happened.</summary>
+    private void ApplyStoredOperationOutcome()
+    {
+        if (StoredOperationOutcome is not { } outcome)
+            return;
+
+        foreach (var (repositoryId, message) in outcome.RepositoryErrors)
+            SetRepositoryError(repositoryId, message);
+        foreach (var (level, message) in outcome.LevelErrors)
+            SetLevelError(level, message);
+    }
+
+    private void DismissOperationOutcome()
+    {
+        if (_selectedContextId is { } contextId)
+            OperationOutcomes.Clear(WorkspaceId, contextId);
+        ClearRepositoryErrors();
+    }
 
     private void ClearRepositoryErrors()
     {

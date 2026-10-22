@@ -121,7 +121,7 @@ public sealed partial class WorkspaceActions : IDisposable
                 }
             });
 
-            await _hubConnection.StartAsync();
+            _ = WorkspaceSyncHubConnectionHelper.TryStartAsync(_hubConnection, Logger);
         }
     }
 

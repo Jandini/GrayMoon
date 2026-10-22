@@ -14,7 +14,8 @@ public sealed class WorkspacePushOperations(
     WorkspacePushHandler pushHandler,
     WorkspaceRepository workspaceRepository,
     IWorkspaceCapabilitiesResolver capabilitiesResolver,
-    WorkspacePushStrategySelector strategySelector) : IWorkspacePushOperations
+    WorkspacePushStrategySelector strategySelector,
+    WorkspaceOperationOutcomeStore outcomes) : IWorkspacePushOperations
 {
     public async Task<WorkspacePushPlan> GetPlanAsync(
         int workspaceId,
@@ -80,7 +81,11 @@ public sealed class WorkspacePushOperations(
             syncedRepoIds,
             restorePackages,
             runId);
-        return await pushHandler.RunPushWithDependenciesAsync(strategy, run, progress, cancellationToken: cancellationToken);
+        var recorder = outcomes.Begin(workspaceId, contextId, "Push");
+        var result = await pushHandler.RunPushWithDependenciesAsync(strategy, run, progress, cancellationToken: cancellationToken);
+        if (!result.Success)
+            recorder.Result(result);
+        return result;
     }
 
     public async Task<OperationResult> PushPendingAsync(

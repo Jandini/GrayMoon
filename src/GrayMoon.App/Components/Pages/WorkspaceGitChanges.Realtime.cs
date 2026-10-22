@@ -33,7 +33,7 @@ public sealed partial class WorkspaceGitChanges
                 await InvokeAsync(LoadAsync);
             });
 
-            await _hubConnection.StartAsync();
+            _ = WorkspaceSyncHubConnectionHelper.TryStartAsync(_hubConnection, Logger);
         }
 
         await ScrollSelectionIntoViewIfPendingAsync();

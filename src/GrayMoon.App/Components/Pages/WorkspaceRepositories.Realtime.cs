@@ -93,7 +93,7 @@ public sealed partial class WorkspaceRepositories
                     Logger.LogDebug(ex, "GitChangesUpdated snapshot refresh failed for workspace {WorkspaceId} repo {RepositoryId}", workspaceId, repositoryId);
                 }
             });
-            await _hubConnection.StartAsync();
+            _ = WorkspaceSyncHubConnectionHelper.TryStartAsync(_hubConnection, Logger);
         }
     }
 

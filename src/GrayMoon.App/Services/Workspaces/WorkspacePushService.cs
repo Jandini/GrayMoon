@@ -355,7 +355,6 @@ public sealed partial class WorkspacePushService(
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
             var linkedToken = linkedCts.Token;
             var deadline = DateTime.UtcNow + totalTimeout;
-            var waitWindow = totalTimeout;
             var foundByIndex = new bool[totalDeps];
             var observations = new PackageWaitObservation[totalDeps];
             for (var observationIndex = 0; observationIndex < totalDeps; observationIndex++)
@@ -382,8 +381,18 @@ public sealed partial class WorkspacePushService(
             async Task AbortPackageWaitTimeout()
             {
                 var found = getFoundCount();
-                _logger.LogWarning("[PushOrchestrator {RunId}] Push wait: timed out after {TotalMinutes:F1} min. Found {Found} of {Total}.", runId, waitWindow.TotalMinutes, found, totalDeps);
-                PackageWaitTimeout.Report(level, onLevelError, found, totalDeps, waitWindow);
+                var waited = DateTime.UtcNow - waitStartedUtc;
+                string[] missing;
+                lock (foundLock)
+                {
+                    missing = Enumerable.Range(0, totalDeps)
+                        .Where(i => !foundByIndex[i])
+                        .Select(i => $"{requiredForLevel[i].PackageId} {requiredForLevel[i].Version}")
+                        .ToArray();
+                }
+
+                _logger.LogWarning("[PushOrchestrator {RunId}] Push wait: timed out after {TotalMinutes:F1} min. Found {Found} of {Total}.", runId, waited.TotalMinutes, found, totalDeps);
+                PackageWaitTimeout.Report(level, onLevelError, found, totalDeps, waited, missing);
                 run.Diagnostics.FailedLevel = level;
                 run.Diagnostics.FailureCategory = PackageWaitDiagnostics.FailurePackageWaitTimeout;
                 run.Diagnostics.BlockedRepositories.AddRange(reposAtLevel.Select(repo => repo.RepoName));
@@ -505,9 +514,15 @@ public sealed partial class WorkspacePushService(
                             var stillWaiting = totalDeps - nowFound;
                             if (stillWaiting > 0)
                             {
-                                waitWindow = TimeSpan.FromMinutes(stillWaiting * minutesPerDep);
-                                deadline = DateTime.UtcNow + waitWindow;
-                                timeoutCts.CancelAfter(waitWindow);
+                                // Each package found gives the rest a fresh budget, but never less time than is
+                                // already left: the package still missing is often the one this run has just pushed,
+                                // which is the slowest to appear, and a shorter deadline would stop the run early.
+                                var proposed = DateTime.UtcNow + TimeSpan.FromMinutes(stillWaiting * minutesPerDep);
+                                if (proposed > deadline)
+                                {
+                                    deadline = proposed;
+                                    timeoutCts.CancelAfter(deadline - DateTime.UtcNow);
+                                }
                             }
                         }
                         if (nowFound >= totalDeps)
