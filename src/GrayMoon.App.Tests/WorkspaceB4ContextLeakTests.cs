@@ -475,7 +475,8 @@ public sealed class B4ContextLeakTestContext : IAsyncDisposable
             null!,
             null!,
             null!,
-            NullLogger<WorkspaceFileVersionService>.Instance);
+            NullLogger<WorkspaceFileVersionService>.Instance,
+            new FileVersionCheckCoalescer());
         return new WorkspaceFileOperations(
             workspaceRepository,
             fileRepository,

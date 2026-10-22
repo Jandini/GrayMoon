@@ -76,6 +76,28 @@ public sealed class WorkspaceDependencyGatingTests
         });
     }
 
+    /// <summary>
+    /// Each SyncStateTestContext seeds workspace id 1. A process-wide static coalescer keyed by that id would let
+    /// one host swallow another's CheckFileVersions call under parallel xUnit. Per-host FileVersionCheckCoalescer
+    /// registration must keep every host's worker call list populated.
+    /// </summary>
+    [Fact]
+    public async Task Parallel_hosts_with_the_same_workspace_id_each_still_call_CheckFileVersions()
+    {
+        await Task.WhenAll(Enumerable.Range(0, 12).Select(_ => RunOneAsync()));
+
+        static async Task RunOneAsync()
+        {
+            await using var ctx = await SyncStateTestContext.CreateAsync();
+            await AddConsumerWithVersionFileAsync(ctx, "deploy/versions.env", $"API_BRANCH={{@{ProducerName}:branch}}");
+            RespondCheckFileVersionsOutOfDate(ctx, $"@{ProducerName}:branch", "main", "feature/x");
+
+            await RecomputeAsync(ctx);
+
+            Assert.Contains(ctx.WorkerBridge.Calls, c => c.Command == "CheckFileVersions");
+        }
+    }
+
     [Fact]
     public async Task DotNet_recompute_still_orders_the_version_file_consumer_after_its_producer()
     {

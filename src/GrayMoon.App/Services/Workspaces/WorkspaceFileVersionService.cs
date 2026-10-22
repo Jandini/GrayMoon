@@ -37,6 +37,7 @@ public sealed class WorkspaceFileVersionService(
     IWorkspaceFeatureContextResolver contextResolver,
     IWorkspaceCapabilitiesResolver capabilitiesResolver,
     ILogger<WorkspaceFileVersionService> logger,
+    FileVersionCheckCoalescer fileVersionCheckCoalescer,
     IOptions<WorkspaceOptions>? workspaceOptions = null)
 {
     /// <summary>
@@ -62,11 +63,10 @@ public sealed class WorkspaceFileVersionService(
 
     /// <summary>
     /// Runs at most one check per (workspace, context) at a time, and every caller waits for a check that started
-    /// after it arrived. A separate instance from the hook syncs' <see cref="SyncRecomputeCoalescer"/> singleton,
-    /// whose recompute runs this check under the same key.
+    /// after it arrived. Injected as a process singleton (separate from the hook syncs'
+    /// <see cref="SyncRecomputeCoalescer"/>) so a recompute that itself runs a check cannot nest on the same key.
+    /// Tests register their own instance per host so parallel fixtures with the same workspace id do not share it.
     /// </summary>
-    private static readonly SyncRecomputeCoalescer Checks = new();
-
     private static string CheckKey(int workspaceId, int contextId) => $"{workspaceId}:{contextId}";
 
     /// <summary>
@@ -539,7 +539,7 @@ public sealed class WorkspaceFileVersionService(
         WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken = default,
         bool deferDependencyRecompute = false)
-        => Checks.RunAsync(
+        => fileVersionCheckCoalescer.RunAsync(
             CheckKey(workspaceId, contextId.Value),
             () => CheckAndPersistFileVersionStatusCoreAsync(workspaceId, contextId, cancellationToken, deferDependencyRecompute));
 
