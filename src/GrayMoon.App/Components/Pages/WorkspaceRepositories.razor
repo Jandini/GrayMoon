@@ -110,6 +110,14 @@
         {
             <div class="page-error-callout page-callout repo-error-line" role="alert" title="@UngroupedLevelErrorMessage">@UngroupedLevelErrorMessage</div>
         }
+        @if (OperationOutcomeBanner is { } outcomeBanner)
+        {
+            <div class="page-error-callout page-callout repo-error-line" role="alert" style="white-space: pre-line;">
+                <span>@outcomeBanner</span>
+                <button type="button" class="page-callout-action page-callout-action--secondary text-nowrap"
+                        @onclick="DismissOperationOutcome">Dismiss</button>
+            </div>
+        }
     </div>
     @if (workspace != null && hasLoadedOnce && !isInitialLoading)
     {

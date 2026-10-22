@@ -1109,7 +1109,7 @@ Pages may layer domain-specific predicates over the shared parser.
 
 When running in Desktop mode, GrayMoon may provide native actions such as opening a repository folder or external URL.
 
-The context selector also shows an **Open in...** flyout for the selected context: Cursor, Claude CLI, Codex CLI, VS Code and Visual Studio (each only when Desktop detects it), Terminal and Explorer, with a per-repository sub-flyout. Each tool can be added to or removed from the button row next to the selector (persisted per Workspace); using a tool does not add it. The App resolves the paths (`IWorkspaceNativeLaunchService`); Desktop only launches the tool.
+The context selector also shows an **Open in...** flyout for the selected context: Cursor, Claude CLI, Codex CLI, VS Code and Visual Studio (each only when Desktop detects it), Terminal and Explorer, with a per-repository sub-flyout. Each tool can be added to or removed from the button row next to the selector (persisted per Workspace); using a tool does not add it. The App resolves the paths (`IWorkspaceNativeLaunchService`); Desktop only launches the tool. The tools render only when this client's WebView bridge (window.graymoonDesktop) answers; Desktop:PipeName is process-wide and only triggers the installed-tool scan, so a browser tab on the Desktop-launched App never shows them.
 
 The web/container application remains fully functional without Desktop.
 

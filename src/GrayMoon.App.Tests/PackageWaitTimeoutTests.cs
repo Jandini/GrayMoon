@@ -26,4 +26,15 @@ public sealed class PackageWaitTimeoutTests
         Assert.Contains("Timed out waiting for package dependencies", errors[2], StringComparison.Ordinal);
         Assert.DoesNotContain("Push cancelled", errors[2], StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void FormatMessage_names_missing_packages_without_naming_a_ci_product()
+    {
+        var message = PackageWaitTimeout.FormatMessage(1, 2, TimeSpan.FromMinutes(5), ["Edx1.Pkg 1.0.0"]);
+
+        Assert.Contains("Edx1.Pkg 1.0.0", message, StringComparison.Ordinal);
+        Assert.Contains("Run Push Synchronized again", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("GitHub", message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("workflow", message, StringComparison.OrdinalIgnoreCase);
+    }
 }

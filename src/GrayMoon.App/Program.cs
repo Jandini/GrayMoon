@@ -163,6 +163,7 @@ try
     builder.Services.AddScoped<WorkspaceContextNavigationService>();
     builder.Services.AddScoped<IWorkspaceExternalWorktreeOperations, WorkspaceExternalWorktreeOperations>();
     builder.Services.AddScoped<IWorkspaceNativeLaunchService, WorkspaceNativeLaunchService>();
+    builder.Services.AddHttpContextAccessor();
     builder.Services.AddScoped<WorkspaceOpenInRecentTools>();
     builder.Services.AddScoped<IWorkspaceBranchOccupancyService, WorkspaceBranchOccupancyService>();
     builder.Services.AddScoped<IFeatureBranchGuard, FeatureBranchGuard>();
@@ -235,6 +236,7 @@ try
     builder.Services.AddScoped<IWorkspacePageService, WorkspacePageService>();
     builder.Services.AddScoped<IWorkspaceTopBarService, WorkspaceTopBarService>();
     builder.Services.AddSingleton<DesktopWorkspaceContextTracker>();
+    builder.Services.AddSingleton<WorkspaceOperationOutcomeStore>();
 
     builder.Services.AddScoped<IWorkspaceGitChangesReadService, WorkspaceGitChangesReadService>();
     builder.Services.AddScoped<IGitChangesWorkerClient, GitChangesWorkerClient>();

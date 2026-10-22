@@ -1,6 +1,7 @@
 using GrayMoon.App.Components.Features;
 using GrayMoon.App.Services;
 using GrayMoon.App.Services.Features;
+using GrayMoon.App.Services.Orchestration;
 using GrayMoon.App.Services.Queries;
 using GrayMoon.Application;
 using GrayMoon.Application.Features;
@@ -14,6 +15,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     [Parameter] public int WorkspaceId { get; set; }
     [SupplyParameterFromQuery(Name = "context")] public int? ContextQuery { get; set; }
     [Inject] private IWorkspacePageService WorkspacePageService { get; set; } = default!;
+    [Inject] private WorkspaceOperationOutcomeStore OperationOutcomes { get; set; } = default!;
     [Inject] private IServiceScopeFactory ServiceScopeFactory { get; set; } = default!;
     [Inject] private NavigationManager NavigationManager { get; set; } = default!;
     [Inject] private ILogger<WorkspaceRepositories> Logger { get; set; } = default!;
@@ -156,6 +158,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         _boundContextQuery = BoundContextQueryFromSelection();
         Interlocked.Increment(ref _contextGeneration);
         ClearRepositoryErrors();
+        ApplyStoredOperationOutcome();
         // Drop Feature/Workspace rows immediately so the selector label and grid cannot disagree
         // while LoadWorkspaceAsync is still queued (InvokeAsync runs after the current turn).
         // Keep header action flags so Branch/Create PR does not flash during the reload.
