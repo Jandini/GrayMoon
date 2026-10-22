@@ -24,7 +24,7 @@ public sealed class RefreshRepositoryProjectsCommand(ICsProjFileService csProjFi
         var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
 
         if (!Directory.Exists(repoPath))
-            return new RefreshRepositoryProjectsResponse { Projects = [] };
+            return new RefreshRepositoryProjectsResponse { Projects = null }; // not cloned: not scanned, so not an authoritative empty list
 
         var maxParallel = request.MaxParallelOperations is > 0 ? request.MaxParallelOperations : null;
         var projects = await csProjFileService.FindAsync(repoPath, cancellationToken, maxParallel);

@@ -448,7 +448,7 @@ ReferencedProjectId
 Version
 ```
 
-Only Workspace-internal package relationships become persisted project dependency edges. The package-target index (`IndexPackageTargets` in `WorkspaceProjectRepository.Merge.cs`) is keyed by non-empty `PackageId` only, with no `ProjectName` fallback, so a project that is not a package (section 6) is never a dependency target; edges to a project that lost its `PackageId` are dropped and levels recomputed. Generated package rows keep a `PackageId` and take part.
+Only Workspace-internal package relationships become persisted project dependency edges. The package-target index (`PackageTargetIndex` in `WorkspaceProjectRepository.Merge.cs`) is keyed by non-empty effective `PackageId` only, with no `ProjectName` fallback, so a project that is not a package (section 6) is never a dependency target. A physical producer wins over a generated row of the same id; more than one producer is ambiguous, creates no edge and logs a warning naming the producers. Dependents are matched to rows by physical path. Edges whose referenced project stopped being a unique producer are dropped (and logged as needing a consumer rescan) and levels recomputed. Generated package rows keep a `PackageId` and take part.
 
 The project graph is later collapsed into repository-level relationships and dependency levels.
 
@@ -678,7 +678,7 @@ rebuild relevant dependency edges
 recompute repository graph metrics
 ```
 
-Projects are matched by name (local `PackageId` element, then `AssemblyName`, then file name), so a project whose classification changes (for example `IsPackable=false` added) is updated in place (type `Library`, `PackageId` null) on the next sync; no migration is involved.
+Projects are matched by physical path (the project identity key); the worker derives the PackageId from (local `PackageId` element, then `AssemblyName`, then file name), so a project whose classification changes (for example `IsPackable=false` added) is updated in place (type `Library`, `PackageId` null) on the next sync; no migration is involved.
 
 Only `DotNetDependency` Workspaces persist project rows: `WorkspaceRepositoryStateWriter` drops project data unless `WorkspaceCapabilities.DiscoversDotNetProjects`, and Workspace-wide recompute goes through `WorkspaceStateRecomputeScope.RecomputeDependencyStatsAsync`.
 

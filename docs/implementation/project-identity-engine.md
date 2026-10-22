@@ -9,7 +9,7 @@ Branch: `package-collision` (GrayMoon sub-repo), HEAD at audit start `937b5fb6`.
 |---|---|
 | P0 audit and decisions | Done, approved |
 | P1 identity/schema/migration | Done, gate passed (1596 App tests green) |
-| P2 physical merge | Not started |
+| P2 physical merge | Done, gate passed (1607 App, 817 Worker tests green) |
 | P3 graph identity/ambiguity | Not started |
 | P4 transactional reconciliation | Not started |
 | P5 diagnostics/perf | Not started |
@@ -77,3 +77,20 @@ Approved by the owner ("ok, let's start"): D1-D7 as proposed, with the D1/D2 ref
 **Risks / next**
 - Legacy rows with NULL context are not keyed (the unique index requires a context). Real DBs backfill contexts in the legacy baseline, so this should only affect pathological rows.
 - Next gated phase: P2 (physical project merge by path). Waiting for a go-ahead.
+
+## P2 - physical project merge by path (done, gate passed)
+
+**Changed**
+- `WorkspaceProjectRepository.Merge.cs`: `MergeProjectsForRepository` matches incoming projects to rows by `ProjectIdentityKey` (path), never by name. Same-named projects at different paths all persist; a moved project is a removal plus an addition. A legacy row with no usable path is adopted by an unclaimed same-name incoming project so its ProjectId survives. Duplicate incoming paths collapse (identical) or keep the first and log a warning (conflicting). Projects with unusable paths are skipped and logged. A successful empty list removes the physical rows of that repository and context; generated rows are untouched.
+- Dependency merge: dependents resolve by path (same-named consumers keep their own PackageReferences). Targets resolve through `PackageTargetIndex` by effective PackageId only (D8: physical beats generated; more than one candidate is ambiguous, no edge, structured warning naming the producers). Project name is no longer a fallback. `UpdateProjectDependencyVersionsAsync` uses the same index.
+- D5: edges whose referenced project is no longer a unique producer are deleted during a partial refresh and logged as needing a rescan of the consumers.
+- Empty-scan fix: `GetAuthoritativeProjectsDetail` keeps "no project list" (null, not scanned, nothing pruned) distinct from "scanned, none found" (empty, authoritative). `WorkspaceGitService.Projects.cs` now merges empty lists and only updates `RepositoryType` when scanned. The Worker's `RefreshRepositoryProjectsCommand` now returns null (not scanned) when the repository folder is missing, so a missing clone cannot prune data.
+- `WorkspaceFeatureOperations` seed keys projects by `(RepositoryId, path key)` instead of name.
+- Tests: `WorkspaceProjectRepositoryNameCollisionTests` rewritten for path identity (reported case, order independence, same-name coexistence, duplicate PackageId, stale-edge invalidation, rename, move, case/separator, conflicts, idempotence, empty scan, context isolation). Two `FeatureProjectionSeedTests` updated: identity is the path, not the name.
+
+**Validation:** `dotnet test` App 1607 passed / 0 failed; Worker 817 passed (one timing test, `RepositoryAccessTests.Mutating_holder_that_finishes_inside_the_grace_period_is_never_cancelled`, failed once under load and passed on rerun; unrelated).
+
+**Risks / next**
+- `WorkspaceRepositoryStateWriter` batch path already passes empty lists through the same merge; the edge merge there is still not run (P4 covers all entry points).
+- `UpdateProjectDependencyVersionsAsync` and `SyncGeneratedPackageDependenciesAsync` still use their own path normalizers (P3).
+- Next gated phase: P3. Waiting for a go-ahead.

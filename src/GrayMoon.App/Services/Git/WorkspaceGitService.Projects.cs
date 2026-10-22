@@ -81,7 +81,7 @@ public sealed partial class WorkspaceGitService
                     onProgress?.Invoke(c, totalCount, repo.RepositoryId);
                     return (repo.RepositoryId, ProjectsDetail: (IReadOnlyList<SyncProjectInfo>?)null);
                 }
-                var projectsDetail = response.Data != null ? GetProjectsDetail(response.Data) : null;
+                var projectsDetail = GetAuthoritativeProjectsDetail(response.Data);
                 var c2 = Interlocked.Increment(ref completedCount);
                 onProgress?.Invoke(c2, totalCount, repo.RepositoryId);
                 return (repo.RepositoryId, ProjectsDetail: projectsDetail);
@@ -93,7 +93,7 @@ public sealed partial class WorkspaceGitService
         }));
 
         var repoProjectsToMerge = syncResults
-            .Where(r => r.ProjectsDetail is { Count: > 0 })
+            .Where(r => r.ProjectsDetail is not null)
             .Select(r => (r.RepositoryId, (IReadOnlyList<SyncProjectInfo>)r.ProjectsDetail!))
             .ToList();
         if (repoProjectsToMerge.Count > 0)
@@ -106,7 +106,7 @@ public sealed partial class WorkspaceGitService
         foreach (var r in syncResults)
         {
             var link = linksToUpdate.FirstOrDefault(l => l.RepositoryId == r.RepositoryId);
-            if (link != null)
+            if (link != null && r.ProjectsDetail is not null)
                 link.RepositoryType = ComputeRepositoryType(r.ProjectsDetail);
         }
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -156,13 +156,13 @@ public sealed partial class WorkspaceGitService
             return false;
         }
 
-        var projectsDetail = response.Data != null ? GetProjectsDetail(response.Data) : null;
-        if (projectsDetail is { Count: > 0 })
+        var projectsDetail = GetAuthoritativeProjectsDetail(response.Data);
+        if (projectsDetail is not null)
             await _workspaceProjectRepository.MergeWorkspaceProjectsAsync(workspaceId, repositoryId, projectsDetail, contextId.Value, cancellationToken);
 
         var link = await _dbContext.WorkspaceRepositories
             .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId, cancellationToken);
-        if (link != null)
+        if (link != null && projectsDetail is not null)
         {
             link.RepositoryType = ComputeRepositoryType(projectsDetail);
             await _dbContext.SaveChangesAsync(cancellationToken);
