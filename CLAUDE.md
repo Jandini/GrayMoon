@@ -121,7 +121,7 @@ Allowed leftovers until a later pass: `IWorkspacePageService` bag properties alr
 
 `GhaLogsModal.LoadLogsAsync` fetches logs on demand (not polled) when the modal opens: one `GetWorkflowRunJobsAsync` call to list jobs, then one `GetJobLogsAsync` call per job, each returning the full log text (no incremental/tail fetching).
 
-`GitHubActionsService.GetWorkflowStatusesForBranchAsync` caches its static parts via `IMemoryCache` - the workflow list (5 min TTL) and per-workflow `workflow_dispatch` YAML detection (12 h TTL, keyed by connector+owner+repo+workflow id+path) - since neither changes tick to tick. `GetWorkflowRunsForBranchAsync` (the actual run status) is never cached and is fetched fresh on every call, so grid/terminal responsiveness is unaffected.
+`GitHubActionsService.GetWorkflowStatusesForBranchAsync` caches its static parts via `IMemoryCache` - the workflow list (5 min TTL) and per-workflow `workflow_dispatch` YAML detection (12 h TTL, keyed by connector+owner+repo+workflow id+path) - since neither changes tick to tick. `GetWorkflowRunsForBranchAsync` (the actual run status) is never cached and is fetched fresh on every call, so grid/terminal responsiveness is unaffected. GitHub intermittently answers that call with HTTP 200 and zero runs for a branch that has runs, so for a repository with active workflows an empty answer is re-read (up to 2 more times, `GetBranchRunsConfirmingEmptyAsync`) before it is accepted as "none".
 
 ### Filter search expression (GrayMoon.Common)
 

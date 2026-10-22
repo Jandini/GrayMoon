@@ -187,8 +187,8 @@ public sealed class GitHubActionsService(
             .ToList();
 
         // Live/dynamic - always fetched fresh, never cached.
-        var runs = await gitHubService.GetWorkflowRunsForBranchAsync(
-            connector, owner, repoName, branch, perPage: 100);
+        var runs = await GetBranchRunsConfirmingEmptyAsync(
+            connector, owner, repoName, branch, expectRuns: workflows.Count > 0, cancellationToken);
         var latestByWorkflowId = runs
             .GroupBy(r => r.WorkflowId)
             .ToDictionary(g => g.Key, g => g.OrderByDescending(r => r.UpdatedAt).First());
@@ -276,6 +276,37 @@ public sealed class GitHubActionsService(
 
         return result;
     }
+
+    /// <summary>
+    /// GitHub's branch-filtered runs list intermittently answers HTTP 200 with <c>total_count: 0</c> for a branch that
+    /// has runs (observed more often under bursts of parallel requests, e.g. a full-grid refresh). Taken at face value
+    /// that overwrites good state with "none" and persists it, so the row vanishes behind the hidden "none" filter until
+    /// a later poll happens to succeed. An empty answer for a repository that has active workflows is therefore only
+    /// accepted after it has been re-read and stayed empty.
+    /// </summary>
+    private async Task<List<GitHubWorkflowRunDto>> GetBranchRunsConfirmingEmptyAsync(
+        Connector connector,
+        string owner,
+        string repoName,
+        string branch,
+        bool expectRuns,
+        CancellationToken cancellationToken)
+    {
+        var runs = await gitHubService.GetWorkflowRunsForBranchAsync(connector, owner, repoName, branch, perPage: 100, cancellationToken);
+        for (var attempt = 1; expectRuns && runs.Count == 0 && attempt <= EmptyRunsConfirmAttempts; attempt++)
+        {
+            logger.LogDebug(
+                "No runs returned for {Owner}/{Repo} branch {Branch} despite active workflows; re-reading ({Attempt}/{Max})",
+                owner, repoName, branch, attempt, EmptyRunsConfirmAttempts);
+            await Task.Delay(EmptyRunsConfirmDelay * attempt, cancellationToken);
+            runs = await gitHubService.GetWorkflowRunsForBranchAsync(connector, owner, repoName, branch, perPage: 100, cancellationToken);
+        }
+
+        return runs;
+    }
+
+    private const int EmptyRunsConfirmAttempts = 2;
+    private static readonly TimeSpan EmptyRunsConfirmDelay = TimeSpan.FromMilliseconds(400);
 
     /// <summary>Cached workflow list - this rarely changes, unlike run status, which must stay live.</summary>
     private Task<List<GitHubWorkflowDto>> GetCachedWorkflowsAsync(Connector connector, string owner, string repoName, CancellationToken cancellationToken)
