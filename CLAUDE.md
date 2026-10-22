@@ -19,7 +19,7 @@ After every completed task that changes product behavior, update `## Recent Gray
 
 ## Never commit or push without an explicit request
 
-Never run `git commit` or `git push` (or stage, tag, amend, or open a pull request) in this repository or the sibling `../GrayMoon.Desktop` unless the user explicitly asks for that exact action in the current message. Requests like "update the README", "fix it" or "let me build it" are not requests to commit or push. Leave changes uncommitted and end the reply with a short commit message in a fenced code block, as `AGENTS.md` "Never commit or push" describes.
+Never run `git commit` or `git push` (or stage, tag, amend, or open a pull request) in this repository or the sibling `../GrayMoon.Desktop` unless the user explicitly asks for that exact action in the current message. Requests like "update the README", "fix it" or "let me build it" are not requests to commit or push. Leave changes uncommitted.
 
 ## Documentation
 
