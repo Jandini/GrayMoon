@@ -109,12 +109,27 @@ public sealed partial class WorkspaceGitChanges
                 ? (EffectiveMdPreviewMode == MarkdownProsePreviewMode.Before ? "(HEAD)" : "(Index)")
                 : (EffectiveMdPreviewMode == MarkdownProsePreviewMode.Before ? "(Index)" : "(Working Tree)");
 
-    private static bool IsMarkdownPath(string path)
+    /// <summary>
+    /// Extensions treated as markdown on Changes. Includes Cursor rules (<c>.mdc</c>) and the
+    /// older aliases recognized by GitHub Linguist, VS Code, Pandoc, and Docusaurus.
+    /// </summary>
+    private static readonly HashSet<string> MarkdownExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        var extension = Path.GetExtension(path);
-        return extension.Equals(".md", StringComparison.OrdinalIgnoreCase)
-            || extension.Equals(".markdown", StringComparison.OrdinalIgnoreCase);
-    }
+        ".md",
+        ".markdown",
+        ".mdown",
+        ".mkdn",
+        ".mkd",
+        ".mdwn",
+        ".mkdown",
+        ".mdtxt",
+        ".mdtext",
+        ".markdn",
+        ".mdc",
+    };
+
+    private static bool IsMarkdownPath(string path) =>
+        MarkdownExtensions.Contains(Path.GetExtension(path));
 
     private async Task EnsureMdPreferenceLoadedAsync()
     {

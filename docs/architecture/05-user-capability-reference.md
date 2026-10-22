@@ -899,6 +899,8 @@ large file
 unavailable/unsupported diff
 ```
 
+`.md`, `.markdown`, `.mdown`, `.mkdn`, `.mkd`, `.mdwn`, `.mkdown`, `.mdtxt`, `.mdtext`, `.markdn`, and `.mdc` (Cursor project rules) open on Preview, with Source still available as the Monaco diff. Other extensions stay on the Monaco diff only.
+
 ### Implementation
 
 ```text
