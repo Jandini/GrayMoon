@@ -120,6 +120,7 @@ public sealed partial class WorkspaceProjectRepository
                 p.TargetFramework = info.TargetFramework;
                 p.PackageId = string.IsNullOrWhiteSpace(info.PackageId) ? null : info.PackageId;
                 p.WorkspaceFeatureContextId = workspaceFeatureContextId;
+                p.RefreshIdentityKey();
             }
         }
 
@@ -128,7 +129,7 @@ public sealed partial class WorkspaceProjectRepository
         {
             if (existingNames.Contains(name))
                 continue;
-            dbContext.WorkspaceProjects.Add(new WorkspaceProject
+            var added = new WorkspaceProject
             {
                 WorkspaceId = workspaceId,
                 WorkspaceFeatureContextId = workspaceFeatureContextId,
@@ -138,7 +139,9 @@ public sealed partial class WorkspaceProjectRepository
                 ProjectFilePath = info.ProjectFilePath,
                 TargetFramework = info.TargetFramework,
                 PackageId = string.IsNullOrWhiteSpace(info.PackageId) ? null : info.PackageId
-            });
+            };
+            added.RefreshIdentityKey();
+            dbContext.WorkspaceProjects.Add(added);
         }
 
         return (toRemove.Count, byName.Count);

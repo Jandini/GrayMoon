@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace GrayMoon.App.Models;
 
-/// <summary>Persisted .csproj project within a repository for a specific workspace Feature context. Merge key: WorkspaceFeatureContextId + RepositoryId + ProjectName.</summary>
+/// <summary>Persisted .csproj project within a repository for a specific workspace Feature context. Identity: WorkspaceFeatureContextId + RepositoryId + IsGenerated + ProjectIdentityKey (never ProjectName).</summary>
 [Table("WorkspaceProjects")]
 public class WorkspaceProject
 {
@@ -57,6 +57,19 @@ public class WorkspaceProject
 
     [ForeignKey(nameof(MatchedConnectorId))]
     public Connector? MatchedConnector { get; set; }
+
+    /// <summary>
+    /// Canonical identity within (context, repository): the case-folded normalized <see cref="ProjectFilePath"/> for a
+    /// physical project, the case-folded <see cref="PackageId"/> for a generated row. Null when it cannot be derived
+    /// (legacy or invalid rows); null keys are not covered by the unique index. Maintained by <see cref="RefreshIdentityKey"/>.
+    /// Declared after the other columns so a fresh database and one upgraded by strict step 11 (ALTER ... ADD COLUMN) share column order.
+    /// </summary>
+    [MaxLength(500)]
+    public string? ProjectIdentityKey { get; set; }
+
+    /// <summary>Recomputes <see cref="ProjectIdentityKey"/> from the current path or package id. Call after setting either.</summary>
+    public void RefreshIdentityKey() =>
+        ProjectIdentityKey = IsGenerated ? ProjectIdentity.GeneratedKey(PackageId) : ProjectIdentity.PhysicalKey(ProjectFilePath);
 
     /// <summary>Outgoing dependencies (projects this one references).</summary>
     [InverseProperty(nameof(ProjectDependency.DependentProject))]

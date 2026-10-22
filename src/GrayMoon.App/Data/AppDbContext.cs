@@ -254,8 +254,13 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
         modelBuilder.Entity<WorkspaceProject>(entity =>
         {
             entity.HasKey(p => p.ProjectId);
-            entity.HasIndex(p => new { p.WorkspaceFeatureContextId, p.RepositoryId, p.ProjectName })
+            // Physical projects are unique by normalized path, generated package rows by package id; names may repeat.
+            entity.HasIndex(p => new { p.WorkspaceFeatureContextId, p.RepositoryId, p.IsGenerated, p.ProjectIdentityKey })
                 .IsUnique()
+                .HasFilter("\"ProjectIdentityKey\" IS NOT NULL AND \"WorkspaceFeatureContextId\" IS NOT NULL")
+                .HasDatabaseName("IX_WorkspaceProjects_Context_Repo_Identity");
+
+            entity.HasIndex(p => new { p.WorkspaceFeatureContextId, p.RepositoryId, p.ProjectName })
                 .HasDatabaseName("IX_WorkspaceProjects_Context_Repo_Name");
 
             entity.HasIndex(p => new { p.WorkspaceId, p.RepositoryId, p.ProjectName })

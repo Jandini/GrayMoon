@@ -2500,6 +2500,7 @@ public sealed class WorkspaceFeatureOperations(
                 existing.ProjectFilePath = src.ProjectFilePath;
                 existing.TargetFramework = src.TargetFramework;
                 existing.PackageId = src.PackageId;
+                existing.RefreshIdentityKey();
                 projectIdMap[src.ProjectId] = existing;
                 continue;
             }
@@ -2516,6 +2517,7 @@ public sealed class WorkspaceFeatureOperations(
                 PackageId = src.PackageId,
                 IsGenerated = false
             };
+            clone.RefreshIdentityKey();
             db.WorkspaceProjects.Add(clone);
             featureProjectsByKey[key] = clone;
             projectIdMap[src.ProjectId] = clone;

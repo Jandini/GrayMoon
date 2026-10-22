@@ -7,8 +7,8 @@ Branch: `package-collision` (GrayMoon sub-repo), HEAD at audit start `937b5fb6`.
 
 | Phase | State |
 |---|---|
-| P0 audit and decisions | Audit done, awaiting approval to proceed |
-| P1 identity/schema/migration | Not started |
+| P0 audit and decisions | Done, approved |
+| P1 identity/schema/migration | Done, gate passed (1596 App tests green) |
 | P2 physical merge | Not started |
 | P3 graph identity/ambiguity | Not started |
 | P4 transactional reconciliation | Not started |
@@ -47,3 +47,33 @@ Branch: `package-collision` (GrayMoon sub-repo), HEAD at audit start `937b5fb6`.
 
 - Approve D1-D7, in particular D5 (no persisted reference facts) and D7.
 - Proceed to P1 after this check-in.
+
+## P1 - identity primitive and schema (done, gate passed)
+
+Approved by the owner ("ok, let's start"): D1-D7 as proposed, with the D1/D2 refinement below. P2 not started.
+
+**Refinements to the decisions**
+- D1/D2 merged into one column and one index: `ProjectIdentityKey` (physical: case-folded normalized path; generated: case-folded `PackageId`) with a single unique partial index `IX_WorkspaceProjects_Context_Repo_Identity` on `(WorkspaceFeatureContextId, RepositoryId, IsGenerated, ProjectIdentityKey) WHERE ProjectIdentityKey IS NOT NULL AND WorkspaceFeatureContextId IS NOT NULL`. `IsGenerated` in the key keeps a generated package id from colliding with a physical path.
+- Correction to P0 finding 8: the next free strict step was 11, not 10 (10 is the pinned AI provider column).
+- Added finding: the Feature projection seed (`WorkspaceFeatureOperations`, around line 2480) is also name-keyed (`featureProjectsByKey` by `(RepositoryId, name)`) and logs "Collisions". It is a P2 site, not only the repository merge.
+
+**Changed**
+- `GrayMoon.Application/Models/ProjectIdentity.cs` (new): the one normalizer (`NormalizePath`, `PhysicalKey`, `GeneratedKey`). Rejects empty, rooted, drive and repo-escaping paths.
+- `WorkspaceProject.ProjectIdentityKey` + `RefreshIdentityKey()`; declared last so a fresh database and an upgraded one have the same column order.
+- `AppDbContext`: unique name index replaced by the unique identity index plus a non-unique name index with the old name.
+- `Migrations.ProjectIdentity.cs` (new) + `StrictSteps` entry 11: adds the column, backfills from each row's own path or package id, swaps the indexes. Rows with a duplicate or underivable key keep a NULL key (ignored by the unique index), are logged, and are never deleted. ProjectIds and edges are untouched.
+- Keys are stamped at the three existing row writers (repository merge add/update, generated package add, Feature seed add/update). Matching is still by name there until P2.
+- `docs/architecture/03-data-model-and-persistence.md`: step 11 and the new uniqueness.
+- Test fixture only: `WorkspaceFeatureContextOrphanCleanupTests` rebuilds a pre-step-11 table shape, so it now skips index definitions that mention the new column.
+
+**Validated**
+- `dotnet test src/GrayMoon.App.Tests`: Passed 1596, Failed 0 (includes the 38 baseline repository tests and the existing 0.1.0 fixture schema-parity test).
+- New `ProjectIdentityTests`: path normalization (mixed separators, `.`, `..`, rooted, drive, escaping, case), distinct paths with equal names coexist, canonical duplicate (case/separator variant) rejected, same path in another repo/context allowed, generated rows with empty paths unique by package id and not colliding with a physical key, step 11 backfill keeps ProjectIds and a dependency edge and is idempotent, duplicate/underivable rows are kept with NULL keys.
+
+**Compatibility**
+- Existing DBs get the backup the runner already takes (`VACUUM INTO`) before step 11. Rollback: restore that backup file; the column is additive, and the previous build ignores it, but the old unique name index is dropped so an older build would not re-impose it.
+- Note for P2: until the merge stops matching by name, behaviour is unchanged for users (the P0 workaround still decides which same-name project is stored).
+
+**Risks / next**
+- Legacy rows with NULL context are not keyed (the unique index requires a context). Real DBs backfill contexts in the legacy baseline, so this should only affect pathological rows.
+- Next gated phase: P2 (physical project merge by path). Waiting for a go-ahead.

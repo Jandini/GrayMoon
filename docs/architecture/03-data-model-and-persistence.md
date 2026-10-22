@@ -110,6 +110,8 @@ Current strict steps:
                                                            IX_WorkspaceFileLineStatuses_Workspace_Context_Repo,
                                                            IX_WorkspaceFeatureRepositories_WorkspaceRepositoryId)
 10  Workspace pinned AI provider column                    (Workspaces.PinnedAiProviderId)
+11  WorkspaceProjects identity key                         (ProjectIdentityKey column + backfill from path / package id; unique (context, repo, name) index becomes
+                                                           non-unique, unique IX_WorkspaceProjects_Context_Repo_Identity added; no rows deleted)
 ```
 
 A brand-new database also starts at `user_version` 0, so it runs the baseline and every strict step right after `EnsureCreated()`. Every step must therefore be a no-op against the current model's shape (guard with `pragma_table_info(...)`, `sqlite_master`, `CREATE ... IF NOT EXISTS`), and a backfill must run only on the branch that actually created the column (see `AddWorkspaceProfileColumnIfMissingAsync`).
@@ -380,13 +382,13 @@ Known gap: the unique index does not include `IsTag`, so a tag and a local branc
 
 `WorkspaceProjects` stores projects discovered in Workspace repositories, per Feature context.
 
-Current uniqueness (`IX_WorkspaceProjects_Context_Repo_Name`):
+Current uniqueness (`IX_WorkspaceProjects_Context_Repo_Identity`, partial: non-null key and context):
 
 ```text
-WorkspaceFeatureContextId + RepositoryId + ProjectName
+WorkspaceFeatureContextId + RepositoryId + IsGenerated + ProjectIdentityKey
 ```
 
-`WorkspaceId + RepositoryId + ProjectName` remains as a non-unique index (`IX_WorkspaceProjects_Workspace_Repo_Name`). Each Feature gets its own copy of the physical project rows and their `ProjectDependencies` edges when it is created; generated projects stay on the special Workspace context.
+`ProjectIdentityKey` is the case-folded normalized `ProjectFilePath` for a physical project (`ProjectIdentity.PhysicalKey`) and the case-folded `PackageId` for a generated row (`GeneratedKey`); `WorkspaceProject.RefreshIdentityKey()` maintains it. Project names are not unique. `WorkspaceFeatureContextId + RepositoryId + ProjectName` and `WorkspaceId + RepositoryId + ProjectName` remain as non-unique indexes (`IX_WorkspaceProjects_Context_Repo_Name`, `IX_WorkspaceProjects_Workspace_Repo_Name`). Each Feature gets its own copy of the physical project rows and their `ProjectDependencies` edges when it is created; generated projects stay on the special Workspace context.
 
 Project fields include:
 

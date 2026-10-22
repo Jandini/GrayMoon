@@ -122,6 +122,7 @@ public sealed partial class WorkspaceProjectRepository
                 PackageId = key.PackageName,
                 IsGenerated = true
             };
+            newProject.RefreshIdentityKey();
             dbContext.WorkspaceProjects.Add(newProject);
             generatedByKey[key] = newProject;
         }
