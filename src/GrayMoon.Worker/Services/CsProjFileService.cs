@@ -201,6 +201,29 @@ public sealed class CsProjFileService(
                 }
             });
 
+        // Central package management keeps the version in Directory.Packages.props, not in the project. Every requested
+        // package that file lists is rewritten there; a package it does not list is untouched, so a project that still
+        // carries its own Version is unaffected.
+        var propsUpdates = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (fullPath, list) in groups)
+        {
+            var props = CentralPackageVersions.FindPropsFile(fullPath, repoPath);
+            if (props == null)
+                continue;
+            if (!propsUpdates.TryGetValue(props, out var merged))
+                propsUpdates[props] = merged = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var packageUpdates in list)
+                foreach (var (packageId, version) in packageUpdates)
+                    merged[packageId] = version;
+        }
+
+        foreach (var (props, packageUpdates) in propsUpdates)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (await CentralPackageVersions.UpdateAsync(props, packageUpdates, cancellationToken))
+                updatedCount++;
+        }
+
         return updatedCount;
     }
 
