@@ -102,9 +102,12 @@
     margin-top: 0;
 }
 
-::deep .bulk-merge-pr-return-scope .form-check-input:disabled:not(:checked) {
+::deep .bulk-merge-pr-return-scope .form-check-input:not(:checked) {
     background-color: #6c757d;
     border-color: #6c757d;
+}
+
+::deep .bulk-merge-pr-return-scope .form-check-input:disabled:not(:checked) {
     opacity: 0.55;
 }
 
