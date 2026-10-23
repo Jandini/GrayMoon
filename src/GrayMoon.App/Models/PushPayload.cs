@@ -7,8 +7,8 @@ public sealed record PushRepoPayload(
     int? DependencyLevel,
     IReadOnlyList<RequiredPackageForPush> RequiredPackages);
 
-/// <summary>A package (id + version) that must be present in its matched registry before a dependent repo can be pushed.</summary>
-public sealed record RequiredPackageForPush(string PackageId, string Version, int? MatchedConnectorId);
+/// <summary>A package (id + version) that must be present in its matched registry before a dependent repo can be pushed. <paramref name="ProducerRepositoryId"/> is the repository that publishes it, when that repository is in the workspace.</summary>
+public sealed record RequiredPackageForPush(string PackageId, string Version, int? MatchedConnectorId, int? ProducerRepositoryId = null);
 
 /// <summary>Dependency and level info for a single repo when pushing (e.g. from badge click). Used to show prompt and choose sync vs non-sync push.
 /// When <c>PackageIdToLevel</c> is set, it overrides RepoName-based level for packages (e.g. when package name differs from repo name).</summary>

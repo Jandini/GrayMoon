@@ -112,9 +112,9 @@
         }
         @if (OperationOutcomeBanner is { } outcomeBanner)
         {
-            <div class="page-error-callout page-callout repo-error-line" role="alert" style="white-space: pre-line;">
-                <span>@outcomeBanner</span>
-                <button type="button" class="page-callout-action page-callout-action--secondary text-nowrap"
+            <div class="page-error-callout page-callout-with-actions page-callout" role="alert">
+                <span title="@outcomeBanner">@outcomeBanner</span>
+                <button type="button" class="page-callout-action page-callout-action--secondary"
                         @onclick="DismissOperationOutcome">Dismiss</button>
             </div>
         }

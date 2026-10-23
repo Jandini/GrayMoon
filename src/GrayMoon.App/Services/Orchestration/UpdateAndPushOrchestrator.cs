@@ -18,8 +18,9 @@ public sealed class UpdateAndPushOrchestrator(
 {
     /// <summary>
     /// Runs the pipeline. Returns <see cref="UpdateAndPushResult.NotPipelined"/> without changing anything when the push
-    /// lane cannot run safely (a required package has no registry mapping, or no registry is reachable): the caller then
-    /// runs the sequential update-then-push, whose own checks and confirm dialog handle that case.
+    /// lane cannot run safely (a required package has no registry and this run will not publish it, or no registry is
+    /// reachable). A package created by a repository this run pushes is matched after that level is pushed. The caller
+    /// then runs the sequential update-then-push, whose own checks and confirm dialog handle the refused case.
     /// </summary>
     /// <param name="reportOverlay">Receives the combined two-lane overlay message every time either lane reports.</param>
     public async Task<UpdateAndPushResult> RunAsync(

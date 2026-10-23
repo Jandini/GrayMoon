@@ -98,7 +98,13 @@ public sealed class PackageRegistrySyncService(
         logger.LogTrace("Synced package registries for workspace {WorkspaceId}: {PackageCount} packages, {ConnectorCount} NuGet connectors.", workspaceId, packages.Count, connectors.Count);
     }
 
-    /// <summary>Syncs registry matches only for workspace packages whose PackageId is in <paramref name="packageIds"/>. Use when doing synchronized push for a single repo and only its required packages need matching.</summary>
+    /// <summary>
+    /// Syncs registry matches only for workspace packages whose PackageId is in <paramref name="packageIds"/>.
+    /// A package created or first published by an earlier level of the current run has no registry until that
+    /// level has published it, so synchronized push calls this again for ids that are still unmatched.
+    /// Projects that already have <see cref="WorkspaceProject.MatchedConnectorId"/> are left alone: a miss is
+    /// stored as null and would clear a match that is already known.
+    /// </summary>
     public async Task SyncRegistriesForPackageIdsAsync(
         int workspaceId,
         IReadOnlySet<string> packageIds,
@@ -122,6 +128,12 @@ public sealed class PackageRegistrySyncService(
 
         await Parallel.ForEachAsync(packages, options, async (p, ct) =>
         {
+            if (p.MatchedConnectorId.HasValue)
+            {
+                Interlocked.Increment(ref completed);
+                return;
+            }
+
             var packageId = (p.PackageId ?? p.ProjectName).Trim();
             if (string.IsNullOrEmpty(packageId))
             {

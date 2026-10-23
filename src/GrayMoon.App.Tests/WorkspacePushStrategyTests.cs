@@ -134,13 +134,31 @@ public sealed class WorkspacePushStrategyTests
     {
         await using var ctx = await CreateContextAsync(new RecordingNuGetHandler());
         await ctx.UseDotNetDependencyProfileAsync();
-        await SeedDependencyGraphAsync(ctx, matchConnector: false);
+        var graph = await SeedDependencyGraphAsync(ctx, matchConnector: false);
         RespondPushCommands(ctx);
         var plan = await GetPlanAsync(ctx);
 
+        // The producer is not in this push, so the missing registry is not something this run will publish.
         await Assert.ThrowsAsync<SynchronizedPushNotPossibleException>(
-            () => PushAsync(ctx, plan.RepositoryIds, synchronizedPush: true, plan.RequiredPackageIds));
+            () => PushAsync(ctx, new HashSet<int> { graph.ConsumerId }, synchronizedPush: true, plan.RequiredPackageIds));
         Assert.Empty(PushCalls(ctx));
+    }
+
+    [Fact]
+    public async Task DotNet_synchronized_push_matches_a_package_after_the_level_that_publishes_it()
+    {
+        var nuget = new RecordingNuGetHandler { PublishedVersions = ["0.9.0"], UnavailablePackageLookups = 1 };
+        await using var ctx = await CreateContextAsync(nuget);
+        await ctx.UseDotNetDependencyProfileAsync();
+        var graph = await SeedDependencyGraphAsync(ctx, matchConnector: false);
+        RespondPushCommands(ctx);
+        var plan = await GetPlanAsync(ctx);
+
+        var result = await PushAsync(ctx, plan.RepositoryIds, synchronizedPush: true, plan.RequiredPackageIds, syncedRepoIds: new HashSet<int> { graph.ConsumerId });
+
+        Assert.True(result.Success, result.Error);
+        Assert.Equal(new[] { graph.ProducerId, graph.ConsumerId }, PushCalls(ctx).Select(p => p.GetProperty("repositoryId").GetInt32()).ToList());
+        Assert.Contains(nuget.Requests, url => url.Contains("/acme.api/index.json", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -379,7 +397,9 @@ public sealed class WorkspacePushStrategyTests
     [Fact]
     public async Task Push_lane_reports_a_level_error_and_stops_when_a_required_package_has_no_registry()
     {
-        await using var ctx = await CreateContextAsync(new RecordingNuGetHandler());
+        await using var ctx = await CreateContextAsync(
+            new RecordingNuGetHandler(),
+            options => options.PushWaitDependencyTimeoutMinutesPerDependency = 0.1);
         await ctx.UseDotNetDependencyProfileAsync();
         var graph = await SeedDependencyGraphAsync(ctx, matchConnector: false);
         RespondPushCommands(ctx);
@@ -393,10 +413,11 @@ public sealed class WorkspacePushStrategyTests
         Assert.Equal(new[] { graph.ProducerId }, PushCalls(ctx).Select(c => c.GetProperty("repositoryId").GetInt32()).ToList());
         Assert.Equal(1, pushed.Count);
         Assert.Contains(2, pushed.LevelErrors.Keys);
+        Assert.Contains("have no registry", pushed.LevelErrors[2], StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task Push_lane_is_possible_only_when_every_required_package_can_be_matched_to_a_registry()
+    public async Task Push_lane_is_possible_when_this_run_publishes_the_unmatched_package()
     {
         await using (var published = await CreateContextAsync(new RecordingNuGetHandler { PublishedVersions = ["0.9.0"] }))
         {
@@ -405,10 +426,18 @@ public sealed class WorkspacePushStrategyTests
             Assert.True(await CanRunPushLaneAsync(published));
         }
 
-        await using var unpublished = await CreateContextAsync(new RecordingNuGetHandler());
-        await unpublished.UseDotNetDependencyProfileAsync();
-        await SeedDependencyGraphAsync(unpublished, matchConnector: false);
-        Assert.False(await CanRunPushLaneAsync(unpublished));
+        await using (var unpublished = await CreateContextAsync(new RecordingNuGetHandler()))
+        {
+            await unpublished.UseDotNetDependencyProfileAsync();
+            await SeedDependencyGraphAsync(unpublished, matchConnector: false);
+            Assert.True(await CanRunPushLaneAsync(unpublished));
+        }
+
+        await using var pinnedProducer = await CreateContextAsync(new RecordingNuGetHandler());
+        await pinnedProducer.UseDotNetDependencyProfileAsync();
+        await SeedDependencyGraphAsync(pinnedProducer, matchConnector: false);
+        await PinRepositoryAsync(pinnedProducer, pinnedProducer.RepositoryId);
+        Assert.False(await CanRunPushLaneAsync(pinnedProducer));
     }
 
     [Fact]
@@ -417,6 +446,7 @@ public sealed class WorkspacePushStrategyTests
         await using var ctx = await CreateContextAsync(new RecordingNuGetHandler());
         await ctx.UseDotNetDependencyProfileAsync();
         await SeedDependencyGraphAsync(ctx, matchConnector: false);
+        await PinRepositoryAsync(ctx, ctx.RepositoryId);
         RespondPushCommands(ctx);
         var special = await ctx.GetSpecialContextIdAsync();
         var overlay = new ConcurrentQueue<string>();
@@ -524,9 +554,21 @@ public sealed class WorkspacePushStrategyTests
         }
     }
 
-    private static Task<SyncStateTestContext> CreateContextAsync(RecordingNuGetHandler nuget)
+    private static async Task PinRepositoryAsync(SyncStateTestContext ctx, int repositoryId)
+    {
+        await using var db = await ctx.Resolve<IDbContextFactory<AppDbContext>>().CreateDbContextAsync();
+        var link = await db.WorkspaceRepositories.SingleAsync(l => l.RepositoryId == repositoryId);
+        link.CheckedOutTag = "v1.0.0";
+        await db.SaveChangesAsync();
+    }
+
+    private static Task<SyncStateTestContext> CreateContextAsync(
+        RecordingNuGetHandler nuget,
+        Action<WorkspaceOptions>? configureOptions = null)
         => SyncStateTestContext.CreateAsync(configureServices: services =>
         {
+            if (configureOptions != null)
+                services.Configure(configureOptions);
             services.AddSingleton(new HttpClient(nuget));
             services.AddScoped<NuGetService>();
             services.AddScoped<PackageRegistrySyncService>();
@@ -697,7 +739,12 @@ public sealed class WorkspacePushStrategyTests
 
         public IReadOnlyList<string> PublishedVersions { get; init; } = [];
 
+        /// <summary>The first this many package-index requests answer 404, so a package can appear after the opening sync.</summary>
+        public int UnavailablePackageLookups { get; init; }
+
         public IReadOnlyList<string> Requests => _requests.ToList();
+
+        private int _packageLookups;
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -705,8 +752,12 @@ public sealed class WorkspacePushStrategyTests
             _requests.Enqueue(url);
             if (url.Equals(NuGetIndexUrl, StringComparison.OrdinalIgnoreCase))
                 return Json("""{"resources":[{"@type":"PackageBaseAddress/3.0.0","@id":"https://nuget.test/flat/"}]}""");
-            if (url.StartsWith("https://nuget.test/flat/", StringComparison.OrdinalIgnoreCase) && PublishedVersions.Count > 0)
-                return Json(JsonSerializer.Serialize(new { versions = PublishedVersions }));
+            if (url.StartsWith("https://nuget.test/flat/", StringComparison.OrdinalIgnoreCase))
+            {
+                var lookup = Interlocked.Increment(ref _packageLookups);
+                if (lookup > UnavailablePackageLookups && PublishedVersions.Count > 0)
+                    return Json(JsonSerializer.Serialize(new { versions = PublishedVersions }));
+            }
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
         }
 
