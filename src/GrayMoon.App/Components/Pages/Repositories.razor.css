@@ -52,6 +52,22 @@
     width: 30%;
 }
 
+/* Repository name: same as Workspace Repositories - inherited text, underline on hover only. */
+.repositories-table td .repo-link,
+.repositories-table td a.repo-link,
+.repositories-table td .repo-link strong {
+    text-decoration: none !important;
+    color: inherit !important;
+    cursor: pointer;
+    user-select: text;
+}
+
+.repositories-table td .repo-link:hover,
+.repositories-table td a.repo-link:hover,
+.repositories-table td .repo-link:hover strong {
+    text-decoration: underline !important;
+}
+
 .col-owner {
     width: 20%;
 }

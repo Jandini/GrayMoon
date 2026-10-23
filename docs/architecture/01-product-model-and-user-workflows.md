@@ -214,6 +214,8 @@ Worker         (/worker)
 Settings
 ```
 
+On Repositories (`/repositories`), the name in the Repository column opens that repository on GitHub, the same way a repository name does on a Workspace's Repositories page.
+
 Inside a Workspace the main navigation is (with Home above it):
 
 ```text
