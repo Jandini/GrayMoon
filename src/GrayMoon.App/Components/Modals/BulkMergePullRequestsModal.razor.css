@@ -74,6 +74,43 @@
     gap: 0.4rem;
 }
 
+::deep .bulk-merge-pr-return-options {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.75rem 1rem;
+    min-width: 0;
+}
+
+::deep .bulk-merge-pr-return-scope {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.15rem 0.75rem;
+}
+
+::deep .bulk-merge-pr-return-scope .form-check-inline {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-right: 0;
+    padding-left: 0;
+}
+
+::deep .bulk-merge-pr-return-scope .form-check-input {
+    margin-left: 0;
+    margin-top: 0;
+}
+
+::deep .bulk-merge-pr-return-scope .form-check-input:not(:checked) {
+    background-color: #6c757d;
+    border-color: #6c757d;
+}
+
+::deep .bulk-merge-pr-return-scope .form-check-input:disabled:not(:checked) {
+    opacity: 0.55;
+}
+
 ::deep .bulk-merge-pr-select-all .form-check-input,
 ::deep .bulk-merge-pr-row__check .form-check-input,
 ::deep .merge-pr-return-default-check .form-check-input {

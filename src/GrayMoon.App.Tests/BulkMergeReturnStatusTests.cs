@@ -60,11 +60,38 @@ public sealed class BulkMergeReturnStatusTests
         Assert.Equal(0, counts.RealReturnFailed);
     }
 
+    [Fact]
+    public void Count_excludes_no_open_pr_companion_rows_from_succeeded_merges()
+    {
+        var rows = new[]
+        {
+            Row(1, BulkMergeRowStatus.ReturnedToDefault),
+            NoOpenPrRow(2, BulkMergeRowStatus.ReturnedToDefault),
+            NoOpenPrRow(3, BulkMergeRowStatus.ReturnFailed),
+        };
+
+        var counts = BulkMergeRunFinalizer.Count(rows);
+
+        Assert.Equal(1, counts.Succeeded);
+        Assert.Equal(1, counts.ReturnFailed);
+        Assert.Equal(1, counts.RealReturnFailed);
+    }
+
     private static BulkMergePrRow Row(int repositoryId, BulkMergeRowStatus status) => new()
     {
         RepositoryId = repositoryId,
         RepositoryName = $"repo-{repositoryId}",
         PrNumber = repositoryId,
         Status = status,
+    };
+
+    private static BulkMergePrRow NoOpenPrRow(int repositoryId, BulkMergeRowStatus status) => new()
+    {
+        RepositoryId = repositoryId,
+        RepositoryName = $"repo-{repositoryId}",
+        PrNumber = 0,
+        HasNoOpenPullRequest = true,
+        Status = status,
+        ErrorMessage = status == BulkMergeRowStatus.ReturnFailed ? "dirty" : null,
     };
 }

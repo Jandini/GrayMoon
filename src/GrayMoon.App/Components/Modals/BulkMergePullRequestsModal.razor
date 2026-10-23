@@ -83,9 +83,9 @@
                                     }
                                     <button type="button"
                                             class="bulk-merge-pr-row__info"
-                                            title="View details"
-                                            aria-label="View details for @row.RepositoryName PR #@row.PrNumber"
-                                            disabled="@IsRunning"
+                                            title="@(row.HasNoOpenPullRequest ? null : "View details")"
+                                            aria-label="@(row.HasNoOpenPullRequest ? $"{row.RepositoryName} (no open pull request)" : $"View details for {row.RepositoryName} PR #{row.PrNumber}")"
+                                            disabled="@(IsRunning || row.HasNoOpenPullRequest)"
                                             @onclick="() => OnRowInfo.InvokeAsync(row)">
                                         <span class="merge-pr-status-icon @GetRowIconClass(row)">
                                             <i class="bi @GetRowIconGlyph(row)"></i>
@@ -93,7 +93,11 @@
                                         <div class="merge-pr-status-text">
                                             <div class="merge-pr-status-title bulk-merge-pr-row__title">
                                                 <span class="bulk-merge-pr-row__repo">@row.RepositoryName</span>
-                                                @if (row.Status == BulkMergeRowStatus.LoadingSnapshot && string.IsNullOrWhiteSpace(row.Title))
+                                                @if (row.HasNoOpenPullRequest)
+                                                {
+                                                    <span class="bulk-merge-pr-row__pr">No open pull request</span>
+                                                }
+                                                else if (row.Status == BulkMergeRowStatus.LoadingSnapshot && string.IsNullOrWhiteSpace(row.Title))
                                                 {
                                                     <span class="merge-pr-placeholder bulk-merge-pr-placeholder--title"></span>
                                                 }
@@ -152,10 +156,30 @@
                     <div class="modal-footer bulk-merge-pr-modal-footer">
                         @if (ShowReturnToDefault)
                         {
-                            <div class="form-check mb-0 merge-pr-return-default-check">
-                                <input class="form-check-input" type="checkbox" id="bulk-merge-pr-return-default"
-                                       checked="@ReturnToDefaultAfterMerge" @onchange="OnSyncCheckboxChanged" />
-                                <label class="form-check-label" for="bulk-merge-pr-return-default">Return to default branch after merging</label>
+                            <div class="bulk-merge-pr-return-options">
+                                <div class="form-check mb-0 merge-pr-return-default-check">
+                                    <input class="form-check-input" type="checkbox" id="bulk-merge-pr-return-default"
+                                           checked="@ReturnToDefaultAfterMerge" @onchange="OnSyncCheckboxChanged" />
+                                    <label class="form-check-label" for="bulk-merge-pr-return-default">Return to default branch</label>
+                                </div>
+                                <div class="bulk-merge-pr-return-scope" role="radiogroup" aria-label="Return to default branch scope">
+                                    <div class="form-check form-check-inline mb-0">
+                                        <input class="form-check-input" type="radio" name="bulk-merge-return-scope"
+                                               id="bulk-merge-return-merged"
+                                               checked="@(ReturnToDefaultScope == BulkMergeReturnToDefaultScope.Merged)"
+                                               disabled="@(!ReturnToDefaultAfterMerge)"
+                                               @onchange="() => OnReturnScopeChanged(BulkMergeReturnToDefaultScope.Merged)" />
+                                        <label class="form-check-label" for="bulk-merge-return-merged">Merged</label>
+                                    </div>
+                                    <div class="form-check form-check-inline mb-0">
+                                        <input class="form-check-input" type="radio" name="bulk-merge-return-scope"
+                                               id="bulk-merge-return-all"
+                                               checked="@(ReturnToDefaultScope == BulkMergeReturnToDefaultScope.AllRepositories)"
+                                               disabled="@(!ReturnToDefaultAfterMerge)"
+                                               @onchange="() => OnReturnScopeChanged(BulkMergeReturnToDefaultScope.AllRepositories)" />
+                                        <label class="form-check-label" for="bulk-merge-return-all">All repositories</label>
+                                    </div>
+                                </div>
                             </div>
                         }
                         <button type="button" class="btn merge-pr-btn-github" disabled="@(SelectedCount == 0 || AnySelectedSnapshotPending)" @onclick="() => OnMerge.InvokeAsync()">
@@ -176,6 +200,8 @@
     [Parameter] public EventCallback<BulkMergeMethodSelection> SelectedMethodChanged { get; set; }
     [Parameter] public bool ReturnToDefaultAfterMerge { get; set; }
     [Parameter] public EventCallback<bool> ReturnToDefaultAfterMergeChanged { get; set; }
+    [Parameter] public BulkMergeReturnToDefaultScope ReturnToDefaultScope { get; set; } = BulkMergeReturnToDefaultScope.Merged;
+    [Parameter] public EventCallback<BulkMergeReturnToDefaultScope> ReturnToDefaultScopeChanged { get; set; }
     /// <summary>When false, hides the Return to default branch checkbox (Feature contexts).</summary>
     [Parameter] public bool ShowReturnToDefault { get; set; } = true;
     [Parameter] public bool IsRunning { get; set; }
@@ -209,8 +235,10 @@
     private bool AllSelected => Rows.Count > 0 && Rows.All(r => r.IsSelected);
     /// <summary>Also true while GitHub hasn't finished computing a selected row's mergeability yet (CheckingMergeability) - Merge must wait for that to resolve for every selected PR before it can proceed, same as it already waits for the initial snapshot load.</summary>
     private bool AnySelectedSnapshotPending => Rows.Any(r => r.IsSelected && r.Status is BulkMergeRowStatus.LoadingSnapshot or BulkMergeRowStatus.CheckingMergeability);
-    /// <summary>Computed from the durable per-row state, not the transient Completed/Failed progress counters (which reset on every run, including a retry) - so the finished summary describes the whole batch, not just the last retry.</summary>
-    private int MergedRowCount => Rows.Count(r => r.Status is BulkMergeRowStatus.Merged or BulkMergeRowStatus.ReturnedToDefault or BulkMergeRowStatus.ReturnFailed);
+    /// <summary>Computed from the durable per-row state, not the transient Completed/Failed progress counters (which reset on every run, including a retry) - so the finished summary describes the whole batch, not just the last retry. Excludes no-open-PR companion rows (they were never merged).</summary>
+    private int MergedRowCount => Rows.Count(r =>
+        !r.HasNoOpenPullRequest &&
+        r.Status is BulkMergeRowStatus.Merged or BulkMergeRowStatus.ReturnedToDefault or BulkMergeRowStatus.ReturnFailed);
     private int FailedRowCount => Rows.Count(r => r.Status == BulkMergeRowStatus.Failed);
     private int ReturnIssueCount => Rows.Count(r => r.Status == BulkMergeRowStatus.ReturnFailed);
 
@@ -272,6 +300,12 @@
             await ReturnToDefaultAfterMergeChanged.InvokeAsync(val);
     }
 
+    private async Task OnReturnScopeChanged(BulkMergeReturnToDefaultScope scope)
+    {
+        if (ReturnToDefaultScopeChanged.HasDelegate)
+            await ReturnToDefaultScopeChanged.InvokeAsync(scope);
+    }
+
     private void ToggleMethodDropdown() => _showMethodDropdown = !_showMethodDropdown;
 
     private async Task SelectMethod(BulkMergeMethodSelection method)
@@ -311,6 +345,7 @@
         BulkMergeRowStatus.Skipped => "bi-dash-lg",
         _ => "bi-dash-lg"
     };
+
 
     /// <summary>
     /// Mirrors PRBadge.GetOpenPrMergeabilityClass so a Ready row reads the same GitHub mergeable_state
@@ -357,9 +392,13 @@
         BulkMergeRowStatus.Merging => "Merging...",
         BulkMergeRowStatus.ReturningToDefault => "Returning to default branch...",
         BulkMergeRowStatus.Merged => "Merged",
-        BulkMergeRowStatus.ReturnedToDefault => "Merged and returned to default",
+        BulkMergeRowStatus.ReturnedToDefault => row.HasNoOpenPullRequest
+            ? "Returned to default"
+            : "Merged and returned to default",
         BulkMergeRowStatus.Failed => row.ErrorMessage ?? "The merge could not be completed.",
-        BulkMergeRowStatus.ReturnFailed => $"Merged, but return to default failed: {row.ErrorMessage}",
+        BulkMergeRowStatus.ReturnFailed => row.HasNoOpenPullRequest
+            ? $"Return to default failed: {row.ErrorMessage}"
+            : $"Merged, but return to default failed: {row.ErrorMessage}",
         BulkMergeRowStatus.Skipped => "Skipped",
         BulkMergeRowStatus.Closed => "Closed without merging",
         _ => string.Empty
