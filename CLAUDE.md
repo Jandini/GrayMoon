@@ -203,6 +203,10 @@ Long-running App-side operations (restore, update, push orchestration) run as ba
 
 **Buttons never word-wrap.** When adding or changing UX, every button label (and short action labels next to buttons, such as checkbox captions like "Push committed") must stay on one line. Use Bootstrap `text-nowrap` and/or `white-space: nowrap` on the button / label (and `flex-shrink: 0` / `flex-wrap: nowrap` on tight flex rows that host them) so narrow panels never wrap "Commit All" onto two lines. Do not rely on default Bootstrap `.btn` wrapping behavior in constrained layouts.
 
+### Tag-pinned repositories
+
+Repositories checked out on a tag (`IsOnTag` / `CheckedOutTag`, including Workspace tag pins) are never candidates for mutating multi-repo operations (Return to Default, Push, Sync Commits, Update Dependencies, Prepare Workspace branch work, Merge PRs... return follow-ups, and similar). Filter them out of id sets and leave them untouched in service paths; see `AGENTS.md` and `docs/architecture/06-developer-extension-guide.md` section 11.
+
 ### CSS conventions for the loading overlay terminal
 
 Global terminal styles live in `wwwroot/css/loading-overlay.css`. The embedded GHA terminal in `WorkspaceActions` is a fixed 8-line board with a caption/progress header (`actions-gha-terminal__caption`, `actions-gha-terminal__scroll`, `actions-gha-terminal__progress`) in `GhaWorkflowLiveTerminal.razor.css`, not a split-pane layout. Line color variants: `--out` (green/yellow by scheme), `--err` (red), `--cmd` (gray). Scheme toggling uses `.loading-overlay-terminal--scheme-yellow`. High-specificity overrides needed to beat the running-row `td { color }` inheritance use `!important` in `loading-overlay.css`.

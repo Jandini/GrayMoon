@@ -124,12 +124,12 @@ public sealed class ReturnToDefaultAnalyzeTests
     }
 
     [Fact]
-    public void Classify_tag_is_blocking()
+    public void Classify_tag_is_excluded_not_blocking()
     {
         var plan = WorkspaceSyncHandler.ClassifyRepository(Dto(tag: "v1.0.0", branch: null));
         Assert.True(plan.IsOnTag);
         Assert.False(plan.CanDiscardLocalBranchSafely);
-        Assert.Contains("tag", plan.BlockingReason, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(plan.BlockingReason);
     }
 
     [Fact]
@@ -182,7 +182,7 @@ public sealed class ReturnToDefaultAnalyzeTests
     }
 
     [Fact]
-    public async Task Analyze_tag_blocks_automatic_cleanup()
+    public async Task Analyze_tag_is_skipped_and_does_not_block_automatic_cleanup()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
         ctx.WorkerBridge.Respond("RefreshBranches", new BranchesResponse
@@ -207,7 +207,8 @@ public sealed class ReturnToDefaultAnalyzeTests
         var plan = await handler.AnalyzeReturnToDefaultAsync(
             ctx.WorkspaceId, await ctx.GetSpecialContextIdAsync(), [ctx.RepositoryId], null, CancellationToken.None);
 
-        Assert.False(plan.CanProceedAutomatically);
+        Assert.True(plan.CanProceedAutomatically);
+        Assert.False(plan.HasBlockingRepositories);
         var repo = Assert.Single(plan.Repositories);
         Assert.True(repo.IsOnTag);
     }
@@ -242,7 +243,7 @@ public sealed class ReturnToDefaultAnalyzeTests
     }
 
     [Fact]
-    public async Task Unattended_aborts_on_tag()
+    public async Task Unattended_leaves_tag_checkout_untouched()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
         ctx.WorkerBridge.Respond("RefreshBranches", new BranchesResponse
@@ -266,8 +267,9 @@ public sealed class ReturnToDefaultAnalyzeTests
         var result = await handler.ReturnToDefaultUnattendedAsync(
             ctx.WorkspaceId, await ctx.GetSpecialContextIdAsync(), [ctx.RepositoryId], null, CancellationToken.None);
 
-        Assert.False(result.Completed);
-        Assert.Contains("tag", result.AbortReason, StringComparison.OrdinalIgnoreCase);
+        Assert.True(result.Completed);
+        Assert.Null(result.AbortReason);
+        Assert.DoesNotContain(ctx.WorkerBridge.Calls, c => c.Command == "ReturnToDefaultBranch");
     }
 
     [Fact]

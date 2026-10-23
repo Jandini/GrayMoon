@@ -148,6 +148,27 @@ mixes every context's data into one answer, or persists onto the wrong row.
   `WorkspaceRepositoryLinkListQueryServiceTests.Feature_context_sort_keyset_and_level_grouping_use_context_state_not_shared_link`
   for the pattern.
 
+## Tag-pinned repositories are never part of mutating operations
+
+A repository checked out on a tag (Workspace tag pin in `graymoon.json`, or any
+`CheckedOutTag` / `IsOnTag`) must not be included in Push, Sync Commits, Update
+Dependencies, Return to Default, Prepare Workspace branch work, bulk Merge PRs...
+return-to-default follow-ups, or any similar mutating multi-repo operation.
+
+1. **Filter at the call site** - build candidate id sets with `!wr.IsOnTag` (or
+   equivalent). UI tips such as "Repositories checked out on a tag will not be
+   affected" match this rule.
+2. **Service paths leave tags untouched** - if a tag id still reaches an
+   operation, skip it (do not mutate, do not fail the batch for that reason).
+   Return to Default classifies `IsOnTag` as excluded, not blocking
+   (`ClassifyRepository`, unattended batch, `ExecuteReturnToDefaultAsync`).
+3. **Exceptions** - switching onto a tag (which records the pin) and leaving a
+   tag through GrayMoon Switch Branch / checkout are intentional.
+
+See `docs/architecture/06-developer-extension-guide.md` section 11 and
+`docs/architecture/05-user-capability-reference.md` (tagged repositories /
+Return to Default).
+
 ## Buttons and short action labels never word-wrap
 
 When adding or changing Blazor UX, button text must stay on a single line.

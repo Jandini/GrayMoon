@@ -48,15 +48,13 @@ public sealed partial class WorkspaceSyncHandler
 
         var results = new UnattendedReturnToDefaultRepositoryResult?[orderedIds.Count];
         var settled = 0;
-        var failed = 0;
         var progressGate = new object();
 
-        void ReportSettled(int repositoryId, bool success, string? repositoryName)
+        void ReportSettled(bool success)
         {
             var done = Interlocked.Increment(ref settled);
-            var failedNow = success ? Volatile.Read(ref failed) : Interlocked.Increment(ref failed);
-            var name = success ? null : DisplayName(repositoryId, repositoryName);
-            var message = FormatBatchProgress(orderedIds.Count, done, failedNow, name);
+            // Overlay shows progress only; per-repository failures surface on the workspace after the run.
+            var message = FormatBatchProgress(orderedIds.Count, done, success);
             lock (progressGate)
             {
                 if (orderedIds.Count <= 1)
@@ -79,7 +77,7 @@ public sealed partial class WorkspaceSyncHandler
                 for (var i = 0; i < orderedIds.Count; i++)
                 {
                     results[i] = Failed(orderedIds[i], FeatureContextMessage, UnattendedReturnFailureStage.Eligibility, mutationAttempted: false, mutationCompleted: false);
-                    ReportSettled(orderedIds[i], success: false, repositoryName: null);
+                    ReportSettled(false);
                 }
 
                 return Finish(results, reconciliationAttempted: false, reconciliationSucceeded: true, reconciliationError: null);
@@ -107,7 +105,7 @@ public sealed partial class WorkspaceSyncHandler
                     results[i] = Failed(orderedIds[i], FetchFailedMessage, UnattendedReturnFailureStage.Fetch, false, false);
                 else
                     results[i] = Failed(orderedIds[i], UnattendedReturnToDefaultBatchResult.CancelledMessage, UnattendedReturnFailureStage.Cancelled, false, false);
-                ReportSettled(orderedIds[i], success: false, repositoryName: null);
+                ReportSettled(false);
             }
 
             return Finish(results, false, true, null);
@@ -126,7 +124,7 @@ public sealed partial class WorkspaceSyncHandler
             results[i] = cancelled
                 ? Failed(orderedIds[i], UnattendedReturnToDefaultBatchResult.CancelledMessage, UnattendedReturnFailureStage.Cancelled, false, false)
                 : Failed(orderedIds[i], FetchFailedMessage, UnattendedReturnFailureStage.Fetch, false, false);
-            ReportSettled(orderedIds[i], success: false, repositoryName: null);
+            ReportSettled(false);
         }
 
         if (pending.Count == 0)
@@ -144,7 +142,7 @@ public sealed partial class WorkspaceSyncHandler
             foreach (var index in pending)
             {
                 results[index] = Failed(orderedIds[index], UnattendedReturnToDefaultBatchResult.CancelledMessage, UnattendedReturnFailureStage.Cancelled, false, false);
-                ReportSettled(orderedIds[index], success: false, repositoryName: null);
+                ReportSettled(false);
             }
 
             return Finish(results, false, true, null);
@@ -155,7 +153,7 @@ public sealed partial class WorkspaceSyncHandler
             foreach (var index in pending)
             {
                 results[index] = Failed(orderedIds[index], PullRequestRefreshFailedMessage, UnattendedReturnFailureStage.PullRequestRefresh, false, false);
-                ReportSettled(orderedIds[index], success: false, repositoryName: null);
+                ReportSettled(false);
             }
 
             return Finish(results, false, true, null);
@@ -178,15 +176,16 @@ public sealed partial class WorkspaceSyncHandler
                 if (!snapshots.TryGetValue(repositoryId, out var dto))
                 {
                     results[index] = Failed(repositoryId, StateUnreadableMessage, UnattendedReturnFailureStage.Eligibility, false, false);
-                    ReportSettled(repositoryId, success: false, repositoryName: null);
+                    ReportSettled(false);
                     continue;
                 }
 
                 var plan = ClassifyRepository(dto);
-                if (plan.IsAlreadyOnDefault)
+                if (plan.IsAlreadyOnDefault || plan.IsOnTag)
                 {
+                    // Already on default, or on a tag: leave untouched (tags are never part of Return to Default).
                     results[index] = Completed(repositoryId, mutationAttempted: false, mutationCompleted: false);
-                    ReportSettled(repositoryId, success: true, repositoryName: plan.RepositoryName);
+                    ReportSettled(true);
                     continue;
                 }
 
@@ -198,7 +197,7 @@ public sealed partial class WorkspaceSyncHandler
                         UnattendedReturnFailureStage.Eligibility,
                         mutationAttempted: false,
                         mutationCompleted: false);
-                    ReportSettled(repositoryId, success: false, repositoryName: plan.RepositoryName);
+                    ReportSettled(false);
                     continue;
                 }
 
@@ -221,7 +220,7 @@ public sealed partial class WorkspaceSyncHandler
                     UnattendedReturnFailureStage.Cancelled,
                     mutationAttempted: false,
                     mutationCompleted: false);
-                ReportSettled(item.Plan.RepositoryId, success: false, item.Plan.RepositoryName);
+                ReportSettled(false);
                 continue;
             }
 
@@ -356,7 +355,7 @@ public sealed partial class WorkspaceSyncHandler
                         "Unattended return repository settled WorkspaceId={WorkspaceId} ContextId={ContextId} RepositoryId={RepositoryId} Stage={Stage} ElapsedMs={ElapsedMs} Completed={Completed} MutationCompleted={MutationCompleted}",
                         workspaceId, contextId.Value, plan.RepositoryId, outcome.FailureStage,
                         (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds, outcome.Completed, outcome.MutationCompleted);
-                    ReportSettled(plan.RepositoryId, outcome.Completed, plan.RepositoryName);
+                    ReportSettled(outcome.Completed);
                 }
             }
         }
@@ -401,23 +400,10 @@ public sealed partial class WorkspaceSyncHandler
         return new UnattendedReturnToDefaultBatchResult(concrete, reconciliationAttempted, reconciliationSucceeded, reconciliationError);
     }
 
-    private static string DisplayName(int repositoryId, string? repositoryName)
-        => string.IsNullOrWhiteSpace(repositoryName) ? $"Repository {repositoryId}" : repositoryName;
-
-    private static string FormatBatchProgress(int total, int done, int failed, string? failedName)
+    private static string FormatBatchProgress(int total, int done, bool success)
     {
         if (total <= 1)
-        {
-            return failed > 0
-                ? failedName is null ? "Return to default failed." : $"Return to default failed: {failedName}"
-                : "Returned to default branch";
-        }
-
-        if (failed > 0)
-        {
-            var line = $"Returned {done} of {total} repositories to default ({failed} failed)";
-            return failedName is null ? line + "." : $"{line}. {failedName} failed.";
-        }
+            return success ? "Returned to default branch" : "Returning to default branch...";
 
         return $"Returned {done} of {total} repositories to default";
     }
