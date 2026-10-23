@@ -36,7 +36,7 @@ public sealed class WorkspaceManifestServiceTests
         var connector = Assert.Single(manifest.Connectors);
         Assert.Equal("github", connector.Type);
         Assert.Equal("https://github.com", connector.Url);
-        Assert.Equal("ws", manifest.Workspace.Name);
+        Assert.Equal("basic", manifest.Workspace.Profile.Type);
     }
 
     [Fact]
@@ -82,6 +82,32 @@ public sealed class WorkspaceManifestServiceTests
 
         var expected = new WorkspaceManifestFile().Serialize(await service.BuildFromDatabaseAsync(workspace.WorkspaceId));
         Assert.Equal(expected, args.GetProperty("content").GetString());
+        using var written = JsonDocument.Parse(expected);
+        Assert.False(written.RootElement.GetProperty("workspace").TryGetProperty("name", out _));
+    }
+
+    [Fact]
+    public async Task Write_manifest_drops_a_leftover_workspace_name()
+    {
+        await using var fixture = await ManifestTestFixture.CreateAsync();
+        var workspace = await fixture.SeedWorkspaceWithRootRepositoryAsync();
+        var service = fixture.CreateService();
+        var canonical = new WorkspaceManifestFile().Serialize(await service.BuildFromDatabaseAsync(workspace.WorkspaceId));
+        var withName = canonical.Replace(
+            "\"workspace\": {",
+            "\"workspace\": {\n    \"name\": \"OtherMachine\",",
+            StringComparison.Ordinal);
+        fixture.Bridge.RespondWithFile(withName);
+
+        var result = await service.WriteAuthoritativeManifestAsync(workspace.WorkspaceId);
+
+        Assert.True(result.Success, result.Error);
+        var content = ManifestTestFixture.ToJson(
+            Assert.Single(fixture.Bridge.Sent, sent => sent.Command == "WriteRepositoryFile").Args)
+            .GetProperty("content").GetString()!;
+        using var written = JsonDocument.Parse(content);
+        Assert.False(written.RootElement.GetProperty("workspace").TryGetProperty("name", out _));
+        Assert.Contains("\"name\": \"Api\"", content, StringComparison.Ordinal);
     }
 
     [Fact]

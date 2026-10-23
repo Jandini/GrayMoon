@@ -8,7 +8,7 @@ public sealed class WorkspaceManifestFileTests
 
     private static WorkspaceManifest Sample() => new(
         1,
-        new WorkspaceManifestWorkspace("AVR", new WorkspaceManifestProfile("basic", "none", "none")),
+        new WorkspaceManifestWorkspace(new WorkspaceManifestProfile("basic", "none", "none")),
         [
             new WorkspaceManifestConnector("github", "https://github.com")
         ],
@@ -162,9 +162,10 @@ public sealed class WorkspaceManifestFileTests
             """;
 
         Assert.True(ManifestFile.TryParse(json, out var manifest, out var error), error);
-        Assert.Equal("AVR", manifest!.Workspace.Name);
+        Assert.Equal("basic", manifest!.Workspace.Profile.Type);
         Assert.Empty(manifest.Connectors);
         Assert.Single(manifest.Repositories);
+        Assert.False(JsonDocumentHasWorkspaceName(ManifestFile.Serialize(manifest)));
     }
 
     [Fact]
@@ -243,13 +244,38 @@ public sealed class WorkspaceManifestFileTests
     }
 
     [Fact]
-    public void Parse_fails_on_missing_workspace_name()
+    public void Parse_accepts_a_workspace_without_a_name_and_serialize_omits_it()
     {
         const string json = """{ "version": 1, "workspace": { "profile": { "type": "basic", "versioning": "none", "ci": "none" } } }""";
 
+        Assert.True(ManifestFile.TryParse(json, out var manifest, out var error), error);
+        Assert.Equal("basic", manifest!.Workspace.Profile.Type);
+        Assert.False(JsonDocumentHasWorkspaceName(ManifestFile.Serialize(manifest)));
+    }
+
+    [Fact]
+    public void Parse_ignores_a_leftover_workspace_name_and_serialize_drops_it()
+    {
+        const string json = """{ "version": 1, "workspace": { "name": "OtherMachine", "profile": { "type": "basic", "versioning": "none", "ci": "none" } } }""";
+
+        Assert.True(ManifestFile.TryParse(json, out var manifest, out var error), error);
+        Assert.False(JsonDocumentHasWorkspaceName(ManifestFile.Serialize(manifest!)));
+    }
+
+    [Fact]
+    public void Parse_fails_when_workspace_is_missing()
+    {
+        const string json = """{ "version": 1 }""";
+
         Assert.False(ManifestFile.TryParse(json, out var manifest, out var error));
         Assert.Null(manifest);
-        Assert.False(string.IsNullOrWhiteSpace(error));
+        Assert.Equal("Workspace definition is missing workspace", error);
+    }
+
+    private static bool JsonDocumentHasWorkspaceName(string json)
+    {
+        using var document = System.Text.Json.JsonDocument.Parse(json);
+        return document.RootElement.GetProperty("workspace").TryGetProperty("name", out _);
     }
 
     [Fact]

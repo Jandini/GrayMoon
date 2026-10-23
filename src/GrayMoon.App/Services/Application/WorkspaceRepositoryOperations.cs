@@ -128,7 +128,6 @@ public sealed class WorkspaceRepositoryOperations(
             return new RestoreWorkspacePreflight
             {
                 Success = true,
-                DefinitionName = plan.Plan.Manifest.Workspace.Name,
                 WorkspaceType = plan.Plan.Type,
                 VersioningMode = plan.Plan.Versioning,
                 CiProvider = plan.Plan.Ci,
@@ -414,7 +413,7 @@ public sealed class WorkspaceRepositoryOperations(
     /// The restored definition is rewritten only when it is complete on this computer and its canonical form differs
     /// (for example duplicate entries, or the Workspace repository listed as its own Source repository). A definition
     /// with repositories, connectors or version files that are missing here is never rewritten: that would drop them from the file.
-    /// The Workspace name in the file is not a reason to rewrite, so choosing a local name does not dirty the repository.
+    /// A leftover <c>workspace.name</c> is not a reason to rewrite, so restoring under another local name does not dirty the repository.
     /// </summary>
     private async Task<bool> IsDefinitionRewriteRequiredAsync(
         int workspaceId,
@@ -425,14 +424,21 @@ public sealed class WorkspaceRepositoryOperations(
         if (plan.MissingRepositories.Count > 0 || plan.MissingConnectors.Count > 0)
             return false;
 
-        var database = await manifestService.BuildFromDatabaseAsync(workspaceId, cancellationToken);
-        if (manifestFile.TryParse(fileContent, out var fileManifest, out _) && fileManifest is not null)
-            database = WorkspaceRepositoryTagPins.CopyOnto(database, fileManifest);
-        var canonical = manifestFile.Serialize(database with
+        if (!manifestFile.TryParse(fileContent, out var fileManifest, out _) || fileManifest is null)
+            return true;
+
+        var database = WorkspaceRepositoryTagPins.CopyOnto(
+            await manifestService.BuildFromDatabaseAsync(workspaceId, cancellationToken),
+            fileManifest) with
         {
-            Workspace = database.Workspace with { Name = plan.Manifest.Workspace.Name },
-        });
-        return !string.Equals(canonical, fileContent.Replace("\r\n", "\n"), StringComparison.Ordinal);
+            CodeGraph = fileManifest.CodeGraph,
+            Ai = fileManifest.Ai,
+        };
+        // Parsing drops workspace.name, so both sides omit it. A leftover name does not differ.
+        return !string.Equals(
+            manifestFile.Serialize(database),
+            manifestFile.Serialize(fileManifest),
+            StringComparison.Ordinal);
     }
 
     /// <summary>

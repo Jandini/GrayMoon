@@ -77,7 +77,11 @@ public sealed class LenientBooleanJsonConverter : JsonConverter<bool?>
     }
 }
 
-public sealed record WorkspaceManifestWorkspace(string Name, WorkspaceManifestProfile Profile);
+/// <summary>
+/// The <c>workspace</c> object. The Workspace name is the folder on this computer and is not stored here.
+/// A leftover <c>name</c> in an older file is ignored and left out the next time the file is written.
+/// </summary>
+public sealed record WorkspaceManifestWorkspace(WorkspaceManifestProfile Profile);
 
 public sealed record WorkspaceManifestProfile(string Type, string Versioning, string Ci);
 

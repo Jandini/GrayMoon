@@ -611,14 +611,14 @@ A Workspace has three persisted settings (`Type`, `VersioningMode`, `CiProvider`
 
 | Section | Owner | Meaning for new code |
 |---|---|---|
-| `workspace.name`, `workspace.profile`, `connectors`, `repositories`, `versionFiles` | DB | Rebuilt from the database by `BuildFromDatabaseAsync` on every authoritative write. Drift compares repositories, connectors and profile only. |
+| `workspace.profile`, `connectors`, `repositories`, `versionFiles` | DB | Rebuilt from the database by `BuildFromDatabaseAsync` on every authoritative write. Drift compares repositories, connectors and profile only. The Workspace name is the local folder and is never written; a leftover `workspace.name` is ignored and omitted on the next rewrite. |
 | `codegraph`, `ai`, repository `tag`/`commit` pins | File | No DB copy; `WriteAuthoritativeManifestAsync` copies them from the existing file; drift ignores them. |
 
 Rules:
 
 - A new DB-owned section must be produced by `BuildFromDatabaseAsync`, imported on Restore / Sync, and decide whether it takes part in drift.
 - A new file-owned section must be copied forward in `WriteAuthoritativeManifestAsync`, or the next write deletes it.
-- Never write anything local: database ids, paths, credentials, the pinned AI provider (`Workspaces.PinnedAiProviderId` is per machine).
+- Never write anything local: the Workspace name, database ids, paths, credentials, the pinned AI provider (`Workspaces.PinnedAiProviderId` is per machine).
 - Keep the schema at `version` 1 for optional additive sections; a reader rejects a newer version. Strict parse errors are user-visible, so keep new sections lenient where safe (unknown AI providers are kept and reported, not rejected).
 - GrayMoon never commits the definition; written files appear in Git Changes.
 

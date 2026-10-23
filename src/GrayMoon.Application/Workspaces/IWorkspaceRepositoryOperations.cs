@@ -59,9 +59,6 @@ public sealed record RestoreWorkspacePreflight
     /// <summary>Why the repository cannot be restored. Set only when <see cref="Success"/> is false.</summary>
     public string? Error { get; init; }
 
-    /// <summary>The Workspace name stored in the definition.</summary>
-    public string? DefinitionName { get; init; }
-
     public WorkspaceType? WorkspaceType { get; init; }
     public WorkspaceVersioningMode? VersioningMode { get; init; }
     public WorkspaceCiProvider? CiProvider { get; init; }

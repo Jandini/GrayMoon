@@ -78,9 +78,9 @@ public sealed class WorkspaceManifestFile : IWorkspaceManifestFile
                 return false;
             }
 
-            if (parsed.Workspace is null || string.IsNullOrWhiteSpace(parsed.Workspace.Name))
+            if (parsed.Workspace is null)
             {
-                error = "Workspace definition is missing workspace.name";
+                error = "Workspace definition is missing workspace";
                 return false;
             }
 
@@ -128,7 +128,6 @@ public sealed class WorkspaceManifestFile : IWorkspaceManifestFile
             manifest = new WorkspaceManifest(
                 schemaVersion,
                 new WorkspaceManifestWorkspace(
-                    parsed.Workspace.Name,
                     new WorkspaceManifestProfile(
                         profile.Type ?? "basic",
                         profile.Versioning ?? "none",

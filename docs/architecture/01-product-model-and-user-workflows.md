@@ -356,7 +356,6 @@ After a fresh attach GrayMoon writes the managed `.gitignore` section and `graym
 
 ```text
 version             schema version (1)
-workspace.name
 workspace.profile   type / versioning / ci
 connectors          GitHub connector URLs of the Source repositories
 repositories        Source repositories by URL and connector, with an optional tag + commit pin
@@ -365,11 +364,13 @@ codegraph           optional workspace-wide switch (section 22C)
 ai                  optional, AI providers and models for commit/PR text (section 18A)
 ```
 
+The Workspace name is the folder on this computer. It is not written to `graymoon.json`. A leftover `workspace.name` in an older file is ignored, and the next rewrite leaves it out.
+
 - GrayMoon rewrites it when Source membership or the profile changes, and when the user writes it from the drift banner. Version-file changes on the Files page rewrite only `versionFiles`.
-- `codegraph`, `ai` and tag pins are file-owned: rewrites keep them and drift ignores them. Drift compares only repositories, connectors and profile; it also ignores the name and `versionFiles`.
+- `codegraph`, `ai` and tag pins are file-owned: rewrites keep them and drift ignores them. Drift compares only repositories, connectors and profile; it also ignores a leftover name and `versionFiles`.
 - When the Workspace repository is synced in the special context, its `versionFiles` are imported into the database (file wins); entries of repositories not in this Workspace are skipped on import and preserved on write.
 - When a Source repository is checked out on a tag in the special context, the tag and its commit are pinned in the file (not committed); leaving the tag through GrayMoon clears the pin. A fresh clone of a pinned Source is checked out at the pinned commit.
-- Nothing machine-local (paths, IDs, credentials, the pinned AI provider) is ever written.
+- Nothing machine-local (the Workspace name, paths, IDs, credentials, the pinned AI provider) is ever written.
 
 The full schema and write rules are in 03.
 

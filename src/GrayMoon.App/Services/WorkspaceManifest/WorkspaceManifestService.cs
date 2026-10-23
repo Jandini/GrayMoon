@@ -72,7 +72,6 @@ public sealed class WorkspaceManifestService(
         return new WorkspaceManifest(
             manifestFile.CurrentSchemaVersion,
             new WorkspaceManifestWorkspace(
-                workspace.Name,
                 new WorkspaceManifestProfile(
                     WorkspaceManifestProfileNames.ToManifest(workspace.Type),
                     WorkspaceManifestProfileNames.ToManifest(workspace.VersioningMode),

@@ -366,7 +366,6 @@ public sealed class RestoreWorkspaceFlowTests
     private static RestoreWorkspacePreflight Preview() => new()
     {
         Success = true,
-        DefinitionName = "ws",
         WorkspaceType = WorkspaceType.Basic,
         VersioningMode = WorkspaceVersioningMode.None,
         CiProvider = WorkspaceCiProvider.None,

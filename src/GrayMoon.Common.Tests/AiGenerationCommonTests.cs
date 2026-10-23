@@ -10,7 +10,7 @@ public sealed class AiManifestTests
 
     private static WorkspaceManifest Sample(WorkspaceManifestAi? ai) => new(
         1,
-        new WorkspaceManifestWorkspace("AVR", new WorkspaceManifestProfile("basic", "none", "none")),
+        new WorkspaceManifestWorkspace(new WorkspaceManifestProfile("basic", "none", "none")),
         [new WorkspaceManifestConnector("github", "https://github.com")],
         [new WorkspaceManifestRepository("Avr.Api", "https://github.com/example/Avr.Api.git", "https://github.com")],
         Ai: ai);
