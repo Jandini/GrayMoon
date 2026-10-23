@@ -237,7 +237,7 @@ A filtered unique index, `IX_WorkspaceRepositories_WorkspaceId_WorkspaceRole` (`
 
 `Workspaces.ManifestDriftDetectedAt` (nullable `DateTime`, strict migration step 6) is set when a check after a Sync finds `graymoon.json` different from the database, and cleared when they agree, on Dismiss, or when the Workspace repository is disabled. It is reconciliation state, not Git state.
 
-`graymoon.json` itself is not persisted in the database. Its DB-owned parts (Workspace name and profile, Source repositories, their connectors, `versionFiles`) are built from the database and written to the Workspace repository root; its file-owned parts (`codegraph`, `ai`, per-repository tag pins) exist only in the file. Schema, ownership, write, import and drift rules are in section 4A. Feature contexts never run drift detection.
+`graymoon.json` itself is not persisted in the database. Its DB-owned parts (Workspace profile, Source repositories, their connectors, `versionFiles`) are built from the database and written to the Workspace repository root; its file-owned parts (`codegraph`, `ai`, per-repository tag pins) exist only in the file. The Workspace name is the folder on this computer and is not stored in the file. Schema, ownership, write, import and drift rules are in section 4A. Feature contexts never run drift detection.
 
 ---
 
@@ -285,7 +285,8 @@ When a Workspace has a Workspace-role repository, its root holds `graymoon.json`
 ```text
 version            int, key "version" (WorkspaceManifestFile.SchemaVersion = 1); a value > 1 is rejected:
                    "Workspace definition schema N is newer than this GrayMoon"
-workspace.name     required
+workspace          required object. The local Workspace name is not stored. A leftover name is ignored
+                   and omitted the next time the file is written.
 workspace.profile  { type: basic|dotNetDependency, versioning: none|gitVersion, ci: none|githubActions }
                    missing -> basic / none / none
 connectors[]       { type: "github", url: normalized web root } - GitHub connectors of Source repositories only; NuGet never written
@@ -300,15 +301,15 @@ ai                 { providers: [ { provider: claude|codex|cursor|<unknown kept>
 ### Ownership
 
 ```text
-DB-owned    workspace.name, workspace.profile, connectors, repositories (name/url/connector), versionFiles
+DB-owned    workspace.profile, connectors, repositories (name/url/connector), versionFiles
 File-owned  codegraph, ai, repositories[].tag / commit pins   (no DB copy; kept on every rewrite; ignored by drift)
-Never       anything local: pinned AI provider, credentials, paths, local ids
+Never       anything local: the Workspace name (folder), pinned AI provider, credentials, paths, local ids
 ```
 
 ### Serialization and parsing
 
 - `Serialize`: System.Text.Json, camelCase, indented; connectors sorted by `url`, repositories by `name`, versionFiles by `repository` then `path` (all ordinal ignore-case); LF line endings plus a trailing newline. Optional sections are omitted when null.
-- `TryParse` (case-insensitive) fails on: empty content, invalid JSON, newer schema, missing `workspace.name`, an invalid tag pin, a versionFile without `repository` or `path`, an `ai` provider entry without `provider` or `providers` that is not a list.
+- `TryParse` (case-insensitive) fails on: empty content, invalid JSON, newer schema, a missing `workspace` object, an invalid tag pin, a versionFile without `repository` or `path`, an `ai` provider entry without `provider` or `providers` that is not a list. A leftover `workspace.name` is ignored.
 - `ai`: unknown and duplicate providers are kept in the file and checked when used (a duplicate or an unsafe model disables that provider with a message; an unknown id shows a notice). Feature contexts read `ai` from the special Workspace's file.
 - URL identity (`GrayMoon.Common/Git/RepositoryUrlIdentity`): `NormalizeConnectorUrl` lowercases scheme and host, drops the default port, a trailing slash and `/api/v3`; `NormalizeRepositoryUrl` turns https, http, ssh and scp forms into `https://host/owner/repo` (lower host, no `.git`). The connector URL is `RepositoryUrlHelper.GetWebRootFromConnectorApiBase(ApiBaseUrl)`.
 
@@ -329,7 +330,7 @@ Never       anything local: pinned AI provider, credentials, paths, local ids
 ### Reading into the database
 
 - Sync that includes the Workspace repository in the special context imports `versionFiles` (`ImportVersionFilesFromDefinitionAsync` -> `MergeVersionFilesFromDefinitionAsync`, file wins). Entries of repositories not linked here are skipped on import and preserved on write.
-- Restore creates the Workspace row as Basic / None / None, applies the file's profile through `WorkspaceProfileTransition`, merges `versionFiles` (`MergeVersionFilesIntoDatabaseAsync`, file wins), and skips the definition rewrite when any repository, connector or version file is missing locally. A different `workspace.name` in the file is not a reason to rewrite; the Workspace repository listed as its own Source is ignored.
+- Restore creates the Workspace row as Basic / None / None, applies the file's profile through `WorkspaceProfileTransition`, merges `versionFiles` (`MergeVersionFilesIntoDatabaseAsync`, file wins), and skips the definition rewrite when any repository, connector or version file is missing locally. A leftover `workspace.name` is not a reason to rewrite; the Workspace repository listed as its own Source is ignored. The name chosen in Restore is the folder on this computer.
 
 ### Drift
 
@@ -337,7 +338,7 @@ Never       anything local: pinned AI provider, credentials, paths, local ids
 
 ```text
 compared   repositories by normalized URL (added / removed names), connectors by normalized URL, profile type / versioning / ci
-ignored    workspace.name, versionFiles, codegraph, ai, tag pins
+ignored    a leftover workspace.name, versionFiles, codegraph, ai, tag pins
 drift      a missing or unparsable file counts as drift, with the reason
 ```
 

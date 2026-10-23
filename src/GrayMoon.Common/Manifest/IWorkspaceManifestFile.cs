@@ -16,7 +16,7 @@ public interface IWorkspaceManifestFile
     /// <summary>Byte-stable text: fixed property order, connectors and repositories sorted, LF line endings and a trailing newline.</summary>
     string Serialize(WorkspaceManifest manifest);
 
-    /// <summary>Strict parse of the whole definition. False with <paramref name="error"/> for empty, invalid or newer-schema content, a missing <c>workspace.name</c> or an invalid tag pin.</summary>
+    /// <summary>Strict parse of the whole definition. False with <paramref name="error"/> for empty, invalid or newer-schema content, a missing <c>workspace</c> object or an invalid tag pin. A leftover <c>workspace.name</c> is ignored.</summary>
     bool TryParse(string? content, out WorkspaceManifest? manifest, out string? error);
 
     /// <summary>True when the content is JSON whose <c>version</c> is newer than this GrayMoon understands.</summary>

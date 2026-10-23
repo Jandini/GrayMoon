@@ -165,7 +165,6 @@ public sealed class WorkspaceRepositoryOperationsTests
         var preflight = await fixture.Operations.PreflightRestoreAsync(root.RepositoryId);
 
         Assert.True(preflight.Success, preflight.Error);
-        Assert.Equal("restored", preflight.DefinitionName);
         Assert.Equal(WorkspaceType.DotNetDependency, preflight.WorkspaceType);
         Assert.Equal(WorkspaceVersioningMode.GitVersion, preflight.VersioningMode);
         Assert.Equal(WorkspaceCiProvider.GitHubActions, preflight.CiProvider);
@@ -346,6 +345,26 @@ public sealed class WorkspaceRepositoryOperationsTests
         var github = await fixture.GetGitHubConnectorAsync();
         await fixture.Seed.AddRepositoryAsync(github, "Api", "https://github.com/acme/Api.git");
         fixture.UseDefinition(Definition(("basic", "none", "none"), ["https://github.com"], ("Api", "https://github.com/acme/Api.git")));
+
+        var result = await fixture.Operations.RestoreFromRepositoryAsync(root.RepositoryId, "a-local-name");
+
+        Assert.True(result.Success, result.Error);
+        Assert.Equal(["gitignore"], fixture.Manifest.Calls.ToArray());
+    }
+
+    [Fact]
+    public async Task Restore_does_not_rewrite_a_definition_only_to_drop_a_leftover_name()
+    {
+        await using var fixture = await OperationsFixture.CreateAsync();
+        var root = await fixture.SeedRootAsync();
+        var github = await fixture.GetGitHubConnectorAsync();
+        await fixture.Seed.AddRepositoryAsync(github, "Api", "https://github.com/acme/Api.git");
+        var canonical = Definition(("basic", "none", "none"), ["https://github.com"], ("Api", "https://github.com/acme/Api.git"));
+        var withName = canonical.Replace(
+            "\"workspace\": {",
+            "\"workspace\": {\n    \"name\": \"OtherMachine\",",
+            StringComparison.Ordinal);
+        fixture.UseDefinition(withName);
 
         var result = await fixture.Operations.RestoreFromRepositoryAsync(root.RepositoryId, "a-local-name");
 
@@ -662,7 +681,7 @@ public sealed class WorkspaceRepositoryOperationsTests
         params (string Name, string Url)[] repositories) =>
         new WorkspaceManifestFile().Serialize(new WorkspaceManifest(
             1,
-            new WorkspaceManifestWorkspace("restored", new WorkspaceManifestProfile(profile.Type, profile.Versioning, profile.Ci)),
+            new WorkspaceManifestWorkspace(new WorkspaceManifestProfile(profile.Type, profile.Versioning, profile.Ci)),
             connectors.Select(c => new WorkspaceManifestConnector("github", c)).ToList(),
             repositories.Select(r => new WorkspaceManifestRepository(r.Name, r.Url, "https://github.com")).ToList()));
 
