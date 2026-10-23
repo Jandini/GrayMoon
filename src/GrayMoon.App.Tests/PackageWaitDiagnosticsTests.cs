@@ -425,6 +425,7 @@ public sealed class PackageWaitDiagnosticsTests
         await db.SaveChangesAsync();
 
         var ids = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var links = new List<(WorkspaceRepositoryLink Link, GraphRepo Repo)>();
         foreach (var repo in repos)
         {
             var repository = new Repository
@@ -437,7 +438,7 @@ public sealed class PackageWaitDiagnosticsTests
             };
             db.Repositories.Add(repository);
             await db.SaveChangesAsync();
-            db.WorkspaceRepositories.Add(new WorkspaceRepositoryLink
+            var link = new WorkspaceRepositoryLink
             {
                 WorkspaceId = ctx.WorkspaceId,
                 RepositoryId = repository.RepositoryId,
@@ -448,7 +449,9 @@ public sealed class PackageWaitDiagnosticsTests
                 BranchHasUpstream = true,
                 DependencyLevel = repo.Level,
                 SyncStatus = RepoSyncStatus.InSync
-            });
+            };
+            db.WorkspaceRepositories.Add(link);
+            links.Add((link, repo));
             if (!string.IsNullOrWhiteSpace(repo.PackageId))
             {
                 db.WorkspaceProjects.Add(new WorkspaceProject
@@ -496,7 +499,20 @@ public sealed class PackageWaitDiagnosticsTests
             });
         }
 
+        // Persist the levels the way the app does, so a later write to a context state cannot hide them.
         db.WorkspaceRepositoryContextStates.RemoveRange(db.WorkspaceRepositoryContextStates);
+        await db.SaveChangesAsync();
+        foreach (var (link, repo) in links)
+        {
+            db.WorkspaceRepositoryContextStates.Add(new WorkspaceRepositoryContextState
+            {
+                WorkspaceFeatureContextId = special.Value,
+                WorkspaceRepositoryId = link.WorkspaceRepositoryId,
+                DependencyLevel = repo.Level,
+                SyncStatus = RepoSyncStatus.InSync
+            });
+        }
+
         await db.SaveChangesAsync();
         return new SeededGraph(ids, nuget.ConnectorId);
     }

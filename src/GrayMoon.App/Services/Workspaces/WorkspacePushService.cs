@@ -226,7 +226,8 @@ public sealed partial class WorkspacePushService(
         async Task<List<PushRepoPayload>> LoadSelectedPayloadAsync()
         {
             var all = await _workspaceDependencyService.GetPushPlanPayloadAsync(workspaceId, contextId.Value, cancellationToken);
-            return all.Where(p => runRepositoryIds.Contains(p.RepoId)).ToList();
+            var freshByRepo = all.Where(p => runRepositoryIds.Contains(p.RepoId)).ToDictionary(p => p.RepoId);
+            return payload.Select(planned => PreferFreshPlan(runId, planned, freshByRepo)).ToList();
         }
 
         foreach (var level in levelsAsc)
@@ -639,6 +640,24 @@ public sealed partial class WorkspacePushService(
         return true;
     }
 
+    /// <summary>
+    /// A plan read again during the run replaces the planned repository only while it still has the planned level.
+    /// A fresh row without that level (for example a context state rewritten without one) also has no required
+    /// packages, so using it would let the repository skip its turn and the run report success.
+    /// </summary>
+    private PushRepoPayload PreferFreshPlan(string? runId, PushRepoPayload planned, IReadOnlyDictionary<int, PushRepoPayload> freshByRepo)
+    {
+        if (!freshByRepo.TryGetValue(planned.RepoId, out var fresh))
+            return planned;
+        if (fresh.DependencyLevel == planned.DependencyLevel)
+            return fresh;
+
+        _logger.LogWarning(
+            "[PushOrchestrator {RunId}] Push plan read again gave {RepoName} level {FreshLevel} instead of {PlannedLevel}; keeping the planned repository.",
+            runId, planned.RepoName, fresh.DependencyLevel?.ToString() ?? "none", planned.DependencyLevel?.ToString() ?? "none");
+        return planned;
+    }
+
     /// <summary>An unmatched package blocks the run up front only when this run will not publish it.</summary>
     private static bool BlocksBeforeAnyLevel(RequiredPackageForPush package, IReadOnlySet<int> runRepositoryIds)
         => !package.MatchedConnectorId.HasValue && !ProducedByThisRun(package, runRepositoryIds);
@@ -916,7 +935,7 @@ public sealed partial class WorkspacePushService(
             var fresh = await _workspaceDependencyService.GetPushPlanPayloadAsync(workspaceId, contextId.Value, cancellationToken);
             var freshByRepo = fresh.ToDictionary(p => p.RepoId);
             reposAtLevel = reposAtLevel
-                .Select(repo => freshByRepo.TryGetValue(repo.RepoId, out var updated) ? updated : repo)
+                .Select(repo => PreferFreshPlan(runId, repo, freshByRepo))
                 .ToList();
         }
 
