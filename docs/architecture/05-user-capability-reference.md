@@ -436,7 +436,7 @@ Starts multi-repository PR creation (section 24). In a Feature context, a reposi
 
 ### Merge PRs...
 
-Opens `BulkMergePullRequestsModal` over the scope (a level, the Workspace or Repositories header set, or all repositories). Candidates are resolved from the persisted PR table, not from the virtualized render cache. The "Return to default branch" checkbox shares its remembered value with the single-PR dialog and is hidden in a Feature. When checked, **Merged** (default) or **All repositories** chooses the return set: Merged returns only repositories whose PR just merged; All repositories also returns every other repository in the same dialog scope that had no open PR (typically unchanged on the branch). Returning after a bulk merge uses `ReturnToDefaultUnattendedBatchAsync`: ids deduped, branches refreshed in parallel, one PR refresh, eligible repositories returned in parallel, one recompute only when at least one returned.
+Opens `BulkMergePullRequestsModal` over the scope (a level, the Workspace or Repositories header set, or all repositories). Candidates are resolved from the persisted PR table, not from the virtualized render cache. The "Return to default branch" checkbox shares its remembered value with the single-PR dialog and is hidden in a Feature. When checked, **Merged** (default) or **All repositories** chooses the return set: Merged returns only repositories whose PR just merged; All repositories also returns every other repository in the same dialog scope that had no open PR and is not on a tag (tag checkouts are never returned). Returning after a bulk merge uses `ReturnToDefaultUnattendedBatchAsync`: ids deduped, branches refreshed in parallel, one PR refresh, eligible repositories returned in parallel (tag checkouts completed as untouched), one recompute only when at least one returned. Overlay progress shows counts only (no "(failed)" annotation); repository failures surface on the workspace afterward.
 
 ### Return to Default
 
@@ -458,7 +458,7 @@ delete branch where supported
 update branch from default
 ```
 
-Tagged repositories are intentionally protected from mutating workflows.
+Tagged repositories are intentionally protected from mutating workflows: a repository checked out on a tag (including a Workspace tag pin in `graymoon.json`) is never a candidate for Push, Sync Commits, Update Dependencies, Return to Default, Prepare Workspace branch work, or bulk Merge PRs... return-to-default follow-ups. Those operations leave the tag checkout untouched rather than failing it.
 
 Switch Branch marks branches held elsewhere (`WorkspaceBranchOccupancyService`, `BranchOccupancyKind`): **Current**, **Feature** (checked out by a Feature), **Workspace** (held by the special Workspace checkout), **Worktree** (an external worktree). Checkout is allowed only for unoccupied or current branches; an ordinary delete only for unoccupied ones. Deleting a Feature-held branch opens Remove Feature; deleting an external-worktree branch runs `AnalyzeExternalWorktreeCleanupAsync` with an inline confirmation (a dirty worktree needs a second confirmation) and `RemoveExternalWorktreeAsync`. Delete errors show the server's error text. The Tags-tab entry point passes the repository id so badges appear there too.
 
@@ -680,7 +680,7 @@ It refreshes enough state to determine:
 
 ```text
 already on default
-tag checkout
+tag checkout (excluded - never mutated, does not block the plan)
 ahead of default
 upstream
 PR merged/closed/open
@@ -690,7 +690,7 @@ whether explicit discard confirmation is needed
 
 ### Execution
 
-`ExecuteReturnToDefaultAsync` receives explicit `ReturnToDefaultOptions`.
+`ExecuteReturnToDefaultAsync` receives explicit `ReturnToDefaultOptions`. Repositories on a tag are skipped (untouched), not reported as errors.
 
 ### UI policy
 

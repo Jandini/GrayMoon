@@ -123,12 +123,15 @@ public sealed partial class WorkspaceRepositories
 
         // Repositories in this merge scope with no open PR (usually unchanged on the branch). Used when
         // "Return to default branch" → All repositories is selected so they are returned alongside merges.
+        // Tag checkouts are never part of Return to Default (or other mutating ops) - leave them out.
         var noOpenPrRepositories = new List<BulkMergeNoOpenPrRepository>();
         foreach (var repositoryId in ids)
         {
             if (openPrRepositoryIds.Contains(repositoryId))
                 continue;
             if (!linkByRepoId.TryGetValue(repositoryId, out var link) || link.Repository == null)
+                continue;
+            if (link.IsOnTag)
                 continue;
             noOpenPrRepositories.Add(new BulkMergeNoOpenPrRepository(repositoryId, link.Repository.RepositoryName));
         }

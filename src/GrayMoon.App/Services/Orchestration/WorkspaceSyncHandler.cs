@@ -270,11 +270,9 @@ public sealed partial class WorkspaceSyncHandler(
                 continue;
             }
 
+            // Tag-pinned / tag-checked-out repositories are never part of Return to Default - leave them untouched.
             if (!string.IsNullOrWhiteSpace(dto.CheckedOutTag))
-            {
-                repoErrors[repoId] = "Repository is on a tag.";
                 continue;
-            }
 
             var needsSync = !string.IsNullOrWhiteSpace(dto.BranchName)
                 && !string.Equals(dto.BranchName, dto.DefaultBranchName, StringComparison.Ordinal);
@@ -493,6 +491,7 @@ public sealed partial class WorkspaceSyncHandler(
 
         if (isOnTag)
         {
+            // Tag checkouts are never part of Return to Default (or other mutating ops): leave them untouched.
             return new ReturnToDefaultRepositoryPlan(
                 dto.RepositoryId,
                 dto.RepositoryName,
@@ -507,7 +506,7 @@ public sealed partial class WorkspaceSyncHandler(
                 CanDiscardLocalBranchSafely: false,
                 RemoteBranchCanBeDeleted: false,
                 RequiresExplicitDiscardConfirmation: false,
-                BlockingReason: "Repository is on a tag. Return to default was aborted.");
+                BlockingReason: null);
         }
 
         var requiresExplicitDiscard = ahead > 0 && !prMergedOrClosed;
@@ -544,17 +543,8 @@ public sealed partial class WorkspaceSyncHandler(
 
         foreach (var repo in repoPlans)
         {
-            if (repo.IsAlreadyOnDefault)
+            if (repo.IsAlreadyOnDefault || repo.IsOnTag)
                 continue;
-
-            if (repo.IsOnTag)
-            {
-                hasBlocking = true;
-                canProceedAutomatically = false;
-                if (repo.BlockingReason != null)
-                    blockingReasons.Add(repo.BlockingReason);
-                continue;
-            }
 
             if (repo.RequiresExplicitDiscardConfirmation)
             {

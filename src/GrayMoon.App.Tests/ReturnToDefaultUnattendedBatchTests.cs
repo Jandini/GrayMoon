@@ -321,6 +321,68 @@ public sealed class ReturnToDefaultUnattendedBatchTests
         Assert.DoesNotContain(progress.Messages, message => message.Contains("1 of 1", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task Tag_checkout_is_left_untouched()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await ctx.MutateLinkAsync(link =>
+        {
+            link.CheckedOutTag = "v1.0.0";
+            link.BranchName = null;
+            link.DefaultBranchName = "main";
+            link.DefaultBranchAheadCommits = 0;
+        });
+        ctx.WorkerBridge.Respond("RefreshBranches", _ => new WorkerCommandResponse(true, new BranchesResponse
+        {
+            Success = true,
+            LocalBranches = ["main"],
+            RemoteBranches = ["origin/main"],
+            CurrentBranch = null,
+            DefaultBranch = "main",
+            Tags = ["v1.0.0"],
+            CurrentTag = "v1.0.0",
+            UpstreamProbed = false,
+        }, null));
+        ctx.WorkerBridge.Respond("ReturnToDefaultBranch", _ => new WorkerCommandResponse(true, ReturnResponse(), null));
+        var progress = new ListProgress();
+        var handler = CreateHandler(ctx);
+
+        var batch = await handler.ReturnToDefaultUnattendedBatchAsync(
+            ctx.WorkspaceId, await ctx.GetSpecialContextIdAsync(), [ctx.RepositoryId], progress, CancellationToken.None);
+
+        var result = Assert.Single(batch.Results);
+        Assert.True(result.Completed);
+        Assert.False(result.MutationAttempted);
+        Assert.DoesNotContain(ctx.WorkerBridge.Calls, call => call.Command == "ReturnToDefaultBranch");
+        Assert.DoesNotContain(progress.Messages, message => message.Contains("failed", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Batch_progress_omits_failed_counts_when_a_repository_fails()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var ids = await SeedEligibleAsync(ctx, 1);
+        ctx.WorkerBridge.Respond("RefreshBranches", _ => new WorkerCommandResponse(true, RefreshBranchesOk(), null));
+        var call = 0;
+        ctx.WorkerBridge.Respond("ReturnToDefaultBranch", _ =>
+        {
+            call++;
+            return call == 1
+                ? new WorkerCommandResponse(true, ReturnResponse(), null)
+                : new WorkerCommandResponse(false, null, "boom");
+        });
+        var progress = new ListProgress();
+        var handler = CreateHandler(ctx);
+
+        var batch = await handler.ReturnToDefaultUnattendedBatchAsync(
+            ctx.WorkspaceId, await ctx.GetSpecialContextIdAsync(), ids, progress, CancellationToken.None);
+
+        Assert.Contains(batch.Results, result => result.Completed);
+        Assert.Contains(batch.Results, result => !result.Completed);
+        Assert.DoesNotContain(progress.Messages, message => message.Contains("failed", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(progress.Messages, message => message.Contains("Returned", StringComparison.Ordinal) && message.Contains("of", StringComparison.Ordinal));
+    }
+
     private static void RespondReturn(SyncStateTestContext ctx)
     {
         ctx.WorkerBridge.Respond("RefreshBranches", RefreshBranchesOk());
