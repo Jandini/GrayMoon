@@ -36,7 +36,8 @@ public sealed class RepositoryListQueryService(AppDbContext dbContext) : IReposi
                 r.Connector != null ? r.Connector.ConnectorName : "Unknown",
                 r.Visibility,
                 r.Archived,
-                r.Topics))
+                r.Topics,
+                r.CloneUrl))
             .Take(take)
             .ToListAsync(cancellationToken);
 
@@ -84,7 +85,8 @@ public sealed class RepositoryListQueryService(AppDbContext dbContext) : IReposi
                 r.Connector != null ? r.Connector.ConnectorName : "Unknown",
                 r.Visibility,
                 r.Archived,
-                r.Topics))
+                r.Topics,
+                r.CloneUrl))
             .ToListAsync(cancellationToken);
 
         var order = repositoryIds

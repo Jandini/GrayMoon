@@ -157,8 +157,20 @@
                                     }
                                     else
                                     {
+                                        var repoUrl = RepositoryUrlHelper.GetRepositoryUrl(repository.CloneUrl);
                                         <tr @key="@id" class="@StripeClass(index)">
-                                            <td class="col-repo"><strong>@repository.RepositoryName</strong></td>
+                                            <td class="col-repo">
+                                                @if (!string.IsNullOrEmpty(repoUrl))
+                                                {
+                                                    <a href="@repoUrl" target="_blank" rel="noopener noreferrer" class="repo-link">
+                                                        <strong>@repository.RepositoryName</strong>
+                                                    </a>
+                                                }
+                                                else
+                                                {
+                                                    <strong>@repository.RepositoryName</strong>
+                                                }
+                                            </td>
                                             <td class="col-owner">@(string.IsNullOrWhiteSpace(repository.OrgName) ? "-" : repository.OrgName)</td>
                                             <td class="col-topics">
                                                 @if (!string.IsNullOrWhiteSpace(repository.Topics))

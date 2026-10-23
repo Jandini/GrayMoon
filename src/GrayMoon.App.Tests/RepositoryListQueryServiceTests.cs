@@ -100,6 +100,7 @@ public class RepositoryListQueryServiceTests
         var rows = await ctx.RepositoryQuery.GetByIdsAsync(subset);
         Assert.Equal(subset, rows.Select(r => r.RepositoryId).ToList());
         Assert.All(rows, r => Assert.False(string.IsNullOrWhiteSpace(r.RepositoryName)));
+        Assert.All(rows, r => Assert.StartsWith("https://github.com/acme/", r.CloneUrl, StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -116,7 +117,8 @@ public class RepositoryListQueryServiceTests
                 r.Connector != null ? r.Connector.ConnectorName : "Unknown",
                 r.Visibility,
                 r.Archived,
-                r.Topics))
+                r.Topics,
+                r.CloneUrl))
             .Take(51);
 
         var sql = query.ToQueryString();

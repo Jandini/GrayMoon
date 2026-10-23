@@ -22,7 +22,8 @@ public sealed record RepositoryListItemDto(
     string ConnectorName,
     string Visibility,
     bool Archived,
-    string? Topics);
+    string? Topics,
+    string CloneUrl);
 
 public sealed record RepositoryListPageResult(
     IReadOnlyList<RepositoryListItemDto> Items,
