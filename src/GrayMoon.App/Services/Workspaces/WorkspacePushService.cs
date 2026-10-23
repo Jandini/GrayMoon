@@ -173,19 +173,19 @@ public sealed partial class WorkspacePushService(
             return;
         }
 
-        bool synchronizedPushPossible = payload.All(p => p.RequiredPackages.All(r => r.MatchedConnectorId.HasValue));
-        var missingPackagesCount = payload
+        var runRepositoryIds = payload.Select(p => p.RepoId).ToHashSet();
+        var blockingPackages = payload
             .SelectMany(p => p.RequiredPackages)
-            .Where(r => !r.MatchedConnectorId.HasValue)
+            .Where(r => BlocksBeforeAnyLevel(r, runRepositoryIds))
             .DistinctBy(r => (r.PackageId, r.Version))
             .Count();
-        if (!synchronizedPushPossible && missingPackagesCount > 0)
+        if (blockingPackages > 0)
         {
-            _logger.LogInformation("Push: synchronized push unavailable; {Count} required package mappings are missing.", missingPackagesCount);
-            throw new SynchronizedPushNotPossibleException(missingPackagesCount);
+            _logger.LogInformation("Push: synchronized push unavailable; {Count} required package mappings are missing.", blockingPackages);
+            throw new SynchronizedPushNotPossibleException(blockingPackages);
         }
 
-        if (!synchronizedPushPossible || _nuGetService == null || _connectorRepository == null)
+        if (_nuGetService == null || _connectorRepository == null)
         {
             onProgressMessage?.Invoke("Pushing all repositories...");
             await PushReposAsync(workspace, contextId, payload, bearerByRepoId, onProgressMessage, onRepoError, onAppSideComplete, cancellationToken: cancellationToken);
@@ -223,11 +223,25 @@ public sealed partial class WorkspacePushService(
             runId, workspaceId, levelsAsc.Count,
             string.Join(", ", levelsAsc.Select(l => $"L{l}={payload.Count(p => (p.DependencyLevel ?? 0) == l)} repo(s)")));
         await LogPushInvocationAsync(run, payload, cancellationToken);
+        async Task<List<PushRepoPayload>> LoadSelectedPayloadAsync()
+        {
+            var all = await _workspaceDependencyService.GetPushPlanPayloadAsync(workspaceId, contextId.Value, cancellationToken);
+            return all.Where(p => runRepositoryIds.Contains(p.RepoId)).ToList();
+        }
+
         foreach (var level in levelsAsc)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var reposAtLevel = payload.Where(p => (p.DependencyLevel ?? 0) == level).ToList();
+            var current = await LoadSelectedPayloadAsync();
+            var reposAtLevel = current.Where(p => (p.DependencyLevel ?? 0) == level).ToList();
             if (reposAtLevel.Count == 0) continue;
+            // A package created or first published by an earlier level has no registry until that level has
+            // pushed it. Match only ids that are still unmatched, then read the plan again.
+            if (await SyncUnmatchedPackageIdsAsync(workspaceId, UnmatchedPackageIds(reposAtLevel), cancellationToken))
+            {
+                current = await LoadSelectedPayloadAsync();
+                reposAtLevel = current.Where(p => (p.DependencyLevel ?? 0) == level).ToList();
+            }
             if (!await PushLevelAsync(run, level, reposAtLevel, level == lastLevel, levelsAsc.Count, skippedCount: 0, cancellationToken))
             {
                 LogOperationSummary(run, pushSucceeded: false);
@@ -342,7 +356,6 @@ public sealed partial class WorkspacePushService(
         var requiredForLevel = reposAtLevel
             .SelectMany(r => r.RequiredPackages)
             .DistinctBy(r => (r.PackageId, r.Version, r.MatchedConnectorId))
-            .Where(r => r.MatchedConnectorId.HasValue)
             .ToList();
         totalDeps = requiredForLevel.Count;
 
@@ -370,7 +383,7 @@ public sealed partial class WorkspacePushService(
 
             // Prefetch all connectors for this level once to avoid concurrent DbContext reads in the polling loop
             var connectorByIdForLevel = new Dictionary<int, Connector?>();
-            foreach (var cid in requiredForLevel.Select(r => r.MatchedConnectorId!.Value).Distinct())
+            foreach (var cid in requiredForLevel.Where(r => r.MatchedConnectorId.HasValue).Select(r => r.MatchedConnectorId!.Value).Distinct())
                 connectorByIdForLevel[cid] = await _connectorRepository!.GetByIdAsync(cid);
 
             // One read of producer/consumer metadata. The polling loop does not touch the graph again.
@@ -392,7 +405,19 @@ public sealed partial class WorkspacePushService(
                 }
 
                 _logger.LogWarning("[PushOrchestrator {RunId}] Push wait: timed out after {TotalMinutes:F1} min. Found {Found} of {Total}.", runId, waited.TotalMinutes, found, totalDeps);
-                PackageWaitTimeout.Report(level, onLevelError, found, totalDeps, waited, missing);
+                var stillUnmatched = 0;
+                lock (foundLock)
+                {
+                    stillUnmatched = Enumerable.Range(0, totalDeps)
+                        .Where(i => !foundByIndex[i] && !requiredForLevel[i].MatchedConnectorId.HasValue)
+                        .Select(i => (requiredForLevel[i].PackageId, requiredForLevel[i].Version))
+                        .Distinct()
+                        .Count();
+                }
+                if (stillUnmatched > 0)
+                    onLevelError?.Invoke(level, NoRegistryMessage(stillUnmatched));
+                else
+                    PackageWaitTimeout.Report(level, onLevelError, found, totalDeps, waited, missing);
                 run.Diagnostics.FailedLevel = level;
                 run.Diagnostics.FailureCategory = PackageWaitDiagnostics.FailurePackageWaitTimeout;
                 run.Diagnostics.BlockedRepositories.AddRange(reposAtLevel.Select(repo => repo.RepoName));
@@ -457,13 +482,17 @@ public sealed partial class WorkspacePushService(
                     }
                     if (toCheck.Length > 0)
                     {
+                        if (requiredForLevel.Any(r => !r.MatchedConnectorId.HasValue))
+                            await MatchUnmatchedPackagesAsync(workspaceId, requiredForLevel, connectorByIdForLevel, linkedToken);
                         var prevFound = getFoundCount();
                         foreach (var chunk in toCheck.Chunk(_maxConcurrent))
                         {
                             await Task.WhenAll(chunk.Select(async i =>
                             {
                                 var req = requiredForLevel[i];
-                                connectorByIdForLevel.TryGetValue(req.MatchedConnectorId!.Value, out var connector);
+                                if (req.MatchedConnectorId is not int matchedConnectorId)
+                                    return;
+                                connectorByIdForLevel.TryGetValue(matchedConnectorId, out var connector);
                                 if (connector == null)
                                 {
                                     if (observations[i].Observe(PackageVersionLookupKind.Inconclusive, null, false, DateTime.UtcNow))
@@ -610,12 +639,95 @@ public sealed partial class WorkspacePushService(
         return true;
     }
 
+    /// <summary>An unmatched package blocks the run up front only when this run will not publish it.</summary>
+    private static bool BlocksBeforeAnyLevel(RequiredPackageForPush package, IReadOnlySet<int> runRepositoryIds)
+        => !package.MatchedConnectorId.HasValue && !ProducedByThisRun(package, runRepositoryIds);
+
+    private static bool ProducedByThisRun(RequiredPackageForPush package, IReadOnlySet<int> runRepositoryIds)
+        => package.ProducerRepositoryId is int producer && runRepositoryIds.Contains(producer);
+
+    private static string NoRegistryMessage(int count)
+        => $"Synchronized push could not continue: {count} required package mapping(s) have no registry. Check the NuGet connector configuration and token.";
+
+    private static IReadOnlySet<string> UnmatchedPackageIds(IEnumerable<PushRepoPayload> repos)
+        => UnmatchedPackageIds(repos.SelectMany(repo => repo.RequiredPackages));
+
+    private static IReadOnlySet<string> UnmatchedPackageIds(IEnumerable<RequiredPackageForPush> packages)
+    {
+        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var package in packages)
+        {
+            if (package.MatchedConnectorId.HasValue)
+                continue;
+            var id = package.PackageId?.Trim();
+            if (!string.IsNullOrEmpty(id))
+                ids.Add(id);
+        }
+
+        return ids;
+    }
+
     /// <summary>
-    /// Whether <see cref="RunPushLaneAsync"/> can run alongside an update for this context: the registries must be
-    /// reachable and every package a repository (up to <paramref name="maxLevel"/>) requires must already be matched
-    /// to a registry. Syncs the registries first, exactly as the sequential push does before it checks the same
-    /// mappings. Matching is by package id only, so the answer does not change when the update bumps versions.
-    /// When false nothing has been changed, and the caller should run the sequential update-then-push instead.
+    /// Matches registries for package ids that still have no connector. Exists so a package created or first
+    /// published by an earlier level of this run can be mapped after that level has pushed it. Callers pass
+    /// only ids that are still unmatched.
+    /// </summary>
+    private async Task<bool> SyncUnmatchedPackageIdsAsync(
+        int workspaceId,
+        IReadOnlySet<string> unmatchedPackageIds,
+        CancellationToken cancellationToken)
+    {
+        if (unmatchedPackageIds.Count == 0 || _packageRegistrySyncService == null)
+            return false;
+
+        await _packageRegistrySyncService.SyncRegistriesForPackageIdsAsync(workspaceId, unmatchedPackageIds, cancellationToken);
+        return true;
+    }
+
+    /// <summary>
+    /// While a level waits, asks every active NuGet connector for package ids that still have no registry.
+    /// The first connector that has the id is stored. Later polls of that id use only that connector.
+    /// </summary>
+    private async Task MatchUnmatchedPackagesAsync(
+        int workspaceId,
+        List<RequiredPackageForPush> required,
+        Dictionary<int, Connector?> connectorById,
+        CancellationToken cancellationToken)
+    {
+        var unmatched = UnmatchedPackageIds(required);
+        if (!await SyncUnmatchedPackageIdsAsync(workspaceId, unmatched, cancellationToken) || _connectorRepository == null)
+            return;
+
+        var packages = await _workspaceProjectRepository.GetPackagesByWorkspaceIdAndPackageIdsAsync(workspaceId, unmatched, cancellationToken);
+        var connectorByPackage = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var project in packages)
+        {
+            if (project.MatchedConnectorId is int connectorId && !string.IsNullOrWhiteSpace(project.PackageId))
+                connectorByPackage.TryAdd(project.PackageId.Trim(), connectorId);
+        }
+
+        for (var i = 0; i < required.Count; i++)
+        {
+            var package = required[i];
+            if (package.MatchedConnectorId.HasValue || string.IsNullOrWhiteSpace(package.PackageId))
+                continue;
+            if (!connectorByPackage.TryGetValue(package.PackageId.Trim(), out var connectorId))
+                continue;
+
+            required[i] = package with { MatchedConnectorId = connectorId };
+            if (!connectorById.ContainsKey(connectorId))
+                connectorById[connectorId] = await _connectorRepository.GetByIdAsync(connectorId);
+        }
+    }
+
+    /// <summary>
+    /// Whether <see cref="RunPushLaneAsync"/> can run alongside an update for this context. Syncs the registries
+    /// first, exactly as the sequential push does. Matching is by package id only, so a version bump does not change
+    /// a registry that is already known. A package id created or first published by a repository this run will push
+    /// has no registry until that level has published it, so those ids are matched again after that level is pushed
+    /// and are not a reason to refuse the run here. An unmatched package whose producer is not in this run (or
+    /// cannot be resolved) is. When false the update and the push have not started, and the caller should run the
+    /// sequential update-then-push instead.
     /// </summary>
     public async Task<bool> CanRunPushLaneAsync(
         int workspaceId,
@@ -645,7 +757,8 @@ public sealed partial class WorkspacePushService(
             payload = await LoadPayloadAsync();
         }
 
-        return payload.All(p => p.RequiredPackages.All(r => r.MatchedConnectorId.HasValue));
+        var runRepositoryIds = payload.Select(p => p.RepoId).ToHashSet();
+        return payload.All(p => p.RequiredPackages.All(r => !BlocksBeforeAnyLevel(r, runRepositoryIds)));
     }
 
     /// <summary>
@@ -796,16 +909,15 @@ public sealed partial class WorkspacePushService(
         if (reposAtLevel.Count == 0)
             return true;
 
-        var unmatchedPackages = reposAtLevel
-            .SelectMany(p => p.RequiredPackages)
-            .Where(r => !r.MatchedConnectorId.HasValue)
-            .DistinctBy(r => (r.PackageId, r.Version))
-            .Count();
-        if (unmatchedPackages > 0)
+        // A package created or first published by an earlier level has no registry until that level has pushed
+        // it. Match only ids that are still unmatched; a known match is not looked up again.
+        if (await SyncUnmatchedPackageIdsAsync(workspaceId, UnmatchedPackageIds(reposAtLevel), cancellationToken))
         {
-            _logger.LogWarning("[PushOrchestrator {RunId}] Push lane: Level {Level} has {Count} required package mapping(s) with no registry.", runId, done.Level, unmatchedPackages);
-            run.OnLevelError?.Invoke(done.Level, $"Synchronized push could not continue: {unmatchedPackages} required package mapping(s) have no registry. Check the NuGet connector configuration and token.");
-            return false;
+            var fresh = await _workspaceDependencyService.GetPushPlanPayloadAsync(workspaceId, contextId.Value, cancellationToken);
+            var freshByRepo = fresh.ToDictionary(p => p.RepoId);
+            reposAtLevel = reposAtLevel
+                .Select(repo => freshByRepo.TryGetValue(repo.RepoId, out var updated) ? updated : repo)
+                .ToList();
         }
 
         cancellationToken.ThrowIfCancellationRequested();

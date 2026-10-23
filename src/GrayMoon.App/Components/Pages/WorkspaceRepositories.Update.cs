@@ -468,8 +468,8 @@ public sealed partial class WorkspaceRepositories
     /// <summary>
     /// Runs Update and Push as two lanes (see <see cref="IWorkspaceUpdateOperations.UpdateAndPushAsync"/>): each level is
     /// pushed while the levels above it are still being updated, and the overlay shows one line per lane. Returns false,
-    /// having changed nothing, when the push lane cannot run (required package mappings missing); the caller then runs
-    /// the sequential update-then-push, which owns the "continue with normal push?" confirmation.
+    /// having changed nothing, when the push lane cannot run (a required package has no registry and this run will not
+    /// publish it). The caller then runs the sequential update-then-push, which owns the "continue with normal push?" confirmation.
     /// </summary>
     private async Task<bool> TryRunPipelinedUpdateAndPushAsync(
         BackgroundJobHandle job,

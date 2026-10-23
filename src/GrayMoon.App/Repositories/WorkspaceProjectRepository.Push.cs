@@ -258,7 +258,7 @@ public sealed partial class WorkspaceProjectRepository
             var key = (packageId.ToLowerInvariant(), version);
             if (seenPerRepo[depProj.RepositoryId].Contains(key)) continue;
             seenPerRepo[depProj.RepositoryId].Add(key);
-            repoToRequired[depProj.RepositoryId].Add(new RequiredPackageForPush(packageId, version, refProj.MatchedConnectorId));
+            repoToRequired[depProj.RepositoryId].Add(new RequiredPackageForPush(packageId, version, refProj.MatchedConnectorId, refProj.RepositoryId));
         }
 
         var result = new List<PushRepoPayload>();

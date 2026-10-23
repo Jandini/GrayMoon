@@ -1009,6 +1009,20 @@
     white-space: nowrap;
 }
 
+/* The Update / Push failure can be several lines. Dismiss still sits at the right and fills the strip. */
+.page-error-callout.page-callout-with-actions {
+    white-space: normal;
+    text-overflow: clip;
+}
+
+.page-error-callout.page-callout-with-actions > span {
+    align-self: center;
+    white-space: pre-line;
+    overflow: visible;
+    text-overflow: unset;
+    overflow-wrap: break-word;
+}
+
 button.page-callout-action {
     display: inline-flex;
     align-items: center;
