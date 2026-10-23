@@ -489,6 +489,8 @@
                             SelectedMethodChanged="SetBulkMergeMethod"
                             ReturnToDefaultAfterMerge="@BulkMergeReturnToDefault"
                             ReturnToDefaultAfterMergeChanged="SetBulkMergeReturnToDefault"
+                            ReturnToDefaultScope="@BulkMergeReturnToDefaultScope"
+                            ReturnToDefaultScopeChanged="SetBulkMergeReturnToDefaultScope"
                             ShowReturnToDefault="@(!_isFeatureContext)"
                             IsRunning="@_bulkMergeModal.IsRunning"
                             IsCoveredByOverlay="@(_bulkMergeModal.DrillInRepositoryId.HasValue && IsJobRunning)"

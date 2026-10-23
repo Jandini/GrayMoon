@@ -25,6 +25,13 @@ public sealed partial class WorkspaceRepositories
         set => ReturnToDefaultPreferenceService.ReturnToDefault = value;
     }
 
+    /// <summary>Bulk-merge only: Merged (default) vs All repositories in the dialog scope.</summary>
+    private BulkMergeReturnToDefaultScope BulkMergeReturnToDefaultScope
+    {
+        get => ReturnToDefaultPreferenceService.ReturnToDefaultScope;
+        set => ReturnToDefaultPreferenceService.ReturnToDefaultScope = value;
+    }
+
     private async Task OpenMergePullRequestsDialogForLevelAsync(int? levelKey)
     {
         var ids = (await GetRepositoryIdsAtLevelAsync(levelKey)).ToHashSet();
@@ -84,6 +91,7 @@ public sealed partial class WorkspaceRepositories
         var linkByRepoId = links.Where(wr => ids.Contains(wr.RepositoryId)).ToDictionary(wr => wr.RepositoryId);
 
         var rows = new List<BulkMergePrRow>();
+        var openPrRepositoryIds = new HashSet<int>();
         foreach (var repositoryId in ids)
         {
             if (!persistedPrs.TryGetValue(repositoryId, out var pr) || pr == null)
@@ -93,6 +101,7 @@ public sealed partial class WorkspaceRepositories
             if (!linkByRepoId.TryGetValue(repositoryId, out var link) || link.Repository == null)
                 continue;
 
+            openPrRepositoryIds.Add(repositoryId);
             rows.Add(new BulkMergePrRow
             {
                 RepositoryId = repositoryId,
@@ -112,6 +121,18 @@ public sealed partial class WorkspaceRepositories
             return;
         }
 
+        // Repositories in this merge scope with no open PR (usually unchanged on the branch). Used when
+        // "Return to default branch" → All repositories is selected so they are returned alongside merges.
+        var noOpenPrRepositories = new List<BulkMergeNoOpenPrRepository>();
+        foreach (var repositoryId in ids)
+        {
+            if (openPrRepositoryIds.Contains(repositoryId))
+                continue;
+            if (!linkByRepoId.TryGetValue(repositoryId, out var link) || link.Repository == null)
+                continue;
+            noOpenPrRepositories.Add(new BulkMergeNoOpenPrRepository(repositoryId, link.Repository.RepositoryName));
+        }
+
         rows = rows.OrderBy(r => r.RepositoryName, StringComparer.OrdinalIgnoreCase).ToList();
 
         _bulkMergeModal = new BulkMergePullRequestsModalState
@@ -119,7 +140,8 @@ public sealed partial class WorkspaceRepositories
             IsVisible = true,
             LevelKey = levelKey,
             LevelLabel = scopeLabel,
-            Rows = rows
+            Rows = rows,
+            NoOpenPrRepositories = noOpenPrRepositories
         };
         StateHasChanged();
 
@@ -274,6 +296,12 @@ public sealed partial class WorkspaceRepositories
         StateHasChanged();
     }
 
+    private void SetBulkMergeReturnToDefaultScope(BulkMergeReturnToDefaultScope scope)
+    {
+        BulkMergeReturnToDefaultScope = scope;
+        StateHasChanged();
+    }
+
     private void CloseBulkMergeModal()
     {
         if (_bulkMergeModal.IsRunning)
@@ -289,20 +317,26 @@ public sealed partial class WorkspaceRepositories
         if (rows.Count == 0)
             return;
 
-        // Captured once here (the "Return to default branch" checkbox is only editable during this pre-run
+        // Captured once here (the "Return to default branch" controls are only editable during this pre-run
         // selection phase) rather than re-read from the shared preference singleton on every later retry -
         // otherwise a "Retry failed" click could pick up whatever that singleton now holds (e.g. changed via
         // the single-PR merge dialog in the meantime) instead of the choice this batch was actually confirmed
         // with, leaving sibling rows from the same run inconsistently synced.
         // Feature contexts never return to default after merge.
         var returnToDefault = !_isFeatureContext && BulkMergeReturnToDefault;
+        var returnScope = BulkMergeReturnToDefaultScope;
         var methodPhrase = _bulkMergeModal.SelectedMethod.ToConfirmationPhrase();
-        var syncSuffix = returnToDefault ? " and synced to the default branch" : string.Empty;
+        var syncSuffix = !returnToDefault
+            ? string.Empty
+            : returnScope == BulkMergeReturnToDefaultScope.AllRepositories
+                ? " and return all repositories to the default branch"
+                : " and synced to the default branch";
         var message = $"Merge {rows.Count} pull request{(rows.Count == 1 ? "" : "s")} using {methodPhrase}{syncSuffix}?";
 
         ShowConfirm(message, () =>
         {
             _bulkMergeModal.ReturnToDefault = returnToDefault;
+            _bulkMergeModal.ReturnToDefaultScope = returnScope;
             RunBulkMergeAndReturnToDefaultAsync(rows, Array.Empty<BulkMergePrRow>());
             return Task.CompletedTask;
         }, "Merge");
@@ -353,6 +387,7 @@ public sealed partial class WorkspaceRepositories
         StateHasChanged();
 
         var returnToDefault = _bulkMergeModal.ReturnToDefault;
+        var returnScope = _bulkMergeModal.ReturnToDefaultScope;
         var method = ToMergeMethod(_bulkMergeModal.SelectedMethod);
         var requests = rowsToMerge.Select(r => new MergePullRequestRequest
         {
@@ -425,9 +460,14 @@ public sealed partial class WorkspaceRepositories
                         .ToList();
                 }
 
-                if (rowsToReturnOnly.Count > 0 || (returnToDefault && succeededFromMerge.Count > 0))
+                var includeNoOpenPrReturns = returnToDefault &&
+                    returnScope == BulkMergeReturnToDefaultScope.AllRepositories &&
+                    _bulkMergeModal.NoOpenPrRepositories.Count > 0;
+
+                if (rowsToReturnOnly.Count > 0 || (returnToDefault && succeededFromMerge.Count > 0) || includeNoOpenPrReturns)
                 {
-                    var returnRows = new List<BulkMergePrRow>(rowsToReturnOnly.Count + succeededFromMerge.Count);
+                    var returnRows = new List<BulkMergePrRow>(
+                        rowsToReturnOnly.Count + succeededFromMerge.Count + (includeNoOpenPrReturns ? _bulkMergeModal.NoOpenPrRepositories.Count : 0));
                     var seenRepositoryIds = new HashSet<int>();
                     foreach (var row in rowsToReturnOnly)
                     {
@@ -441,6 +481,22 @@ public sealed partial class WorkspaceRepositories
                         {
                             if (seenRepositoryIds.Add(row.RepositoryId))
                                 returnRows.Add(row);
+                        }
+
+                        if (includeNoOpenPrReturns)
+                        {
+                            List<BulkMergePrRow> extras = [];
+                            await InvokeAsync(() =>
+                            {
+                                if (_disposed)
+                                    return;
+                                extras = EnsureNoOpenPrReturnRows(seenRepositoryIds);
+                                if (extras.Count > 0)
+                                {
+                                    returnRows.AddRange(extras);
+                                    touchedRows.AddRange(extras);
+                                }
+                            });
                         }
                     }
 
@@ -467,6 +523,46 @@ public sealed partial class WorkspaceRepositories
             CancelToast = "Merge cancelled.",
             OnError = ex => Logger.LogError(ex, "Bulk merge job failed for workspace {WorkspaceId}", WorkspaceId)
         });
+    }
+
+    /// <summary>
+    /// Ensures each no-open-PR repository in the dialog scope has a companion row for return-to-default tracking
+    /// when <see cref="BulkMergeReturnToDefaultScope.AllRepositories"/> is selected. Skips ids already queued
+    /// (merged PRs) and repositories already successfully returned. New rows are appended to the modal list so
+    /// a failed return can surface in the completed-run summary.
+    /// </summary>
+    private List<BulkMergePrRow> EnsureNoOpenPrReturnRows(HashSet<int> seenRepositoryIds)
+    {
+        var extras = new List<BulkMergePrRow>();
+        foreach (var repo in _bulkMergeModal.NoOpenPrRepositories)
+        {
+            if (!seenRepositoryIds.Add(repo.RepositoryId))
+                continue;
+
+            var existing = _bulkMergeModal.Rows.FirstOrDefault(r =>
+                r.HasNoOpenPullRequest && r.RepositoryId == repo.RepositoryId);
+            if (existing != null)
+            {
+                if (existing.Status == BulkMergeRowStatus.ReturnedToDefault)
+                    continue;
+                extras.Add(existing);
+                continue;
+            }
+
+            var row = new BulkMergePrRow
+            {
+                RepositoryId = repo.RepositoryId,
+                RepositoryName = repo.RepositoryName,
+                PrNumber = 0,
+                HasNoOpenPullRequest = true,
+                IsSelected = false,
+                Status = BulkMergeRowStatus.ReturningToDefault
+            };
+            _bulkMergeModal.Rows.Add(row);
+            extras.Add(row);
+        }
+
+        return extras;
     }
 
     /// <summary>
@@ -593,7 +689,7 @@ public sealed partial class WorkspaceRepositories
     /// <summary>Info icon drill-in: opens the existing single-PR MergePullRequestModal, unchanged, stacked on top for this one repo/PR. Disabled while the batch is running (guarded by the modal itself).</summary>
     private async Task OnBulkMergeRowInfoAsync(BulkMergePrRow row)
     {
-        if (_bulkMergeModal.IsRunning)
+        if (_bulkMergeModal.IsRunning || row.HasNoOpenPullRequest)
             return;
 
         var link = await TryGetLinkAsync(row.RepositoryId);
@@ -702,6 +798,10 @@ public sealed partial class WorkspaceRepositories
         public BulkMergeMethodSelection SelectedMethod { get; set; } = BulkMergeMethodSelection.Squash;
         /// <summary>Return-to-default choice frozen at the first "Merge N pull requests" confirmation, so later "Retry failed"/single-row retries within this same dialog session use the choice the batch was actually confirmed with, not whatever the shared preference singleton (<see cref="MergePullRequestReturnToDefaultPreferenceService"/>) currently holds.</summary>
         public bool ReturnToDefault { get; set; }
+        /// <summary>Frozen with <see cref="ReturnToDefault"/> at confirm time. <see cref="BulkMergeReturnToDefaultScope.AllRepositories"/> also returns repositories in this dialog's scope that had no open PR.</summary>
+        public BulkMergeReturnToDefaultScope ReturnToDefaultScope { get; set; } = BulkMergeReturnToDefaultScope.Merged;
+        /// <summary>Repositories in the dialog scope with no open PR when the dialog opened. Used only for All repositories return.</summary>
+        public List<BulkMergeNoOpenPrRepository> NoOpenPrRepositories { get; set; } = new();
         public bool IsRunning { get; set; }
         public bool HasRun { get; set; }
         public int Completed { get; set; }
@@ -709,4 +809,7 @@ public sealed partial class WorkspaceRepositories
         /// <summary>Repository id of the bulk row whose info icon opened the single-PR dialog on top of this one, so closing that dialog can refresh just that one row. Null when the single-PR dialog was opened some other way.</summary>
         public int? DrillInRepositoryId { get; set; }
     }
+
+    /// <summary>A repository in the bulk-merge scope that had no open PR when the dialog opened.</summary>
+    private readonly record struct BulkMergeNoOpenPrRepository(int RepositoryId, string RepositoryName);
 }

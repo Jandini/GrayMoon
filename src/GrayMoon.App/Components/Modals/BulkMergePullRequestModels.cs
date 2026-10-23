@@ -1,5 +1,17 @@
 namespace GrayMoon.App.Components.Modals;
 
+/// <summary>
+/// Scope for the bulk-merge dialog's "Return to default branch" option.
+/// <see cref="Merged"/> keeps today's behaviour (only repositories whose PR just merged).
+/// <see cref="AllRepositories"/> also returns every other repository in the same merge scope that had no open PR
+/// (typically because it had no changes on the branch).
+/// </summary>
+public enum BulkMergeReturnToDefaultScope
+{
+    Merged = 0,
+    AllRepositories = 1
+}
+
 /// <summary>Merge method choices offered by <see cref="BulkMergePullRequestsModal"/>'s toolbar picker. Unlike the single-PR dialog's per-method list (limited to what the repository actually allows), this applies uniformly across every selected row, so <see cref="RepositoryDefault"/> is offered alongside the three concrete methods rather than only the ones a specific repository permits.</summary>
 public enum BulkMergeMethodSelection
 {
@@ -70,6 +82,11 @@ public sealed class BulkMergePrRow
     public bool IsSelected { get; set; }
     public BulkMergeRowStatus Status { get; set; } = BulkMergeRowStatus.LoadingSnapshot;
     public string? ErrorMessage { get; set; }
+    /// <summary>
+    /// Companion row for a repository in the merge scope that had no open PR. Only added when returning with
+    /// <see cref="BulkMergeReturnToDefaultScope.AllRepositories"/>; never merged, only returned to default.
+    /// </summary>
+    public bool HasNoOpenPullRequest { get; init; }
 }
 
 /// <summary>
@@ -139,7 +156,10 @@ internal static class BulkMergeRunFinalizer
             list.Count(row => row.Status == BulkMergeRowStatus.Failed),
             list.Count(row => row.Status == BulkMergeRowStatus.ReturnFailed),
             list.Count(row => row.Status == BulkMergeRowStatus.Skipped),
-            list.Count(row => row.Status is BulkMergeRowStatus.Merged or BulkMergeRowStatus.ReturnedToDefault),
+            // Exclude no-open-PR companion rows: they were never merged, only returned to default.
+            list.Count(row =>
+                !row.HasNoOpenPullRequest &&
+                row.Status is BulkMergeRowStatus.Merged or BulkMergeRowStatus.ReturnedToDefault),
             list.Count(row =>
                 row.Status == BulkMergeRowStatus.ReturnFailed &&
                 !string.Equals(row.ErrorMessage, UnattendedReturnToDefaultBatchResult.CancelledMessage, StringComparison.Ordinal)));

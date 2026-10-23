@@ -436,7 +436,7 @@ Starts multi-repository PR creation (section 24). In a Feature context, a reposi
 
 ### Merge PRs...
 
-Opens `BulkMergePullRequestsModal` over the scope (a level, the Workspace or Repositories header set, or all repositories). Candidates are resolved from the persisted PR table, not from the virtualized render cache. The "Return to default branch after merging" checkbox shares its remembered value with the single-PR dialog and is hidden in a Feature. Returning after a bulk merge uses `ReturnToDefaultUnattendedBatchAsync`: ids deduped, branches refreshed in parallel, one PR refresh, eligible repositories returned in parallel, one recompute only when at least one returned.
+Opens `BulkMergePullRequestsModal` over the scope (a level, the Workspace or Repositories header set, or all repositories). Candidates are resolved from the persisted PR table, not from the virtualized render cache. The "Return to default branch" checkbox shares its remembered value with the single-PR dialog and is hidden in a Feature. When checked, **Merged** (default) or **All repositories** chooses the return set: Merged returns only repositories whose PR just merged; All repositories also returns every other repository in the same dialog scope that had no open PR (typically unchanged on the branch). Returning after a bulk merge uses `ReturnToDefaultUnattendedBatchAsync`: ids deduped, branches refreshed in parallel, one PR refresh, eligible repositories returned in parallel, one recompute only when at least one returned.
 
 ### Return to Default
 
