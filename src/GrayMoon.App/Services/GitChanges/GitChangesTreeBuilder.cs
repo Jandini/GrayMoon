@@ -209,7 +209,8 @@ public static class GitChangesTreeBuilder
                 Kind = GitChangesTreeRowKind.Repository,
                 Depth = 1,
                 Label = repo.RepositoryName,
-                Count = isStagedSection ? repo.StagedCount : repo.ChangedCount,
+                // Badge only while collapsed - once expanded the children are visible.
+                Count = repoExpanded ? null : (isStagedSection ? repo.StagedCount : repo.ChangedCount),
                 IsStagedSection = isStagedSection,
                 WorkspaceRepositoryId = repo.WorkspaceRepositoryId,
                 RepositoryName = repo.RepositoryName,
