@@ -20,8 +20,7 @@ public sealed class GitCliRepositoryGitChangesServiceTests : IDisposable
         _service = new GitCliRepositoryGitChangesService(
             runner,
             new LibGit2SharpGitIgnoreService(),
-            NullLogger<GitCliRepositoryGitChangesService>.Instance,
-            Options.Create(new GitChangesOptions()));
+            NullLogger<GitCliRepositoryGitChangesService>.Instance);
     }
 
     public void Dispose() => _repo.Dispose();

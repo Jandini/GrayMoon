@@ -4,7 +4,7 @@ Design: `docs/todo/git-changes-large-changeset-scale.md` (section numbers below 
 
 Status key: `[ ]` not started, `[~]` in progress, `[x]` done, `[-]` dropped (say why).
 
-Standing rules for every item: no cap or truncation of the inventory (section 0); small workspaces must not regress (section 4.11); App and Worker ship together; benchmark `GitChangesBench` log lines are permanent.
+Standing rules for every item: no cap or truncation of the inventory (section 0); small workspaces must not regress (section 4.11); App and Worker ship together. The Phase 0 benchmark code (`GitChangesBench` logs, options floors, fixture script, M0 test) was removed on 2026-10-24 to avoid runtime overhead; the M0 numbers below stay as recorded history.
 
 ## Summary
 
@@ -66,7 +66,7 @@ Standing rules for every item: no cap or truncation of the inventory (section 0)
 - [x] Copy all paths under a folder (Layer B query, `GetEntryPathsAsync`)
 - [x] Change walk next/prev across pages (paged read, list held weakly)
 - [x] Shift-range and select-all-in-folder: reviewed. Shift-range covers only rows between anchor and target, which are materialised rows; folder/section actions already use prefix/section scopes. No change needed
-- [x] Search substring cost measured: 20K-path inventory, 5K matches, all 25 pages of 200 in about 0.5 s total (`GitChangesEntryPageReadServiceTests`); `GitChangesBench` "search page" line logs `ScannedCount` and `QueryMs`
+- [x] Search substring cost measured: 20K-path inventory, 5K matches, all 25 pages of 200 in about 0.5 s total (`GitChangesEntryPageReadServiceTests`)
 - [ ] **M2:** automated parts done (all matches reachable, circuit holds only loaded hits). Manual check on the 20K fixture still to do: filter memory trend and scroll to the last match
 ## Phase 3 - Persist rollups and digest
 
@@ -100,7 +100,7 @@ Standing rules for every item: no cap or truncation of the inventory (section 0)
 
 ## Benchmark results (fill from M0)
 
-Measured 2026-10-24 on a Windows laptop (in-memory SQLite for App persist/read/tree; real `git status` on synthetic untracked trees under `%TEMP%\graymoon-git-changes-scale`). Snapshot bytes are camelCase JSON size of a full `GitChangesSnapshotNotification`. Rows rendered include section/repo/folder chrome (not path count alone). Fixture: `dev/New-GitChangesScaleFixture.ps1`. App harness: `GitChangesBenchM0MeasurementTests`.
+Measured 2026-10-24 on a Windows laptop (in-memory SQLite for App persist/read/tree; real `git status` on synthetic untracked trees under `%TEMP%\graymoon-git-changes-scale`). Snapshot bytes are camelCase JSON size of a full `GitChangesSnapshotNotification`. Rows rendered include section/repo/folder chrome (not path count alone). (Fixture script and harness were removed with the benchmark code.)
 
 | Paths | Snapshot bytes | `StatusMs` | `PersistMs` | `ReadMs` | `BuildTreeMs` | Rows rendered |
 |---|---|---|---|---|---|---|

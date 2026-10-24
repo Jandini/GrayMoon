@@ -184,36 +184,14 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         _initialLoadTask = LoadAsync();
     }
 
-    /// <summary>
-    /// Armed after the tree <see cref="StateHasChanged"/>; completed in <c>OnAfterRenderAsync</c> so
-    /// <c>CircuitPaintMs</c> captures Blazor Server render-batch work (the lag users feel), not only SQLite/CPU.
-    /// </summary>
-    private PendingGitChangesBenchPaint? _pendingBenchPaint;
-
-    private sealed class PendingGitChangesBenchPaint
-    {
-        public required string EventName { get; init; }
-        public required long LoadStarted { get; init; }
-        public required long PaintStarted { get; init; }
-        public required long ReadMs { get; init; }
-        public required long BuildTreeMs { get; init; }
-        public required int EntryCount { get; init; }
-        public required long HeapBeforeBytes { get; init; }
-        public required bool RestoreSelectionAfterPaint { get; init; }
-        public string? LiveOutcome { get; init; }
-        public int LiveWorkspaceId { get; init; }
-        public int LiveContextId { get; init; }
-    }
+    /// <summary>Set when a load finished without error; the next render then restores the remembered file selection.</summary>
+    private bool _restoreSelectionAfterPaint;
 
     // Reads the persisted SQLite projection only - never sends a Worker command. Opening or reloading
     // this page must never trigger a status scan.
-    private Task LoadAsync() => LoadAsync(benchEventName: "changes open", liveOutcome: null, liveWorkspaceId: 0, liveContextId: 0);
-
-    private async Task LoadAsync(string benchEventName, string? liveOutcome, int liveWorkspaceId, int liveContextId)
+    private async Task LoadAsync()
     {
         _errorMessage = null;
-        var openStarted = Stopwatch.GetTimestamp();
-        var heapBefore = GC.GetTotalMemory(forceFullCollection: false);
 
         // Fetched before the StateHasChanged below (rather than after, alongside the heavier git-status
         // read further down) so the header's Workspace name is already correct by the time this
@@ -229,22 +207,12 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
         StateHasChanged();
 
-        long readMs = 0;
-        long buildTreeMs = 0;
-        var entryCount = 0;
         try
         {
-            var readStarted = Stopwatch.GetTimestamp();
             await LoadProjectionAsync();
-            readMs = GitChangesBench.ElapsedMs(readStarted);
-            entryCount = _hydrationMode == GitChangesHydrationMode.Summary
-                ? (_view?.Repositories.Sum(r => r.StagedCount + r.ChangedCount) ?? 0)
-                : (_view?.Repositories.Sum(r => r.Changes.Count) ?? 0);
 
             ClearFilterIfNoChangesRemain();
-            var buildStarted = Stopwatch.GetTimestamp();
             RebuildRows();
-            buildTreeMs = GitChangesBench.ElapsedMs(buildStarted);
             await ClearSelectionIfStaleAsync();
         }
         catch (Exception ex)
@@ -253,100 +221,24 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             _errorMessage = "Failed to load Changes.";
         }
 
-        // Arm paint timing, then render. The GitChangesBench line is written in OnAfterRenderAsync so
-        // CircuitPaintMs includes the Blazor Server circuit sync of RowCountRendered rows - that is what
-        // feels slow around ~1.5K+ paths, not ReadMs/BuildTreeMs alone.
-        _pendingBenchPaint = new PendingGitChangesBenchPaint
-        {
-            EventName = benchEventName,
-            LoadStarted = openStarted,
-            PaintStarted = Stopwatch.GetTimestamp(),
-            ReadMs = readMs,
-            BuildTreeMs = buildTreeMs,
-            EntryCount = entryCount,
-            HeapBeforeBytes = heapBefore,
-            RestoreSelectionAfterPaint = _errorMessage == null,
-            LiveOutcome = liveOutcome,
-            LiveWorkspaceId = liveWorkspaceId,
-            LiveContextId = liveContextId,
-        };
+        _restoreSelectionAfterPaint = _errorMessage == null;
         StateHasChanged();
     }
 
-    private async Task CompletePendingBenchPaintAsync()
+    private async Task CompletePendingPaintAsync()
     {
-        if (_pendingBenchPaint is not { } pending)
+        if (!_restoreSelectionAfterPaint)
             return;
 
-        _pendingBenchPaint = null;
-        var circuitPaintMs = GitChangesBench.ElapsedMs(pending.PaintStarted);
-        var openMs = GitChangesBench.ElapsedMs(pending.LoadStarted);
-        var heapAfter = GC.GetTotalMemory(forceFullCollection: false);
-        var options = GitChangesOptions.Value;
-        var hydrationMode = _hydrationMode == GitChangesHydrationMode.Summary
-            ? (SearchActive ? "Search" : "Summary")
-            : "Full";
-
-        if (pending.EventName == "live update handled")
-        {
-            GitChangesBench.Log(
-                Logger,
-                options,
-                "live update handled",
-                pending.EntryCount,
-                openMs,
-                ("Outcome", pending.LiveOutcome ?? "Reloaded"),
-                ("HandleMs", openMs),
-                ("ReadMs", pending.ReadMs),
-                ("BuildTreeMs", pending.BuildTreeMs),
-                ("CircuitPaintMs", circuitPaintMs),
-                ("RowCountRendered", _rows.Count),
-                ("EntryCount", pending.EntryCount),
-                ("HydrationMode", hydrationMode),
-                ("WorkspaceId", pending.LiveWorkspaceId),
-                ("ContextId", pending.LiveContextId));
-        }
-        else
-        {
-            GitChangesBench.Log(
-                Logger,
-                options,
-                "changes open",
-                pending.EntryCount,
-                openMs,
-                ("EntryCount", pending.EntryCount),
-                ("ReadMs", pending.ReadMs),
-                ("BuildTreeMs", pending.BuildTreeMs),
-                ("CircuitPaintMs", circuitPaintMs),
-                ("RowCountRendered", _rows.Count),
-                ("HydrationMode", hydrationMode),
-                ("OpenMs", openMs),
-                ("WorkspaceId", WorkspaceId),
-                ("ContextId", _selectedContextId?.Value ?? 0));
-        }
-
-        if (Logger.IsEnabled(LogLevel.Debug))
-        {
-            Logger.LogDebug(
-                "GitChangesBench changes open heap WorkspaceId={WorkspaceId} HeapBeforeBytes={HeapBeforeBytes} HeapAfterBytes={HeapAfterBytes} EntryCount={EntryCount} CircuitPaintMs={CircuitPaintMs}",
-                WorkspaceId,
-                pending.HeapBeforeBytes,
-                heapAfter,
-                pending.EntryCount,
-                circuitPaintMs);
-        }
+        _restoreSelectionAfterPaint = false;
 
         // Restoring a remembered file selection re-fetches its diff from the Worker, which can be slow
         // (and, unlike the tree read above, is a real Worker command) - it must never gate the tree
         // render above. TryRestoreSelectionAsync only does work when this page instance has no
         // selection yet (first load / workspace switch); later reloads triggered by Refresh or a
         // mutation already have a selection and return immediately.
-        if (pending.RestoreSelectionAfterPaint)
-        {
-            await TryRestoreSelectionAsync();
-        }
+        await TryRestoreSelectionAsync();
     }
-
     /// <summary>
     /// The Refresh button: a real, user-triggered rescan of every repository in the workspace (not just
     /// the ones currently showing changes). Always runs via the non-overlay ScanJobKey job, whether the
@@ -496,6 +388,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
             _selectedRow = row;
             _scrollSelectionIntoViewPending = true;
+            _scrollSelectionAttempts = 0;
             await LoadDiffAsync(row);
 
             if (_disposed)
@@ -703,29 +596,56 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         await SyncDiffReviewEscListenerAsync();
     }
 
+    /// <summary>Fixed tree row height in px; must match <c>GitChangesTree.razor</c> and the scroll helper's index maths.</summary>
+    private const int TreeRowHeightPx = 28;
+
+    /// <summary>Renders to wait for the selected row to appear in the flattened list before giving up on the scroll.</summary>
+    private const int MaxScrollSelectionAttempts = 6;
+
+    private int _scrollSelectionAttempts;
+
+    /// <summary>
+    /// Scrolls the virtualized tree to the selected file. The row may not be in the DOM yet (virtualization, or the
+    /// tree has not rendered since the selection was restored), so the scroll goes by the row's index in the
+    /// flattened list. Stays pending across a few renders until the row exists and is in view.
+    /// </summary>
     private async Task ScrollSelectionIntoViewIfPendingAsync()
     {
-        if (!_scrollSelectionIntoViewPending || _disposed || _selectedRow is not { Kind: GitChangesTreeRowKind.File })
+        if (!_scrollSelectionIntoViewPending || _disposed || _selectedRow is not { Kind: GitChangesTreeRowKind.File } selected)
         {
             return;
         }
 
-        _scrollSelectionIntoViewPending = false;
+        var index = _rows.FindIndex(r => r.Key == selected.Key);
+        if (index < 0)
+        {
+            // Not rendered yet (still loading its folder pages) - try again on a later render, but not forever.
+            if (++_scrollSelectionAttempts >= MaxScrollSelectionAttempts)
+            {
+                _scrollSelectionIntoViewPending = false;
+            }
+
+            return;
+        }
 
         try
         {
-            await Js.InvokeVoidAsync("scrollSelectedGitChangesRowIntoView");
+            var inView = await Js.InvokeAsync<bool>("scrollSelectedGitChangesRowIntoView", index, TreeRowHeightPx);
+            if (inView || ++_scrollSelectionAttempts >= MaxScrollSelectionAttempts)
+            {
+                _scrollSelectionIntoViewPending = false;
+            }
         }
         catch (JSDisconnectedException)
         {
-            // Circuit gone - nothing to scroll.
+            _scrollSelectionIntoViewPending = false;
         }
         catch (Exception ex)
         {
+            _scrollSelectionIntoViewPending = false;
             Logger.LogDebug(ex, "Failed to scroll restored Git Changes selection into view");
         }
     }
-
     private void OnFilterChanged(string value)
     {
         _filterQuery = value;

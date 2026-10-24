@@ -25,20 +25,10 @@ public sealed class GitChangesSnapshotPushHandler(
     IWorkspaceGitChangesNotifier notifier,
     IOptions<GitChangesOptions> gitChangesOptions)
 {
-    public Task HandleAsync(GitChangesSnapshotNotification notification, CancellationToken cancellationToken) =>
-        HandleAsync(notification, cancellationToken, receiveTiming: default);
-
-    public async Task HandleAsync(
-        GitChangesSnapshotNotification notification,
-        CancellationToken cancellationToken,
-        GitChangesSnapshotReceiveTiming receiveTiming)
+    public async Task HandleAsync(GitChangesSnapshotNotification notification, CancellationToken cancellationToken)
     {
-        var persistStarted = Stopwatch.GetTimestamp();
         var options = gitChangesOptions.Value;
         var pathCount = notification.Snapshot.Changes.Count;
-        var receiveUtf8Bytes = ShouldMeasureReceiveBytes(options, pathCount)
-            ? GitChangesBench.EstimateUtf8JsonBytes(notification)
-            : 0;
 
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
 
@@ -83,17 +73,6 @@ public sealed class GitChangesSnapshotPushHandler(
             logger.LogDebug(
                 "GitChangesSnapshotUpdated: rejected stale context snapshot version {IncomingVersion} <= persisted {PersistedVersion}",
                 snapshot.Version, existingContext.SnapshotVersion);
-            LogReceiveApply(
-                options,
-                pathCount,
-                receiveUtf8Bytes,
-                receiveTiming.WriteQueueWaitMs,
-                persistMs: GitChangesBench.ElapsedMs(persistStarted),
-                version: snapshot.Version,
-                workspaceId: notification.WorkspaceId,
-                contextId: contextId.Value.Value,
-                repositoryId: notification.RepositoryId,
-                skippedStale: true);
             return;
         }
 
@@ -110,17 +89,6 @@ public sealed class GitChangesSnapshotPushHandler(
                 logger.LogDebug(
                     "GitChangesSnapshotUpdated: rejected stale legacy snapshot version {IncomingVersion} <= persisted {PersistedVersion}",
                     snapshot.Version, existingLegacy.SnapshotVersion);
-                LogReceiveApply(
-                    options,
-                    pathCount,
-                    receiveUtf8Bytes,
-                    receiveTiming.WriteQueueWaitMs,
-                    persistMs: GitChangesBench.ElapsedMs(persistStarted),
-                    version: snapshot.Version,
-                    workspaceId: notification.WorkspaceId,
-                    contextId: contextId.Value.Value,
-                    repositoryId: notification.RepositoryId,
-                    skippedStale: true);
                 return;
             }
         }
@@ -250,55 +218,9 @@ public sealed class GitChangesSnapshotPushHandler(
             lineStatsRefresh.RequestRepository(notification.WorkspaceId, notification.RepositoryId, contextId.Value);
         }
 
-        var persistMs = GitChangesBench.ElapsedMs(persistStarted);
-        LogReceiveApply(
-            options,
-            pathCount,
-            receiveUtf8Bytes,
-            receiveTiming.WriteQueueWaitMs,
-            persistMs,
-            snapshot.Version,
-            notification.WorkspaceId,
-            contextId.Value.Value,
-            notification.RepositoryId,
-            skippedStale: false);
-
         logger.LogDebug(
             "GitChangesSnapshotUpdated persisted: workspace={WorkspaceId}, context={ContextId}, repo={RepositoryId}, version={Version}",
             notification.WorkspaceId, contextId.Value.Value, notification.RepositoryId, snapshot.Version);
-    }
-
-    private static bool ShouldMeasureReceiveBytes(GitChangesOptions options, int pathCount) =>
-        pathCount >= options.BenchmarkLogMinPathCount;
-
-    private void LogReceiveApply(
-        GitChangesOptions options,
-        int pathCount,
-        int receiveUtf8Bytes,
-        long writeQueueWaitMs,
-        long persistMs,
-        long version,
-        int workspaceId,
-        int contextId,
-        int repositoryId,
-        bool skippedStale)
-    {
-        var elapsedForFloor = Math.Max(persistMs, writeQueueWaitMs);
-        GitChangesBench.Log(
-            logger,
-            options,
-            "snapshot receive apply",
-            pathCount,
-            elapsedForFloor,
-            ("ReceiveUtf8Bytes", receiveUtf8Bytes),
-            ("WriteQueueWaitMs", writeQueueWaitMs),
-            ("PersistMs", persistMs),
-            ("PathCount", pathCount),
-            ("Version", version),
-            ("SkippedStale", skippedStale),
-            ("WorkspaceId", workspaceId),
-            ("ContextId", contextId),
-            ("RepositoryId", repositoryId));
     }
 
     private static void ApplyStatus(

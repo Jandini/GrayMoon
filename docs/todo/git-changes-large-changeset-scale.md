@@ -1,6 +1,6 @@
 # Git Changes: scale to tens of thousands of changed files
 
-Status: Phases 0–1 are implemented (permanent benches + M0; circuit/tree summaries, lazy expand, `Virtualize`, per-repo live patch). Phases 2–5 are not (next: Phase 2, then Phase 3a digest only; Phase 3b, 4 and 5 are postponed). Current product behavior is documented in `docs/architecture/07-git-changes-projection-and-tree.md` (fold Phase 1 detail in Phase 5). Progress is tracked in `docs/todo/git-changes-large-changeset-scale-tracker.md`.
+Status: Phases 0ï¿½1 are implemented (permanent benches + M0; circuit/tree summaries, lazy expand, `Virtualize`, per-repo live patch). Phases 2ï¿½5 are not (next: Phase 2, then Phase 3a digest only; Phase 3b, 4 and 5 are postponed). Current product behavior is documented in `docs/architecture/07-git-changes-projection-and-tree.md` (fold Phase 1 detail in Phase 5). Progress is tracked in `docs/todo/git-changes-large-changeset-scale-tracker.md`.
 
 ## 0. Non-negotiable requirements (full inventory)
 
@@ -326,7 +326,7 @@ Tasks:
 
 **Milestone M0:** benchmark log lines merged in App and Worker; numbers attached to this doc; fixture reproducible. The log lines are kept (not removed) after M0 and are reused to verify every later milestone.
 
-**M0 results (2026-10-24):** see the table in `git-changes-large-changeset-scale-tracker.md`. Fixture: `dev/New-GitChangesScaleFixture.ps1`. App harness: `GitChangesBenchM0MeasurementTests`. Takeaways: ~145 UTF-8 bytes per short path on the notification JSON; 50K ˜ 8.9 MiB (under the 10 MiB hub receive cap with little headroom); Worker `StatusMs` stays small; App `PersistMs` and full-circuit row count dominate by ~5K paths. Prefer a **byte budget** for `SnapshotPathsInlineMax` (still an open decision) rather than a fixed path count.
+**M0 results (2026-10-24):** see the table in `git-changes-large-changeset-scale-tracker.md`. Fixture: `dev/New-GitChangesScaleFixture.ps1`. App harness: `GitChangesBenchM0MeasurementTests`. Takeaways: ~145 UTF-8 bytes per short path on the notification JSON; 50K ï¿½ 8.9 MiB (under the 10 MiB hub receive cap with little headroom); Worker `StatusMs` stays small; App `PersistMs` and full-circuit row count dominate by ~5K paths. Prefer a **byte budget** for `SnapshotPathsInlineMax` (still an open decision) rather than a fixed path count.
 
 ### Phase 1 - Circuit and tree (App-only) - highest UX leverage
 
@@ -362,7 +362,7 @@ Implemented: the digest also folds in the status fields the page shows (branch, 
 2. `ContextGitChangesUpdated` broadcast carries `repositoryId` and `contentDigest`, so an unchanged digest is a no-op in the page handler (section 4.6).
 3. Tests: digest stability (same entries in any order give the same digest), and a no-op when the digest is unchanged.
 
-**Milestone M3a:** a watcher push with identical content causes no circuit reload or page re-fetch. The `GitChangesBench` live-update line reports `NoOp`.
+**Milestone M3a:** a watcher push with identical content causes no circuit reload or page re-fetch.
 
 #### Phase 3b - Folder summaries table (postponed)
 

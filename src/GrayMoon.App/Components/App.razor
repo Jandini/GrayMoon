@@ -71,10 +71,40 @@
             const el = document.getElementById(id);
             if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
         };
-        window.scrollSelectedGitChangesRowIntoView = () => {
-            const el = document.querySelector('.git-changes-tree .git-changes-tree__row--selected');
-            if (el && el.scrollIntoView)
-                el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        // The tree is virtualized, so the selected row may not be in the DOM yet. When its index in the flattened
+        // row list is known, scroll the tree's scroll container to that offset first (rows are a fixed height),
+        // which makes the virtualizer render it. Returns true once the row is at least roughly in view.
+        window.scrollSelectedGitChangesRowIntoView = (rowIndex, rowHeight) => {
+            const tree = document.querySelector('.git-changes-tree');
+            if (!tree)
+                return false;
+
+            if (typeof rowIndex === 'number' && rowIndex >= 0 && rowHeight > 0) {
+                let container = tree.parentElement;
+                while (container && container !== document.body) {
+                    const overflowY = getComputedStyle(container).overflowY;
+                    if ((overflowY === 'auto' || overflowY === 'scroll') && container.scrollHeight > container.clientHeight)
+                        break;
+                    container = container.parentElement;
+                }
+
+                if (container && container !== document.body) {
+                    const treeTop = tree.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
+                    const rowTop = treeTop + rowIndex * rowHeight;
+                    const visibleTop = container.scrollTop;
+                    const visibleBottom = visibleTop + container.clientHeight - rowHeight;
+                    if (rowTop < visibleTop || rowTop > visibleBottom)
+                        container.scrollTop = Math.max(0, rowTop - (container.clientHeight - rowHeight) / 2);
+                }
+            }
+
+            const el = tree.querySelector('.git-changes-tree__row--selected');
+            if (el && el.scrollIntoView) {
+                el.scrollIntoView({ block: 'nearest' });
+                return true;
+            }
+
+            return false;
         };
         window.getWorkerDownloadInfo = () => {
             const ua = navigator.userAgent.toLowerCase();

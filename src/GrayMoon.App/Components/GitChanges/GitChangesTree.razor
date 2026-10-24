@@ -1,4 +1,5 @@
 @namespace GrayMoon.App.Components.GitChanges
+@implements IDisposable
 @using GrayMoon.App.Services.GitChanges
 @using GrayMoon.Common.Git
 
@@ -15,7 +16,7 @@
 
     @if (Rows.Count == 0)
     {
-        <div class="git-changes-tree__empty text-muted">@(IsSearching ? "Searching..." : IsFilterActive && HasChanges ? "No changes match the current filter." : "No changes")</div>
+        <div class="git-changes-tree__empty text-muted">@EmptyMessage</div>
     }
     else
     {
@@ -110,6 +111,63 @@
 </div>
 
 @code {
+    /// <summary>A search shorter than this shows no "Searching..." text, so quick searches do not flash it.</summary>
+    private const int SearchingDelayMs = 1000;
+
+    private bool _showSearching;
+    private bool _wasSearching;
+    private CancellationTokenSource? _searchingDelayCts;
+
+    /// <summary>Empty-state text. While a search is loading it stays blank for the first second, then reads "Searching...".</summary>
+    private string EmptyMessage =>
+        IsSearching
+            ? (_showSearching ? "Searching..." : string.Empty)
+            : IsFilterActive && HasChanges ? "No changes match the current filter." : "No changes";
+
+    protected override void OnParametersSet()
+    {
+        if (IsSearching && !_wasSearching)
+        {
+            _showSearching = false;
+            _searchingDelayCts?.Cancel();
+            _searchingDelayCts?.Dispose();
+            var cts = _searchingDelayCts = new CancellationTokenSource();
+            _ = ShowSearchingAfterDelayAsync(cts.Token);
+        }
+        else if (!IsSearching && _wasSearching)
+        {
+            _searchingDelayCts?.Cancel();
+            _showSearching = false;
+        }
+
+        _wasSearching = IsSearching;
+    }
+
+    private async Task ShowSearchingAfterDelayAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(SearchingDelayMs, cancellationToken);
+            await InvokeAsync(() =>
+            {
+                if (cancellationToken.IsCancellationRequested || !IsSearching)
+                    return;
+
+                _showSearching = true;
+                StateHasChanged();
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            // Search finished (or restarted) before the delay elapsed.
+        }
+    }
+
+    public void Dispose()
+    {
+        _searchingDelayCts?.Cancel();
+        _searchingDelayCts?.Dispose();
+    }
     /// <summary>Fixed row height for <see cref="Virtualize{TItem}"/> (must match CSS).</summary>
     private const float RowHeightPx = 28f;
 

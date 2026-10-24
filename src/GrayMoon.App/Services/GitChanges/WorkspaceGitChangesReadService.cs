@@ -433,7 +433,6 @@ public sealed class WorkspaceGitChangesReadService : IWorkspaceGitChangesReadSer
                 cancellationToken);
         }
 
-        var queryStarted = Stopwatch.GetTimestamp();
         // Callers may ask for any page size; clamp so one request stays bounded (TreePageSize x 4 at most).
         take = Math.Clamp(take, 1, Math.Max(1, _gitChangesOptions.Value.TreePageSize * 4));
 
@@ -604,21 +603,6 @@ public sealed class WorkspaceGitChangesReadService : IWorkspaceGitChangesReadSer
             NextAfterChildKey = hasMore && children.Count > 0 ? children[^1].ChildKey : null,
         };
 
-        GitChangesBench.Log(
-            _logger,
-            _gitChangesOptions.Value,
-            "entry page",
-            pathCount: children.Count,
-            elapsedMs: GitChangesBench.ElapsedMs(queryStarted),
-            ("PrefixDepth", prefix.Length == 0 ? 0 : prefix.Count(c => c == '/') + 1),
-            ("Take", take),
-            ("ReturnedCount", children.Count),
-            ("TotalDirectChildCount", total),
-            ("QueryMs", GitChangesBench.ElapsedMs(queryStarted)),
-            ("WorkspaceId", workspaceId),
-            ("ContextId", contextId.Value),
-            ("WorkspaceRepositoryId", workspaceRepositoryId));
-
         return result;
     }
 
@@ -637,7 +621,6 @@ public sealed class WorkspaceGitChangesReadService : IWorkspaceGitChangesReadSer
         string? filter,
         CancellationToken cancellationToken)
     {
-        var queryStarted = Stopwatch.GetTimestamp();
         take = Math.Clamp(take, 1, Math.Max(1, _gitChangesOptions.Value.TreePageSize * 4));
 
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -722,21 +705,6 @@ public sealed class WorkspaceGitChangesReadService : IWorkspaceGitChangesReadSer
             NextAfterChildKey = nextKey,
         };
 
-        GitChangesBench.Log(
-            _logger,
-            _gitChangesOptions.Value,
-            "entry page",
-            pathCount: page.Count,
-            elapsedMs: GitChangesBench.ElapsedMs(queryStarted),
-            ("PrefixDepth", prefix.Length == 0 ? 0 : prefix.Count(c => c == '/') + 1),
-            ("Take", take),
-            ("ReturnedCount", page.Count),
-            ("TotalDirectChildCount", total),
-            ("QueryMs", GitChangesBench.ElapsedMs(queryStarted)),
-            ("WorkspaceId", workspaceId),
-            ("ContextId", contextId.Value),
-            ("WorkspaceRepositoryId", workspaceRepositoryId));
-
         return result;
     }
 
@@ -748,7 +716,6 @@ public sealed class WorkspaceGitChangesReadService : IWorkspaceGitChangesReadSer
         int take,
         CancellationToken cancellationToken)
     {
-        var queryStarted = Stopwatch.GetTimestamp();
         take = Math.Clamp(take, 1, Math.Max(1, _gitChangesOptions.Value.TreePageSize * 4));
 
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -790,7 +757,6 @@ public sealed class WorkspaceGitChangesReadService : IWorkspaceGitChangesReadSer
 
         var hits = new List<GitChangesSearchHit>(take);
         var totalMatches = 0;
-        var scanned = 0;
         var hasMore = false;
         string? nextKey = null;
 
@@ -815,7 +781,6 @@ public sealed class WorkspaceGitChangesReadService : IWorkspaceGitChangesReadSer
             // as they are read, so memory is bounded by the page, not by the repository's inventory.
             await foreach (var entity in query.OrderBy(e => e.Path).AsAsyncEnumerable().WithCancellation(cancellationToken))
             {
-                scanned++;
                 var view = ToEntryView(entity);
                 if (!matches(repo.RepositoryName, view))
                     continue;
@@ -857,21 +822,6 @@ public sealed class WorkspaceGitChangesReadService : IWorkspaceGitChangesReadSer
             Hits = hits,
             NextAfterKey = nextKey,
         };
-
-        GitChangesBench.Log(
-            _logger,
-            _gitChangesOptions.Value,
-            "search page",
-            pathCount: scanned,
-            elapsedMs: GitChangesBench.ElapsedMs(queryStarted),
-            ("FilterLength", filter?.Length ?? 0),
-            ("Take", take),
-            ("ReturnedCount", hits.Count),
-            ("MatchCount", result.TotalMatchCount ?? -1),
-            ("ScannedCount", scanned),
-            ("QueryMs", GitChangesBench.ElapsedMs(queryStarted)),
-            ("WorkspaceId", workspaceId),
-            ("ContextId", contextId.Value));
 
         return result;
     }

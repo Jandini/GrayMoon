@@ -170,6 +170,7 @@ public sealed partial class WorkspaceGitChanges
         _selectedRow = target;
         RememberSelection(target);
         _scrollSelectionIntoViewPending = true;
+        _scrollSelectionAttempts = 0;
 
         await LoadDiffAsync(target, landing);
     }

@@ -11,8 +11,7 @@ public sealed partial class WorkspaceGitChanges
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        // Circuit paint bench first: this is the render that followed LoadAsync's tree StateHasChanged.
-        await CompletePendingBenchPaintAsync();
+        await CompletePendingPaintAsync();
 
         if (firstRender && _hubConnection == null)
         {
@@ -35,19 +34,13 @@ public sealed partial class WorkspaceGitChanges
                     return;
 
                 if (_selectedContextId is WorkspaceFeatureContextId selected && selected.Value != contextId)
-                {
-                    LogLiveUpdateNoOp(workspaceId, contextId);
                     return;
-                }
 
                 await InvokeAsync(() =>
                 {
                     // Same digest as what the page already shows: nothing to read, rebuild or re-fetch.
                     if (IsLiveUpdateDigestUnchanged(repositoryId, contentDigest))
-                    {
-                        LogLiveUpdateNoOp(workspaceId, contextId);
                         return Task.CompletedTask;
-                    }
 
                     return PatchRepositoryLiveAsync(workspaceId, contextId, repositoryId);
                 });
@@ -71,23 +64,5 @@ public sealed partial class WorkspaceGitChanges
         var current = _view.Repositories.FirstOrDefault(r => r.RepositoryId == repositoryId);
         return current?.ContentDigest is { Length: > 0 } known
                && string.Equals(known, contentDigest, StringComparison.Ordinal);
-    }
-
-    private void LogLiveUpdateNoOp(int workspaceId, int contextId)
-    {
-        var entryCount = _hydrationMode == GitChangesHydrationMode.Summary
-            ? (_view?.Repositories.Sum(r => r.StagedCount + r.ChangedCount) ?? 0)
-            : (_view?.Repositories.Sum(r => r.Changes.Count) ?? 0);
-        GitChangesBench.Log(
-            Logger,
-            GitChangesOptions.Value,
-            "live update handled",
-            entryCount,
-            elapsedMs: 0,
-            ("Outcome", "NoOp"),
-            ("HandleMs", 0),
-            ("CircuitPaintMs", 0),
-            ("WorkspaceId", workspaceId),
-            ("ContextId", contextId));
     }
 }

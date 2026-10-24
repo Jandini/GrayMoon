@@ -239,7 +239,6 @@ public class GitChangesEntryPageReadServiceTests
         var contextId = await SpecialContextIdAsync(ctx, factory);
         var readService = new WorkspaceGitChangesReadService(factory);
 
-        var timer = System.Diagnostics.Stopwatch.StartNew();
         var seen = new HashSet<string>(StringComparer.Ordinal);
         string? after = null;
         int? total = null;
@@ -253,11 +252,9 @@ public class GitChangesEntryPageReadServiceTests
             after = page.NextAfterKey;
         }
         while (after != null);
-        timer.Stop();
 
         Assert.Equal(5_000, total);
         Assert.Equal(5_000, seen.Count);
-        Console.WriteLine($"GitChangesBench search 20K: all pages {timer.ElapsedMilliseconds} ms");
     }
 
     [Fact]

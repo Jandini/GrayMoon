@@ -112,49 +112,28 @@ public sealed partial class WorkspaceGitChanges
 
         if (_view == null)
         {
-            await LoadAsync(
-                benchEventName: "live update handled",
-                liveOutcome: "Reloaded",
-                liveWorkspaceId: workspaceId,
-                liveContextId: contextId);
+            await LoadAsync();
             return;
         }
-
-        var openStarted = Stopwatch.GetTimestamp();
-        var heapBefore = GC.GetTotalMemory(forceFullCollection: false);
-        long readMs = 0;
-        long buildTreeMs = 0;
-        var entryCount = 0;
-        string outcome;
 
         try
         {
             if (_selectedContextId is not WorkspaceFeatureContextId ctx)
             {
                 // Page has no resolved context yet - fall back to a full reload.
-                await LoadAsync(
-                    benchEventName: "live update handled",
-                    liveOutcome: "Reloaded",
-                    liveWorkspaceId: workspaceId,
-                    liveContextId: contextId);
+                await LoadAsync();
                 return;
             }
 
             var summaryMode = _hydrationMode == GitChangesHydrationMode.Summary;
-            var readStarted = Stopwatch.GetTimestamp();
             var patched = summaryMode
                 ? await ReadService.GetRepositorySummaryAsync(workspaceId, ctx, repositoryId, CancellationToken.None)
                 : await ReadService.GetRepositoryAsync(workspaceId, ctx, repositoryId, CancellationToken.None);
-            readMs = GitChangesBench.ElapsedMs(readStarted);
 
             // The mode can change underneath us while we awaited a full reload.
             if (summaryMode != (_hydrationMode == GitChangesHydrationMode.Summary) || _view == null)
             {
-                await LoadAsync(
-                    benchEventName: "live update handled",
-                    liveOutcome: "Reloaded",
-                    liveWorkspaceId: workspaceId,
-                    liveContextId: contextId);
+                await LoadAsync();
                 return;
             }
 
@@ -179,11 +158,7 @@ public sealed partial class WorkspaceGitChanges
             if (ShouldSwitchHydrationMode())
             {
                 // The inventory crossed FullHydrationMaxEntries: reopen so the right mode is used.
-                await LoadAsync(
-                    benchEventName: "live update handled",
-                    liveOutcome: "Reloaded",
-                    liveWorkspaceId: workspaceId,
-                    liveContextId: contextId);
+                await LoadAsync();
                 return;
             }
 
@@ -194,43 +169,17 @@ public sealed partial class WorkspaceGitChanges
             if (summaryMode && SearchActive)
                 await RefreshSearchAsync();
 
-            outcome = "PatchedOnly";
-            entryCount = summaryMode
-                ? (_view?.Repositories.Sum(r => r.StagedCount + r.ChangedCount) ?? 0)
-                : (_view?.Repositories.Sum(r => r.Changes.Count) ?? 0);
-
             InvalidateWalkableFilesCache();
             ClearFilterIfNoChangesRemain();
-            var buildStarted = Stopwatch.GetTimestamp();
             RebuildRows();
-            buildTreeMs = GitChangesBench.ElapsedMs(buildStarted);
             await ClearSelectionIfStaleAsync();
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Failed to patch Git Changes for repository {RepositoryId}", repositoryId);
-            await LoadAsync(
-                benchEventName: "live update handled",
-                liveOutcome: "Reloaded",
-                liveWorkspaceId: workspaceId,
-                liveContextId: contextId);
+            await LoadAsync();
             return;
         }
-
-        _pendingBenchPaint = new PendingGitChangesBenchPaint
-        {
-            EventName = "live update handled",
-            LoadStarted = openStarted,
-            PaintStarted = Stopwatch.GetTimestamp(),
-            ReadMs = readMs,
-            BuildTreeMs = buildTreeMs,
-            EntryCount = entryCount,
-            HeapBeforeBytes = heapBefore,
-            RestoreSelectionAfterPaint = false,
-            LiveOutcome = outcome,
-            LiveWorkspaceId = workspaceId,
-            LiveContextId = contextId,
-        };
 
         // Another live patch is mid-way through re-fetching its repository's pages: painting now would show that
         // repository empty. That patch rebuilds the rows and paints when it finishes.

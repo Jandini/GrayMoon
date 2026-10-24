@@ -1,6 +1,6 @@
 namespace GrayMoon.Common.Git;
 
-/// <summary>Bounded-concurrency and debounce tuning for the Git Changes feature. Configurable, benchmark-driven.</summary>
+/// <summary>Bounded-concurrency and debounce tuning for the Git Changes feature. Configurable.</summary>
 public sealed class GitChangesOptions
 {
     /// <summary>
@@ -47,20 +47,6 @@ public sealed class GitChangesOptions
     /// Set true to also write the legacy special-Workspace tables. Rollback is turning this back on.
     /// </summary>
     public bool WriteLegacyGitChangesTables { get; init; }
-
-    /// <summary>
-    /// Permanent <c>GitChangesBench</c> logs use Information when path count is at or above this floor
-    /// (or <see cref="BenchmarkLogMinElapsedMs"/> is met); otherwise Debug. Default 500 so small
-    /// workspaces do not flood Information logs.
-    /// </summary>
-    public int BenchmarkLogMinPathCount { get; init; } = 500;
-
-    /// <summary>
-    /// Permanent <c>GitChangesBench</c> logs use Information when an event's elapsed milliseconds are
-    /// at or above this floor (or <see cref="BenchmarkLogMinPathCount"/> is met); otherwise Debug.
-    /// Default 100.
-    /// </summary>
-    public int BenchmarkLogMinElapsedMs { get; init; } = 100;
 
     /// <summary>
     /// Internal hydration switch only (not a product inventory cap). At or below this total entry count
