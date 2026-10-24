@@ -15,6 +15,16 @@
     else
     {
         <Virtualize Items="Rows" ItemSize="RowHeightPx" OverscanCount="12" Context="row">
+          @if (row.Kind == GitChangesTreeRowKind.More)
+          {
+            <div class="git-changes-tree__row git-changes-tree__row--more text-muted"
+                 style="padding-left: @(row.Depth * 1.1)rem; height: @(RowHeightPx)px"
+                 @key="row.Key">
+                <GitChangesLoadMoreSentinel Label="@row.Label" OnVisible="() => OnLoadMore.InvokeAsync(row)" />
+            </div>
+          }
+          else
+          {
             <div class="git-changes-tree__row git-changes-tree__row--@(row.Kind.ToString().ToLowerInvariant()) @(IsSelected(row) ? "git-changes-tree__row--selected" : "") @(row.Kind == GitChangesTreeRowKind.File && IsMultiSelected(row) ? "git-changes-tree__row--multi-selected" : "")"
                  style="padding-left: @(row.Depth * 1.1)rem; height: @(RowHeightPx)px"
                  @key="@(row.IsLoadingChildren ? row.Key + ":loading" : row.Key)">
@@ -89,6 +99,7 @@
                     @RenderActions(row)
                 </span>
             </div>
+          }
         </Virtualize>
     }
 </div>
@@ -103,6 +114,8 @@
     [Parameter] public bool HasChanges { get; set; }
     [Parameter] public GitChangesTreeRow? SelectedRow { get; set; }
     [Parameter] public EventCallback<GitChangesTreeRow> OnToggleExpand { get; set; }
+    /// <summary>Raised once when a "Loading more..." sentinel row scrolls into the rendered window (large mode).</summary>
+    [Parameter] public EventCallback<GitChangesTreeRow> OnLoadMore { get; set; }
     [Parameter] public EventCallback<GitChangesFileSelectEventArgs> OnSelectFile { get; set; }
     /// <summary>Raised when a row's icon is clicked. For File rows, copies that file's full path; for
     /// Folder/Repository/Section rows, copies every contained file's full path as multiline text.</summary>

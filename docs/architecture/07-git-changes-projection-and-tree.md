@@ -133,11 +133,13 @@ There is no incremental path-diff persist: every successful snapshot is a full r
 3. `RebuildRows()` → `GitChangesTreeBuilder.Build` (Full) or `BuildFromCache` + `GitChangesTreeNodeCache` (Summary).
 4. Optionally restores a remembered file selection (diff fetch is the only Worker call on open, and it does not gate the tree). In Summary mode, restoring a selection expands ancestors and `GetEntryPageAsync`-hydrates those prefixes.
 
-`GetContextAsync` / `LoadContextAsync` still load every entry for the context when Full mode is chosen. Summary mode leaves `Changes` empty until the user expands a repository or folder; children come from `GetEntryPageAsync` (direct children, keyset-paged, snapshot-version tagged). Path indexes: `(context, repo, Path)` and `(context, Path)` (migration 13).
+`GetContextAsync` / `LoadContextAsync` still load every entry for the context when Full mode is chosen. Summary mode leaves `Changes` empty until the user expands a repository or folder; children come from `GetEntryPageAsync`. Path indexes: `(context, repo, Path)` and `(context, Path)` (migration 13).
+
+`GetEntryPageAsync` (unfiltered) groups and pages **in SQLite**: one raw-SQL CTE restricts to the section and a binary `Path` range on the `(context, repo, Path)` index, groups by next path segment, and returns `take + 1` rows after the keyset cursor (`f:name` / `p:name`), so only one page of rows is materialised. Order is folders and directory entries first, then files, each by `NOCASE` name with a binary tiebreak (identical to the builder's ordinal-ignore-case order for ASCII names; `GroupDirectChildren` / `OrderChildren` remain the in-memory reference and serve the filtered path). Summaries also carry per-repository changed-kind counts so the header chips work without entries. Bulk consumers (copy all paths, Undo confirmation) and selection checks use `GetEntryPathsAsync` and `EntryExistsAsync`, which read Layer B on demand and retain nothing.
 
 ### Live updates
 
-`WorkspaceGitChanges.Realtime.cs` handles `ContextGitChangesUpdated(workspaceId, contextId, repositoryId)` by patching **that repository only** (`GetRepositoryAsync` + badge/cache invalidation; Outcome `PatchedOnly`). It does not reload sibling repositories. Legacy `GitChangesUpdated` is ignored when the context event is authoritative. Unrelated contexts stay `NoOp`.
+`WorkspaceGitChanges.Realtime.cs` handles `ContextGitChangesUpdated(workspaceId, contextId, repositoryId)` by patching **that repository only**. Full mode re-reads that repository's entries (`GetRepositoryAsync`). Summary mode reads only its status row and kind counts (`GetRepositorySummaryAsync`), drops its node caches, and re-fetches the first page of each expanded prefix (Outcome `PatchedOnly`). Fetches in flight are tracked by cache object, so a fetch started before an invalidation is discarded and never blocks its replacement. If the patched counts cross `FullHydrationMaxEntries` (and no filter is active) the page reloads into the other mode. It does not reload sibling repositories. Legacy `GitChangesUpdated` is ignored when the context event is authoritative. Unrelated contexts stay `NoOp`.
 
 Opening the page does not start a status scan. Scans are activated by workspace route activity (`WorkspaceGitChangesRouteActivity` → `WorkspaceGitChangesActivation`), monitoring (`GitChangesMonitoringBackgroundService`), line-stats fill-in, Sync post-hooks, and the Refresh button.
 
@@ -150,9 +152,9 @@ Staged (section) → Repository → Folder* → File
 Changed (section) → Repository → Folder* → File
 ```
 
-Output is a flattened `List<GitChangesTreeRow>` (kinds: `Section`, `Repository`, `Folder`, `File`). Collapsed keys omit descendants from the list. **Full** mode: default `_collapsedKeys` empty (fully expanded). **Summary** mode: repositories start collapsed; expanding fetches pages until every direct child of that prefix is in the node cache (nested folders still expand on demand).
+Output is a flattened `List<GitChangesTreeRow>` (kinds: `Section`, `Repository`, `Folder`, `File`, `More`). Collapsed keys omit descendants from the list. **Full** mode: default `_collapsedKeys` empty (fully expanded). **Summary** mode: repositories start collapsed; expanding fetches the **first page** of that prefix (plus first pages of already-open child folders). A partially loaded level ends with a `More` sentinel row; when the virtualizer renders it, the next page is fetched, so the circuit only retains what was scrolled to and every file stays reachable. Caches of collapsed prefixes are evicted once retained children exceed `CircuitVisibleRowBudget` (never expanded ones); a failed fetch shows a toast and the next expand retries. Revealing a selected or walked file pages its ancestors until the file is cached.
 
-Filter (`WorkspaceGitChangeSearchMatcher`) runs **client-side** over hydrated entries in Full mode. In Summary mode, applying a filter reloads into Full until Phase 2 server-side search. Supported tokens: plain text, `repo:`, `status:`, `staged:`, `ext:` (via `FilterSearchExpression`).
+Filter (`WorkspaceGitChangeSearchMatcher`) runs **client-side** over hydrated entries in Full mode. In Summary mode, applying a filter reloads into Full (debounced, latest load wins) until Phase 2 server-side search. Supported tokens: plain text, `repo:`, `status:`, `staged:`, `ext:` (via `FilterSearchExpression`).
 
 Directory entries (`path` ending in `/`) become `IsDirectoryEntry` Folder rows: no diff, no Stage/Undo.
 

@@ -8,6 +8,12 @@ public enum GitChangesTreeRowKind
     Repository,
     Folder,
     File,
+
+    /// <summary>
+    /// Large-mode sentinel at the end of a partially loaded level. Rendering it (the virtualizer only does so
+    /// when it scrolls into view) fetches the next page for <see cref="GitChangesTreeRow.PathPrefix"/>.
+    /// </summary>
+    More,
 }
 
 /// <summary>One flattened, renderable row of the section-first Staged/Changed tree. The page renders this
@@ -55,6 +61,9 @@ public sealed record GitChangesTreeRow
 
     /// <summary>Large-mode: children for this folder/repo are being fetched from Layer B.</summary>
     public bool IsLoadingChildren { get; init; }
+
+    /// <summary>Repo-relative folder prefix ("" = repository root) a <see cref="GitChangesTreeRowKind.More"/> row pages.</summary>
+    public string? PathPrefix { get; init; }
 }
 
 /// <summary>
@@ -147,6 +156,7 @@ public static class GitChangesTreeBuilder
                 LastErrorCode = s.LastErrorCode,
                 LastErrorMessage = s.LastErrorMessage,
                 Changes = [],
+                ChangedKindCounts = s.ChangedKindCounts ?? new Dictionary<GitChangeKind, int>(),
             }).ToList(),
         };
 
@@ -230,7 +240,7 @@ public static class GitChangesTreeBuilder
     /// <summary>Spinner on the parent icon only until the first children page is in the cache.</summary>
     private static bool IsPrefixLoading(GitChangesTreeNodeCache.PrefixPageCache? cache) =>
         cache is null
-        || (cache.Children.Count == 0 && (cache.IsLoading || !cache.IsComplete));
+        || (cache.Children.Count == 0 && !cache.HasLoaded && !cache.LoadFailed);
 
     private static void AppendCachedLevel(
         List<GitChangesTreeRow> rows,
@@ -295,6 +305,23 @@ public static class GitChangesTreeBuilder
 
             if (child.Entry is not null)
                 rows.Add(MakeFileRow(parentKey, depth, isStagedSection, repo, child.Entry));
+        }
+
+        // No sentinel after a failed fetch: it would remount and retry in a loop. Collapse/expand retries instead.
+        if (cache.HasMore && !cache.LoadFailed)
+        {
+            rows.Add(new GitChangesTreeRow
+            {
+                // Count in the key so each loaded page mounts a fresh sentinel.
+                Key = $"{parentKey}/:more:{cache.Children.Count}",
+                Kind = GitChangesTreeRowKind.More,
+                Depth = depth,
+                Label = "Loading more...",
+                IsStagedSection = isStagedSection,
+                WorkspaceRepositoryId = repo.WorkspaceRepositoryId,
+                RepositoryName = repo.RepositoryName,
+                PathPrefix = pathPrefix,
+            });
         }
     }
 

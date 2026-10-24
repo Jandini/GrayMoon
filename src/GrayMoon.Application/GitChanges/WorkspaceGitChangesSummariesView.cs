@@ -48,4 +48,7 @@ public sealed record WorkspaceGitChangesRepositorySummary
 
     /// <summary>Persisted snapshot version for this repo+context; used to detect stale tree-page caches.</summary>
     public long SnapshotVersion { get; init; }
+
+    /// <summary>Per-kind counts of unstaged entries (see <c>WorkspaceGitChangesRepositoryView.ChangedKindCounts</c>).</summary>
+    public IReadOnlyDictionary<GrayMoon.Common.Git.GitChangeKind, int>? ChangedKindCounts { get; init; }
 }

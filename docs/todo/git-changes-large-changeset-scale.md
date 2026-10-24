@@ -1,6 +1,6 @@
 # Git Changes: scale to tens of thousands of changed files
 
-Status: Phases 0–1 are implemented (permanent benches + M0; circuit/tree summaries, lazy expand, `Virtualize`, per-repo live patch). Phases 2–5 are not. Current product behavior is documented in `docs/architecture/07-git-changes-projection-and-tree.md` (fold Phase 1 detail in Phase 5). Progress is tracked in `docs/todo/git-changes-large-changeset-scale-tracker.md`.
+Status: Phases 0�1 are implemented (permanent benches + M0; circuit/tree summaries, lazy expand, `Virtualize`, per-repo live patch). Phases 2�5 are not. Current product behavior is documented in `docs/architecture/07-git-changes-projection-and-tree.md` (fold Phase 1 detail in Phase 5). Progress is tracked in `docs/todo/git-changes-large-changeset-scale-tracker.md`.
 
 ## 0. Non-negotiable requirements (full inventory)
 
@@ -8,7 +8,7 @@ Status: Phases 0–1 are implemented (permanent benches + M0; circuit/tree summa
 
 - **No hard caps** on how many changed files may exist, be persisted, or be reached by the user.
 - If git reports 20K (or 100K) changed paths, **all of them remain available**: scroll the virtualized list, expand every folder, page through every prefix, search/jump to any match. Nothing is dropped as "first N", hidden behind "too many files - refine your filter", or otherwise truncated from the product inventory.
-- Paging (`skip`/`take`), virtualization, lazy folder expand, and chunked Worker→App transfer are **transport and paint windows**. They fetch or render a slice at a time; they do not define a maximum set size. Every path in Layer B (SQLite) must be reachable through further scroll, expand, or search pagination.
+- Paging (`skip`/`take`), virtualization, lazy folder expand, and chunked Worker?App transfer are **transport and paint windows**. They fetch or render a slice at a time; they do not define a maximum set size. Every path in Layer B (SQLite) must be reachable through further scroll, expand, or search pagination.
 - Forbidden UX: silent truncation, "showing 1-500 of 20_000", hard stop walls, or omitting paths from persistence to save work.
 - Allowed UX: progressive paint, collapsed-by-default folders on large sets, virtualized DOM, server-backed pages of visible rows, search result pages that continue until every match is listed.
 
@@ -30,10 +30,10 @@ What must stay true (in addition to section 0):
 
 | Hop | What happens | Why it hurts at 10Ks |
 |---|---|---|
-| Worker | `git status --porcelain=v2 -z --untracked-files=all` → full `GitChangeSnapshot.Changes` | CPU/IO and large in-memory lists per watched repo |
-| Worker → App SignalR | Full `GitChangesSnapshotNotification` (10 MiB receive cap) | JSON size, deserialize GC, hub contention |
+| Worker | `git status --porcelain=v2 -z --untracked-files=all` ? full `GitChangeSnapshot.Changes` | CPU/IO and large in-memory lists per watched repo |
+| Worker ? App SignalR | Full `GitChangesSnapshotNotification` (10 MiB receive cap) | JSON size, deserialize GC, hub contention |
 | App SQLite | Delete all entries for repo+context, insert all | Write-queue latency; WAL growth; slow subsequent reads |
-| Circuit `LoadAsync` | All context entries → `WorkspaceGitChangesView` | Per-tab retained heap; reload on every `ContextGitChangesUpdated` |
+| Circuit `LoadAsync` | All context entries ? `WorkspaceGitChangesView` | Per-tab retained heap; reload on every `ContextGitChangesUpdated` |
 | `GitChangesTreeBuilder` | Filter + flatten; default **fully expanded** | O(N) rebuild on filter keystroke / expand |
 | `GitChangesTree.razor` | `@foreach` every row, no `Virtualize` | Thousands of DOM nodes synced over the circuit |
 
@@ -44,7 +44,7 @@ Collapse-aware flatten only skips **rendering** descendants; it never shrinks `_
 1. **All paths remain reachable** at any scale (section 0) - discoverable by scroll, folder expand, and search/jump with continued paging until exhausted.
 2. **Open Changes in bounded time and memory** even when the context has 50K+ paths (target: interactive tree chrome + repo/folder summaries within ~200-400 ms of SQLite readiness on a warm App; file rows fill progressively as the user explores).
 3. **Circuit memory O(visible viewport)** for the tree, not O(total paths). Retain only the virtualized window (plus overscan and hydrated folder pages the user opened); eviction of unused page caches never deletes paths from Layer B or blocks re-fetch.
-4. **Worker → App payloads stay manageable** for status pushes (prefer metadata + digests; stream or page path bodies when needed) while still persisting **every** path into SQLite before the snapshot version is committed.
+4. **Worker ? App payloads stay manageable** for status pushes (prefer metadata + digests; stream or page path bodies when needed) while still persisting **every** path into SQLite before the snapshot version is committed.
 5. **Search and bulk actions** work without requiring the circuit to hold every path, yet can still address the full matching set (paged results, Worker scopes).
 6. **Small inventory fast path** identical in UX to today (single read, full expand, immediate file rows) below an internal hydration threshold - not a product limit.
 7. **No App/Worker version fork** - ship together; no capability flags (per GrayMoon version lock).
@@ -114,7 +114,7 @@ Rollups are derived from the same entry set as today - one writer, no second sou
 **Opening Changes (large path):**
 
 1. Read all repository **status** rows + folder summaries for the context (small).
-2. Build section → repository → (collapsed) folder skeleton with badges from summaries.
+2. Build section ? repository ? (collapsed) folder skeleton with badges from summaries.
 3. Do **not** load `WorkspaceGitContextChangeEntries` into `_view` yet.
 4. As the user expands a folder (or the fast path auto-expands when under threshold), query Layer B for that prefix page.
 
@@ -139,13 +139,13 @@ Replace the circuit-wide `GetContextAsync` full materialization with focused que
 
 ```text
 GetContextSummariesAsync(workspaceId, contextId)
-  → repos + counts + folder summaries (no entry lists)
+  ? repos + counts + folder summaries (no entry lists)
 
 GetEntryPageAsync(workspaceId, contextId, workspaceRepositoryId, section, pathPrefix, skip, take, filter)
-  → page of WorkspaceGitChangeEntryView + totalCount for that prefix
+  ? page of WorkspaceGitChangeEntryView + totalCount for that prefix
 
 SearchEntriesAsync(workspaceId, contextId, filter, skip, take)
-  → cross-repo hits (repo name + path + kinds) without loading non-matching paths
+  ? cross-repo hits (repo name + path + kinds) without loading non-matching paths
 ```
 
 `WorkspaceGitChangesView.Changes` becomes either empty (large mode) or fully populated (small/fast path). Prefer a new summary DTO rather than overloading the existing view with null semantics long-term.
@@ -156,7 +156,7 @@ SearchEntriesAsync(workspaceId, contextId, filter, skip, take)
 
 - Default for large mode: expand **sections** only; repositories show count badges (full counts); folders under a repo load children on expand. Collapsing is presentation, not omission - every path remains in Layer B and under the badge count.
 - Optional "Expand all" stays available: it marks prefixes expanded and lets the virtualizer request pages until **every** file under those prefixes can be scrolled into view. It must never park 50K DOM nodes at once, and must never stop early with a truncated inventory.
-- `GitChangesTreeBuilder` gains a mode that builds from a **partial** node cache (`TreeNodeCache`: prefix → children pages, with `totalCount` so the UI knows when more pages exist) instead of requiring the full entry list in the circuit.
+- `GitChangesTreeBuilder` gains a mode that builds from a **partial** node cache (`TreeNodeCache`: prefix ? children pages, with `totalCount` so the UI knows when more pages exist) instead of requiring the full entry list in the circuit.
 
 **Virtualization**
 
@@ -169,16 +169,16 @@ SearchEntriesAsync(workspaceId, contextId, filter, skip, take)
 
 ### 4.6 Incremental updates / diffs (no full circuit reload)
 
-Today: any `ContextGitChangesUpdated` → `LoadAsync` → full SQLite read.
+Today: any `ContextGitChangesUpdated` ? `LoadAsync` ? full SQLite read.
 
 Proposed:
 
 1. Broadcast stays, but payload gains `repositoryId`, `contentDigest`, `stagedCount`, `changedCount` (counts already derivable; digest is new).
 2. Page handler:
    - Update that repository's summary badges in place.
-   - If digest unchanged → no-op.
-   - If digest changed and repo is **not** expanded / has no hydrated prefixes → drop only that repo's cached pages.
-   - If digest changed and prefixes are hydrated → invalidate those prefixes and re-fetch the visible page(s) only.
+   - If digest unchanged ? no-op.
+   - If digest changed and repo is **not** expanded / has no hydrated prefixes ? drop only that repo's cached pages.
+   - If digest changed and prefixes are hydrated ? invalidate those prefixes and re-fetch the visible page(s) only.
 3. Never re-query unrelated repositories' entries.
 
 Worker pushes can eventually send **path deltas** (`added` / `removed` / `modified` entries vs previous digest) once Layer B supports apply-delta; phase 1 can keep full replace in SQLite while fixing the circuit reload shape (largest UX win per engineering cost).
@@ -186,12 +186,12 @@ Worker pushes can eventually send **path deltas** (`added` / `removed` / `modifi
 ### 4.7 Search / filter without full client inventory
 
 - Small mode: keep `WorkspaceGitChangeSearchMatcher` in-process (today).
-- Large mode: debounce input (cancel the in-flight query when a new keystroke arrives) → `SearchEntriesAsync` (substring match needs `instr`/`LIKE` with escaped wildcards and an explicit case rule matching `WorkspaceGitChangeSearchMatcher`; `ext:` as suffix match, status filters via the `IndexChange`/`WorktreeChange` columns, `repo:` via join). Substring search cannot use the path index and is O(N) in SQLite; that is acceptable for 50K rows but should be measured in M2, with FTS5 as a later option. Reuse `FilterSearchExpression` parsing on the App; execute predicates in the read service, not in the circuit over a giant list.
+- Large mode: debounce input (cancel the in-flight query when a new keystroke arrives) ? `SearchEntriesAsync` (substring match needs `instr`/`LIKE` with escaped wildcards and an explicit case rule matching `WorkspaceGitChangeSearchMatcher`; `ext:` as suffix match, status filters via the `IndexChange`/`WorktreeChange` columns, `repo:` via join). Substring search cannot use the path index and is O(N) in SQLite; that is acceptable for 50K rows but should be measured in M2, with FTS5 as a later option. Reuse `FilterSearchExpression` parsing on the App; execute predicates in the read service, not in the circuit over a giant list.
 - Results UI: flat hit list or tree-with-ancestors for the **current result page**, with clear total match count and continued paging / infinite scroll until **every** match is listed. Never "too many results - refine your filter" as a hard stop that hides matches.
 
 Field tokens (`repo:`, `status:`, `staged:`, `ext:`) must keep working; map them to SQL predicates in one place next to the matcher so behavior stays aligned.
 
-### 4.8 Worker ↔ App payload strategy
+### 4.8 Worker ? App payload strategy
 
 Note: the 10 MiB limit is the App hub's `MaximumReceiveMessageSize`. At roughly 100-200 bytes of JSON per entry, a single 50K-path repo is about 5-10 MiB, so it is near or over the limit once long paths are involved. Phase 0 must measure real bytes per entry (permanent `GitChangesBench` log lines in the Worker and App) before `SnapshotPathsInlineMax` is fixed (2_000 is a placeholder; consider a byte budget rather than a count).
 
@@ -251,7 +251,7 @@ When `totalEntries <= FullHydrationMaxEntries` (internal hydration switch only -
 3. Client-side filter matcher preserved.
 4. Virtualize may still wrap the list (harmless for hundreds of rows) but must not add visible latency or empty-flash.
 
-Acceptance: a Workspace with ≤500 changed files feels as snappy as today on open, filter, expand, stage, and commit. Larger sets use the progressive path but still expose every file.
+Acceptance: a Workspace with =500 changed files feels as snappy as today on open, filter, expand, stage, and commit. Larger sets use the progressive path but still expose every file.
 
 ## 5. Compatibility and migration
 
@@ -268,7 +268,7 @@ Acceptance: a Workspace with ≤500 changed files feels as snappy as today on op
 | Two modes (small/large) diverge in bugs | One tree component; mode only changes data source. Shared row model and keys. |
 | Expand-all expectations | Keep action; virtualize + page until every file under expanded prefixes is scrollable. Show true total counts always. Never imply a max file count. |
 | Accidental inventory caps | Code review / tests forbid "take first N and stop", truncated persist, and "too many files" hard-stop UX. |
-| Search SQL vs client matcher drift | Single parser; shared tests for token → predicate. |
+| Search SQL vs client matcher drift | Single parser; shared tests for token ? predicate. |
 | Chunked snapshot torn writes | Buffer by version in write queue; swap atomically; reject incomplete versions. |
 | Write-queue backlog during mega replace | Phase 2 chunking + optional delta apply; measure queue lag under watcher storms. |
 | Virtualize + variable row height | Fix row height; avoid multi-line labels in the row chrome. |
@@ -300,8 +300,8 @@ Benchmarks are **permanent structured log lines in both the App and the Worker**
 
 | Event | Properties |
 |---|---|
-| Snapshot received and applied (`GitChangesSnapshotPushHandler`) | `ReceiveUtf8Bytes`, `DeserializeMs`, `WriteQueueWaitMs`, `PersistMs`, `PathCount`, `Version`, whether skipped as stale |
-| Changes page open (`LoadAsync` / summaries read) | `EntryCount`, `ReadMs`, `BuildTreeMs`, `CircuitPaintMs` (StateHasChanged → next `OnAfterRender`), `RowCountRendered`, `HydrationMode` (Full or Summary), `OpenMs` |
+| Snapshot received and applied (`GitChangesSnapshotPushHandler`) | `ReceiveUtf8Bytes`, `WriteQueueWaitMs`, `PersistMs`, `PathCount`, `Version`, whether skipped as stale |
+| Changes page open (`LoadAsync` / summaries read) | `EntryCount`, `ReadMs`, `BuildTreeMs`, `CircuitPaintMs` (StateHasChanged ? next `OnAfterRender`), `RowCountRendered`, `HydrationMode` (Full or Summary), `OpenMs` |
 | Page fetch (`GetEntryPageAsync`, phase 1) | `Prefix` depth only, `Take`, `ReturnedCount`, `QueryMs` |
 | Search (`SearchEntriesAsync`, phase 2) | `FilterLength`, `MatchCount`, `QueryMs` |
 | Live update handled | `Reloaded` vs `PatchedOnly` vs `NoOp`, `HandleMs`, `ReadMs`, `BuildTreeMs`, `CircuitPaintMs` |
@@ -315,7 +315,7 @@ Tasks:
 
 **Milestone M0:** benchmark log lines merged in App and Worker; numbers attached to this doc; fixture reproducible. The log lines are kept (not removed) after M0 and are reused to verify every later milestone.
 
-**M0 results (2026-10-24):** see the table in `git-changes-large-changeset-scale-tracker.md`. Fixture: `dev/New-GitChangesScaleFixture.ps1`. App harness: `GitChangesBenchM0MeasurementTests`. Takeaways: ~145 UTF-8 bytes per short path on the notification JSON; 50K ≈ 8.9 MiB (under the 10 MiB hub receive cap with little headroom); Worker `StatusMs` stays small; App `PersistMs` and full-circuit row count dominate by ~5K paths. Prefer a **byte budget** for `SnapshotPathsInlineMax` (still an open decision) rather than a fixed path count.
+**M0 results (2026-10-24):** see the table in `git-changes-large-changeset-scale-tracker.md`. Fixture: `dev/New-GitChangesScaleFixture.ps1`. App harness: `GitChangesBenchM0MeasurementTests`. Takeaways: ~145 UTF-8 bytes per short path on the notification JSON; 50K � 8.9 MiB (under the 10 MiB hub receive cap with little headroom); Worker `StatusMs` stays small; App `PersistMs` and full-circuit row count dominate by ~5K paths. Prefer a **byte budget** for `SnapshotPathsInlineMax` (still an open decision) rather than a fixed path count.
 
 ### Phase 1 - Circuit and tree (App-only) - highest UX leverage
 
@@ -364,7 +364,7 @@ Tasks:
 2. `IWorkspaceGitChangesReadService` summary/page/search methods + EF queries + indexes migration.
 3. Page state machine: `HydrationMode`, `TreeNodeCache`, replace blanket `LoadAsync` on hub events.
 4. `GitChangesTreeBuilder` partial-cache build; default collapse in large mode.
-5. `GitChangesTree.razor` → `Virtualize`.
+5. `GitChangesTree.razor` ? `Virtualize`.
 6. Wire expand handlers to page fetches; loading placeholders on folder rows.
 7. Server search path + UI debounce.
 8. Call-site audit for full entry enumeration.
@@ -384,10 +384,10 @@ Do not start Worker chunking before M1: most user pain is circuit/DOM, fixable i
 
 ## 10. Success criteria
 
-- Context with ≥20K paths: Changes route interactive (section/repo chrome + **accurate** counts) without loading 20K strings into the circuit at once.
+- Context with =20K paths: Changes route interactive (section/repo chrome + **accurate** counts) without loading 20K strings into the circuit at once.
 - **All 20K paths remain reachable:** expand folders and scroll (or search/page) until every path can be selected; no truncation, no "first N", no refine-filter wall.
 - Scroll/expand remain usable; no multi-second UI freezes on watcher updates for a single repo.
-- Context with ≤500 paths: no extra round trips beyond today's single read (or one equivalent batched read); expand-all still immediate (fast path only).
+- Context with =500 paths: no extra round trips beyond today's single read (or one equivalent batched read); expand-all still immediate (fast path only).
 - SignalR status pushes for a 50K-path repo stay within message size limits via chunking (phase 4) without dropping the Worker connection, and the committed snapshot contains all 50K paths.
 
 ## 11. References

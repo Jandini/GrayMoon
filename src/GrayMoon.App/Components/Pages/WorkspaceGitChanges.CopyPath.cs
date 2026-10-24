@@ -1,4 +1,5 @@
 using GrayMoon.App.Services.GitChanges;
+using GrayMoon.Application.Features;
 using Microsoft.JSInterop;
 
 namespace GrayMoon.App.Components.Pages;
@@ -45,7 +46,18 @@ public sealed partial class WorkspaceGitChanges
             return;
         }
 
-        var entries = GetContainedFileEntries(row);
+        List<(string RepositoryName, string Path)> entries;
+        try
+        {
+            entries = await GetContainedFileEntriesAsync(row);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to gather Git Changes paths to copy for workspace {WorkspaceId}", WorkspaceId);
+            ToastService.ShowError("Could not read the paths to copy.");
+            return;
+        }
+
         if (entries.Count == 0)
         {
             ToastService.Show("No files to copy.");
@@ -68,6 +80,43 @@ public sealed partial class WorkspaceGitChanges
             Logger.LogDebug(ex, "Clipboard copy failed for Git Changes path(s)");
             ToastService.ShowError("Could not copy to clipboard.");
         }
+    }
+
+    /// <summary>
+    /// Full-mode: reads the in-circuit view. Summary mode: the circuit holds no entries, so the paths come from
+    /// Layer B (SQLite) for the row's section/repository/folder prefix and are discarded after copying.
+    /// </summary>
+    private async Task<List<(string RepositoryName, string Path)>> GetContainedFileEntriesAsync(GitChangesTreeRow row)
+    {
+        if (_hydrationMode != GitChangesHydrationMode.Summary
+            || _view == null
+            || _selectedContextId is not WorkspaceFeatureContextId ctxId)
+        {
+            return GetContainedFileEntries(row);
+        }
+
+        var result = new List<(string RepositoryName, string Path)>();
+        IEnumerable<WorkspaceGitChangesRepositoryView> repos = row.Kind switch
+        {
+            GitChangesTreeRowKind.Section => _view.Repositories.OrderBy(r => r.RepositoryName, StringComparer.OrdinalIgnoreCase),
+            _ => _view.Repositories.Where(r => r.WorkspaceRepositoryId == row.WorkspaceRepositoryId),
+        };
+        var prefix = row.Kind == GitChangesTreeRowKind.Folder
+            ? GitChangesTreeBuilder.FolderRelativePathOf(row)
+            : string.Empty;
+
+        foreach (var repo in repos)
+        {
+            if ((row.IsStagedSection ? repo.StagedCount : repo.ChangedCount) <= 0)
+                continue;
+
+            var paths = await ReadService.GetEntryPathsAsync(
+                WorkspaceId, ctxId, repo.WorkspaceRepositoryId, row.IsStagedSection, prefix, CancellationToken.None);
+            foreach (var path in paths)
+                result.Add((repo.RepositoryName, path));
+        }
+
+        return result;
     }
 
     /// <summary>Gathers every File change contained under a Folder/Repository/Section row from the full

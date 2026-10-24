@@ -107,7 +107,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         {
             // Summary mode cannot filter unhydrated paths in-circuit (Phase 2); reload into Full.
             if (_hydrationMode == GitChangesHydrationMode.Summary && !string.IsNullOrWhiteSpace(incoming))
-                _ = LoadAsync();
+                ScheduleFilterReload();
             else
                 RebuildRows();
         }
@@ -421,7 +421,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             return;
         }
 
-        if (SelectionStillExists(row.WorkspaceRepositoryId, row.FilePath!, row.IsStagedSection))
+        if (await SelectionStillExistsAsync(row.WorkspaceRepositoryId, row.FilePath!, row.IsStagedSection))
         {
             return;
         }
@@ -468,7 +468,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
                 return;
             }
 
-            if (!SelectionStillExists(remembered.WorkspaceRepositoryId, remembered.FilePath, remembered.IsStagedSection))
+            if (!await SelectionStillExistsAsync(remembered.WorkspaceRepositoryId, remembered.FilePath, remembered.IsStagedSection))
             {
                 SelectionMemory.Clear(WorkspaceId);
                 return;
@@ -561,15 +561,54 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         int workspaceRepositoryId,
         bool isStagedSection)
     {
-        // Only prefixes along this file's path - not every subfolder under the repo.
-        await FetchPrefixPagesAsync(workspaceRepositoryId, isStagedSection, pathPrefix: string.Empty);
-
-        var segments = filePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        for (var i = 0; i < segments.Length - 1; i++)
+        // Only prefixes along this file's path - not every subfolder under the repo. The file (or the next
+        // folder on its path) can sit beyond the first page of a level, so page until it is cached.
+        var segments = filePath.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var prefix = string.Empty;
+        for (var i = 0; i < segments.Length; i++)
         {
-            var prefix = string.Join('/', segments.Take(i + 1));
-            await FetchPrefixPagesAsync(workspaceRepositoryId, isStagedSection, prefix);
+            var isLast = i == segments.Length - 1;
+            await FetchUntilChildAsync(
+                workspaceRepositoryId,
+                isStagedSection,
+                prefix,
+                (isLast ? "p:" : "f:") + segments[i]);
+
+            if (!isLast)
+                prefix = prefix.Length == 0 ? segments[i] : $"{prefix}/{segments[i]}";
         }
+    }
+
+    private async Task<bool> SelectionStillExistsAsync(int workspaceRepositoryId, string filePath, bool isStagedSection)
+    {
+        var repo = _view?.Repositories.FirstOrDefault(r => r.WorkspaceRepositoryId == workspaceRepositoryId);
+        if (repo is null)
+            return false;
+
+        if (_hydrationMode == GitChangesHydrationMode.Summary
+            && repo.Changes.Count == 0
+            && _selectedContextId is WorkspaceFeatureContextId ctxId)
+        {
+            if (isStagedSection ? repo.StagedCount <= 0 : repo.ChangedCount <= 0)
+                return false;
+
+            if (SelectionExistsInNodeCache(workspaceRepositoryId, filePath, isStagedSection))
+                return true;
+
+            // Not materialised in the circuit: ask Layer B (one indexed lookup) rather than guessing.
+            try
+            {
+                return await ReadService.EntryExistsAsync(
+                    WorkspaceId, ctxId, workspaceRepositoryId, isStagedSection, filePath.Replace('\\', '/'), CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Git Changes selection existence check failed; keeping selection");
+                return true;
+            }
+        }
+
+        return SelectionStillExists(workspaceRepositoryId, filePath, isStagedSection);
     }
 
     private bool SelectionStillExists(int workspaceRepositoryId, string filePath, bool isStagedSection)
@@ -675,16 +714,19 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         // Large-mode client filter cannot see unhydrated paths; re-open with full hydration when filtering.
         if (_hydrationMode == GitChangesHydrationMode.Summary && !string.IsNullOrWhiteSpace(value))
         {
-            _ = LoadAsync();
+            ScheduleFilterReload();
             return;
         }
+
+        // Anything else supersedes a pending mode-switch reload (e.g. the filter was cleared before it fired).
+        CancelFilterReload();
 
         if (_hydrationMode == GitChangesHydrationMode.Full
             && string.IsNullOrWhiteSpace(value)
             && GitChangesOptions.Value.UseLargeHydration(
                 _view?.Repositories.Sum(r => r.Changes.Count) ?? 0))
         {
-            _ = LoadAsync();
+            ScheduleFilterReload();
             return;
         }
 
@@ -970,6 +1012,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         }
 
         _disposed = true;
+        CancelFilterReload();
         CommitGeneration.Changed -= OnCommitGenerationChanged;
         WorkerConnectionTracker.RemoveStateChanged(OnAiWorkerStateChanged);
         JobService.Changed -= OnJobServiceChanged;

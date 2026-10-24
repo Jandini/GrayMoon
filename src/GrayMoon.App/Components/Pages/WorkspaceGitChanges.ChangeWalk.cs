@@ -22,7 +22,11 @@ public sealed partial class WorkspaceGitChanges
     /// Summary-mode walk order cannot use <c>_view.Changes</c> (empty). Cached full-context file rows from
     /// SQLite, invalidated when the projection or filter changes.
     /// </summary>
-    private List<GitChangesTreeRow>? _walkableFilesCache;
+    /// <summary>
+    /// Held weakly on purpose: the list is O(every file), so the GC may reclaim it under memory pressure and
+    /// the next walk simply re-reads it. The circuit never pins the whole inventory.
+    /// </summary>
+    private WeakReference<List<GitChangesTreeRow>>? _walkableFilesCache;
 
     private bool CanWalkChanges =>
         !_isDiffLoading
@@ -134,9 +138,9 @@ public sealed partial class WorkspaceGitChanges
             return [.. FileOrdering.Order(fileRows)];
         }
 
-        if (_walkableFilesCache != null)
+        if (_walkableFilesCache != null && _walkableFilesCache.TryGetTarget(out var cached))
         {
-            return _walkableFilesCache;
+            return cached;
         }
 
         if (_selectedContextId is not WorkspaceFeatureContextId ctxId)
@@ -149,8 +153,9 @@ public sealed partial class WorkspaceGitChanges
         var rows = GitChangesTreeBuilder.Build(full, _filterQuery)
             .Where(r => r.Kind == GitChangesTreeRowKind.File)
             .ToList();
-        _walkableFilesCache = [.. FileOrdering.Order(rows)];
-        return _walkableFilesCache;
+        var ordered = new List<GitChangesTreeRow>(FileOrdering.Order(rows));
+        _walkableFilesCache = new WeakReference<List<GitChangesTreeRow>>(ordered);
+        return ordered;
     }
 
     private void InvalidateWalkableFilesCache() => _walkableFilesCache = null;

@@ -1,0 +1,16 @@
+<span class="git-changes-tree__action-spinner" aria-hidden="true"></span>
+<span class="ms-2">@Label</span>
+
+@code {
+    [Parameter] public string Label { get; set; } = "Loading more...";
+
+    /// <summary>Raised once, the first time this sentinel renders. The virtualizer only renders rows near the
+    /// viewport, so this fires exactly when the user has scrolled close to the end of a partially loaded level.</summary>
+    [Parameter] public EventCallback OnVisible { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+            await OnVisible.InvokeAsync();
+    }
+}

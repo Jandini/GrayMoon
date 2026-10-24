@@ -76,7 +76,8 @@ public sealed class GitChangesOptions
     public int TreePageSize { get; init; } = 200;
 
     /// <summary>
-    /// Depth of folder summaries computed at persist time for Layer A badges (Phase 3). Default 2.
+    /// Depth of folder summaries computed at persist time for Layer A badges. Reserved for Phase 3: nothing
+    /// reads it yet. Default 2.
     /// </summary>
     public int FolderRollupDepth { get; init; } = 2;
 

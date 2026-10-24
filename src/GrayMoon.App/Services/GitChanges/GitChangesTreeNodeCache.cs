@@ -25,6 +25,7 @@ public sealed class GitChangesTreeNodeCache
         return page;
     }
 
+    /// <summary>Drops every cached prefix for one repository. In-flight fetches holding the old cache objects detect this by reference.</summary>
     public void InvalidateRepository(int workspaceRepositoryId)
     {
         var toRemove = _pages.Keys.Where(k => k.WorkspaceRepositoryId == workspaceRepositoryId).ToList();
@@ -34,61 +35,74 @@ public sealed class GitChangesTreeNodeCache
 
     public void Clear() => _pages.Clear();
 
-    /// <summary>Drops caches for collapsed prefixes outside the keep set (soft circuit budget helper).</summary>
-    public void EvictExcept(IReadOnlySet<PrefixKey> keep)
+    /// <summary>Number of child rows currently retained across every cached prefix.</summary>
+    public int TotalCachedChildren => _pages.Values.Sum(p => p.Children.Count);
+
+    public IReadOnlyCollection<PrefixKey> Keys => _pages.Keys;
+
+    /// <summary>Drops cached prefixes for which <paramref name="shouldEvict"/> is true (soft circuit budget helper).</summary>
+    public int Evict(Func<PrefixKey, PrefixPageCache, bool> shouldEvict)
     {
-        var toRemove = _pages.Keys.Where(k => !keep.Contains(k)).ToList();
+        var toRemove = _pages.Where(kv => shouldEvict(kv.Key, kv.Value)).Select(kv => kv.Key).ToList();
         foreach (var key in toRemove)
             _pages.Remove(key);
+        return toRemove.Count;
     }
 
     public readonly record struct PrefixKey(int WorkspaceRepositoryId, bool IsStagedSection, string PathPrefix);
 
     public sealed class PrefixPageCache
     {
+        private readonly HashSet<string> _childKeys = new(StringComparer.Ordinal);
+
         public long SnapshotVersion { get; set; }
         public int TotalDirectChildCount { get; set; }
         public List<GitChangesTreeChild> Children { get; } = [];
         public string? NextAfterChildKey { get; set; }
         public bool IsLoading { get; set; }
-        /// <summary>True after at least one successful page apply with no further keyset cursor.</summary>
-        public bool IsComplete =>
-            SnapshotVersion != 0
-            && string.IsNullOrEmpty(NextAfterChildKey)
-            && Children.Count >= TotalDirectChildCount;
-        public bool HasMore => !IsComplete && !string.IsNullOrEmpty(NextAfterChildKey);
+
+        /// <summary>True once at least one page was applied for this cache (even an empty one).</summary>
+        public bool HasLoaded { get; private set; }
+
+        /// <summary>The last fetch for this prefix failed; the UI stops spinning and the next expand retries.</summary>
+        public bool LoadFailed { get; set; }
+
+        /// <summary>True after a page apply with no further keyset cursor.</summary>
+        public bool IsComplete => HasLoaded && string.IsNullOrEmpty(NextAfterChildKey);
+
+        public bool HasMore => HasLoaded && !string.IsNullOrEmpty(NextAfterChildKey);
 
         public void Reset(long snapshotVersion)
         {
             SnapshotVersion = snapshotVersion;
             TotalDirectChildCount = 0;
             Children.Clear();
+            _childKeys.Clear();
             NextAfterChildKey = null;
-            IsLoading = false;
+            HasLoaded = false;
+            LoadFailed = false;
         }
 
-        public void ApplyPage(GitChangesEntryPage page)
+        /// <summary>Applies a page. Returns false (and ignores it) when the page belongs to a different snapshot version.</summary>
+        public bool ApplyPage(GitChangesEntryPage page)
         {
-            if (Children.Count == 0)
+            if (Children.Count == 0 && !HasLoaded)
                 SnapshotVersion = page.SnapshotVersion;
             else if (page.SnapshotVersion != SnapshotVersion)
-            {
-                // Stale mid-flight page - caller should invalidate and retry; ignore append.
-                return;
-            }
+                return false;
 
             TotalDirectChildCount = page.TotalDirectChildCount;
             foreach (var child in page.Children)
             {
-                // Guard against a repeated first-page fetch appending duplicates (duplicate @key crash).
-                if (Children.Any(c => c.ChildKey == child.ChildKey))
-                    continue;
-                Children.Add(child);
+                // O(1) guard against a repeated fetch appending duplicates (duplicate @key crashes Virtualize).
+                if (_childKeys.Add(child.ChildKey))
+                    Children.Add(child);
             }
 
             NextAfterChildKey = page.HasMore ? page.NextAfterChildKey : null;
-            if (!page.HasMore || Children.Count >= TotalDirectChildCount)
-                NextAfterChildKey = null;
+            HasLoaded = true;
+            LoadFailed = false;
+            return true;
         }
     }
 }

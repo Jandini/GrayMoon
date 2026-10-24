@@ -36,8 +36,6 @@ public sealed class GitChangesSnapshotPushHandler(
         var persistStarted = Stopwatch.GetTimestamp();
         var options = gitChangesOptions.Value;
         var pathCount = notification.Snapshot.Changes.Count;
-        // SignalR already deserialized the hub argument before enqueue; App-side DeserializeMs is not observable here.
-        const long deserializeMs = 0;
         var receiveUtf8Bytes = ShouldMeasureReceiveBytes(options, pathCount)
             ? GitChangesBench.EstimateUtf8JsonBytes(notification)
             : 0;
@@ -89,7 +87,6 @@ public sealed class GitChangesSnapshotPushHandler(
                 options,
                 pathCount,
                 receiveUtf8Bytes,
-                deserializeMs,
                 receiveTiming.WriteQueueWaitMs,
                 persistMs: GitChangesBench.ElapsedMs(persistStarted),
                 version: snapshot.Version,
@@ -117,7 +114,6 @@ public sealed class GitChangesSnapshotPushHandler(
                     options,
                     pathCount,
                     receiveUtf8Bytes,
-                    deserializeMs,
                     receiveTiming.WriteQueueWaitMs,
                     persistMs: GitChangesBench.ElapsedMs(persistStarted),
                     version: snapshot.Version,
@@ -237,7 +233,6 @@ public sealed class GitChangesSnapshotPushHandler(
             options,
             pathCount,
             receiveUtf8Bytes,
-            deserializeMs,
             receiveTiming.WriteQueueWaitMs,
             persistMs,
             snapshot.Version,
@@ -258,7 +253,6 @@ public sealed class GitChangesSnapshotPushHandler(
         GitChangesOptions options,
         int pathCount,
         int receiveUtf8Bytes,
-        long deserializeMs,
         long writeQueueWaitMs,
         long persistMs,
         long version,
@@ -275,7 +269,6 @@ public sealed class GitChangesSnapshotPushHandler(
             pathCount,
             elapsedForFloor,
             ("ReceiveUtf8Bytes", receiveUtf8Bytes),
-            ("DeserializeMs", deserializeMs),
             ("WriteQueueWaitMs", writeQueueWaitMs),
             ("PersistMs", persistMs),
             ("PathCount", pathCount),

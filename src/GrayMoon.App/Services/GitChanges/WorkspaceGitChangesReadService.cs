@@ -3,6 +3,7 @@ using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.Application.Features;
 using GrayMoon.Common.Git;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -33,6 +34,38 @@ public interface IWorkspaceGitChangesReadService
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         int repositoryId,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// One repository's status and counts with no entry list (large-mode live patch). Cost is independent of
+    /// the repository's path count apart from one grouped kind-count query.
+    /// </summary>
+    Task<WorkspaceGitChangesRepositoryView?> GetRepositorySummaryAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        int repositoryId,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Every path (files and untracked directory entries) in one section at or below <paramref name="pathPrefix"/>
+    /// (empty = whole repository), ordered ignore-case. Used by bulk consumers (copy all, undo confirmation)
+    /// that must cover paths the circuit has not materialised. The list is transient, never retained.
+    /// </summary>
+    Task<IReadOnlyList<string>> GetEntryPathsAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        int workspaceRepositoryId,
+        bool isStagedSection,
+        string pathPrefix,
+        CancellationToken cancellationToken);
+
+    /// <summary>True when <paramref name="path"/> exists in the given section of one repository (one indexed lookup).</summary>
+    Task<bool> EntryExistsAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        int workspaceRepositoryId,
+        bool isStagedSection,
+        string path,
         CancellationToken cancellationToken);
 
     /// <summary>
@@ -140,6 +173,8 @@ public sealed class WorkspaceGitChangesReadService : IWorkspaceGitChangesReadSer
             .Select(wr => new { wr.WorkspaceRepositoryId, wr.RepositoryId, RepositoryName = wr.Repository!.RepositoryName, wr.DefaultBranchName })
             .ToDictionaryAsync(r => r.WorkspaceRepositoryId, cancellationToken);
 
+        var kindCountsByRepo = await LoadChangedKindCountsAsync(db, contextId.Value, workspaceRepositoryIds, cancellationToken);
+
         var repositories = statuses
             .Where(s => repoInfoById.ContainsKey(s.WorkspaceRepositoryId))
             .Select(s =>
@@ -147,6 +182,8 @@ public sealed class WorkspaceGitChangesReadService : IWorkspaceGitChangesReadSer
                 var info = repoInfoById[s.WorkspaceRepositoryId];
                 return new WorkspaceGitChangesRepositorySummary
                 {
+                    ChangedKindCounts = kindCountsByRepo.GetValueOrDefault(s.WorkspaceRepositoryId)
+                                        ?? new Dictionary<GitChangeKind, int>(),
                     WorkspaceRepositoryId = s.WorkspaceRepositoryId,
                     RepositoryId = info.RepositoryId,
                     RepositoryName = info.RepositoryName,
@@ -217,7 +254,363 @@ public sealed class WorkspaceGitChangesReadService : IWorkspaceGitChangesReadSer
         return MapRepository(status, link.RepositoryId, link.RepositoryName, link.DefaultBranchName, entries);
     }
 
+    public async Task<WorkspaceGitChangesRepositoryView?> GetRepositorySummaryAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        int repositoryId,
+        CancellationToken cancellationToken)
+    {
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        var link = await db.WorkspaceRepositories
+            .AsNoTracking()
+            .Where(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId)
+            .Select(wr => new { wr.WorkspaceRepositoryId, wr.RepositoryId, RepositoryName = wr.Repository!.RepositoryName, wr.DefaultBranchName })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (link is null)
+            return null;
+
+        var status = await db.WorkspaceGitContextRepositoryStatuses
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                s => s.WorkspaceFeatureContextId == contextId.Value
+                     && s.WorkspaceRepositoryId == link.WorkspaceRepositoryId,
+                cancellationToken);
+        if (status is null)
+            return null;
+
+        var kindCounts = await LoadChangedKindCountsAsync(
+            db, contextId.Value, [link.WorkspaceRepositoryId], cancellationToken);
+
+        return MapRepository(status, link.RepositoryId, link.RepositoryName, link.DefaultBranchName, [])
+            with
+            {
+                ChangedKindCounts = kindCounts.GetValueOrDefault(link.WorkspaceRepositoryId)
+                                    ?? new Dictionary<GitChangeKind, int>(),
+            };
+    }
+
+    public async Task<IReadOnlyList<string>> GetEntryPathsAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        int workspaceRepositoryId,
+        bool isStagedSection,
+        string pathPrefix,
+        CancellationToken cancellationToken)
+    {
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        var belongs = await db.WorkspaceRepositories
+            .AsNoTracking()
+            .AnyAsync(wr => wr.WorkspaceId == workspaceId && wr.WorkspaceRepositoryId == workspaceRepositoryId, cancellationToken);
+        if (!belongs)
+            return [];
+
+        var prefix = NormalizePrefix(pathPrefix);
+        var query = db.WorkspaceGitContextChangeEntries
+            .AsNoTracking()
+            .Where(e => e.WorkspaceFeatureContextId == contextId.Value
+                        && e.WorkspaceRepositoryId == workspaceRepositoryId);
+
+        query = isStagedSection
+            ? query.Where(e => e.IndexChange != GitChangeKind.None)
+            : query.Where(e => e.WorktreeChange != GitChangeKind.None);
+
+        if (prefix.Length > 0)
+        {
+            var rangeStart = prefix + "/";
+            var rangeEnd = prefix + "0";
+            query = query.Where(e => e.Path.CompareTo(rangeStart) >= 0 && e.Path.CompareTo(rangeEnd) < 0);
+        }
+
+        var paths = await query.Select(e => e.Path).ToListAsync(cancellationToken);
+        paths.Sort(StringComparer.OrdinalIgnoreCase);
+        return paths;
+    }
+
+    public async Task<bool> EntryExistsAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        int workspaceRepositoryId,
+        bool isStagedSection,
+        string path,
+        CancellationToken cancellationToken)
+    {
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        var belongs = await db.WorkspaceRepositories
+            .AsNoTracking()
+            .AnyAsync(wr => wr.WorkspaceId == workspaceId && wr.WorkspaceRepositoryId == workspaceRepositoryId, cancellationToken);
+        if (!belongs)
+            return false;
+
+        var query = db.WorkspaceGitContextChangeEntries
+            .AsNoTracking()
+            .Where(e => e.WorkspaceFeatureContextId == contextId.Value
+                        && e.WorkspaceRepositoryId == workspaceRepositoryId
+                        && e.Path == path);
+
+        return isStagedSection
+            ? await query.AnyAsync(e => e.IndexChange != GitChangeKind.None, cancellationToken)
+            : await query.AnyAsync(e => e.WorktreeChange != GitChangeKind.None, cancellationToken);
+    }
+
+    private static string NormalizePrefix(string? pathPrefix) =>
+        pathPrefix?.Replace('\\', '/').Trim('/') ?? string.Empty;
+
+    private static async Task<Dictionary<int, Dictionary<GitChangeKind, int>>> LoadChangedKindCountsAsync(
+        AppDbContext db,
+        int contextId,
+        IReadOnlyCollection<int> workspaceRepositoryIds,
+        CancellationToken cancellationToken)
+    {
+        var rows = await db.WorkspaceGitContextChangeEntries
+            .AsNoTracking()
+            .Where(e => e.WorkspaceFeatureContextId == contextId
+                        && workspaceRepositoryIds.Contains(e.WorkspaceRepositoryId)
+                        && e.WorktreeChange != GitChangeKind.None)
+            .GroupBy(e => new { e.WorkspaceRepositoryId, e.WorktreeChange, e.IsConflicted })
+            .Select(g => new { g.Key.WorkspaceRepositoryId, g.Key.WorktreeChange, g.Key.IsConflicted, Count = g.Count() })
+            .ToListAsync(cancellationToken);
+
+        var result = new Dictionary<int, Dictionary<GitChangeKind, int>>();
+        foreach (var row in rows)
+        {
+            // Same classification as GitChangesSummaryStats.Classify.
+            var kind = row.IsConflicted
+                ? GitChangeKind.Unmerged
+                : row.WorktreeChange == GitChangeKind.Untracked ? GitChangeKind.Added : row.WorktreeChange;
+
+            if (!result.TryGetValue(row.WorkspaceRepositoryId, out var perRepo))
+                result[row.WorkspaceRepositoryId] = perRepo = new Dictionary<GitChangeKind, int>();
+            perRepo[kind] = perRepo.GetValueOrDefault(kind) + row.Count;
+        }
+
+        return result;
+    }
+
+    private sealed class ChildRow
+    {
+        public int Grp { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public int Kind { get; set; }
+        public int? EntryId { get; set; }
+    }
+
     public async Task<GitChangesEntryPage> GetEntryPageAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        int workspaceRepositoryId,
+        bool isStagedSection,
+        string pathPrefix,
+        string? afterChildKey,
+        int take,
+        string? filter,
+        CancellationToken cancellationToken)
+    {
+        // A text filter needs the in-process matcher (Phase 2 moves this to SQL); the unfiltered tree path
+        // groups and keyset-pages entirely in SQLite so only one page of rows is ever materialized.
+        if (!string.IsNullOrWhiteSpace(filter))
+        {
+            return await GetEntryPageInMemoryAsync(
+                workspaceId, contextId, workspaceRepositoryId, isStagedSection, pathPrefix, afterChildKey, take, filter,
+                cancellationToken);
+        }
+
+        var queryStarted = Stopwatch.GetTimestamp();
+        // Callers may ask for any page size; clamp so one request stays bounded (TreePageSize x 4 at most).
+        take = Math.Clamp(take, 1, Math.Max(1, _gitChangesOptions.Value.TreePageSize * 4));
+
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        var belongs = await db.WorkspaceRepositories
+            .AsNoTracking()
+            .AnyAsync(wr => wr.WorkspaceId == workspaceId && wr.WorkspaceRepositoryId == workspaceRepositoryId, cancellationToken);
+        if (!belongs)
+        {
+            return new GitChangesEntryPage
+            {
+                SnapshotVersion = 0,
+                TotalDirectChildCount = 0,
+                Children = [],
+                NextAfterChildKey = null,
+            };
+        }
+
+        var snapshotVersion = await db.WorkspaceGitContextRepositoryStatuses
+            .AsNoTracking()
+            .Where(s => s.WorkspaceFeatureContextId == contextId.Value
+                        && s.WorkspaceRepositoryId == workspaceRepositoryId)
+            .Select(s => (long?)s.SnapshotVersion)
+            .FirstOrDefaultAsync(cancellationToken) ?? 0L;
+
+        var prefix = NormalizePrefix(pathPrefix);
+        var parameters = new List<SqliteParameter>
+        {
+            new("@ctx", contextId.Value),
+            new("@repo", workspaceRepositoryId),
+            new("@start", prefix.Length == 0 ? 1 : prefix.Length + 2),
+        };
+
+        var sectionSql = isStagedSection
+            ? "e.\"IndexChange\" <> 0"
+            : "e.\"WorktreeChange\" <> 0";
+
+        var rangeSql = string.Empty;
+        if (prefix.Length > 0)
+        {
+            // Binary range on the (ctx, repo, Path) index; '0' is the character after '/'.
+            rangeSql = " AND e.\"Path\" >= @lo AND e.\"Path\" < @hi AND e.\"Path\" <> @exact";
+            parameters.Add(new SqliteParameter("@lo", prefix + "/"));
+            parameters.Add(new SqliteParameter("@hi", prefix + "0"));
+            parameters.Add(new SqliteParameter("@exact", prefix + "/"));
+        }
+
+        // Group by next path segment. Kind: 0 = folder (deeper paths exist), 1 = untracked directory entry
+        // ("name/"), 2 = file. Folder-ish and file groups are separate (Grp 0 / 1), a folder wins over a
+        // directory entry of the same name, matching GroupDirectChildren.
+        var cte = $"""
+            WITH scoped AS (
+                SELECT e."WorkspaceGitContextChangeEntryId" AS Id,
+                       CASE WHEN substr(e."Path", -1) = '/'
+                            THEN substr(e."Path", @start, length(e."Path") - @start)
+                            ELSE substr(e."Path", @start) END AS Rem,
+                       CASE WHEN substr(e."Path", -1) = '/' THEN 1 ELSE 0 END AS IsDir
+                FROM "WorkspaceGitContextChangeEntries" e
+                WHERE e."WorkspaceFeatureContextId" = @ctx
+                  AND e."WorkspaceRepositoryId" = @repo
+                  AND {sectionSql}{rangeSql}
+            ),
+            kinds AS (
+                SELECT Id,
+                       CASE WHEN instr(Rem, '/') > 0 THEN substr(Rem, 1, instr(Rem, '/') - 1) ELSE Rem END AS Name,
+                       CASE WHEN instr(Rem, '/') > 0 THEN 0 WHEN IsDir = 1 THEN 1 ELSE 2 END AS Kind
+                FROM scoped
+                WHERE length(Rem) > 0
+            ),
+            grouped AS (
+                SELECT CASE WHEN Kind = 2 THEN 1 ELSE 0 END AS Grp,
+                       Name,
+                       MIN(Kind) AS Kind,
+                       MIN(CASE WHEN Kind > 0 THEN Id END) AS EntryId
+                FROM kinds
+                GROUP BY Grp, Name
+            )
+            """;
+
+        // The concatenated fragments (cte, keysetSql) are compile-time constants or built from constants only;
+        // every user-derived value (paths, keys, ids) is a SqliteParameter.
+#pragma warning disable EF1003
+        var total = await db.Database
+            .SqlQueryRaw<int>(cte + " SELECT COUNT(*) AS \"Value\" FROM grouped", CloneParameters(parameters))
+            .SingleAsync(cancellationToken);
+
+        var keysetSql = string.Empty;
+        var pageParameters = CloneParameters(parameters).ToList();
+        if (!string.IsNullOrEmpty(afterChildKey) && afterChildKey.Length >= 2 && afterChildKey[1] == ':')
+        {
+            var afterGrp = afterChildKey[0] == 'p' ? 1 : 0;
+            var afterName = afterChildKey[2..];
+            keysetSql = """
+                 WHERE (Grp > @ag
+                        OR (Grp = @ag AND (Name COLLATE NOCASE > @an COLLATE NOCASE
+                                           OR (Name COLLATE NOCASE = @an COLLATE NOCASE AND Name > @an))))
+                """;
+            pageParameters.Add(new SqliteParameter("@ag", afterGrp));
+            pageParameters.Add(new SqliteParameter("@an", afterName));
+        }
+
+        pageParameters.Add(new SqliteParameter("@limit", take + 1));
+        var rows = await db.Database
+            .SqlQueryRaw<ChildRow>(
+                cte + " SELECT Grp, Name, Kind, EntryId FROM grouped" + keysetSql
+                    + " ORDER BY Grp, Name COLLATE NOCASE, Name LIMIT @limit",
+                pageParameters.Cast<object>().ToArray())
+            .ToListAsync(cancellationToken);
+#pragma warning restore EF1003
+
+        var hasMore = rows.Count > take;
+        if (hasMore)
+            rows.RemoveAt(rows.Count - 1);
+
+        var entryIds = rows.Where(r => r.EntryId.HasValue && (r.Grp == 1 || r.Kind == 1))
+            .Select(r => r.EntryId!.Value)
+            .ToList();
+        var entriesById = entryIds.Count == 0
+            ? new Dictionary<int, WorkspaceGitContextChangeEntry>()
+            : await db.WorkspaceGitContextChangeEntries
+                .AsNoTracking()
+                .Where(e => entryIds.Contains(e.WorkspaceGitContextChangeEntryId))
+                .ToDictionaryAsync(e => e.WorkspaceGitContextChangeEntryId, cancellationToken);
+
+        var children = new List<GitChangesTreeChild>(rows.Count);
+        foreach (var row in rows)
+        {
+            if (row.Grp == 0 && row.Kind == 0)
+            {
+                children.Add(new GitChangesTreeChild
+                {
+                    IsFolder = true,
+                    Name = row.Name,
+                    Path = prefix.Length == 0 ? row.Name : $"{prefix}/{row.Name}",
+                    Entry = null,
+                });
+                continue;
+            }
+
+            if (row.EntryId is not int id || !entriesById.TryGetValue(id, out var entity))
+                continue;
+
+            var entry = ToEntryView(entity);
+            children.Add(row.Grp == 0
+                ? new GitChangesTreeChild
+                {
+                    IsFolder = true,
+                    Name = row.Name,
+                    Path = entry.Path,
+                    Entry = entry,
+                    IsDirectoryEntry = true,
+                }
+                : new GitChangesTreeChild
+                {
+                    IsFolder = false,
+                    Name = row.Name,
+                    Path = entry.Path,
+                    Entry = entry,
+                });
+        }
+
+        var result = new GitChangesEntryPage
+        {
+            SnapshotVersion = snapshotVersion,
+            TotalDirectChildCount = total,
+            Children = children,
+            NextAfterChildKey = hasMore && children.Count > 0 ? children[^1].ChildKey : null,
+        };
+
+        GitChangesBench.Log(
+            _logger,
+            _gitChangesOptions.Value,
+            "entry page",
+            pathCount: children.Count,
+            elapsedMs: GitChangesBench.ElapsedMs(queryStarted),
+            ("PrefixDepth", prefix.Length == 0 ? 0 : prefix.Count(c => c == '/') + 1),
+            ("Take", take),
+            ("ReturnedCount", children.Count),
+            ("TotalDirectChildCount", total),
+            ("QueryMs", GitChangesBench.ElapsedMs(queryStarted)),
+            ("WorkspaceId", workspaceId),
+            ("ContextId", contextId.Value),
+            ("WorkspaceRepositoryId", workspaceRepositoryId));
+
+        return result;
+    }
+
+    // SqliteParameter instances cannot be shared between commands.
+    private static object[] CloneParameters(IEnumerable<SqliteParameter> source) =>
+        source.Select(p => (object)new SqliteParameter(p.ParameterName, p.Value)).ToArray();
+
+    private async Task<GitChangesEntryPage> GetEntryPageInMemoryAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         int workspaceRepositoryId,

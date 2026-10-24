@@ -47,6 +47,13 @@ public sealed record WorkspaceGitChangesRepositoryView
     public string? LastErrorMessage { get; init; }
 
     public required IReadOnlyList<WorkspaceGitChangeEntryView> Changes { get; init; }
+
+    /// <summary>
+    /// Per-kind counts of unstaged (Changed) entries, classified like the header chips (conflicted counts as
+    /// Unmerged, untracked as Added). Set when <see cref="Changes"/> is intentionally empty (large-mode
+    /// summaries) so the header chips stay accurate; null when <see cref="Changes"/> is populated.
+    /// </summary>
+    public IReadOnlyDictionary<GitChangeKind, int>? ChangedKindCounts { get; init; }
 }
 
 public sealed record WorkspaceGitChangeEntryView

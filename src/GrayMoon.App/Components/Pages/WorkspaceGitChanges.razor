@@ -196,6 +196,7 @@
                                  HasChanges="@(ChangedRepositoryCount > 0)"
                                  SelectedRow="_selectedRow"
                                  OnToggleExpand="ToggleExpanded"
+                                 OnLoadMore="LoadMoreAsync"
                                  OnSelectFile="SelectFile"
                                  OnCopyPath="CopyPathAsync"
                                  OnStage="args => StageAsync(args.WorkspaceRepositoryId, args.Scope, args.Paths, args.RowKey)"
@@ -208,7 +209,7 @@
                                  MultiSelectionCount="_multiSelectedKeys.Count"
                                  OnStageAllChanged="StageAllChangedAsync"
                                  OnUnstageAllStaged="UnstageAllStagedAsync"
-                                 OnDiscard="args => ConfirmDiscardFileOrFolder(args.WorkspaceRepositoryId, args.Scope, args.Paths, args.RowKey)"
+                                 OnDiscard="args => ConfirmDiscardFileOrFolderAsync(args.WorkspaceRepositoryId, args.Scope, args.Paths, args.RowKey)"
                                  OnDiscardSelected="ConfirmDiscardSelected"
                                  OnDiscardAllChanged="ConfirmDiscardAllChanged" />
             </div>

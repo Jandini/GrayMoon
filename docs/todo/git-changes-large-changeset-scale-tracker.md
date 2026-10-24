@@ -21,7 +21,7 @@ Standing rules for every item: no cap or truncation of the inventory (section 0)
 
 - [x] Folder page unit: **direct children** grouped by next path segment (`GroupDirectChildren` / `GetEntryPageAsync`).
 - [x] Comparer that matches `GitChangesTreeBuilder` ordering: folders (incl. directory entries) first, then files; `OrdinalIgnoreCase` by name.
-- [ ] `SnapshotPathsInlineMax` as a count or a byte budget (M0 favors byte budget; ~145 B/entry short paths, 50K ≈ 8.9 MiB vs 10 MiB hub cap).
+- [ ] `SnapshotPathsInlineMax` as a count or a byte budget (M0 favors byte budget; ~145 B/entry short paths, 50K � 8.9 MiB vs 10 MiB hub cap).
 - [ ] Digest computed App-side (stage 1) vs Worker-side (later).
 - [x] Knob defaults from M0: `FullHydrationMaxEntries` = 1_500, `TreePageSize` = 200, `FolderRollupDepth` = 2, `CircuitVisibleRowBudget` = 500 (still tunable).
 
@@ -31,7 +31,7 @@ Standing rules for every item: no cap or truncation of the inventory (section 0)
 - [x] Worker: `git status` scan log (`StatusMs`, counts, `PorcelainBytes`)
 - [x] Worker: snapshot build/serialize/publish log (`PayloadUtf8Bytes`, `BytesPerEntry`)
 - [x] Worker: send result log (including hub-size rejection)
-- [x] App: snapshot receive/apply log (`ReceiveUtf8Bytes`, `DeserializeMs`, `WriteQueueWaitMs`, `PersistMs`)
+- [x] App: snapshot receive/apply log (`ReceiveUtf8Bytes`, `WriteQueueWaitMs`, `PersistMs`)
 - [x] App: Changes open log (`EntryCount`, `ReadMs`, `BuildTreeMs`, `CircuitPaintMs`, `RowCountRendered`, `HydrationMode`)
 - [x] App: live-update handling log (`Reloaded` / `PatchedOnly` / `NoOp`, with `CircuitPaintMs` on reload)
 - [x] App: heap trend on open (Debug)
@@ -116,6 +116,6 @@ Notes from M0: ~145 UTF-8 bytes/entry on the wire for short paths; 50K is ~8.9 M
 | Date | Change |
 |---|---|
 | 2026-10-24 | Phase 1 done: summary-first open above `FullHydrationMaxEntries`, `GetEntryPageAsync` + `TreeNodeCache`, `Virtualize`, per-repo live patch (`PatchedOnly`), path indexes migration 13. |
-| 2026-10-24 | App open/live-update benches include `CircuitPaintMs` (tree StateHasChanged → OnAfterRender) so felt UI lag is visible in logs. |
+| 2026-10-24 | App open/live-update benches include `CircuitPaintMs` (tree StateHasChanged ? OnAfterRender) so felt UI lag is visible in logs. |
 | 2026-10-24 | Phase 0 done: permanent `GitChangesBench` logs (App+Worker), floors on `GitChangesOptions`, fixture script, M0 numbers recorded. |
 | 2026-10-24 | Tracker created; design reviewed and corrected (indexes, query rules, payload stages, permanent benchmark logging). |
