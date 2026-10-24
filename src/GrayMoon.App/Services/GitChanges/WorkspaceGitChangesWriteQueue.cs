@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Threading.Channels;
 using GrayMoon.Common.Git;
 
@@ -22,7 +23,7 @@ public class WorkspaceGitChangesWriteQueue(
 
     /// <summary>Enqueues a notification for background processing. Always returns before any DB work begins.</summary>
     public virtual bool Enqueue(GitChangesSnapshotNotification notification) =>
-        _channel.Writer.TryWrite(new QueuedSnapshot(notification, Completed: null));
+        _channel.Writer.TryWrite(new QueuedSnapshot(notification, Completed: null, EnqueuedTimestamp: Stopwatch.GetTimestamp()));
 
     /// <summary>
     /// Enqueues a notification and waits until the single reader has finished persisting it.
@@ -33,7 +34,7 @@ public class WorkspaceGitChangesWriteQueue(
         CancellationToken cancellationToken = default)
     {
         var completed = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        if (!_channel.Writer.TryWrite(new QueuedSnapshot(notification, completed)))
+        if (!_channel.Writer.TryWrite(new QueuedSnapshot(notification, completed, Stopwatch.GetTimestamp())))
             throw new InvalidOperationException("Git Changes write queue is stopped.");
 
         await using var registration = cancellationToken.Register(() => completed.TrySetCanceled(cancellationToken));
@@ -48,9 +49,13 @@ public class WorkspaceGitChangesWriteQueue(
         {
             try
             {
+                var writeQueueWaitMs = GitChangesBench.ElapsedMs(item.EnqueuedTimestamp);
                 await using var scope = scopeFactory.CreateAsyncScope();
                 var handler = scope.ServiceProvider.GetRequiredService<GitChangesSnapshotPushHandler>();
-                await handler.HandleAsync(item.Notification, stoppingToken);
+                await handler.HandleAsync(
+                    item.Notification,
+                    stoppingToken,
+                    new GitChangesSnapshotReceiveTiming(writeQueueWaitMs));
                 item.Completed?.TrySetResult(true);
             }
             catch (OperationCanceledException)
@@ -78,5 +83,11 @@ public class WorkspaceGitChangesWriteQueue(
         return base.StopAsync(cancellationToken);
     }
 
-    private sealed record QueuedSnapshot(GitChangesSnapshotNotification Notification, TaskCompletionSource<bool>? Completed);
+    private sealed record QueuedSnapshot(
+        GitChangesSnapshotNotification Notification,
+        TaskCompletionSource<bool>? Completed,
+        long EnqueuedTimestamp);
 }
+
+/// <summary>Timing captured at write-queue enqueue for permanent <c>GitChangesBench</c> receive/apply logs.</summary>
+public readonly record struct GitChangesSnapshotReceiveTiming(long WriteQueueWaitMs);

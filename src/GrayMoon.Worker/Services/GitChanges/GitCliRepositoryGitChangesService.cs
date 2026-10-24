@@ -1,9 +1,11 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text;
 using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Services;
 using GrayMoon.Common.Git;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace GrayMoon.Worker.Services.GitChanges;
 
@@ -12,7 +14,11 @@ namespace GrayMoon.Worker.Services.GitChanges;
 /// through <see cref="GitProcessRunner"/>'s <c>ArgumentList</c> overload (never an interpolated argument
 /// string) and every path is validated with <see cref="GitRepositoryPathValidator"/> before use.
 /// </summary>
-public sealed class GitCliRepositoryGitChangesService(GitProcessRunner runner, IGitIgnoreService ignore, ILogger<GitCliRepositoryGitChangesService> logger)
+public sealed class GitCliRepositoryGitChangesService(
+    GitProcessRunner runner,
+    IGitIgnoreService ignore,
+    ILogger<GitCliRepositoryGitChangesService> logger,
+    IOptions<GitChangesOptions> gitChangesOptions)
     : IRepositoryGitChangesService
 {
     private const int SoftSizeLimitBytes = 5 * 1024 * 1024;
@@ -33,6 +39,7 @@ public sealed class GitCliRepositoryGitChangesService(GitProcessRunner runner, I
             return new GitChangeStatusResult { Success = false, ErrorCode = "RepositoryNotFound", ErrorMessage = "Repository not found." };
         }
 
+        var statusStarted = Stopwatch.GetTimestamp();
         var statusTask = runner.RunAsync(
             "git",
             ["--no-optional-locks", "status", "--porcelain=v2", "-z", "--branch", "--untracked-files=all"],
@@ -68,6 +75,7 @@ public sealed class GitCliRepositoryGitChangesService(GitProcessRunner runner, I
             return new GitChangeStatusResult { Success = false, ErrorCode = "GitStatusFailed", ErrorMessage = error };
         }
 
+        var porcelainBytes = Encoding.UTF8.GetByteCount(stdout ?? string.Empty);
         var parsed = GitPorcelainV2Parser.Parse(stdout);
         var (isMerging, isRebasing, isCherryPicking) = await GetOperationStateAsync(repoPath, cancellationToken);
         var (insertions, deletions) = await ResolveLineStatsAsync(unstagedNumstatTask);
@@ -95,6 +103,23 @@ public sealed class GitCliRepositoryGitChangesService(GitProcessRunner runner, I
             StagedInsertions = stagedInsertions,
             StagedDeletions = stagedDeletions,
         };
+
+        var statusMs = GitChangesBench.ElapsedMs(statusStarted);
+        var pathCount = snapshot.Changes.Count;
+        var stagedCount = snapshot.Changes.Count(c => c.IsStaged);
+        var changedCount = snapshot.Changes.Count(c => c.IsChanged);
+        GitChangesBench.Log(
+            logger,
+            gitChangesOptions.Value,
+            "status scan complete",
+            pathCount,
+            statusMs,
+            ("StatusMs", statusMs),
+            ("PathCount", pathCount),
+            ("StagedCount", stagedCount),
+            ("ChangedCount", changedCount),
+            ("PorcelainBytes", porcelainBytes),
+            ("Version", snapshotVersion));
 
         return new GitChangeStatusResult { Success = true, Snapshot = snapshot };
     }

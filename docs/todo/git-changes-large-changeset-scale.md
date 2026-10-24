@@ -1,6 +1,6 @@
 # Git Changes: scale to tens of thousands of changed files
 
-Status: design only - not implemented. Current behavior is documented in `docs/architecture/07-git-changes-projection-and-tree.md`. Progress is tracked in `docs/todo/git-changes-large-changeset-scale-tracker.md`.
+Status: Phase 0 (permanent `GitChangesBench` logs + fixture + M0 numbers) is implemented; Phases 1-5 are not. Current product behavior is documented in `docs/architecture/07-git-changes-projection-and-tree.md`. Progress is tracked in `docs/todo/git-changes-large-changeset-scale-tracker.md`.
 
 ## 0. Non-negotiable requirements (full inventory)
 
@@ -314,6 +314,8 @@ Tasks:
 3. Record the numbers in this doc and use them to set `SnapshotPathsInlineMax` (preferably as a byte budget), `FullHydrationMaxEntries` and the other knobs.
 
 **Milestone M0:** benchmark log lines merged in App and Worker; numbers attached to this doc; fixture reproducible. The log lines are kept (not removed) after M0 and are reused to verify every later milestone.
+
+**M0 results (2026-10-24):** see the table in `git-changes-large-changeset-scale-tracker.md`. Fixture: `dev/New-GitChangesScaleFixture.ps1`. App harness: `GitChangesBenchM0MeasurementTests`. Takeaways: ~145 UTF-8 bytes per short path on the notification JSON; 50K ≈ 8.9 MiB (under the 10 MiB hub receive cap with little headroom); Worker `StatusMs` stays small; App `PersistMs` and full-circuit row count dominate by ~5K paths. Prefer a **byte budget** for `SnapshotPathsInlineMax` (still an open decision) rather than a fixed path count.
 
 ### Phase 1 - Circuit and tree (App-only) - highest UX leverage
 

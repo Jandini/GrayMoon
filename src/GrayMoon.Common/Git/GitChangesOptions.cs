@@ -47,4 +47,18 @@ public sealed class GitChangesOptions
     /// Set true to also write the legacy special-Workspace tables. Rollback is turning this back on.
     /// </summary>
     public bool WriteLegacyGitChangesTables { get; init; }
+
+    /// <summary>
+    /// Permanent <c>GitChangesBench</c> logs use Information when path count is at or above this floor
+    /// (or <see cref="BenchmarkLogMinElapsedMs"/> is met); otherwise Debug. Default 500 so small
+    /// workspaces do not flood Information logs.
+    /// </summary>
+    public int BenchmarkLogMinPathCount { get; init; } = 500;
+
+    /// <summary>
+    /// Permanent <c>GitChangesBench</c> logs use Information when an event's elapsed milliseconds are
+    /// at or above this floor (or <see cref="BenchmarkLogMinPathCount"/> is met); otherwise Debug.
+    /// Default 100.
+    /// </summary>
+    public int BenchmarkLogMinElapsedMs { get; init; } = 100;
 }

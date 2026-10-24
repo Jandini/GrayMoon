@@ -17,7 +17,11 @@ public sealed class GitCliRepositoryGitChangesServiceTests : IDisposable
     {
         var commandLine = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
         var runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
-        _service = new GitCliRepositoryGitChangesService(runner, new LibGit2SharpGitIgnoreService(), NullLogger<GitCliRepositoryGitChangesService>.Instance);
+        _service = new GitCliRepositoryGitChangesService(
+            runner,
+            new LibGit2SharpGitIgnoreService(),
+            NullLogger<GitCliRepositoryGitChangesService>.Instance,
+            Options.Create(new GitChangesOptions()));
     }
 
     public void Dispose() => _repo.Dispose();

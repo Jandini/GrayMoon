@@ -10,7 +10,7 @@ Standing rules for every item: no cap or truncation of the inventory (section 0)
 
 | Phase | Scope | Milestone | Status |
 |---|---|---|---|
-| 0 | Permanent benchmark logs (App + Worker), fixture | M0 | [ ] |
+| 0 | Permanent benchmark logs (App + Worker), fixture | M0 | [x] |
 | 1 | Circuit and tree: summaries, lazy expand, `Virtualize`, live-update patching | M1 | [ ] |
 | 2 | Server-side search, bulk-path call sites, indexes | M2 | [ ] |
 | 3 | `ContentDigest` and folder summaries persisted | M3 | [ ] |
@@ -21,24 +21,24 @@ Standing rules for every item: no cap or truncation of the inventory (section 0)
 
 - [ ] Folder page unit: direct children grouped by next path segment, or descendant files with client-side folders (section 4.4).
 - [ ] Comparer that matches `GitChangesTreeBuilder` ordering (section 4.4).
-- [ ] `SnapshotPathsInlineMax` as a count or a byte budget (decide from M0 numbers).
+- [ ] `SnapshotPathsInlineMax` as a count or a byte budget (M0 favors byte budget; ~145 B/entry short paths, 50K ≈ 8.9 MiB vs 10 MiB hub cap).
 - [ ] Digest computed App-side (stage 1) vs Worker-side (later).
 - [ ] Final values for `FullHydrationMaxEntries`, `TreePageSize`, `FolderRollupDepth`, `CircuitVisibleRowBudget` (from M0 numbers).
 
 ## Phase 0 - Measure and log permanently
 
-- [ ] Benchmark floors in `GitChangesOptions` (Information threshold; Debug logs everything)
-- [ ] Worker: `git status` scan log (`StatusMs`, counts, `PorcelainBytes`)
-- [ ] Worker: snapshot build/serialize/publish log (`PayloadUtf8Bytes`, `BytesPerEntry`)
-- [ ] Worker: send result log (including hub-size rejection)
-- [ ] App: snapshot receive/apply log (`ReceiveUtf8Bytes`, `DeserializeMs`, `WriteQueueWaitMs`, `PersistMs`)
-- [ ] App: Changes open log (`EntryCount`, `ReadMs`, `BuildTreeMs`, `RowCountRendered`, `HydrationMode`)
-- [ ] App: live-update handling log (`Reloaded` / `PatchedOnly` / `NoOp`)
-- [ ] App: heap trend on open (Debug)
-- [ ] Confirm no path names or contents are logged
-- [ ] Synthetic fixture Workspace at 100, 2K, 5K, 25K, 50K paths (scripted)
-- [ ] Numbers recorded in the design doc
-- [ ] **M0:** log lines merged, numbers attached, fixture reproducible
+- [x] Benchmark floors in `GitChangesOptions` (Information threshold; Debug logs everything)
+- [x] Worker: `git status` scan log (`StatusMs`, counts, `PorcelainBytes`)
+- [x] Worker: snapshot build/serialize/publish log (`PayloadUtf8Bytes`, `BytesPerEntry`)
+- [x] Worker: send result log (including hub-size rejection)
+- [x] App: snapshot receive/apply log (`ReceiveUtf8Bytes`, `DeserializeMs`, `WriteQueueWaitMs`, `PersistMs`)
+- [x] App: Changes open log (`EntryCount`, `ReadMs`, `BuildTreeMs`, `RowCountRendered`, `HydrationMode`)
+- [x] App: live-update handling log (`Reloaded` / `PatchedOnly` / `NoOp`)
+- [x] App: heap trend on open (Debug)
+- [x] Confirm no path names or contents are logged
+- [x] Synthetic fixture Workspace at 100, 2K, 5K, 25K, 50K paths (scripted)
+- [x] Numbers recorded in the design doc
+- [x] **M0:** log lines merged, numbers attached, fixture reproducible
 
 ## Phase 1 - Circuit and tree (App-only)
 
@@ -99,16 +99,21 @@ Standing rules for every item: no cap or truncation of the inventory (section 0)
 
 ## Benchmark results (fill from M0)
 
+Measured 2026-10-24 on a Windows laptop (in-memory SQLite for App persist/read/tree; real `git status` on synthetic untracked trees under `%TEMP%\graymoon-git-changes-scale`). Snapshot bytes are camelCase JSON size of a full `GitChangesSnapshotNotification`. Rows rendered include section/repo/folder chrome (not path count alone). Fixture: `dev/New-GitChangesScaleFixture.ps1`. App harness: `GitChangesBenchM0MeasurementTests`.
+
 | Paths | Snapshot bytes | `StatusMs` | `PersistMs` | `ReadMs` | `BuildTreeMs` | Rows rendered |
 |---|---|---|---|---|---|---|
-| 100 | | | | | | |
-| 2K | | | | | | |
-| 5K | | | | | | |
-| 25K | | | | | | |
-| 50K | | | | | | |
+| 100 | 18_172 | 39 | 4 | 1 | 0 | 203 |
+| 2K | 356_372 | 41 | 84 | 8 | 2 | 2_103 |
+| 5K | 890_372 | 46 | 254 | 14 | 5 | 5_103 |
+| 25K | 4_475_372 | 86 | 1_201 | 62 | 54 | 25_103 |
+| 50K | 8_950_372 | 120 | 3_613 | 151 | 137 | 50_103 |
+
+Notes from M0: ~145 UTF-8 bytes/entry on the wire for short paths; 50K is ~8.9 MiB (under the 10 MiB hub receive cap, thin margin). `git status` itself stays modest; PersistMs and full-circuit row count dominate by 5K+. Prefer a **byte budget** for `SnapshotPathsInlineMax` (open decision) over a raw count.
 
 ## Log
 
 | Date | Change |
 |---|---|
+| 2026-10-24 | Phase 0 done: permanent `GitChangesBench` logs (App+Worker), floors on `GitChangesOptions`, fixture script, M0 numbers recorded. |
 | 2026-10-24 | Tracker created; design reviewed and corrected (indexes, query rules, payload stages, permanent benchmark logging). |

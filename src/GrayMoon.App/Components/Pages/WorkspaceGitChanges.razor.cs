@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using GrayMoon.App.Components.GitChanges;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
@@ -9,6 +10,7 @@ using GrayMoon.Common.Git;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.JSInterop;
 
 namespace GrayMoon.App.Components.Pages;
@@ -183,6 +185,8 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     private async Task LoadAsync()
     {
         _errorMessage = null;
+        var openStarted = Stopwatch.GetTimestamp();
+        var heapBefore = GC.GetTotalMemory(forceFullCollection: false);
 
         // Fetched before the StateHasChanged below (rather than after, alongside the heavier git-status
         // read further down) so the header's Workspace name is already correct by the time this
@@ -198,14 +202,23 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
         StateHasChanged();
 
+        long readMs = 0;
+        long buildTreeMs = 0;
+        var entryCount = 0;
         try
         {
+            var readStarted = Stopwatch.GetTimestamp();
             if (_selectedContextId is WorkspaceFeatureContextId ctxId)
                 _view = await ReadService.GetContextAsync(WorkspaceId, ctxId, CancellationToken.None);
             else
                 _view = await ReadService.GetWorkspaceAsync(WorkspaceId, CancellationToken.None);
+            readMs = GitChangesBench.ElapsedMs(readStarted);
+            entryCount = _view?.Repositories.Sum(r => r.Changes.Count) ?? 0;
+
             ClearFilterIfNoChangesRemain();
+            var buildStarted = Stopwatch.GetTimestamp();
             RebuildRows();
+            buildTreeMs = GitChangesBench.ElapsedMs(buildStarted);
             await ClearSelectionIfStaleAsync();
         }
         catch (Exception ex)
@@ -216,6 +229,35 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         finally
         {
             StateHasChanged();
+        }
+
+        var openMs = GitChangesBench.ElapsedMs(openStarted);
+        var heapAfter = GC.GetTotalMemory(forceFullCollection: false);
+        // Phase 0 / today: always full hydration. Summary mode arrives in Phase 1.
+        const string hydrationMode = "Full";
+        var options = GitChangesOptions.Value;
+        GitChangesBench.Log(
+            Logger,
+            options,
+            "changes open",
+            entryCount,
+            openMs,
+            ("EntryCount", entryCount),
+            ("ReadMs", readMs),
+            ("BuildTreeMs", buildTreeMs),
+            ("RowCountRendered", _rows.Count),
+            ("HydrationMode", hydrationMode),
+            ("WorkspaceId", WorkspaceId),
+            ("ContextId", _selectedContextId?.Value ?? 0));
+
+        if (Logger.IsEnabled(LogLevel.Debug))
+        {
+            Logger.LogDebug(
+                "GitChangesBench changes open heap WorkspaceId={WorkspaceId} HeapBeforeBytes={HeapBeforeBytes} HeapAfterBytes={HeapAfterBytes} EntryCount={EntryCount}",
+                WorkspaceId,
+                heapBefore,
+                heapAfter,
+                entryCount);
         }
 
         // Restoring a remembered file selection re-fetches its diff from the Worker, which can be slow
