@@ -773,6 +773,8 @@ The page reads a persisted SQLite projection.
 
 The Worker owns Git status scanning, diff generation, mutations, and filesystem watchers.
 
+Today the projection stores every changed path for the selected context, and opening Changes loads that full inventory into the Blazor circuit before building a flattened Staged/Changed tree (default expanded). There is no tree virtualization or folder-lazy loading yet. Precise types, services and scale behavior are in `07-git-changes-projection-and-tree.md`.
+
 ---
 
 ## 18A. AI-generated commit messages and PR text

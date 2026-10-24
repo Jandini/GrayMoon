@@ -626,13 +626,13 @@ Feature contexts use `WorkspaceGitContextRepositoryStatuses` (unique `WorkspaceF
 
 Stores changed paths for the latest snapshot.
 
-Every new snapshot replaces the set of entries for the repository.
+Every new snapshot replaces the set of entries for the repository (`ExecuteDeleteAsync` then `AddRange` in `GitChangesSnapshotPushHandler`). There is no per-path upsert and no cap on entry count.
 
 Fields include:
 
 ```text
-Path
-OriginalPath
+Path                 MaxLength 2000
+OriginalPath         MaxLength 2000
 IndexChange
 WorktreeChange
 IsTracked
@@ -640,7 +640,9 @@ IsConflicted
 IsSubmodule
 ```
 
-The page reads these rows instead of invoking Git during rendering.
+The page reads these rows instead of invoking Git during rendering. `WorkspaceGitChangesReadService` loads **all** context entries for the selected Feature context into `WorkspaceGitChangesView` in one query (grouped by repository). Status rows (`StagedCount` / `ChangedCount` / `ConflictCount`, optional line stats) are the only aggregated fields; folder summaries are not persisted.
+
+See `07-git-changes-projection-and-tree.md` for the full projection and tree pipeline.
 
 ---
 
