@@ -474,7 +474,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
                 return;
             }
 
-            EnsureAncestorsExpanded(remembered.FilePath, remembered.WorkspaceRepositoryId, remembered.IsStagedSection);
+            await EnsureAncestorsExpandedAsync(remembered.FilePath, remembered.WorkspaceRepositoryId, remembered.IsStagedSection);
 
             var row = FindFileRow(remembered.WorkspaceRepositoryId, remembered.FilePath, remembered.IsStagedSection);
             if (row == null)
@@ -524,7 +524,10 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     /// Expands any collapsed section/repo/folder ancestors so a restored file row is present in _rows
     /// and can be scrolled into view. In summary mode, also hydrates each expanded prefix from Layer B.
     /// </summary>
-    private void EnsureAncestorsExpanded(string filePath, int workspaceRepositoryId, bool isStagedSection)
+    private void EnsureAncestorsExpanded(string filePath, int workspaceRepositoryId, bool isStagedSection) =>
+        _ = EnsureAncestorsExpandedAsync(filePath, workspaceRepositoryId, isStagedSection);
+
+    private async Task EnsureAncestorsExpandedAsync(string filePath, int workspaceRepositoryId, bool isStagedSection)
     {
         var section = isStagedSection ? "staged" : "changed";
         var current = $"{section}/{workspaceRepositoryId}";
@@ -538,10 +541,10 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         }
 
         if (expanded)
-            RebuildRows();
+            await RefreshTreeAsync();
 
         if (_hydrationMode == GitChangesHydrationMode.Summary)
-            _ = HydrateAncestorsForSelectionAsync(filePath, workspaceRepositoryId, isStagedSection);
+            await HydrateAncestorsForSelectionAsync(filePath, workspaceRepositoryId, isStagedSection);
     }
 
     private async Task HydrateAncestorsForSelectionAsync(
@@ -558,7 +561,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             await FetchPrefixPagesAsync(workspaceRepositoryId, isStagedSection, prefix, fetchAll: true);
         }
 
-        RebuildRows();
+        await RefreshTreeAsync();
     }
 
     private bool SelectionStillExists(int workspaceRepositoryId, string filePath, bool isStagedSection)
@@ -660,6 +663,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     private void OnFilterChanged(string value)
     {
         _filterQuery = value;
+        InvalidateWalkableFilesCache();
         // Large-mode client filter cannot see unhydrated paths; re-open with full hydration when filtering.
         if (_hydrationMode == GitChangesHydrationMode.Summary && !string.IsNullOrWhiteSpace(value))
         {
@@ -679,7 +683,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         RebuildRows();
     }
 
-    private void ToggleExpanded(GitChangesTreeRow row) => _ = ToggleExpandedAsync(row);
+    private Task ToggleExpanded(GitChangesTreeRow row) => ToggleExpandedAsync(row);
 
     private void SelectFile(GitChangesFileSelectEventArgs args)
     {

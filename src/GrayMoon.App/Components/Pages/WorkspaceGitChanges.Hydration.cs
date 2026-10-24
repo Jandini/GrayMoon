@@ -33,6 +33,7 @@ public sealed partial class WorkspaceGitChanges
         {
             _hydrationMode = GitChangesHydrationMode.Summary;
             _treeNodeCache.Clear();
+            InvalidateWalkableFilesCache();
             _view = GitChangesTreeBuilder.ViewFromSummaries(summaries);
             _collapsedKeys.Clear();
             GitChangesTreeBuilder.SeedCollapsedRepositories(_view, _collapsedKeys);
@@ -41,6 +42,7 @@ public sealed partial class WorkspaceGitChanges
 
         _hydrationMode = GitChangesHydrationMode.Full;
         _treeNodeCache.Clear();
+        InvalidateWalkableFilesCache();
         _view = await ReadService.GetContextAsync(WorkspaceId, ctxId, CancellationToken.None);
         // Small / filtered path keeps today's default-expand: do not seed collapsed keys.
     }
@@ -122,6 +124,7 @@ public sealed partial class WorkspaceGitChanges
                 ? (_view?.Repositories.Sum(r => r.StagedCount + r.ChangedCount) ?? 0)
                 : (_view?.Repositories.Sum(r => r.Changes.Count) ?? 0);
 
+            InvalidateWalkableFilesCache();
             ClearFilterIfNoChangesRemain();
             var buildStarted = Stopwatch.GetTimestamp();
             RebuildRows();
@@ -187,8 +190,7 @@ public sealed partial class WorkspaceGitChanges
         else
             _collapsedKeys.Add(row.Key);
 
-        RebuildRows();
-        StateHasChanged();
+        await RefreshTreeAsync();
 
         if (expanding && _hydrationMode == GitChangesHydrationMode.Summary)
             await EnsurePrefixHydratedAsync(row);
@@ -233,8 +235,7 @@ public sealed partial class WorkspaceGitChanges
             return;
 
         cache.IsLoading = true;
-        RebuildRows();
-        StateHasChanged();
+        await RefreshTreeAsync();
 
         try
         {
@@ -267,8 +268,7 @@ public sealed partial class WorkspaceGitChanges
 
                 cache.ApplyPage(page);
                 after = page.NextAfterChildKey;
-                RebuildRows();
-                StateHasChanged();
+                await RefreshTreeAsync();
 
                 if (!fetchAll)
                     break;
@@ -285,10 +285,19 @@ public sealed partial class WorkspaceGitChanges
         {
             cache.IsLoading = false;
             _prefixFetchInFlight.Remove(flightKey);
-            RebuildRows();
-            StateHasChanged();
+            await RefreshTreeAsync();
         }
     }
+
+    /// <summary>
+    /// Rebuild and paint on the circuit sync context. After <c>await</c> (SQLite page fetch), a bare
+    /// <see cref="ComponentBase.StateHasChanged"/> can leave the spinner stuck until the next click.
+    /// </summary>
+    private Task RefreshTreeAsync() => InvokeAsync(() =>
+    {
+        RebuildRows();
+        StateHasChanged();
+    });
 
     private async Task RefetchExpandedPrefixesAsync(int workspaceRepositoryId)
     {
