@@ -600,7 +600,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     private const int TreeRowHeightPx = 28;
 
     /// <summary>Renders to wait for the selected row to appear in the flattened list before giving up on the scroll.</summary>
-    private const int MaxScrollSelectionAttempts = 6;
+    private const int MaxScrollSelectionAttempts = 12;
 
     private int _scrollSelectionAttempts;
 

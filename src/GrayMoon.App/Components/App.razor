@@ -80,24 +80,19 @@
                 return false;
 
             if (typeof rowIndex === 'number' && rowIndex >= 0 && rowHeight > 0) {
-                let container = tree.parentElement;
-                while (container && container !== document.body) {
-                    const overflowY = getComputedStyle(container).overflowY;
-                    if ((overflowY === 'auto' || overflowY === 'scroll') && container.scrollHeight > container.clientHeight)
-                        break;
-                    container = container.parentElement;
-                }
-
-                if (container && container !== document.body) {
-                    const treeTop = tree.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
-                    const rowTop = treeTop + rowIndex * rowHeight;
-                    const visibleTop = container.scrollTop;
-                    const visibleBottom = visibleTop + container.clientHeight - rowHeight;
-                    if (rowTop < visibleTop || rowTop > visibleBottom)
-                        container.scrollTop = Math.max(0, rowTop - (container.clientHeight - rowHeight) / 2);
-                }
+                // .git-changes-tree is itself the scroll container (overflow-y: auto).
+                const container = tree;
+                // The first Virtualize spacer marks where the row list starts (after any notice/summary above it).
+                const spacer = tree.querySelector(':scope > div[style*="flex-shrink"], :scope > div[aria-hidden="true"]');
+                const listTop = spacer
+                    ? spacer.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop
+                    : 4;
+                const rowTop = listTop + rowIndex * rowHeight;
+                const visibleTop = container.scrollTop;
+                const visibleBottom = visibleTop + container.clientHeight - rowHeight;
+                if (rowTop < visibleTop || rowTop > visibleBottom)
+                    container.scrollTop = Math.max(0, rowTop - (container.clientHeight - rowHeight) / 2);
             }
-
             const el = tree.querySelector('.git-changes-tree__row--selected');
             if (el && el.scrollIntoView) {
                 el.scrollIntoView({ block: 'nearest' });

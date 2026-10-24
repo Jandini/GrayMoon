@@ -25,6 +25,9 @@ public sealed partial class WorkspaceGitChanges
 
     private SearchState? _search;
 
+    /// <summary>True while a debounced search is fetching its first page (the previous rows stay visible meanwhile).</summary>
+    private bool _searchInFlight;
+
     /// <summary>Expand/collapse state of the search result tree. Separate from the browse tree and never persisted.</summary>
     private readonly HashSet<string> _searchCollapsedKeys = new(StringComparer.Ordinal);
 
@@ -65,16 +68,26 @@ public sealed partial class WorkspaceGitChanges
                 if (cancellationToken.IsCancellationRequested || _disposed)
                     return;
 
-                var filter = _filterQuery;
-                var state = new SearchState(filter) { IsLoading = true };
-                _search = state;
-                _searchCollapsedKeys.Clear();
-                RebuildRows();
+                // The previous rows (browse tree or earlier results) stay on screen while the first page loads and
+                // are swapped for the new results in one render, so the tree never blanks between searches.
+                var state = new SearchState(_filterQuery) { IsLoading = true };
+                _searchInFlight = true;
                 StateHasChanged();
 
-                await FetchSearchPageAsync(state, cancellationToken);
-                if (cancellationToken.IsCancellationRequested || !ReferenceEquals(_search, state))
-                    return;
+                try
+                {
+                    await FetchSearchPageAsync(state, cancellationToken);
+                    if (cancellationToken.IsCancellationRequested || _disposed)
+                        return;
+
+                    _search = state;
+                    _searchCollapsedKeys.Clear();
+                }
+                finally
+                {
+                    if (!cancellationToken.IsCancellationRequested)
+                        _searchInFlight = false;
+                }
 
                 RebuildRows();
                 StateHasChanged();
@@ -149,6 +162,7 @@ public sealed partial class WorkspaceGitChanges
     private void ClearSearch()
     {
         CancelSearch();
+        _searchInFlight = false;
         _search = null;
         _searchCollapsedKeys.Clear();
     }
