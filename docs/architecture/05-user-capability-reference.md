@@ -734,7 +734,7 @@ Available only for .NET Dependency Workspaces (section 1).
 
 ### User sees
 
-Package-producing projects and matched registry, plus a **Used by** count: the other workspace repositories that restore the package in the selected context. That includes repositories that get it transitively through another workspace package, because `dotnet restore` downloads it there too. The package's own repository is never counted. Hovering the count lists the repositories, marking transitive ones "via <package>", with a copy button.
+Package-producing projects and matched registry, plus a **Used by** count: the other workspace repositories that restore the package in the selected context. That includes repositories that get it transitively through another workspace package, because `dotnet restore` downloads it there too. The package's own repository is never counted. Hovering the count lists the repositories, marking transitive ones "via <package>", with a copy button. The count is gray whether or not it opens GitHub settings. The color does not report Actions access.
 
 ### User can
 

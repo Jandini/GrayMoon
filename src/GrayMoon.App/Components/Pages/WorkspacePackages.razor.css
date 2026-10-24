@@ -83,7 +83,7 @@
 }
 
 .packages-table td a.packages-usedby-badge--link {
-    background-color: #198754;
+    background-color: var(--bs-secondary);
     color: #fff !important;
     text-decoration: none;
     cursor: pointer;
