@@ -122,8 +122,36 @@ public class GitChangesEntryPageTests
         var rows = GitChangesTreeBuilder.BuildFromCache(view, cache, collapsed);
 
         Assert.Contains(rows, r => r.Kind == GitChangesTreeRowKind.Section && r.Count == 2000);
-        Assert.Contains(rows, r => r.Kind == GitChangesTreeRowKind.Repository && r.Count == 2000);
+        Assert.Contains(rows, r => r.Kind == GitChangesTreeRowKind.Repository && r.Count == 2000 && !r.IsExpanded);
         Assert.DoesNotContain(rows, r => r.Kind == GitChangesTreeRowKind.File);
+    }
+
+    [Fact]
+    public void BuildFromCache_expanded_repo_hides_count_badge()
+    {
+        var view = GitChangesTreeBuilder.ViewFromSummaries(new WorkspaceGitChangesSummariesView
+        {
+            WorkspaceId = 1,
+            TotalEntryCount = 10,
+            Repositories =
+            [
+                new WorkspaceGitChangesRepositorySummary
+                {
+                    WorkspaceRepositoryId = 7,
+                    RepositoryId = 7,
+                    RepositoryName = "big",
+                    StagedCount = 0,
+                    ChangedCount = 10,
+                    SnapshotVersion = 1,
+                },
+            ],
+        });
+
+        var collapsed = new HashSet<string>(); // repo expanded
+        var rows = GitChangesTreeBuilder.BuildFromCache(view, new GitChangesTreeNodeCache(), collapsed);
+        var repo = Assert.Single(rows, r => r.Kind == GitChangesTreeRowKind.Repository);
+        Assert.True(repo.IsExpanded);
+        Assert.Null(repo.Count);
     }
 
     [Fact]
