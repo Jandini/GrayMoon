@@ -82,6 +82,7 @@
                                         <th class="col-packageid">Package Id</th>
                                         <th class="col-framework">Framework</th>
                                         <th class="col-usedby">Used by</th>
+                                        <th class="col-needs">Needs</th>
                                         <th class="col-registry">Registry</th>
                                     </tr>
                                 </thead>
@@ -89,7 +90,7 @@
                                     @if (isLoading)
                                     {
                                         <tr>
-                                            <td colspan="4" class="text-center text-muted py-4">
+                                            <td colspan="5" class="text-center text-muted py-4">
                                                 Loading packages...
                                             </td>
                                         </tr>
@@ -97,7 +98,7 @@
                                     else if (packages.Count == 0)
                                     {
                                         <tr>
-                                            <td colspan="4" class="text-center text-muted py-4">
+                                            <td colspan="5" class="text-center text-muted py-4">
                                                 No NuGet packages in this workspace. Sync repositories to discover package projects.
                                             </td>
                                         </tr>
@@ -105,7 +106,7 @@
                                     else if (NoPackagesMatchSearch)
                                     {
                                         <tr>
-                                            <td colspan="4" class="text-center text-muted py-4">
+                                            <td colspan="5" class="text-center text-muted py-4">
                                                 No packages match your search.
                                             </td>
                                         </tr>
@@ -187,6 +188,68 @@
                                                         <span class="badge packages-usedby-badge packages-usedby-badge--zero">0</span>
                                                     }
                                                 </td>
+                                                <td class="col-needs">
+                                                    @if (packageAccessNeeds.TryGetValue(p.ProjectId, out var needs) && needs.Count > 0)
+                                                    {
+                                                        var anySettingsUrl = needs.Any(n => SettingsUrlForPackage(n.PackageId) != null);
+                                                        <span class="dependency-badge-tooltip-wrap">
+                                                            @if (anySettingsUrl)
+                                                            {
+                                                                <button type="button"
+                                                                        class="badge packages-usedby-badge packages-usedby-badge--link"
+                                                                        data-package-urls="@PackageSettingsUrlList(needs)"
+                                                                        aria-label="Open all package settings on GitHub"
+                                                                        onclick="for (const url of this.dataset.packageUrls.split('|')) if (url) window.open(url, '_blank', 'noopener')">@needs.Count</button>
+                                                            }
+                                                            else
+                                                            {
+                                                                <span class="badge packages-usedby-badge">@needs.Count</span>
+                                                            }
+                                                            <div class="dependency-badge-tooltip">
+                                                                <div class="dependency-badge-tooltip-header">
+                                                                    <span class="dependency-badge-tooltip-title">Packages this repository restores:</span>
+                                                                    <button type="button"
+                                                                            class="dependency-badge-tooltip-copy"
+                                                                            title="Copy list to clipboard"
+                                                                            aria-label="Copy list to clipboard"
+                                                                            @onclick="() => CopyPackageAccessNeedsAsync(needs)"
+                                                                            @onclick:preventDefault
+                                                                            @onclick:stopPropagation>
+                                                                        <i class="bi bi-clipboard" aria-hidden="true"></i>
+                                                                    </button>
+                                                                </div>
+                                                                @foreach (var need in needs)
+                                                                {
+                                                                    var needSettingsUrl = SettingsUrlForPackage(need.PackageId);
+                                                                    <div class="dependency-badge-tooltip-line">
+                                                                        @if (needSettingsUrl != null)
+                                                                        {
+                                                                            <a href="@needSettingsUrl" target="_blank" rel="noopener noreferrer" class="dependency-badge-tooltip-link"><code>@need.PackageId</code></a>
+                                                                        }
+                                                                        else
+                                                                        {
+                                                                            <code>@need.PackageId</code>
+                                                                        }
+                                                                        @if (!need.IsDirect)
+                                                                        {
+                                                                            <span class="dependency-badge-tooltip-versions">via @need.ViaPackageId</span>
+                                                                        }
+                                                                    </div>
+                                                                }
+                                                                @if (anySettingsUrl)
+                                                                {
+                                                                    <div class="dependency-badge-tooltip-footer">
+                                                                        Open a package to add this repository under Manage Actions access, or click the badge to open them all.
+                                                                    </div>
+                                                                }
+                                                            </div>
+                                                        </span>
+                                                    }
+                                                    else if (_packageConsumersResolved)
+                                                    {
+                                                        <span class="badge packages-usedby-badge packages-usedby-badge--zero">0</span>
+                                                    }
+                                                </td>
                                                 <td class="col-registry text-muted">@(p.MatchedConnector?.ConnectorName ?? "-")</td>
                                             </tr>
                                         }
@@ -222,6 +285,8 @@
     private List<WorkspaceProject> packages = new();
     private IReadOnlyDictionary<int, IReadOnlyList<PackageDependentRepository>> dependentRepositories =
         new Dictionary<int, IReadOnlyList<PackageDependentRepository>>();
+    private IReadOnlyDictionary<int, IReadOnlyList<PackageAccessNeed>> packageAccessNeeds =
+        new Dictionary<int, IReadOnlyList<PackageAccessNeed>>();
     private string? errorMessage;
     private bool isLoading = true;
     private bool isSyncingRegistries = false;
@@ -292,6 +357,7 @@
                 errorMessage = "Workspace not found.";
                 packages = new List<WorkspaceProject>();
                 dependentRepositories = new Dictionary<int, IReadOnlyList<PackageDependentRepository>>();
+                packageAccessNeeds = new Dictionary<int, IReadOnlyList<PackageAccessNeed>>();
                 _packageConsumersResolved = false;
                 return;
             }
@@ -299,6 +365,7 @@
                 ? await WorkspaceProjectRepository.GetPackagesByWorkspaceIdAsync(WorkspaceId, ctx.Value)
                 : await WorkspaceProjectRepository.GetPackagesByWorkspaceIdAsync(WorkspaceId);
             dependentRepositories = await WorkspaceProjectRepository.GetPackageDependentRepositoriesAsync(WorkspaceId, _selectedContextId);
+            packageAccessNeeds = await WorkspaceProjectRepository.GetPackageAccessNeedsAsync(WorkspaceId, _selectedContextId);
         }
         catch (Exception ex)
         {
@@ -306,11 +373,50 @@
             errorMessage = "Failed to load packages. Please try again later.";
             packages = new List<WorkspaceProject>();
             dependentRepositories = new Dictionary<int, IReadOnlyList<PackageDependentRepository>>();
+            packageAccessNeeds = new Dictionary<int, IReadOnlyList<PackageAccessNeed>>();
             _packageConsumersResolved = false;
         }
         finally
         {
             isLoading = false;
+        }
+    }
+
+    private string PackageSettingsUrlList(IReadOnlyList<PackageAccessNeed> needs) =>
+        string.Join("|", needs
+            .Select(n => SettingsUrlForPackage(n.PackageId))
+            .Where(url => !string.IsNullOrEmpty(url))
+            .Distinct(StringComparer.OrdinalIgnoreCase));
+
+    private string? SettingsUrlForPackage(string packageId)
+    {
+        foreach (var producer in packages)
+        {
+            if (!string.Equals(producer.PackageId, packageId, StringComparison.OrdinalIgnoreCase))
+                continue;
+            var url = RepositoryUrlHelper.GetGitHubNuGetPackageSettingsUrl(
+                producer.MatchedConnector?.ApiBaseUrl,
+                producer.PackageId,
+                producer.Repository?.CloneUrl);
+            if (url != null)
+                return url;
+        }
+
+        return null;
+    }
+
+    private async Task CopyPackageAccessNeedsAsync(IReadOnlyList<PackageAccessNeed> needs)
+    {
+        try
+        {
+            var text = string.Join(Environment.NewLine, needs.Select(n => n.PackageId));
+            await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", text);
+            ToastService.Show("Package list copied to the clipboard");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Copy of package access needs failed for workspace {WorkspaceId}", WorkspaceId);
+            ToastService.Show("Could not copy to clipboard.");
         }
     }
 

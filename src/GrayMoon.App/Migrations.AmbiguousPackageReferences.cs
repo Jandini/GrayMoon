@@ -7,7 +7,7 @@ namespace GrayMoon.App;
 public static partial class Migrations
 {
     /// <summary>
-    /// Stores PackageReferences whose package id has more than one producer, for the Packages "Used by" list.
+    /// Stores PackageReferences whose package id has more than one producer, for the Packages "Used by" and "Needs" lists.
     /// Strict step 12. Idempotent. Does not add project-dependency edges.
     /// </summary>
     public static async Task MigrateAmbiguousPackageReferencesAsync(AppDbContext dbContext, ILogger? logger = null)

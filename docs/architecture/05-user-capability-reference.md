@@ -736,6 +736,8 @@ Available only for .NET Dependency Workspaces (section 1).
 
 Package-producing projects and matched registry, plus a **Used by** count: the other workspace repositories that restore the package in the selected context. That includes repositories that get it transitively through another workspace package, because `dotnet restore` downloads it there too. The package's own repository is never counted. Before the selected context has been synced the cell is empty. After a sync, a package with no referencing repositories shows 0 in a darker badge. When several projects publish the same package id, Used by still lists those repositories on each of them. Dependencies and push order leave that package out until one publisher remains; the next sync of a referencing repository then stores the normal dependency and removes the extra list. Hovering the count lists the repositories, marking transitive ones "via <package>", with a copy button. The count is gray whether or not it opens GitHub settings. The color does not report Actions access.
 
+A **Needs** count on the same row lists the other workspace packages that projects in this package's repository restore, including packages reached through another workspace package, because `dotnet restore` downloads those too. Packages that repository itself publishes are left out, and every package row from that repository shows the same list. Before the selected context has been synced the cell is empty. After a sync, a repository that restores no other workspace package shows 0 in a darker badge. Hovering the count lists the packages, marking transitive ones "via <package>", with a copy button. A package name opens that package's settings on GitHub when it is a GitHub package. The note under the list says to open a package, or click the badge to open them all. Clicking the badge opens each of those settings pages. The badge stays gray, and the color does not report Actions access.
+
 ### User can
 
 Synchronize registry matching. When the package is on GitHub Packages, clicking the count opens the package settings page on GitHub (`/orgs/{owner}/packages/nuget/{id}/settings`; GitHub serves this route for user-owned packages too). The user adds the listed repositories there under "Manage Actions access", which `GITHUB_TOKEN` restores in GitHub Actions need for private packages. GitHub has no public API for that list, so GrayMoon neither reads nor changes it.
@@ -746,6 +748,7 @@ Synchronize registry matching. When the package is on GitHub Packages, clicking 
 WorkspacePackages page
 WorkspaceProjectRepository package queries
   GetPackageDependentRepositoriesAsync / ResolvePackageDependentRepositories (Used by)
+  GetPackageAccessNeedsAsync / ResolvePackageAccessNeeds (Needs)
   AmbiguousPackageReferences (consumers of a package id published by several projects; not a graph edge)
 RepositoryUrlHelper.GetGitHubNuGetPackageSettingsUrl
 connector/package-registry services

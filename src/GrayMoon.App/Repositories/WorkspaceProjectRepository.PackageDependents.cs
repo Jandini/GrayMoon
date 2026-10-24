@@ -17,9 +17,37 @@ public sealed partial class WorkspaceProjectRepository
         WorkspaceFeatureContextId? contextId,
         CancellationToken cancellationToken = default)
     {
+        var (nodes, edges) = await LoadPackageConsumerGraphAsync(workspaceId, contextId, cancellationToken);
+        if (nodes.Count == 0)
+            return new Dictionary<int, IReadOnlyList<PackageDependentRepository>>();
+        return ResolvePackageDependentRepositories(nodes, edges);
+    }
+
+    /// <summary>
+    /// Returns, per package project (keyed by ProjectId), the other workspace packages that projects in its repository
+    /// restore, directly or transitively through other workspace packages. Every package row for a repository gets the
+    /// same list. Packages published by that repository are omitted. A package id published by several projects is listed
+    /// once.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<int, IReadOnlyList<PackageAccessNeed>>> GetPackageAccessNeedsAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId? contextId,
+        CancellationToken cancellationToken = default)
+    {
+        var (nodes, edges) = await LoadPackageConsumerGraphAsync(workspaceId, contextId, cancellationToken);
+        if (nodes.Count == 0)
+            return new Dictionary<int, IReadOnlyList<PackageAccessNeed>>();
+        return ResolvePackageAccessNeeds(nodes, edges);
+    }
+
+    private async Task<(IReadOnlyList<PackageDependentsNode> Nodes, IReadOnlyList<(int DependentProjectId, int ReferencedProjectId)> Edges)> LoadPackageConsumerGraphAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId? contextId,
+        CancellationToken cancellationToken)
+    {
         var scopedProjects = await GetByWorkspaceIdAsync(workspaceId, contextId, cancellationToken);
         if (scopedProjects.Count == 0)
-            return new Dictionary<int, IReadOnlyList<PackageDependentRepository>>();
+            return ([], []);
 
         var projectIdSet = scopedProjects.Select(p => p.ProjectId).ToHashSet();
         var edges = await dbContext.ProjectDependencies
@@ -39,7 +67,7 @@ public sealed partial class WorkspaceProjectRepository
             .ToList();
         var combined = edges.Select(e => (e.DependentProjectId, e.ReferencedProjectId)).ToList();
         combined.AddRange(EdgesForAmbiguousUsages(nodes, usages.Select(u => (u.DependentProjectId, u.PackageId))));
-        return ResolvePackageDependentRepositories(nodes, combined);
+        return (nodes, combined);
     }
 
     /// <summary>
@@ -139,5 +167,84 @@ public sealed partial class WorkspaceProjectRepository
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Walks package edges out from every project in a repository. A project that references another repository's
+    /// package makes that package a direct need; packages that package restores are needs through it. A package reached
+    /// both ways is reported as direct. The same list is stored on every package project in the repository.
+    /// </summary>
+    public static IReadOnlyDictionary<int, IReadOnlyList<PackageAccessNeed>> ResolvePackageAccessNeeds(
+        IReadOnlyList<PackageDependentsNode> projects,
+        IReadOnlyList<(int DependentProjectId, int ReferencedProjectId)> edges)
+    {
+        var byProjectId = projects.ToDictionary(p => p.ProjectId);
+        var outgoing = new Dictionary<int, List<int>>();
+        foreach (var (dependentId, referencedId) in edges)
+        {
+            if (!byProjectId.ContainsKey(dependentId) || !byProjectId.ContainsKey(referencedId))
+                continue;
+            if (!outgoing.TryGetValue(dependentId, out var list))
+            {
+                list = new List<int>();
+                outgoing[dependentId] = list;
+            }
+            list.Add(referencedId);
+        }
+
+        var result = new Dictionary<int, IReadOnlyList<PackageAccessNeed>>();
+        foreach (var repo in projects.GroupBy(p => p.RepositoryId))
+        {
+            var repoProjects = repo.ToList();
+            var needs = CollectPackageAccessNeeds(repo.Key, repoProjects, byProjectId, outgoing);
+            if (needs.Count == 0)
+                continue;
+            foreach (var project in repoProjects)
+            {
+                if (!string.IsNullOrWhiteSpace(project.PackageId))
+                    result[project.ProjectId] = needs;
+            }
+        }
+
+        return result;
+    }
+
+    private static List<PackageAccessNeed> CollectPackageAccessNeeds(
+        int repositoryId,
+        IReadOnlyList<PackageDependentsNode> repoProjects,
+        Dictionary<int, PackageDependentsNode> byProjectId,
+        Dictionary<int, List<int>> outgoing)
+    {
+        var byPackage = new Dictionary<string, PackageAccessNeed>(StringComparer.OrdinalIgnoreCase);
+        var visited = new HashSet<int>(repoProjects.Select(p => p.ProjectId));
+        var queue = new Queue<(int ProjectId, string? Via)>();
+        foreach (var project in repoProjects)
+            queue.Enqueue((project.ProjectId, null));
+
+        while (queue.Count > 0)
+        {
+            var (projectId, via) = queue.Dequeue();
+            if (!outgoing.TryGetValue(projectId, out var referencedIds))
+                continue;
+            foreach (var referencedId in referencedIds)
+            {
+                var referenced = byProjectId[referencedId];
+                var packageId = referenced.PackageId?.Trim();
+                if (referenced.RepositoryId != repositoryId
+                    && !string.IsNullOrEmpty(packageId)
+                    && (!byPackage.TryGetValue(packageId, out var existing) || (!existing.IsDirect && via == null)))
+                {
+                    byPackage[packageId] = new PackageAccessNeed(packageId, via);
+                }
+
+                if (!string.IsNullOrEmpty(packageId) && referenced.RepositoryId != repositoryId && visited.Add(referencedId))
+                    queue.Enqueue((referencedId, packageId));
+            }
+        }
+
+        return byPackage.Values
+            .OrderBy(n => n.IsDirect ? 0 : 1)
+            .ThenBy(n => n.PackageId, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 }
