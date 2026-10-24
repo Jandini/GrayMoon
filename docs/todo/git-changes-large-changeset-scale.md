@@ -54,7 +54,7 @@ Non-goals for the first shippable arc:
 - Capping, truncating, or sampling the changed-file inventory (explicitly rejected - see section 0).
 - Changing git's own cost of `status` on a dirty mega-tree (can be mitigated later with optional pathspec / ignore heuristics; not required for UI scale).
 - Replacing Monaco diff virtualization (already on-demand per file).
-- Persisting the tree expand/collapse model in SQLite (session/`_collapsedKeys` is enough).
+- Persisting the tree expand/collapse model in SQLite. Summary-mode expand state is kept in browser `localStorage` instead (section 4.5, "Expand state survives reload").
 
 ## 4. Proposed architecture
 
@@ -164,6 +164,17 @@ SearchEntriesAsync(workspaceId, contextId, filter, skip, take)
 - Keep `@key="row.Key"` for stable identity.
 - Row height should be CSS-stable so virtualization does not thrash.
 - Scrolling to the end of a 20K-file expanded folder must eventually show file 20_000 - via successive provider fetches, not by cutting the list short.
+
+**Expand state survives reload (Summary mode, implemented in Phase 1)**
+
+F5 and Ctrl+F5 destroy the Blazor circuit, so `_collapsedKeys` alone loses the user's expansion and every repo re-collapses. In Summary mode the tree keeps whatever the user expanded or collapsed across a reload:
+
+- Storage: browser `localStorage` (via `graymoonStorageGet`/`graymoonStorageSet`), key `graymoon.gitChanges.tree.{workspaceId}.{contextId}`. Client-side only; not SQLite, no Worker involvement, no inventory impact.
+- Shape: JSON `{ c: [collapsed keys], k: [known keys] }`. `k` is every key whose default was already decided (repo section nodes plus `_summaryFoldersSeeded`). A key in `k` but not in `c` is one the user opened. Keys absent from `k` get today's defaults (new repos and newly seen folders open collapsed), so paths that appear after the save never come up expanded by accident.
+- Save: after each expand/collapse toggle, and after a selection reveal (`EnsureAncestorsExpandedAsync`). Not saved in Full mode, where everything defaults to expanded.
+- Restore: `LoadProjectionAsync` seeds the default collapsed repos, applies the stored state over them, then `HydrateRestoredTreeAsync` fetches the first page of each expanded prefix (`RehydrateExpandedAsync`) so the tree paints as the user left it. Pages beyond the first reload on scroll as usual. Because every `LoadAsync` (refresh, mutation) goes through this path, expand state also now survives those reloads.
+- Stale keys (deleted folders) are harmless: they match no row. Context switch uses its own key.
+- Never persisted: scroll offset, selection (separate memory), loaded pages.
 
 **Why both lazy and virtualize?** Lazy expansion avoids building a 50K-row flat list before the user opens folders; virtualization avoids syncing 50K DOM nodes when a large prefix is expanded. Together they keep paint O(viewport) while the **logical** inventory stays complete and fully traversable.
 
@@ -325,6 +336,7 @@ Tasks:
 4. `Virtualize` the flattened row list.
 5. Live updates: per-repo summary patch + cache invalidation (stop full `LoadAsync`).
 6. Keep small-mode full hydration.
+7. Summary-mode expand state persists across F5 / Ctrl+F5 (section 4.5).
 
 **Milestone M1:** 20K-path fixture opens with responsive chrome; scrolling/expand reaches all 20K files; small Workspace unchanged.
 

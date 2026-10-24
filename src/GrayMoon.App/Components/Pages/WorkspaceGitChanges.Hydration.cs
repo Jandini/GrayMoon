@@ -71,6 +71,13 @@ public sealed partial class WorkspaceGitChanges
             _view = GitChangesTreeBuilder.ViewFromSummaries(summaries);
             _collapsedKeys.Clear();
             GitChangesTreeBuilder.SeedCollapsedRepositories(_view, _collapsedKeys);
+
+            // F5 / Ctrl+F5 / reload: put back whatever the user had expanded, then re-fetch those prefixes.
+            await RestoreTreeStateAsync(ctxId.Value);
+            if (generation != _loadGeneration)
+                return;
+
+            await HydrateRestoredTreeAsync();
             return;
         }
 
@@ -278,6 +285,8 @@ public sealed partial class WorkspaceGitChanges
 
         if (expanding && _hydrationMode == GitChangesHydrationMode.Summary)
             await EnsurePrefixHydratedAsync(row);
+
+        await PersistTreeStateAsync();
     }
 
     private async Task EnsurePrefixHydratedAsync(GitChangesTreeRow row)

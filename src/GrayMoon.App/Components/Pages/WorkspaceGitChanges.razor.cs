@@ -539,6 +539,8 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             ExpandAncestorKeys(filePath, workspaceRepositoryId, isStagedSection);
             await RefreshTreeAsync();
         }
+
+        await PersistTreeStateAsync();
     }
 
     private void ExpandAncestorKeys(string filePath, int workspaceRepositoryId, bool isStagedSection)
