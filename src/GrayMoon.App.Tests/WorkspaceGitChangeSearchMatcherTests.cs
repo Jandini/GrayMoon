@@ -80,4 +80,21 @@ public class WorkspaceGitChangeSearchMatcherTests
         Assert.False(WorkspaceGitChangeSearchMatcher.Matches("graymoon-api", entry, "repo:graymoon and ext:ts"));
         Assert.True(WorkspaceGitChangeSearchMatcher.Matches("graymoon-api", entry, "ext:ts or ext:cs"));
     }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("  ")]
+    [InlineData("file")]
+    [InlineData("repo:graymoon and ext:cs")]
+    [InlineData("ext:ts or status:modified")]
+    [InlineData("(ext:cs")]
+    public void Compile_returns_a_predicate_equal_to_Matches(string? query)
+    {
+        var entry = Entry("src/File.cs", worktree: GitChangeKind.Modified);
+        var predicate = WorkspaceGitChangeSearchMatcher.Compile(query);
+
+        Assert.Equal(
+            WorkspaceGitChangeSearchMatcher.Matches("graymoon-api", entry, query),
+            predicate("graymoon-api", entry));
+    }
 }

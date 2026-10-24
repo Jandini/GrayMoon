@@ -129,9 +129,9 @@ There is no incremental path-diff persist: every successful snapshot is a full r
 `WorkspaceGitChanges.LoadAsync` (`Components/Pages/WorkspaceGitChanges.razor.cs`):
 
 1. Loads the Workspace name for the header.
-2. Calls `GetContextSummariesAsync` first. When distinct path count is at or below `GitChangesOptions.FullHydrationMaxEntries` (default 1_500), or a filter is already active, hydrates with `GetContextAsync` (**Full** mode). Above the threshold with no filter, keeps summary-only repos (**Summary** mode) and seeds every repository as collapsed.
+2. Calls `GetContextSummariesAsync` first. When distinct path count is at or below `GitChangesOptions.FullHydrationMaxEntries` (default 1_500), hydrates with `GetContextAsync` (**Full** mode). Above the threshold, keeps summary-only repos (**Summary** mode) and seeds every repository as collapsed; an active filter does not change the mode, it runs as a server-side search overlay.
 3. `RebuildRows()` → `GitChangesTreeBuilder.Build` (Full) or `BuildFromCache` + `GitChangesTreeNodeCache` (Summary).
-4. Optionally restores a remembered file selection (diff fetch is the only Worker call on open, and it does not gate the tree). In Summary mode, restoring a selection expands ancestors and `GetEntryPageAsync`-hydrates those prefixes.
+4. Optionally restores a remembered file selection. The in-memory `WorkspaceGitChangesSelectionMemory` is per circuit, so it covers SPA navigation only; every selection is also written to browser localStorage (`graymoon.gitChanges.selection.{workspaceId}.{contextId}`, like the tree expand state) and read back when the memory is empty, which is what makes the selection survive F5 / Ctrl+F5. A stored file that no longer exists is dropped. The diff fetch is the only Worker call on open, and it does not gate the tree. In Summary mode, restoring a selection expands ancestors and `GetEntryPageAsync`-hydrates those prefixes.
 
 `GetContextAsync` / `LoadContextAsync` still load every entry for the context when Full mode is chosen. Summary mode leaves `Changes` empty until the user expands a repository or folder; children come from `GetEntryPageAsync`. Path indexes: `(context, repo, Path)` and `(context, Path)` (migration 13).
 
@@ -139,7 +139,7 @@ There is no incremental path-diff persist: every successful snapshot is a full r
 
 ### Live updates
 
-`WorkspaceGitChanges.Realtime.cs` handles `ContextGitChangesUpdated(workspaceId, contextId, repositoryId)` by patching **that repository only**. Full mode re-reads that repository's entries (`GetRepositoryAsync`). Summary mode reads only its status row and kind counts (`GetRepositorySummaryAsync`), drops its node caches, and re-fetches the first page of each expanded prefix (Outcome `PatchedOnly`). Fetches in flight are tracked by cache object, so a fetch started before an invalidation is discarded and never blocks its replacement. If the patched counts cross `FullHydrationMaxEntries` (and no filter is active) the page reloads into the other mode. It does not reload sibling repositories. Legacy `GitChangesUpdated` is ignored when the context event is authoritative. Unrelated contexts stay `NoOp`.
+`WorkspaceGitChanges.Realtime.cs` handles `ContextGitChangesUpdated(workspaceId, contextId, repositoryId)` by patching **that repository only**. Full mode re-reads that repository's entries (`GetRepositoryAsync`). Summary mode reads only its status row and kind counts (`GetRepositorySummaryAsync`), drops its node caches, and re-fetches the first page of each expanded prefix (Outcome `PatchedOnly`). The drop and re-fetch run with intermediate tree paints suppressed (`_quietCacheRefreshDepth`; also a patch that finishes while another is re-fetching defers its paint to that one), so the repository's rows never flash empty or "Loading..." - this matters right after a reload, when the scan activated by route activity pushes one snapshot per repository. Fetches in flight are tracked by cache object, so a fetch started before an invalidation is discarded and never blocks its replacement. If the patched counts cross `FullHydrationMaxEntries` (and no filter is active) the page reloads into the other mode. It does not reload sibling repositories. Legacy `GitChangesUpdated` is ignored when the context event is authoritative. Unrelated contexts stay `NoOp`.
 
 Opening the page does not start a status scan. Scans are activated by workspace route activity (`WorkspaceGitChangesRouteActivity` → `WorkspaceGitChangesActivation`), monitoring (`GitChangesMonitoringBackgroundService`), line-stats fill-in, Sync post-hooks, and the Refresh button.
 
@@ -154,7 +154,7 @@ Changed (section) → Repository → Folder* → File
 
 Output is a flattened `List<GitChangesTreeRow>` (kinds: `Section`, `Repository`, `Folder`, `File`, `More`). Collapsed keys omit descendants from the list. **Full** mode: default `_collapsedKeys` empty (fully expanded). **Summary** mode: repositories start collapsed; expanding fetches the **first page** of that prefix (plus first pages of already-open child folders). A partially loaded level ends with a `More` sentinel row; when the virtualizer renders it, the next page is fetched, so the circuit only retains what was scrolled to and every file stays reachable. Caches of collapsed prefixes are evicted once retained children exceed `CircuitVisibleRowBudget` (never expanded ones); a failed fetch shows a toast and the next expand retries. Revealing a selected or walked file pages its ancestors until the file is cached.
 
-Filter (`WorkspaceGitChangeSearchMatcher`) runs **client-side** over hydrated entries in Full mode. In Summary mode, applying a filter reloads into Full (debounced, latest load wins) until Phase 2 server-side search. Supported tokens: plain text, `repo:`, `status:`, `staged:`, `ext:` (via `FilterSearchExpression`).
+Filter (`WorkspaceGitChangeSearchMatcher`) runs **client-side** over hydrated entries in Full mode. In Summary mode it runs **server-side**: `IWorkspaceGitChangesReadService.SearchEntriesAsync` streams entries in `(repository id, path)` keyset order, applies the same predicate (`WorkspaceGitChangeSearchMatcher.Compile`, parsed once), keeps only matches, and returns a page plus a cursor; the first page also reports the total match count. The page (`WorkspaceGitChanges.Search.cs`) debounces typing, cancels the previous query, and holds only the hits fetched so far (`SearchState`). Results render as a normal tree with every folder open and a "Loading more matches..." sentinel that fetches the next page until every match is listed; a "N matches" line shows the total, and section counts are hidden until all pages are loaded. Search results use their own expand state, never persisted and never touching the browse tree's page caches, so clearing the filter returns to the browse tree instantly. A live update re-runs the search to the loaded depth, a snapshot-version change between pages restarts the cursor, and the change walk collects its list with the same paged search. Supported tokens: plain text, `repo:`, `status:`, `staged:`, `ext:` (via `FilterSearchExpression`).
 
 Directory entries (`path` ending in `/`) become `IsDirectoryEntry` Folder rows: no diff, no Stage/Undo.
 
@@ -185,7 +185,7 @@ Worker→App snapshots and SQLite replace are still O(paths) per repository (Pha
 | Path pagination / lazy folder children | `GetEntryPageAsync` + expand in Summary mode |
 | Tree virtualization | `Virtualize` with fixed 28px rows |
 | Client inventory | Full context on Full-mode open; Summary mode holds summaries + expanded prefix pages |
-| Filter | Full client scan of `_view` in Full mode; Summary mode reloads to Full (Phase 2: server search) |
+| Filter | Full client scan of `_view` in Full mode; Summary mode uses paged server-side search (`SearchEntriesAsync`) |
 | Persist strategy | Full delete+insert per repo snapshot |
 | Worker scan batching | Per-repo coalescing only; parallel across repos via `MaxParallelRepositoryOperations` |
 | Diff | On demand, one file; soft size / binary / encoding states in `GitDiffDocument` |
@@ -199,7 +199,7 @@ Phase 1 removes the worst circuit/DOM cliffs for large inventories (summary open
 
 1. **Full replace persist.** Large snapshots contend on the single-writer write queue and rewrite many SQLite rows.
 2. **Worker→App full snapshot JSON.** Near the 10 MiB hub receive cap at ~50K short paths (Phase 4 chunking).
-3. **Client-side search on Full inventories.** Typing a filter walks every hydrated entry (Phase 2).
+3. **Search cost.** Server-side search is an O(N) streamed scan in SQLite (about 0.5 s to page all 5K matches of a 20K inventory); FTS5 stays an option if larger inventories need it.
 4. **Worker porcelain cost.** `--untracked-files=all` can itself be expensive before any UI work starts.
 
 Small workspaces (at or below `FullHydrationMaxEntries`) keep the single-shot Full path: one SQLite read, default expand, no summary round trip.

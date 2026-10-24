@@ -194,6 +194,8 @@
                                  OfflineNotice="@OfflineNotice"
                                  IsFilterActive="@(!string.IsNullOrWhiteSpace(_filterQuery))"
                                  HasChanges="@(ChangedRepositoryCount > 0)"
+                                 SearchSummary="@SearchSummaryText"
+                                 IsSearching="@(SearchActive && _search!.IsLoading)"
                                  SelectedRow="_selectedRow"
                                  OnToggleExpand="ToggleExpanded"
                                  OnLoadMore="LoadMoreAsync"

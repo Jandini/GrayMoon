@@ -12,7 +12,7 @@ Standing rules for every item: no cap or truncation of the inventory (section 0)
 |---|---|---|---|
 | 0 | Permanent benchmark logs (App + Worker), fixture | M0 | [x] |
 | 1 | Circuit and tree: summaries, lazy expand, `Virtualize`, live-update patching | M1 | [x] |
-| 2 | Server-side search, bulk-path call sites, indexes | M2 | [ ] |
+| 2 | Server-side search, bulk-path call sites, indexes | M2 | [~] |
 | 3 | `ContentDigest` and folder summaries persisted | M3 | [ ] |
 | 4 | Worker payload chunking and deltas | M4 | [ ] |
 | 5 | Polish, tests, architecture fold-in | - | [ ] |
@@ -21,7 +21,7 @@ Standing rules for every item: no cap or truncation of the inventory (section 0)
 
 - [x] Folder page unit: **direct children** grouped by next path segment (`GroupDirectChildren` / `GetEntryPageAsync`).
 - [x] Comparer that matches `GitChangesTreeBuilder` ordering: folders (incl. directory entries) first, then files; `OrdinalIgnoreCase` by name.
-- [ ] `SnapshotPathsInlineMax` as a count or a byte budget (M0 favors byte budget; ~145 B/entry short paths, 50K ˜ 8.9 MiB vs 10 MiB hub cap).
+- [ ] `SnapshotPathsInlineMax` as a count or a byte budget (M0 favors byte budget; ~145 B/entry short paths, 50K ï¿½ 8.9 MiB vs 10 MiB hub cap).
 - [ ] Digest computed App-side (stage 1) vs Worker-side (later).
 - [x] Knob defaults from M0: `FullHydrationMaxEntries` = 1_500, `TreePageSize` = 200, `FolderRollupDepth` = 2, `CircuitVisibleRowBudget` = 500 (still tunable).
 
@@ -58,16 +58,16 @@ Standing rules for every item: no cap or truncation of the inventory (section 0)
 
 ## Phase 2 - Search and bulk path consumers
 
-- [ ] `SearchEntriesAsync` with token-to-predicate mapping next to `WorkspaceGitChangeSearchMatcher`
-- [ ] Debounce and cancel in-flight query in the page
-- [ ] Result paging until every match is listed; total match count shown
-- [ ] Call-site audit of `_view.Repositories.SelectMany(r => r.Changes)` and replacements
-- [ ] Copy all paths under a folder (Layer B query)
-- [ ] Change walk next/prev across pages
-- [ ] Shift-range and select-all-in-folder as prefix/section scopes
-- [ ] Search substring cost measured (FTS5 only if needed)
-- [ ] **M2:** filtering 20K does not spike circuit memory; all matches reachable
-
+- [x] `SearchEntriesAsync`: keyset-paged (repo id, path), streams entries in index order and drops non-matches; evaluates the same compiled predicate as `WorkspaceGitChangeSearchMatcher` (`Compile`), so results equal the in-circuit filter. SQL pushdown / FTS5 not needed yet
+- [x] Debounce and cancel in-flight query in the page (`ScheduleSearch`; each keystroke cancels the previous timer and query)
+- [x] Result paging until every match is listed; total match count shown ("N matches") above the tree
+- [x] Filter on a large inventory stays in Summary mode as a search overlay (no more forced full hydration); live updates re-run the search to the user's loaded depth
+- [x] Call-site audit of `_view.Repositories.SelectMany(r => r.Changes)`: copy-all and selection checks already use Layer B (Phase 1); change walk now collects its list with paged search instead of `GetContextAsync`
+- [x] Copy all paths under a folder (Layer B query, `GetEntryPathsAsync`)
+- [x] Change walk next/prev across pages (paged read, list held weakly)
+- [x] Shift-range and select-all-in-folder: reviewed. Shift-range covers only rows between anchor and target, which are materialised rows; folder/section actions already use prefix/section scopes. No change needed
+- [x] Search substring cost measured: 20K-path inventory, 5K matches, all 25 pages of 200 in about 0.5 s total (`GitChangesEntryPageReadServiceTests`); `GitChangesBench` "search page" line logs `ScannedCount` and `QueryMs`
+- [ ] **M2:** automated parts done (all matches reachable, circuit holds only loaded hits). Manual check on the 20K fixture still to do: filter memory trend and scroll to the last match
 ## Phase 3 - Persist rollups and digest
 
 - [ ] `ContentDigest` and `PathsTransferPending` on repository status

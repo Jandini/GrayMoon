@@ -155,6 +155,130 @@ public class GitChangesEntryPageReadServiceTests
     }
 
     [Fact]
+    public async Task SearchEntriesAsync_pages_every_match_without_skipping_or_repeating_and_reports_total_once()
+    {
+        await using var ctx = await GitChangesTestDbContext.CreateAsync();
+        var factory = new GitChangesTestDbContext.TestDbContextFactory(ctx.Options);
+        var paths = Enumerable.Range(0, 25).Select(i => $"src/match{i:00}.cs")
+            .Concat(Enumerable.Range(0, 10).Select(i => $"docs/other{i}.md"))
+            .ToArray();
+        await PersistPathsAsync(ctx, factory, version: 1, paths);
+
+        var contextId = await SpecialContextIdAsync(ctx, factory);
+        var readService = new WorkspaceGitChangesReadService(factory);
+
+        var seen = new List<string>();
+        string? after = null;
+        int? total = null;
+        var pages = 0;
+        do
+        {
+            var page = await readService.SearchEntriesAsync(
+                ctx.WorkspaceId, contextId, "match", after, take: 4, CancellationToken.None);
+            pages++;
+            if (after is null)
+                total = page.TotalMatchCount;
+            else
+                Assert.Null(page.TotalMatchCount);
+
+            seen.AddRange(page.Hits.Select(h => h.Entry.Path));
+            after = page.NextAfterKey;
+        }
+        while (after != null);
+
+        Assert.Equal(25, total);
+        Assert.Equal(7, pages);
+        Assert.Equal(25, seen.Count);
+        Assert.Equal(seen.Distinct().Count(), seen.Count);
+        Assert.All(seen, p => Assert.Contains("match", p));
+    }
+
+    [Fact]
+    public async Task SearchEntriesAsync_returns_the_same_set_as_the_in_circuit_matcher_for_field_tokens()
+    {
+        await using var ctx = await GitChangesTestDbContext.CreateAsync();
+        var factory = new GitChangesTestDbContext.TestDbContextFactory(ctx.Options);
+        string[] paths = ["a.cs", "b.CS", "c.md", "dir/d.cs", "dir/e.txt", "Dir2/f.CS"];
+        await PersistPathsAsync(ctx, factory, version: 1, paths);
+
+        var contextId = await SpecialContextIdAsync(ctx, factory);
+        var readService = new WorkspaceGitChangesReadService(factory);
+
+        foreach (var query in new[] { "ext:cs", "dir", "dir and ext:cs", "ext:md or ext:txt", "status:modified", "staged:true", "zzz" })
+        {
+            var expected = paths
+                .Where(p => WorkspaceGitChangeSearchMatcher.Matches(
+                    null,
+                    new WorkspaceGitChangeEntryView { Path = p, WorktreeChange = GitChangeKind.Modified },
+                    query))
+                .Order(StringComparer.Ordinal)
+                .ToList();
+
+            var page = await readService.SearchEntriesAsync(
+                ctx.WorkspaceId, contextId, query, afterKey: null, take: 100, CancellationToken.None);
+
+            // The repository name is part of the default haystack, so only compare queries independent of it.
+            if (query != "dir")
+            {
+                Assert.Equal(expected, page.Hits.Select(h => h.Entry.Path).Order(StringComparer.Ordinal).ToList());
+                Assert.Equal(expected.Count, page.TotalMatchCount);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task SearchEntriesAsync_reaches_every_match_in_a_20K_inventory()
+    {
+        await using var ctx = await GitChangesTestDbContext.CreateAsync();
+        var factory = new GitChangesTestDbContext.TestDbContextFactory(ctx.Options);
+        var paths = Enumerable.Range(0, 20_000)
+            .Select(i => i % 4 == 0 ? $"src/mod{i % 50}/hit{i:00000}.cs" : $"src/mod{i % 50}/skip{i:00000}.txt")
+            .ToArray();
+        await PersistPathsAsync(ctx, factory, version: 1, paths);
+
+        var contextId = await SpecialContextIdAsync(ctx, factory);
+        var readService = new WorkspaceGitChangesReadService(factory);
+
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        string? after = null;
+        int? total = null;
+        do
+        {
+            var page = await readService.SearchEntriesAsync(
+                ctx.WorkspaceId, contextId, "hit", after, take: 200, CancellationToken.None);
+            total ??= page.TotalMatchCount;
+            foreach (var hit in page.Hits)
+                Assert.True(seen.Add(hit.Entry.Path), "keyset paging repeated a path");
+            after = page.NextAfterKey;
+        }
+        while (after != null);
+        timer.Stop();
+
+        Assert.Equal(5_000, total);
+        Assert.Equal(5_000, seen.Count);
+        Console.WriteLine($"GitChangesBench search 20K: all pages {timer.ElapsedMilliseconds} ms");
+    }
+
+    [Fact]
+    public async Task SearchEntriesAsync_with_blank_filter_matches_every_entry()
+    {
+        await using var ctx = await GitChangesTestDbContext.CreateAsync();
+        var factory = new GitChangesTestDbContext.TestDbContextFactory(ctx.Options);
+        await PersistPathsAsync(ctx, factory, version: 1, "a.txt", "b.txt", "c.txt");
+
+        var contextId = await SpecialContextIdAsync(ctx, factory);
+        var readService = new WorkspaceGitChangesReadService(factory);
+
+        var page = await readService.SearchEntriesAsync(
+            ctx.WorkspaceId, contextId, null, afterKey: null, take: 2, CancellationToken.None);
+
+        Assert.Equal(3, page.TotalMatchCount);
+        Assert.Equal(2, page.Hits.Count);
+        Assert.True(page.HasMore);
+    }
+
+    [Fact]
     public void NodeCache_ignores_a_page_from_another_snapshot_version_and_never_duplicates_children()
     {
         var cache = new GitChangesTreeNodeCache.PrefixPageCache();

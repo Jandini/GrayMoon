@@ -1,6 +1,6 @@
 # Git Changes: scale to tens of thousands of changed files
 
-Status: Phases 0–1 are implemented (permanent benches + M0; circuit/tree summaries, lazy expand, `Virtualize`, per-repo live patch). Phases 2–5 are not. Current product behavior is documented in `docs/architecture/07-git-changes-projection-and-tree.md` (fold Phase 1 detail in Phase 5). Progress is tracked in `docs/todo/git-changes-large-changeset-scale-tracker.md`.
+Status: Phases 0–1 are implemented (permanent benches + M0; circuit/tree summaries, lazy expand, `Virtualize`, per-repo live patch). Phases 2–5 are not (next: Phase 2, then Phase 3a digest only; Phase 3b, 4 and 5 are postponed). Current product behavior is documented in `docs/architecture/07-git-changes-projection-and-tree.md` (fold Phase 1 detail in Phase 5). Progress is tracked in `docs/todo/git-changes-large-changeset-scale-tracker.md`.
 
 ## 0. Non-negotiable requirements (full inventory)
 
@@ -342,19 +342,34 @@ Tasks:
 
 ### Phase 2 - Search and bulk path consumers
 
+Status: implemented (M2 manual check on the 20K fixture pending). Search streams entries in `(repo, path)` keyset order and applies the compiled `WorkspaceGitChangeSearchMatcher` predicate, so it matches the in-circuit filter exactly; SQL pushdown and FTS5 stay optional.
+
 1. Server-side `SearchEntriesAsync` for large mode; debounce from the page; page until all matches listed.
 2. Audit/replace `_view` full-enumeration call sites (copy-all, change walk, any stats).
 3. Indexes migration for Path queries.
 
 **Milestone M2:** filtering a 20K set does not spike circuit memory; every match is reachable via result paging; copy/walk work.
 
-### Phase 3 - Persist rollups + digest
+### Phase 3 - Digest and rollups (split)
 
-1. `ContentDigest` + `WorkspaceGitContextFolderSummaries` written in `GitChangesSnapshotPushHandler`.
+Phase 3 is split in two. Only 3a is scheduled; 3b is postponed.
+
+#### Phase 3a - Content digest (scheduled, after Phase 2)
+
+1. `ContentDigest` and `PathCount` computed App-side in `GitChangesSnapshotPushHandler` and stored on `WorkspaceGitContextRepositoryStatus` (nullable column, additive migration). No Worker change.
+2. `ContextGitChangesUpdated` broadcast carries `repositoryId` and `contentDigest`, so an unchanged digest is a no-op in the page handler (section 4.6).
+3. Tests: digest stability (same entries in any order give the same digest), and a no-op when the digest is unchanged.
+
+**Milestone M3a:** a watcher push with identical content causes no circuit reload or page re-fetch. The `GitChangesBench` live-update line reports `NoOp`.
+
+#### Phase 3b - Folder summaries table (postponed)
+
+1. `WorkspaceGitContextFolderSummaries` written in `GitChangesSnapshotPushHandler`.
 2. Open path uses persisted rollups (no on-the-fly grouping of all entries).
-3. Broadcast includes digest for cheap no-op.
 
-**Milestone M3:** open cost independent of path count for collapsed tree.
+Start 3b only if the `GitChangesBench` open-time logs, after Phase 2, still show open cost growing with path count.
+
+**Milestone M3b:** open cost independent of path count for collapsed tree.
 
 ### Phase 4 - Worker payload chunking / deltas
 

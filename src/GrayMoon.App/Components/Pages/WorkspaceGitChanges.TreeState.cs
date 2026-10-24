@@ -103,5 +103,87 @@ public sealed partial class WorkspaceGitChanges
         }
     }
 
+    private string SelectionStorageKey(int contextId) => $"graymoon.gitChanges.selection.{WorkspaceId}.{contextId}";
+
+    /// <summary>Serialises a remembered selection for localStorage (empty string = nothing selected).</summary>
+    internal static string SerializeSelection(WorkspaceGitChangesSelectionMemory.Selection selection) =>
+        JsonSerializer.Serialize(selection, TreeStateJson);
+
+    /// <summary>Parses <see cref="SerializeSelection"/> output; null for empty, malformed or incomplete data.</summary>
+    internal static WorkspaceGitChangesSelectionMemory.Selection? ParseSelection(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return null;
+
+        try
+        {
+            var selection = JsonSerializer.Deserialize<WorkspaceGitChangesSelectionMemory.Selection>(raw, TreeStateJson);
+            return selection is { FilePath: { Length: > 0 } } ? selection : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Remembers the selected file in the circuit-scoped memory (SPA navigation) and in browser localStorage
+    /// (F5 / Ctrl+F5 destroy the circuit), per Workspace and context, like the tree expand state.
+    /// </summary>
+    private void RememberSelection(GitChangesTreeRow row)
+    {
+        var selection = new WorkspaceGitChangesSelectionMemory.Selection(
+            row.WorkspaceRepositoryId, row.FilePath!, row.IsStagedSection);
+        SelectionMemory.Set(WorkspaceId, selection);
+        _ = WriteSelectionStorageAsync(SerializeSelection(selection));
+    }
+
+    /// <summary>Drops the remembered selection from both the circuit memory and localStorage.</summary>
+    private void ForgetSelection()
+    {
+        SelectionMemory.Clear(WorkspaceId);
+        _ = WriteSelectionStorageAsync(string.Empty);
+    }
+
+    private async Task WriteSelectionStorageAsync(string value)
+    {
+        if (_disposed || _selectedContextId is not { } ctxId)
+            return;
+
+        try
+        {
+            await Js.InvokeVoidAsync("graymoonStorageSet", SelectionStorageKey(ctxId.Value), value);
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to persist Git Changes selection");
+        }
+    }
+
+    /// <summary>Reads the selection stored before a reload. Best-effort; never throws.</summary>
+    private async Task<WorkspaceGitChangesSelectionMemory.Selection?> LoadPersistedSelectionAsync()
+    {
+        if (_disposed || _selectedContextId is not { } ctxId)
+            return null;
+
+        try
+        {
+            var raw = await Js.InvokeAsync<string?>("graymoonStorageGet", SelectionStorageKey(ctxId.Value));
+            return ParseSelection(raw);
+        }
+        catch (JSDisconnectedException)
+        {
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to read persisted Git Changes selection");
+            return null;
+        }
+    }
+
     private static readonly JsonSerializerOptions TreeStateJson = new() { PropertyNameCaseInsensitive = true };
 }

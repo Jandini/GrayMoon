@@ -105,9 +105,9 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         _filterQuery = incoming;
         if (_view != null)
         {
-            // Summary mode cannot filter unhydrated paths in-circuit (Phase 2); reload into Full.
-            if (_hydrationMode == GitChangesHydrationMode.Summary && !string.IsNullOrWhiteSpace(incoming))
-                ScheduleFilterReload();
+            // Summary mode cannot filter unhydrated paths in-circuit: the filter runs as a server-side search.
+            if (_hydrationMode == GitChangesHydrationMode.Summary)
+                ApplySummaryFilter(incoming);
             else
                 RebuildRows();
         }
@@ -283,7 +283,9 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         var openMs = GitChangesBench.ElapsedMs(pending.LoadStarted);
         var heapAfter = GC.GetTotalMemory(forceFullCollection: false);
         var options = GitChangesOptions.Value;
-        var hydrationMode = _hydrationMode == GitChangesHydrationMode.Summary ? "Summary" : "Full";
+        var hydrationMode = _hydrationMode == GitChangesHydrationMode.Summary
+            ? (SearchActive ? "Search" : "Summary")
+            : "Full";
 
         if (pending.EventName == "live update handled")
         {
@@ -402,7 +404,9 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         }
 
         _rows = _hydrationMode == GitChangesHydrationMode.Summary
-            ? GitChangesTreeBuilder.BuildFromCache(_view, _treeNodeCache, _collapsedKeys)
+            ? (SearchActive
+                ? BuildSearchRows()
+                : GitChangesTreeBuilder.BuildFromCache(_view, _treeNodeCache, _collapsedKeys))
             : GitChangesTreeBuilder.Build(_view, _filterQuery, _collapsedKeys);
     }
 
@@ -463,14 +467,21 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
                 return;
             }
 
+            // The in-memory memory dies with the circuit (F5 / Ctrl+F5), so fall back to browser localStorage.
             if (!SelectionMemory.TryGet(WorkspaceId, out var remembered))
             {
-                return;
+                var persisted = await LoadPersistedSelectionAsync();
+                if (persisted is null || _disposed)
+                {
+                    return;
+                }
+
+                remembered = persisted;
             }
 
             if (!await SelectionStillExistsAsync(remembered.WorkspaceRepositoryId, remembered.FilePath, remembered.IsStagedSection))
             {
-                SelectionMemory.Clear(WorkspaceId);
+                ForgetSelection();
                 return;
             }
 
@@ -529,6 +540,12 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
     private async Task EnsureAncestorsExpandedAsync(string filePath, int workspaceRepositoryId, bool isStagedSection)
     {
+        if (SearchActive)
+        {
+            await EnsureSearchHitLoadedAsync(filePath, workspaceRepositoryId, isStagedSection);
+            return;
+        }
+
         ExpandAncestorKeys(filePath, workspaceRepositoryId, isStagedSection);
         await RefreshTreeAsync();
 
@@ -674,7 +691,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
         if (clearMemory)
         {
-            SelectionMemory.Clear(WorkspaceId);
+            ForgetSelection();
         }
 
         if (_diffViewerRef != null)
@@ -713,10 +730,10 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     {
         _filterQuery = value;
         InvalidateWalkableFilesCache();
-        // Large-mode client filter cannot see unhydrated paths; re-open with full hydration when filtering.
-        if (_hydrationMode == GitChangesHydrationMode.Summary && !string.IsNullOrWhiteSpace(value))
+        // Large inventory: the circuit holds no entries, so filtering is a debounced server-side search.
+        if (_hydrationMode == GitChangesHydrationMode.Summary)
         {
-            ScheduleFilterReload();
+            ApplySummaryFilter(value);
             return;
         }
 
@@ -760,8 +777,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         }
 
         _selectedRow = row;
-        SelectionMemory.Set(WorkspaceId, new WorkspaceGitChangesSelectionMemory.Selection(
-            row.WorkspaceRepositoryId, row.FilePath!, row.IsStagedSection));
+        RememberSelection(row);
         _ = LoadDiffAsync(row);
     }
 

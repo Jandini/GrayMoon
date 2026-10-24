@@ -34,7 +34,7 @@ public sealed partial class WorkspaceGitChanges
 
     /// <summary>
     /// Opens the context with either full hydration (small inventories) or summary-first + collapsed repos
-    /// (large). Filter active in large mode falls back to full hydration until Phase 2 server search.
+    /// (large). A filter on a large inventory stays in Summary mode and runs as a server-side search overlay.
     /// </summary>
     private async Task LoadProjectionAsync()
     {
@@ -48,6 +48,7 @@ public sealed partial class WorkspaceGitChanges
 
             _view = workspaceView;
             _hydrationMode = GitChangesHydrationMode.Full;
+            ClearSearch();
             _treeNodeCache.Clear();
             _prefixFetchInFlight.Clear();
             _summaryFoldersSeeded.Clear();
@@ -55,13 +56,12 @@ public sealed partial class WorkspaceGitChanges
         }
 
         var options = GitChangesOptions.Value;
-        var filterActive = !string.IsNullOrWhiteSpace(_filterQuery);
 
         var summaries = await ReadService.GetContextSummariesAsync(WorkspaceId, ctxId, CancellationToken.None);
         if (generation != _loadGeneration)
             return;
 
-        if (!filterActive && options.UseLargeHydration(summaries.TotalEntryCount))
+        if (options.UseLargeHydration(summaries.TotalEntryCount))
         {
             _hydrationMode = GitChangesHydrationMode.Summary;
             _treeNodeCache.Clear();
@@ -78,6 +78,11 @@ public sealed partial class WorkspaceGitChanges
                 return;
 
             await HydrateRestoredTreeAsync();
+            if (generation != _loadGeneration)
+                return;
+
+            // A filter on a large inventory is a server-side search overlay on top of the browse tree.
+            await LoadSearchForProjectionAsync();
             return;
         }
 
@@ -86,12 +91,13 @@ public sealed partial class WorkspaceGitChanges
             return;
 
         _hydrationMode = GitChangesHydrationMode.Full;
+        ClearSearch();
         _treeNodeCache.Clear();
         _prefixFetchInFlight.Clear();
         _summaryFoldersSeeded.Clear();
         InvalidateWalkableFilesCache();
         _view = full;
-        // Small / filtered path keeps today's default-expand: do not seed collapsed keys.
+        // Small path keeps today's default-expand: do not seed collapsed keys.
     }
 
     /// <summary>
@@ -168,8 +174,6 @@ public sealed partial class WorkspaceGitChanges
             else
             {
                 ReplaceRepositoryInView(patched);
-                if (summaryMode)
-                    InvalidateRepositoryCaches(patched.WorkspaceRepositoryId);
             }
 
             if (ShouldSwitchHydrationMode())
@@ -184,7 +188,11 @@ public sealed partial class WorkspaceGitChanges
             }
 
             if (summaryMode && patched is not null)
-                await RehydrateExpandedAsync(patched.WorkspaceRepositoryId);
+                await RefreshRepositoryCachesQuietlyAsync(patched.WorkspaceRepositoryId);
+
+            // Search hits from before the snapshot may be gone or changed: re-run to the same loaded depth.
+            if (summaryMode && SearchActive)
+                await RefreshSearchAsync();
 
             outcome = "PatchedOnly";
             entryCount = summaryMode
@@ -223,24 +231,52 @@ public sealed partial class WorkspaceGitChanges
             LiveWorkspaceId = workspaceId,
             LiveContextId = contextId,
         };
+
+        // Another live patch is mid-way through re-fetching its repository's pages: painting now would show that
+        // repository empty. That patch rebuilds the rows and paints when it finishes.
+        if (_quietCacheRefreshDepth > 0)
+            return;
+
         StateHasChanged();
     }
 
     /// <summary>
-    /// True when the live-patched counts say the other hydration mode now applies. Full mode with an active
-    /// filter never switches (the filter forces Full). Summary mode switches back only when even the
+    /// True when the live-patched counts say the other hydration mode now applies. Summary mode switches back only when even the
     /// double-counting Staged+Changed total fits the threshold, so the distinct path count surely does and the
     /// reload cannot flap straight back into Summary.
     /// </summary>
     private bool ShouldSwitchHydrationMode()
     {
-        if (_view is null || !string.IsNullOrWhiteSpace(_filterQuery))
+        if (_view is null)
             return false;
 
         var options = GitChangesOptions.Value;
         return _hydrationMode == GitChangesHydrationMode.Full
             ? options.UseLargeHydration(_view.Repositories.Sum(r => r.Changes.Count))
             : !options.UseLargeHydration(_view.Repositories.Sum(r => r.StagedCount + r.ChangedCount));
+    }
+
+    /// <summary>
+    /// Greater than zero while a live snapshot is dropping and re-fetching one repository's page caches.
+    /// <see cref="RefreshTreeAsync"/> skips its intermediate paints meanwhile: painting between the drop and the
+    /// re-fetch showed the repository's rows as empty/"Loading..." (a flicker per snapshot, one snapshot per
+    /// repository after a reload). The live patch paints once, with the fresh pages, when it finishes.
+    /// </summary>
+    private int _quietCacheRefreshDepth;
+
+    /// <summary>Drops one repository's caches and re-fetches its expanded prefixes without painting the gap.</summary>
+    private async Task RefreshRepositoryCachesQuietlyAsync(int workspaceRepositoryId)
+    {
+        _quietCacheRefreshDepth++;
+        try
+        {
+            InvalidateRepositoryCaches(workspaceRepositoryId);
+            await RehydrateExpandedAsync(workspaceRepositoryId);
+        }
+        finally
+        {
+            _quietCacheRefreshDepth--;
+        }
     }
 
     private void InvalidateRepositoryCaches(int workspaceRepositoryId)
@@ -275,6 +311,13 @@ public sealed partial class WorkspaceGitChanges
         if (!row.HasChildren)
             return;
 
+        // Search results have their own expand state and never fetch folder pages or persist anything.
+        if (SearchActive)
+        {
+            await ToggleSearchExpandedAsync(row);
+            return;
+        }
+
         var expanding = _collapsedKeys.Contains(row.Key);
         if (expanding)
             _collapsedKeys.Remove(row.Key);
@@ -307,9 +350,11 @@ public sealed partial class WorkspaceGitChanges
 
     /// <summary>Raised by a "Loading more..." sentinel row: fetches the next page of its prefix.</summary>
     private Task LoadMoreAsync(GitChangesTreeRow row) =>
-        row.Kind == GitChangesTreeRowKind.More
-            ? FetchPrefixPageAsync(row.WorkspaceRepositoryId, row.IsStagedSection, row.PathPrefix ?? string.Empty)
-            : Task.CompletedTask;
+        IsSearchMoreRow(row)
+            ? LoadMoreSearchAsync()
+            : row.Kind == GitChangesTreeRowKind.More
+                ? FetchPrefixPageAsync(row.WorkspaceRepositoryId, row.IsStagedSection, row.PathPrefix ?? string.Empty)
+                : Task.CompletedTask;
 
     private static string SectionKeyOf(bool isStagedSection) => isStagedSection ? "staged" : "changed";
 
@@ -542,6 +587,9 @@ public sealed partial class WorkspaceGitChanges
     /// </summary>
     private Task RefreshTreeAsync() => InvokeAsync(() =>
     {
+        if (_quietCacheRefreshDepth > 0)
+            return;
+
         RebuildRows();
         StateHasChanged();
     });

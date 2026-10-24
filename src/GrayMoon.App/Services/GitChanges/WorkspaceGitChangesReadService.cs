@@ -83,6 +83,21 @@ public interface IWorkspaceGitChangesReadService
         string? filter,
         CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Cross-repository search over the persisted inventory, keyset-paged. Only matching entries are ever
+    /// materialised; non-matching rows are streamed past and dropped. An empty filter matches every entry.
+    /// Evaluates the same predicate as <see cref="Ui.WorkspaceGitChangeSearchMatcher"/>, so results equal the
+    /// in-circuit filter used for small inventories. <paramref name="afterKey"/> is the previous page's
+    /// <see cref="GitChangesSearchPage.NextAfterKey"/> (null for the first page, which also reports the total).
+    /// </summary>
+    Task<GitChangesSearchPage> SearchEntriesAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        string? filter,
+        string? afterKey,
+        int take,
+        CancellationToken cancellationToken);
+
     /// <summary>True when any repository in the context has a staged, unstaged, or conflicted file.</summary>
     Task<bool> HasAnyChangesAsync(
         int workspaceId,
@@ -720,6 +735,140 @@ public sealed class WorkspaceGitChangesReadService : IWorkspaceGitChangesReadSer
             ("WorkspaceId", workspaceId),
             ("ContextId", contextId.Value),
             ("WorkspaceRepositoryId", workspaceRepositoryId));
+
+        return result;
+    }
+
+    public async Task<GitChangesSearchPage> SearchEntriesAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        string? filter,
+        string? afterKey,
+        int take,
+        CancellationToken cancellationToken)
+    {
+        var queryStarted = Stopwatch.GetTimestamp();
+        take = Math.Clamp(take, 1, Math.Max(1, _gitChangesOptions.Value.TreePageSize * 4));
+
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        var repos = await (
+            from s in db.WorkspaceGitContextRepositoryStatuses.AsNoTracking()
+            join wr in db.WorkspaceRepositories.AsNoTracking()
+                on s.WorkspaceRepositoryId equals wr.WorkspaceRepositoryId
+            where s.WorkspaceFeatureContextId == contextId.Value && wr.WorkspaceId == workspaceId
+            orderby wr.WorkspaceRepositoryId
+            select new
+            {
+                wr.WorkspaceRepositoryId,
+                RepositoryName = wr.Repository!.RepositoryName,
+                s.SnapshotVersion,
+            }).ToListAsync(cancellationToken);
+
+        var snapshotVersion = repos.Sum(r => r.SnapshotVersion);
+        var matches = WorkspaceGitChangeSearchMatcher.Compile(filter);
+
+        var firstPage = string.IsNullOrEmpty(afterKey);
+        var cursorRepoId = int.MinValue;
+        string? cursorPath = null;
+        if (!firstPage)
+        {
+            var sep = afterKey!.IndexOf('|');
+            if (sep > 0 && int.TryParse(afterKey.AsSpan(0, sep), out var parsedRepoId))
+            {
+                cursorRepoId = parsedRepoId;
+                cursorPath = afterKey[(sep + 1)..];
+            }
+            else
+            {
+                firstPage = true; // Unreadable cursor: restart rather than return nothing.
+            }
+        }
+
+        var hits = new List<GitChangesSearchHit>(take);
+        var totalMatches = 0;
+        var scanned = 0;
+        var hasMore = false;
+        string? nextKey = null;
+
+        foreach (var repo in repos)
+        {
+            if (repo.WorkspaceRepositoryId < cursorRepoId)
+                continue;
+
+            var query = db.WorkspaceGitContextChangeEntries
+                .AsNoTracking()
+                .Where(e => e.WorkspaceFeatureContextId == contextId.Value
+                            && e.WorkspaceRepositoryId == repo.WorkspaceRepositoryId
+                            && (e.IndexChange != GitChangeKind.None || e.WorktreeChange != GitChangeKind.None));
+
+            if (cursorPath is not null && repo.WorkspaceRepositoryId == cursorRepoId)
+            {
+                var after = cursorPath;
+                query = query.Where(e => e.Path.CompareTo(after) > 0);
+            }
+
+            // Streamed in path order on the (ctx, repo, Path) index: rows that do not match are dropped as soon
+            // as they are read, so memory is bounded by the page, not by the repository's inventory.
+            await foreach (var entity in query.OrderBy(e => e.Path).AsAsyncEnumerable().WithCancellation(cancellationToken))
+            {
+                scanned++;
+                var view = ToEntryView(entity);
+                if (!matches(repo.RepositoryName, view))
+                    continue;
+
+                if (hits.Count < take)
+                {
+                    hits.Add(new GitChangesSearchHit
+                    {
+                        WorkspaceRepositoryId = repo.WorkspaceRepositoryId,
+                        RepositoryName = repo.RepositoryName,
+                        Entry = view,
+                    });
+                    totalMatches++;
+                    continue;
+                }
+
+                hasMore = true;
+                if (!firstPage)
+                    break;
+
+                // The first page also reports the total, so it keeps counting past the page boundary.
+                totalMatches++;
+            }
+
+            if (hasMore && !firstPage)
+                break;
+        }
+
+        if (hasMore && hits.Count > 0)
+        {
+            var last = hits[^1];
+            nextKey = $"{last.WorkspaceRepositoryId}|{last.Entry.Path}";
+        }
+
+        var result = new GitChangesSearchPage
+        {
+            SnapshotVersion = snapshotVersion,
+            TotalMatchCount = firstPage ? totalMatches : null,
+            Hits = hits,
+            NextAfterKey = nextKey,
+        };
+
+        GitChangesBench.Log(
+            _logger,
+            _gitChangesOptions.Value,
+            "search page",
+            pathCount: scanned,
+            elapsedMs: GitChangesBench.ElapsedMs(queryStarted),
+            ("FilterLength", filter?.Length ?? 0),
+            ("Take", take),
+            ("ReturnedCount", hits.Count),
+            ("MatchCount", result.TotalMatchCount ?? -1),
+            ("ScannedCount", scanned),
+            ("QueryMs", GitChangesBench.ElapsedMs(queryStarted)),
+            ("WorkspaceId", workspaceId),
+            ("ContextId", contextId.Value));
 
         return result;
     }

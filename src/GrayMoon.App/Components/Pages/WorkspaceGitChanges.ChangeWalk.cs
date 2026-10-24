@@ -148,11 +148,9 @@ public sealed partial class WorkspaceGitChanges
             return [];
         }
 
-        // One SQLite read for walk order only - not retained as the circuit tree inventory.
-        var full = await ReadService.GetContextAsync(WorkspaceId, ctxId, CancellationToken.None);
-        var rows = GitChangesTreeBuilder.Build(full, _filterQuery)
-            .Where(r => r.Kind == GitChangesTreeRowKind.File)
-            .ToList();
+        // Paged read of the matching entries for walk order only (non-matching rows are never materialised),
+        // not retained as the circuit tree inventory.
+        var rows = await CollectWalkableFilesFromSearchAsync();
         var ordered = new List<GitChangesTreeRow>(FileOrdering.Order(rows));
         _walkableFilesCache = new WeakReference<List<GitChangesTreeRow>>(ordered);
         return ordered;
@@ -170,8 +168,7 @@ public sealed partial class WorkspaceGitChanges
         _multiSelectedKeys.Clear();
         _multiSelectAnchorKey = target.Key;
         _selectedRow = target;
-        SelectionMemory.Set(WorkspaceId, new WorkspaceGitChangesSelectionMemory.Selection(
-            target.WorkspaceRepositoryId, target.FilePath!, target.IsStagedSection));
+        RememberSelection(target);
         _scrollSelectionIntoViewPending = true;
 
         await LoadDiffAsync(target, landing);
