@@ -82,6 +82,11 @@
     color: var(--bs-light);
 }
 
+.packages-usedby-badge--zero {
+    background-color: #343a40;
+    color: #adb5bd;
+}
+
 .packages-table td a.packages-usedby-badge--link {
     background-color: var(--bs-secondary);
     color: #fff !important;

@@ -1,6 +1,9 @@
+using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
+using GrayMoon.Application.Features;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace GrayMoon.App.Tests;
 
@@ -176,6 +179,78 @@ public sealed class WorkspaceProjectRepositoryNameCollisionTests
 
         Assert.Equal(2, await db.WorkspaceProjects.CountAsync(p => p.PackageId == "Dup.Pkg"));
         Assert.Equal(0, await db.ProjectDependencies.CountAsync());
+
+        var usage = await db.AmbiguousPackageReferences.SingleAsync();
+        Assert.Equal("Dup.Pkg", usage.PackageId);
+        Assert.Equal("1.2.3", usage.Version);
+        await AssertBothProducersListConsumerAsync(ctx, scope, db);
+    }
+
+    [Fact]
+    public async Task Rescanning_the_consumer_after_the_duplicate_producer_is_gone_records_one_edge_and_drops_usage()
+    {
+        await using var ctx = await GeneratedPackageTestContext.CreateAsync();
+        await using var scope = ctx.CreateScope();
+        var repo = ctx.Repo(scope);
+        var db = ctx.Db(scope);
+
+        await MergeAllAsync(repo, ctx,
+            [Package("x/X.csproj", "Dup.Pkg", "X"), Package("y/Y.csproj", "Dup.Pkg", "Y")],
+            [Consumer(package: "Dup.Pkg")]);
+
+        await MergeAllAsync(repo, ctx, [Package("x/X.csproj", "Dup.Pkg", "X")], [Consumer(package: "Dup.Pkg")]);
+
+        Assert.Equal(0, await db.AmbiguousPackageReferences.CountAsync());
+        var survivor = await db.WorkspaceProjects.SingleAsync(p => p.PackageId == "Dup.Pkg");
+        Assert.Equal(survivor.ProjectId, (await db.ProjectDependencies.SingleAsync()).ReferencedProjectId);
+        var usedBy = await UsedByAsync(ctx, scope);
+        var dependent = Assert.Single(usedBy[survivor.ProjectId]);
+        Assert.Equal("consumer-repo", dependent.RepositoryName);
+    }
+
+    [Fact]
+    public async Task Dropping_the_reference_removes_the_usage_row()
+    {
+        await using var ctx = await GeneratedPackageTestContext.CreateAsync();
+        await using var scope = ctx.CreateScope();
+        var repo = ctx.Repo(scope);
+        var db = ctx.Db(scope);
+
+        await MergeAllAsync(repo, ctx,
+            [Package("x/X.csproj", "Dup.Pkg", "X"), Package("y/Y.csproj", "Dup.Pkg", "Y")],
+            [Consumer(package: "Dup.Pkg")]);
+
+        await MergeAllAsync(repo, ctx,
+            [Package("x/X.csproj", "Dup.Pkg", "X"), Package("y/Y.csproj", "Dup.Pkg", "Y")],
+            [new SyncProjectInfo("Consumer", ProjectType.Library, GeneratedPackageTestContext.ConsumerProjectFilePath, "net10.0", null, [])]);
+
+        Assert.Equal(0, await db.AmbiguousPackageReferences.CountAsync());
+        Assert.Equal(0, await db.ProjectDependencies.CountAsync());
+        Assert.Empty(await UsedByAsync(ctx, scope));
+    }
+
+    [Fact]
+    public async Task A_package_id_with_no_remaining_producer_drops_usage_without_rescanning_the_consumer()
+    {
+        await using var ctx = await GeneratedPackageTestContext.CreateAsync();
+        await using var scope = ctx.CreateScope();
+        var repo = ctx.Repo(scope);
+        var db = ctx.Db(scope);
+
+        await MergeAllAsync(repo, ctx,
+            [Package("x/X.csproj", "Dup.Pkg", "X"), Package("y/Y.csproj", "Dup.Pkg", "Y")],
+            [Consumer(package: "Dup.Pkg")]);
+
+        IReadOnlyList<SyncProjectInfo> producer =
+        [
+            new("X", ProjectType.Library, "x/X.csproj", "net10.0", null, []),
+            new("Y", ProjectType.Library, "y/Y.csproj", "net10.0", null, []),
+        ];
+        await repo.MergeWorkspaceProjectsAsync(ctx.WorkspaceId, ctx.ProducerRepositoryId, producer);
+        await repo.MergeWorkspaceProjectDependenciesAsync(ctx.WorkspaceId, [(ctx.ProducerRepositoryId, (IReadOnlyList<SyncProjectInfo>?)producer)]);
+
+        Assert.Equal(0, await db.AmbiguousPackageReferences.CountAsync());
+        Assert.Equal(0, await db.ProjectDependencies.CountAsync());
     }
 
     [Fact]
@@ -195,6 +270,7 @@ public sealed class WorkspaceProjectRepositoryNameCollisionTests
         await repo.MergeWorkspaceProjectDependenciesAsync(ctx.WorkspaceId, [(ctx.ProducerRepositoryId, producer)]);
 
         Assert.Equal(0, await db.ProjectDependencies.CountAsync());
+        Assert.Equal(0, await db.AmbiguousPackageReferences.CountAsync());
     }
 
     [Fact]
@@ -385,5 +461,23 @@ public sealed class WorkspaceProjectRepositoryNameCollisionTests
         Assert.Equal(["A", "B"], rows.Select(r => r.ProjectName));
         Assert.Null(rows[0].PackageId);
         Assert.Equal("B", rows[1].PackageId);
+    }
+
+    private static Task<IReadOnlyDictionary<int, IReadOnlyList<PackageDependentRepository>>> UsedByAsync(
+        GeneratedPackageTestContext ctx, AsyncServiceScope scope) =>
+        ctx.Repo(scope).GetPackageDependentRepositoriesAsync(ctx.WorkspaceId, new WorkspaceFeatureContextId(ctx.SpecialContextId));
+
+    private static async Task AssertBothProducersListConsumerAsync(
+        GeneratedPackageTestContext ctx, AsyncServiceScope scope, AppDbContext db)
+    {
+        var usedBy = await UsedByAsync(ctx, scope);
+        var producers = await db.WorkspaceProjects.Where(p => p.PackageId == "Dup.Pkg").ToListAsync();
+        Assert.Equal(2, producers.Count);
+        foreach (var producer in producers)
+        {
+            var dependent = Assert.Single(usedBy[producer.ProjectId]);
+            Assert.Equal("consumer-repo", dependent.RepositoryName);
+            Assert.True(dependent.IsDirect);
+        }
     }
 }

@@ -14,6 +14,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
     public DbSet<WorkspaceRepositoryAction> WorkspaceRepositoryActions => Set<WorkspaceRepositoryAction>();
     public DbSet<WorkspaceProject> WorkspaceProjects => Set<WorkspaceProject>();
     public DbSet<ProjectDependency> ProjectDependencies => Set<ProjectDependency>();
+    public DbSet<AmbiguousPackageReference> AmbiguousPackageReferences => Set<AmbiguousPackageReference>();
     public DbSet<RepositoryBranch> RepositoryBranches => Set<RepositoryBranch>();
     public DbSet<WorkspaceFile> WorkspaceFiles => Set<WorkspaceFile>();
     public DbSet<WorkspaceFileVersionConfig> WorkspaceFileVersionConfigs => Set<WorkspaceFileVersionConfig>();
@@ -325,6 +326,26 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
             entity.HasOne(d => d.ReferencedProject)
                 .WithMany(p => p.ReferencedBy)
                 .HasForeignKey(d => d.ReferencedProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AmbiguousPackageReference>(entity =>
+        {
+            entity.HasKey(d => d.AmbiguousPackageReferenceId);
+            entity.HasIndex(d => new { d.DependentProjectId, d.PackageId })
+                .IsUnique()
+                .HasDatabaseName("IX_AmbiguousPackageReferences_DependentProjectId_PackageId");
+
+            entity.Property(d => d.PackageId)
+                .IsRequired()
+                .HasMaxLength(200);
+
+            entity.Property(d => d.Version)
+                .HasMaxLength(100);
+
+            entity.HasOne(d => d.DependentProject)
+                .WithMany()
+                .HasForeignKey(d => d.DependentProjectId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

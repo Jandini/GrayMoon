@@ -182,9 +182,9 @@
                                                             </div>
                                                         </span>
                                                     }
-                                                    else
+                                                    else if (_packageConsumersResolved)
                                                     {
-                                                        <span class="text-muted">-</span>
+                                                        <span class="badge packages-usedby-badge packages-usedby-badge--zero">0</span>
                                                     }
                                                 </td>
                                                 <td class="col-registry text-muted">@(p.MatchedConnector?.ConnectorName ?? "-")</td>
@@ -211,10 +211,13 @@
     public int? ContextQuery { get; set; }
 
     [Inject] private WorkspaceContextNavigationService ContextNavigation { get; set; } = default!;
+    [Inject] private IWorkspaceFeatureContextResolver ContextResolver { get; set; } = default!;
     [Inject] private IWorkspacePageAccessResolver PageAccess { get; set; } = default!;
 
     private WorkspacePageAccessOutcome? _pageAccess;
     private WorkspaceFeatureContextId? _selectedContextId;
+    /// <summary>True once the selected context has been synced, so a package with no referencing repositories is a real zero.</summary>
+    private bool _packageConsumersResolved;
     private WorkspaceModel? workspace;
     private List<WorkspaceProject> packages = new();
     private IReadOnlyDictionary<int, IReadOnlyList<PackageDependentRepository>> dependentRepositories =
@@ -264,6 +267,7 @@
         {
             var info = await ContextNavigation.ResolveForPageAsync(WorkspaceId, ContextQuery);
             _selectedContextId = info.ContextId;
+            _packageConsumersResolved = info.LastSyncedAt != null;
             await LoadAsync();
         });
     }
@@ -271,6 +275,8 @@
     private async Task OnSelectedContextChangedAsync(WorkspaceFeatureContextId contextId)
     {
         _selectedContextId = contextId;
+        var info = await ContextResolver.GetRequiredAsync(contextId, WorkspaceId);
+        _packageConsumersResolved = info.LastSyncedAt != null;
         await LoadAsync();
     }
 
@@ -286,6 +292,7 @@
                 errorMessage = "Workspace not found.";
                 packages = new List<WorkspaceProject>();
                 dependentRepositories = new Dictionary<int, IReadOnlyList<PackageDependentRepository>>();
+                _packageConsumersResolved = false;
                 return;
             }
             packages = _selectedContextId is WorkspaceFeatureContextId ctx
@@ -299,6 +306,7 @@
             errorMessage = "Failed to load packages. Please try again later.";
             packages = new List<WorkspaceProject>();
             dependentRepositories = new Dictionary<int, IReadOnlyList<PackageDependentRepository>>();
+            _packageConsumersResolved = false;
         }
         finally
         {

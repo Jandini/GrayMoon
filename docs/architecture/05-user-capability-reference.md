@@ -734,7 +734,7 @@ Available only for .NET Dependency Workspaces (section 1).
 
 ### User sees
 
-Package-producing projects and matched registry, plus a **Used by** count: the other workspace repositories that restore the package in the selected context. That includes repositories that get it transitively through another workspace package, because `dotnet restore` downloads it there too. The package's own repository is never counted. Hovering the count lists the repositories, marking transitive ones "via <package>", with a copy button. The count is gray whether or not it opens GitHub settings. The color does not report Actions access.
+Package-producing projects and matched registry, plus a **Used by** count: the other workspace repositories that restore the package in the selected context. That includes repositories that get it transitively through another workspace package, because `dotnet restore` downloads it there too. The package's own repository is never counted. Before the selected context has been synced the cell is empty. After a sync, a package with no referencing repositories shows 0 in a darker badge. When several projects publish the same package id, Used by still lists those repositories on each of them. Dependencies and push order leave that package out until one publisher remains; the next sync of a referencing repository then stores the normal dependency and removes the extra list. Hovering the count lists the repositories, marking transitive ones "via <package>", with a copy button. The count is gray whether or not it opens GitHub settings. The color does not report Actions access.
 
 ### User can
 
@@ -746,6 +746,7 @@ Synchronize registry matching. When the package is on GitHub Packages, clicking 
 WorkspacePackages page
 WorkspaceProjectRepository package queries
   GetPackageDependentRepositoriesAsync / ResolvePackageDependentRepositories (Used by)
+  AmbiguousPackageReferences (consumers of a package id published by several projects; not a graph edge)
 RepositoryUrlHelper.GetGitHubNuGetPackageSettingsUrl
 connector/package-registry services
 ```

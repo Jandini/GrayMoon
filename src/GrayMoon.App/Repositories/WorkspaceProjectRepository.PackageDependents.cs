@@ -9,7 +9,8 @@ public sealed partial class WorkspaceProjectRepository
     /// <summary>
     /// Returns, per package project (keyed by ProjectId), the other workspace repositories that restore it, directly or
     /// transitively through other workspace packages, scoped to a single context (null reproduces the legacy, unscoped
-    /// behavior). The package's own repository is never listed.
+    /// behavior). The package's own repository is never listed. A package id published by several projects has no
+    /// dependency-graph edge; the repositories that reference it are still listed, on every project that publishes it.
     /// </summary>
     public async Task<IReadOnlyDictionary<int, IReadOnlyList<PackageDependentRepository>>> GetPackageDependentRepositoriesAsync(
         int workspaceId,
@@ -27,10 +28,51 @@ public sealed partial class WorkspaceProjectRepository
             .Select(d => new { d.DependentProjectId, d.ReferencedProjectId })
             .ToListAsync(cancellationToken);
 
+        var usages = await dbContext.AmbiguousPackageReferences
+            .AsNoTracking()
+            .Where(u => projectIdSet.Contains(u.DependentProjectId))
+            .Select(u => new { u.DependentProjectId, u.PackageId })
+            .ToListAsync(cancellationToken);
+
         var nodes = scopedProjects
             .Select(p => new PackageDependentsNode(p.ProjectId, p.RepositoryId, p.Repository?.RepositoryName ?? string.Empty, p.PackageId))
             .ToList();
-        return ResolvePackageDependentRepositories(nodes, edges.Select(e => (e.DependentProjectId, e.ReferencedProjectId)).ToList());
+        var combined = edges.Select(e => (e.DependentProjectId, e.ReferencedProjectId)).ToList();
+        combined.AddRange(EdgesForAmbiguousUsages(nodes, usages.Select(u => (u.DependentProjectId, u.PackageId))));
+        return ResolvePackageDependentRepositories(nodes, combined);
+    }
+
+    /// <summary>
+    /// One direct edge from the referencing project to every project that publishes the package id. These edges are
+    /// not stored; the dependency graph keeps a single producer.
+    /// </summary>
+    private static List<(int DependentProjectId, int ReferencedProjectId)> EdgesForAmbiguousUsages(
+        IReadOnlyList<PackageDependentsNode> projects,
+        IEnumerable<(int DependentProjectId, string PackageId)> usages)
+    {
+        var producersByPackage = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var project in projects)
+        {
+            var packageId = project.PackageId?.Trim();
+            if (string.IsNullOrEmpty(packageId))
+                continue;
+            if (!producersByPackage.TryGetValue(packageId, out var producers))
+                producersByPackage[packageId] = producers = [];
+            producers.Add(project.ProjectId);
+        }
+
+        var edges = new List<(int DependentProjectId, int ReferencedProjectId)>();
+        foreach (var (dependentProjectId, packageId) in usages)
+        {
+            if (!producersByPackage.TryGetValue(packageId.Trim(), out var producers))
+                continue;
+            foreach (var producerId in producers)
+            {
+                if (producerId != dependentProjectId)
+                    edges.Add((dependentProjectId, producerId));
+            }
+        }
+        return edges;
     }
 
     /// <summary>Project facts needed by <see cref="ResolvePackageDependentRepositories"/>.</summary>

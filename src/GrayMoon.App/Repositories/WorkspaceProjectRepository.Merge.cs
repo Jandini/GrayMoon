@@ -293,7 +293,7 @@ public sealed partial class WorkspaceProjectRepository
         return context.WorkspaceFeatureContextId;
     }
 
-    /// <summary>Replaces project dependencies for workspace projects from sync results. Dependents are resolved by physical path and referenced packages by unambiguous effective PackageId; a package published by several projects creates no edge. Edges pointing at a project that is no longer a unique producer are removed. When <paramref name="persistDependencyLevel"/> is true, levels are recomputed from the full DB graph (not the partial merge batch). When false, callers such as <c>WorkspaceGitService.PersistVersionsAsync</c> follow with <c>RecomputeAndPersistRepositoryDependencyStatsAsync</c>.</summary>
+    /// <summary>Replaces project dependencies for workspace projects from sync results. Dependents are resolved by physical path and referenced packages by unambiguous effective PackageId; a package published by several projects creates no edge. Those references are stored in <see cref="AmbiguousPackageReference"/> so Packages can list the consumers, and that list is replaced when the consumer is scanned and removed when nothing in the context still publishes the package id. Edges pointing at a project that is no longer a unique producer are removed. When <paramref name="persistDependencyLevel"/> is true, levels are recomputed from the full DB graph (not the partial merge batch). When false, callers such as <c>WorkspaceGitService.PersistVersionsAsync</c> follow with <c>RecomputeAndPersistRepositoryDependencyStatsAsync</c>.</summary>
     public async Task MergeWorkspaceProjectDependenciesAsync(
         int workspaceId,
         IReadOnlyList<(int RepoId, IReadOnlyList<SyncProjectInfo>? ProjectsDetail)> syncResults,
@@ -333,6 +333,7 @@ public sealed partial class WorkspaceProjectRepository
 
         var dependentProjectIds = new HashSet<int>();
         var edges = new List<(int DependentProjectId, int ReferencedProjectId, string? Version)>();
+        var ambiguousUsages = new List<(int DependentProjectId, string PackageId, string? Version)>();
         var ambiguousConsumers = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var (repoId, projectsDetail) in syncResults)
@@ -360,7 +361,10 @@ public sealed partial class WorkspaceProjectRepository
                     var resolution = targets.Resolve(pr.Name);
                     if (resolution.IsAmbiguous)
                     {
-                        ambiguousConsumers[pr.Name.Trim()] = ambiguousConsumers.GetValueOrDefault(pr.Name.Trim()) + 1;
+                        var packageId = pr.Name.Trim();
+                        ambiguousConsumers[packageId] = ambiguousConsumers.GetValueOrDefault(packageId) + 1;
+                        var usageVersion = string.IsNullOrWhiteSpace(pr.Version) ? null : pr.Version.Trim();
+                        ambiguousUsages.Add((dependentProjectId, packageId, usageVersion));
                         continue;
                     }
                     if (resolution.ProjectId is not { } referencedProjectId) continue;
@@ -371,10 +375,12 @@ public sealed partial class WorkspaceProjectRepository
             }
         }
 
+        var usageByDependent = DeduplicateAmbiguousUsages(ambiguousUsages);
         foreach (var (packageId, consumers) in ambiguousConsumers)
             logger.LogWarning(
-                "Project identity diagnostic: Category=AmbiguousPackageProducer, WorkspaceId={WorkspaceId}, ContextId={ContextId}, PackageId={PackageId}, ProducerCount={ProducerCount}, Producers={Producers}, ConsumerReferences={Consumers}, Resolution=NoEdge",
-                workspaceId, workspaceFeatureContextId, packageId, targets.ProducerCount(packageId), targets.DescribeProducers(packageId), consumers);
+                "Project identity diagnostic: Category=AmbiguousPackageProducer, WorkspaceId={WorkspaceId}, ContextId={ContextId}, PackageId={PackageId}, ProducerCount={ProducerCount}, Producers={Producers}, ConsumerReferences={Consumers}, UsageRows={UsageRows}, Resolution=NoEdge",
+                workspaceId, workspaceFeatureContextId, packageId, targets.ProducerCount(packageId), targets.DescribeProducers(packageId), consumers,
+                usageByDependent.Count(u => string.Equals(u.PackageId, packageId, StringComparison.OrdinalIgnoreCase)));
 
         // An edge is valid only while its referenced project is the unique producer of a package. Producers can lose
         // that status (PackageId removed or changed, project removed, a second producer appeared) in a scan that does
@@ -393,42 +399,108 @@ public sealed partial class WorkspaceProjectRepository
                 workspaceId, workspaceFeatureContextId, staleEdges.Count);
         }
 
-        if (dependentProjectIds.Count == 0)
+        var uniqueEdges = new List<(int DependentProjectId, int ReferencedProjectId, string? Version)>();
+        if (dependentProjectIds.Count > 0)
         {
-            if (staleEdges.Count > 0)
+            var existing = await dbContext.ProjectDependencies
+                .Where(d => dependentProjectIds.Contains(d.DependentProjectId))
+                .ToListAsync(cancellationToken);
+            dbContext.ProjectDependencies.RemoveRange(existing);
+
+            uniqueEdges = edges
+                .GroupBy(e => (e.DependentProjectId, e.ReferencedProjectId))
+                .Select(g => (g.Key.DependentProjectId, g.Key.ReferencedProjectId, g.First().Version))
+                .ToList();
+            foreach (var (depId, refId, version) in uniqueEdges)
             {
-                await dbContext.SaveChangesAsync(cancellationToken);
-                if (persistDependencyLevel)
-                    await RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, workspaceFeatureContextId, cancellationToken);
+                dbContext.ProjectDependencies.Add(new ProjectDependency
+                {
+                    DependentProjectId = depId,
+                    ReferencedProjectId = refId,
+                    Version = version
+                });
             }
+
+            await ReplaceAmbiguousUsagesAsync(dependentProjectIds, usageByDependent, cancellationToken);
+        }
+
+        var droppedUsage = await DropUnproducedAmbiguousUsagesAsync(workspaceProjects, cancellationToken);
+        var usageChanged = dependentProjectIds.Count > 0 || droppedUsage > 0;
+        if (staleEdges.Count == 0 && !usageChanged)
             return;
-        }
-
-        var existing = await dbContext.ProjectDependencies
-            .Where(d => dependentProjectIds.Contains(d.DependentProjectId))
-            .ToListAsync(cancellationToken);
-        dbContext.ProjectDependencies.RemoveRange(existing);
-
-        var uniqueEdges = edges
-            .GroupBy(e => (e.DependentProjectId, e.ReferencedProjectId))
-            .Select(g => (g.Key.DependentProjectId, g.Key.ReferencedProjectId, g.First().Version))
-            .ToList();
-        foreach (var (depId, refId, version) in uniqueEdges)
-        {
-            dbContext.ProjectDependencies.Add(new ProjectDependency
-            {
-                DependentProjectId = depId,
-                ReferencedProjectId = refId,
-                Version = version
-            });
-        }
 
         await dbContext.SaveChangesAsync(cancellationToken);
-        logger.LogInformation("Persistence: ProjectDependencies. WorkspaceId={WorkspaceId}, ContextId={ContextId}, DependentCount={Count}, EdgeCount={Edges}",
-            workspaceId, workspaceFeatureContextId, dependentProjectIds.Count, uniqueEdges.Count);
+        if (dependentProjectIds.Count > 0)
+            logger.LogInformation("Persistence: ProjectDependencies. WorkspaceId={WorkspaceId}, ContextId={ContextId}, DependentCount={Count}, EdgeCount={Edges}, AmbiguousUsageRows={UsageRows}",
+                workspaceId, workspaceFeatureContextId, dependentProjectIds.Count, uniqueEdges.Count, usageByDependent.Count);
 
-        if (persistDependencyLevel)
+        // Levels follow graph edges only. A usage-row cleanup does not change them.
+        if (persistDependencyLevel && (staleEdges.Count > 0 || dependentProjectIds.Count > 0))
             await RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, workspaceFeatureContextId, cancellationToken);
+    }
+
+    /// <summary>One row per consumer project and package id. A repeated reference keeps the first version.</summary>
+    private static List<(int DependentProjectId, string PackageId, string? Version)> DeduplicateAmbiguousUsages(
+        List<(int DependentProjectId, string PackageId, string? Version)> usages)
+    {
+        var unique = new List<(int DependentProjectId, string PackageId, string? Version)>();
+        foreach (var usage in usages)
+        {
+            if (unique.Any(existing => existing.DependentProjectId == usage.DependentProjectId
+                    && string.Equals(existing.PackageId, usage.PackageId, StringComparison.OrdinalIgnoreCase)))
+                continue;
+            unique.Add(usage);
+        }
+        return unique;
+    }
+
+    /// <summary>Replaces usage rows for the projects included in this scan. A consumer that no longer references an ambiguous package loses its row.</summary>
+    private async Task ReplaceAmbiguousUsagesAsync(
+        HashSet<int> dependentProjectIds,
+        IReadOnlyList<(int DependentProjectId, string PackageId, string? Version)> usages,
+        CancellationToken cancellationToken)
+    {
+        var existing = await dbContext.AmbiguousPackageReferences
+            .Where(u => dependentProjectIds.Contains(u.DependentProjectId))
+            .ToListAsync(cancellationToken);
+        dbContext.AmbiguousPackageReferences.RemoveRange(existing);
+        foreach (var usage in usages)
+        {
+            dbContext.AmbiguousPackageReferences.Add(new AmbiguousPackageReference
+            {
+                DependentProjectId = usage.DependentProjectId,
+                PackageId = usage.PackageId,
+                Version = usage.Version
+            });
+        }
+    }
+
+    /// <summary>Deletes usage whose package id is no longer published by any project in this context, including when the consumer itself was not scanned.</summary>
+    private async Task<int> DropUnproducedAmbiguousUsagesAsync(
+        IReadOnlyList<WorkspaceProject> workspaceProjects,
+        CancellationToken cancellationToken)
+    {
+        var produced = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var project in workspaceProjects)
+        {
+            var packageId = project.PackageId?.Trim();
+            if (!string.IsNullOrEmpty(packageId))
+                produced.Add(packageId);
+        }
+
+        var projectIds = workspaceProjects.Select(p => p.ProjectId).ToList();
+        var rows = await dbContext.AmbiguousPackageReferences
+            .Where(u => projectIds.Contains(u.DependentProjectId))
+            .ToListAsync(cancellationToken);
+        var stale = rows
+            .Where(u => dbContext.Entry(u).State != EntityState.Deleted && !produced.Contains(u.PackageId))
+            .ToList();
+        if (stale.Count == 0)
+            return 0;
+
+        dbContext.AmbiguousPackageReferences.RemoveRange(stale);
+        logger.LogInformation("Persistence: AmbiguousPackageReferences. Action=DropUnproduced, Rows={Rows}", stale.Count);
+        return stale.Count;
     }
 
     /// <summary>Legacy overload for callers without a context id: resolves the special Workspace context.</summary>
