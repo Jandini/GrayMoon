@@ -354,7 +354,9 @@ Status: implemented (M2 manual check on the 20K fixture pending). Search streams
 
 Phase 3 is split in two. Only 3a is scheduled; 3b is postponed.
 
-#### Phase 3a - Content digest (scheduled, after Phase 2)
+#### Phase 3a - Content digest (implemented)
+
+Implemented: the digest also folds in the status fields the page shows (branch, head, state flags, counts, line stats), not only entry tuples, because line stats and branch can change with identical entries and the page must still repaint then.
 
 1. `ContentDigest` and `PathCount` computed App-side in `GitChangesSnapshotPushHandler` and stored on `WorkspaceGitContextRepositoryStatus` (nullable column, additive migration). No Worker change.
 2. `ContextGitChangesUpdated` broadcast carries `repositoryId` and `contentDigest`, so an unchanged digest is a no-op in the page handler (section 4.6).

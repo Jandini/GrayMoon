@@ -143,6 +143,27 @@ public sealed class GitChangesSnapshotPushHandler(
 
         ApplyStatus(existingContext, snapshot, stagedCount, changedCount, conflictCount);
 
+        // Computed from the persisted values (line stats may carry over from the previous row), so equal digests
+        // mean the page would paint exactly what it already shows.
+        var contentDigest = GitChangesContentDigest.Compute(
+            snapshot.Changes,
+            existingContext.BranchName,
+            existingContext.HeadCommit,
+            existingContext.IsDetachedHead,
+            existingContext.IsUnbornBranch,
+            existingContext.IsMerging,
+            existingContext.IsRebasing,
+            existingContext.IsCherryPicking,
+            existingContext.StagedCount,
+            existingContext.ChangedCount,
+            existingContext.ConflictCount,
+            existingContext.Insertions,
+            existingContext.Deletions,
+            existingContext.StagedInsertions,
+            existingContext.StagedDeletions);
+        existingContext.ContentDigest = contentDigest;
+        existingContext.PathCount = pathCount;
+
         if (writeLegacy)
         {
             if (existingLegacy == null)
@@ -210,6 +231,7 @@ public sealed class GitChangesSnapshotPushHandler(
             notification.WorkspaceId,
             contextId.Value.Value,
             notification.RepositoryId,
+            contentDigest,
             cancellationToken: cancellationToken);
 
         if (writeLegacy)

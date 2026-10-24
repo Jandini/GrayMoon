@@ -41,4 +41,20 @@ public static partial class Migrations
 
         logger?.LogDebug("Git Changes path indexes are present.");
     }
+
+    /// <summary>
+    /// Content digest and distinct path count on the context repository status. Strict step 14. Idempotent,
+    /// nullable columns only: rows written before this step stay null until their next snapshot.
+    /// </summary>
+    public static async Task MigrateGitChangesContentDigestAsync(AppDbContext dbContext, ILogger? logger = null)
+    {
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != ConnectionState.Open)
+            await conn.OpenAsync();
+
+        await AddNullableTextColumnIfMissingAsync(conn, "WorkspaceGitContextRepositoryStatuses", "ContentDigest");
+        await AddNullableIntegerColumnIfMissingAsync(conn, "WorkspaceGitContextRepositoryStatuses", "PathCount");
+
+        logger?.LogDebug("Git Changes content digest columns are present.");
+    }
 }

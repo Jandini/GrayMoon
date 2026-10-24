@@ -153,6 +153,7 @@ public static class GitChangesTreeBuilder
                 StagedDeletions = s.StagedDeletions,
                 WorkerScannedAt = s.WorkerScannedAt,
                 PersistedAt = s.PersistedAt,
+                ContentDigest = s.ContentDigest,
                 LastErrorCode = s.LastErrorCode,
                 LastErrorMessage = s.LastErrorMessage,
                 Changes = [],

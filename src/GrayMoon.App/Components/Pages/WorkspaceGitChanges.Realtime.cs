@@ -28,8 +28,8 @@ public sealed partial class WorkspaceGitChanges
                 return Task.CompletedTask;
             });
 
-            // (workspaceId, contextId, repositoryId) - repositoryId is Repository.RepositoryId.
-            _hubConnection.On<int, int, int>("ContextGitChangesUpdated", async (workspaceId, contextId, repositoryId) =>
+            // (workspaceId, contextId, repositoryId, contentDigest) - repositoryId is Repository.RepositoryId.
+            _hubConnection.On<int, int, int, string?>("ContextGitChangesUpdated", async (workspaceId, contextId, repositoryId, contentDigest) =>
             {
                 if (workspaceId != WorkspaceId || _disposed)
                     return;
@@ -40,13 +40,37 @@ public sealed partial class WorkspaceGitChanges
                     return;
                 }
 
-                await InvokeAsync(() => PatchRepositoryLiveAsync(workspaceId, contextId, repositoryId));
+                await InvokeAsync(() =>
+                {
+                    // Same digest as what the page already shows: nothing to read, rebuild or re-fetch.
+                    if (IsLiveUpdateDigestUnchanged(repositoryId, contentDigest))
+                    {
+                        LogLiveUpdateNoOp(workspaceId, contextId);
+                        return Task.CompletedTask;
+                    }
+
+                    return PatchRepositoryLiveAsync(workspaceId, contextId, repositoryId);
+                });
             });
 
             _ = WorkspaceSyncHubConnectionHelper.TryStartAsync(_hubConnection, Logger);
         }
 
         await ScrollSelectionIntoViewIfPendingAsync();
+    }
+
+    /// <summary>
+    /// True when the broadcast digest equals the digest of the repository already in <see cref="_view"/>. A missing
+    /// digest (old rows, unknown repository, no view yet) is never a no-op.
+    /// </summary>
+    private bool IsLiveUpdateDigestUnchanged(int repositoryId, string? contentDigest)
+    {
+        if (string.IsNullOrEmpty(contentDigest) || _view is null)
+            return false;
+
+        var current = _view.Repositories.FirstOrDefault(r => r.RepositoryId == repositoryId);
+        return current?.ContentDigest is { Length: > 0 } known
+               && string.Equals(known, contentDigest, StringComparison.Ordinal);
     }
 
     private void LogLiveUpdateNoOp(int workspaceId, int contextId)

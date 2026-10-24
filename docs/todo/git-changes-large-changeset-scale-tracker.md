@@ -70,11 +70,12 @@ Standing rules for every item: no cap or truncation of the inventory (section 0)
 - [ ] **M2:** automated parts done (all matches reachable, circuit holds only loaded hits). Manual check on the 20K fixture still to do: filter memory trend and scroll to the last match
 ## Phase 3 - Persist rollups and digest
 
-- [ ] `ContentDigest` and `PathsTransferPending` on repository status
+- [x] Phase 3a: `ContentDigest` and `PathCount` on repository status (App-side, migration 14, nullable). The digest covers every entry plus the status fields the page shows (branch, head, flags, counts, line stats), so an equal digest means an identical paint
+- [x] Phase 3a: broadcast carries `repositoryId` and `contentDigest`; the page no-ops (`NoOp` bench line) when it equals the digest of the repository already in view. Tests: `GitChangesContentDigestTests`
+- [ ] `PathsTransferPending` on repository status (Phase 4)
 - [ ] `WorkspaceGitContextFolderSummaries` table (per section) via numbered migration
 - [ ] Written in `GitChangesSnapshotPushHandler` from the same entry set
 - [ ] Open path uses persisted rollups; tolerate missing rollups on old data
-- [ ] Broadcast carries `repositoryId`, `contentDigest`, counts; no-op on unchanged digest
 - [ ] **M3:** open cost independent of path count for a collapsed tree
 
 ## Phase 4 - Worker payload chunking and deltas
@@ -115,6 +116,7 @@ Notes from M0: ~145 UTF-8 bytes/entry on the wire for short paths; 50K is ~8.9 M
 
 | Date | Change |
 |---|---|
+| 2026-10-24 | Phase 3a done: App-side `ContentDigest` + `PathCount` (migration 14); `ContextGitChangesUpdated` carries the digest; unchanged digest is a page no-op. |
 | 2026-10-24 | Phase 1 done: summary-first open above `FullHydrationMaxEntries`, `GetEntryPageAsync` + `TreeNodeCache`, `Virtualize`, per-repo live patch (`PatchedOnly`), path indexes migration 13. |
 | 2026-10-24 | App open/live-update benches include `CircuitPaintMs` (tree StateHasChanged ? OnAfterRender) so felt UI lag is visible in logs. |
 | 2026-10-24 | Phase 0 done: permanent `GitChangesBench` logs (App+Worker), floors on `GitChangesOptions`, fixture script, M0 numbers recorded. |

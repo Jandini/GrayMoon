@@ -45,6 +45,7 @@ public static partial class Migrations
         (11, "WorkspaceProjects identity key", dbContext => MigrateWorkspaceProjectIdentityKeyAsync(dbContext)),
         (12, "Ambiguous package reference usage", dbContext => MigrateAmbiguousPackageReferencesAsync(dbContext)),
         (13, "Git Changes path indexes", dbContext => MigrateGitChangesPathIndexesAsync(dbContext)),
+        (14, "Git Changes content digest", dbContext => MigrateGitChangesContentDigestAsync(dbContext)),
     };
 
     public static async Task RunAllAsync(AppDbContext dbContext, ILogger? logger = null)

@@ -43,6 +43,9 @@ public sealed record WorkspaceGitChangesRepositoryView
     public DateTimeOffset? WorkerScannedAt { get; init; }
     public DateTimeOffset? PersistedAt { get; init; }
 
+    /// <summary>Persisted content digest of this repository's snapshot; null on rows that predate the digest.</summary>
+    public string? ContentDigest { get; init; }
+
     public string? LastErrorCode { get; init; }
     public string? LastErrorMessage { get; init; }
 
