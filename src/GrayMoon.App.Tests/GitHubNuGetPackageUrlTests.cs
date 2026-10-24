@@ -51,4 +51,26 @@ public class GitHubNuGetPackageUrlTests
 
         Assert.Null(url);
     }
+
+    [Fact]
+    public void Settings_url_points_at_the_owner_package_settings_page()
+    {
+        var url = RepositoryUrlHelper.GetGitHubNuGetPackageSettingsUrl(
+            "https://nuget.pkg.github.com/Jandini/index.json",
+            "GrayMoon.App",
+            "git@github.com:Jandini/GrayMoon.git");
+
+        Assert.Equal("https://github.com/orgs/Jandini/packages/nuget/GrayMoon.App/settings", url);
+    }
+
+    [Fact]
+    public void Settings_url_is_null_for_other_registries()
+    {
+        var url = RepositoryUrlHelper.GetGitHubNuGetPackageSettingsUrl(
+            "https://api.nuget.org/v3/index.json",
+            "GrayMoon.App",
+            "https://github.com/Jandini/GrayMoon.git");
+
+        Assert.Null(url);
+    }
 }

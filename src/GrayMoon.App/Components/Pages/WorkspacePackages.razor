@@ -12,6 +12,8 @@
 @inject WorkspaceRepository WorkspaceRepository
 @inject WorkspaceProjectRepository WorkspaceProjectRepository
 @inject PackageRegistrySyncService PackageRegistrySyncService
+@inject IJSRuntime JSRuntime
+@inject IToastService ToastService
 @inject ILogger<WorkspacePackages> Logger
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 
@@ -79,6 +81,7 @@
                                     <tr>
                                         <th class="col-packageid">Package Id</th>
                                         <th class="col-framework">Framework</th>
+                                        <th class="col-usedby">Used by</th>
                                         <th class="col-registry">Registry</th>
                                     </tr>
                                 </thead>
@@ -86,7 +89,7 @@
                                     @if (isLoading)
                                     {
                                         <tr>
-                                            <td colspan="3" class="text-center text-muted py-4">
+                                            <td colspan="4" class="text-center text-muted py-4">
                                                 Loading packages...
                                             </td>
                                         </tr>
@@ -94,7 +97,7 @@
                                     else if (packages.Count == 0)
                                     {
                                         <tr>
-                                            <td colspan="3" class="text-center text-muted py-4">
+                                            <td colspan="4" class="text-center text-muted py-4">
                                                 No NuGet packages in this workspace. Sync repositories to discover package projects.
                                             </td>
                                         </tr>
@@ -102,7 +105,7 @@
                                     else if (NoPackagesMatchSearch)
                                     {
                                         <tr>
-                                            <td colspan="3" class="text-center text-muted py-4">
+                                            <td colspan="4" class="text-center text-muted py-4">
                                                 No packages match your search.
                                             </td>
                                         </tr>
@@ -127,6 +130,63 @@
                                                     }
                                                 </td>
                                                 <td class="col-framework"><span class="badge bg-secondary">@(p.TargetFramework ?? "-")</span></td>
+                                                <td class="col-usedby">
+                                                    @if (dependentRepositories.TryGetValue(p.ProjectId, out var dependents) && dependents.Count > 0)
+                                                    {
+                                                        var settingsUrl = RepositoryUrlHelper.GetGitHubNuGetPackageSettingsUrl(
+                                                            p.MatchedConnector?.ApiBaseUrl,
+                                                            p.PackageId,
+                                                            p.Repository?.CloneUrl);
+                                                        <span class="dependency-badge-tooltip-wrap">
+                                                            @if (settingsUrl != null)
+                                                            {
+                                                                <a href="@settingsUrl"
+                                                                   target="_blank"
+                                                                   rel="noopener noreferrer"
+                                                                   class="badge packages-usedby-badge packages-usedby-badge--link"
+                                                                   aria-label="Open package settings on GitHub">@dependents.Count</a>
+                                                            }
+                                                            else
+                                                            {
+                                                                <span class="badge packages-usedby-badge">@dependents.Count</span>
+                                                            }
+                                                            <div class="dependency-badge-tooltip">
+                                                                <div class="dependency-badge-tooltip-header">
+                                                                    <span class="dependency-badge-tooltip-title">Used by repositories:</span>
+                                                                    <button type="button"
+                                                                            class="dependency-badge-tooltip-copy"
+                                                                            title="Copy list to clipboard"
+                                                                            aria-label="Copy list to clipboard"
+                                                                            @onclick="() => CopyDependentRepositoriesAsync(dependents)"
+                                                                            @onclick:preventDefault
+                                                                            @onclick:stopPropagation>
+                                                                        <i class="bi bi-clipboard" aria-hidden="true"></i>
+                                                                    </button>
+                                                                </div>
+                                                                @foreach (var dependent in dependents)
+                                                                {
+                                                                    <div class="dependency-badge-tooltip-line">
+                                                                        <code>@dependent.RepositoryName</code>
+                                                                        @if (!dependent.IsDirect)
+                                                                        {
+                                                                            <span class="dependency-badge-tooltip-versions">via @dependent.ViaPackageId</span>
+                                                                        }
+                                                                    </div>
+                                                                }
+                                                                @if (settingsUrl != null)
+                                                                {
+                                                                    <div class="dependency-badge-tooltip-footer">
+                                                                        Click the number to open the package settings on GitHub, then add these repositories under Manage Actions access.
+                                                                    </div>
+                                                                }
+                                                            </div>
+                                                        </span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="text-muted">-</span>
+                                                    }
+                                                </td>
                                                 <td class="col-registry text-muted">@(p.MatchedConnector?.ConnectorName ?? "-")</td>
                                             </tr>
                                         }
@@ -157,6 +217,8 @@
     private WorkspaceFeatureContextId? _selectedContextId;
     private WorkspaceModel? workspace;
     private List<WorkspaceProject> packages = new();
+    private IReadOnlyDictionary<int, IReadOnlyList<PackageDependentRepository>> dependentRepositories =
+        new Dictionary<int, IReadOnlyList<PackageDependentRepository>>();
     private string? errorMessage;
     private bool isLoading = true;
     private bool isSyncingRegistries = false;
@@ -223,21 +285,39 @@
             {
                 errorMessage = "Workspace not found.";
                 packages = new List<WorkspaceProject>();
+                dependentRepositories = new Dictionary<int, IReadOnlyList<PackageDependentRepository>>();
                 return;
             }
             packages = _selectedContextId is WorkspaceFeatureContextId ctx
                 ? await WorkspaceProjectRepository.GetPackagesByWorkspaceIdAsync(WorkspaceId, ctx.Value)
                 : await WorkspaceProjectRepository.GetPackagesByWorkspaceIdAsync(WorkspaceId);
+            dependentRepositories = await WorkspaceProjectRepository.GetPackageDependentRepositoriesAsync(WorkspaceId, _selectedContextId);
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error loading packages for workspace {WorkspaceId}", WorkspaceId);
             errorMessage = "Failed to load packages. Please try again later.";
             packages = new List<WorkspaceProject>();
+            dependentRepositories = new Dictionary<int, IReadOnlyList<PackageDependentRepository>>();
         }
         finally
         {
             isLoading = false;
+        }
+    }
+
+    private async Task CopyDependentRepositoriesAsync(IReadOnlyList<PackageDependentRepository> dependents)
+    {
+        try
+        {
+            var text = string.Join(Environment.NewLine, dependents.Select(d => d.RepositoryName));
+            await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", text);
+            ToastService.Show("Repository list copied to the clipboard");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Copy of dependent repositories failed for workspace {WorkspaceId}", WorkspaceId);
+            ToastService.Show("Could not copy to clipboard.");
         }
     }
 

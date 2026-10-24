@@ -69,3 +69,129 @@
 .packages-table td .repo-link:hover strong {
     text-decoration: underline !important;
 }
+
+.col-usedby {
+    width: 90px;
+    white-space: nowrap;
+}
+
+/* Used by: repository count, same badge and hover popup as the Repositories dependency badge */
+.packages-usedby-badge {
+    font-weight: 400;
+    background-color: var(--bs-secondary);
+    color: var(--bs-light);
+}
+
+.packages-table td a.packages-usedby-badge--link {
+    background-color: var(--bs-secondary);
+    color: #fff !important;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.packages-table td a.packages-usedby-badge--link:hover {
+    filter: brightness(1.1);
+}
+
+.dependency-badge-tooltip-wrap {
+    position: relative;
+    display: inline-block;
+}
+
+.dependency-badge-tooltip {
+    display: block;
+    position: fixed;
+    top: -9999px;
+    left: -9999px;
+    right: auto;
+    /* No margin-top: a gap between badge and popup would break the :hover chain (see WorkspaceRepositories.razor.css). */
+    background: #2a2a2a;
+    background-clip: padding-box;
+    border: 1px solid #555;
+    border-radius: 0.25rem;
+    padding: 0.65rem 0.6rem 0.4rem;
+    font-size: 0.78rem;
+    font-family: var(--bs-font-monospace);
+    color: #f0f0f0;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    /* Above table rows/thead; below page-scoped loading overlay (z-index 100) */
+    z-index: 50;
+    pointer-events: none;
+    max-height: 14rem;
+    width: 24rem;
+    overflow-y: auto;
+    overflow-x: hidden;
+    white-space: normal;
+    text-align: left;
+    opacity: 0;
+    transition: opacity 0.15s ease 0.4s;
+    scrollbar-width: thin;
+    scrollbar-color: #5a5a5a #2a2a2a;
+}
+
+.dependency-badge-tooltip-wrap:hover .dependency-badge-tooltip,
+.dependency-badge-tooltip-wrap:focus-within .dependency-badge-tooltip {
+    opacity: 1;
+    pointer-events: auto;
+    transition: opacity 0.1s ease 0.5s;
+}
+
+.dependency-badge-tooltip-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
+}
+
+.dependency-badge-tooltip-title {
+    color: #aaa;
+    font-family: var(--bs-body-font-family);
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.dependency-badge-tooltip-line {
+    margin-bottom: 0.15rem;
+}
+
+.dependency-badge-tooltip-line code {
+    color: goldenrod;
+    font-size: 0.85rem;
+}
+
+.dependency-badge-tooltip-versions {
+    color: #aaa;
+    font-size: 0.85rem;
+    margin-left: 0.4rem;
+}
+
+.dependency-badge-tooltip-footer {
+    color: #888;
+    font-size: 0.72rem;
+    margin-top: 0.35rem;
+    padding-top: 0.25rem;
+    border-top: 1px solid #444;
+    font-family: var(--bs-body-font-family);
+}
+
+.dependency-badge-tooltip-copy {
+    flex: 0 0 auto;
+    background: transparent;
+    border: none;
+    color: #bbb;
+    font-size: 0.95rem;
+    line-height: 1;
+    padding: 0.15rem 0.3rem;
+    border-radius: 0.2rem;
+    cursor: pointer;
+    transition: background-color 0.1s ease, color 0.1s ease;
+}
+
+.dependency-badge-tooltip-copy:hover,
+.dependency-badge-tooltip-copy:focus-visible {
+    color: #fff;
+    background-color: transparent;
+    text-shadow: 0 0 6px rgba(255, 255, 255, 0.9);
+    outline: none;
+}

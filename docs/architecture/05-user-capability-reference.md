@@ -734,17 +734,19 @@ Available only for .NET Dependency Workspaces (section 1).
 
 ### User sees
 
-Package-producing projects and matched registry.
+Package-producing projects and matched registry, plus a **Used by** count: the other workspace repositories that restore the package in the selected context. That includes repositories that get it transitively through another workspace package, because `dotnet restore` downloads it there too. The package's own repository is never counted. Hovering the count lists the repositories, marking transitive ones "via <package>", with a copy button. The count is gray whether or not it opens GitHub settings. The color does not report Actions access.
 
 ### User can
 
-Synchronize registry matching.
+Synchronize registry matching. When the package is on GitHub Packages, clicking the count opens the package settings page on GitHub (`/orgs/{owner}/packages/nuget/{id}/settings`; GitHub serves this route for user-owned packages too). The user adds the listed repositories there under "Manage Actions access", which `GITHUB_TOKEN` restores in GitHub Actions need for private packages. GitHub has no public API for that list, so GrayMoon neither reads nor changes it.
 
 ### Implementation
 
 ```text
 WorkspacePackages page
 WorkspaceProjectRepository package queries
+  GetPackageDependentRepositoriesAsync / ResolvePackageDependentRepositories (Used by)
+RepositoryUrlHelper.GetGitHubNuGetPackageSettingsUrl
 connector/package-registry services
 ```
 
