@@ -200,6 +200,8 @@ public static class GitChangesTreeBuilder
         {
             var repoKey = $"{sectionKey}/{repo.WorkspaceRepositoryId}";
             var repoExpanded = !collapsedKeys.Contains(repoKey);
+            var rootCache = nodeCache.TryGet(repo.WorkspaceRepositoryId, isStagedSection, string.Empty);
+            var repoLoading = repoExpanded && IsPrefixLoading(rootCache);
 
             rows.Add(new GitChangesTreeRow
             {
@@ -214,14 +216,18 @@ public static class GitChangesTreeBuilder
                 BranchName = repo.BranchName,
                 HasChildren = true,
                 IsExpanded = repoExpanded,
+                IsLoadingChildren = repoLoading,
             });
 
-            if (!repoExpanded)
+            if (!repoExpanded || rootCache is null || rootCache.Children.Count == 0)
                 continue;
 
             AppendCachedLevel(rows, repoKey, depth: 2, isStagedSection, repo, pathPrefix: string.Empty, nodeCache, collapsedKeys);
         }
     }
+
+    private static bool IsPrefixLoading(GitChangesTreeNodeCache.PrefixPageCache? cache) =>
+        cache is null || cache.IsLoading || (!cache.IsComplete && cache.Children.Count == 0);
 
     private static void AppendCachedLevel(
         List<GitChangesTreeRow> rows,
@@ -234,25 +240,7 @@ public static class GitChangesTreeBuilder
         IReadOnlySet<string> collapsedKeys)
     {
         var cache = nodeCache.TryGet(repo.WorkspaceRepositoryId, isStagedSection, pathPrefix);
-        if (cache is null || (cache.Children.Count == 0 && cache.IsLoading))
-        {
-            rows.Add(new GitChangesTreeRow
-            {
-                Key = $"{parentKey}/__loading",
-                Kind = GitChangesTreeRowKind.Folder,
-                Depth = depth,
-                Label = "Loading…",
-                IsStagedSection = isStagedSection,
-                WorkspaceRepositoryId = repo.WorkspaceRepositoryId,
-                RepositoryName = repo.RepositoryName,
-                HasChildren = false,
-                IsExpanded = false,
-                IsLoadingChildren = true,
-            });
-            return;
-        }
-
-        if (cache.Children.Count == 0 && cache.IsComplete)
+        if (cache is null || cache.Children.Count == 0)
             return;
 
         foreach (var child in cache.Children)
@@ -282,6 +270,7 @@ public static class GitChangesTreeBuilder
             {
                 var folderKey = $"{parentKey}/{child.Name}";
                 var expanded = !collapsedKeys.Contains(folderKey);
+                var childCache = nodeCache.TryGet(repo.WorkspaceRepositoryId, isStagedSection, child.Path);
                 rows.Add(new GitChangesTreeRow
                 {
                     Key = folderKey,
@@ -293,34 +282,16 @@ public static class GitChangesTreeBuilder
                     RepositoryName = repo.RepositoryName,
                     HasChildren = true,
                     IsExpanded = expanded,
-                    IsLoadingChildren = expanded
-                        && nodeCache.TryGet(repo.WorkspaceRepositoryId, isStagedSection, child.Path) is { IsLoading: true, Children.Count: 0 },
+                    IsLoadingChildren = expanded && IsPrefixLoading(childCache),
                 });
 
-                if (expanded)
+                if (expanded && childCache is { Children.Count: > 0 })
                     AppendCachedLevel(rows, folderKey, depth + 1, isStagedSection, repo, child.Path, nodeCache, collapsedKeys);
                 continue;
             }
 
             if (child.Entry is not null)
                 rows.Add(MakeFileRow(parentKey, depth, isStagedSection, repo, child.Entry));
-        }
-
-        if (cache.HasMore || cache.IsLoading)
-        {
-            rows.Add(new GitChangesTreeRow
-            {
-                Key = $"{parentKey}/__more",
-                Kind = GitChangesTreeRowKind.Folder,
-                Depth = depth,
-                Label = cache.IsLoading ? "Loading…" : "Loading more…",
-                IsStagedSection = isStagedSection,
-                WorkspaceRepositoryId = repo.WorkspaceRepositoryId,
-                RepositoryName = repo.RepositoryName,
-                HasChildren = false,
-                IsExpanded = false,
-                IsLoadingChildren = true,
-            });
         }
     }
 

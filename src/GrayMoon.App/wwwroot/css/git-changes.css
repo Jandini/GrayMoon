@@ -596,12 +596,14 @@
     overflow: hidden;
 }
 
-.git-changes-tree__row--loading {
-    pointer-events: none;
-}
-
 .git-changes-tree__row--repository .git-changes-tree__count-badge {
     margin-left: 0.25rem;
+}
+
+/* Spinner replaces the folder/repo icon while children are fetched (no "Loading…" child row). */
+.git-changes-tree__icon .git-changes-tree__action-spinner {
+    width: 0.75rem;
+    height: 0.75rem;
 }
 
 .git-changes-tree__row:hover {

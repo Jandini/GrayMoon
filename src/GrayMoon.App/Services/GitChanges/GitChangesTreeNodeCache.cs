@@ -51,7 +51,11 @@ public sealed class GitChangesTreeNodeCache
         public List<GitChangesTreeChild> Children { get; } = [];
         public string? NextAfterChildKey { get; set; }
         public bool IsLoading { get; set; }
-        public bool IsComplete => TotalDirectChildCount >= 0 && Children.Count >= TotalDirectChildCount;
+        /// <summary>True after at least one successful page apply with no further keyset cursor.</summary>
+        public bool IsComplete =>
+            SnapshotVersion != 0
+            && string.IsNullOrEmpty(NextAfterChildKey)
+            && Children.Count >= TotalDirectChildCount;
         public bool HasMore => !IsComplete && !string.IsNullOrEmpty(NextAfterChildKey);
 
         public void Reset(long snapshotVersion)
@@ -75,7 +79,13 @@ public sealed class GitChangesTreeNodeCache
 
             TotalDirectChildCount = page.TotalDirectChildCount;
             foreach (var child in page.Children)
+            {
+                // Guard against a repeated first-page fetch appending duplicates (duplicate @key crash).
+                if (Children.Any(c => c.ChildKey == child.ChildKey))
+                    continue;
                 Children.Add(child);
+            }
+
             NextAfterChildKey = page.HasMore ? page.NextAfterChildKey : null;
             if (!page.HasMore || Children.Count >= TotalDirectChildCount)
                 NextAfterChildKey = null;

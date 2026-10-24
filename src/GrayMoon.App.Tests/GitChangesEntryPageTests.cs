@@ -133,4 +133,55 @@ public class GitChangesEntryPageTests
         Assert.False(options.UseLargeHydration(1500));
         Assert.True(options.UseLargeHydration(1501));
     }
+
+    [Fact]
+    public void BuildFromCache_loading_marks_repo_not_child_placeholder()
+    {
+        var view = GitChangesTreeBuilder.ViewFromSummaries(new WorkspaceGitChangesSummariesView
+        {
+            WorkspaceId = 1,
+            TotalEntryCount = 2000,
+            Repositories =
+            [
+                new WorkspaceGitChangesRepositorySummary
+                {
+                    WorkspaceRepositoryId = 7,
+                    RepositoryId = 7,
+                    RepositoryName = "big",
+                    StagedCount = 0,
+                    ChangedCount = 2000,
+                    SnapshotVersion = 1,
+                },
+            ],
+        });
+
+        var collapsed = new HashSet<string>(); // repo expanded
+        var cache = new GitChangesTreeNodeCache();
+        cache.GetOrCreate(7, isStagedSection: false, string.Empty).IsLoading = true;
+
+        var rows = GitChangesTreeBuilder.BuildFromCache(view, cache, collapsed);
+        Assert.Contains(rows, r => r.Kind == GitChangesTreeRowKind.Repository && r.IsLoadingChildren);
+        Assert.DoesNotContain(rows, r => r.Label.Contains("Loading", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TreeNodeCache_ApplyPage_does_not_duplicate_children()
+    {
+        var cache = new GitChangesTreeNodeCache.PrefixPageCache();
+        var page = new GitChangesEntryPage
+        {
+            SnapshotVersion = 3,
+            TotalDirectChildCount = 1,
+            Children =
+            [
+                new GitChangesTreeChild { IsFolder = false, Name = "a.txt", Path = "a.txt", Entry = new WorkspaceGitChangeEntryView { Path = "a.txt" } },
+            ],
+            NextAfterChildKey = null,
+        };
+
+        cache.ApplyPage(page);
+        cache.ApplyPage(page);
+        Assert.Single(cache.Children);
+        Assert.True(cache.IsComplete);
+    }
 }

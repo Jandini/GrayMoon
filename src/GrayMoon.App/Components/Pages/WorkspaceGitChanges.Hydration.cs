@@ -178,20 +178,19 @@ public sealed partial class WorkspaceGitChanges
 
     private async Task ToggleExpandedAsync(GitChangesTreeRow row)
     {
-        if (!row.HasChildren || row.IsLoadingChildren)
+        if (!row.HasChildren)
             return;
 
-        if (!_collapsedKeys.Add(row.Key))
-        {
+        var expanding = _collapsedKeys.Contains(row.Key);
+        if (expanding)
             _collapsedKeys.Remove(row.Key);
-            if (_hydrationMode == GitChangesHydrationMode.Summary)
-                await EnsurePrefixHydratedAsync(row);
-        }
+        else
+            _collapsedKeys.Add(row.Key);
 
         RebuildRows();
         StateHasChanged();
 
-        if (_hydrationMode == GitChangesHydrationMode.Summary && !_collapsedKeys.Contains(row.Key))
+        if (expanding && _hydrationMode == GitChangesHydrationMode.Summary)
             await EnsurePrefixHydratedAsync(row);
     }
 
@@ -223,11 +222,16 @@ public sealed partial class WorkspaceGitChanges
         if (_selectedContextId is not WorkspaceFeatureContextId ctxId)
             return;
 
+        var cache = _treeNodeCache.GetOrCreate(workspaceRepositoryId, isStagedSection, pathPrefix);
+        // Already fully hydrated - a second expand/hydrate must not re-fetch page 0 (that duplicated
+        // children and crashed Virtualize with duplicate @key values).
+        if (cache.IsComplete && !cache.IsLoading)
+            return;
+
         var flightKey = $"{workspaceRepositoryId}|{isStagedSection}|{pathPrefix}";
         if (!_prefixFetchInFlight.Add(flightKey))
             return;
 
-        var cache = _treeNodeCache.GetOrCreate(workspaceRepositoryId, isStagedSection, pathPrefix);
         cache.IsLoading = true;
         RebuildRows();
         StateHasChanged();
@@ -235,10 +239,8 @@ public sealed partial class WorkspaceGitChanges
         try
         {
             var take = Math.Max(1, GitChangesOptions.Value.TreePageSize);
+            // Resume only when we already have a partial page; otherwise start from the first page.
             string? after = cache.Children.Count > 0 ? cache.NextAfterChildKey : null;
-            // First fetch after invalidate: start clean.
-            if (cache.Children.Count == 0)
-                after = null;
 
             do
             {

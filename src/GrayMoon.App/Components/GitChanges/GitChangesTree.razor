@@ -24,30 +24,26 @@
                     {
                         <i class="bi @(row.IsExpanded ? "bi-chevron-down" : "bi-chevron-right")" aria-hidden="true"></i>
                     }
-                    else if (row.IsLoadingChildren)
+                </span>
+
+                <span class="git-changes-tree__icon"
+                      title="@(row.IsLoadingChildren ? "Loading…" : row.Kind == GitChangesTreeRowKind.File ? "Copy path" : "Copy all paths")"
+                      @onclick="() => row.IsLoadingChildren ? Task.CompletedTask : OnCopyPath.InvokeAsync(row)"
+                      @onclick:stopPropagation>
+                    @if (row.IsLoadingChildren)
                     {
                         <span class="git-changes-tree__action-spinner" aria-hidden="true"></span>
                     }
-                </span>
-
-                @if (!row.IsLoadingChildren)
-                {
-                    <span class="git-changes-tree__icon"
-                          title="@(row.Kind == GitChangesTreeRowKind.File ? "Copy path" : "Copy all paths")"
-                          @onclick="() => OnCopyPath.InvokeAsync(row)"
-                          @onclick:stopPropagation>
+                    else
+                    {
                         <i class="bi @IconFor(row)" aria-hidden="true"></i>
-                    </span>
-                }
+                    }
+                </span>
 
                 <span class="git-changes-tree__label"
                       @onclick="e => OnLabelClick(row, e)"
                       @onmousedown:preventDefault="@(row.Kind == GitChangesTreeRowKind.File)">
-                    @if (row.IsLoadingChildren)
-                    {
-                        <span class="text-muted">@row.Label</span>
-                    }
-                    else if (row.Kind == GitChangesTreeRowKind.Repository)
+                    @if (row.Kind == GitChangesTreeRowKind.Repository)
                     {
                         <span class="git-changes-tree__repo-name">@row.Label</span>
                         @if (!string.IsNullOrEmpty(row.BranchName))
@@ -89,12 +85,9 @@
                     </span>
                 }
 
-                @if (!row.IsLoadingChildren)
-                {
-                    <span class="git-changes-tree__actions">
-                        @RenderActions(row)
-                    </span>
-                }
+                <span class="git-changes-tree__actions">
+                    @RenderActions(row)
+                </span>
             </div>
         </Virtualize>
     }
