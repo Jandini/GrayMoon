@@ -14,10 +14,9 @@
     }
     else
     {
-        @foreach (var row in Rows)
-        {
-            <div class="git-changes-tree__row git-changes-tree__row--@(row.Kind.ToString().ToLowerInvariant()) @(IsSelected(row) ? "git-changes-tree__row--selected" : "") @(row.Kind == GitChangesTreeRowKind.File && IsMultiSelected(row) ? "git-changes-tree__row--multi-selected" : "")"
-                 style="padding-left: @(row.Depth * 1.1)rem"
+        <Virtualize Items="Rows" ItemSize="RowHeightPx" OverscanCount="12" Context="row">
+            <div class="git-changes-tree__row git-changes-tree__row--@(row.Kind.ToString().ToLowerInvariant()) @(IsSelected(row) ? "git-changes-tree__row--selected" : "") @(row.Kind == GitChangesTreeRowKind.File && IsMultiSelected(row) ? "git-changes-tree__row--multi-selected" : "") @(row.IsLoadingChildren ? "git-changes-tree__row--loading" : "")"
+                 style="padding-left: @(row.Depth * 1.1)rem; height: @(RowHeightPx)px"
                  @key="row.Key">
 
                 <span class="git-changes-tree__toggle" @onclick="() => OnToggleExpand.InvokeAsync(row)">
@@ -25,24 +24,39 @@
                     {
                         <i class="bi @(row.IsExpanded ? "bi-chevron-down" : "bi-chevron-right")" aria-hidden="true"></i>
                     }
+                    else if (row.IsLoadingChildren)
+                    {
+                        <span class="git-changes-tree__action-spinner" aria-hidden="true"></span>
+                    }
                 </span>
 
-                <span class="git-changes-tree__icon"
-                      title="@(row.Kind == GitChangesTreeRowKind.File ? "Copy path" : "Copy all paths")"
-                      @onclick="() => OnCopyPath.InvokeAsync(row)"
-                      @onclick:stopPropagation>
-                    <i class="bi @IconFor(row)" aria-hidden="true"></i>
-                </span>
+                @if (!row.IsLoadingChildren)
+                {
+                    <span class="git-changes-tree__icon"
+                          title="@(row.Kind == GitChangesTreeRowKind.File ? "Copy path" : "Copy all paths")"
+                          @onclick="() => OnCopyPath.InvokeAsync(row)"
+                          @onclick:stopPropagation>
+                        <i class="bi @IconFor(row)" aria-hidden="true"></i>
+                    </span>
+                }
 
                 <span class="git-changes-tree__label"
                       @onclick="e => OnLabelClick(row, e)"
                       @onmousedown:preventDefault="@(row.Kind == GitChangesTreeRowKind.File)">
-                    @if (row.Kind == GitChangesTreeRowKind.Repository)
+                    @if (row.IsLoadingChildren)
+                    {
+                        <span class="text-muted">@row.Label</span>
+                    }
+                    else if (row.Kind == GitChangesTreeRowKind.Repository)
                     {
                         <span class="git-changes-tree__repo-name">@row.Label</span>
                         @if (!string.IsNullOrEmpty(row.BranchName))
                         {
                             <span class="git-changes-tree__repo-branch" title="@row.BranchName">@row.BranchName</span>
+                        }
+                        @if (row.Count.HasValue)
+                        {
+                            <span class="git-changes-tree__count-badge">@row.Count</span>
                         }
                     }
                     else if (row.Kind == GitChangesTreeRowKind.Section)
@@ -75,17 +89,22 @@
                     </span>
                 }
 
-                <span class="git-changes-tree__actions">
-                    @RenderActions(row)
-                </span>
+                @if (!row.IsLoadingChildren)
+                {
+                    <span class="git-changes-tree__actions">
+                        @RenderActions(row)
+                    </span>
+                }
             </div>
-
-        }
+        </Virtualize>
     }
 </div>
 
 @code {
-    [Parameter, EditorRequired] public IReadOnlyList<GitChangesTreeRow> Rows { get; set; } = [];
+    /// <summary>Fixed row height for <see cref="Virtualize{TItem}"/> (must match CSS).</summary>
+    private const float RowHeightPx = 28f;
+
+    [Parameter, EditorRequired] public ICollection<GitChangesTreeRow> Rows { get; set; } = [];
     [Parameter] public string? OfflineNotice { get; set; }
     [Parameter] public bool IsFilterActive { get; set; }
     [Parameter] public bool HasChanges { get; set; }

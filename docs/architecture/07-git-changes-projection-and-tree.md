@@ -129,15 +129,15 @@ There is no incremental path-diff persist: every successful snapshot is a full r
 `WorkspaceGitChanges.LoadAsync` (`Components/Pages/WorkspaceGitChanges.razor.cs`):
 
 1. Loads the Workspace name for the header.
-2. Calls `IWorkspaceGitChangesReadService.GetContextAsync` (or `GetWorkspaceAsync` for the special Workspace context).
-3. `RebuildRows()` → `GitChangesTreeBuilder.Build(_view, _filterQuery, _collapsedKeys)`.
-4. Optionally restores a remembered file selection (diff fetch is the only Worker call on open, and it does not gate the tree).
+2. Calls `GetContextSummariesAsync` first. When distinct path count is at or below `GitChangesOptions.FullHydrationMaxEntries` (default 1_500), or a filter is already active, hydrates with `GetContextAsync` (**Full** mode). Above the threshold with no filter, keeps summary-only repos (**Summary** mode) and seeds every repository as collapsed.
+3. `RebuildRows()` → `GitChangesTreeBuilder.Build` (Full) or `BuildFromCache` + `GitChangesTreeNodeCache` (Summary).
+4. Optionally restores a remembered file selection (diff fetch is the only Worker call on open, and it does not gate the tree). In Summary mode, restoring a selection expands ancestors and `GetEntryPageAsync`-hydrates those prefixes.
 
-`WorkspaceGitChangesReadService.LoadContextAsync` loads **every** `WorkspaceGitContextChangeEntry` for **every** repository in the selected Feature context into `WorkspaceGitChangesView` / `WorkspaceGitChangesRepositoryView.Changes`. There is no server-side paging, folder scoping, or "summary only" mode.
+`GetContextAsync` / `LoadContextAsync` still load every entry for the context when Full mode is chosen. Summary mode leaves `Changes` empty until the user expands a repository or folder; children come from `GetEntryPageAsync` (direct children, keyset-paged, snapshot-version tagged). Path indexes: `(context, repo, Path)` and `(context, Path)` (migration 13).
 
 ### Live updates
 
-`WorkspaceGitChanges.Realtime.cs` subscribes to `ContextGitChangesUpdated` / `GitChangesUpdated` and calls `LoadAsync` again. A single-repository watcher update therefore reloads the **full context inventory** from SQLite into the circuit, rebuilds the full flattened row list, and re-renders the tree.
+`WorkspaceGitChanges.Realtime.cs` handles `ContextGitChangesUpdated(workspaceId, contextId, repositoryId)` by patching **that repository only** (`GetRepositoryAsync` + badge/cache invalidation; Outcome `PatchedOnly`). It does not reload sibling repositories. Legacy `GitChangesUpdated` is ignored when the context event is authoritative. Unrelated contexts stay `NoOp`.
 
 Opening the page does not start a status scan. Scans are activated by workspace route activity (`WorkspaceGitChangesRouteActivity` → `WorkspaceGitChangesActivation`), monitoring (`GitChangesMonitoringBackgroundService`), line-stats fill-in, Sync post-hooks, and the Refresh button.
 
@@ -150,15 +150,15 @@ Staged (section) → Repository → Folder* → File
 Changed (section) → Repository → Folder* → File
 ```
 
-Output is a **flattened** `IReadOnlyList<GitChangesTreeRow>` (kinds: `Section`, `Repository`, `Folder`, `File`). Collapsed keys omit descendants from the list (comment: "flatten only visible nodes"). Default `_collapsedKeys` is empty, so **sections, repositories and folders start expanded** - every file row is present on first paint when the inventory is large.
+Output is a flattened `List<GitChangesTreeRow>` (kinds: `Section`, `Repository`, `Folder`, `File`). Collapsed keys omit descendants from the list. **Full** mode: default `_collapsedKeys` empty (fully expanded). **Summary** mode: repositories start collapsed; expanding fetches pages until every direct child of that prefix is in the node cache (nested folders still expand on demand).
 
-Filter (`WorkspaceGitChangeSearchMatcher`) runs **client-side** over every entry before the tree is built. Supported tokens: plain text, `repo:`, `status:`, `staged:`, `ext:` (via `FilterSearchExpression`).
+Filter (`WorkspaceGitChangeSearchMatcher`) runs **client-side** over hydrated entries in Full mode. In Summary mode, applying a filter reloads into Full until Phase 2 server-side search. Supported tokens: plain text, `repo:`, `status:`, `staged:`, `ext:` (via `FilterSearchExpression`).
 
 Directory entries (`path` ending in `/`) become `IsDirectoryEntry` Folder rows: no diff, no Stage/Undo.
 
 ### Rendering
 
-`GitChangesTree.razor` renders with `@foreach (var row in Rows)` - **no** `Virtualize`, **no** windowing, **no** lazy child fetch. Each row is a full Blazor element subtree (toggle, icon, label, status letter, action buttons). Diff content is separate (Monaco / markdown preview) and loads per selected file through `GetGitFileDiff` on the Worker **diff** pool.
+`GitChangesTree.razor` renders with Blazor `Virtualize` over the flattened row list (fixed 28px row height, `@key="row.Key"`). Only the viewport (+ overscan) is synced to the browser; lazy child fetch is Summary-mode expand via `GetEntryPageAsync`. Diff content is separate (Monaco / markdown preview) and loads per selected file through `GetGitFileDiff` on the Worker **diff** pool.
 
 ## 5. What lives where (memory and serialization)
 
@@ -168,42 +168,39 @@ Directory entries (`path` ending in `/`) become `IsDirectoryEntry` Folder rows: 
 | Worker → App SignalR | Full `GitChangesSnapshotNotification` JSON (all paths). App `MaximumReceiveMessageSize` = **10 MiB** (`Program.cs`) |
 | App SQLite | One row per path per context+repo; full replace on each snapshot |
 | App write path | Transient EF entities for the whole entry set of one repo |
-| Blazor circuit | `_view` (all repos × all entries) + `_rows` (flattened visible tree) + multi-selection keys |
-| Circuit → browser | Blazor Server render diffs for every tree DOM node that changed |
+| Blazor circuit | Full mode: `_view` (all entries) + `_rows`. Summary mode: summaries + `TreeNodeCache` for expanded prefixes + virtualized `_rows` |
+| Circuit → browser | Virtualized tree window (+ overscan); not every logical row |
 
-Approximate pressure at ~5,000 paths (order of magnitude): hundreds of KB to low single-digit MiB of JSON per heavy repository snapshot; multiple MiB of managed objects in the circuit after materializing views and rows; thousands of DOM nodes when the tree is expanded. At tens of thousands of paths the same pipeline stays O(N) at every hop with no batching of the tree itself.
+Worker→App snapshots and SQLite replace are still O(paths) per repository (Phases 3–4). Circuit open and live update for large inventories are summary-first and per-repo.
 
-There is **no** Changes-specific entry count limit in `GitChangesOptions`. That options type only tunes parallelism (default 8), watcher debounce/idle/renewal, and legacy dual-write.
+`GitChangesOptions` also carries hydration knobs (`FullHydrationMaxEntries`, `TreePageSize`, …) in addition to parallelism, watcher debounce/idle/renewal, legacy dual-write, and benchmark floors. There is still **no** product inventory cap.
 
 ## 6. Current limits, batching, pagination, virtualization
 
 | Concern | Today |
 |---|---|
-| Change-count limit | None |
-| Path pagination / lazy folder children | None |
-| Tree virtualization | None |
-| Client inventory | Full context on every `LoadAsync` |
-| Filter | Full client scan of `_view` |
+| Change-count limit | None (inventory uncapped; `FullHydrationMaxEntries` is an internal hydration switch only) |
+| Path pagination / lazy folder children | `GetEntryPageAsync` + expand in Summary mode |
+| Tree virtualization | `Virtualize` with fixed 28px rows |
+| Client inventory | Full context on Full-mode open; Summary mode holds summaries + expanded prefix pages |
+| Filter | Full client scan of `_view` in Full mode; Summary mode reloads to Full (Phase 2: server search) |
 | Persist strategy | Full delete+insert per repo snapshot |
 | Worker scan batching | Per-repo coalescing only; parallel across repos via `MaxParallelRepositoryOperations` |
 | Diff | On demand, one file; soft size / binary / encoding states in `GitDiffDocument` |
 | SignalR receive cap | 10 MiB (shared with Sync and other large commands) |
 
-The tree builder's collapse-aware flatten is the only "visible nodes" optimization. It does not reduce SQLite load, SignalR snapshot size, or circuit `_view` size.
+Phase 1 addresses circuit open, expand, virtualize, and live-update shape. SQLite replace and Worker→App payload size remain O(paths) until Phases 3–4 (`docs/todo/git-changes-large-changeset-scale.md`).
 
 ## 7. Why UX degrades around ~5K+ files
 
-Observed pain follows directly from the architecture above:
+Phase 1 removes the worst circuit/DOM cliffs for large inventories (summary open, collapsed repos, virtualize, per-repo live patch). Remaining pain follows from hops that are still O(paths):
 
-1. **Full inventory in the circuit.** Opening Changes materializes every path for the context before the first paint of a complete expanded tree.
-2. **Default expand.** Empty `_collapsedKeys` means ~N file rows (plus folder/repo/section rows) enter the DOM immediately.
-3. **No virtualization.** Blazor Server must diff and sync thousands of elements; scroll and expand/collapse re-diff large ranges.
-4. **Full reload on every live update.** Watcher churn (builds, IDE saves) retriggers `LoadAsync` for the whole context, not a surgical row patch.
-5. **Full replace persist.** Large snapshots contend on the single-reader write queue and rewrite many SQLite rows.
-6. **Client-side search.** Typing a filter walks every entry and rebuilds the tree in the circuit.
-7. **Worker porcelain cost.** `--untracked-files=all` can itself be expensive before any UI work starts; that cost is then multiplied by App and circuit work.
+1. **Full replace persist.** Large snapshots contend on the single-writer write queue and rewrite many SQLite rows.
+2. **Worker→App full snapshot JSON.** Near the 10 MiB hub receive cap at ~50K short paths (Phase 4 chunking).
+3. **Client-side search on Full inventories.** Typing a filter walks every hydrated entry (Phase 2).
+4. **Worker porcelain cost.** `--untracked-files=all` can itself be expensive before any UI work starts.
 
-Small workspaces (tens to low hundreds of paths) stay fast because each step is still O(N) with small N: SQLite read, in-memory build, and DOM size stay modest.
+Small workspaces (at or below `FullHydrationMaxEntries`) keep the single-shot Full path: one SQLite read, default expand, no summary round trip.
 
 ## 8. Related types and services (index)
 

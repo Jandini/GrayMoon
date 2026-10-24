@@ -54,7 +54,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     private int? _loadedContextQuery;
     private Workspace? _workspace;
     private WorkspaceGitChangesView? _view;
-    private IReadOnlyList<GitChangesTreeRow> _rows = [];
+    private List<GitChangesTreeRow> _rows = [];
     private readonly HashSet<string> _collapsedKeys = [];
     private string _filterQuery = string.Empty;
     private string? _appliedFilterQuery;
@@ -105,7 +105,11 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         _filterQuery = incoming;
         if (_view != null)
         {
-            RebuildRows();
+            // Summary mode cannot filter unhydrated paths in-circuit (Phase 2); reload into Full.
+            if (_hydrationMode == GitChangesHydrationMode.Summary && !string.IsNullOrWhiteSpace(incoming))
+                _ = LoadAsync();
+            else
+                RebuildRows();
         }
     }
 
@@ -231,12 +235,11 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         try
         {
             var readStarted = Stopwatch.GetTimestamp();
-            if (_selectedContextId is WorkspaceFeatureContextId ctxId)
-                _view = await ReadService.GetContextAsync(WorkspaceId, ctxId, CancellationToken.None);
-            else
-                _view = await ReadService.GetWorkspaceAsync(WorkspaceId, CancellationToken.None);
+            await LoadProjectionAsync();
             readMs = GitChangesBench.ElapsedMs(readStarted);
-            entryCount = _view?.Repositories.Sum(r => r.Changes.Count) ?? 0;
+            entryCount = _hydrationMode == GitChangesHydrationMode.Summary
+                ? (_view?.Repositories.Sum(r => r.StagedCount + r.ChangedCount) ?? 0)
+                : (_view?.Repositories.Sum(r => r.Changes.Count) ?? 0);
 
             ClearFilterIfNoChangesRemain();
             var buildStarted = Stopwatch.GetTimestamp();
@@ -280,8 +283,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         var openMs = GitChangesBench.ElapsedMs(pending.LoadStarted);
         var heapAfter = GC.GetTotalMemory(forceFullCollection: false);
         var options = GitChangesOptions.Value;
-        // Phase 0 / today: always full hydration. Summary mode arrives in Phase 1.
-        const string hydrationMode = "Full";
+        var hydrationMode = _hydrationMode == GitChangesHydrationMode.Summary ? "Summary" : "Full";
 
         if (pending.EventName == "live update handled")
         {
@@ -298,6 +300,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
                 ("CircuitPaintMs", circuitPaintMs),
                 ("RowCountRendered", _rows.Count),
                 ("EntryCount", pending.EntryCount),
+                ("HydrationMode", hydrationMode),
                 ("WorkspaceId", pending.LiveWorkspaceId),
                 ("ContextId", pending.LiveContextId));
         }
@@ -392,8 +395,14 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
     private void RebuildRows()
     {
-        _rows = _view == null
-            ? []
+        if (_view == null)
+        {
+            _rows = [];
+            return;
+        }
+
+        _rows = _hydrationMode == GitChangesHydrationMode.Summary
+            ? GitChangesTreeBuilder.BuildFromCache(_view, _treeNodeCache, _collapsedKeys)
             : GitChangesTreeBuilder.Build(_view, _filterQuery, _collapsedKeys);
     }
 
@@ -513,7 +522,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
     /// <summary>
     /// Expands any collapsed section/repo/folder ancestors so a restored file row is present in _rows
-    /// and can be scrolled into view.
+    /// and can be scrolled into view. In summary mode, also hydrates each expanded prefix from Layer B.
     /// </summary>
     private void EnsureAncestorsExpanded(string filePath, int workspaceRepositoryId, bool isStagedSection)
     {
@@ -529,16 +538,79 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         }
 
         if (expanded)
-        {
             RebuildRows();
+
+        if (_hydrationMode == GitChangesHydrationMode.Summary)
+            _ = HydrateAncestorsForSelectionAsync(filePath, workspaceRepositoryId, isStagedSection);
+    }
+
+    private async Task HydrateAncestorsForSelectionAsync(
+        string filePath,
+        int workspaceRepositoryId,
+        bool isStagedSection)
+    {
+        await FetchPrefixPagesAsync(workspaceRepositoryId, isStagedSection, pathPrefix: string.Empty, fetchAll: true);
+
+        var segments = filePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        for (var i = 0; i < segments.Length - 1; i++)
+        {
+            var prefix = string.Join('/', segments.Take(i + 1));
+            await FetchPrefixPagesAsync(workspaceRepositoryId, isStagedSection, prefix, fetchAll: true);
         }
+
+        RebuildRows();
     }
 
     private bool SelectionStillExists(int workspaceRepositoryId, string filePath, bool isStagedSection)
     {
         var repo = _view?.Repositories.FirstOrDefault(r => r.WorkspaceRepositoryId == workspaceRepositoryId);
-        return repo != null && repo.Changes.Any(c =>
-            c.Path == filePath && (isStagedSection ? c.IsStaged : c.IsChanged));
+        if (repo is null)
+            return false;
+
+        if (repo.Changes.Count > 0)
+        {
+            return repo.Changes.Any(c =>
+                c.Path == filePath && (isStagedSection ? c.IsStaged : c.IsChanged));
+        }
+
+        if (_hydrationMode != GitChangesHydrationMode.Summary)
+            return false;
+
+        // Large mode: entries may only live in the node cache until a folder is expanded.
+        if (SelectionExistsInNodeCache(workspaceRepositoryId, filePath, isStagedSection))
+            return true;
+
+        // Not yet hydrated for this path - keep selection while the section still reports files.
+        return isStagedSection ? repo.StagedCount > 0 : repo.ChangedCount > 0;
+    }
+
+    private bool SelectionExistsInNodeCache(int workspaceRepositoryId, string filePath, bool isStagedSection)
+    {
+        var normalized = filePath.Replace('\\', '/');
+        foreach (var prefix in PrefixesAlongPath(normalized))
+        {
+            var page = _treeNodeCache.TryGet(workspaceRepositoryId, isStagedSection, prefix);
+            if (page is null)
+                continue;
+
+            if (page.Children.Any(c =>
+                    !c.IsFolder
+                    && c.Entry is not null
+                    && string.Equals(c.Entry.Path, normalized, StringComparison.Ordinal)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static IEnumerable<string> PrefixesAlongPath(string filePath)
+    {
+        yield return string.Empty;
+        var segments = filePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        for (var i = 0; i < segments.Length - 1; i++)
+            yield return string.Join('/', segments.Take(i + 1));
     }
 
     private async Task ClearSelectionQuietlyAsync(bool clearMemory)
@@ -588,23 +660,26 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     private void OnFilterChanged(string value)
     {
         _filterQuery = value;
-        RebuildRows();
-    }
-
-    private void ToggleExpanded(GitChangesTreeRow row)
-    {
-        if (!row.HasChildren)
+        // Large-mode client filter cannot see unhydrated paths; re-open with full hydration when filtering.
+        if (_hydrationMode == GitChangesHydrationMode.Summary && !string.IsNullOrWhiteSpace(value))
         {
+            _ = LoadAsync();
             return;
         }
 
-        if (!_collapsedKeys.Add(row.Key))
+        if (_hydrationMode == GitChangesHydrationMode.Full
+            && string.IsNullOrWhiteSpace(value)
+            && GitChangesOptions.Value.UseLargeHydration(
+                _view?.Repositories.Sum(r => r.Changes.Count) ?? 0))
         {
-            _collapsedKeys.Remove(row.Key);
+            _ = LoadAsync();
+            return;
         }
 
         RebuildRows();
     }
+
+    private void ToggleExpanded(GitChangesTreeRow row) => _ = ToggleExpandedAsync(row);
 
     private void SelectFile(GitChangesFileSelectEventArgs args)
     {

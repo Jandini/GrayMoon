@@ -584,13 +584,24 @@
     display: flex;
     align-items: center;
     gap: 0.35rem;
-    padding-top: 0.2rem;
-    padding-bottom: 0.2rem;
+    /* Fixed height keeps Virtualize ItemSize stable (28px). */
+    height: 28px;
+    box-sizing: border-box;
+    padding-top: 0;
+    padding-bottom: 0;
     padding-right: 0.5rem;
     border-radius: 0.2rem;
     cursor: default;
     min-width: 0;
     overflow: hidden;
+}
+
+.git-changes-tree__row--loading {
+    pointer-events: none;
+}
+
+.git-changes-tree__row--repository .git-changes-tree__count-badge {
+    margin-left: 0.25rem;
 }
 
 .git-changes-tree__row:hover {

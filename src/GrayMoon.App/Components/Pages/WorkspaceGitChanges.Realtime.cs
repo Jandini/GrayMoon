@@ -1,3 +1,4 @@
+using GrayMoon.App.Services.GitChanges;
 using GrayMoon.Application.Features;
 using GrayMoon.Common.Git;
 using Microsoft.AspNetCore.SignalR.Client;
@@ -17,19 +18,18 @@ public sealed partial class WorkspaceGitChanges
         {
             _hubConnection = WorkspaceSyncHubConnectionHelper.Create(NavigationManager);
 
-            _hubConnection.On<int, int>("GitChangesUpdated", async (workspaceId, _) =>
+            // Legacy dual-write companion of ContextGitChangesUpdated; ignore to avoid a second patch.
+            _hubConnection.On<int, int>("GitChangesUpdated", (workspaceId, _) =>
             {
                 if (workspaceId != WorkspaceId || _disposed)
-                    return;
+                    return Task.CompletedTask;
 
-                await InvokeAsync(() => LoadAsync(
-                    benchEventName: "live update handled",
-                    liveOutcome: "Reloaded",
-                    liveWorkspaceId: workspaceId,
-                    liveContextId: 0));
+                // ContextGitChangesUpdated is always published for the same snapshot and carries contextId.
+                return Task.CompletedTask;
             });
 
-            _hubConnection.On<int, int, int>("ContextGitChangesUpdated", async (workspaceId, contextId, _) =>
+            // (workspaceId, contextId, repositoryId) - repositoryId is Repository.RepositoryId.
+            _hubConnection.On<int, int, int>("ContextGitChangesUpdated", async (workspaceId, contextId, repositoryId) =>
             {
                 if (workspaceId != WorkspaceId || _disposed)
                     return;
@@ -40,11 +40,7 @@ public sealed partial class WorkspaceGitChanges
                     return;
                 }
 
-                await InvokeAsync(() => LoadAsync(
-                    benchEventName: "live update handled",
-                    liveOutcome: "Reloaded",
-                    liveWorkspaceId: workspaceId,
-                    liveContextId: contextId));
+                await InvokeAsync(() => PatchRepositoryLiveAsync(workspaceId, contextId, repositoryId));
             });
 
             _ = WorkspaceSyncHubConnectionHelper.TryStartAsync(_hubConnection, Logger);
@@ -55,7 +51,9 @@ public sealed partial class WorkspaceGitChanges
 
     private void LogLiveUpdateNoOp(int workspaceId, int contextId)
     {
-        var entryCount = _view?.Repositories.Sum(r => r.Changes.Count) ?? 0;
+        var entryCount = _hydrationMode == GitChangesHydrationMode.Summary
+            ? (_view?.Repositories.Sum(r => r.StagedCount + r.ChangedCount) ?? 0)
+            : (_view?.Repositories.Sum(r => r.Changes.Count) ?? 0);
         GitChangesBench.Log(
             Logger,
             GitChangesOptions.Value,

@@ -61,4 +61,38 @@ public sealed class GitChangesOptions
     /// Default 100.
     /// </summary>
     public int BenchmarkLogMinElapsedMs { get; init; } = 100;
+
+    /// <summary>
+    /// Internal hydration switch only (not a product inventory cap). At or below this total entry count
+    /// the Changes page uses today's single-shot full hydration and default expand. Above it, summary-first
+    /// open + lazy folder pages. Tuned from M0 (~1.5–2K is where full-circuit reload storms hurt). Default 1_500.
+    /// </summary>
+    public int FullHydrationMaxEntries { get; init; } = 1_500;
+
+    /// <summary>
+    /// Rows fetched per request when expanding a folder or paging the virtualizer in large mode.
+    /// Scroll/expand continues until the prefix is exhausted. Default 200.
+    /// </summary>
+    public int TreePageSize { get; init; } = 200;
+
+    /// <summary>
+    /// Depth of folder summaries computed at persist time for Layer A badges (Phase 3). Default 2.
+    /// </summary>
+    public int FolderRollupDepth { get; init; } = 2;
+
+    /// <summary>
+    /// Soft bound on retained flattened tree rows in large mode (evict collapsed page caches).
+    /// Must stay at least <see cref="TreePageSize"/> plus overscan. Default 500.
+    /// </summary>
+    public int CircuitVisibleRowBudget { get; init; } = 500;
+
+    /// <summary>
+    /// Per-repo paths inlined on one Worker→App SignalR message before chunked transfer (Phase 4).
+    /// Placeholder until a byte budget is chosen from M0. Default 2_000.
+    /// </summary>
+    public int SnapshotPathsInlineMax { get; init; } = 2_000;
+
+    /// <summary>True when <paramref name="totalEntries"/> should use summary-first + lazy pages.</summary>
+    public bool UseLargeHydration(int totalEntries) =>
+        totalEntries > Math.Max(0, FullHydrationMaxEntries);
 }

@@ -923,7 +923,7 @@ Monaco integration
 
 ### Inventory and tree (current behavior)
 
-Opening `/workspaces/{id}/changes` reads SQLite only (`IWorkspaceGitChangesReadService`) - never `GetGitChangeStatus` for the initial paint. The read materializes every `WorkspaceGitContextChangeEntry` for the selected context into `WorkspaceGitChangesView`. `GitChangesTreeBuilder` builds a flattened Staged/Changed list; `_collapsedKeys` starts empty so the tree is fully expanded. `GitChangesTree.razor` renders with `@foreach` (no `Virtualize`). Filter (`WorkspaceGitChangeSearchMatcher`) runs in the circuit over the full inventory. Live `ContextGitChangesUpdated` events call `LoadAsync` again for the whole context. End-to-end detail: `07-git-changes-projection-and-tree.md`.
+Opening `/workspaces/{id}/changes` reads SQLite only (`IWorkspaceGitChangesReadService`) - never `GetGitChangeStatus` for the initial paint. Small inventories hydrate fully and open expanded; larger ones (above `FullHydrationMaxEntries`) open summary-first with repositories collapsed and load folder children on expand via `GetEntryPageAsync`. `GitChangesTree.razor` uses `Virtualize`. Live `ContextGitChangesUpdated` patches the affected repository only. Filter still runs in-circuit on a fully hydrated view (large inventories reload to Full when filtering). End-to-end detail: `07-git-changes-projection-and-tree.md`.
 
 ---
 

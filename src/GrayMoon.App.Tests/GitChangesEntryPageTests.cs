@@ -1,0 +1,136 @@
+using GrayMoon.App.Services.GitChanges;
+using GrayMoon.Common.Git;
+
+namespace GrayMoon.App.Tests;
+
+public class GitChangesEntryPageTests
+{
+    private static WorkspaceGitChangeEntryView Entry(
+        string path,
+        GitChangeKind index = GitChangeKind.None,
+        GitChangeKind worktree = GitChangeKind.Modified) => new()
+    {
+        Path = path,
+        IndexChange = index,
+        WorktreeChange = worktree,
+    };
+
+    [Fact]
+    public void GroupDirectChildren_repo_root_folders_first_then_files()
+    {
+        var entries = new[]
+        {
+            Entry("z.txt"),
+            Entry("src/a.cs"),
+            Entry("src/b.cs"),
+            Entry("lib/x.cs"),
+            Entry("a.txt"),
+            Entry("nested/", worktree: GitChangeKind.Untracked),
+        };
+
+        var children = WorkspaceGitChangesReadService.GroupDirectChildren(string.Empty, entries);
+        var ordered = WorkspaceGitChangesReadService.OrderChildren(children).ToList();
+
+        Assert.Equal(["lib", "nested", "src", "a.txt", "z.txt"], ordered.Select(c => c.Name).ToList());
+        Assert.True(ordered[0].IsFolder);
+        Assert.True(ordered[1].IsDirectoryEntry);
+        Assert.False(ordered[^1].IsFolder);
+    }
+
+    [Fact]
+    public void GroupDirectChildren_under_prefix_only_direct()
+    {
+        var entries = new[]
+        {
+            Entry("src/Foo/a.cs"),
+            Entry("src/Foo/bar/b.cs"),
+            Entry("src/Foo/z.cs"),
+            Entry("src/Other/x.cs"),
+            Entry("root.cs"),
+        };
+
+        var children = WorkspaceGitChangesReadService.GroupDirectChildren("src/Foo", entries);
+        var ordered = WorkspaceGitChangesReadService.OrderChildren(children).ToList();
+
+        Assert.Equal(["bar", "a.cs", "z.cs"], ordered.Select(c => c.Name).ToList());
+        Assert.Equal("src/Foo/bar", ordered[0].Path);
+    }
+
+    [Fact]
+    public void GroupDirectChildren_matches_tree_builder_top_level_names()
+    {
+        var entries = new[]
+        {
+            Entry("App/Program.cs", index: GitChangeKind.Modified),
+            Entry("App/Services/X.cs", index: GitChangeKind.Added),
+            Entry("readme.md", index: GitChangeKind.Modified),
+        };
+        var view = new WorkspaceGitChangesView
+        {
+            WorkspaceId = 1,
+            Repositories =
+            [
+                new WorkspaceGitChangesRepositoryView
+                {
+                    WorkspaceRepositoryId = 1,
+                    RepositoryId = 1,
+                    RepositoryName = "repo",
+                    Changes = entries,
+                },
+            ],
+        };
+
+        // Staged section only (all entries above are staged).
+        var rows = GitChangesTreeBuilder.Build(view, null);
+        var topNames = rows
+            .Where(r => r.Depth == 2 && r.IsStagedSection)
+            .Select(r => r.Label)
+            .ToList();
+
+        var children = WorkspaceGitChangesReadService.OrderChildren(
+            WorkspaceGitChangesReadService.GroupDirectChildren(
+                string.Empty,
+                entries.Where(e => e.IsStaged))).ToList();
+
+        Assert.Equal(topNames, children.Select(c => c.Name).ToList());
+    }
+
+    [Fact]
+    public void BuildFromCache_collapsed_repos_show_counts_without_files()
+    {
+        var view = GitChangesTreeBuilder.ViewFromSummaries(new WorkspaceGitChangesSummariesView
+        {
+            WorkspaceId = 1,
+            TotalEntryCount = 2000,
+            Repositories =
+            [
+                new WorkspaceGitChangesRepositorySummary
+                {
+                    WorkspaceRepositoryId = 7,
+                    RepositoryId = 7,
+                    RepositoryName = "big",
+                    StagedCount = 0,
+                    ChangedCount = 2000,
+                    SnapshotVersion = 1,
+                },
+            ],
+        });
+
+        var collapsed = new HashSet<string>();
+        GitChangesTreeBuilder.SeedCollapsedRepositories(view, collapsed);
+        var cache = new GitChangesTreeNodeCache();
+        var rows = GitChangesTreeBuilder.BuildFromCache(view, cache, collapsed);
+
+        Assert.Contains(rows, r => r.Kind == GitChangesTreeRowKind.Section && r.Count == 2000);
+        Assert.Contains(rows, r => r.Kind == GitChangesTreeRowKind.Repository && r.Count == 2000);
+        Assert.DoesNotContain(rows, r => r.Kind == GitChangesTreeRowKind.File);
+    }
+
+    [Fact]
+    public void UseLargeHydration_threshold()
+    {
+        var options = new GitChangesOptions { FullHydrationMaxEntries = 1500 };
+        Assert.False(options.UseLargeHydration(1500));
+        Assert.True(options.UseLargeHydration(1501));
+    }
+}

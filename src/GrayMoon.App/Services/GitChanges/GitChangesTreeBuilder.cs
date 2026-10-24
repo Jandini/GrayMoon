@@ -52,6 +52,9 @@ public sealed record GitChangesTreeRow
     /// nothing to expand. <see cref="FilePath"/> holds the entry's path (with the trailing "/").
     /// </summary>
     public bool IsDirectoryEntry { get; init; }
+
+    /// <summary>Large-mode: children for this folder/repo are being fetched from Layer B.</summary>
+    public bool IsLoadingChildren { get; init; }
 }
 
 /// <summary>
@@ -75,7 +78,7 @@ public static class GitChangesTreeBuilder
     /// </summary>
     public static bool IsDirectoryPath(string path) => path.EndsWith('/');
 
-    public static IReadOnlyList<GitChangesTreeRow> Build(
+    public static List<GitChangesTreeRow> Build(
         WorkspaceGitChangesView view,
         string? filterQuery,
         IReadOnlySet<string>? collapsedKeys = null)
@@ -97,6 +100,228 @@ public static class GitChangesTreeBuilder
         AppendSection(rows, "changed", "Changed", isStagedSection: false, changedRepos, filterQuery, collapsedKeys);
 
         return rows;
+    }
+
+    /// <summary>
+    /// Large-mode flatten: section/repo chrome from summary counts; file/folder rows from
+    /// <paramref name="nodeCache"/> for expanded prefixes. Missing cache entries render a loading placeholder.
+    /// </summary>
+    public static List<GitChangesTreeRow> BuildFromCache(
+        WorkspaceGitChangesView view,
+        GitChangesTreeNodeCache nodeCache,
+        IReadOnlySet<string> collapsedKeys)
+    {
+        var rows = new List<GitChangesTreeRow>();
+        AppendSummarySection(rows, "staged", "Staged", isStagedSection: true, view, nodeCache, collapsedKeys);
+        AppendSummarySection(rows, "changed", "Changed", isStagedSection: false, view, nodeCache, collapsedKeys);
+        return rows;
+    }
+
+    /// <summary>Builds a view with empty Changes lists from Layer A summaries (large-mode open).</summary>
+    public static WorkspaceGitChangesView ViewFromSummaries(WorkspaceGitChangesSummariesView summaries) =>
+        new()
+        {
+            WorkspaceId = summaries.WorkspaceId,
+            Repositories = summaries.Repositories.Select(s => new WorkspaceGitChangesRepositoryView
+            {
+                WorkspaceRepositoryId = s.WorkspaceRepositoryId,
+                RepositoryId = s.RepositoryId,
+                RepositoryName = s.RepositoryName,
+                BranchName = s.BranchName,
+                DefaultBranchName = s.DefaultBranchName,
+                HeadCommit = s.HeadCommit,
+                IsDetachedHead = s.IsDetachedHead,
+                IsUnbornBranch = s.IsUnbornBranch,
+                IsMerging = s.IsMerging,
+                IsRebasing = s.IsRebasing,
+                IsCherryPicking = s.IsCherryPicking,
+                StagedCount = s.StagedCount,
+                ChangedCount = s.ChangedCount,
+                ConflictCount = s.ConflictCount,
+                Insertions = s.Insertions,
+                Deletions = s.Deletions,
+                StagedInsertions = s.StagedInsertions,
+                StagedDeletions = s.StagedDeletions,
+                WorkerScannedAt = s.WorkerScannedAt,
+                PersistedAt = s.PersistedAt,
+                LastErrorCode = s.LastErrorCode,
+                LastErrorMessage = s.LastErrorMessage,
+                Changes = [],
+            }).ToList(),
+        };
+
+    /// <summary>Seeds <paramref name="collapsedKeys"/> so every repository starts collapsed (large-mode default).</summary>
+    public static void SeedCollapsedRepositories(WorkspaceGitChangesView view, ISet<string> collapsedKeys)
+    {
+        foreach (var repo in view.Repositories)
+        {
+            if (repo.StagedCount > 0)
+                collapsedKeys.Add($"staged/{repo.WorkspaceRepositoryId}");
+            if (repo.ChangedCount > 0)
+                collapsedKeys.Add($"changed/{repo.WorkspaceRepositoryId}");
+        }
+    }
+
+    private static void AppendSummarySection(
+        List<GitChangesTreeRow> rows,
+        string sectionKey,
+        string sectionLabel,
+        bool isStagedSection,
+        WorkspaceGitChangesView view,
+        GitChangesTreeNodeCache nodeCache,
+        IReadOnlySet<string> collapsedKeys)
+    {
+        var repos = view.Repositories
+            .Where(r => isStagedSection ? r.StagedCount > 0 : r.ChangedCount > 0)
+            .OrderBy(r => r.RepositoryName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (repos.Count == 0)
+            return;
+
+        var sectionExpanded = !collapsedKeys.Contains(sectionKey);
+        var totalCount = repos.Sum(r => isStagedSection ? r.StagedCount : r.ChangedCount);
+
+        rows.Add(new GitChangesTreeRow
+        {
+            Key = sectionKey,
+            Kind = GitChangesTreeRowKind.Section,
+            Depth = 0,
+            Label = sectionLabel,
+            Count = totalCount,
+            IsStagedSection = isStagedSection,
+            HasChildren = true,
+            IsExpanded = sectionExpanded,
+        });
+
+        if (!sectionExpanded)
+            return;
+
+        foreach (var repo in repos)
+        {
+            var repoKey = $"{sectionKey}/{repo.WorkspaceRepositoryId}";
+            var repoExpanded = !collapsedKeys.Contains(repoKey);
+
+            rows.Add(new GitChangesTreeRow
+            {
+                Key = repoKey,
+                Kind = GitChangesTreeRowKind.Repository,
+                Depth = 1,
+                Label = repo.RepositoryName,
+                Count = isStagedSection ? repo.StagedCount : repo.ChangedCount,
+                IsStagedSection = isStagedSection,
+                WorkspaceRepositoryId = repo.WorkspaceRepositoryId,
+                RepositoryName = repo.RepositoryName,
+                BranchName = repo.BranchName,
+                HasChildren = true,
+                IsExpanded = repoExpanded,
+            });
+
+            if (!repoExpanded)
+                continue;
+
+            AppendCachedLevel(rows, repoKey, depth: 2, isStagedSection, repo, pathPrefix: string.Empty, nodeCache, collapsedKeys);
+        }
+    }
+
+    private static void AppendCachedLevel(
+        List<GitChangesTreeRow> rows,
+        string parentKey,
+        int depth,
+        bool isStagedSection,
+        WorkspaceGitChangesRepositoryView repo,
+        string pathPrefix,
+        GitChangesTreeNodeCache nodeCache,
+        IReadOnlySet<string> collapsedKeys)
+    {
+        var cache = nodeCache.TryGet(repo.WorkspaceRepositoryId, isStagedSection, pathPrefix);
+        if (cache is null || (cache.Children.Count == 0 && cache.IsLoading))
+        {
+            rows.Add(new GitChangesTreeRow
+            {
+                Key = $"{parentKey}/__loading",
+                Kind = GitChangesTreeRowKind.Folder,
+                Depth = depth,
+                Label = "Loading…",
+                IsStagedSection = isStagedSection,
+                WorkspaceRepositoryId = repo.WorkspaceRepositoryId,
+                RepositoryName = repo.RepositoryName,
+                HasChildren = false,
+                IsExpanded = false,
+                IsLoadingChildren = true,
+            });
+            return;
+        }
+
+        if (cache.Children.Count == 0 && cache.IsComplete)
+            return;
+
+        foreach (var child in cache.Children)
+        {
+            if (child.IsDirectoryEntry && child.Entry is not null)
+            {
+                rows.Add(new GitChangesTreeRow
+                {
+                    Key = $"{parentKey}/{child.Name}",
+                    Kind = GitChangesTreeRowKind.Folder,
+                    Depth = depth,
+                    Label = child.Name,
+                    IsStagedSection = isStagedSection,
+                    WorkspaceRepositoryId = repo.WorkspaceRepositoryId,
+                    RepositoryName = repo.RepositoryName,
+                    FilePath = child.Entry.Path,
+                    IndexChange = child.Entry.IndexChange,
+                    WorktreeChange = child.Entry.WorktreeChange,
+                    HasChildren = false,
+                    IsExpanded = false,
+                    IsDirectoryEntry = true,
+                });
+                continue;
+            }
+
+            if (child.IsFolder)
+            {
+                var folderKey = $"{parentKey}/{child.Name}";
+                var expanded = !collapsedKeys.Contains(folderKey);
+                rows.Add(new GitChangesTreeRow
+                {
+                    Key = folderKey,
+                    Kind = GitChangesTreeRowKind.Folder,
+                    Depth = depth,
+                    Label = child.Name,
+                    IsStagedSection = isStagedSection,
+                    WorkspaceRepositoryId = repo.WorkspaceRepositoryId,
+                    RepositoryName = repo.RepositoryName,
+                    HasChildren = true,
+                    IsExpanded = expanded,
+                    IsLoadingChildren = expanded
+                        && nodeCache.TryGet(repo.WorkspaceRepositoryId, isStagedSection, child.Path) is { IsLoading: true, Children.Count: 0 },
+                });
+
+                if (expanded)
+                    AppendCachedLevel(rows, folderKey, depth + 1, isStagedSection, repo, child.Path, nodeCache, collapsedKeys);
+                continue;
+            }
+
+            if (child.Entry is not null)
+                rows.Add(MakeFileRow(parentKey, depth, isStagedSection, repo, child.Entry));
+        }
+
+        if (cache.HasMore || cache.IsLoading)
+        {
+            rows.Add(new GitChangesTreeRow
+            {
+                Key = $"{parentKey}/__more",
+                Kind = GitChangesTreeRowKind.Folder,
+                Depth = depth,
+                Label = cache.IsLoading ? "Loading…" : "Loading more…",
+                IsStagedSection = isStagedSection,
+                WorkspaceRepositoryId = repo.WorkspaceRepositoryId,
+                RepositoryName = repo.RepositoryName,
+                HasChildren = false,
+                IsExpanded = false,
+                IsLoadingChildren = true,
+            });
+        }
     }
 
     private static void AppendSection(

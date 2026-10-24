@@ -1,6 +1,6 @@
 # Git Changes: scale to tens of thousands of changed files
 
-Status: Phase 0 (permanent `GitChangesBench` logs + fixture + M0 numbers) is implemented; Phases 1-5 are not. Current product behavior is documented in `docs/architecture/07-git-changes-projection-and-tree.md`. Progress is tracked in `docs/todo/git-changes-large-changeset-scale-tracker.md`.
+Status: Phases 0–1 are implemented (permanent benches + M0; circuit/tree summaries, lazy expand, `Virtualize`, per-repo live patch). Phases 2–5 are not. Current product behavior is documented in `docs/architecture/07-git-changes-projection-and-tree.md` (fold Phase 1 detail in Phase 5). Progress is tracked in `docs/todo/git-changes-large-changeset-scale-tracker.md`.
 
 ## 0. Non-negotiable requirements (full inventory)
 

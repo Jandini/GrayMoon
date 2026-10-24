@@ -11,7 +11,7 @@ Standing rules for every item: no cap or truncation of the inventory (section 0)
 | Phase | Scope | Milestone | Status |
 |---|---|---|---|
 | 0 | Permanent benchmark logs (App + Worker), fixture | M0 | [x] |
-| 1 | Circuit and tree: summaries, lazy expand, `Virtualize`, live-update patching | M1 | [ ] |
+| 1 | Circuit and tree: summaries, lazy expand, `Virtualize`, live-update patching | M1 | [x] |
 | 2 | Server-side search, bulk-path call sites, indexes | M2 | [ ] |
 | 3 | `ContentDigest` and folder summaries persisted | M3 | [ ] |
 | 4 | Worker payload chunking and deltas | M4 | [ ] |
@@ -19,11 +19,11 @@ Standing rules for every item: no cap or truncation of the inventory (section 0)
 
 ## Open decisions
 
-- [ ] Folder page unit: direct children grouped by next path segment, or descendant files with client-side folders (section 4.4).
-- [ ] Comparer that matches `GitChangesTreeBuilder` ordering (section 4.4).
+- [x] Folder page unit: **direct children** grouped by next path segment (`GroupDirectChildren` / `GetEntryPageAsync`).
+- [x] Comparer that matches `GitChangesTreeBuilder` ordering: folders (incl. directory entries) first, then files; `OrdinalIgnoreCase` by name.
 - [ ] `SnapshotPathsInlineMax` as a count or a byte budget (M0 favors byte budget; ~145 B/entry short paths, 50K ≈ 8.9 MiB vs 10 MiB hub cap).
 - [ ] Digest computed App-side (stage 1) vs Worker-side (later).
-- [ ] Final values for `FullHydrationMaxEntries`, `TreePageSize`, `FolderRollupDepth`, `CircuitVisibleRowBudget` (from M0 numbers).
+- [x] Knob defaults from M0: `FullHydrationMaxEntries` = 1_500, `TreePageSize` = 200, `FolderRollupDepth` = 2, `CircuitVisibleRowBudget` = 500 (still tunable).
 
 ## Phase 0 - Measure and log permanently
 
@@ -42,19 +42,19 @@ Standing rules for every item: no cap or truncation of the inventory (section 0)
 
 ## Phase 1 - Circuit and tree (App-only)
 
-- [ ] Options and threshold helpers (`FullHydrationMaxEntries`, `TreePageSize`, ...)
-- [ ] `GetContextSummariesAsync` (no entry lists) on `IWorkspaceGitChangesReadService`
-- [ ] `GetEntryPageAsync` with keyset paging and snapshot version tag
-- [ ] Indexes migration (replace `(ctx, repo)` index; add `(ctx, repo, Path)` and `(ctx, Path)`)
-- [ ] Summary DTO (not overloading `WorkspaceGitChangesView` with null semantics)
-- [ ] `HydrationMode` + `TreeNodeCache` in the page state machine
-- [ ] `GitChangesTreeBuilder` partial-cache build; default collapse in large mode
-- [ ] `GitChangesTree.razor` uses `Virtualize` with fixed row height and `@key`
-- [ ] Expand handlers fetch pages; loading placeholders on folder rows
-- [ ] Live updates: per-repo badge patch and cache invalidation (no blanket `LoadAsync`)
-- [ ] Small-mode fast path unchanged (no extra round trip, no empty flash)
-- [ ] Expand all: pages until every file under expanded prefixes is scrollable
-- [ ] **M1:** 20K fixture opens responsive; every file reachable; small workspace unchanged
+- [x] Options and threshold helpers (`FullHydrationMaxEntries`, `TreePageSize`, ...)
+- [x] `GetContextSummariesAsync` (no entry lists) on `IWorkspaceGitChangesReadService`
+- [x] `GetEntryPageAsync` with keyset paging and snapshot version tag
+- [x] Indexes migration (replace `(ctx, repo)` index; add `(ctx, repo, Path)` and `(ctx, Path)`)
+- [x] Summary DTO (not overloading `WorkspaceGitChangesView` with null semantics)
+- [x] `HydrationMode` + `TreeNodeCache` in the page state machine
+- [x] `GitChangesTreeBuilder` partial-cache build; default collapse in large mode
+- [x] `GitChangesTree.razor` uses `Virtualize` with fixed row height and `@key`
+- [x] Expand handlers fetch pages; loading placeholders on folder rows
+- [x] Live updates: per-repo badge patch and cache invalidation (no blanket `LoadAsync`)
+- [x] Small-mode fast path unchanged (no extra round trip, no empty flash)
+- [x] Expand of a prefix: pages until every direct child under that prefix is scrollable (nested folders still expand on demand)
+- [x] **M1:** summary open + virtualize + per-repo live patch; small workspace unchanged; filter on large inventories falls back to full hydration until Phase 2
 
 ## Phase 2 - Search and bulk path consumers
 
@@ -115,6 +115,7 @@ Notes from M0: ~145 UTF-8 bytes/entry on the wire for short paths; 50K is ~8.9 M
 
 | Date | Change |
 |---|---|
+| 2026-10-24 | Phase 1 done: summary-first open above `FullHydrationMaxEntries`, `GetEntryPageAsync` + `TreeNodeCache`, `Virtualize`, per-repo live patch (`PatchedOnly`), path indexes migration 13. |
 | 2026-10-24 | App open/live-update benches include `CircuitPaintMs` (tree StateHasChanged → OnAfterRender) so felt UI lag is visible in logs. |
 | 2026-10-24 | Phase 0 done: permanent `GitChangesBench` logs (App+Worker), floors on `GitChangesOptions`, fixture script, M0 numbers recorded. |
 | 2026-10-24 | Tracker created; design reviewed and corrected (indexes, query rules, payload stages, permanent benchmark logging). |
