@@ -617,10 +617,11 @@ merge/rebase/cherry-pick state
 staged/changed/conflict counts
 insertions/deletions (working tree and staged)
 scan/persist timestamps
+ContentDigest, PathCount (nullable; migration 14)
 last error
 ```
 
-Feature contexts use `WorkspaceGitContextRepositoryStatuses` (unique `WorkspaceFeatureContextId + WorkspaceRepositoryId`) and `WorkspaceGitContextChangeEntries` with the same shape. The special Workspace context writes both the legacy tables and the context tables.
+Feature contexts use `WorkspaceGitContextRepositoryStatuses` (unique `WorkspaceFeatureContextId + WorkspaceRepositoryId`) and `WorkspaceGitContextChangeEntries` with the same shape. `ContentDigest` (SHA-256 over every entry plus the status fields the page shows) and `PathCount` are computed in `GitChangesSnapshotPushHandler` so the page can skip a repaint for identical content. The special Workspace context writes both the legacy tables and the context tables.
 
 ### WorkspaceGitChangeEntry
 
@@ -913,7 +914,7 @@ WorkspaceRepositoryContextStates       checkout projection: the link's projectio
 WorkspaceRepositoryContextPullRequests
 WorkspaceRepositoryContextActions
 WorkspaceGitContextRepositoryStatuses
-WorkspaceGitContextChangeEntries       (non-unique index)
+WorkspaceGitContextChangeEntries       (non-unique indexes on (context, repo, Path) and (context, Path); migration 13)
 WorkspaceFileContextStates
 ```
 

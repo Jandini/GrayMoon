@@ -38,7 +38,7 @@ Read these documents in order:
    Rules for adding or changing functionality without violating GrayMoon architecture, plus the list of known gaps and open review findings.
 
 7. [07 - Git Changes Projection and File Tree](07-git-changes-projection-and-tree.md)  
-   End-to-end Changes inventory: Worker status scan, SignalR snapshot push, SQLite projection, circuit load, tree builder and render path, and current scale limits. Large-changeset design lives in `docs/todo/git-changes-large-changeset-scale.md`.
+   End-to-end Changes inventory: Worker status scan, SignalR snapshot push, SQLite projection, circuit load, tree builder and render path, and current scale behavior and limits. Unbuilt scale follow-ups live in `docs/todo/git-changes-large-changeset-scale.md`.
 
 The companion Desktop shell is documented in `GrayMoon.Desktop/docs/architecture/` in the sibling repository.
 

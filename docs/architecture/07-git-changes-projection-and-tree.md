@@ -1,7 +1,7 @@
 # 07 - Git Changes Projection and File Tree
 
 **State documented:** current Git Changes end-to-end path (Worker scan → App persistence → Blazor tree)  
-**Scope:** how changed files are collected, stored, loaded into the circuit, and rendered. Design for large change sets lives in `docs/todo/git-changes-large-changeset-scale.md`.
+**Scope:** how changed files are collected, stored, loaded into the circuit, and rendered. Large change sets are handled by summary-first open, lazy paged expand, virtualization, server-side search and a content digest; the work that is not built yet (folder rollup table, chunked Worker transfer, deltas) is in `docs/todo/git-changes-large-changeset-scale.md`.
 
 This document is the precise current-state reference for the Changes page inventory and tree. Product-facing workflow text is in `01-product-model-and-user-workflows.md` (section 18). Watcher leases, pools and mutation consistency are in `04-runtime-communication-and-concurrency.md` (sections 9-13). Page capabilities are in `05-user-capability-reference.md` (sections 21-22). Persisted tables are in `03-data-model-and-persistence.md` (section 13).
 
@@ -173,9 +173,9 @@ Directory entries (`path` ending in `/`) become `IsDirectoryEntry` Folder rows: 
 | Blazor circuit | Full mode: `_view` (all entries) + `_rows`. Summary mode: summaries + `TreeNodeCache` for expanded prefixes + virtualized `_rows` |
 | Circuit → browser | Virtualized tree window (+ overscan); not every logical row |
 
-Worker→App snapshots and SQLite replace are still O(paths) per repository (Phases 3–4). Circuit open and live update for large inventories are summary-first and per-repo.
+Worker→App snapshots and SQLite replace are still O(paths) per repository (not planned now; see the todo document). Circuit open and live update for large inventories are summary-first and per-repo.
 
-`GitChangesOptions` also carries hydration knobs (`FullHydrationMaxEntries`, `TreePageSize`, …) in addition to parallelism, watcher debounce/idle/renewal, legacy dual-write, and benchmark floors. There is still **no** product inventory cap.
+`GitChangesOptions` also carries hydration knobs (`FullHydrationMaxEntries`, `TreePageSize`, …) in addition to parallelism, watcher debounce/idle/renewal, and legacy dual-write. There is still **no** product inventory cap.
 
 ## 6. Current limits, batching, pagination, virtualization
 
@@ -191,14 +191,14 @@ Worker→App snapshots and SQLite replace are still O(paths) per repository (Pha
 | Diff | On demand, one file; soft size / binary / encoding states in `GitDiffDocument` |
 | SignalR receive cap | 10 MiB (shared with Sync and other large commands) |
 
-Phase 1 addresses circuit open, expand, virtualize, and live-update shape. SQLite replace and Worker→App payload size remain O(paths) until Phases 3–4 (`docs/todo/git-changes-large-changeset-scale.md`).
+Circuit open, expand, virtualize, search and live-update shape no longer grow with path count. SQLite replace and Worker→App payload size remain O(paths); possible follow-ups are in `docs/todo/git-changes-large-changeset-scale.md`.
 
 ## 7. Why UX degrades around ~5K+ files
 
-Phase 1 removes the worst circuit/DOM cliffs for large inventories (summary open, collapsed repos, virtualize, per-repo live patch). Remaining pain follows from hops that are still O(paths):
+The circuit and DOM cliffs for large inventories are removed (summary open, collapsed repos, virtualize, per-repo live patch, server-side search, digest no-op). Remaining pain follows from hops that are still O(paths):
 
 1. **Full replace persist.** Large snapshots contend on the single-writer write queue and rewrite many SQLite rows.
-2. **Worker→App full snapshot JSON.** Near the 10 MiB hub receive cap at ~50K short paths (Phase 4 chunking).
+2. **Worker→App full snapshot JSON.** Near the 10 MiB hub receive cap at ~50K short paths (chunked transfer is a todo item).
 3. **Search cost.** Server-side search is an O(N) streamed scan in SQLite (about 0.5 s to page all 5K matches of a 20K inventory); FTS5 stays an option if larger inventories need it.
 4. **Worker porcelain cost.** `--untracked-files=all` can itself be expensive before any UI work starts.
 
@@ -222,8 +222,15 @@ DB:         WorkspaceGitContextRepositoryStatuses, WorkspaceGitContextChangeEntr
 Hubs:       WorkerHub.GitChangesSnapshotUpdated; WorkspaceSyncHub ContextGitChangesUpdated
 ```
 
-## 9. Known gap (scale)
+## 9. Known gaps (scale)
 
-Git Changes has no progressive tree loading, no virtualization, and no server-side folder aggregation for large inventories. Opening or refreshing Changes with many thousands of paths loads the full entry set into the Blazor circuit and renders the expanded flattened list. The inventory itself is already uncapped (Worker and SQLite store every path); the gap is client materialization and DOM cost, not a missing product limit.
+The inventory is uncapped and every path stays reachable (scroll, expand, search). What is still O(paths), per repository and per snapshot:
 
-Planned scale work must keep **every** changed path reachable (scroll / expand / search) and must not introduce inventory caps or "first N" truncation. Design: `docs/todo/git-changes-large-changeset-scale.md` (section 0).
+- Worker `git status` scan and the full `GitChangesSnapshotNotification` JSON (about 145 bytes per short path; a 50K-path repository is about 8.9 MiB against the 10 MiB hub receive cap, so very large or long-path snapshots can be rejected).
+- The App's delete-and-insert replace of the repository's entry set on the single write queue (about 3.6 s at 50K paths on the reference laptop).
+- Opening Summary mode still computes folder-level numbers on the fly; there is no persisted folder rollup table.
+- Search is an O(N) streamed scan (about 0.5 s to page 5K matches of 20K paths).
+
+Reference timings (Windows laptop, in-memory SQLite, synthetic untracked trees; the benchmark code was removed afterwards): 25K paths: persist 1.2 s, read 62 ms, build tree 54 ms; 50K paths: persist 3.6 s, read 151 ms, build tree 137 ms.
+
+Follow-ups, none scheduled: `docs/todo/git-changes-large-changeset-scale.md`. Any follow-up must keep every changed path reachable and must not introduce caps or "first N" truncation.

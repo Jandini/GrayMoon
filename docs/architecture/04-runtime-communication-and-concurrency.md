@@ -806,4 +806,4 @@ Worker rules:
 - The watcher does not filter ignored build output; it drops only `.git` and nested repositories.
 - The App has no single-flight for Worker install / `SelfUpdate`; the `Global\GrayMoonWorkerInstall` mutex in the install script is the guard.
 - A remote default branch switched to an already existing branch is not detected by origin/HEAD repair.
-- Git Changes inventories are unbounded end-to-end: full porcelain status, full snapshot SignalR payloads, full SQLite replace, full circuit load and a non-virtualized expanded tree. Painful around thousands of paths; design in `docs/todo/git-changes-large-changeset-scale.md` (current path in `07-git-changes-projection-and-tree.md`).
+- Git Changes snapshots are full-list end-to-end on the Worker-to-App side: full porcelain status, full snapshot SignalR payloads (a 50K-path repository is about 8.9 MiB against the 10 MiB receive cap) and full SQLite replace. The circuit side is paged and virtualized. Details in `07-git-changes-projection-and-tree.md` section 9; follow-ups in `docs/todo/git-changes-large-changeset-scale.md`.
