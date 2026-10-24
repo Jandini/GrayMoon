@@ -301,10 +301,10 @@ Benchmarks are **permanent structured log lines in both the App and the Worker**
 | Event | Properties |
 |---|---|
 | Snapshot received and applied (`GitChangesSnapshotPushHandler`) | `ReceiveUtf8Bytes`, `DeserializeMs`, `WriteQueueWaitMs`, `PersistMs`, `PathCount`, `Version`, whether skipped as stale |
-| Changes page open (`LoadAsync` / summaries read) | `EntryCount`, `ReadMs`, `BuildTreeMs`, `RowCountRendered`, `HydrationMode` (Full or Summary) |
+| Changes page open (`LoadAsync` / summaries read) | `EntryCount`, `ReadMs`, `BuildTreeMs`, `CircuitPaintMs` (StateHasChanged → next `OnAfterRender`), `RowCountRendered`, `HydrationMode` (Full or Summary), `OpenMs` |
 | Page fetch (`GetEntryPageAsync`, phase 1) | `Prefix` depth only, `Take`, `ReturnedCount`, `QueryMs` |
 | Search (`SearchEntriesAsync`, phase 2) | `FilterLength`, `MatchCount`, `QueryMs` |
-| Live update handled | `Reloaded` vs `PatchedOnly` vs `NoOp`, `HandleMs` |
+| Live update handled | `Reloaded` vs `PatchedOnly` vs `NoOp`, `HandleMs`, `ReadMs`, `BuildTreeMs`, `CircuitPaintMs` |
 | Circuit heap on open | `GC.GetTotalMemory(false)` before and after open (Debug only; it is not per-circuit exact, so treat as a trend) |
 
 Tasks:

@@ -180,9 +180,32 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         _initialLoadTask = LoadAsync();
     }
 
+    /// <summary>
+    /// Armed after the tree <see cref="StateHasChanged"/>; completed in <c>OnAfterRenderAsync</c> so
+    /// <c>CircuitPaintMs</c> captures Blazor Server render-batch work (the lag users feel), not only SQLite/CPU.
+    /// </summary>
+    private PendingGitChangesBenchPaint? _pendingBenchPaint;
+
+    private sealed class PendingGitChangesBenchPaint
+    {
+        public required string EventName { get; init; }
+        public required long LoadStarted { get; init; }
+        public required long PaintStarted { get; init; }
+        public required long ReadMs { get; init; }
+        public required long BuildTreeMs { get; init; }
+        public required int EntryCount { get; init; }
+        public required long HeapBeforeBytes { get; init; }
+        public required bool RestoreSelectionAfterPaint { get; init; }
+        public string? LiveOutcome { get; init; }
+        public int LiveWorkspaceId { get; init; }
+        public int LiveContextId { get; init; }
+    }
+
     // Reads the persisted SQLite projection only - never sends a Worker command. Opening or reloading
     // this page must never trigger a status scan.
-    private async Task LoadAsync()
+    private Task LoadAsync() => LoadAsync(benchEventName: "changes open", liveOutcome: null, liveWorkspaceId: 0, liveContextId: 0);
+
+    private async Task LoadAsync(string benchEventName, string? liveOutcome, int liveWorkspaceId, int liveContextId)
     {
         _errorMessage = null;
         var openStarted = Stopwatch.GetTimestamp();
@@ -226,38 +249,86 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             Logger.LogError(ex, "Failed to load Git Changes for workspace {WorkspaceId}", WorkspaceId);
             _errorMessage = "Failed to load Changes.";
         }
-        finally
-        {
-            StateHasChanged();
-        }
 
-        var openMs = GitChangesBench.ElapsedMs(openStarted);
+        // Arm paint timing, then render. The GitChangesBench line is written in OnAfterRenderAsync so
+        // CircuitPaintMs includes the Blazor Server circuit sync of RowCountRendered rows - that is what
+        // feels slow around ~1.5K+ paths, not ReadMs/BuildTreeMs alone.
+        _pendingBenchPaint = new PendingGitChangesBenchPaint
+        {
+            EventName = benchEventName,
+            LoadStarted = openStarted,
+            PaintStarted = Stopwatch.GetTimestamp(),
+            ReadMs = readMs,
+            BuildTreeMs = buildTreeMs,
+            EntryCount = entryCount,
+            HeapBeforeBytes = heapBefore,
+            RestoreSelectionAfterPaint = _errorMessage == null,
+            LiveOutcome = liveOutcome,
+            LiveWorkspaceId = liveWorkspaceId,
+            LiveContextId = liveContextId,
+        };
+        StateHasChanged();
+    }
+
+    private async Task CompletePendingBenchPaintAsync()
+    {
+        if (_pendingBenchPaint is not { } pending)
+            return;
+
+        _pendingBenchPaint = null;
+        var circuitPaintMs = GitChangesBench.ElapsedMs(pending.PaintStarted);
+        var openMs = GitChangesBench.ElapsedMs(pending.LoadStarted);
         var heapAfter = GC.GetTotalMemory(forceFullCollection: false);
+        var options = GitChangesOptions.Value;
         // Phase 0 / today: always full hydration. Summary mode arrives in Phase 1.
         const string hydrationMode = "Full";
-        var options = GitChangesOptions.Value;
-        GitChangesBench.Log(
-            Logger,
-            options,
-            "changes open",
-            entryCount,
-            openMs,
-            ("EntryCount", entryCount),
-            ("ReadMs", readMs),
-            ("BuildTreeMs", buildTreeMs),
-            ("RowCountRendered", _rows.Count),
-            ("HydrationMode", hydrationMode),
-            ("WorkspaceId", WorkspaceId),
-            ("ContextId", _selectedContextId?.Value ?? 0));
+
+        if (pending.EventName == "live update handled")
+        {
+            GitChangesBench.Log(
+                Logger,
+                options,
+                "live update handled",
+                pending.EntryCount,
+                openMs,
+                ("Outcome", pending.LiveOutcome ?? "Reloaded"),
+                ("HandleMs", openMs),
+                ("ReadMs", pending.ReadMs),
+                ("BuildTreeMs", pending.BuildTreeMs),
+                ("CircuitPaintMs", circuitPaintMs),
+                ("RowCountRendered", _rows.Count),
+                ("EntryCount", pending.EntryCount),
+                ("WorkspaceId", pending.LiveWorkspaceId),
+                ("ContextId", pending.LiveContextId));
+        }
+        else
+        {
+            GitChangesBench.Log(
+                Logger,
+                options,
+                "changes open",
+                pending.EntryCount,
+                openMs,
+                ("EntryCount", pending.EntryCount),
+                ("ReadMs", pending.ReadMs),
+                ("BuildTreeMs", pending.BuildTreeMs),
+                ("CircuitPaintMs", circuitPaintMs),
+                ("RowCountRendered", _rows.Count),
+                ("HydrationMode", hydrationMode),
+                ("OpenMs", openMs),
+                ("WorkspaceId", WorkspaceId),
+                ("ContextId", _selectedContextId?.Value ?? 0));
+        }
 
         if (Logger.IsEnabled(LogLevel.Debug))
         {
             Logger.LogDebug(
-                "GitChangesBench changes open heap WorkspaceId={WorkspaceId} HeapBeforeBytes={HeapBeforeBytes} HeapAfterBytes={HeapAfterBytes} EntryCount={EntryCount}",
+                "GitChangesBench changes open heap WorkspaceId={WorkspaceId} HeapBeforeBytes={HeapBeforeBytes} HeapAfterBytes={HeapAfterBytes} EntryCount={EntryCount} CircuitPaintMs={CircuitPaintMs}",
                 WorkspaceId,
-                heapBefore,
+                pending.HeapBeforeBytes,
                 heapAfter,
-                entryCount);
+                pending.EntryCount,
+                circuitPaintMs);
         }
 
         // Restoring a remembered file selection re-fetches its diff from the Worker, which can be slow
@@ -265,7 +336,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         // render above. TryRestoreSelectionAsync only does work when this page instance has no
         // selection yet (first load / workspace switch); later reloads triggered by Refresh or a
         // mutation already have a selection and return immediately.
-        if (_errorMessage == null)
+        if (pending.RestoreSelectionAfterPaint)
         {
             await TryRestoreSelectionAsync();
         }

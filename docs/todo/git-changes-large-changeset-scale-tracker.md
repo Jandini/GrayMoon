@@ -32,8 +32,8 @@ Standing rules for every item: no cap or truncation of the inventory (section 0)
 - [x] Worker: snapshot build/serialize/publish log (`PayloadUtf8Bytes`, `BytesPerEntry`)
 - [x] Worker: send result log (including hub-size rejection)
 - [x] App: snapshot receive/apply log (`ReceiveUtf8Bytes`, `DeserializeMs`, `WriteQueueWaitMs`, `PersistMs`)
-- [x] App: Changes open log (`EntryCount`, `ReadMs`, `BuildTreeMs`, `RowCountRendered`, `HydrationMode`)
-- [x] App: live-update handling log (`Reloaded` / `PatchedOnly` / `NoOp`)
+- [x] App: Changes open log (`EntryCount`, `ReadMs`, `BuildTreeMs`, `CircuitPaintMs`, `RowCountRendered`, `HydrationMode`)
+- [x] App: live-update handling log (`Reloaded` / `PatchedOnly` / `NoOp`, with `CircuitPaintMs` on reload)
 - [x] App: heap trend on open (Debug)
 - [x] Confirm no path names or contents are logged
 - [x] Synthetic fixture Workspace at 100, 2K, 5K, 25K, 50K paths (scripted)
@@ -115,5 +115,6 @@ Notes from M0: ~145 UTF-8 bytes/entry on the wire for short paths; 50K is ~8.9 M
 
 | Date | Change |
 |---|---|
+| 2026-10-24 | App open/live-update benches include `CircuitPaintMs` (tree StateHasChanged → OnAfterRender) so felt UI lag is visible in logs. |
 | 2026-10-24 | Phase 0 done: permanent `GitChangesBench` logs (App+Worker), floors on `GitChangesOptions`, fixture script, M0 numbers recorded. |
 | 2026-10-24 | Tracker created; design reviewed and corrected (indexes, query rules, payload stages, permanent benchmark logging). |

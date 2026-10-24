@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using GrayMoon.Application.Features;
 using GrayMoon.Common.Git;
 using Microsoft.AspNetCore.SignalR.Client;
@@ -11,6 +10,9 @@ public sealed partial class WorkspaceGitChanges
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        // Circuit paint bench first: this is the render that followed LoadAsync's tree StateHasChanged.
+        await CompletePendingBenchPaintAsync();
+
         if (firstRender && _hubConnection == null)
         {
             _hubConnection = WorkspaceSyncHubConnectionHelper.Create(NavigationManager);
@@ -20,9 +22,11 @@ public sealed partial class WorkspaceGitChanges
                 if (workspaceId != WorkspaceId || _disposed)
                     return;
 
-                var started = Stopwatch.GetTimestamp();
-                await InvokeAsync(LoadAsync);
-                LogLiveUpdateHandled("Reloaded", GitChangesBench.ElapsedMs(started), workspaceId, contextId: 0);
+                await InvokeAsync(() => LoadAsync(
+                    benchEventName: "live update handled",
+                    liveOutcome: "Reloaded",
+                    liveWorkspaceId: workspaceId,
+                    liveContextId: 0));
             });
 
             _hubConnection.On<int, int, int>("ContextGitChangesUpdated", async (workspaceId, contextId, _) =>
@@ -32,13 +36,15 @@ public sealed partial class WorkspaceGitChanges
 
                 if (_selectedContextId is WorkspaceFeatureContextId selected && selected.Value != contextId)
                 {
-                    LogLiveUpdateHandled("NoOp", handleMs: 0, workspaceId, contextId);
+                    LogLiveUpdateNoOp(workspaceId, contextId);
                     return;
                 }
 
-                var started = Stopwatch.GetTimestamp();
-                await InvokeAsync(LoadAsync);
-                LogLiveUpdateHandled("Reloaded", GitChangesBench.ElapsedMs(started), workspaceId, contextId);
+                await InvokeAsync(() => LoadAsync(
+                    benchEventName: "live update handled",
+                    liveOutcome: "Reloaded",
+                    liveWorkspaceId: workspaceId,
+                    liveContextId: contextId));
             });
 
             _ = WorkspaceSyncHubConnectionHelper.TryStartAsync(_hubConnection, Logger);
@@ -47,18 +53,18 @@ public sealed partial class WorkspaceGitChanges
         await ScrollSelectionIntoViewIfPendingAsync();
     }
 
-    private void LogLiveUpdateHandled(string outcome, long handleMs, int workspaceId, int contextId)
+    private void LogLiveUpdateNoOp(int workspaceId, int contextId)
     {
-        // PatchedOnly arrives in Phase 1; today every accepted update reloads the full context inventory.
         var entryCount = _view?.Repositories.Sum(r => r.Changes.Count) ?? 0;
         GitChangesBench.Log(
             Logger,
             GitChangesOptions.Value,
             "live update handled",
             entryCount,
-            handleMs,
-            ("Outcome", outcome),
-            ("HandleMs", handleMs),
+            elapsedMs: 0,
+            ("Outcome", "NoOp"),
+            ("HandleMs", 0),
+            ("CircuitPaintMs", 0),
             ("WorkspaceId", workspaceId),
             ("ContextId", contextId));
     }
