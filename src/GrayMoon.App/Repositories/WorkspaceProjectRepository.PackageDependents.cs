@@ -25,9 +25,9 @@ public sealed partial class WorkspaceProjectRepository
 
     /// <summary>
     /// Returns, per package project (keyed by ProjectId), the other workspace packages that projects in its repository
-    /// restore, directly or transitively through other workspace packages. Every package row for a repository gets the
-    /// same list. Packages published by that repository are omitted. A package id published by several projects is listed
-    /// once.
+    /// restore, directly or transitively through other workspace packages. Other packages published by a referenced
+    /// package's repository are included too, via that package. Every package row for a repository gets the same list.
+    /// Packages published by that repository are omitted. A package id published by several projects is listed once.
     /// </summary>
     public async Task<IReadOnlyDictionary<int, IReadOnlyList<PackageAccessNeed>>> GetPackageAccessNeedsAsync(
         int workspaceId,
@@ -171,14 +171,19 @@ public sealed partial class WorkspaceProjectRepository
 
     /// <summary>
     /// Walks package edges out from every project in a repository. A project that references another repository's
-    /// package makes that package a direct need; packages that package restores are needs through it. A package reached
-    /// both ways is reported as direct. The same list is stored on every package project in the repository.
+    /// package makes that package a direct need; packages that package restores are needs through it, including the
+    /// other packages that repository publishes. A package reached both ways is reported as direct. The same list is
+    /// stored on every package project in the repository.
     /// </summary>
     public static IReadOnlyDictionary<int, IReadOnlyList<PackageAccessNeed>> ResolvePackageAccessNeeds(
         IReadOnlyList<PackageDependentsNode> projects,
         IReadOnlyList<(int DependentProjectId, int ReferencedProjectId)> edges)
     {
         var byProjectId = projects.ToDictionary(p => p.ProjectId);
+        var packagesByRepository = projects
+            .Where(p => !string.IsNullOrWhiteSpace(p.PackageId))
+            .GroupBy(p => p.RepositoryId)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<PackageDependentsNode>)g.ToList());
         var outgoing = new Dictionary<int, List<int>>();
         foreach (var (dependentId, referencedId) in edges)
         {
@@ -196,7 +201,7 @@ public sealed partial class WorkspaceProjectRepository
         foreach (var repo in projects.GroupBy(p => p.RepositoryId))
         {
             var repoProjects = repo.ToList();
-            var needs = CollectPackageAccessNeeds(repo.Key, repoProjects, byProjectId, outgoing);
+            var needs = CollectPackageAccessNeeds(repo.Key, repoProjects, byProjectId, packagesByRepository, outgoing);
             if (needs.Count == 0)
                 continue;
             foreach (var project in repoProjects)
@@ -213,6 +218,7 @@ public sealed partial class WorkspaceProjectRepository
         int repositoryId,
         IReadOnlyList<PackageDependentsNode> repoProjects,
         Dictionary<int, PackageDependentsNode> byProjectId,
+        Dictionary<int, IReadOnlyList<PackageDependentsNode>> packagesByRepository,
         Dictionary<int, List<int>> outgoing)
     {
         var byPackage = new Dictionary<string, PackageAccessNeed>(StringComparer.OrdinalIgnoreCase);
@@ -230,16 +236,32 @@ public sealed partial class WorkspaceProjectRepository
             {
                 var referenced = byProjectId[referencedId];
                 var packageId = referenced.PackageId?.Trim();
-                if (referenced.RepositoryId != repositoryId
-                    && !string.IsNullOrEmpty(packageId)
-                    && (!byPackage.TryGetValue(packageId, out var existing) || (!existing.IsDirect && via == null)))
+                if (referenced.RepositoryId == repositoryId || string.IsNullOrEmpty(packageId))
+                    continue;
+
+                RememberNeed(packageId, via);
+                if (packagesByRepository.TryGetValue(referenced.RepositoryId, out var siblings))
                 {
-                    byPackage[packageId] = new PackageAccessNeed(packageId, via);
+                    foreach (var sibling in siblings)
+                    {
+                        var siblingId = sibling.PackageId?.Trim();
+                        if (string.IsNullOrEmpty(siblingId) || siblingId.Equals(packageId, StringComparison.OrdinalIgnoreCase))
+                            continue;
+                        RememberNeed(siblingId, packageId);
+                        if (visited.Add(sibling.ProjectId))
+                            queue.Enqueue((sibling.ProjectId, siblingId));
+                    }
                 }
 
-                if (!string.IsNullOrEmpty(packageId) && referenced.RepositoryId != repositoryId && visited.Add(referencedId))
+                if (visited.Add(referencedId))
                     queue.Enqueue((referencedId, packageId));
             }
+        }
+
+        void RememberNeed(string packageId, string? needVia)
+        {
+            if (!byPackage.TryGetValue(packageId, out var existing) || (!existing.IsDirect && needVia == null))
+                byPackage[packageId] = new PackageAccessNeed(packageId, needVia);
         }
 
         return byPackage.Values

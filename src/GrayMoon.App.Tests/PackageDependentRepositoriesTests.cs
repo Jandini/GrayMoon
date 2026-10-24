@@ -110,4 +110,25 @@ public class PackageDependentRepositoriesTests
         Assert.Same(needs, result[abstractions.ProjectId]);
         Assert.False(result.ContainsKey(io.ProjectId));
     }
+
+    [Fact]
+    public void A_referenced_package_lists_the_other_packages_its_repository_publishes()
+    {
+        var mailbox = new Node(1, 1, "mailbox", "Edx1.File.Mailbox");
+        var archive = new Node(2, 2, "archive", "Edx1.File.Archive");
+        var abstractions = new Node(3, 2, "archive", "Edx1.File.Archive.Abstractions");
+        var io = new Node(4, 3, "io", "Edx1.IO");
+
+        var result = WorkspaceProjectRepository.ResolvePackageAccessNeeds(
+            [mailbox, archive, abstractions, io],
+            [(1, 2), (3, 4)]);
+
+        var needs = result[mailbox.ProjectId];
+        Assert.Equal(
+            ["Edx1.File.Archive", "Edx1.File.Archive.Abstractions", "Edx1.IO"],
+            needs.Select(n => n.PackageId));
+        Assert.True(needs.Single(n => n.PackageId == "Edx1.File.Archive").IsDirect);
+        Assert.Equal("Edx1.File.Archive", needs.Single(n => n.PackageId == "Edx1.File.Archive.Abstractions").ViaPackageId);
+        Assert.Equal("Edx1.File.Archive.Abstractions", needs.Single(n => n.PackageId == "Edx1.IO").ViaPackageId);
+    }
 }
