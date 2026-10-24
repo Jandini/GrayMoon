@@ -199,6 +199,26 @@ public static class RepositoryUrlHelper
         return $"{root.TrimEnd('/')}/{EscapePathSegment(owner)}/{EscapePathSegment(repo)}/pkgs/nuget/{EscapePathSegment(packageId.Trim())}";
     }
 
+    /// <summary>
+    /// Browser URL for the settings page of a NuGet package on GitHub Packages (<c>orgs/owner/packages/nuget/id/settings</c>),
+    /// where "Manage Actions access" lists the repositories whose workflows may read the package. GitHub serves this
+    /// route for user-owned packages as well, so the owner type is not needed.
+    /// Null when the matched registry is not GitHub Packages, or the repository clone URL cannot be parsed.
+    /// </summary>
+    public static string? GetGitHubNuGetPackageSettingsUrl(string? registryApiBaseUrl, string? packageId, string? cloneUrl)
+    {
+        if (string.IsNullOrWhiteSpace(packageId) || string.IsNullOrWhiteSpace(registryApiBaseUrl))
+            return null;
+        if (!ConnectorHelpers.IsGitHubPackages(registryApiBaseUrl))
+            return null;
+        if (!TryParseGitHubOwnerRepo(cloneUrl, out var owner, out _) || string.IsNullOrEmpty(owner))
+            return null;
+        if (!TryGetGitHostRootFromCloneUrl(cloneUrl, out var root) || string.IsNullOrEmpty(root))
+            return null;
+
+        return $"{root.TrimEnd('/')}/orgs/{EscapePathSegment(owner)}/packages/nuget/{EscapePathSegment(packageId.Trim())}/settings";
+    }
+
     private static string EscapePathSegment(string value) => Uri.EscapeDataString(value);
 
     /// <summary>Converts a repository's CloneUrl to a web URL, or null if the URL is not parseable.</summary>
