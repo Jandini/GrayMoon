@@ -43,6 +43,7 @@ public static partial class Migrations
         (9, "SQLite read indexes", dbContext => MigrateSqliteReadIndexesAsync(dbContext)),
         (10, "Workspace pinned AI provider column", dbContext => MigrateWorkspacePinnedAiProviderColumnAsync(dbContext)),
         (11, "WorkspaceProjects identity key", dbContext => MigrateWorkspaceProjectIdentityKeyAsync(dbContext)),
+        (12, "Ambiguous package reference usage", dbContext => MigrateAmbiguousPackageReferencesAsync(dbContext)),
     };
 
     public static async Task RunAllAsync(AppDbContext dbContext, ILogger? logger = null)

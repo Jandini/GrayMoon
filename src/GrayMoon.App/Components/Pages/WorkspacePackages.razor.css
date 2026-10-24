@@ -70,7 +70,8 @@
     text-decoration: underline !important;
 }
 
-.col-usedby {
+.col-usedby,
+.col-needs {
     width: 90px;
     white-space: nowrap;
 }
@@ -82,14 +83,23 @@
     color: var(--bs-light);
 }
 
-.packages-table td a.packages-usedby-badge--link {
+.packages-usedby-badge--zero {
+    background-color: #343a40;
+    color: #adb5bd;
+}
+
+.packages-table td a.packages-usedby-badge--link,
+.packages-table td button.packages-usedby-badge--link {
     background-color: var(--bs-secondary);
     color: #fff !important;
     text-decoration: none;
     cursor: pointer;
+    border: none;
+    line-height: 1;
 }
 
-.packages-table td a.packages-usedby-badge--link:hover {
+.packages-table td a.packages-usedby-badge--link:hover,
+.packages-table td button.packages-usedby-badge--link:hover {
     filter: brightness(1.1);
 }
 
@@ -158,6 +168,22 @@
 .dependency-badge-tooltip-line code {
     color: goldenrod;
     font-size: 0.85rem;
+}
+
+.packages-table td a.dependency-badge-tooltip-link,
+.packages-table td a.dependency-badge-tooltip-link:hover,
+.packages-table td a.dependency-badge-tooltip-link code {
+    color: goldenrod !important;
+    text-decoration-color: #f0f0f0;
+}
+
+.packages-table td a.dependency-badge-tooltip-link {
+    text-decoration: none;
+}
+
+.packages-table td a.dependency-badge-tooltip-link:hover {
+    text-decoration: underline;
+    text-decoration-color: #f0f0f0;
 }
 
 .dependency-badge-tooltip-versions {
