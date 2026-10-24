@@ -163,6 +163,7 @@
 .dependency-badge-tooltip-versions {
     color: #aaa;
     font-size: 0.85rem;
+    margin-left: 0.4rem;
 }
 
 .dependency-badge-tooltip-footer {
