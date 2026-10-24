@@ -261,6 +261,22 @@ public class GitChangesEntryPageReadServiceTests
     }
 
     [Fact]
+    public async Task SearchEntriesAsync_does_not_overflow_when_snapshot_versions_are_huge()
+    {
+        await using var ctx = await GitChangesTestDbContext.CreateAsync();
+        var factory = new GitChangesTestDbContext.TestDbContextFactory(ctx.Options);
+        await PersistPathsAsync(ctx, factory, version: long.MaxValue - 1, "a.txt", "b.txt");
+
+        var contextId = await SpecialContextIdAsync(ctx, factory);
+        var readService = new WorkspaceGitChangesReadService(factory);
+
+        var page = await readService.SearchEntriesAsync(
+            ctx.WorkspaceId, contextId, "txt", afterKey: null, take: 10, CancellationToken.None);
+
+        Assert.Equal(2, page.TotalMatchCount);
+    }
+
+    [Fact]
     public async Task SearchEntriesAsync_with_blank_filter_matches_every_entry()
     {
         await using var ctx = await GitChangesTestDbContext.CreateAsync();

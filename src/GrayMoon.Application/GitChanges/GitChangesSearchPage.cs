@@ -6,7 +6,7 @@ namespace GrayMoon.App.Services.GitChanges;
 /// </summary>
 public sealed record GitChangesSearchPage
 {
-    /// <summary>Sum of the repositories' snapshot versions; a change between pages means the cursor may be stale.</summary>
+    /// <summary>Fingerprint of the repositories' snapshot versions (not their sum, which can overflow); a change between pages means the cursor may be stale.</summary>
     public required long SnapshotVersion { get; init; }
 
     /// <summary>

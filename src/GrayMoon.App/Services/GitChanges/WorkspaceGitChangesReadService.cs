@@ -765,7 +765,9 @@ public sealed class WorkspaceGitChangesReadService : IWorkspaceGitChangesReadSer
                 s.SnapshotVersion,
             }).ToListAsync(cancellationToken);
 
-        var snapshotVersion = repos.Sum(r => r.SnapshotVersion);
+        // Only used to detect "a snapshot landed between pages". Per-repository versions can be huge (they are
+        // not small counters), so fold them with unchecked arithmetic instead of a checked Sum, which overflows.
+        var snapshotVersion = repos.Aggregate(17L, (acc, r) => unchecked((acc * 31) + r.SnapshotVersion));
         var matches = WorkspaceGitChangeSearchMatcher.Compile(filter);
 
         var firstPage = string.IsNullOrEmpty(afterKey);
