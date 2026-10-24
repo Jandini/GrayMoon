@@ -617,22 +617,23 @@ merge/rebase/cherry-pick state
 staged/changed/conflict counts
 insertions/deletions (working tree and staged)
 scan/persist timestamps
+ContentDigest, PathCount (nullable; migration 14)
 last error
 ```
 
-Feature contexts use `WorkspaceGitContextRepositoryStatuses` (unique `WorkspaceFeatureContextId + WorkspaceRepositoryId`) and `WorkspaceGitContextChangeEntries` with the same shape. The special Workspace context writes both the legacy tables and the context tables.
+Feature contexts use `WorkspaceGitContextRepositoryStatuses` (unique `WorkspaceFeatureContextId + WorkspaceRepositoryId`) and `WorkspaceGitContextChangeEntries` with the same shape. `ContentDigest` (SHA-256 over every entry plus the status fields the page shows) and `PathCount` are computed in `GitChangesSnapshotPushHandler` so the page can skip a repaint for identical content. The special Workspace context writes both the legacy tables and the context tables.
 
 ### WorkspaceGitChangeEntry
 
 Stores changed paths for the latest snapshot.
 
-Every new snapshot replaces the set of entries for the repository.
+Every new snapshot replaces the set of entries for the repository (`ExecuteDeleteAsync` then `AddRange` in `GitChangesSnapshotPushHandler`). There is no per-path upsert and no cap on entry count.
 
 Fields include:
 
 ```text
-Path
-OriginalPath
+Path                 MaxLength 2000
+OriginalPath         MaxLength 2000
 IndexChange
 WorktreeChange
 IsTracked
@@ -640,7 +641,9 @@ IsConflicted
 IsSubmodule
 ```
 
-The page reads these rows instead of invoking Git during rendering.
+The page reads these rows instead of invoking Git during rendering. `WorkspaceGitChangesReadService` loads **all** context entries for the selected Feature context into `WorkspaceGitChangesView` in one query (grouped by repository). Status rows (`StagedCount` / `ChangedCount` / `ConflictCount`, optional line stats) are the only aggregated fields; folder summaries are not persisted.
+
+See `07-git-changes-projection-and-tree.md` for the full projection and tree pipeline.
 
 ---
 
@@ -911,7 +914,7 @@ WorkspaceRepositoryContextStates       checkout projection: the link's projectio
 WorkspaceRepositoryContextPullRequests
 WorkspaceRepositoryContextActions
 WorkspaceGitContextRepositoryStatuses
-WorkspaceGitContextChangeEntries       (non-unique index)
+WorkspaceGitContextChangeEntries       (non-unique indexes on (context, repo, Path) and (context, Path); migration 13)
 WorkspaceFileContextStates
 ```
 

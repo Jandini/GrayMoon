@@ -78,5 +78,7 @@ public class WorkspaceGitChangesWriteQueue(
         return base.StopAsync(cancellationToken);
     }
 
-    private sealed record QueuedSnapshot(GitChangesSnapshotNotification Notification, TaskCompletionSource<bool>? Completed);
+    private sealed record QueuedSnapshot(
+        GitChangesSnapshotNotification Notification,
+        TaskCompletionSource<bool>? Completed);
 }

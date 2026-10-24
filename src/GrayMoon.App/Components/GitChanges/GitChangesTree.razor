@@ -1,4 +1,5 @@
 @namespace GrayMoon.App.Components.GitChanges
+@implements IDisposable
 @using GrayMoon.App.Services.GitChanges
 @using GrayMoon.Common.Git
 
@@ -8,17 +9,31 @@
         <div class="gm-callout gm-callout--warning" role="alert">@OfflineNotice</div>
     }
 
+    @if (!string.IsNullOrEmpty(SearchSummary))
+    {
+        <div class="git-changes-tree__search-summary text-muted small px-2 py-1">@SearchSummary</div>
+    }
+
     @if (Rows.Count == 0)
     {
-        <div class="git-changes-tree__empty text-muted">@(IsFilterActive && HasChanges ? "No changes match the current filter." : "No changes")</div>
+        <div class="git-changes-tree__empty text-muted">@EmptyMessage</div>
     }
     else
     {
-        @foreach (var row in Rows)
-        {
-            <div class="git-changes-tree__row git-changes-tree__row--@(row.Kind.ToString().ToLowerInvariant()) @(IsSelected(row) ? "git-changes-tree__row--selected" : "") @(row.Kind == GitChangesTreeRowKind.File && IsMultiSelected(row) ? "git-changes-tree__row--multi-selected" : "")"
-                 style="padding-left: @(row.Depth * 1.1)rem"
+        <Virtualize Items="Rows" ItemSize="RowHeightPx" OverscanCount="12" Context="row">
+          @if (row.Kind == GitChangesTreeRowKind.More)
+          {
+            <div class="git-changes-tree__row git-changes-tree__row--more text-muted"
+                 style="padding-left: @(row.Depth * 1.1)rem; height: @(RowHeightPx)px"
                  @key="row.Key">
+                <GitChangesLoadMoreSentinel Label="@row.Label" OnVisible="() => OnLoadMore.InvokeAsync(row)" />
+            </div>
+          }
+          else
+          {
+            <div class="git-changes-tree__row git-changes-tree__row--@(row.Kind.ToString().ToLowerInvariant()) @(IsSelected(row) ? "git-changes-tree__row--selected" : "") @(row.Kind == GitChangesTreeRowKind.File && IsMultiSelected(row) ? "git-changes-tree__row--multi-selected" : "")"
+                 style="padding-left: @(row.Depth * 1.1)rem; height: @(RowHeightPx)px"
+                 @key="@(row.IsLoadingChildren ? row.Key + ":loading" : row.Key)">
 
                 <span class="git-changes-tree__toggle" @onclick="() => OnToggleExpand.InvokeAsync(row)">
                     @if (row.HasChildren)
@@ -28,10 +43,17 @@
                 </span>
 
                 <span class="git-changes-tree__icon"
-                      title="@(row.Kind == GitChangesTreeRowKind.File ? "Copy path" : "Copy all paths")"
-                      @onclick="() => OnCopyPath.InvokeAsync(row)"
+                      title="@(row.IsLoadingChildren ? "Loading…" : row.Kind == GitChangesTreeRowKind.File ? "Copy path" : "Copy all paths")"
+                      @onclick="() => row.IsLoadingChildren ? Task.CompletedTask : OnCopyPath.InvokeAsync(row)"
                       @onclick:stopPropagation>
-                    <i class="bi @IconFor(row)" aria-hidden="true"></i>
+                    @if (row.IsLoadingChildren)
+                    {
+                        <span class="git-changes-tree__action-spinner" aria-hidden="true"></span>
+                    }
+                    else
+                    {
+                        <i class="bi @IconFor(row)" aria-hidden="true"></i>
+                    }
                 </span>
 
                 <span class="git-changes-tree__label"
@@ -43,6 +65,10 @@
                         @if (!string.IsNullOrEmpty(row.BranchName))
                         {
                             <span class="git-changes-tree__repo-branch" title="@row.BranchName">@row.BranchName</span>
+                        }
+                        @if (row.Count.HasValue)
+                        {
+                            <span class="git-changes-tree__count-badge">@row.Count</span>
                         }
                     }
                     else if (row.Kind == GitChangesTreeRowKind.Section)
@@ -79,18 +105,84 @@
                     @RenderActions(row)
                 </span>
             </div>
-
-        }
+          }
+        </Virtualize>
     }
 </div>
 
 @code {
-    [Parameter, EditorRequired] public IReadOnlyList<GitChangesTreeRow> Rows { get; set; } = [];
+    /// <summary>A search shorter than this shows no "Searching..." text, so quick searches do not flash it.</summary>
+    private const int SearchingDelayMs = 1000;
+
+    private bool _showSearching;
+    private bool _wasSearching;
+    private CancellationTokenSource? _searchingDelayCts;
+
+    /// <summary>Empty-state text. While a search is loading it stays blank for the first second, then reads "Searching...".</summary>
+    private string EmptyMessage =>
+        IsSearching
+            ? (_showSearching ? "Searching..." : string.Empty)
+            : IsFilterActive && HasChanges ? "No changes match the current filter." : "No changes";
+
+    protected override void OnParametersSet()
+    {
+        if (IsSearching && !_wasSearching)
+        {
+            _showSearching = false;
+            _searchingDelayCts?.Cancel();
+            _searchingDelayCts?.Dispose();
+            var cts = _searchingDelayCts = new CancellationTokenSource();
+            _ = ShowSearchingAfterDelayAsync(cts.Token);
+        }
+        else if (!IsSearching && _wasSearching)
+        {
+            _searchingDelayCts?.Cancel();
+            _showSearching = false;
+        }
+
+        _wasSearching = IsSearching;
+    }
+
+    private async Task ShowSearchingAfterDelayAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(SearchingDelayMs, cancellationToken);
+            await InvokeAsync(() =>
+            {
+                if (cancellationToken.IsCancellationRequested || !IsSearching)
+                    return;
+
+                _showSearching = true;
+                StateHasChanged();
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            // Search finished (or restarted) before the delay elapsed.
+        }
+    }
+
+    public void Dispose()
+    {
+        _searchingDelayCts?.Cancel();
+        _searchingDelayCts?.Dispose();
+    }
+    /// <summary>Fixed row height for <see cref="Virtualize{TItem}"/> (must match CSS).</summary>
+    private const float RowHeightPx = 28f;
+
+    [Parameter, EditorRequired] public ICollection<GitChangesTreeRow> Rows { get; set; } = [];
     [Parameter] public string? OfflineNotice { get; set; }
     [Parameter] public bool IsFilterActive { get; set; }
     [Parameter] public bool HasChanges { get; set; }
+    /// <summary>Total match count line shown above the rows while a server-side search is showing results (large inventories).</summary>
+    [Parameter] public string? SearchSummary { get; set; }
+    /// <summary>True while the first page of a server-side search is loading.</summary>
+    [Parameter] public bool IsSearching { get; set; }
     [Parameter] public GitChangesTreeRow? SelectedRow { get; set; }
     [Parameter] public EventCallback<GitChangesTreeRow> OnToggleExpand { get; set; }
+    /// <summary>Raised once when a "Loading more..." sentinel row scrolls into the rendered window (large mode).</summary>
+    [Parameter] public EventCallback<GitChangesTreeRow> OnLoadMore { get; set; }
     [Parameter] public EventCallback<GitChangesFileSelectEventArgs> OnSelectFile { get; set; }
     /// <summary>Raised when a row's icon is clicked. For File rows, copies that file's full path; for
     /// Folder/Repository/Section rows, copies every contained file's full path as multiline text.</summary>

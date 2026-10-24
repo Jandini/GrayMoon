@@ -1,9 +1,11 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text;
 using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Services;
 using GrayMoon.Common.Git;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace GrayMoon.Worker.Services.GitChanges;
 
@@ -12,7 +14,10 @@ namespace GrayMoon.Worker.Services.GitChanges;
 /// through <see cref="GitProcessRunner"/>'s <c>ArgumentList</c> overload (never an interpolated argument
 /// string) and every path is validated with <see cref="GitRepositoryPathValidator"/> before use.
 /// </summary>
-public sealed class GitCliRepositoryGitChangesService(GitProcessRunner runner, IGitIgnoreService ignore, ILogger<GitCliRepositoryGitChangesService> logger)
+public sealed class GitCliRepositoryGitChangesService(
+    GitProcessRunner runner,
+    IGitIgnoreService ignore,
+    ILogger<GitCliRepositoryGitChangesService> logger)
     : IRepositoryGitChangesService
 {
     private const int SoftSizeLimitBytes = 5 * 1024 * 1024;

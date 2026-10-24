@@ -1,5 +1,6 @@
 using GrayMoon.App.Models;
 using GrayMoon.App.Services.GitChanges;
+using GrayMoon.Application.Features;
 using GrayMoon.Common.Git;
 
 namespace GrayMoon.App.Components.Pages;
@@ -71,7 +72,7 @@ public sealed partial class WorkspaceGitChanges
     /// Repository row. Computes the affected file count from the persisted view before asking for
     /// confirmation - never from the rendered/filtered tree - so the count is accurate even under an
     /// active filter.</summary>
-    private void ConfirmDiscardFileOrFolder(int workspaceRepositoryId, GitChangeOperationScope scope, IReadOnlyList<string> paths, string rowKey)
+    private async Task ConfirmDiscardFileOrFolderAsync(int workspaceRepositoryId, GitChangeOperationScope scope, IReadOnlyList<string> paths, string rowKey)
     {
         if (!WorkerBridge.IsWorkerConnected)
         {
@@ -90,10 +91,27 @@ public sealed partial class WorkspaceGitChanges
             return;
         }
 
+        IReadOnlyList<string> affectedFiles = [];
+        if (scope != GitChangeOperationScope.ExplicitPaths)
+        {
+            try
+            {
+                affectedFiles = await GetChangedPathsUnderAsync(
+                    repo, scope == GitChangeOperationScope.Folder ? paths[0] : string.Empty);
+            }
+            catch (Exception ex)
+            {
+                // Never confirm (or silently skip) a destructive action without knowing what it will touch.
+                Logger.LogWarning(ex, "Failed to read Git Changes paths for undo in workspace {WorkspaceId}", WorkspaceId);
+                ToastService.ShowError("Could not read the files to undo.");
+                return;
+            }
+        }
+
         var (fileCount, details) = scope switch
         {
-            GitChangeOperationScope.Repository => BuildRepositoryUndoDetails(repo),
-            GitChangeOperationScope.Folder => BuildFolderUndoDetails(repo, paths[0]),
+            GitChangeOperationScope.Repository => BuildRepositoryUndoDetails(repo, affectedFiles),
+            GitChangeOperationScope.Folder => BuildFolderUndoDetails(repo, paths[0], affectedFiles),
             _ => BuildFileUndoDetails(repo, paths),
         };
 
@@ -113,10 +131,30 @@ public sealed partial class WorkspaceGitChanges
             }), "Undo", details, UndoFooterNote, confirmIsDanger: true);
     }
 
-    private static (int FileCount, IReadOnlyList<ConfirmDetailGroup> Details) BuildRepositoryUndoDetails(
-        WorkspaceGitChangesRepositoryView repo)
+    /// <summary>
+    /// Every unstaged path in <paramref name="repo"/> at or under <paramref name="folderPath"/> (empty = whole
+    /// repository). Summary mode reads Layer B because the circuit holds no entries; the list is transient.
+    /// </summary>
+    private async Task<IReadOnlyList<string>> GetChangedPathsUnderAsync(WorkspaceGitChangesRepositoryView repo, string folderPath)
     {
-        var files = repo.Changes.Where(c => c.IsChanged).Select(c => c.Path).ToList();
+        if (_hydrationMode == GitChangesHydrationMode.Summary
+            && repo.Changes.Count == 0
+            && _selectedContextId is WorkspaceFeatureContextId ctxId)
+        {
+            return await ReadService.GetEntryPathsAsync(
+                WorkspaceId, ctxId, repo.WorkspaceRepositoryId, isStagedSection: false, folderPath, CancellationToken.None);
+        }
+
+        return repo.Changes
+            .Where(c => c.IsChanged && (folderPath.Length == 0 || IsUnderFolder(c.Path, folderPath)))
+            .Select(c => c.Path)
+            .ToList();
+    }
+
+    private static (int FileCount, IReadOnlyList<ConfirmDetailGroup> Details) BuildRepositoryUndoDetails(
+        WorkspaceGitChangesRepositoryView repo,
+        IReadOnlyList<string> files)
+    {
         IReadOnlyList<ConfirmDetailGroup> details =
         [
             new("Repository", [new ConfirmDetailItem(repo.RepositoryName, FileCountLabel(files.Count))]),
@@ -127,12 +165,9 @@ public sealed partial class WorkspaceGitChanges
 
     private static (int FileCount, IReadOnlyList<ConfirmDetailGroup> Details) BuildFolderUndoDetails(
         WorkspaceGitChangesRepositoryView repo,
-        string folderPath)
+        string folderPath,
+        IReadOnlyList<string> files)
     {
-        var files = repo.Changes
-            .Where(c => c.IsChanged && IsUnderFolder(c.Path, folderPath))
-            .Select(c => c.Path)
-            .ToList();
         var lastSegment = LastPathSegment(folderPath);
         var folderItem = lastSegment == folderPath
             ? new ConfirmDetailItem(folderPath)

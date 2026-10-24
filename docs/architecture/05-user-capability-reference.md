@@ -921,6 +921,10 @@ Worker Git Changes commands
 Monaco integration
 ```
 
+### Inventory and tree (current behavior)
+
+Opening `/workspaces/{id}/changes` reads SQLite only (`IWorkspaceGitChangesReadService`) - never `GetGitChangeStatus` for the initial paint. Small inventories hydrate fully and open expanded; larger ones (above `FullHydrationMaxEntries`) open summary-first with repositories collapsed and load folder children on expand via `GetEntryPageAsync`. `GitChangesTree.razor` uses `Virtualize`. Live `ContextGitChangesUpdated` patches the affected repository only, and does nothing when the content digest is unchanged. The filter runs in-circuit in Full mode and as a paged server-side search in Summary mode ("N matches", more pages load on scroll). End-to-end detail: `07-git-changes-projection-and-tree.md`.
+
 ---
 
 ## 22. Git Changes watcher behavior

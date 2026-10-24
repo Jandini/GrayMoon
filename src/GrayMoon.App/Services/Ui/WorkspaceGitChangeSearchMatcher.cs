@@ -16,6 +16,25 @@ public static class WorkspaceGitChangeSearchMatcher
     public static bool Matches(string? repositoryName, WorkspaceGitChangeEntryView entry, string? query) =>
         FilterSearchMatcher.Matches(query, term => MatchTerm(repositoryName, entry, term));
 
+    /// <summary>
+    /// Parses <paramref name="query"/> once and returns a predicate equivalent to <see cref="Matches"/>. Used by
+    /// the server-side search, which evaluates the same predicate over many entries (parsing per entry would
+    /// dominate the scan). An unparsable query keeps the legacy per-entry fallback of <see cref="Matches"/>.
+    /// </summary>
+    public static Func<string?, WorkspaceGitChangeEntryView, bool> Compile(string? query)
+    {
+        var parsed = FilterSearchExpression.Parse(query);
+        if (!parsed.IsValid)
+            return (repositoryName, entry) => Matches(repositoryName, entry, query);
+
+        if (parsed.Expression is null)
+            return static (_, _) => true;
+
+        var expression = parsed.Expression;
+        return (repositoryName, entry) =>
+            FilterSearchExpression.Evaluate(expression, term => MatchTerm(repositoryName, entry, term));
+    }
+
     private static bool MatchTerm(string? repositoryName, WorkspaceGitChangeEntryView entry, FilterSearchTerm term)
     {
         if (string.IsNullOrEmpty(term.Field))

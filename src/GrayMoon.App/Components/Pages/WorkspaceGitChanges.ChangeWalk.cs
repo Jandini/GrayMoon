@@ -1,4 +1,5 @@
 using GrayMoon.App.Services.GitChanges;
+using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Components.Pages;
 
@@ -17,10 +18,23 @@ public sealed partial class WorkspaceGitChanges
 
     private bool _changeWalkBusy;
 
+    /// <summary>
+    /// Summary-mode walk order cannot use <c>_view.Changes</c> (empty). Cached full-context file rows from
+    /// SQLite, invalidated when the projection or filter changes.
+    /// </summary>
+    /// <summary>
+    /// Held weakly on purpose: the list is O(every file), so the GC may reclaim it under memory pressure and
+    /// the next walk simply re-reads it. The circuit never pins the whole inventory.
+    /// </summary>
+    private WeakReference<List<GitChangesTreeRow>>? _walkableFilesCache;
+
     private bool CanWalkChanges =>
         !_isDiffLoading
         && !_changeWalkBusy
-        && (_selectedRow is { Kind: GitChangesTreeRowKind.File } || _rows.Any(r => r.Kind == GitChangesTreeRowKind.File));
+        && (_selectedRow is { Kind: GitChangesTreeRowKind.File }
+            || _rows.Any(r => r.Kind == GitChangesTreeRowKind.File)
+            || (_hydrationMode == GitChangesHydrationMode.Summary
+                && _view?.Repositories.Any(r => r.StagedCount > 0 || r.ChangedCount > 0) == true));
 
     private Task NavigateNextChangeAsync() => NavigateChangeAsync(forward: true);
 
@@ -77,7 +91,7 @@ public sealed partial class WorkspaceGitChanges
 
     private async Task WalkToAdjacentFileAsync(bool forward)
     {
-        var files = GetWalkableFiles();
+        var files = await GetWalkableFilesAsync();
         if (files.Count == 0)
         {
             return;
@@ -109,23 +123,44 @@ public sealed partial class WorkspaceGitChanges
     }
 
     /// <summary>All File rows in walk order, ignoring which folders are collapsed but honouring the filter.</summary>
-    private List<GitChangesTreeRow> GetWalkableFiles()
+    private async Task<List<GitChangesTreeRow>> GetWalkableFilesAsync()
     {
         if (_view == null)
         {
             return [];
         }
 
-        var fileRows = GitChangesTreeBuilder.Build(_view, _filterQuery)
-            .Where(r => r.Kind == GitChangesTreeRowKind.File)
-            .ToList();
+        if (_hydrationMode == GitChangesHydrationMode.Full)
+        {
+            var fileRows = GitChangesTreeBuilder.Build(_view, _filterQuery)
+                .Where(r => r.Kind == GitChangesTreeRowKind.File)
+                .ToList();
+            return [.. FileOrdering.Order(fileRows)];
+        }
 
-        return [.. FileOrdering.Order(fileRows)];
+        if (_walkableFilesCache != null && _walkableFilesCache.TryGetTarget(out var cached))
+        {
+            return cached;
+        }
+
+        if (_selectedContextId is not WorkspaceFeatureContextId ctxId)
+        {
+            return [];
+        }
+
+        // Paged read of the matching entries for walk order only (non-matching rows are never materialised),
+        // not retained as the circuit tree inventory.
+        var rows = await CollectWalkableFilesFromSearchAsync();
+        var ordered = new List<GitChangesTreeRow>(FileOrdering.Order(rows));
+        _walkableFilesCache = new WeakReference<List<GitChangesTreeRow>>(ordered);
+        return ordered;
     }
+
+    private void InvalidateWalkableFilesCache() => _walkableFilesCache = null;
 
     private async Task SelectWalkedFileAsync(GitChangesTreeRow row, DiffLanding landing)
     {
-        EnsureAncestorsExpanded(row.FilePath!, row.WorkspaceRepositoryId, row.IsStagedSection);
+        await EnsureAncestorsExpandedAsync(row.FilePath!, row.WorkspaceRepositoryId, row.IsStagedSection);
 
         // Prefer the row instance the tree is rendering so the selection highlight and scroll target match.
         var target = FindFileRow(row.WorkspaceRepositoryId, row.FilePath!, row.IsStagedSection) ?? row;
@@ -133,9 +168,9 @@ public sealed partial class WorkspaceGitChanges
         _multiSelectedKeys.Clear();
         _multiSelectAnchorKey = target.Key;
         _selectedRow = target;
-        SelectionMemory.Set(WorkspaceId, new WorkspaceGitChangesSelectionMemory.Selection(
-            target.WorkspaceRepositoryId, target.FilePath!, target.IsStagedSection));
+        RememberSelection(target);
         _scrollSelectionIntoViewPending = true;
+        _scrollSelectionAttempts = 0;
 
         await LoadDiffAsync(target, landing);
     }

@@ -37,6 +37,17 @@ public sealed record GitChangesSummaryStats(
         var counts = new Dictionary<GitChangeKind, int>();
         foreach (var repo in view.Repositories)
         {
+            if (repo.ChangedKindCounts is { } precomputed)
+            {
+                foreach (var (kind, count) in precomputed)
+                {
+                    if (kind != GitChangeKind.None && count > 0)
+                        counts[kind] = counts.GetValueOrDefault(kind) + count;
+                }
+
+                continue;
+            }
+
             foreach (var entry in repo.Changes)
             {
                 var kind = Classify(entry);

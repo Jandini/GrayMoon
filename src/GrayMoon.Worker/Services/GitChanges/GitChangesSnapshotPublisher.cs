@@ -53,20 +53,25 @@ public sealed class GitChangesSnapshotPublisher : IHostedService, IDisposable
             return;
         }
 
+        var notification = new GitChangesSnapshotNotification
+        {
+            WorkspaceId = workspaceId,
+            RepositoryId = repositoryId,
+            RepositoryPath = repositoryPath,
+            Snapshot = snapshot,
+        };
+
         try
         {
-            var notification = new GitChangesSnapshotNotification
-            {
-                WorkspaceId = workspaceId,
-                RepositoryId = repositoryId,
-                RepositoryPath = repositoryPath,
-                Snapshot = snapshot,
-            };
             await connection.InvokeAsync(WorkerHubMethods.GitChangesSnapshotUpdated, notification);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to publish Git Changes snapshot update for workspace {WorkspaceId} repository {RepositoryId}", workspaceId, repositoryId);
+            _logger.LogWarning(
+                ex,
+                "Failed to publish Git Changes snapshot update for workspace {WorkspaceId} repository {RepositoryId}",
+                workspaceId,
+                repositoryId);
         }
     }
 

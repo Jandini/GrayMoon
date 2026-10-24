@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using GrayMoon.App.Components.GitChanges;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
@@ -9,6 +10,7 @@ using GrayMoon.Common.Git;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.JSInterop;
 
 namespace GrayMoon.App.Components.Pages;
@@ -52,7 +54,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     private int? _loadedContextQuery;
     private Workspace? _workspace;
     private WorkspaceGitChangesView? _view;
-    private IReadOnlyList<GitChangesTreeRow> _rows = [];
+    private List<GitChangesTreeRow> _rows = [];
     private readonly HashSet<string> _collapsedKeys = [];
     private string _filterQuery = string.Empty;
     private string? _appliedFilterQuery;
@@ -103,7 +105,11 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         _filterQuery = incoming;
         if (_view != null)
         {
-            RebuildRows();
+            // Summary mode cannot filter unhydrated paths in-circuit: the filter runs as a server-side search.
+            if (_hydrationMode == GitChangesHydrationMode.Summary)
+                ApplySummaryFilter(incoming);
+            else
+                RebuildRows();
         }
     }
 
@@ -178,6 +184,9 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         _initialLoadTask = LoadAsync();
     }
 
+    /// <summary>Set when a load finished without error; the next render then restores the remembered file selection.</summary>
+    private bool _restoreSelectionAfterPaint;
+
     // Reads the persisted SQLite projection only - never sends a Worker command. Opening or reloading
     // this page must never trigger a status scan.
     private async Task LoadAsync()
@@ -200,10 +209,8 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
         try
         {
-            if (_selectedContextId is WorkspaceFeatureContextId ctxId)
-                _view = await ReadService.GetContextAsync(WorkspaceId, ctxId, CancellationToken.None);
-            else
-                _view = await ReadService.GetWorkspaceAsync(WorkspaceId, CancellationToken.None);
+            await LoadProjectionAsync();
+
             ClearFilterIfNoChangesRemain();
             RebuildRows();
             await ClearSelectionIfStaleAsync();
@@ -213,22 +220,25 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             Logger.LogError(ex, "Failed to load Git Changes for workspace {WorkspaceId}", WorkspaceId);
             _errorMessage = "Failed to load Changes.";
         }
-        finally
-        {
-            StateHasChanged();
-        }
+
+        _restoreSelectionAfterPaint = _errorMessage == null;
+        StateHasChanged();
+    }
+
+    private async Task CompletePendingPaintAsync()
+    {
+        if (!_restoreSelectionAfterPaint)
+            return;
+
+        _restoreSelectionAfterPaint = false;
 
         // Restoring a remembered file selection re-fetches its diff from the Worker, which can be slow
         // (and, unlike the tree read above, is a real Worker command) - it must never gate the tree
         // render above. TryRestoreSelectionAsync only does work when this page instance has no
         // selection yet (first load / workspace switch); later reloads triggered by Refresh or a
         // mutation already have a selection and return immediately.
-        if (_errorMessage == null)
-        {
-            await TryRestoreSelectionAsync();
-        }
+        await TryRestoreSelectionAsync();
     }
-
     /// <summary>
     /// The Refresh button: a real, user-triggered rescan of every repository in the workspace (not just
     /// the ones currently showing changes). Always runs via the non-overlay ScanJobKey job, whether the
@@ -279,8 +289,16 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
     private void RebuildRows()
     {
-        _rows = _view == null
-            ? []
+        if (_view == null)
+        {
+            _rows = [];
+            return;
+        }
+
+        _rows = _hydrationMode == GitChangesHydrationMode.Summary
+            ? (SearchActive
+                ? BuildSearchRows()
+                : GitChangesTreeBuilder.BuildFromCache(_view, _treeNodeCache, _collapsedKeys))
             : GitChangesTreeBuilder.Build(_view, _filterQuery, _collapsedKeys);
     }
 
@@ -299,7 +317,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             return;
         }
 
-        if (SelectionStillExists(row.WorkspaceRepositoryId, row.FilePath!, row.IsStagedSection))
+        if (await SelectionStillExistsAsync(row.WorkspaceRepositoryId, row.FilePath!, row.IsStagedSection))
         {
             return;
         }
@@ -341,18 +359,25 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
                 return;
             }
 
+            // The in-memory memory dies with the circuit (F5 / Ctrl+F5), so fall back to browser localStorage.
             if (!SelectionMemory.TryGet(WorkspaceId, out var remembered))
             {
-                return;
+                var persisted = await LoadPersistedSelectionAsync();
+                if (persisted is null || _disposed)
+                {
+                    return;
+                }
+
+                remembered = persisted;
             }
 
-            if (!SelectionStillExists(remembered.WorkspaceRepositoryId, remembered.FilePath, remembered.IsStagedSection))
+            if (!await SelectionStillExistsAsync(remembered.WorkspaceRepositoryId, remembered.FilePath, remembered.IsStagedSection))
             {
-                SelectionMemory.Clear(WorkspaceId);
+                ForgetSelection();
                 return;
             }
 
-            EnsureAncestorsExpanded(remembered.FilePath, remembered.WorkspaceRepositoryId, remembered.IsStagedSection);
+            await EnsureAncestorsExpandedAsync(remembered.FilePath, remembered.WorkspaceRepositoryId, remembered.IsStagedSection);
 
             var row = FindFileRow(remembered.WorkspaceRepositoryId, remembered.FilePath, remembered.IsStagedSection);
             if (row == null)
@@ -363,6 +388,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
             _selectedRow = row;
             _scrollSelectionIntoViewPending = true;
+            _scrollSelectionAttempts = 0;
             await LoadDiffAsync(row);
 
             if (_disposed)
@@ -400,32 +426,153 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
     /// <summary>
     /// Expands any collapsed section/repo/folder ancestors so a restored file row is present in _rows
-    /// and can be scrolled into view.
+    /// and can be scrolled into view. In summary mode, also hydrates each expanded prefix from Layer B.
     /// </summary>
-    private void EnsureAncestorsExpanded(string filePath, int workspaceRepositoryId, bool isStagedSection)
+    private void EnsureAncestorsExpanded(string filePath, int workspaceRepositoryId, bool isStagedSection) =>
+        _ = EnsureAncestorsExpandedAsync(filePath, workspaceRepositoryId, isStagedSection);
+
+    private async Task EnsureAncestorsExpandedAsync(string filePath, int workspaceRepositoryId, bool isStagedSection)
+    {
+        if (SearchActive)
+        {
+            await EnsureSearchHitLoadedAsync(filePath, workspaceRepositoryId, isStagedSection);
+            return;
+        }
+
+        ExpandAncestorKeys(filePath, workspaceRepositoryId, isStagedSection);
+        await RefreshTreeAsync();
+
+        if (_hydrationMode == GitChangesHydrationMode.Summary)
+        {
+            await HydrateAncestorsForSelectionAsync(filePath, workspaceRepositoryId, isStagedSection);
+            // Fetch seeds newly seen folders as collapsed; re-open the path we need for this file.
+            ExpandAncestorKeys(filePath, workspaceRepositoryId, isStagedSection);
+            await RefreshTreeAsync();
+        }
+
+        await PersistTreeStateAsync();
+    }
+
+    private void ExpandAncestorKeys(string filePath, int workspaceRepositoryId, bool isStagedSection)
     {
         var section = isStagedSection ? "staged" : "changed";
         var current = $"{section}/{workspaceRepositoryId}";
-        var expanded = _collapsedKeys.Remove(section) | _collapsedKeys.Remove(current);
+        _collapsedKeys.Remove(section);
+        _collapsedKeys.Remove(current);
 
         var segments = filePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
         for (var i = 0; i < segments.Length - 1; i++)
         {
             current = $"{current}/{segments[i]}";
-            expanded |= _collapsedKeys.Remove(current);
+            _collapsedKeys.Remove(current);
+        }
+    }
+
+    private async Task HydrateAncestorsForSelectionAsync(
+        string filePath,
+        int workspaceRepositoryId,
+        bool isStagedSection)
+    {
+        // Only prefixes along this file's path - not every subfolder under the repo. The file (or the next
+        // folder on its path) can sit beyond the first page of a level, so page until it is cached.
+        var segments = filePath.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var prefix = string.Empty;
+        for (var i = 0; i < segments.Length; i++)
+        {
+            var isLast = i == segments.Length - 1;
+            await FetchUntilChildAsync(
+                workspaceRepositoryId,
+                isStagedSection,
+                prefix,
+                (isLast ? "p:" : "f:") + segments[i]);
+
+            if (!isLast)
+                prefix = prefix.Length == 0 ? segments[i] : $"{prefix}/{segments[i]}";
+        }
+    }
+
+    private async Task<bool> SelectionStillExistsAsync(int workspaceRepositoryId, string filePath, bool isStagedSection)
+    {
+        var repo = _view?.Repositories.FirstOrDefault(r => r.WorkspaceRepositoryId == workspaceRepositoryId);
+        if (repo is null)
+            return false;
+
+        if (_hydrationMode == GitChangesHydrationMode.Summary
+            && repo.Changes.Count == 0
+            && _selectedContextId is WorkspaceFeatureContextId ctxId)
+        {
+            if (isStagedSection ? repo.StagedCount <= 0 : repo.ChangedCount <= 0)
+                return false;
+
+            if (SelectionExistsInNodeCache(workspaceRepositoryId, filePath, isStagedSection))
+                return true;
+
+            // Not materialised in the circuit: ask Layer B (one indexed lookup) rather than guessing.
+            try
+            {
+                return await ReadService.EntryExistsAsync(
+                    WorkspaceId, ctxId, workspaceRepositoryId, isStagedSection, filePath.Replace('\\', '/'), CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Git Changes selection existence check failed; keeping selection");
+                return true;
+            }
         }
 
-        if (expanded)
-        {
-            RebuildRows();
-        }
+        return SelectionStillExists(workspaceRepositoryId, filePath, isStagedSection);
     }
 
     private bool SelectionStillExists(int workspaceRepositoryId, string filePath, bool isStagedSection)
     {
         var repo = _view?.Repositories.FirstOrDefault(r => r.WorkspaceRepositoryId == workspaceRepositoryId);
-        return repo != null && repo.Changes.Any(c =>
-            c.Path == filePath && (isStagedSection ? c.IsStaged : c.IsChanged));
+        if (repo is null)
+            return false;
+
+        if (repo.Changes.Count > 0)
+        {
+            return repo.Changes.Any(c =>
+                c.Path == filePath && (isStagedSection ? c.IsStaged : c.IsChanged));
+        }
+
+        if (_hydrationMode != GitChangesHydrationMode.Summary)
+            return false;
+
+        // Large mode: entries may only live in the node cache until a folder is expanded.
+        if (SelectionExistsInNodeCache(workspaceRepositoryId, filePath, isStagedSection))
+            return true;
+
+        // Not yet hydrated for this path - keep selection while the section still reports files.
+        return isStagedSection ? repo.StagedCount > 0 : repo.ChangedCount > 0;
+    }
+
+    private bool SelectionExistsInNodeCache(int workspaceRepositoryId, string filePath, bool isStagedSection)
+    {
+        var normalized = filePath.Replace('\\', '/');
+        foreach (var prefix in PrefixesAlongPath(normalized))
+        {
+            var page = _treeNodeCache.TryGet(workspaceRepositoryId, isStagedSection, prefix);
+            if (page is null)
+                continue;
+
+            if (page.Children.Any(c =>
+                    !c.IsFolder
+                    && c.Entry is not null
+                    && string.Equals(c.Entry.Path, normalized, StringComparison.Ordinal)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static IEnumerable<string> PrefixesAlongPath(string filePath)
+    {
+        yield return string.Empty;
+        var segments = filePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        for (var i = 0; i < segments.Length - 1; i++)
+            yield return string.Join('/', segments.Take(i + 1));
     }
 
     private async Task ClearSelectionQuietlyAsync(bool clearMemory)
@@ -437,7 +584,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
         if (clearMemory)
         {
-            SelectionMemory.Clear(WorkspaceId);
+            ForgetSelection();
         }
 
         if (_diffViewerRef != null)
@@ -449,49 +596,83 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         await SyncDiffReviewEscListenerAsync();
     }
 
+    /// <summary>Fixed tree row height in px; must match <c>GitChangesTree.razor</c> and the scroll helper's index maths.</summary>
+    private const int TreeRowHeightPx = 28;
+
+    /// <summary>Renders to wait for the selected row to appear in the flattened list before giving up on the scroll.</summary>
+    private const int MaxScrollSelectionAttempts = 12;
+
+    private int _scrollSelectionAttempts;
+
+    /// <summary>
+    /// Scrolls the virtualized tree to the selected file. The row may not be in the DOM yet (virtualization, or the
+    /// tree has not rendered since the selection was restored), so the scroll goes by the row's index in the
+    /// flattened list. Stays pending across a few renders until the row exists and is in view.
+    /// </summary>
     private async Task ScrollSelectionIntoViewIfPendingAsync()
     {
-        if (!_scrollSelectionIntoViewPending || _disposed || _selectedRow is not { Kind: GitChangesTreeRowKind.File })
+        if (!_scrollSelectionIntoViewPending || _disposed || _selectedRow is not { Kind: GitChangesTreeRowKind.File } selected)
         {
             return;
         }
 
-        _scrollSelectionIntoViewPending = false;
+        var index = _rows.FindIndex(r => r.Key == selected.Key);
+        if (index < 0)
+        {
+            // Not rendered yet (still loading its folder pages) - try again on a later render, but not forever.
+            if (++_scrollSelectionAttempts >= MaxScrollSelectionAttempts)
+            {
+                _scrollSelectionIntoViewPending = false;
+            }
+
+            return;
+        }
 
         try
         {
-            await Js.InvokeVoidAsync("scrollSelectedGitChangesRowIntoView");
+            var inView = await Js.InvokeAsync<bool>("scrollSelectedGitChangesRowIntoView", index, TreeRowHeightPx);
+            if (inView || ++_scrollSelectionAttempts >= MaxScrollSelectionAttempts)
+            {
+                _scrollSelectionIntoViewPending = false;
+            }
         }
         catch (JSDisconnectedException)
         {
-            // Circuit gone - nothing to scroll.
+            _scrollSelectionIntoViewPending = false;
         }
         catch (Exception ex)
         {
+            _scrollSelectionIntoViewPending = false;
             Logger.LogDebug(ex, "Failed to scroll restored Git Changes selection into view");
         }
     }
-
     private void OnFilterChanged(string value)
     {
         _filterQuery = value;
-        RebuildRows();
-    }
-
-    private void ToggleExpanded(GitChangesTreeRow row)
-    {
-        if (!row.HasChildren)
+        InvalidateWalkableFilesCache();
+        // Large inventory: the circuit holds no entries, so filtering is a debounced server-side search.
+        if (_hydrationMode == GitChangesHydrationMode.Summary)
         {
+            ApplySummaryFilter(value);
             return;
         }
 
-        if (!_collapsedKeys.Add(row.Key))
+        // Anything else supersedes a pending mode-switch reload (e.g. the filter was cleared before it fired).
+        CancelFilterReload();
+
+        if (_hydrationMode == GitChangesHydrationMode.Full
+            && string.IsNullOrWhiteSpace(value)
+            && GitChangesOptions.Value.UseLargeHydration(
+                _view?.Repositories.Sum(r => r.Changes.Count) ?? 0))
         {
-            _collapsedKeys.Remove(row.Key);
+            ScheduleFilterReload();
+            return;
         }
 
         RebuildRows();
     }
+
+    private Task ToggleExpanded(GitChangesTreeRow row) => ToggleExpandedAsync(row);
 
     private void SelectFile(GitChangesFileSelectEventArgs args)
     {
@@ -516,8 +697,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         }
 
         _selectedRow = row;
-        SelectionMemory.Set(WorkspaceId, new WorkspaceGitChangesSelectionMemory.Selection(
-            row.WorkspaceRepositoryId, row.FilePath!, row.IsStagedSection));
+        RememberSelection(row);
         _ = LoadDiffAsync(row);
     }
 
@@ -770,6 +950,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         }
 
         _disposed = true;
+        CancelFilterReload();
         CommitGeneration.Changed -= OnCommitGenerationChanged;
         WorkerConnectionTracker.RemoveStateChanged(OnAiWorkerStateChanged);
         JobService.Changed -= OnJobServiceChanged;

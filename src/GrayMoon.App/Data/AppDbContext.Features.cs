@@ -193,8 +193,11 @@ public partial class AppDbContext
             entity.ToTable("WorkspaceGitContextChangeEntries");
             entity.HasKey(e => e.WorkspaceGitContextChangeEntryId);
             entity.Property(e => e.WorkspaceGitContextChangeEntryId).ValueGeneratedOnAdd();
-            entity.HasIndex(e => new { e.WorkspaceFeatureContextId, e.WorkspaceRepositoryId })
-                .HasDatabaseName("IX_WorkspaceGitContextChangeEntries_Context_Repo");
+            entity.HasIndex(e => new { e.WorkspaceFeatureContextId, e.WorkspaceRepositoryId, e.Path })
+                .HasDatabaseName("IX_WorkspaceGitContextChangeEntries_Context_Repo_Path");
+            entity.HasIndex(e => new { e.WorkspaceFeatureContextId, e.Path })
+                .HasDatabaseName("IX_WorkspaceGitContextChangeEntries_Context_Path");
+
             entity.Property(e => e.Path).IsRequired().HasMaxLength(2000);
             entity.Property(e => e.OriginalPath).HasMaxLength(2000);
             entity.Property(e => e.IndexChange).HasConversion<int>();

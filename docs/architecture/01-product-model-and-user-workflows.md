@@ -773,6 +773,8 @@ The page reads a persisted SQLite projection.
 
 The Worker owns Git status scanning, diff generation, mutations, and filesystem watchers.
 
+The projection stores every changed path for the selected context. Small inventories open fully expanded from one read. Large ones open summary-first with repositories collapsed, load folder children page by page on expand, render through a virtualized list, and filter with a paged server-side search; every path stays reachable. Precise types, services and scale behavior are in `07-git-changes-projection-and-tree.md`.
+
 ---
 
 ## 18A. AI-generated commit messages and PR text

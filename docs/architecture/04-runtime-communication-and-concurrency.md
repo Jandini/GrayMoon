@@ -552,7 +552,7 @@ This is a deliberate scalability choice.
 
 "Refresh" is not merely re-reading SQLite.
 
-An explicit refresh ultimately requests a new Worker status scan.
+An explicit refresh ultimately requests a new Worker status scan (`GitChangesWorkspaceScanner` → `GetGitChangeStatus` per repository, bounded by `GitChangesOptions.MaxParallelRepositoryOperations`).
 
 When the snapshot returns:
 
@@ -564,9 +564,11 @@ flowchart LR
   D --> E["page re-reads"]
 ```
 
-`GitChangesSnapshotPushHandler` resolves the context from the reported repository path, writes the context tables, and broadcasts `ContextGitChangesUpdated(workspaceId, contextId, repositoryId)`. For the special Workspace context it also writes the legacy tables and broadcasts `GitChangesUpdated(workspaceId, repositoryId)`.
+`GitChangesSnapshotPushHandler` resolves the context from the reported repository path, writes the context tables, and broadcasts `ContextGitChangesUpdated(workspaceId, contextId, repositoryId)`. Legacy dual-write (`GitChangesOptions.WriteLegacyGitChangesTables`) also writes the legacy tables and broadcasts `GitChangesUpdated(workspaceId, repositoryId)` for the special Workspace.
 
-The UI remains projection-driven.
+Each snapshot carries the **full** `GitChangeEntry` list for that repository over Worker↔App SignalR (`GitChangesSnapshotNotification`). The App's hub `MaximumReceiveMessageSize` is 10 MiB. The Changes page then re-reads the **entire** context projection into the circuit (`LoadAsync`), not only the updated repository's rows.
+
+The UI remains projection-driven. Tree construction and circuit inventory details are in `07-git-changes-projection-and-tree.md`.
 
 ---
 
@@ -804,3 +806,4 @@ Worker rules:
 - The watcher does not filter ignored build output; it drops only `.git` and nested repositories.
 - The App has no single-flight for Worker install / `SelfUpdate`; the `Global\GrayMoonWorkerInstall` mutex in the install script is the guard.
 - A remote default branch switched to an already existing branch is not detected by origin/HEAD repair.
+- Git Changes snapshots are full-list end-to-end on the Worker-to-App side: full porcelain status, full snapshot SignalR payloads (a 50K-path repository is about 8.9 MiB against the 10 MiB receive cap) and full SQLite replace. The circuit side is paged and virtualized. Details in `07-git-changes-projection-and-tree.md` section 9; follow-ups in `docs/todo/git-changes-large-changeset-scale.md`.

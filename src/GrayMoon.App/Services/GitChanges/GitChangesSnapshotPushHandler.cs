@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using GrayMoon.App.Data;
 using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
@@ -26,6 +27,9 @@ public sealed class GitChangesSnapshotPushHandler(
 {
     public async Task HandleAsync(GitChangesSnapshotNotification notification, CancellationToken cancellationToken)
     {
+        var options = gitChangesOptions.Value;
+        var pathCount = notification.Snapshot.Changes.Count;
+
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
 
         var workspaceRepository = await db.WorkspaceRepositories
@@ -72,7 +76,7 @@ public sealed class GitChangesSnapshotPushHandler(
             return;
         }
 
-        var writeLegacy = gitChangesOptions.Value.WriteLegacyGitChangesTables && contextInfo.IsSpecialWorkspace;
+        var writeLegacy = options.WriteLegacyGitChangesTables && contextInfo.IsSpecialWorkspace;
 
         // Legacy table version gate only while dual-write is on for the special Workspace.
         WorkspaceGitRepositoryStatus? existingLegacy = null;
@@ -106,6 +110,27 @@ public sealed class GitChangesSnapshotPushHandler(
         }
 
         ApplyStatus(existingContext, snapshot, stagedCount, changedCount, conflictCount);
+
+        // Computed from the persisted values (line stats may carry over from the previous row), so equal digests
+        // mean the page would paint exactly what it already shows.
+        var contentDigest = GitChangesContentDigest.Compute(
+            snapshot.Changes,
+            existingContext.BranchName,
+            existingContext.HeadCommit,
+            existingContext.IsDetachedHead,
+            existingContext.IsUnbornBranch,
+            existingContext.IsMerging,
+            existingContext.IsRebasing,
+            existingContext.IsCherryPicking,
+            existingContext.StagedCount,
+            existingContext.ChangedCount,
+            existingContext.ConflictCount,
+            existingContext.Insertions,
+            existingContext.Deletions,
+            existingContext.StagedInsertions,
+            existingContext.StagedDeletions);
+        existingContext.ContentDigest = contentDigest;
+        existingContext.PathCount = pathCount;
 
         if (writeLegacy)
         {
@@ -174,6 +199,7 @@ public sealed class GitChangesSnapshotPushHandler(
             notification.WorkspaceId,
             contextId.Value.Value,
             notification.RepositoryId,
+            contentDigest,
             cancellationToken: cancellationToken);
 
         if (writeLegacy)
