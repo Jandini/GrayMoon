@@ -529,22 +529,31 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
     private async Task EnsureAncestorsExpandedAsync(string filePath, int workspaceRepositoryId, bool isStagedSection)
     {
+        ExpandAncestorKeys(filePath, workspaceRepositoryId, isStagedSection);
+        await RefreshTreeAsync();
+
+        if (_hydrationMode == GitChangesHydrationMode.Summary)
+        {
+            await HydrateAncestorsForSelectionAsync(filePath, workspaceRepositoryId, isStagedSection);
+            // Fetch seeds newly seen folders as collapsed; re-open the path we need for this file.
+            ExpandAncestorKeys(filePath, workspaceRepositoryId, isStagedSection);
+            await RefreshTreeAsync();
+        }
+    }
+
+    private void ExpandAncestorKeys(string filePath, int workspaceRepositoryId, bool isStagedSection)
+    {
         var section = isStagedSection ? "staged" : "changed";
         var current = $"{section}/{workspaceRepositoryId}";
-        var expanded = _collapsedKeys.Remove(section) | _collapsedKeys.Remove(current);
+        _collapsedKeys.Remove(section);
+        _collapsedKeys.Remove(current);
 
         var segments = filePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
         for (var i = 0; i < segments.Length - 1; i++)
         {
             current = $"{current}/{segments[i]}";
-            expanded |= _collapsedKeys.Remove(current);
+            _collapsedKeys.Remove(current);
         }
-
-        if (expanded)
-            await RefreshTreeAsync();
-
-        if (_hydrationMode == GitChangesHydrationMode.Summary)
-            await HydrateAncestorsForSelectionAsync(filePath, workspaceRepositoryId, isStagedSection);
     }
 
     private async Task HydrateAncestorsForSelectionAsync(
@@ -552,16 +561,15 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         int workspaceRepositoryId,
         bool isStagedSection)
     {
-        await FetchPrefixPagesAsync(workspaceRepositoryId, isStagedSection, pathPrefix: string.Empty, fetchAll: true);
+        // Only prefixes along this file's path - not every subfolder under the repo.
+        await FetchPrefixPagesAsync(workspaceRepositoryId, isStagedSection, pathPrefix: string.Empty);
 
         var segments = filePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
         for (var i = 0; i < segments.Length - 1; i++)
         {
             var prefix = string.Join('/', segments.Take(i + 1));
-            await FetchPrefixPagesAsync(workspaceRepositoryId, isStagedSection, prefix, fetchAll: true);
+            await FetchPrefixPagesAsync(workspaceRepositoryId, isStagedSection, prefix);
         }
-
-        await RefreshTreeAsync();
     }
 
     private bool SelectionStillExists(int workspaceRepositoryId, string filePath, bool isStagedSection)

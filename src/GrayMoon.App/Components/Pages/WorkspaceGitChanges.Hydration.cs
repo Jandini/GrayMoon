@@ -10,6 +10,11 @@ public sealed partial class WorkspaceGitChanges
     private GitChangesHydrationMode _hydrationMode = GitChangesHydrationMode.Full;
     private readonly GitChangesTreeNodeCache _treeNodeCache = new();
     private readonly HashSet<string> _prefixFetchInFlight = new(StringComparer.Ordinal);
+    /// <summary>
+    /// Folder keys already given a default collapsed state in Summary mode. First sight collapses them so
+    /// expanding a repo does not treat every child folder as open (which left permanent spinners).
+    /// </summary>
+    private readonly HashSet<string> _summaryFoldersSeeded = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Opens the context with either full hydration (small inventories) or summary-first + collapsed repos
@@ -22,6 +27,7 @@ public sealed partial class WorkspaceGitChanges
             _view = await ReadService.GetWorkspaceAsync(WorkspaceId, CancellationToken.None);
             _hydrationMode = GitChangesHydrationMode.Full;
             _treeNodeCache.Clear();
+            _summaryFoldersSeeded.Clear();
             return;
         }
 
@@ -33,6 +39,7 @@ public sealed partial class WorkspaceGitChanges
         {
             _hydrationMode = GitChangesHydrationMode.Summary;
             _treeNodeCache.Clear();
+            _summaryFoldersSeeded.Clear();
             InvalidateWalkableFilesCache();
             _view = GitChangesTreeBuilder.ViewFromSummaries(summaries);
             _collapsedKeys.Clear();
@@ -42,6 +49,7 @@ public sealed partial class WorkspaceGitChanges
 
         _hydrationMode = GitChangesHydrationMode.Full;
         _treeNodeCache.Clear();
+        _summaryFoldersSeeded.Clear();
         InvalidateWalkableFilesCache();
         _view = await ReadService.GetContextAsync(WorkspaceId, ctxId, CancellationToken.None);
         // Small / filtered path keeps today's default-expand: do not seed collapsed keys.
@@ -207,19 +215,17 @@ public sealed partial class WorkspaceGitChanges
             ? string.Empty
             : GitChangesTreeBuilder.FolderRelativePathOf(row);
 
-        // Fetch every page under this prefix so Expand makes every direct child scrollable (Virtualize
-        // keeps DOM bounded). Nested folders still load on their own expand.
-        await FetchPrefixPagesAsync(row.WorkspaceRepositoryId, row.IsStagedSection, pathPrefix, fetchAll: true);
+        // Only this node's direct children - never recurse into subfolders (those load when the user expands them).
+        await FetchPrefixPagesAsync(row.WorkspaceRepositoryId, row.IsStagedSection, pathPrefix);
     }
 
     /// <summary>
-    /// Fetches one page (or all pages when <paramref name="fetchAll"/>) of direct children into the node cache.
+    /// Fetches direct children of one prefix into the node cache (all pages for that prefix only).
     /// </summary>
     private async Task FetchPrefixPagesAsync(
         int workspaceRepositoryId,
         bool isStagedSection,
-        string pathPrefix,
-        bool fetchAll)
+        string pathPrefix)
     {
         if (_selectedContextId is not WorkspaceFeatureContextId ctxId)
             return;
@@ -240,7 +246,6 @@ public sealed partial class WorkspaceGitChanges
         try
         {
             var take = Math.Max(1, GitChangesOptions.Value.TreePageSize);
-            // Resume only when we already have a partial page; otherwise start from the first page.
             string? after = cache.Children.Count > 0 ? cache.NextAfterChildKey : null;
 
             do
@@ -267,11 +272,9 @@ public sealed partial class WorkspaceGitChanges
                     cache.Reset(page.SnapshotVersion);
 
                 cache.ApplyPage(page);
+                SeedCollapsedFolderChildren(workspaceRepositoryId, isStagedSection, pathPrefix, page);
                 after = page.NextAfterChildKey;
                 await RefreshTreeAsync();
-
-                if (!fetchAll)
-                    break;
             }
             while (!string.IsNullOrEmpty(after));
         }
@@ -286,6 +289,35 @@ public sealed partial class WorkspaceGitChanges
             cache.IsLoading = false;
             _prefixFetchInFlight.Remove(flightKey);
             await RefreshTreeAsync();
+        }
+    }
+
+    /// <summary>
+    /// First time we see a folder under a prefix, collapse it. Expanding a repo then only shows that
+    /// level; nested folders stay closed until the user opens them (and only then do we fetch).
+    /// </summary>
+    private void SeedCollapsedFolderChildren(
+        int workspaceRepositoryId,
+        bool isStagedSection,
+        string pathPrefix,
+        GitChangesEntryPage page)
+    {
+        if (_hydrationMode != GitChangesHydrationMode.Summary)
+            return;
+
+        var section = isStagedSection ? "staged" : "changed";
+        var parentKey = string.IsNullOrEmpty(pathPrefix)
+            ? $"{section}/{workspaceRepositoryId}"
+            : $"{section}/{workspaceRepositoryId}/{pathPrefix}";
+
+        foreach (var child in page.Children)
+        {
+            if (!child.IsFolder || child.IsDirectoryEntry)
+                continue;
+
+            var folderKey = $"{parentKey}/{child.Name}";
+            if (_summaryFoldersSeeded.Add(folderKey))
+                _collapsedKeys.Add(folderKey);
         }
     }
 
@@ -315,7 +347,7 @@ public sealed partial class WorkspaceGitChanges
                 : GitChangesTreeBuilder.FolderRelativePathOf(row);
             var cache = _treeNodeCache.GetOrCreate(workspaceRepositoryId, row.IsStagedSection, prefix);
             cache.Reset(0);
-            await FetchPrefixPagesAsync(workspaceRepositoryId, row.IsStagedSection, prefix, fetchAll: true);
+            await FetchPrefixPagesAsync(workspaceRepositoryId, row.IsStagedSection, prefix);
         }
     }
 }

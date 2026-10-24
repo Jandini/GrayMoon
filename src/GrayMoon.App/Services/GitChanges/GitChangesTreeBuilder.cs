@@ -226,7 +226,7 @@ public static class GitChangesTreeBuilder
         }
     }
 
-    /// <summary>Spinner on the parent icon only until the first page arrives (or an empty complete result).</summary>
+    /// <summary>Spinner on the parent icon only until the first children page is in the cache.</summary>
     private static bool IsPrefixLoading(GitChangesTreeNodeCache.PrefixPageCache? cache) =>
         cache is null
         || (cache.Children.Count == 0 && (cache.IsLoading || !cache.IsComplete));

@@ -165,6 +165,47 @@ public class GitChangesEntryPageTests
     }
 
     [Fact]
+    public void BuildFromCache_child_folders_stay_collapsed_without_spinner()
+    {
+        var view = GitChangesTreeBuilder.ViewFromSummaries(new WorkspaceGitChangesSummariesView
+        {
+            WorkspaceId = 1,
+            TotalEntryCount = 2000,
+            Repositories =
+            [
+                new WorkspaceGitChangesRepositorySummary
+                {
+                    WorkspaceRepositoryId = 7,
+                    RepositoryId = 7,
+                    RepositoryName = "big",
+                    StagedCount = 0,
+                    ChangedCount = 10,
+                    SnapshotVersion = 1,
+                },
+            ],
+        });
+
+        var collapsed = new HashSet<string> { "changed/7/src" };
+        var cache = new GitChangesTreeNodeCache();
+        var page = cache.GetOrCreate(7, isStagedSection: false, string.Empty);
+        page.ApplyPage(new GitChangesEntryPage
+        {
+            SnapshotVersion = 1,
+            TotalDirectChildCount = 1,
+            Children =
+            [
+                new GitChangesTreeChild { IsFolder = true, Name = "src", Path = "src" },
+            ],
+            NextAfterChildKey = null,
+        });
+
+        var rows = GitChangesTreeBuilder.BuildFromCache(view, cache, collapsed);
+        var folder = Assert.Single(rows, r => r.Kind == GitChangesTreeRowKind.Folder && r.Label == "src");
+        Assert.False(folder.IsExpanded);
+        Assert.False(folder.IsLoadingChildren);
+    }
+
+    [Fact]
     public void TreeNodeCache_ApplyPage_does_not_duplicate_children()
     {
         var cache = new GitChangesTreeNodeCache.PrefixPageCache();

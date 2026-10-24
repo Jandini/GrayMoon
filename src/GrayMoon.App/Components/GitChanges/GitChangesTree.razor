@@ -15,9 +15,9 @@
     else
     {
         <Virtualize Items="Rows" ItemSize="RowHeightPx" OverscanCount="12" Context="row">
-            <div class="git-changes-tree__row git-changes-tree__row--@(row.Kind.ToString().ToLowerInvariant()) @(IsSelected(row) ? "git-changes-tree__row--selected" : "") @(row.Kind == GitChangesTreeRowKind.File && IsMultiSelected(row) ? "git-changes-tree__row--multi-selected" : "") @(row.IsLoadingChildren ? "git-changes-tree__row--loading" : "")"
+            <div class="git-changes-tree__row git-changes-tree__row--@(row.Kind.ToString().ToLowerInvariant()) @(IsSelected(row) ? "git-changes-tree__row--selected" : "") @(row.Kind == GitChangesTreeRowKind.File && IsMultiSelected(row) ? "git-changes-tree__row--multi-selected" : "")"
                  style="padding-left: @(row.Depth * 1.1)rem; height: @(RowHeightPx)px"
-                 @key="row.Key">
+                 @key="@(row.IsLoadingChildren ? row.Key + ":loading" : row.Key)">
 
                 <span class="git-changes-tree__toggle" @onclick="() => OnToggleExpand.InvokeAsync(row)">
                     @if (row.HasChildren)
