@@ -177,6 +177,13 @@
                                 <button type="button" class="btn-close gm-ai-error__close" aria-label="Dismiss" @onclick="DismissAiError"></button>
                             </div>
                         }
+                        else if (_aiWarning is { } warning)
+                        {
+                            <div class="gm-ai-warning" role="status">
+                                <span class="gm-ai-warning__text">@warning.Message</span>
+                                <button type="button" class="btn-close gm-ai-warning__close" aria-label="Dismiss" @onclick="DismissAiWarning"></button>
+                            </div>
+                        }
                         @if (_aiSuggestion is { } suggestion)
                         {
                             <AiSuggestionPanel ProviderLabel="@suggestion.ProviderLabel"

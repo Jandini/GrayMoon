@@ -106,7 +106,7 @@ public sealed class WorkspaceAiGenerationOperations(
             return AiGenerationResult<GeneratedCommitMessage>.Fail(providerId, run.Failure.Kind, run.Failure.Message, run.Coverage);
 
         return AiGeneratedTextParser.TryParseCommit(run.Json, out var message, out var error)
-            ? new AiGenerationResult<GeneratedCommitMessage>(message, null, providerId, run.Coverage)
+            ? new AiGenerationResult<GeneratedCommitMessage>(message, null, providerId, run.Coverage, AcceptedWarning(run.Warning, AiGenerationWarning.CommitUserMessage))
             : AiGenerationResult<GeneratedCommitMessage>.Fail(providerId, AiGenerationErrorKind.InvalidOutput, error!, run.Coverage);
     }
 
@@ -151,7 +151,7 @@ public sealed class WorkspaceAiGenerationOperations(
             return AiGenerationResult<GeneratedPullRequestText>.Fail(providerId, run.Failure.Kind, run.Failure.Message, run.Coverage);
 
         return AiGeneratedTextParser.TryParsePullRequest(run.Json, out var text, out var error)
-            ? new AiGenerationResult<GeneratedPullRequestText>(text, null, providerId, run.Coverage)
+            ? new AiGenerationResult<GeneratedPullRequestText>(text, null, providerId, run.Coverage, AcceptedWarning(run.Warning, AiGenerationWarning.PullRequestUserMessage))
             : AiGenerationResult<GeneratedPullRequestText>.Fail(providerId, AiGenerationErrorKind.InvalidOutput, error!, run.Coverage);
     }
 
@@ -271,18 +271,23 @@ public sealed class WorkspaceAiGenerationOperations(
         var outcome = answer switch
         {
             null => GenerationRun.Fail(AiGenerationErrorKind.ProviderFailed, generation.Error ?? "The Worker did not return an answer.", prompt.Coverage),
-            { Success: true, Json: not null } => new GenerationRun(answer.Json, null, prompt.Coverage),
+            { Success: true, Json: not null } => new GenerationRun(answer.Json, null, prompt.Coverage, answer.Warning?.ToWarning()),
             _ => GenerationRun.Fail(answer.ErrorKind == AiGenerationErrorKind.None ? AiGenerationErrorKind.ProviderFailed : answer.ErrorKind,
                 answer.ErrorMessage ?? "The AI provider did not answer.", prompt.Coverage),
         };
 
         logger.LogInformation(
-            "AI generation. Kind={Kind} Provider={Provider} ModelSet={ModelSet} Repositories={Repositories} ChangedFiles={ChangedFiles} ExcerptFiles={ExcerptFiles} HistoryCommits={HistoryCommits} HistoryShown={HistoryShown} RedactedLines={RedactedLines} Partial={Partial} EstimatedTokens={EstimatedTokens} EvidenceMs={EvidenceMs} WorkerEvidenceMs={WorkerEvidenceMs} PromptMs={PromptMs} ProviderMs={ProviderMs} TotalMs={TotalMs} Outcome={Outcome}",
+            "AI generation. Kind={Kind} Provider={Provider} ModelSet={ModelSet} Repositories={Repositories} ChangedFiles={ChangedFiles} ExcerptFiles={ExcerptFiles} HistoryCommits={HistoryCommits} HistoryShown={HistoryShown} RedactedLines={RedactedLines} Partial={Partial} EstimatedTokens={EstimatedTokens} EvidenceMs={EvidenceMs} WorkerEvidenceMs={WorkerEvidenceMs} PromptMs={PromptMs} ProviderMs={ProviderMs} TotalMs={TotalMs} Outcome={Outcome} WarningCode={WarningCode} CorrelationId={CorrelationId}",
             kind, providerId, choice.Model is not null, prompt.Coverage.Repositories, prompt.Coverage.ChangedFiles, prompt.Coverage.FilesWithExcerpts,
             prompt.Coverage.HistoryCommits, prompt.Coverage.HistoryShown, prompt.Coverage.RedactedLines, prompt.Coverage.IsPartial, prompt.EstimatedTokens, evidenceMs, evidence.ElapsedMs, promptMs - evidenceMs,
-            answer?.ElapsedMs, (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds, outcome.Failure?.Kind ?? AiGenerationErrorKind.None);
+            answer?.ElapsedMs, (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds, outcome.Failure?.Kind ?? AiGenerationErrorKind.None,
+            outcome.Warning?.Code, outcome.Warning?.CorrelationId);
         return outcome;
     }
+
+    /// <summary>Attaches a warning only after consumer validation succeeded; never promote an unvalidated Worker candidate.</summary>
+    private static AiGenerationWarning? AcceptedWarning(AiGenerationWarning? candidate, string userMessage) =>
+        candidate is null ? null : candidate with { Message = userMessage };
 
     private static string Describe(IReadOnlyList<RepositoryGitEvidence> failed)
     {
@@ -316,7 +321,7 @@ public sealed class WorkspaceAiGenerationOperations(
 
     private sealed record WorkspaceManifestAiRead(GrayMoon.Common.Manifest.WorkspaceManifestAi? Section, string? Error);
 
-    private sealed record GenerationRun(string? Json, AiGenerationFailure? Failure, AiEvidenceCoverage? Coverage)
+    private sealed record GenerationRun(string? Json, AiGenerationFailure? Failure, AiEvidenceCoverage? Coverage, AiGenerationWarning? Warning = null)
     {
         public static GenerationRun Fail(AiGenerationErrorKind kind, string message, AiEvidenceCoverage? coverage = null) =>
             new(null, new AiGenerationFailure(kind, message), coverage);
@@ -347,5 +352,8 @@ public sealed class WorkspaceAiGenerationOperations(
 
         [JsonPropertyName("elapsedMs")]
         public long ElapsedMs { get; set; }
+
+        [JsonPropertyName("warning")]
+        public AiGenerationWarningDto? Warning { get; set; }
     }
 }

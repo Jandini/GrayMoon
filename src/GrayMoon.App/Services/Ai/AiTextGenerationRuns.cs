@@ -1,3 +1,4 @@
+using GrayMoon.Common.Ai;
 using Microsoft.Extensions.Logging;
 
 namespace GrayMoon.App.Services.Ai;
@@ -6,8 +7,8 @@ namespace GrayMoon.App.Services.Ai;
 /// App-wide (singleton) runs of one AI text, started from a provider button. One run per Workspace and Feature context,
 /// so a Feature and the Workspace can be written at the same time. Leaving the page, closing the dialog, switching
 /// context or reloading (F5 / Ctrl+F5 starts a new circuit) does not cancel a run; only Cancel for that same context
-/// does. The written text is stored for that context even when no page is showing it, and an error or a suggestion
-/// stays for that context until dismissed. Not kept across an App restart.
+/// does. The written text is stored for that context even when no page is showing it, and an error, a warning or a
+/// suggestion stays for that context until dismissed. Not kept across an App restart.
 /// The work itself must not use the starting circuit's scope (start it through <c>IScopedServiceExecutor</c>).
 /// </summary>
 /// <typeparam name="TText">The generated text, as the derived class stores it.</typeparam>
@@ -25,12 +26,13 @@ public abstract class AiTextGenerationRuns<TText>(ILogger logger, string failedM
         TText? Text,
         string? Error,
         string ProviderLabel,
-        string TextAtClick)
+        string TextAtClick,
+        AiGenerationWarning? Warning = null)
     {
         public static Outcome CancelledResult { get; } = new(true, false, null, null, "", "");
 
-        public static Outcome Succeeded(TText text, string providerLabel, string textAtClick) =>
-            new(false, true, text, null, providerLabel, textAtClick);
+        public static Outcome Succeeded(TText text, string providerLabel, string textAtClick, AiGenerationWarning? warning = null) =>
+            new(false, true, text, null, providerLabel, textAtClick, warning);
 
         public static Outcome Failed(string error, string providerLabel, string textAtClick) =>
             new(false, false, null, error, providerLabel, textAtClick);
@@ -40,6 +42,7 @@ public abstract class AiTextGenerationRuns<TText>(ILogger logger, string failedM
     {
         public CancellationTokenSource? Cts;
         public string? Error;
+        public AiGenerationWarning? Warning;
         public Offer? Offer;
     }
 
@@ -64,6 +67,12 @@ public abstract class AiTextGenerationRuns<TText>(ILogger logger, string failedM
     {
         lock (_gate)
             return _slots.TryGetValue(key, out var slot) ? slot.Error : null;
+    }
+
+    public AiGenerationWarning? Warning(Key key)
+    {
+        lock (_gate)
+            return _slots.TryGetValue(key, out var slot) ? slot.Warning : null;
     }
 
     public Offer? OfferFor(Key key)
@@ -95,6 +104,7 @@ public abstract class AiTextGenerationRuns<TText>(ILogger logger, string failedM
             var slot = existing ?? new Slot();
             slot.Cts = cts;
             slot.Error = null;
+            slot.Warning = null;
             slot.Offer = null;
             _slots[key] = slot;
         }
@@ -124,6 +134,18 @@ public abstract class AiTextGenerationRuns<TText>(ILogger logger, string failedM
         Changed?.Invoke(key);
     }
 
+    public void DismissWarning(Key key)
+    {
+        lock (_gate)
+        {
+            if (!_slots.TryGetValue(key, out var slot) || slot.Warning is null)
+                return;
+            slot.Warning = null;
+        }
+
+        Changed?.Invoke(key);
+    }
+
     public void DismissOffer(Key key)
     {
         lock (_gate)
@@ -148,7 +170,27 @@ public abstract class AiTextGenerationRuns<TText>(ILogger logger, string failedM
                 return;
             var slot = existing ?? new Slot();
             slot.Error = error;
+            slot.Warning = null;
             slot.Offer = null;
+            _slots[key] = slot;
+        }
+
+        Changed?.Invoke(key);
+    }
+
+    /// <summary>
+    /// Keeps a non-fatal warning (for example recovered Cursor exit) for this context when no click-run is already using
+    /// the slot. Does not clear an applied message or offer; clears any prior error.
+    /// </summary>
+    public void RememberWarning(Key key, AiGenerationWarning warning)
+    {
+        lock (_gate)
+        {
+            if (_slots.TryGetValue(key, out var existing) && existing.Cts is not null)
+                return;
+            var slot = existing ?? new Slot();
+            slot.Warning = warning;
+            slot.Error = null;
             _slots[key] = slot;
         }
 
@@ -220,11 +262,13 @@ public abstract class AiTextGenerationRuns<TText>(ILogger logger, string failedM
                 if (decision is null || outcome.Text is null)
                 {
                     slot.Error = string.IsNullOrWhiteSpace(outcome.Error) ? failedMessage : outcome.Error;
+                    slot.Warning = null;
                     slot.Offer = null;
                 }
                 else
                 {
                     slot.Error = null;
+                    slot.Warning = outcome.Warning;
                     if (decision.ApplyDirectly)
                     {
                         if (!pageApplied)

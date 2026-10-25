@@ -34,6 +34,8 @@ public partial class NewPullRequestModal
 
     private string? _aiError => _aiLocalError ?? Generation.Error(GenerationKey);
 
+    private AiGenerationWarning? _aiWarning => Generation.Warning(GenerationKey);
+
     private WorkspacePullRequestTextGeneration.Offer? _aiSuggestion => Generation.OfferFor(GenerationKey);
 
     /// <summary>The fields hold AI text that was written for a branch selection other than the current one.</summary>
@@ -181,7 +183,7 @@ public partial class NewPullRequestModal
                         ops => ops.GeneratePullRequestTextAsync(scope, provider.Id, ct),
                         ct);
                     return result.Success
-                        ? WorkspacePullRequestTextGeneration.Outcome.Succeeded(new PullRequestAiText(result.Value!, fingerprint), provider.Label, textAtClick)
+                        ? WorkspacePullRequestTextGeneration.Outcome.Succeeded(new PullRequestAiText(result.Value!, fingerprint), provider.Label, textAtClick, result.Warning)
                         : WorkspacePullRequestTextGeneration.Outcome.Failed(result.Failure!.Message, provider.Label, textAtClick);
                 }
                 catch (OperationCanceledException)
@@ -269,6 +271,14 @@ public partial class NewPullRequestModal
     }
 
     private void DismissAiSuggestion() => Generation.DismissOffer(GenerationKey);
+
+    private void DismissAiWarning()
+    {
+        if (Generation.Warning(GenerationKey) is not null)
+            Generation.DismissWarning(GenerationKey);
+        else
+            StateHasChanged();
+    }
 
     private void DismissAiError()
     {

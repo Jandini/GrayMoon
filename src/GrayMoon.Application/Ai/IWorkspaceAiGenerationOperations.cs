@@ -85,12 +85,16 @@ public sealed record AiPullRequestRepository(int RepositoryId, string HeadBranch
 
 public sealed record AiGenerationFailure(AiGenerationErrorKind Kind, string Message);
 
-/// <summary>The generated text, or why there is none. Never partial: a failure has no value.</summary>
+/// <summary>
+/// The generated text, or why there is none. Never partial: a failure has no value.
+/// <see cref="Warning"/> is set only with a validated <see cref="Value"/> (success with attention), never with a failure.
+/// </summary>
 public sealed record AiGenerationResult<T>(
     T? Value,
     AiGenerationFailure? Failure,
     string ProviderId,
-    AiEvidenceCoverage? Coverage)
+    AiEvidenceCoverage? Coverage,
+    AiGenerationWarning? Warning = null)
     where T : class
 {
     public bool Success => Value is not null;

@@ -473,6 +473,7 @@ Adapter rules:
 - Never pass credentials; the CLI must already be signed in for the Worker's user.
 - Never log arguments or prompts (`BoundedProcessRunner` logs only the executable, timing and sizes).
 - The answer is strict JSON parsed by `AiGeneratedTextParser`; one provider call per click, never partial results.
+- Cursor only: a nonzero process exit may return `success` with optional `AiGenerationWarning` (`ProviderExitedAfterResult`) when stdout has a verified `type=result` / `subtype=success` / `is_error=false` envelope and extractable JSON. The App still validates the commit/PR shape before accepting the warning. Do not recover timeout, cancel, start failure, truncation, Claude or Codex this way. Correlated Worker logs use `OperationId` and `CompletionClassification`; anomaly-only Cursor launcher file snapshots must never fail the generation.
 
 ---
 

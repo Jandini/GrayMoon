@@ -364,6 +364,102 @@ public sealed class AiGenerationTests
     }
 
     [Fact]
+    public async Task Worker_warning_is_kept_only_after_commit_validation_succeeds()
+    {
+        await using var h = await CreateHarnessAsync();
+        h.Evidence = request => EvidenceFor(request);
+        h.Generation = new
+        {
+            success = true,
+            json = """{"subject":"Recovered subject","body":"Recovered body."}""",
+            errorKind = "None",
+            warning = new
+            {
+                code = AiGenerationWarningCodes.ProviderExitedAfterResult,
+                message = AiGenerationWarning.WorkerCandidateMessage,
+                correlationId = "op-abc",
+            },
+        };
+        var scope = new AiCommitScope(h.Workspace.WorkspaceId, Context, GitCommitEvidenceMode.Staged, [new(h.RepositoryIds["Api"], "main")]);
+
+        var result = await h.Operations.GenerateCommitMessageAsync(scope, AiProviderIds.Claude, progress: null, CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Equal("Recovered subject\n\nRecovered body.", result.Value!.Message);
+        Assert.NotNull(result.Warning);
+        Assert.Equal(AiGenerationWarningCodes.ProviderExitedAfterResult, result.Warning!.Code);
+        Assert.Equal(AiGenerationWarning.CommitUserMessage, result.Warning.Message);
+        Assert.Equal("op-abc", result.Warning.CorrelationId);
+    }
+
+    [Fact]
+    public async Task Worker_warning_is_dropped_when_commit_validation_fails()
+    {
+        await using var h = await CreateHarnessAsync();
+        h.Evidence = request => EvidenceFor(request);
+        h.Generation = new
+        {
+            success = true,
+            json = """{"title":"not a commit"}""",
+            errorKind = "None",
+            warning = new
+            {
+                code = AiGenerationWarningCodes.ProviderExitedAfterResult,
+                message = AiGenerationWarning.WorkerCandidateMessage,
+                correlationId = "op-drop",
+            },
+        };
+        var scope = new AiCommitScope(h.Workspace.WorkspaceId, Context, GitCommitEvidenceMode.Staged, [new(h.RepositoryIds["Api"], "main")]);
+
+        var result = await h.Operations.GenerateCommitMessageAsync(scope, AiProviderIds.Claude, progress: null, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(AiGenerationErrorKind.InvalidOutput, result.Failure!.Kind);
+        Assert.Null(result.Warning);
+    }
+
+    [Fact]
+    public async Task Missing_optional_warning_fields_remain_safe()
+    {
+        await using var h = await CreateHarnessAsync();
+        h.Evidence = request => EvidenceFor(request);
+        h.Generation = new { success = true, json = """{"subject":"Add the feature","body":"Details."}""", errorKind = "None" };
+        var scope = new AiCommitScope(h.Workspace.WorkspaceId, Context, GitCommitEvidenceMode.Staged, [new(h.RepositoryIds["Api"], "main")]);
+
+        var result = await h.Operations.GenerateCommitMessageAsync(scope, AiProviderIds.Claude, progress: null, CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Null(result.Warning);
+    }
+
+    [Fact]
+    public async Task Pull_request_warning_uses_pr_copy_after_validation()
+    {
+        await using var h = await CreateHarnessAsync();
+        h.Evidence = request => EvidenceFor(request);
+        h.Generation = new
+        {
+            success = true,
+            json = """{"title":"Ship it","description":"Summary."}""",
+            errorKind = "None",
+            warning = new
+            {
+                code = AiGenerationWarningCodes.ProviderExitedAfterResult,
+                message = AiGenerationWarning.WorkerCandidateMessage,
+                correlationId = "op-pr",
+            },
+        };
+        var scope = new AiPullRequestScope(h.Workspace.WorkspaceId, Context,
+            [new(h.RepositoryIds["Api"], "feature/x", "main")]);
+
+        var result = await h.Operations.GeneratePullRequestTextAsync(scope, AiProviderIds.Claude, CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Equal(AiGenerationWarning.PullRequestUserMessage, result.Warning!.Message);
+        Assert.Equal("op-pr", result.Warning.CorrelationId);
+    }
+
+    [Fact]
     public async Task Provider_menu_combines_installed_clis_models_and_the_local_pin()
     {
         await using var h = await CreateHarnessAsync(new WorkspaceManifestAi([new("claude", "opus"), new("codex", "bad model!"), new("other")]));

@@ -1418,8 +1418,15 @@ apply policy         AiTextApplyPolicy.Decide: text goes straight into the field
                      selection changed)
 all-or-nothing       if any repository cannot be compared (missing target ref, no merge base, no commits ahead,
                      conflicts), nothing is generated and the message names the repositories
-failures             stay inside the AI control as one redacted line (not signed in, unsupported model,
+failures             stay inside the AI control as one redacted red callout (not signed in, unsupported model,
                      unsupported CLI, timeout, invalid output); Commit and Create still work
+recovered Cursor     when Cursor returns a verified success result but the Windows CLI exits nonzero, and the
+exit                 App validates the commit/PR shape, the text is kept and an amber dismissible warning
+                     callout appears instead of the red failure (role=status); dismiss clears only the
+                     warning, not the text; Commit / Create are not blocked; a later normal generation for
+                     that context clears the warning. Invalid or incomplete text still fails red with nothing
+                     applied. Claude and Codex are unchanged. The Cursor launcher root cause is unproven
+                     (installer/update state is a hypothesis only).
 ```
 
 ### Configuration
@@ -1442,8 +1449,12 @@ AiPromptBuilder             one prompt under a hard budget (commit 4,000 / PR 8,
                             and facts (45%), history (20%, low-signal then small middle commits dropped first,
                             the first and last 10 kept longest) and excerpts (the rest)
 Worker GenerateAiText       one CLI process in its own empty temp folder, no tools (Cursor: read-only ask mode),
-                            timeout AiGeneration:TimeoutSeconds (default 120)
-AiGeneratedTextParser       strict JSON check; the result is never partial
+                            timeout AiGeneration:TimeoutSeconds (default 120); Cursor may return success=true
+                            with optional warning metadata (ProviderExitedAfterResult) when a verified success
+                            envelope was recovered after a nonzero exit — never on timeout, cancel, start
+                            failure or truncated stdout
+AiGeneratedTextParser       strict JSON check in the App; the result is never partial; a Worker warning is
+                            attached to AiGenerationResult only after this validation succeeds
 ```
 
 All three Worker commands run on the main pool. The App never runs git or an AI CLI.
@@ -1451,15 +1462,15 @@ All three Worker commands run on the main pool. The App never runs git or an AI 
 ### Implementation
 
 ```text
-Components/Ai: AiProviderControl, AiMenuCheckItem, AiSuggestionPanel; wwwroot/css/ai-generation.css, js/gm-ai-menu.js
+Components/Ai: AiProviderControl, AiMenuCheckItem, AiSuggestionPanel; wwwroot/css/ai-generation.css (gm-ai-error / gm-ai-warning), js/gm-ai-menu.js
 WorkspaceGitChanges.Ai.cs / NewPullRequestModal.Ai.cs
-AiTextGenerationRuns<TText>          app-wide click-to-write runs, one per Workspace and Feature context, outside any page or circuit
+AiTextGenerationRuns<TText>          app-wide click-to-write runs, one per Workspace and Feature context, outside any page or circuit; Error, Warning and Offer are per context
 WorkspaceGitChangesCommitGeneration   the commit message runs (stores into WorkspaceGitChangesCommitMessageMemory)
 WorkspacePullRequestTextGeneration    the New PR title and description runs (stores into WorkspacePullRequestDraftMemory)
 WorkspacePullRequestDraftMemory       the New PR title and description, per Workspace and Feature context
 WorkspaceGitChangesCommitMessageMemory   the message, per Workspace and Feature context
 WorkspaceGitChangesPushAfterCommitMemory / WorkspaceGitChangesGenerateMessageOnCommitMemory   the two On Commit checkboxes, per Workspace
-IWorkspaceAiGenerationOperations -> WorkspaceAiGenerationOperations
-AiTextApplyPolicy, AiPromptBuilder, CommitHistoryCondenser, GitCommitLogParser, AiGeneratedTextParser (Common)
-Worker: GitEvidenceCollector, AiCliRunner, AiCliAdapters
+IWorkspaceAiGenerationOperations -> WorkspaceAiGenerationOperations (AiGenerationResult may carry AiGenerationWarning)
+AiTextApplyPolicy, AiPromptBuilder, CommitHistoryCondenser, GitCommitLogParser, AiGeneratedTextParser, AiGenerationWarning (Common)
+Worker: GitEvidenceCollector, AiCliRunner, AiCliAdapters, AiCliDiagnostics (correlated recovery logs; anomaly-only Cursor launcher snapshot)
 ```

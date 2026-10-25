@@ -54,6 +54,9 @@ public sealed partial class WorkspaceGitChanges
     private string? _aiError =>
         _aiLocalError ?? (CurrentCommitGenerationKey is { } key ? CommitGeneration.Error(key) : null);
 
+    private AiGenerationWarning? _aiWarning =>
+        CurrentCommitGenerationKey is { } key ? CommitGeneration.Warning(key) : null;
+
     private WorkspaceGitChangesCommitGeneration.Offer? _aiSuggestion =>
         CurrentCommitGenerationKey is { } key ? CommitGeneration.OfferFor(key) : null;
 
@@ -98,11 +101,12 @@ public sealed partial class WorkspaceGitChanges
         });
 
         var result = await AiOperations.GenerateCommitMessageAsync(scope, provider.Id, progress, cancellationToken);
+        var key = new WorkspaceGitChangesCommitGeneration.Key(scope.WorkspaceId, scope.ContextId.Value);
         if (!result.Success)
         {
             var reason = result.Failure!.Message;
             terminal.Append(AiTerminalLabel, WorkerCommandStreamKind.Stderr, $"Nothing was committed: {reason}");
-            CommitGeneration.RememberError(new WorkspaceGitChangesCommitGeneration.Key(scope.WorkspaceId, scope.ContextId.Value), reason);
+            CommitGeneration.RememberError(key, reason);
             SafeInvoke(() => ToastService.ShowError($"{provider.Label} could not write the commit message, so nothing was committed."));
             return null;
         }
@@ -114,6 +118,8 @@ public sealed partial class WorkspaceGitChanges
 
         // Memory first: SafeInvoke no-ops once the page is gone, and the message must survive navigating away mid-job.
         CommitMessageMemory.Set(scope.WorkspaceId, scope.ContextId.Value, message);
+        if (result.Warning is { } warning)
+            CommitGeneration.RememberWarning(key, warning);
         SafeInvoke(() =>
         {
             if (IsSameAiScope(scope))
@@ -256,7 +262,7 @@ public sealed partial class WorkspaceGitChanges
                         ops => ops.GenerateCommitMessageAsync(scope, provider.Id, progress: null, ct),
                         ct);
                     return result.Success
-                        ? WorkspaceGitChangesCommitGeneration.Outcome.Succeeded(result.Value!.Message, provider.Label, messageAtClick)
+                        ? WorkspaceGitChangesCommitGeneration.Outcome.Succeeded(result.Value!.Message, provider.Label, messageAtClick, result.Warning)
                         : WorkspaceGitChangesCommitGeneration.Outcome.Failed(result.Failure!.Message, provider.Label, messageAtClick);
                 }
                 catch (OperationCanceledException)
@@ -339,6 +345,17 @@ public sealed partial class WorkspaceGitChanges
         if (CurrentCommitGenerationKey is { } key && CommitGeneration.Error(key) is not null)
         {
             CommitGeneration.DismissError(key);
+            return;
+        }
+
+        StateHasChanged();
+    }
+
+    private void DismissAiWarning()
+    {
+        if (CurrentCommitGenerationKey is { } key && CommitGeneration.Warning(key) is not null)
+        {
+            CommitGeneration.DismissWarning(key);
             return;
         }
 

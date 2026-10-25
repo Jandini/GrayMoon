@@ -93,6 +93,13 @@
                                     <button type="button" class="btn-close gm-ai-error__close" aria-label="Dismiss" @onclick="DismissAiError"></button>
                                 </div>
                             }
+                            else if (_aiWarning is { } warning)
+                            {
+                                <div class="gm-ai-warning mb-2" role="status">
+                                    <span class="gm-ai-warning__text">@warning.Message</span>
+                                    <button type="button" class="btn-close gm-ai-warning__close" aria-label="Dismiss" @onclick="DismissAiWarning"></button>
+                                </div>
+                            }
                             @if (_aiSuggestion is { } suggestion)
                             {
                                 <div class="mb-2">

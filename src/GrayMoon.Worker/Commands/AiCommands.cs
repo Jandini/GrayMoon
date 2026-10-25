@@ -51,6 +51,7 @@ public sealed class GenerateAiTextCommand(AiCliRunner aiCli) : ICommandHandler<G
             ErrorKind = outcome.Error,
             ErrorMessage = outcome.Message,
             ElapsedMs = (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+            Warning = AiGenerationWarningDto.From(outcome.Warning),
         };
     }
 }
