@@ -261,6 +261,7 @@ public sealed class AiCliRunnerTests : IDisposable
             Request with { JsonSchema = AiOutputSchemas.PullRequest }, TimeSpan.FromSeconds(30), CancellationToken.None);
 
         Assert.Equal(AiGenerationErrorKind.None, outcome.Error);
+        Assert.Null(outcome.Warning);
         Assert.True(AiGeneratedTextParser.TryParsePullRequest(outcome.Json, out var text, out _));
         Assert.Equal("Add X", text!.Title);
         var args = Assert.Single(_runner.Requests).Arguments.ToList();

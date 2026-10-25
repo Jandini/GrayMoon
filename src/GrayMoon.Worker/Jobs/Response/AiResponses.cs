@@ -45,4 +45,11 @@ public sealed class GenerateAiTextResponse
 
     [JsonPropertyName("elapsedMs")]
     public long ElapsedMs { get; set; }
+
+    /// <summary>
+    /// Optional warning candidate when <see cref="Success"/> is true (for example Cursor exited nonzero after a verified
+    /// result). Older App binaries ignore this field; the App must still validate <see cref="Json"/> before showing it.
+    /// </summary>
+    [JsonPropertyName("warning")]
+    public AiGenerationWarningDto? Warning { get; set; }
 }

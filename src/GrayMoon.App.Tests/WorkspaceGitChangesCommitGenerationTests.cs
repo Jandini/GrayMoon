@@ -1,5 +1,6 @@
 using GrayMoon.App.Services.Ai;
 using GrayMoon.App.Services.GitChanges;
+using GrayMoon.Common.Ai;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace GrayMoon.App.Tests;
@@ -113,6 +114,83 @@ public sealed class WorkspaceGitChangesCommitGenerationTests
         Assert.Equal(string.Empty, memory.Get(1, 10));
         Assert.Equal("workspace text", memory.Get(1, 20));
         Assert.Null(generation.Error(Workspace));
+    }
+
+    [Fact]
+    public async Task Recovered_warning_stays_with_applied_text_and_dismiss_keeps_the_message()
+    {
+        var memory = new WorkspaceGitChangesCommitMessageMemory();
+        var generation = NewGeneration(memory);
+        var warning = AiGenerationWarning.ProviderExitedAfterResult("op-1", AiGenerationWarning.CommitUserMessage);
+
+        generation.TryStart(
+            Feature,
+            _ => Task.FromResult(WorkspaceGitChangesCommitGeneration.Outcome.Succeeded("generated message", "Cursor", "", warning)),
+            consult: null);
+        await WaitUntilAsync(() => !generation.IsRunning(Feature));
+
+        Assert.Equal("generated message", memory.Get(1, 10));
+        Assert.Equal(warning, generation.Warning(Feature));
+        Assert.Null(generation.Error(Feature));
+
+        generation.DismissWarning(Feature);
+
+        Assert.Null(generation.Warning(Feature));
+        Assert.Equal("generated message", memory.Get(1, 10));
+    }
+
+    [Fact]
+    public async Task Normal_success_clears_a_prior_warning_for_the_same_context()
+    {
+        var memory = new WorkspaceGitChangesCommitMessageMemory();
+        var generation = NewGeneration(memory);
+        generation.RememberWarning(Feature, AiGenerationWarning.ProviderExitedAfterResult("old", AiGenerationWarning.CommitUserMessage));
+
+        generation.TryStart(
+            Feature,
+            _ => Task.FromResult(WorkspaceGitChangesCommitGeneration.Outcome.Succeeded("fresh message", "Cursor", "")),
+            consult: null);
+        await WaitUntilAsync(() => !generation.IsRunning(Feature));
+
+        Assert.Equal("fresh message", memory.Get(1, 10));
+        Assert.Null(generation.Warning(Feature));
+    }
+
+    [Fact]
+    public async Task Warning_does_not_leak_into_another_context()
+    {
+        var memory = new WorkspaceGitChangesCommitMessageMemory();
+        var generation = NewGeneration(memory);
+        var warning = AiGenerationWarning.ProviderExitedAfterResult("op-feature", AiGenerationWarning.CommitUserMessage);
+
+        generation.TryStart(
+            Feature,
+            _ => Task.FromResult(WorkspaceGitChangesCommitGeneration.Outcome.Succeeded("feature text", "Cursor", "", warning)),
+            consult: null);
+        await WaitUntilAsync(() => !generation.IsRunning(Feature));
+
+        Assert.Equal(warning, generation.Warning(Feature));
+        Assert.Null(generation.Warning(Workspace));
+    }
+
+    [Fact]
+    public async Task Recovered_warning_survives_as_a_suggestion_when_the_user_edited()
+    {
+        var memory = new WorkspaceGitChangesCommitMessageMemory();
+        memory.Set(1, 10, "I typed this");
+        var generation = NewGeneration(memory);
+        var warning = AiGenerationWarning.ProviderExitedAfterResult("op-edit", AiGenerationWarning.CommitUserMessage);
+
+        generation.TryStart(
+            Feature,
+            _ => Task.FromResult(WorkspaceGitChangesCommitGeneration.Outcome.Succeeded("ai text", "Cursor", "", warning)),
+            consult: null);
+        await WaitUntilAsync(() => !generation.IsRunning(Feature));
+
+        Assert.Equal("I typed this", memory.Get(1, 10));
+        Assert.NotNull(generation.OfferFor(Feature));
+        Assert.Equal(warning, generation.Warning(Feature));
+        Assert.Null(generation.Error(Feature));
     }
 
     [Fact]

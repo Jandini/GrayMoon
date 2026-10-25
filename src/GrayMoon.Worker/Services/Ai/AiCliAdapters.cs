@@ -11,12 +11,17 @@ public sealed record AiCliRequest(string SystemPrompt, string UserPrompt, string
 /// <summary>Arguments, stdin and files (relative to the isolated working folder) for one CLI run.</summary>
 public sealed record AiCliInvocation(IReadOnlyList<string> Arguments, byte[]? Stdin, IReadOnlyDictionary<string, string> Files);
 
-/// <summary>The provider's JSON answer, or why there is none.</summary>
-public sealed record AiCliOutcome(string? Json, AiGenerationErrorKind Error, string? Message)
+/// <summary>
+/// The provider's JSON answer, or why there is none. A <see cref="Warning"/> is only set with a successful
+/// <see cref="Json"/> (never with a failure): the App still validates the consumer shape before showing it.
+/// </summary>
+public sealed record AiCliOutcome(string? Json, AiGenerationErrorKind Error, string? Message, AiGenerationWarning? Warning = null)
 {
-    public static AiCliOutcome Success(string json) => new(json, AiGenerationErrorKind.None, null);
+    public static AiCliOutcome Success(string json, AiGenerationWarning? warning = null) =>
+        new(json, AiGenerationErrorKind.None, null, warning);
 
-    public static AiCliOutcome Failure(AiGenerationErrorKind error, string message) => new(null, error, message);
+    public static AiCliOutcome Failure(AiGenerationErrorKind error, string message) =>
+        new(null, error, message);
 }
 
 /// <summary>
@@ -284,10 +289,62 @@ public sealed class CursorCliAdapter : IAiCliAdapter
         return null;
     }
 
+    /// <summary>
+    /// A Cursor top-level result envelope that claims success: <c>type=result</c>, <c>subtype=success</c>, and
+    /// explicit <c>is_error=false</c>, with a string <c>result</c>. Used only to recover a nonzero process exit; a
+    /// normal zero-exit answer still uses the looser last-line parse so ordinary Cursor output stays unchanged.
+    /// </summary>
+    internal static bool TryParseSuccessEnvelope(string text, out JsonDocument? document, out string? resultText)
+    {
+        document = null;
+        resultText = null;
+        if (!ClaudeCliAdapter.TryParseObject(text, out document))
+            return false;
+
+        var element = document!.RootElement;
+        if (!element.TryGetProperty("type", out var type) || type.ValueKind != JsonValueKind.String
+            || !string.Equals(type.GetString(), "result", StringComparison.Ordinal))
+        {
+            document.Dispose();
+            document = null;
+            return false;
+        }
+
+        if (!element.TryGetProperty("subtype", out var subtype) || subtype.ValueKind != JsonValueKind.String
+            || !string.Equals(subtype.GetString(), "success", StringComparison.Ordinal))
+        {
+            document.Dispose();
+            document = null;
+            return false;
+        }
+
+        if (!element.TryGetProperty("is_error", out var flag) || flag.ValueKind != JsonValueKind.False)
+        {
+            document.Dispose();
+            document = null;
+            return false;
+        }
+
+        if (!element.TryGetProperty("result", out var resultProp) || resultProp.ValueKind != JsonValueKind.String)
+        {
+            document.Dispose();
+            document = null;
+            return false;
+        }
+
+        resultText = resultProp.GetString();
+        return true;
+    }
+
     public AiCliOutcome Interpret(BoundedProcessResult result, string workDirectory)
     {
+        // Nonzero exit: recover only a verified success envelope with extractable JSON. Start failure, timeout and
+        // truncation never reach here (the runner rejects them first). Cancellation throws before Interpret.
+        if (result.ExitCode != 0)
+            return InterpretAbnormalExit(result);
+
         // On failure Cursor prints no JSON and writes the error to stderr.
-        if (result.ExitCode != 0 || !ClaudeCliAdapter.TryParseObject(result.StdoutText, out var root))
+        if (!ClaudeCliAdapter.TryParseObject(result.StdoutText, out var root))
             return AiCliErrors.FromProcess(result);
 
         using (root)
@@ -302,6 +359,24 @@ public sealed class CursorCliAdapter : IAiCliAdapter
             return ExtractAnswer(text) is { } json
                 ? AiCliOutcome.Success(json)
                 : AiCliOutcome.Failure(AiGenerationErrorKind.InvalidOutput, "Cursor did not answer with the expected JSON.");
+        }
+    }
+
+    /// <summary>
+    /// Candidate recovery only: the envelope must prove success and the embedded answer must extract to JSON.
+    /// Consumer (commit/PR) shape is still validated by the App; this warning is a candidate until then.
+    /// </summary>
+    private static AiCliOutcome InterpretAbnormalExit(BoundedProcessResult result)
+    {
+        if (!TryParseSuccessEnvelope(result.StdoutText, out var root, out var text))
+            return AiCliErrors.FromProcess(result);
+
+        using (root)
+        {
+            if (ExtractAnswer(text) is not { } json)
+                return AiCliOutcome.Failure(AiGenerationErrorKind.InvalidOutput, "Cursor did not answer with the expected JSON.");
+
+            return AiCliOutcome.Success(json, AiGenerationWarning.ProviderExitedAfterResult(correlationId: null));
         }
     }
 }

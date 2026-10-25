@@ -65,6 +65,7 @@ public sealed class AiCliRunner(IEnumerable<IAiCliAdapter> adapters, IAiCliExecu
 
     public async Task<AiCliOutcome> GenerateAsync(string providerId, AiCliRequest request, TimeSpan timeout, CancellationToken cancellationToken)
     {
+        var operationId = Guid.NewGuid().ToString("N");
         if (!_adapters.TryGetValue(providerId, out var adapter))
             return AiCliOutcome.Failure(AiGenerationErrorKind.Configuration, $"Unknown AI provider \"{providerId}\".");
         if (request.Model is not null && !AiProviderConfiguration.IsValidModel(request.Model))
@@ -77,15 +78,17 @@ public sealed class AiCliRunner(IEnumerable<IAiCliAdapter> adapters, IAiCliExecu
 
         var workDirectory = Path.Combine(Path.GetTempPath(), "graymoon-ai", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(workDirectory);
-        var started = Stopwatch.GetTimestamp();
+        var prepareStarted = Stopwatch.GetTimestamp();
         try
         {
             var invocation = adapter.Prepare(request, workDirectory);
             foreach (var (name, content) in invocation.Files)
                 await File.WriteAllTextAsync(Path.Combine(workDirectory, name), content, new UTF8Encoding(false), cancellationToken);
+            var prepareMs = (long)Stopwatch.GetElapsedTime(prepareStarted).TotalMilliseconds;
 
             // The arguments never carry the prompt (it goes through stdin or a file), so the call itself can be shown.
             ReportToOverlay(WorkerCommandStreamKind.CommandLine, $"$ {Path.GetFileName(executable)} {FormatArguments(invocation.Arguments)}");
+            var processStarted = Stopwatch.GetTimestamp();
             var result = await runner.RunAsync(new BoundedProcessRequest(executable, invocation.Arguments)
             {
                 WorkingDirectory = workDirectory,
@@ -95,7 +98,9 @@ public sealed class AiCliRunner(IEnumerable<IAiCliAdapter> adapters, IAiCliExecu
                 Timeout = timeout,
                 Environment = ChildEnvironment,
             }, cancellationToken);
+            var processMs = (long)Stopwatch.GetElapsedTime(processStarted).TotalMilliseconds;
 
+            var parseStarted = Stopwatch.GetTimestamp();
             var outcome = result switch
             {
                 { StartFailure: not null } => AiCliOutcome.Failure(AiGenerationErrorKind.NotInstalled, $"{AiProviderIds.DisplayName(providerId)} CLI could not be started."),
@@ -103,32 +108,81 @@ public sealed class AiCliRunner(IEnumerable<IAiCliAdapter> adapters, IAiCliExecu
                 { StdoutTruncated: true } => AiCliOutcome.Failure(AiGenerationErrorKind.InvalidOutput, $"{AiProviderIds.DisplayName(providerId)} answered with more output than expected."),
                 _ => adapter.Interpret(result, workDirectory),
             };
+            var parseMs = (long)Stopwatch.GetElapsedTime(parseStarted).TotalMilliseconds;
+            outcome = WithOperationId(outcome, operationId);
 
-            var seconds = Stopwatch.GetElapsedTime(started).TotalSeconds;
+            var seconds = Stopwatch.GetElapsedTime(prepareStarted).TotalSeconds;
             ReportToOverlay(
                 outcome.Error == AiGenerationErrorKind.None ? WorkerCommandStreamKind.Stdout : WorkerCommandStreamKind.Stderr,
                 outcome.Error == AiGenerationErrorKind.None
                     ? $"{AiProviderIds.DisplayName(providerId)} answered in {seconds:0.0} s."
                     : $"{AiProviderIds.DisplayName(providerId)} failed after {seconds:0.0} s: {outcome.Message}");
 
-            logger.LogInformation(
-                "AI CLI call finished. Provider={Provider} ModelSet={ModelSet} PromptChars={PromptChars} ElapsedMs={ElapsedMs} ExitCode={ExitCode} Outcome={Outcome}",
-                providerId, request.Model is not null, request.SystemPrompt.Length + request.UserPrompt.Length,
-                (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds, result.ExitCode, outcome.Error);
-
-            // The prompt is never logged, but a reply the adapter could not read is the one thing that explains the failure:
-            // log its size and a short, single-line start and end of what the CLI printed (the model's answer, not the input).
-            if (outcome.Error is AiGenerationErrorKind.InvalidOutput or AiGenerationErrorKind.ProviderFailed)
-                logger.LogWarning(
-                    "AI CLI reply was not usable. Provider={Provider} Error={Error} ExitCode={ExitCode} StdoutChars={StdoutChars} StdoutTruncated={Truncated} StderrChars={StderrChars} Stderr={Stderr} StdoutHead={Head} StdoutTail={Tail}",
-                    providerId, outcome.Error, result.ExitCode, result.StdoutText.Length, result.StdoutTruncated, result.Stderr.Length,
-                    Preview(result.Stderr, 300), Preview(result.StdoutText, 600), Preview(result.StdoutText.Length > 600 ? result.StdoutText[^300..] : string.Empty, 300));
+            LogGenerationOutcome(providerId, request, executable, result, outcome, operationId, prepareMs, processMs, parseMs);
             return outcome;
         }
         finally
         {
             TryDelete(workDirectory);
         }
+    }
+
+    private void LogGenerationOutcome(
+        string providerId,
+        AiCliRequest request,
+        string executable,
+        BoundedProcessResult result,
+        AiCliOutcome outcome,
+        string operationId,
+        long prepareMs,
+        long processMs,
+        long parseMs)
+    {
+        var classification = AiCliDiagnostics.ClassifyCompletion(result, outcome);
+        var (executableName, executableKind, launcherChain) = AiCliDiagnostics.DescribeExecutable(executable);
+        var (pathCategory, pathHash) = AiCliDiagnostics.PathFingerprint(executable);
+        var stderrCategory = AiCliDiagnostics.ClassifyStderr(result.Stderr);
+        string? cachedVersion = null;
+        if (_probeCache.TryGetValue(providerId, out var cached))
+            cachedVersion = cached.Availability.Version;
+        var extractedJsonValid = outcome.Json is not null;
+        var elapsedMs = prepareMs + processMs + parseMs;
+
+        logger.LogInformation(
+            "AI CLI call finished. OperationId={OperationId} Provider={Provider} ModelSet={ModelSet} PromptChars={PromptChars} ElapsedMs={ElapsedMs} PrepareMs={PrepareMs} ProcessMs={ProcessMs} ParseMs={ParseMs} ExitCode={ExitCode} Started={Started} TimedOut={TimedOut} StdoutBytes={StdoutBytes} StderrChars={StderrChars} StdoutTruncated={StdoutTruncated} ExecutableName={ExecutableName} ExecutableKind={ExecutableKind} LauncherChain={LauncherChain} PathCategory={PathCategory} PathHash={PathHash} CliVersion={CliVersion} CompletionClassification={CompletionClassification} StderrCategory={StderrCategory} ExtractedJsonValid={ExtractedJsonValid} Outcome={Outcome} WarningCode={WarningCode}",
+            operationId, providerId, request.Model is not null, request.SystemPrompt.Length + request.UserPrompt.Length,
+            elapsedMs, prepareMs, processMs, parseMs, result.ExitCode, result.Started, result.TimedOut,
+            result.Stdout.Length, result.Stderr.Length, result.StdoutTruncated,
+            executableName, executableKind, launcherChain, pathCategory, pathHash, cachedVersion,
+            classification, stderrCategory, extractedJsonValid, outcome.Error, outcome.Warning?.Code);
+
+        if (classification == AiCliDiagnostics.ClassificationRecoveredNonZeroExit)
+        {
+            logger.LogWarning(
+                "AI CLI recovered after abnormal exit. OperationId={OperationId} Provider={Provider} ExitCode={ExitCode} CompletionClassification={CompletionClassification} StderrCategory={StderrCategory} StderrSample={StderrSample} ExecutableName={ExecutableName} ExecutableKind={ExecutableKind} LauncherChain={LauncherChain} PathCategory={PathCategory} PathHash={PathHash} CliVersion={CliVersion} ExtractedJsonValid={ExtractedJsonValid} WarningCode={WarningCode}",
+                operationId, providerId, result.ExitCode, classification, stderrCategory,
+                AiCliDiagnostics.RedactedStderrSample(result.Stderr),
+                executableName, executableKind, launcherChain, pathCategory, pathHash, cachedVersion,
+                extractedJsonValid, outcome.Warning?.Code);
+            AiCliDiagnostics.TryLogCursorLauncherSnapshot(logger, executable, operationId);
+            return;
+        }
+
+        // The prompt is never logged. On genuine unusable replies, log sizes and a short redacted sample — never on a recovered success.
+        if (outcome.Error is AiGenerationErrorKind.InvalidOutput or AiGenerationErrorKind.ProviderFailed)
+            logger.LogWarning(
+                "AI CLI reply was not usable. OperationId={OperationId} Provider={Provider} Error={Error} ExitCode={ExitCode} CompletionClassification={CompletionClassification} StderrCategory={StderrCategory} StdoutChars={StdoutChars} StdoutTruncated={Truncated} StderrChars={StderrChars} Stderr={Stderr} StdoutHead={Head} StdoutTail={Tail}",
+                operationId, providerId, outcome.Error, result.ExitCode, classification, stderrCategory,
+                result.StdoutText.Length, result.StdoutTruncated, result.Stderr.Length,
+                Preview(result.Stderr, 300), Preview(result.StdoutText, 600),
+                Preview(result.StdoutText.Length > 600 ? result.StdoutText[^300..] : string.Empty, 300));
+    }
+
+    private static AiCliOutcome WithOperationId(AiCliOutcome outcome, string operationId)
+    {
+        if (outcome.Warning is null)
+            return outcome;
+        return outcome with { Warning = outcome.Warning with { CorrelationId = operationId } };
     }
 
     private async Task<AiCliAvailability> ProbeOneAsync(IAiCliAdapter adapter, bool refresh, CancellationToken cancellationToken)
