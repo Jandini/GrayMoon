@@ -21,6 +21,7 @@ public sealed class GitChangesSnapshotPublisher : IHostedService, IDisposable
     private readonly GitChangesRepositoryRegistry _registry;
     private readonly IHubConnectionProvider _hubProvider;
     private readonly ILogger<GitChangesSnapshotPublisher> _logger;
+    private long _droppedWhileOffline;
 
     public GitChangesSnapshotPublisher(
         GitStatusRefreshCoordinator coordinator,
@@ -39,6 +40,7 @@ public sealed class GitChangesSnapshotPublisher : IHostedService, IDisposable
     {
         if (!_registry.TryGet(repoPath, out var workspaceId, out var repositoryId))
         {
+            _logger.LogDebug("[GCDiag] snapshot not published (path not registered with the App): {RepoPath} version={Version}", repoPath, snapshot.Version);
             return;
         }
 
@@ -50,6 +52,14 @@ public sealed class GitChangesSnapshotPublisher : IHostedService, IDisposable
         var connection = _hubProvider.Connection;
         if (connection?.State != HubConnectionState.Connected)
         {
+            var dropped = Interlocked.Increment(ref _droppedWhileOffline);
+            if (dropped == 1 || dropped % 25 == 0)
+            {
+                _logger.LogWarning(
+                    "[GCDiag] snapshot dropped because the App connection is not connected (totalDropped={Dropped}): workspace={WorkspaceId} repo={RepositoryId} version={Version}. Nothing is buffered; the view is stale until a later scan",
+                    dropped, workspaceId, repositoryId, snapshot.Version);
+            }
+
             return;
         }
 

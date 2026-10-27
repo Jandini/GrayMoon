@@ -30,6 +30,9 @@ public sealed class WorkspaceGitChangesActivation(
     {
         var wasActive = activityTracker.IsActive(workspaceId);
         var lease = activityTracker.Subscribe(workspaceId);
+        logger.LogInformation(
+            "[GCDiag] workspace activation: workspace={WorkspaceId} wasActive={WasActive} workerConnected={WorkerConnected} (warm-up scan runs only when not previously active; special Workspace context only)",
+            workspaceId, wasActive, workerBridge.IsWorkerConnected);
 
         if (wasActive || !workerBridge.IsWorkerConnected)
         {
@@ -68,4 +71,3 @@ public sealed class WorkspaceGitChangesActivation(
         return lease;
     }
 }
-

@@ -52,6 +52,15 @@ public sealed class GitRepositoryWatcher : IDisposable, IReleasable, IRepository
     /// snapshot as potentially stale and trigger a full refresh.</summary>
     public event Action? Overflowed;
 
+    /// <summary>True while the work-tree OS watcher exists and is raising events. Diagnostic only.</summary>
+    public bool IsWorkTreeWatching => _workTreeWatcher is { EnableRaisingEvents: true };
+
+    /// <summary>True while the <c>.git</c> metadata OS watcher exists and is raising events. Diagnostic only.</summary>
+    public bool IsMetadataWatching => _gitDirWatcher is { EnableRaisingEvents: true };
+
+    /// <summary>Why no metadata watcher is running (null when it is). A linked worktree has a <c>.git</c> file, not a directory.</summary>
+    public string? MetadataWatcherSkipReason { get; private set; }
+
     private void Start()
     {
         try
@@ -69,6 +78,7 @@ public sealed class GitRepositoryWatcher : IDisposable, IReleasable, IRepository
             _workTreeWatcher.Error += OnError;
             _workTreeWatcher.EnableRaisingEvents = true;
 
+            MetadataWatcherSkipReason = null;
             var gitDir = Path.Combine(_repoPath, ".git");
             if (Directory.Exists(gitDir))
             {
@@ -84,10 +94,18 @@ public sealed class GitRepositoryWatcher : IDisposable, IReleasable, IRepository
                 _gitDirWatcher.Error += OnError;
                 _gitDirWatcher.EnableRaisingEvents = true;
             }
+            else
+            {
+                MetadataWatcherSkipReason = File.Exists(gitDir) ? ".git is a file (linked worktree: index and HEAD live elsewhere and are not watched)" : ".git not found";
+            }
+
+            _logger.LogInformation(
+                "[GCDiag] git watcher started for {RepoPath}: workTree={WorkTree} metadata={Metadata} metadataSkipReason={SkipReason}",
+                _repoPath, IsWorkTreeWatching, IsMetadataWatching, MetadataWatcherSkipReason);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to start git repository watcher for {RepoPath}", _repoPath);
+            _logger.LogWarning(ex, "[GCDiag] Failed to start git repository watcher for {RepoPath} (entry will have no working OS watcher until recreated)", _repoPath);
         }
     }
 
@@ -272,13 +290,17 @@ public sealed class GitRepositoryWatcher : IDisposable, IReleasable, IRepository
             return;
         }
 
-        _logger.LogWarning(e.GetException(), "Git repository watcher overflow/failure for {RepoPath}; recreating watcher", _repoPath);
+        _logger.LogWarning(e.GetException(), "[GCDiag] Git repository watcher overflow/failure for {RepoPath}; recreating watcher", _repoPath);
         DisposeWatchers();
         Overflowed?.Invoke();
 
         if (!_disposed)
         {
             Start();
+            _logger.Log(
+                IsWorkTreeWatching ? LogLevel.Information : LogLevel.Warning,
+                "[GCDiag] git watcher restart after error finished for {RepoPath}: workTreeWatching={WorkTree}",
+                _repoPath, IsWorkTreeWatching);
         }
     }
 

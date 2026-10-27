@@ -18,7 +18,9 @@ public interface IWorkspaceGitChangesActivityTracker
     IReadOnlyCollection<int> GetActiveWorkspaceIds();
 }
 
-public sealed class WorkspaceGitChangesActivityTracker(IOptions<GitChangesOptions> options) : IWorkspaceGitChangesActivityTracker
+public sealed class WorkspaceGitChangesActivityTracker(
+    IOptions<GitChangesOptions> options,
+    ILogger<WorkspaceGitChangesActivityTracker>? logger = null) : IWorkspaceGitChangesActivityTracker
 {
     private readonly object _gate = new();
     private readonly Dictionary<int, Entry> _entries = [];
@@ -37,6 +39,7 @@ public sealed class WorkspaceGitChangesActivityTracker(IOptions<GitChangesOption
 
             entry.RefCount++;
             entry.LastActiveUtc = DateTimeOffset.UtcNow;
+            logger?.LogInformation("[GCDiag] workspace activity lease gained: workspace={WorkspaceId} refCount={RefCount}", workspaceId, entry.RefCount);
         }
 
         return new Lease(this, workspaceId);
@@ -75,6 +78,7 @@ public sealed class WorkspaceGitChangesActivityTracker(IOptions<GitChangesOption
                 foreach (var workspaceId in expired)
                 {
                     _entries.Remove(workspaceId);
+                    logger?.LogInformation("[GCDiag] workspace left active set (no viewers, activity grace elapsed): workspace={WorkspaceId}", workspaceId);
                 }
             }
 
@@ -100,6 +104,7 @@ public sealed class WorkspaceGitChangesActivityTracker(IOptions<GitChangesOption
             {
                 entry.RefCount--;
                 entry.LastActiveUtc = DateTimeOffset.UtcNow;
+                logger?.LogInformation("[GCDiag] workspace activity lease released: workspace={WorkspaceId} refCount={RefCount} graceMinutes={GraceMinutes}", workspaceId, entry.RefCount, GraceWindow.TotalMinutes);
             }
         }
     }
@@ -126,4 +131,3 @@ public sealed class WorkspaceGitChangesActivityTracker(IOptions<GitChangesOption
         }
     }
 }
-

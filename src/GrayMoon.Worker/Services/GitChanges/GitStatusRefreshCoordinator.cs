@@ -194,11 +194,11 @@ public sealed class GitStatusRefreshCoordinator : IDisposable, IGitChangesRefres
         }
         catch (OperationCanceledException)
         {
-            _logger.LogDebug("Watcher-driven git status scan cancelled or timed out for {RepoPath}", repoPath);
+            _logger.LogWarning("[GCDiag] Watcher-driven git status scan cancelled or timed out for {RepoPath} (timeout {TimeoutSeconds}s); no retry is scheduled, the persisted view stays stale until the next event or App scan", repoPath, Math.Max(1, _options.WatcherScanTimeoutSeconds));
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Watcher-driven git status scan failed for {RepoPath}", repoPath);
+            _logger.LogWarning(ex, "[GCDiag] Watcher-driven git status scan failed for {RepoPath}; no retry is scheduled", repoPath);
         }
     }
 
@@ -247,7 +247,7 @@ public sealed class GitStatusRefreshCoordinator : IDisposable, IGitChangesRefres
                     }
                     else
                     {
-                        _logger.LogWarning("Git status scan failed for {RepoPath}: {ErrorCode} {ErrorMessage}", repoPath, result.ErrorCode, result.ErrorMessage);
+                        _logger.LogWarning("[GCDiag] Git status scan failed for {RepoPath}: {ErrorCode} {ErrorMessage}", repoPath, result.ErrorCode, result.ErrorMessage);
                     }
                 }
                 finally

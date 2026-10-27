@@ -58,6 +58,12 @@ public sealed class GitRepositoryWatcherManager(
 
             entry.CancelIdleDisposal();
             Interlocked.Increment(ref entry.LeaseCount);
+            if (!entry.IsOsWatching)
+            {
+                logger.LogWarning(
+                    "[GCDiag] watcher entry exists but its OS watcher is not running: {RepoPath} (entries={Entries}); renewal will not restore it",
+                    key, _entries.Count);
+            }
         }
 
         return new Lease(this, key);
@@ -107,7 +113,7 @@ public sealed class GitRepositoryWatcherManager(
             coverage.RecordObservation(observation.ObservedAt);
             observations.Add(observation);
         };
-        logger.LogDebug("Created git repository watcher for {RepoPath}", repoPath);
+        logger.LogInformation("[GCDiag] watcher entry created for {RepoPath} (entries after create={Entries})", repoPath, _entries.Count + 1);
         var entry = new WatcherEntry(watcher, coverage, observations, released => OnEntryReleased(key, released));
 
         // The access broker lets go of this watcher when the folder is removed, and pauses it while a folder beneath it is.
@@ -132,7 +138,7 @@ public sealed class GitRepositoryWatcherManager(
         refreshCoordinator.RemoveTracker(key);
         snapshotCache.Remove(key);
         repositoryRegistry.Remove(key);
-        logger.LogDebug("Released git repository watcher for {RepoPath} (folder is being removed)", key);
+        logger.LogInformation("[GCDiag] watcher released because folder is being removed: {RepoPath}", key);
     }
 
     private void Release(string key)
@@ -143,6 +149,11 @@ public sealed class GitRepositoryWatcherManager(
         }
 
         var remaining = Interlocked.Decrement(ref entry.LeaseCount);
+        if (remaining < 0)
+        {
+            logger.LogWarning("[GCDiag] watcher lease count underflow ({Remaining}) for {RepoPath}: a stale or duplicate lease release hit the current entry", remaining, key);
+        }
+
         if (remaining > 0)
         {
             return;
@@ -164,7 +175,7 @@ public sealed class GitRepositoryWatcherManager(
                 snapshotCache.Remove(key);
                 repositoryRegistry.Remove(key);
 
-                logger.LogDebug("Disposed idle git repository watcher for {RepoPath}", key);
+                logger.LogInformation("[GCDiag] watcher idle-expired and disposed: {RepoPath} (entries remaining={Entries})", key, _entries.Count);
             }
         });
     }
@@ -194,6 +205,8 @@ public sealed class GitRepositoryWatcherManager(
         private int _disposed;
 
         public bool IsReleased => _released;
+
+        public bool IsOsWatching => watcher.IsWorkTreeWatching;
 
         public void Track(IDisposable registration)
         {
@@ -278,4 +291,3 @@ public sealed class GitRepositoryWatcherManager(
         }
     }
 }
-

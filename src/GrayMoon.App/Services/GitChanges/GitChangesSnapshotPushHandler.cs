@@ -70,9 +70,9 @@ public sealed class GitChangesSnapshotPushHandler(
 
         if (existingContext != null && snapshot.Version <= existingContext.SnapshotVersion)
         {
-            logger.LogDebug(
-                "GitChangesSnapshotUpdated: rejected stale context snapshot version {IncomingVersion} <= persisted {PersistedVersion}",
-                snapshot.Version, existingContext.SnapshotVersion);
+            logger.LogInformation(
+                "[GCDiag] GitChangesSnapshotUpdated: rejected stale context snapshot version {IncomingVersion} <= persisted {PersistedVersion} (workspace={WorkspaceId}, repo={RepositoryId}, path={RepositoryPath})",
+                snapshot.Version, existingContext.SnapshotVersion, notification.WorkspaceId, notification.RepositoryId, notification.RepositoryPath);
             return;
         }
 
@@ -86,9 +86,9 @@ public sealed class GitChangesSnapshotPushHandler(
                 .FirstOrDefaultAsync(s => s.WorkspaceRepositoryId == workspaceRepository.WorkspaceRepositoryId, cancellationToken);
             if (existingLegacy != null && snapshot.Version <= existingLegacy.SnapshotVersion)
             {
-                logger.LogDebug(
-                    "GitChangesSnapshotUpdated: rejected stale legacy snapshot version {IncomingVersion} <= persisted {PersistedVersion}",
-                    snapshot.Version, existingLegacy.SnapshotVersion);
+                logger.LogInformation(
+                    "[GCDiag] GitChangesSnapshotUpdated: rejected stale legacy snapshot version {IncomingVersion} <= persisted {PersistedVersion} (workspace={WorkspaceId}, repo={RepositoryId})",
+                    snapshot.Version, existingLegacy.SnapshotVersion, notification.WorkspaceId, notification.RepositoryId);
                 return;
             }
         }
@@ -219,7 +219,7 @@ public sealed class GitChangesSnapshotPushHandler(
         }
 
         logger.LogDebug(
-            "GitChangesSnapshotUpdated persisted: workspace={WorkspaceId}, context={ContextId}, repo={RepositoryId}, version={Version}",
+            "[GCDiag] GitChangesSnapshotUpdated persisted: workspace={WorkspaceId}, context={ContextId}, repo={RepositoryId}, version={Version}",
             notification.WorkspaceId, contextId.Value.Value, notification.RepositoryId, snapshot.Version);
     }
 

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Threading.Channels;
 using GrayMoon.Common.Git;
 
@@ -13,6 +14,8 @@ public class WorkspaceGitChangesWriteQueue(
     IServiceScopeFactory scopeFactory,
     ILogger<WorkspaceGitChangesWriteQueue> logger) : BackgroundService
 {
+    private static readonly TimeSpan SlowQueueLag = TimeSpan.FromSeconds(5);
+
     private readonly Channel<QueuedSnapshot> _channel =
         Channel.CreateUnbounded<QueuedSnapshot>(new UnboundedChannelOptions
         {
@@ -46,6 +49,14 @@ public class WorkspaceGitChangesWriteQueue(
 
         await foreach (var item in _channel.Reader.ReadAllAsync(stoppingToken))
         {
+            var queueLag = Stopwatch.GetElapsedTime(item.EnqueuedAt);
+            if (queueLag > SlowQueueLag)
+            {
+                logger.LogWarning(
+                    "[GCDiag] Git Changes write queue lag {LagMs} ms before persisting workspace={WorkspaceId} repo={RepositoryId}",
+                    (long)queueLag.TotalMilliseconds, item.Notification.WorkspaceId, item.Notification.RepositoryId);
+            }
+
             try
             {
                 await using var scope = scopeFactory.CreateAsyncScope();
@@ -80,5 +91,8 @@ public class WorkspaceGitChangesWriteQueue(
 
     private sealed record QueuedSnapshot(
         GitChangesSnapshotNotification Notification,
-        TaskCompletionSource<bool>? Completed);
+        TaskCompletionSource<bool>? Completed)
+    {
+        public long EnqueuedAt { get; } = Stopwatch.GetTimestamp();
+    }
 }

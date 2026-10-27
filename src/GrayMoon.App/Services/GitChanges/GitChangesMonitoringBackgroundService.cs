@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using GrayMoon.Common.Git;
 using GrayMoon.Application.Features;
 using Microsoft.Extensions.Options;
@@ -29,6 +30,7 @@ public sealed class GitChangesMonitoringBackgroundService(
     ILogger<GitChangesMonitoringBackgroundService> logger) : BackgroundService
 {
     private readonly SemaphoreSlim _wake = new(0, 1);
+    private long? _lastSweepStartedAt;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -36,6 +38,7 @@ public sealed class GitChangesMonitoringBackgroundService(
         // instead of waiting for the next renewal interval.
         connectionTracker.OnStateChanged(state =>
         {
+            logger.LogInformation("[GCDiag] Worker connection state changed: {State}", state);
             if (state == WorkerConnectionState.Online)
             {
                 TryWake();
@@ -101,9 +104,16 @@ public sealed class GitChangesMonitoringBackgroundService(
     private async Task MonitorActiveWorkspacesAsync(CancellationToken cancellationToken)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
+        var sweepStarted = Stopwatch.GetTimestamp();
+        var sinceLastSweep = _lastSweepStartedAt is { } last ? Stopwatch.GetElapsedTime(last) : (TimeSpan?)null;
+        _lastSweepStartedAt = sweepStarted;
+
         var workerBridge = scope.ServiceProvider.GetRequiredService<IWorkerBridge>();
         if (!workerBridge.IsWorkerConnected)
         {
+            logger.LogInformation(
+                "[GCDiag] sweep skipped: Worker is not connected (sinceLastSweepStartSec={SinceLastSweepSec})",
+                sinceLastSweep?.TotalSeconds);
             return;
         }
 
@@ -111,8 +121,16 @@ public sealed class GitChangesMonitoringBackgroundService(
         var activeWorkspaceIds = activityTracker.GetActiveWorkspaceIds();
         if (activeWorkspaceIds.Count == 0)
         {
+            logger.LogDebug("[GCDiag] sweep skipped: no active workspaces");
             return;
         }
+
+        // Planned cadence is the renewal interval; sinceLastSweepStart much larger than that means the
+        // previous sweep ran long (watcher idle grace is only 10 minutes by default).
+        logger.LogInformation(
+            "[GCDiag] sweep start: activeWorkspaces=[{WorkspaceIds}] sinceLastSweepStartSec={SinceLastSweepSec}",
+            string.Join(",", activeWorkspaceIds),
+            sinceLastSweep?.TotalSeconds);
 
         // Scanned sequentially: each ScanWorkspaceAsync call is already internally bounded to
         // MaxParallelRepositoryOperations, so looping (rather than fanning all workspaces out at once)
@@ -132,9 +150,16 @@ public sealed class GitChangesMonitoringBackgroundService(
                     // Worker to scan a worktree that Remove Feature is deleting at the same time. The
                     // special Workspace context is never paused, so its own monitoring is unaffected.
                     if (monitoringPause.IsPaused(ctx.ContextId.Value))
+                    {
+                        logger.LogDebug("[GCDiag] sweep context skipped (paused for removal): workspace={WorkspaceId} context={ContextId}", workspaceId, ctx.ContextId.Value);
                         continue;
+                    }
 
+                    var contextStarted = Stopwatch.GetTimestamp();
                     await scanner.ScanWorkspaceAsync(workspaceId, ctx.ContextId, cancellationToken);
+                    logger.LogInformation(
+                        "[GCDiag] sweep context done: workspace={WorkspaceId} context={ContextId} elapsedMs={ElapsedMs}",
+                        workspaceId, ctx.ContextId.Value, (long)Stopwatch.GetElapsedTime(contextStarted).TotalMilliseconds);
                 }
             }
             catch (OperationCanceledException)
@@ -145,6 +170,24 @@ public sealed class GitChangesMonitoringBackgroundService(
             {
                 logger.LogWarning(ex, "Git Changes monitoring sweep failed for workspace {WorkspaceId}", workspaceId);
             }
+        }
+
+        var elapsed = Stopwatch.GetElapsedTime(sweepStarted);
+        var renewalInterval = TimeSpan.FromMinutes(Math.Clamp(
+            gitChangesOptions.Value.WatcherRenewalIntervalMinutes, 1, Math.Max(1, gitChangesOptions.Value.WatcherIdleGraceMinutes - 1)));
+        var idleGrace = TimeSpan.FromMinutes(Math.Max(1, gitChangesOptions.Value.WatcherIdleGraceMinutes));
+
+        // Next sweep starts after this one plus the renewal delay; if that exceeds the Worker's idle grace,
+        // watchers for repositories scanned early in this sweep can expire before they are renewed.
+        if (elapsed + renewalInterval >= idleGrace)
+        {
+            logger.LogWarning(
+                "[GCDiag] sweep slow: elapsedSec={ElapsedSec} plus renewal {RenewalSec}s reaches watcher idle grace {GraceSec}s; Worker watchers may expire before renewal",
+                (long)elapsed.TotalSeconds, (long)renewalInterval.TotalSeconds, (long)idleGrace.TotalSeconds);
+        }
+        else
+        {
+            logger.LogInformation("[GCDiag] sweep end: elapsedSec={ElapsedSec}", (long)elapsed.TotalSeconds);
         }
     }
 }

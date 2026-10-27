@@ -155,6 +155,8 @@ public sealed class GitChangesWorkspaceScanner(
 
         var completed = 0;
         var total = targets.Count;
+        var scanStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+        var failed = 0;
         using var semaphore = new SemaphoreSlim(Math.Max(1, Math.Min(gitChangesOptions.Value.MaxParallelRepositoryOperations, total)));
 
         var tasks = targets.Select(async target =>
@@ -188,8 +190,9 @@ public sealed class GitChangesWorkspaceScanner(
                 }
                 else if (!result.Success)
                 {
-                    logger.LogDebug(
-                        "Git Changes scan failed for {WorkspaceName}/{RepositoryName}: {ErrorCode} {ErrorMessage}",
+                    logger.Log(
+                        result.ErrorCode is "PathUnderRemoval" or "RepositoryNotFound" ? LogLevel.Information : LogLevel.Warning,
+                        "[GCDiag] Git Changes scan failed for {WorkspaceName}/{RepositoryName}: {ErrorCode} {ErrorMessage}",
                         target.WorkspaceName, target.RepositoryName, result.ErrorCode, result.ErrorMessage);
                 }
             }
@@ -208,11 +211,19 @@ public sealed class GitChangesWorkspaceScanner(
                 semaphore.Release();
             }
 
+            if (!success)
+            {
+                Interlocked.Increment(ref failed);
+            }
+
             var completedCount = Interlocked.Increment(ref completed);
             onProgress?.Invoke(new GitChangesWorkspaceScanProgress(target.RepositoryName, success, completedCount, total));
         });
 
         await Task.WhenAll(tasks);
+        logger.LogInformation(
+            "[GCDiag] scan done: workspace={WorkspaceId} context={ContextId} repos={Total} failedOrEmpty={Failed} elapsedMs={ElapsedMs} lineStats={LineStats} immediate={Immediate}",
+            workspaceId, contextId.Value, total, failed, (long)System.Diagnostics.Stopwatch.GetElapsedTime(scanStarted).TotalMilliseconds, includeLineStats, persistImmediately);
     }
 
     private sealed record MonitorTarget(
