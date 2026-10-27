@@ -1,4 +1,11 @@
 using System.Reflection;
+using System.Text.Json;
+using GrayMoon.App.Api.Endpoints;
+using GrayMoon.App.Services.Git;
+using GrayMoon.App.Services.Jobs;
+using GrayMoon.App.Services.Orchestration;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services.Queries;
 using GrayMoon.Application.Features;
@@ -397,6 +404,121 @@ public sealed class WorkspaceUpdateAndPushOperationsTests
             RepositoryType: null, HasNewerTag: null, HasSelfFileVersionToken: null, PullRequestState: null, PullRequestNumber: null,
             PullRequestHtmlUrl: null, PullRequestMergedAt: null, PullRequestMergeable: null, PullRequestMergeableState: null,
             PullRequestChangedFiles: null, Archived: false, UncommittedChangedFileCount: 0);
+
+    // ---- REST: the approval id round-trips through the real endpoints and the real coordinator ----
+
+    private static readonly IServiceProvider HttpServices = new ServiceCollection().AddLogging().AddOptions().BuildServiceProvider();
+
+    private static async Task<(int Status, JsonElement Body)> ReadAsync(IResult result)
+    {
+        var http = new DefaultHttpContext { RequestServices = HttpServices };
+        http.Response.Body = new MemoryStream();
+        await result.ExecuteAsync(http);
+        http.Response.Body.Position = 0;
+        using var doc = await JsonDocument.ParseAsync(http.Response.Body);
+        return (http.Response.StatusCode, doc.RootElement.Clone());
+    }
+
+    private static WorkspaceOperationRunner NewRunner() => new(NullLogger<WorkspaceOperationRunner>.Instance);
+
+    [Fact]
+    public async Task Rest_approval_is_returned_as_409_and_the_id_pushes_normally_exactly_once()
+    {
+        var h = new Harness();
+        h.Push.ThrowNotPossibleWhenSynchronized = true;
+        var resolver = new FakeContextResolver(h);
+        var runner = NewRunner();
+
+        var first = await ReadAsync(await WorkspaceOperationsEndpoints.UpdateAndPush(
+            WorkspaceId, new UpdateAndPushApiRequest(), h.Operations, resolver, runner, CancellationToken.None));
+
+        Assert.Equal(409, first.Status);
+        Assert.Equal("ApprovalRequired", first.Body.GetProperty("status").GetString());
+        var id = first.Body.GetProperty("pendingApprovalId").GetString();
+        Assert.False(string.IsNullOrEmpty(id));
+        Assert.All(h.Push.PushCalls, call => Assert.True(call.Synchronized));
+        var pushesBefore = h.Push.PushCalls.Count;
+
+        var approve = new ApproveUpdateAndPushApiRequest { PendingApprovalId = id };
+        var done = await ReadAsync(await WorkspaceOperationsEndpoints.ApproveUpdateAndPush(
+            WorkspaceId, approve, h.Operations, resolver, runner, CancellationToken.None));
+        var replay = await ReadAsync(await WorkspaceOperationsEndpoints.ApproveUpdateAndPush(
+            WorkspaceId, approve, h.Operations, resolver, runner, CancellationToken.None));
+
+        Assert.Equal(200, done.Status);
+        Assert.Equal("Completed", done.Body.GetProperty("status").GetString());
+        Assert.False(h.Push.PushCalls.Last().Synchronized);
+        Assert.Equal(409, replay.Status);
+        Assert.Equal("Rejected", replay.Body.GetProperty("status").GetString());
+        Assert.Equal(pushesBefore + 1, h.Push.PushCalls.Count);
+    }
+
+    [Fact]
+    public async Task Rest_approval_id_is_refused_for_another_workspace_or_an_unknown_id_and_pushes_nothing()
+    {
+        var h = new Harness();
+        h.Push.ThrowNotPossibleWhenSynchronized = true;
+        var resolver = new FakeContextResolver(h);
+        var runner = NewRunner();
+        var first = await ReadAsync(await WorkspaceOperationsEndpoints.UpdateAndPush(
+            WorkspaceId, null, h.Operations, resolver, runner, CancellationToken.None));
+        var id = first.Body.GetProperty("pendingApprovalId").GetString();
+        var pushesBefore = h.Push.PushCalls.Count;
+
+        var otherWorkspace = await ReadAsync(await WorkspaceOperationsEndpoints.ApproveUpdateAndPush(
+            WorkspaceId + 1, new ApproveUpdateAndPushApiRequest { PendingApprovalId = id }, h.Operations, resolver, runner, CancellationToken.None));
+        var unknown = await ReadAsync(await WorkspaceOperationsEndpoints.ApproveUpdateAndPush(
+            WorkspaceId, new ApproveUpdateAndPushApiRequest { PendingApprovalId = "nope" }, h.Operations, resolver, runner, CancellationToken.None));
+
+        Assert.Equal(409, otherWorkspace.Status);
+        Assert.Equal(409, unknown.Status);
+        Assert.Equal(pushesBefore, h.Push.PushCalls.Count);
+    }
+
+    // ---- Prepare Workspace: the real phase mapping reaches the coordinator and its approval ----
+
+    [Fact]
+    public async Task Prepare_workspace_with_update_and_push_asks_for_approval_and_only_the_approval_pushes_normally()
+    {
+        var h = new Harness();
+        h.Push.ThrowNotPossibleWhenSynchronized = true;
+        var phases = new PreparePhasesOverCoordinator(new PrepareWorkspacePhases(null!, null!, h.Operations));
+        var orchestrator = new PrepareWorkspaceOrchestrator(phases, NullLogger<PrepareWorkspaceOrchestrator>.Instance);
+
+        var result = await orchestrator.RunAsync(
+            WorkspaceId, Context, "feature/prep", "__default__", null, updateDependencies: true, pushChanges: true,
+            commitMessage: null, progress: null, (_, _) => { }, (_, _) => { }, CancellationToken.None);
+
+        Assert.True(result.BranchesCreated);
+        Assert.True(result.Combined!.NeedsApproval);
+        Assert.False(result.PushPending);
+        Assert.All(h.Push.PushCalls, call => Assert.True(call.Synchronized));
+
+        var approved = await h.Run(new ApproveNormalPushContinuation(WorkspaceId, Context, result.Combined.PendingApprovalId!));
+
+        Assert.Equal(UpdateAndPushStatus.Completed, approved.Status);
+        Assert.False(h.Push.PushCalls.Last().Synchronized);
+    }
+
+    /// <summary>Branch creation is faked; the combined step is the real <see cref="PrepareWorkspacePhases"/> mapping.</summary>
+    private sealed class PreparePhasesOverCoordinator(IPrepareWorkspacePhases real) : IPrepareWorkspacePhases
+    {
+        public Task<BranchCreationOutcome> CreateBranchesAsync(
+            int workspaceId, WorkspaceFeatureContextId contextId, string newBranchName, string baseBranch,
+            IReadOnlySet<int>? repositoryIds, IProgress<OperationProgress>? progress, CancellationToken cancellationToken)
+            => Task.FromResult(new BranchCreationOutcome(
+                new HashSet<int> { 1 }, new Dictionary<int, string?> { [1] = newBranchName }, new Dictionary<int, string>()));
+
+        public Task<DependencyUpdateRunResult> UpdateDependenciesAsync(
+            int workspaceId, WorkspaceFeatureContextId contextId, string? commitMessage, IProgress<OperationProgress>? progress,
+            Action<int, string> setRepositoryError, Action<int, string> setLevelError, CancellationToken cancellationToken)
+            => throw new InvalidOperationException("Update Only must not run for Update and Push.");
+
+        public Task<UpdateAndPushExecutionResult> UpdateAndPushAsync(
+            int workspaceId, WorkspaceFeatureContextId contextId, string? commitMessage, Action<string> reportOverlay,
+            Action<int, string> setRepositoryError, Action<int, string> setLevelError, CancellationToken cancellationToken)
+            => real.UpdateAndPushAsync(workspaceId, contextId, commitMessage, reportOverlay, setRepositoryError, setLevelError, cancellationToken);
+    }
 
     private sealed class Harness
     {

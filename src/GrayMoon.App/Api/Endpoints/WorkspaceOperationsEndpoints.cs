@@ -142,7 +142,7 @@ public static class WorkspaceOperationsEndpoints
     /// use). A normal push that needs the user's consent is not done silently: 409 with a pendingApprovalId, which
     /// /update-and-push/approve continues. reviewedDefaultBranchRepoIds null skips the default-branch re-check.
     /// </summary>
-    private static Task<IResult> UpdateAndPush(
+    internal static Task<IResult> UpdateAndPush(
         int workspaceId,
         UpdateAndPushApiRequest? body,
         IWorkspaceUpdateAndPushOperations operations,
