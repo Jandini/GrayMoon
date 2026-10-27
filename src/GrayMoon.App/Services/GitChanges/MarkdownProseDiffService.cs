@@ -30,10 +30,7 @@ public sealed class MarkdownProseDiffService
     /// <summary>Soft cap per side (~512 KiB of UTF-16 chars) - HtmlDiff is heavier than Monaco paint.</summary>
     public const int SoftCharLimitPerSide = 512 * 1024;
 
-    private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
-        .UseAdvancedExtensions()
-        .DisableHtml()
-        .Build();
+    private static readonly MarkdownPipeline Pipeline = CreatePipeline();
 
     private static readonly HtmlSanitizer Sanitizer = CreateSanitizer();
 
@@ -200,6 +197,15 @@ public sealed class MarkdownProseDiffService
         }
 
         return repaired;
+    }
+
+    // Generic attributes would read a literal {PLACEHOLDER} after a heading, paragraph or inline element as an
+    // attribute block and drop it from the visible text, so it is removed from the advanced set.
+    private static MarkdownPipeline CreatePipeline()
+    {
+        var builder = new MarkdownPipelineBuilder().UseAdvancedExtensions().DisableHtml();
+        builder.Extensions.RemoveAll(static extension => extension is Markdig.Extensions.GenericAttributes.GenericAttributesExtension);
+        return builder.Build();
     }
 
     private static HtmlSanitizer CreateSanitizer()
