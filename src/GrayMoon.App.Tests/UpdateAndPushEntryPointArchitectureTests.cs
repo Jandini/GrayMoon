@@ -8,7 +8,7 @@ namespace GrayMoon.App.Tests;
 /// still do so with <see cref="KnownViolations"/>. A file may host a standalone Update Only and a standalone Push Only as
 /// long as no single member chains them. The list is a ratchet for the Push Updated unification: it only shrinks. A file
 /// that is not listed and starts chaining fails the test; a listed file that was migrated also fails it, so the list
-/// cannot go stale. The end state is an empty list (see docs/todo/push-updated-unified-entry-living-notes.md).
+/// cannot go stale. The list is now empty and must stay empty (see docs/architecture/02-system-architecture.md section 8A).
 /// </summary>
 public sealed class UpdateAndPushEntryPointArchitectureTests
 {

@@ -126,6 +126,17 @@ REST endpoints resolve the special Workspace context (`GetOrCreateSpecialWorkspa
 
 ---
 
+## 4A. Update and Push is one entry point
+
+A start of Update and Push from a page, popup, Prepare Workspace, REST or a future automation calls `IWorkspaceUpdateAndPushOperations.ExecuteAsync` and nothing else. Do not call `IWorkspaceUpdateOperations` and `IWorkspacePushOperations` one after the other from UI code; `UpdateAndPushEntryPointArchitectureTests` fails when a member under `Components/**` does. To add a new caller:
+
+- Capture the `WorkspaceFeatureContextId` once, when the user acts, and build an explicit `StartUpdateAndPush` (levels, commit message, restore, `Origin`).
+- When the UI warns about the default branch, take the targets from `GetDefaultBranchReviewAsync` and pass `ReviewedDefaultBranchRepoIds`, so a stale confirmation is refused.
+- Show the result with `UpdateAndPushResultPresenter`. On `ApprovalRequired`, ask the user and only then send `ApproveNormalPushContinuation`; never approve on the user's behalf.
+- Run the call inside the surface's job or lock (`BackgroundJobService` or `RunExclusiveAsync`); the job body only calls `ExecuteAsync`.
+
+Changing the engine: `UpdateAndPushOrchestrator` talks to `IDependencyUpdateLane` and `IPushLane`, so test ordering and failure handling with fake lanes (`UpdateAndPushOrchestratorPipelineTests`). A `Pipelined = false` result must stay free of side effects, because the coordinator then falls back to the sequential path. Policy (update failure gate, approval, default-branch refusal) belongs in the coordinator, not in the engine or the callers. See `02-system-architecture.md` section 8A.
+
 ## 5. Use query services for large pages
 
 Do not load the full Workspace aggregate with every navigation property for grids that may contain many rows.
