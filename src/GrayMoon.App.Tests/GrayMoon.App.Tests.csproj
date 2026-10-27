@@ -25,6 +25,7 @@
 
   <ItemGroup>
     <None Include="Fixtures\graymoon-0.1.0.db" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Fixtures\Markdown\*.md" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
