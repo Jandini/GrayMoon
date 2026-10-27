@@ -6,9 +6,10 @@ public interface IWorkspacePreparationOperations
 {
     /// <summary>
     /// Creates <paramref name="newBranchName"/> in every targeted repository, then (only when every one succeeded)
-    /// updates dependencies, pushes, or both. With both, the update and the push run as the two-lane pipeline; when
-    /// that is not possible the update runs here and <see cref="PrepareWorkspaceResult.PushPending"/> hands the push
-    /// back to the caller. Progress is reported in order on the reporting thread, so pass a synchronous reporter.
+    /// updates dependencies, pushes, or both. With both, the shared combined Update and Push runs and its result is
+    /// <see cref="PrepareWorkspaceResult.Combined"/> (a normal push that needs approval is continued through
+    /// <see cref="IWorkspaceUpdateAndPushOperations"/>). Push alone is handed back as <see cref="PrepareWorkspaceResult.PushPending"/>.
+    /// Progress is reported in order on the reporting thread, so pass a synchronous reporter.
     /// </summary>
     Task<PrepareWorkspaceResult> PrepareAsync(
         int workspaceId,

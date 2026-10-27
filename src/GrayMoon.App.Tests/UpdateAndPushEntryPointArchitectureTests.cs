@@ -13,11 +13,7 @@ namespace GrayMoon.App.Tests;
 public sealed class UpdateAndPushEntryPointArchitectureTests
 {
     // Files under src/GrayMoon.App/Components, slash separated.
-    private static readonly string[] KnownViolations =
-    [
-        // Prepare Workspace: the post-pipeline push is still chained by the page (phase 5, behavior decision pending).
-        "Components/Pages/WorkspaceRepositories.PrepareWorkspace.cs",
-    ];
+    private static readonly string[] KnownViolations = [];
 
     private static readonly string[] UpdateCalls = [".UpdateAsync(", "PrepareAsync("];
     private static readonly string[] PushCalls = ["PushAsync(", "ExecutePushCoreAsync(", "ExecutePushAsync("];

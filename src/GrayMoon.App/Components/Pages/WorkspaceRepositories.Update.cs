@@ -336,23 +336,7 @@ public sealed partial class WorkspaceRepositories
 
             await ApplyUpdateAndPushExecutionResultAsync(result);
 
-            var notice = UpdateAndPushResultPresenter.Present(result, errorsShownOnGrid: true);
-            SafeInvoke(() =>
-            {
-                switch (notice.Kind)
-                {
-                    case UpdateAndPushNoticeKind.Info:
-                        ToastService.Show(notice.Message);
-                        break;
-                    case UpdateAndPushNoticeKind.Error:
-                        ToastService.ShowError(notice.Message);
-                        break;
-                    case UpdateAndPushNoticeKind.Approval:
-                        var approval = notice.Approval!;
-                        ShowConfirm(notice.Message, () => StartApprovedContinuationAsync(approval), confirmButtonText: "Continue");
-                        break;
-                }
-            });
+            PresentUpdateAndPushNotice(result);
         }
         catch (OperationCanceledException)
         {
@@ -372,6 +356,28 @@ public sealed partial class WorkspaceRepositories
         }
     }
 
+
+    /// <summary>Tells the user how a combined run ended: a toast, or the "Continue with normal push?" prompt.</summary>
+    private void PresentUpdateAndPushNotice(UpdateAndPushExecutionResult result)
+    {
+        var notice = UpdateAndPushResultPresenter.Present(result, errorsShownOnGrid: true);
+        SafeInvoke(() =>
+        {
+            switch (notice.Kind)
+            {
+                case UpdateAndPushNoticeKind.Info:
+                    ToastService.Show(notice.Message);
+                    break;
+                case UpdateAndPushNoticeKind.Error:
+                    ToastService.ShowError(notice.Message);
+                    break;
+                case UpdateAndPushNoticeKind.Approval:
+                    var approval = notice.Approval!;
+                    ShowConfirm(notice.Message, () => StartApprovedContinuationAsync(approval), confirmButtonText: "Continue");
+                    break;
+            }
+        });
+    }
     /// <summary>Reloads the grid after a combined run, shows what the run reports and clears the errors of repositories it updated cleanly.</summary>
     private async Task ApplyUpdateAndPushExecutionResultAsync(UpdateAndPushExecutionResult result)
     {
@@ -398,35 +404,6 @@ public sealed partial class WorkspaceRepositories
             // Errors the push lane reported while the update was still running must survive this clean-up.
             var pushFailedRepoIds = result.Push?.RepoErrors?.Keys.ToHashSet() ?? new HashSet<int>();
             SafeInvoke(() => ClearRepositoryErrorsFor(update.SyncedRepoIds.Where(id => !pushFailedRepoIds.Contains(id)).ToHashSet()));
-        }
-    }
-
-    /// <summary>Reloads the grid after a pipelined Update and Push and clears the errors of repositories it updated cleanly.</summary>
-    private async Task ApplyPipelinedUpdateAndPushResultAsync(UpdateAndPushResult result, string nothingToPushMessage)
-    {
-        await ReloadWorkspaceDataFromFreshScopeAsync();
-        _ = InvokeAsync(() => { if (!_disposed) { ApplySyncStateFromLoadedItems(); StateHasChanged(); } });
-
-        // The live callbacks reach the page only while it is alive and only as they happen; a push that waits
-        // minutes for a package can fail long after the user looked away. The returned result is the complete
-        // account (like the sequential push), so apply it and say that the push stopped.
-        if (result.Push is { Success: false } pushFailure)
-        {
-            SafeInvoke(() =>
-            {
-                ApplyRepositoryErrors(pushFailure.RepoErrors);
-                ApplyLevelErrors(pushFailure.LevelErrors);
-                ToastService.Show(PushOperationResult.Describe(pushFailure));
-            });
-        }
-
-        if (result.Update.Success)
-        {
-            // Errors the push lane reported while the update was still running must survive this clean-up.
-            var pushFailedRepoIds = result.Push?.RepoErrors?.Keys.ToHashSet() ?? new HashSet<int>();
-            SafeInvoke(() => ClearRepositoryErrorsFor(result.Update.SyncedRepoIds.Where(id => !pushFailedRepoIds.Contains(id)).ToHashSet()));
-            if (result.Push?.Success != false && result.PushedRepoCount == 0)
-                SafeInvoke(() => ToastService.Show(nothingToPushMessage));
         }
     }
 

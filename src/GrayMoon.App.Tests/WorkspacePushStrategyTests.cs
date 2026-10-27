@@ -573,6 +573,7 @@ public sealed class WorkspacePushStrategyTests
             services.AddScoped<NuGetService>();
             services.AddScoped<PackageRegistrySyncService>();
             services.AddScoped<WorkspacePushService>();
+            services.AddScoped<IPushLane>(sp => sp.GetRequiredService<WorkspacePushService>());
             services.AddScoped<PushOrchestrator>();
             services.AddScoped<WorkspacePushHandler>();
             services.AddScoped<BasicGitPushStrategy>();
@@ -584,6 +585,7 @@ public sealed class WorkspacePushStrategyTests
             services.AddSingleton<WorkerSyncNotificationQueue>();
             services.AddSingleton<IWorkerSyncNotificationBarrier>(sp => sp.GetRequiredService<WorkerSyncNotificationQueue>());
             services.AddScoped<DependencyUpdateOrchestrator>();
+            services.AddScoped<IDependencyUpdateLane>(sp => sp.GetRequiredService<DependencyUpdateOrchestrator>());
             services.AddScoped<UpdateAndPushOrchestrator>();
             services.AddScoped<IGitChangesWorkerClient, GitChangesWorkerClient>();
         });

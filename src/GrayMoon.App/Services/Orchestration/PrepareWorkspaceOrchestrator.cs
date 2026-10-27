@@ -5,7 +5,7 @@ namespace GrayMoon.App.Services.Orchestration;
 /// <summary>
 /// Sequences the Prepare Workspace workflow: parallel branch creation with inline state sync (hooks suppressed), then
 /// - only when every targeted repository is on the new branch - the dependency update, the push, or both as the
-/// two-lane Update and Push. Any branch failure, unknown outcome or cancellation stops the workflow before anything
+/// shared combined Update and Push. Any branch failure, unknown outcome or cancellation stops the workflow before anything
 /// is updated, committed or pushed; branches already created are left as they are.
 /// </summary>
 public sealed class PrepareWorkspaceOrchestrator(
@@ -63,7 +63,7 @@ public sealed class PrepareWorkspaceOrchestrator(
 
         if (updateDependencies && pushChanges)
         {
-            var pipeline = await phases.UpdateAndPushAsync(
+            var combined = await phases.UpdateAndPushAsync(
                 workspaceId,
                 contextId,
                 commitMessage,
@@ -71,14 +71,8 @@ public sealed class PrepareWorkspaceOrchestrator(
                 setRepositoryError,
                 setLevelError,
                 cancellationToken);
-            if (pipeline.Pipelined)
-            {
-                logger.LogInformation("PrepareWorkspaceOrchestrator completed for workspace {WorkspaceId} (two-lane). Success={Success}", workspaceId, pipeline.Success);
-                return new PrepareWorkspaceResult(true, noBranchErrors, Pipeline: pipeline);
-            }
-
-            // Nothing ran: the update runs here and the caller pushes with its own checks and confirmation.
-            logger.LogInformation("PrepareWorkspaceOrchestrator workspace {WorkspaceId}: two-lane push not possible, updating then handing the push back.", workspaceId);
+            logger.LogInformation("PrepareWorkspaceOrchestrator completed for workspace {WorkspaceId} (combined). Status={Status}", workspaceId, combined.Status);
+            return new PrepareWorkspaceResult(true, noBranchErrors, Combined: combined);
         }
 
         DependencyUpdateRunResult? update = null;

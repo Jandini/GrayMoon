@@ -26,7 +26,7 @@ public interface IPrepareWorkspacePhases
         Action<int, string> setLevelError,
         CancellationToken cancellationToken);
 
-    Task<UpdateAndPushResult> UpdateAndPushAsync(
+    Task<UpdateAndPushExecutionResult> UpdateAndPushAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         string? commitMessage,
@@ -37,7 +37,7 @@ public interface IPrepareWorkspacePhases
 }
 
 /// <summary>
-/// Branch creation with inline state sync (hooks suppressed), the dependency update, and the two-lane Update and Push,
+/// Branch creation with inline state sync (hooks suppressed), the dependency update, and the shared combined Update and Push,
 /// each with the arguments Prepare Workspace has always used. The update and the pipeline take every repository
 /// (<c>repoIdsToUpdate: null</c>): after the branch gate every targeted repository is on the new branch, and the
 /// repositories deliberately left out (Skip Repos on Tags) are tag-pinned, which both the update and the push skip.
@@ -45,7 +45,7 @@ public interface IPrepareWorkspacePhases
 public sealed class PrepareWorkspacePhases(
     WorkspaceBranchHandler branchHandler,
     DependencyUpdateOrchestrator dependencyUpdateOrchestrator,
-    UpdateAndPushOrchestrator updateAndPushOrchestrator) : IPrepareWorkspacePhases
+    IWorkspaceUpdateAndPushOperations updateAndPush) : IPrepareWorkspacePhases
 {
     public Task<BranchCreationOutcome> CreateBranchesAsync(
         int workspaceId,
@@ -85,7 +85,7 @@ public sealed class PrepareWorkspacePhases(
             commitMessage: commitMessage,
             includeDepsInCommitMessage: true);
 
-    public Task<UpdateAndPushResult> UpdateAndPushAsync(
+    public Task<UpdateAndPushExecutionResult> UpdateAndPushAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         string? commitMessage,
@@ -93,15 +93,15 @@ public sealed class PrepareWorkspacePhases(
         Action<int, string> setRepositoryError,
         Action<int, string> setLevelError,
         CancellationToken cancellationToken)
-        => updateAndPushOrchestrator.RunAsync(
-            workspaceId,
-            contextId,
-            cancellationToken,
-            reportOverlay,
-            setRepositoryError,
-            setLevelError,
-            commitMessage,
-            includeDepsInCommitMessage: true,
-            restorePackages: true,
-            runId: GrayMoon.Abstractions.Logging.GrayMoonOperationContext.EnsureId());
+        => updateAndPush.ExecuteAsync(
+            new StartUpdateAndPush(
+                workspaceId,
+                contextId,
+                MaxLevel: null,
+                commitMessage,
+                IncludeDepsInCommitMessage: true,
+                RestorePackages: true,
+                Origin: "PrepareWorkspace"),
+            new UpdateAndPushObserver(reportOverlay, setRepositoryError, setLevelError),
+            cancellationToken);
 }

@@ -11,8 +11,8 @@ namespace GrayMoon.App.Services.Orchestration;
 /// package wait overlaps the update of the levels above it. Stateless; the caller owns all UI state.
 /// </summary>
 public sealed class UpdateAndPushOrchestrator(
-    DependencyUpdateOrchestrator updateOrchestrator,
-    WorkspacePushService workspacePushService,
+    IDependencyUpdateLane updateOrchestrator,
+    IPushLane workspacePushService,
     IServiceScopeFactory scopeFactory,
     ILogger<UpdateAndPushOrchestrator> logger)
 {
@@ -53,7 +53,7 @@ public sealed class UpdateAndPushOrchestrator(
         var lane = Task.Run<int>(async () =>
         {
             await using var scope = scopeFactory.CreateAsyncScope();
-            var pushService = scope.ServiceProvider.GetRequiredService<WorkspacePushService>();
+            var pushService = scope.ServiceProvider.GetRequiredService<IPushLane>();
             try
             {
                 return await pushService.RunPushLaneAsync(

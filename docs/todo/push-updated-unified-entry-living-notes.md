@@ -62,7 +62,7 @@ Note: the "UI-owned Update then Push chain" exists in THREE page-side places, no
 - [ ] P2 coordinator.
 - [ ] P3 popup migration.
 - [ ] P4 Repositories migration.
-- [ ] P5 Prepare and REST audit, architecture guard.
+- [x] P5 Prepare and REST audit, architecture guard.
 - [ ] P6 diagnostics, docs (`docs/architecture`), Desktop README bullet, full test run.
 
 ## P0 result
@@ -84,5 +84,5 @@ Note: the "UI-owned Update then Push chain" exists in THREE page-side places, no
 - Default branch: `StartUpdateAndPush.ReviewedDefaultBranchRepoIds` plus `GetDefaultBranchReviewAsync`. The re-check is one read of the stored link snapshots; the update plan is only read when a repository sits on its default branch. No Worker call, nothing per level. A change in the middle of a run is not covered (would need a per-level check inside the update lane).
 - Popup/page logic: `UpdateAndPushResultPresenter` (unit tested) decides toast or approval prompt for both surfaces. Razor event wiring itself is still checked only by manual smoke tests.
 - Job locks: popup uses the whole-workspace key, a Feature page the context key; the runner refuses each while the other is held. `StartJob` silently starts nothing while the lock is held, so both approval callbacks now wait (in memory, up to 10 s) before starting.
-- Three-level chain: NOT unit tested. `UpdateAndPushOrchestrator` takes the concrete `DependencyUpdateOrchestrator` and `WorkspacePushService`, so a fake-lane test needs interfaces extracted from the engine (behavior neutral, but it touches the engine). Decision pending. Manual scenario: three repositories A (level 1) -> B (level 2, consumes A's package) -> C (level 3, consumes B's package), each with an out-of-date reference. Run Push Updated from the popup and from the page. Expect: B is updated to the version A just published, C to the version B just published, pushes in order 1, 2, 3, one outcome per run, no second update after the push. Then repeat with the synchronized push refused (remove a NuGet mapping): expect the prompt, nothing pushed until Continue.
-- Open: Prepare Workspace (P5, question Q2). REST: no combined endpoint exists; /update, /push, /prepare-workspace each take the whole-workspace lock themselves.
+- Three-level chain: closed. `IDependencyUpdateLane` and `IPushLane` are extracted; `UpdateAndPushOrchestratorPipelineTests` (6) check hand-off order, overlap and failure settling with fake lanes. Version content across levels is still not simulated (wiring level only).
+- Closed: Prepare Workspace (P5, Q2 decided: it gets the same "Continue with normal push?" approval) now uses the shared operation for Update and Push; Push only remains standalone in the page. REST has `POST /update-and-push` and `/update-and-push/approve`; `KnownViolations` is empty.
