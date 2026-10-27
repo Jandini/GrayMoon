@@ -280,6 +280,25 @@ public sealed partial class WorkspaceRepositories
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// The confirmation is raised while the run that asked for it is still settling, and StartJob silently starts
+    /// nothing while the lock is held. Waiting on the in-memory job state is free; the approval stays valid meanwhile.
+    /// </summary>
+    private async Task StartApprovedContinuationAsync(ApproveNormalPushContinuation approval)
+    {
+        for (var i = 0; i < 100 && IsJobRunning && !_disposed; i++)
+            await Task.Delay(100);
+
+        if (_disposed) return;
+        if (IsJobRunning)
+        {
+            ToastService.ShowError("Another operation is still running. Run Update and Push again when it has finished.");
+            return;
+        }
+
+        JobService.StartJob(PageJobKey, "Preparing push...", (j, c) => RunUpdateAndPushCommandAsync(j, c, approval));
+    }
+
     private async Task RunUpdateAndPushCommandAsync(BackgroundJobHandle job, CancellationToken ct, UpdateAndPushCommand command)
     {
         try
@@ -300,11 +319,7 @@ public sealed partial class WorkspaceRepositories
                 var approval = new ApproveNormalPushContinuation(result.WorkspaceId, result.ContextId, result.PendingApprovalId!);
                 SafeInvoke(() => ShowConfirm(
                     result.Summary,
-                    () =>
-                    {
-                        JobService.StartJob(PageJobKey, "Preparing push...", (j, c) => RunUpdateAndPushCommandAsync(j, c, approval));
-                        return Task.CompletedTask;
-                    },
+                    () => StartApprovedContinuationAsync(approval),
                     confirmButtonText: "Continue"));
             }
         }

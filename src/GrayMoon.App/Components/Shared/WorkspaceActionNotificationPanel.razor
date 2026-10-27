@@ -764,13 +764,24 @@
         StateHasChanged();
     }
 
-    private Task OnNormalPushConfirmedAsync()
+    private async Task OnNormalPushConfirmedAsync()
     {
         var approval = _normalPushConfirm.Approval;
         CloseNormalPushConfirm();
-        if (approval != null)
-            StartUpdateAndPushJob(approval, "Preparing push...");
-        return Task.CompletedTask;
+        if (approval == null) return;
+
+        // StartJob silently starts nothing while the run that raised this confirmation still holds the lock.
+        for (var i = 0; i < 100 && IsWorkspaceJobRunning(approval.WorkspaceId) && !_disposed; i++)
+            await Task.Delay(100);
+
+        if (_disposed) return;
+        if (IsWorkspaceJobRunning(approval.WorkspaceId))
+        {
+            ToastService.ShowError("Another operation is still running. Run Update and Push again when it has finished.");
+            return;
+        }
+
+        StartUpdateAndPushJob(approval, "Preparing push...");
     }
 
     private Task RunUpdateFilesAsync(int workspaceId)
