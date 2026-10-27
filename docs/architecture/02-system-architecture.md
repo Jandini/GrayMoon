@@ -157,7 +157,7 @@ Most `IWorkspace*Operations` methods take an explicit `WorkspaceFeatureContextId
 
 Blazor pages and REST endpoints should use this boundary instead of reaching directly into orchestration internals where a suitable application operation exists.
 
-This layer is also the intended future seam for automation such as MCP.
+This layer is also the intended future seam for automation such as MCP. There is no MCP server or MCP documentation yet (the only plan is the roadmap line in the root `README.md`). When one is built, it should call these operations (or the REST endpoints over them), never orchestrators or the Worker. Notes for that work: Update and Push is one operation (`IWorkspaceUpdateAndPushOperations`, REST `POST /api/workspaces/{id}/update-and-push` and `/update-and-push/approve`). A result of `ApprovalRequired` (REST 409 with `pendingApprovalId`) must go to a human before `approve` is called; an agent must not approve a normal push on its own. Send `reviewedDefaultBranchRepoIds` (omitting it skips the default-branch re-check); a route that returns the default-branch review does not exist yet. Failures caused by a bad connector token need a typed result before an agent can act on them (see `docs/todo/connector-token-failure-handling.md`).
 
 ### GrayMoon.Abstractions
 

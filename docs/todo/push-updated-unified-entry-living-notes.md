@@ -86,3 +86,10 @@ Note: the "UI-owned Update then Push chain" exists in THREE page-side places, no
 - Job locks: popup uses the whole-workspace key, a Feature page the context key; the runner refuses each while the other is held. `StartJob` silently starts nothing while the lock is held, so both approval callbacks now wait (in memory, up to 10 s) before starting.
 - Three-level chain: closed. `IDependencyUpdateLane` and `IPushLane` are extracted; `UpdateAndPushOrchestratorPipelineTests` (6) check hand-off order, overlap and failure settling with fake lanes. Version content across levels is still not simulated (wiring level only).
 - Closed: Prepare Workspace (P5, Q2 decided: it gets the same "Continue with normal push?" approval) now uses the shared operation for Update and Push; Push only remains standalone in the page. REST has `POST /update-and-push` and `/update-and-push/approve`; `KnownViolations` is empty.
+
+## Sign-off (2026-10-27)
+
+- Manually verified by the owner on real repositories: Push Updated from the popup and from the Repositories page, Level N Only, the default-branch warning, Prepare Workspace with Update and Push.
+- Not exercised live: the "Continue with normal push?" dialog (needs a package with no registry mapping; covered by unit tests of the coordinator, the approval store, the REST round trip and the Prepare chain, but not the Razor dialog) and the REST endpoints in real use (no consumer yet).
+- Accepted limits: no per-level default-branch re-check during a run; version content across levels is only tested at wiring level.
+- Follow-ups kept separate: connector token failure handling (`connector-token-failure-handling.md`); for a future MCP server, a REST route for the default-branch review and the approval rule noted in `architecture/02-system-architecture.md`.
