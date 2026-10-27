@@ -40,7 +40,8 @@ public sealed class WorkspaceUpdateAndPushOperations(
         switch (command)
         {
             case StartUpdateAndPush start:
-                return await RunAsync(start, runId!, observer, cancellationToken);
+                return await CheckReviewedDefaultBranchesAsync(start, runId!, cancellationToken)
+                    ?? await RunAsync(start, runId!, observer, cancellationToken);
             case ApproveNormalPushContinuation approval:
                 return await ContinueWithNormalPushAsync(approval, observer, cancellationToken);
             default:
@@ -53,20 +54,60 @@ public sealed class WorkspaceUpdateAndPushOperations(
         WorkspaceFeatureContextId contextId,
         int? maxLevel,
         CancellationToken cancellationToken)
+        => (await GetDefaultBranchReviewAsync(workspaceId, contextId, maxLevel, cancellationToken)).Targets;
+
+    public async Task<UpdateAndPushDefaultBranchReview> GetDefaultBranchReviewAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        int? maxLevel,
+        CancellationToken cancellationToken)
     {
         var info = await contextResolver.GetRequiredAsync(contextId, workspaceId, cancellationToken);
+        var links = await linkListQuery.GetAllSnapshotsAsync(workspaceId, contextId, info.IsSpecialWorkspace, cancellationToken);
+        var onDefault = links.Where(l => IsOnDefaultBranchInScope(l, maxLevel)).ToList();
+        if (onDefault.Count == 0)
+            return new UpdateAndPushDefaultBranchReview([], new HashSet<int>());
+
+        // The update plan is the more expensive read, so it is only taken when something could be warned about.
         var (updatePlan, _) = await updateOperations.GetUpdatePlanAsync(workspaceId, contextId, null, cancellationToken);
         var repoIdsWithUpdates = updatePlan.Select(p => p.RepoId).ToHashSet();
-        var links = await linkListQuery.GetAllSnapshotsAsync(workspaceId, contextId, info.IsSpecialWorkspace, cancellationToken);
 
-        return links
-            .Where(l => string.IsNullOrWhiteSpace(l.CheckedOutTag)
-                && (maxLevel is null || (l.DependencyLevel ?? 0) <= maxLevel)
-                && !string.IsNullOrWhiteSpace(l.DefaultBranchName)
-                && string.Equals(l.BranchName, l.DefaultBranchName, StringComparison.Ordinal)
-                && repoIdsWithUpdates.Contains(l.RepositoryId))
-            .Select(l => new UpdateAndPushDefaultBranchTarget(l.RepositoryId, l.RepositoryName, l.DefaultBranchName!))
+        return new UpdateAndPushDefaultBranchReview(
+            onDefault
+                .Where(l => repoIdsWithUpdates.Contains(l.RepositoryId))
+                .Select(l => new UpdateAndPushDefaultBranchTarget(l.RepositoryId, l.RepositoryName, l.DefaultBranchName!))
+                .ToList(),
+            onDefault.Select(l => l.RepositoryId).ToHashSet());
+    }
+
+    private static bool IsOnDefaultBranchInScope(WorkspaceRepositoryLinkListItemDto l, int? maxLevel)
+        => string.IsNullOrWhiteSpace(l.CheckedOutTag)
+            && (maxLevel is null || (l.DependencyLevel ?? 0) <= maxLevel)
+            && !string.IsNullOrWhiteSpace(l.DefaultBranchName)
+            && string.Equals(l.BranchName, l.DefaultBranchName, StringComparison.Ordinal);
+
+    /// <summary>
+    /// One read of the stored branch state (no Worker call, no update plan). Refuses the run when a repository in scope sits
+    /// on its default branch now but was not on it when the user was warned.
+    /// </summary>
+    private async Task<UpdateAndPushExecutionResult?> CheckReviewedDefaultBranchesAsync(
+        StartUpdateAndPush start, string runId, CancellationToken cancellationToken)
+    {
+        if (start.ReviewedDefaultBranchRepoIds is not { } reviewed)
+            return null;
+
+        var info = await contextResolver.GetRequiredAsync(start.ContextId, start.WorkspaceId, cancellationToken);
+        var links = await linkListQuery.GetAllSnapshotsAsync(start.WorkspaceId, start.ContextId, info.IsSpecialWorkspace, cancellationToken);
+        var changed = links
+            .Where(l => IsOnDefaultBranchInScope(l, start.MaxLevel) && !reviewed.Contains(l.RepositoryId))
+            .Select(l => l.RepositoryName)
+            .Order(StringComparer.OrdinalIgnoreCase)
             .ToList();
+        if (changed.Count == 0)
+            return null;
+
+        logger.LogWarning("[UpdateAndPush {RunId}] Workspace {WorkspaceId}: refused, {Count} repositories moved onto their default branch after the warning: {Repos}", runId, start.WorkspaceId, changed.Count, string.Join(", ", changed));
+        return Rejected(start, runId, $"These repositories moved onto their default branch after you confirmed: {string.Join(", ", changed)}. Review and start Update and Push again.");
     }
 
     private async Task<UpdateAndPushExecutionResult?> ValidateContextAsync(

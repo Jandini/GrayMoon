@@ -121,6 +121,8 @@ public sealed partial class WorkspaceRepositories
 
         return Task.CompletedTask;
     }
+    private IReadOnlySet<int>? _reviewedDefaultBranchRepoIds;
+
 
     private async Task OnUpdateAndPushClickAsync()
     {
@@ -137,6 +139,13 @@ public sealed partial class WorkspaceRepositories
         var (updatePlan, _) = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, (IReadOnlyList<SyncDependenciesRepoPayload> Payload, bool IsMultiLevel)>(
             svc => svc.GetUpdatePlanAsync(WorkspaceId, RequireSelectedContextId()));
         var repoIdsWithUpdates = updatePlan.Select(p => p.RepoId).ToHashSet();
+
+        _reviewedDefaultBranchRepoIds = allLinks
+            .Where(wr => !wr.IsOnTag
+                && !string.IsNullOrWhiteSpace(wr.DefaultBranchName)
+                && string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal))
+            .Select(wr => wr.RepositoryId)
+            .ToHashSet();
 
         var reposOnDefault = allLinks
             .Where(wr => !wr.IsOnTag
@@ -206,6 +215,14 @@ public sealed partial class WorkspaceRepositories
             svc => svc.GetUpdatePlanAsync(WorkspaceId, RequireSelectedContextId()));
         var repoIdsWithUpdates = updatePlan.Select(p => p.RepoId).ToHashSet();
 
+        _reviewedDefaultBranchRepoIds = allLinks
+            .Where(wr => !wr.IsOnTag
+                && (wr.DependencyLevel ?? 0) <= level
+                && !string.IsNullOrWhiteSpace(wr.DefaultBranchName)
+                && string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal))
+            .Select(wr => wr.RepositoryId)
+            .ToHashSet();
+
         var reposOnDefault = allLinks
             .Where(wr => !wr.IsOnTag
                 && (wr.DependencyLevel ?? 0) <= level
@@ -268,6 +285,10 @@ public sealed partial class WorkspaceRepositories
         if (workspace == null || !HasRepositories || IsJobRunning)
             return Task.CompletedTask;
 
+        // Taken when the user was warned (or found nothing to warn about); used once so a stale set never carries over.
+        var reviewedDefaultBranchRepoIds = _reviewedDefaultBranchRepoIds;
+        _reviewedDefaultBranchRepoIds = null;
+
         var command = new StartUpdateAndPush(
             WorkspaceId,
             RequireSelectedContextId(),
@@ -275,7 +296,8 @@ public sealed partial class WorkspaceRepositories
             commitMessage,
             includeDepsInCommitMessage,
             restorePackages,
-            Origin: "RepositoriesPage");
+            Origin: "RepositoriesPage",
+            ReviewedDefaultBranchRepoIds: reviewedDefaultBranchRepoIds);
         JobService.StartJob(PageJobKey, title, (job, ct) => RunUpdateAndPushCommandAsync(job, ct, command));
         return Task.CompletedTask;
     }
@@ -314,14 +336,23 @@ public sealed partial class WorkspaceRepositories
 
             await ApplyUpdateAndPushExecutionResultAsync(result);
 
-            if (result.NeedsApproval)
+            var notice = UpdateAndPushResultPresenter.Present(result, errorsShownOnGrid: true);
+            SafeInvoke(() =>
             {
-                var approval = new ApproveNormalPushContinuation(result.WorkspaceId, result.ContextId, result.PendingApprovalId!);
-                SafeInvoke(() => ShowConfirm(
-                    result.Summary,
-                    () => StartApprovedContinuationAsync(approval),
-                    confirmButtonText: "Continue"));
-            }
+                switch (notice.Kind)
+                {
+                    case UpdateAndPushNoticeKind.Info:
+                        ToastService.Show(notice.Message);
+                        break;
+                    case UpdateAndPushNoticeKind.Error:
+                        ToastService.ShowError(notice.Message);
+                        break;
+                    case UpdateAndPushNoticeKind.Approval:
+                        var approval = notice.Approval!;
+                        ShowConfirm(notice.Message, () => StartApprovedContinuationAsync(approval), confirmButtonText: "Continue");
+                        break;
+                }
+            });
         }
         catch (OperationCanceledException)
         {
@@ -348,21 +379,17 @@ public sealed partial class WorkspaceRepositories
         _ = InvokeAsync(() => { if (!_disposed) { ApplySyncStateFromLoadedItems(); StateHasChanged(); } });
 
         if (result.Status == UpdateAndPushStatus.Rejected)
-        {
-            SafeInvoke(() => ToastService.ShowError(result.Summary));
             return;
-        }
 
         // The live callbacks reach the page only while it is alive and only as they happen; a push that waits
         // minutes for a package can fail long after the user looked away. The returned result is the complete
-        // account, so apply it and say that the push stopped.
+        // account, so apply it; the presenter's notice then says that the push stopped.
         if (result.Push is { Success: false } pushFailure)
         {
             SafeInvoke(() =>
             {
                 ApplyRepositoryErrors(pushFailure.RepoErrors);
                 ApplyLevelErrors(pushFailure.LevelErrors);
-                ToastService.Show(PushOperationResult.Describe(pushFailure));
             });
         }
 
@@ -371,8 +398,6 @@ public sealed partial class WorkspaceRepositories
             // Errors the push lane reported while the update was still running must survive this clean-up.
             var pushFailedRepoIds = result.Push?.RepoErrors?.Keys.ToHashSet() ?? new HashSet<int>();
             SafeInvoke(() => ClearRepositoryErrorsFor(update.SyncedRepoIds.Where(id => !pushFailedRepoIds.Contains(id)).ToHashSet()));
-            if (result.Status == UpdateAndPushStatus.NothingToPush)
-                SafeInvoke(() => ToastService.Show(result.Summary));
         }
     }
 

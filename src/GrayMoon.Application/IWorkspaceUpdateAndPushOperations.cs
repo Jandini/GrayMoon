@@ -29,10 +29,25 @@ public interface IWorkspaceUpdateAndPushOperations
         WorkspaceFeatureContextId contextId,
         int? maxLevel,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Like <see cref="GetDefaultBranchTargetsAsync"/>, and also returns every in-scope repository that sits on its default
+    /// branch (with or without updates). Pass that set as <see cref="StartUpdateAndPush.ReviewedDefaultBranchRepoIds"/>.
+    /// </summary>
+    Task<UpdateAndPushDefaultBranchReview> GetDefaultBranchReviewAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        int? maxLevel,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>A repository that an Update and Push would commit to on its default (protected) branch.</summary>
 public sealed record UpdateAndPushDefaultBranchTarget(int RepositoryId, string RepositoryName, string DefaultBranchName);
+
+/// <summary>What the user is warned about, and the baseline the run later checks against.</summary>
+public sealed record UpdateAndPushDefaultBranchReview(
+    IReadOnlyList<UpdateAndPushDefaultBranchTarget> Targets,
+    IReadOnlySet<int> OnDefaultBranchRepoIds);
 
 /// <summary>Live callbacks for a run. All optional; the returned result is the complete account either way.</summary>
 public sealed record UpdateAndPushObserver(
@@ -49,7 +64,9 @@ public abstract record UpdateAndPushCommand(int WorkspaceId, WorkspaceFeatureCon
 /// <summary>
 /// Starts a combined run. <see cref="MaxLevel"/> null means every dependency level; a number means the levels at or
 /// below it. There is no repository subset: the update walks the levels live. Options are explicit; the caller chooses
-/// them (Repositories modal: restore off; popup: restore on).
+/// them (Repositories modal: restore off; popup: restore on). <see cref="ReviewedDefaultBranchRepoIds"/> is the set the
+/// user was shown when warned about default branches; when given, the run is refused if another in-scope repository has
+/// moved onto its default branch since (one cheap read of the stored branch state, no Worker call). Null skips the check.
 /// </summary>
 public sealed record StartUpdateAndPush(
     int WorkspaceId,
@@ -58,7 +75,8 @@ public sealed record StartUpdateAndPush(
     string? CommitMessage,
     bool IncludeDepsInCommitMessage,
     bool RestorePackages,
-    string? Origin = null) : UpdateAndPushCommand(WorkspaceId, ContextId);
+    string? Origin = null,
+    IReadOnlySet<int>? ReviewedDefaultBranchRepoIds = null) : UpdateAndPushCommand(WorkspaceId, ContextId);
 
 /// <summary>
 /// Continues a run that returned <see cref="UpdateAndPushStatus.ApprovalRequired"/> after the user explicitly agreed to a

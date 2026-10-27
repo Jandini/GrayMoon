@@ -668,14 +668,14 @@
         if (IsWorkspaceJobRunning(workspaceId)) return;
 
         StartUpdateAndPush command;
-        IReadOnlyList<UpdateAndPushDefaultBranchTarget> defaultBranchTargets;
+        UpdateAndPushDefaultBranchReview defaultBranchReview;
         string title;
         try
         {
             await using var scope = ServiceScopeFactory.CreateAsyncScope();
             var contextId = await ResolveOperationContextAsync(scope.ServiceProvider, workspaceId, CancellationToken.None);
-            defaultBranchTargets = await scope.ServiceProvider.GetRequiredService<IWorkspaceUpdateAndPushOperations>()
-                .GetDefaultBranchTargetsAsync(workspaceId, contextId, maxLevel, CancellationToken.None);
+            defaultBranchReview = await scope.ServiceProvider.GetRequiredService<IWorkspaceUpdateAndPushOperations>()
+                .GetDefaultBranchReviewAsync(workspaceId, contextId, maxLevel, CancellationToken.None);
             var capabilities = await scope.ServiceProvider.GetRequiredService<IWorkspaceCapabilitiesResolver>().GetAsync(workspaceId);
             title = maxLevel is { } level ? $"Updating Level {level}..." : UpdateJobTitle(capabilities);
             command = new StartUpdateAndPush(
@@ -685,7 +685,8 @@
                 CommitMessage: null,
                 IncludeDepsInCommitMessage: true,
                 RestorePackages: true,
-                Origin: "NotificationPopup");
+                Origin: "NotificationPopup",
+                ReviewedDefaultBranchRepoIds: defaultBranchReview.OnDefaultBranchRepoIds);
         }
         catch (Exception ex)
         {
@@ -694,12 +695,12 @@
             return;
         }
 
-        if (defaultBranchTargets.Count > 0)
+        if (defaultBranchReview.Targets.Count > 0)
         {
             var scopeText = maxLevel is { } l ? $" (up to Level {l})" : "";
             ShowDefaultBranchWarning(
                 $"Update on workspace '{n.WorkspaceName}'{scopeText} will commit dependency changes directly to the default (protected) branch.",
-                defaultBranchTargets.Select(t => new DefaultBranchWarningItem(t.RepositoryName, t.DefaultBranchName)).ToList(),
+                defaultBranchReview.Targets.Select(t => new DefaultBranchWarningItem(t.RepositoryName, t.DefaultBranchName)).ToList(),
                 () => { StartUpdateAndPushJob(command, title); return Task.CompletedTask; });
             return;
         }
@@ -733,20 +734,18 @@
     /// <summary>The persistent outcome (shown on Repositories) is recorded by the operation; this only tells the user.</summary>
     private void PresentUpdateAndPushResult(UpdateAndPushExecutionResult result)
     {
-        switch (result.Status)
+        var notice = UpdateAndPushResultPresenter.Present(result, errorsShownOnGrid: false);
+        switch (notice.Kind)
         {
-            case UpdateAndPushStatus.Completed:
+            case UpdateAndPushNoticeKind.Info:
+                ToastService.Show(notice.Message);
                 break;
-            case UpdateAndPushStatus.NothingToPush:
-                ToastService.Show(result.Summary);
+            case UpdateAndPushNoticeKind.Error:
+                ToastService.ShowError(notice.Message);
                 break;
-            case UpdateAndPushStatus.ApprovalRequired:
-                var approval = new ApproveNormalPushContinuation(result.WorkspaceId, result.ContextId, result.PendingApprovalId!);
-                _normalPushConfirm = new NormalPushConfirmState(true, result.Summary, approval);
+            case UpdateAndPushNoticeKind.Approval:
+                _normalPushConfirm = new NormalPushConfirmState(true, notice.Message, notice.Approval);
                 StateHasChanged();
-                break;
-            default:
-                ToastService.ShowError(result.Summary);
                 break;
         }
     }

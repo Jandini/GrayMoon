@@ -314,6 +314,78 @@ public sealed class WorkspaceUpdateAndPushOperationsTests
         Assert.DoesNotContain(level1, t => t.RepositoryId == 2);
     }
 
+    [Fact]
+    public async Task Run_is_refused_when_a_repository_moved_onto_its_default_branch_after_the_warning()
+    {
+        var h = new Harness();
+        h.Links = [Link(1, "a", 1, "main", "main"), Link(2, "b", 1, "main", "main")];
+
+        var result = await h.Run(Start() with { ReviewedDefaultBranchRepoIds = Ids(1) });
+
+        Assert.Equal(UpdateAndPushStatus.Rejected, result.Status);
+        Assert.Contains("b", result.Summary);
+        Assert.DoesNotContain("a,", result.Summary);
+        Assert.Empty(h.Update.PipelineCalls);
+        Assert.Empty(h.Update.UpdateCalls);
+        Assert.Empty(h.Push.PushCalls);
+    }
+
+    [Fact]
+    public async Task Run_proceeds_when_the_default_branch_repositories_are_the_reviewed_ones_or_out_of_scope()
+    {
+        var h = new Harness();
+        h.Update.Pipeline = new UpdateAndPushResult(true, DependencyUpdateRunResult.Ok(Ids(1)), OperationResult.Ok(), PushedRepoCount: 1);
+        h.Links =
+        [
+            Link(1, "a", 1, "main", "main"),
+            Link(2, "b", 2, "main", "main"),
+            Link(3, "c", 1, "main", "main", tag: "v1.0.0"),
+        ];
+
+        var result = await h.Run(Start(maxLevel: 1) with { ReviewedDefaultBranchRepoIds = Ids(1) });
+
+        Assert.Equal(UpdateAndPushStatus.Completed, result.Status);
+    }
+
+    [Fact]
+    public async Task Run_without_a_reviewed_set_does_not_read_the_branch_state()
+    {
+        var h = new Harness();
+        h.Update.Pipeline = new UpdateAndPushResult(true, DependencyUpdateRunResult.Ok(Ids(1)), OperationResult.Ok(), PushedRepoCount: 1);
+        h.Links = [Link(1, "a", 1, "main", "main")];
+
+        var result = await h.Run(Start());
+
+        Assert.Equal(UpdateAndPushStatus.Completed, result.Status);
+        Assert.Equal(0, h.LinkReads);
+    }
+
+    [Fact]
+    public async Task Review_without_default_branch_repositories_skips_the_update_plan()
+    {
+        var h = new Harness();
+        h.Links = [Link(1, "a", 1, "feature/x", "main")];
+
+        var review = await h.Operations.GetDefaultBranchReviewAsync(WorkspaceId, Context, null, CancellationToken.None);
+
+        Assert.Empty(review.Targets);
+        Assert.Empty(review.OnDefaultBranchRepoIds);
+        Assert.Equal(0, h.Update.PlanReads);
+    }
+
+    [Fact]
+    public async Task Review_lists_warned_repositories_and_the_whole_default_branch_baseline()
+    {
+        var h = new Harness();
+        h.Update.UpdatePlan = [new SyncDependenciesRepoPayload(1, "a", 1, [])];
+        h.Links = [Link(1, "a", 1, "main", "main"), Link(2, "b", 1, "main", "main")];
+
+        var review = await h.Operations.GetDefaultBranchReviewAsync(WorkspaceId, Context, null, CancellationToken.None);
+
+        Assert.Equal([1], review.Targets.Select(t => t.RepositoryId));
+        Assert.Equal(Ids(1, 2), review.OnDefaultBranchRepoIds);
+    }
+
     private static HashSet<int> Ids(params int[] ids) => ids.ToHashSet();
 
     private static WorkspaceRepositoryLinkListItemDto Link(int repoId, string name, int level, string branch, string defaultBranch, string? tag = null)
@@ -336,6 +408,7 @@ public sealed class WorkspaceUpdateAndPushOperationsTests
         public string? LifecycleState { get; init; }
         public bool IsSpecialWorkspace { get; init; } = true;
         public IReadOnlyList<WorkspaceRepositoryLinkListItemDto> Links { get; set; } = [];
+        public int LinkReads { get; private set; }
         public IWorkspaceUpdateAndPushOperations Operations { get; }
 
         public Harness()
@@ -346,7 +419,7 @@ public sealed class WorkspaceUpdateAndPushOperationsTests
                 Update,
                 Push,
                 new FakeContextResolver(this),
-                LinkProxy.Create(() => Links),
+                LinkProxy.Create(() => { LinkReads++; return Links; }),
                 Outcomes,
                 new UpdateAndPushApprovalStore(),
                 NullLogger<WorkspaceUpdateAndPushOperations>.Instance);
@@ -390,10 +463,17 @@ public sealed class WorkspaceUpdateAndPushOperationsTests
         public IReadOnlyList<SyncDependenciesRepoPayload> UpdatePlan { get; set; } = [];
         public List<PipelineCall> PipelineCalls { get; } = [];
         public List<UpdateCall> UpdateCalls { get; } = [];
+        public int PlanReads { get; private set; }
+
+        private (IReadOnlyList<SyncDependenciesRepoPayload>, bool) CountPlanRead()
+        {
+            PlanReads++;
+            return (UpdatePlan, true);
+        }
 
         public Task<(IReadOnlyList<SyncDependenciesRepoPayload> Payload, bool IsMultiLevel)> GetUpdatePlanAsync(
             int workspaceId, WorkspaceFeatureContextId contextId, IReadOnlySet<int>? repositoryIds = null, CancellationToken cancellationToken = default)
-            => Task.FromResult((UpdatePlan, true));
+            => Task.FromResult(CountPlanRead());
 
         public Task<DependencyUpdateRunResult> UpdateAsync(
             int workspaceId, WorkspaceFeatureContextId contextId, CancellationToken cancellationToken, IProgress<OperationProgress>? progress,
