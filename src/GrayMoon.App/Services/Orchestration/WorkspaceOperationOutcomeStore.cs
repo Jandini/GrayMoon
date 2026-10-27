@@ -36,10 +36,19 @@ public sealed class WorkspaceOperationOutcomeStore
 {
     private readonly ConcurrentDictionary<(int WorkspaceId, int ContextId), Entry> _entries = new();
 
-    /// <summary>Starts a run: forgets the previous outcome of this context and returns the recorder for the new one.</summary>
-    public Recorder Begin(int workspaceId, WorkspaceFeatureContextId contextId, string operation)
+    /// <summary>
+    /// Starts a run: forgets the previous outcome of this context and returns the recorder for the new one. A call that
+    /// carries the <paramref name="runId"/> of the run already recorded for this context joins that run instead, so the
+    /// nested Update and Push of one combined operation add to one outcome and never replace each other.
+    /// </summary>
+    public Recorder Begin(int workspaceId, WorkspaceFeatureContextId contextId, string operation, string? runId = null)
     {
-        var entry = new Entry(operation, DateTime.UtcNow);
+        if (!string.IsNullOrEmpty(runId)
+            && _entries.TryGetValue((workspaceId, contextId.Value), out var current)
+            && string.Equals(current.RunId, runId, StringComparison.Ordinal))
+            return new Recorder(current);
+
+        var entry = new Entry(operation, DateTime.UtcNow, runId);
         _entries[(workspaceId, contextId.Value)] = entry;
         return new Recorder(entry);
     }
@@ -84,9 +93,11 @@ public sealed class WorkspaceOperationOutcomeStore
         }
     }
 
-    internal sealed class Entry(string operation, DateTime startedUtc)
+    internal sealed class Entry(string operation, DateTime startedUtc, string? runId = null)
     {
         private readonly object _gate = new();
+
+        public string? RunId { get; } = runId;
 
         public Dictionary<int, string> RepositoryErrors { get; } = new();
         public Dictionary<int, string> LevelErrors { get; } = new();

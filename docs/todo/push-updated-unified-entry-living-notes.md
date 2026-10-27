@@ -3,7 +3,7 @@
 Spec: workspace `docs/todo/GrayMoon_Push_Updated_Implementation_Plan_2026-10-27_v2.md` and the bootstrap prompt next to it.
 Branch: `push-updated-notification` (GrayMoon worktree). Baseline SHA: `eb320738a999486bfec9aeaab4d31a87c6f4f93e` (equals the reviewed SHA, so no drift; working tree clean at start).
 
-Status: code review done. No production code changed yet. Waiting for a go-ahead for P0.
+Status: code review and P0 done. No production code changed. P1-P4 done (see Result section).
 
 ## Verified call graph (before)
 
@@ -56,11 +56,25 @@ Note: the "UI-owned Update then Push chain" exists in THREE page-side places, no
 
 - [x] Baseline SHA recorded; working tree clean (only untracked `docs/` at workspace root).
 - [x] Call sites inventoried; F01-F13 rechecked.
-- [ ] Baseline `GrayMoon.App.Tests` result recorded (running).
-- [ ] P0 characterization tests (F02 returned failure, F03 evolving levels, NotPipelined no side effects, outcome overwrite, Feature context).
+- [x] Baseline `GrayMoon.App.Tests`: 1696 passed, 0 failed, 0 skipped. Common and Worker projects not run (untouched so far).
+- [x] P0 done (partial by design, see P0 result).
 - [ ] P1 contract and DI.
 - [ ] P2 coordinator.
 - [ ] P3 popup migration.
 - [ ] P4 Repositories migration.
 - [ ] P5 Prepare and REST audit, architecture guard.
 - [ ] P6 diagnostics, docs (`docs/architecture`), Desktop README bullet, full test run.
+
+## P0 result
+
+- Added `UpdateAndPushEntryPointArchitectureTests` (T27 ratchet): UI files that chain update and push must equal `KnownViolations` (popup, Update.cs, PrepareWorkspace.cs). Green now; each phase removes its file; end state is an empty list.
+- Added `Begin_for_a_following_push_replaces_an_earlier_update_failure` (F07/T25 current behavior).
+- Already covered: `NotPipelined` has no side effects (`WorkspacePushStrategyTests.Update_and_push_falls_back_without_touching_anything...`), failed update does not chain push (`DependencyUpdateRunResultTests`).
+- Deferred to P2 (need the coordinator seams; the popup is a Razor component and cannot be unit tested): T03 evolving 3-level dependency, T04 returned `Success=false` gives zero push, T09/T10 approval, T13 Feature context pinning. No red tests were added.
+- Focused run: 6 passed, 0 failed.
+
+## P1-P4 result
+
+- Contract `IWorkspaceUpdateAndPushOperations` and coordinator `WorkspaceUpdateAndPushOperations` added; popup and Repositories page migrated; page-local pipelined/sequential chain and `RestoreSyncedPackagesCoreAsync` removed.
+- Architecture test `KnownViolations` now holds only `WorkspaceRepositories.PrepareWorkspace.cs` (P5, Q2 open).
+- Open: execution-time re-check of default-branch targets, engine-level T03 test, popup/page manual smoke tests.

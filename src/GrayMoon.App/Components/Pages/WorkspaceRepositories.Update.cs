@@ -254,257 +254,59 @@ public sealed partial class WorkspaceRepositories
     }
 
     private Task RunLevelOnlyUpdateAndPushCoreAsync(int level, string? commitMessage = null, bool includeDepsInCommitMessage = true, bool restorePackages = false)
-    {
-        if (workspace == null || !HasRepositories || IsJobRunning)
-            return Task.CompletedTask;
-
-        JobService.StartJob(PageJobKey, $"Updating Level {level}...", async (job, ct) =>
-        {
-            var runId = GrayMoon.Abstractions.Logging.GrayMoonOperationContext.EnsureId();
-            Logger.LogInformation("[PushUpdated {RunId}] Level-Only Update & Push starting for workspace {WorkspaceId}, up to level {Level}", runId, WorkspaceId, level);
-
-            if (await TryRunPipelinedUpdateAndPushAsync(job, ct, runId, commitMessage, includeDepsInCommitMessage, level, restorePackages, $"Up to Level {level} updated. Nothing to push."))
-                return;
-
-            // Phase 1: update repos needing work up to the target level.
-            // Do not pre-filter by a snapshot of repos already flagged as out of date: a level-1/2
-            // commit made during this run can only mark higher levels (up to and including the
-            // target level) out of date once refreshed, which happens after this snapshot is taken.
-            // The orchestrator already scopes/skips per level live (via maxLevel), so no repo-id
-            // scope is needed here.
-            IReadOnlySet<int> syncedRepoIds = new HashSet<int>();
-            try
-            {
-                var updateResult = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, DependencyUpdateRunResult>(
-                    svc => svc.UpdateAsync(
-                        WorkspaceId, RequireSelectedContextId(),
-                        ct,
-                        job.ToOperationProgress(),
-                        (repoId, msg) => SafeInvoke(() => SetRepositoryError(repoId, msg)),
-                        (level, msg) => SafeInvoke(() => SetLevelError(level, msg)),
-                        commitMessage: commitMessage,
-                        includeDepsInCommitMessage: includeDepsInCommitMessage,
-                        repoIdsToUpdate: null,
-                        maxLevel: level,
-                        runId: runId));
-
-                await ReloadWorkspaceDataFromFreshScopeAsync();
-                _ = InvokeAsync(() => { if (!_disposed) { ApplySyncStateFromLoadedItems(); StateHasChanged(); } });
-
-                if (!updateResult.Success)
-                    return;
-
-                syncedRepoIds = updateResult.SyncedRepoIds;
-                SafeInvoke(() => ClearRepositoryErrorsFor(syncedRepoIds));
-            }
-            catch (OperationCanceledException)
-            {
-                await ReloadWorkspaceDataAfterCancelAsync();
-                throw;
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError(ex, "Level-Only Update & Push: update failed for workspace {WorkspaceId}", WorkspaceId);
-                SafeInvoke(() => SetLevelError(0, ex.Message));
-                throw;
-            }
-
-            // Phase 2: determine push plan for repos that need pushing up to the target level
-            job.ReportProgress("Preparing push...");
-            IReadOnlySet<int> pushRepoIds;
-            IReadOnlySet<string> requiredPackageIds;
-            try
-            {
-                var plan = await BuildPushPlanAsync($"Up to Level {level} updated. Nothing to push.", ct, maxLevel: level);
-                if (plan == null)
-                    return;
-
-                (pushRepoIds, requiredPackageIds) = plan.Value;
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError(ex, "Level-Only Update & Push: failed to get push plan for workspace {WorkspaceId}", WorkspaceId);
-                SafeInvoke(() => SetLevelError(0, ex.Message));
-                throw;
-            }
-
-            // Phase 3: execute push (per-level restore of synced repos handled inside push service)
-            try
-            {
-                await ExecutePushCoreAsync(job, ct, pushRepoIds, synchronizedPush: true, requiredPackageIds, syncedRepoIds, runId: runId, restorePackages: restorePackages);
-            }
-            catch (SynchronizedPushNotPossibleException ex)
-            {
-                SafeInvoke(() => ShowConfirm(
-                    $"Synchronized push could not be completed because {ex.MissingPackagesCount} required package mappings are missing. Check NuGet connector configuration and token, then retry. Continue with normal push?",
-                    () =>
-                    {
-                        JobService.StartJob(PageJobKey, "Preparing push...", async (j, c) =>
-                        {
-                            await ExecutePushCoreAsync(j, c, pushRepoIds, synchronizedPush: false, requiredPackageIds, syncedRepoIds, runId: runId, restorePackages: restorePackages);
-                            if (restorePackages)
-                                await RestoreSyncedPackagesCoreAsync(syncedRepoIds, j, c);
-                        });
-                        return Task.CompletedTask;
-                    },
-                    confirmButtonText: "Continue"));
-                return;
-            }
-
-            Logger.LogInformation("[PushUpdated {RunId}] Level-Only Update & Push completed for workspace {WorkspaceId}", runId, WorkspaceId);
-        });
-
-        return Task.CompletedTask;
-    }
+        => StartUpdateAndPushJob($"Updating Level {level}...", level, commitMessage, includeDepsInCommitMessage, restorePackages);
 
     private Task RunUpdateAndPushCoreAsync(string? commitMessage = null, bool includeDepsInCommitMessage = true, bool restorePackages = false)
+        => StartUpdateAndPushJob(UpdateJobTitle, maxLevel: null, commitMessage, includeDepsInCommitMessage, restorePackages);
+
+    /// <summary>
+    /// Submits one explicit command to the shared combined Update and Push (<see cref="IWorkspaceUpdateAndPushOperations"/>);
+    /// the page owns only the confirmations, the job and the presentation. The Feature context is captured here, once.
+    /// </summary>
+    private Task StartUpdateAndPushJob(string title, int? maxLevel, string? commitMessage, bool includeDepsInCommitMessage, bool restorePackages)
     {
         if (workspace == null || !HasRepositories || IsJobRunning)
             return Task.CompletedTask;
 
-        JobService.StartJob(PageJobKey, UpdateJobTitle, async (job, ct) =>
-        {
-            var runId = GrayMoon.Abstractions.Logging.GrayMoonOperationContext.EnsureId();
-            Logger.LogInformation("[PushUpdated {RunId}] Update & Push starting for workspace {WorkspaceId}", runId, WorkspaceId);
-
-            if (await TryRunPipelinedUpdateAndPushAsync(job, ct, runId, commitMessage, includeDepsInCommitMessage, maxLevel: null, restorePackages, "Update complete. Nothing to push."))
-                return;
-
-            // Phase 1: update - fresh scope so DbContext does not compete with circuit page loads.
-            // Do not pre-filter by a snapshot of repos already flagged as out of date: a lower-level
-            // commit made during this run only marks higher levels out of date once refreshed, which
-            // happens after this snapshot would be taken. The orchestrator already scopes/skips per
-            // level live, so no repo-id scope is needed here (see plain "Update", which also passes null).
-            IReadOnlySet<int> syncedRepoIds = new HashSet<int>();
-            try
-            {
-                var updateResult = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, DependencyUpdateRunResult>(
-                    svc => svc.UpdateAsync(
-                        WorkspaceId, RequireSelectedContextId(),
-                        ct,
-                        job.ToOperationProgress(),
-                        (repoId, msg) => SafeInvoke(() => SetRepositoryError(repoId, msg)),
-                        (level, msg) => SafeInvoke(() => SetLevelError(level, msg)),
-                        repoIdsToUpdate: null,
-                        commitMessage: commitMessage,
-                        includeDepsInCommitMessage: includeDepsInCommitMessage,
-                        runId: runId));
-
-                await ReloadWorkspaceDataFromFreshScopeAsync();
-                _ = InvokeAsync(() => { if (!_disposed) { ApplySyncStateFromLoadedItems(); StateHasChanged(); } });
-
-                if (!updateResult.Success)
-                    return;
-
-                syncedRepoIds = updateResult.SyncedRepoIds;
-                SafeInvoke(() => ClearRepositoryErrorsFor(syncedRepoIds));
-            }
-            catch (OperationCanceledException)
-            {
-                await ReloadWorkspaceDataAfterCancelAsync();
-                throw;
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError(ex, "Update & Push: update failed for workspace {WorkspaceId}", WorkspaceId);
-                SafeInvoke(() => SetLevelError(0, ex.Message));
-                throw;
-            }
-
-            // Phase 2: determine push plan using fresh workspaceRepositories loaded above
-            job.ReportProgress("Preparing push...");
-            IReadOnlySet<int> pushRepoIds;
-            IReadOnlySet<string> requiredPackageIds;
-            try
-            {
-                var plan = await BuildPushPlanAsync("Update complete. Nothing to push.", ct);
-                if (plan == null) return;
-                (pushRepoIds, requiredPackageIds) = plan.Value;
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError(ex, "Update & Push: failed to get push plan for workspace {WorkspaceId}", WorkspaceId);
-                SafeInvoke(() => SetLevelError(0, ex.Message));
-                throw;
-            }
-
-            // Phase 3: execute push (per-level restore of synced repos handled inside push service)
-            try
-            {
-                await ExecutePushCoreAsync(job, ct, pushRepoIds, synchronizedPush: true, requiredPackageIds, syncedRepoIds, runId: runId, restorePackages: restorePackages);
-            }
-            catch (SynchronizedPushNotPossibleException ex)
-            {
-                SafeInvoke(() => ShowConfirm(
-                    $"Synchronized push could not be completed because {ex.MissingPackagesCount} required package mappings are missing. Check NuGet connector configuration and token, then retry. Continue with normal push?",
-                    () =>
-                    {
-                        JobService.StartJob(PageJobKey, "Preparing push...", async (j, c) =>
-                        {
-                            await ExecutePushCoreAsync(j, c, pushRepoIds, synchronizedPush: false, requiredPackageIds, syncedRepoIds, runId: runId, restorePackages: restorePackages);
-                            if (restorePackages)
-                                await RestoreSyncedPackagesCoreAsync(syncedRepoIds, j, c);
-                        });
-                        return Task.CompletedTask;
-                    },
-                    confirmButtonText: "Continue"));
-                return;
-            }
-
-            Logger.LogInformation("[PushUpdated {RunId}] Update & Push completed for workspace {WorkspaceId}", runId, WorkspaceId);
-        });
-
+        var command = new StartUpdateAndPush(
+            WorkspaceId,
+            RequireSelectedContextId(),
+            maxLevel,
+            commitMessage,
+            includeDepsInCommitMessage,
+            restorePackages,
+            Origin: "RepositoriesPage");
+        JobService.StartJob(PageJobKey, title, (job, ct) => RunUpdateAndPushCommandAsync(job, ct, command));
         return Task.CompletedTask;
     }
 
-    /// <summary>
-    /// Runs Update and Push as two lanes (see <see cref="IWorkspaceUpdateOperations.UpdateAndPushAsync"/>): each level is
-    /// pushed while the levels above it are still being updated, and the overlay shows one line per lane. Returns false,
-    /// having changed nothing, when the push lane cannot run (a required package has no registry and this run will not
-    /// publish it). The caller then runs the sequential update-then-push, which owns the "continue with normal push?" confirmation.
-    /// </summary>
-    private async Task<bool> TryRunPipelinedUpdateAndPushAsync(
-        BackgroundJobHandle job,
-        CancellationToken ct,
-        string runId,
-        string? commitMessage,
-        bool includeDepsInCommitMessage,
-        int? maxLevel,
-        bool restorePackages,
-        string nothingToPushMessage)
+    private async Task RunUpdateAndPushCommandAsync(BackgroundJobHandle job, CancellationToken ct, UpdateAndPushCommand command)
     {
-        var ran = false;
         try
         {
-            var result = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, UpdateAndPushResult>(
-                svc => svc.UpdateAndPushAsync(
-                    WorkspaceId, RequireSelectedContextId(),
-                    ct,
-                    job.ReportProgress,
-                    (repoId, msg) => SafeInvoke(() => SetRepositoryError(repoId, msg)),
-                    (errorLevel, msg) => SafeInvoke(() => SetLevelError(errorLevel, msg)),
-                    commitMessage: commitMessage,
-                    includeDepsInCommitMessage: includeDepsInCommitMessage,
-                    maxLevel: maxLevel,
-                    restorePackages: restorePackages,
-                    runId: runId));
-            if (!result.Pipelined)
-                return false;
+            var result = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateAndPushOperations, UpdateAndPushExecutionResult>(
+                svc => svc.ExecuteAsync(
+                    command,
+                    new UpdateAndPushObserver(
+                        job.ReportProgress,
+                        (repoId, msg) => SafeInvoke(() => SetRepositoryError(repoId, msg)),
+                        (errorLevel, msg) => SafeInvoke(() => SetLevelError(errorLevel, msg))),
+                    ct));
 
-            ran = true;
+            await ApplyUpdateAndPushExecutionResultAsync(result);
 
-            await ApplyPipelinedUpdateAndPushResultAsync(result, nothingToPushMessage);
-
-            Logger.LogInformation("[PushUpdated {RunId}] Pipelined Update & Push completed for workspace {WorkspaceId}. Success={Success}", runId, WorkspaceId, result.Success);
-            return true;
+            if (result.NeedsApproval)
+            {
+                var approval = new ApproveNormalPushContinuation(result.WorkspaceId, result.ContextId, result.PendingApprovalId!);
+                SafeInvoke(() => ShowConfirm(
+                    result.Summary,
+                    () =>
+                    {
+                        JobService.StartJob(PageJobKey, "Preparing push...", (j, c) => RunUpdateAndPushCommandAsync(j, c, approval));
+                        return Task.CompletedTask;
+                    },
+                    confirmButtonText: "Continue"));
+            }
         }
         catch (OperationCanceledException)
         {
@@ -514,14 +316,48 @@ public sealed partial class WorkspaceRepositories
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Pipelined Update & Push failed for workspace {WorkspaceId}", WorkspaceId);
+            Logger.LogError(ex, "Update & Push failed for workspace {WorkspaceId}", WorkspaceId);
             SafeInvoke(() => SetLevelError(0, ex.Message));
             throw;
         }
         finally
         {
-            if (ran)
-                await RefreshAfterPipelinedRunAsync();
+            await RefreshAfterPipelinedRunAsync();
+        }
+    }
+
+    /// <summary>Reloads the grid after a combined run, shows what the run reports and clears the errors of repositories it updated cleanly.</summary>
+    private async Task ApplyUpdateAndPushExecutionResultAsync(UpdateAndPushExecutionResult result)
+    {
+        await ReloadWorkspaceDataFromFreshScopeAsync();
+        _ = InvokeAsync(() => { if (!_disposed) { ApplySyncStateFromLoadedItems(); StateHasChanged(); } });
+
+        if (result.Status == UpdateAndPushStatus.Rejected)
+        {
+            SafeInvoke(() => ToastService.ShowError(result.Summary));
+            return;
+        }
+
+        // The live callbacks reach the page only while it is alive and only as they happen; a push that waits
+        // minutes for a package can fail long after the user looked away. The returned result is the complete
+        // account, so apply it and say that the push stopped.
+        if (result.Push is { Success: false } pushFailure)
+        {
+            SafeInvoke(() =>
+            {
+                ApplyRepositoryErrors(pushFailure.RepoErrors);
+                ApplyLevelErrors(pushFailure.LevelErrors);
+                ToastService.Show(PushOperationResult.Describe(pushFailure));
+            });
+        }
+
+        if (result.Update is { Success: true } update)
+        {
+            // Errors the push lane reported while the update was still running must survive this clean-up.
+            var pushFailedRepoIds = result.Push?.RepoErrors?.Keys.ToHashSet() ?? new HashSet<int>();
+            SafeInvoke(() => ClearRepositoryErrorsFor(update.SyncedRepoIds.Where(id => !pushFailedRepoIds.Contains(id)).ToHashSet()));
+            if (result.Status == UpdateAndPushStatus.NothingToPush)
+                SafeInvoke(() => ToastService.Show(result.Summary));
         }
     }
 

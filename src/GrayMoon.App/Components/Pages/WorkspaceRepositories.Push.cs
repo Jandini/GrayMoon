@@ -405,41 +405,6 @@ public sealed partial class WorkspaceRepositories
         return Task.CompletedTask;
     }
 
-    private async Task RestoreSyncedPackagesCoreAsync(IReadOnlySet<int> syncedRepoIds, BackgroundJobHandle job, CancellationToken ct)
-    {
-        if (syncedRepoIds.Count == 0) return;
-        job.ReportProgress("Restoring packages...");
-        try
-        {
-            var count = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, int>(
-                svc => svc.RestoreSyncedPackagesAsync(WorkspaceId, RequireSelectedContextId(), syncedRepoIds, job.ToOperationProgress(), ct));
-
-            SafeInvoke(() =>
-            {
-                ClearRepositoryErrorsFor(syncedRepoIds);
-                if (count > 0)
-                    ToastService.Show($"Restored packages in {count} {(count == 1 ? "project" : "projects")}");
-            });
-        }
-        catch (OperationCanceledException)
-        {
-            SafeInvoke(() => ToastService.Show("Restore cancelled."));
-            throw;
-        }
-        catch (WorkerNotConnectedException ex)
-        {
-            Logger.LogError(ex, "Restore packages failed (worker not connected) for workspace {WorkspaceId}", WorkspaceId);
-            SafeInvoke(() => ToastService.ShowError($"Restore failed. {ex.Message}"));
-            throw;
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Restore packages failed for workspace {WorkspaceId}", WorkspaceId);
-            SafeInvoke(() => ToastService.ShowError($"Restore failed: {ex.Message}"));
-            throw;
-        }
-    }
-
     private sealed record PushWithDependenciesModalState
     {
         public bool IsVisible { get; init; }

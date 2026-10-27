@@ -214,6 +214,7 @@ try
     builder.Services.AddScoped<IWorkspaceCatalogOperations, WorkspaceCatalogOperations>();
     builder.Services.AddScoped<IWorkspacePushOperations, WorkspacePushOperations>();
     builder.Services.AddScoped<IWorkspaceUpdateOperations, WorkspaceUpdateOperations>();
+    builder.Services.AddScoped<IWorkspaceUpdateAndPushOperations, WorkspaceUpdateAndPushOperations>();
     builder.Services.AddScoped<IWorkspacePreparationOperations, WorkspacePreparationOperations>();
     builder.Services.AddScoped<IWorkspaceSyncOperations, WorkspaceSyncOperations>();
     builder.Services.AddScoped<IWorkspacePullRequestOperations, WorkspacePullRequestOperations>();
@@ -237,6 +238,7 @@ try
     builder.Services.AddScoped<IWorkspaceTopBarService, WorkspaceTopBarService>();
     builder.Services.AddSingleton<DesktopWorkspaceContextTracker>();
     builder.Services.AddSingleton<WorkspaceOperationOutcomeStore>();
+    builder.Services.AddSingleton<UpdateAndPushApprovalStore>();
 
     builder.Services.AddScoped<IWorkspaceGitChangesReadService, WorkspaceGitChangesReadService>();
     builder.Services.AddScoped<IGitChangesWorkerClient, GitChangesWorkerClient>();

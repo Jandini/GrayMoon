@@ -30,7 +30,7 @@ public sealed class WorkspaceUpdateOperations(
         int? maxLevel = null,
         string? runId = null)
     {
-        var recorder = outcomes.Begin(workspaceId, contextId, "Update");
+        var recorder = outcomes.Begin(workspaceId, contextId, "Update", runId);
         return updateHandler.RunUpdateAsync(
             workspaceId,
             contextId,
@@ -58,7 +58,7 @@ public sealed class WorkspaceUpdateOperations(
         bool restorePackages = true,
         string? runId = null)
     {
-        var recorder = outcomes.Begin(workspaceId, contextId, "Update and Push");
+        var recorder = outcomes.Begin(workspaceId, contextId, "Update and Push", runId);
         return updateAndPushOrchestrator.RunAsync(
             workspaceId,
             contextId,

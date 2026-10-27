@@ -81,7 +81,7 @@ public sealed class WorkspacePushOperations(
             syncedRepoIds,
             restorePackages,
             runId);
-        var recorder = outcomes.Begin(workspaceId, contextId, "Push");
+        var recorder = outcomes.Begin(workspaceId, contextId, "Push", runId);
         var result = await pushHandler.RunPushWithDependenciesAsync(strategy, run, progress, cancellationToken: cancellationToken);
         if (!result.Success)
             recorder.Result(result);
