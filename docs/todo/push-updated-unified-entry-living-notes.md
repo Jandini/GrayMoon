@@ -1,0 +1,66 @@
+# Push Updated unification - living design notes and checklist
+
+Spec: workspace `docs/todo/GrayMoon_Push_Updated_Implementation_Plan_2026-10-27_v2.md` and the bootstrap prompt next to it.
+Branch: `push-updated-notification` (GrayMoon worktree). Baseline SHA: `eb320738a999486bfec9aeaab4d31a87c6f4f93e` (equals the reviewed SHA, so no drift; working tree clean at start).
+
+Status: code review done. No production code changed yet. Waiting for a go-ahead for P0.
+
+## Verified call graph (before)
+
+| Surface | Path | Engine |
+|---|---|---|
+| Repositories full | `WorkspaceRepositories.Update.cs` `RunUpdateAndPushCoreAsync` (l.364) | `IWorkspaceUpdateOperations.UpdateAndPushAsync` -> `UpdateAndPushOrchestrator` (two lanes); if `Pipelined=false`, page-local `UpdateAsync(repoIdsToUpdate:null)` -> `if (!Success) return` -> `BuildPushPlanAsync` -> `ExecutePushCoreAsync(synchronized:true)`; `SynchronizedPushNotPossibleException` -> `ShowConfirm` -> normal push |
+| Repositories Level Only | same file `RunLevelOnlyUpdateAndPushCoreAsync` (l.256) | same, `maxLevel: level` |
+| Popup full | `WorkspaceActionNotificationPanel.razor` `StartUpdateAndPushJobAsync` (l.669) | `UpdateAsync(repoIdsToUpdate: prefiltered)` result DISCARDED -> `ExecutePushAsync` (own sync/parallel decision) |
+| Popup Level Only | same file `StartLevelOnlyUpdateAndPushJobAsync` (l.755) | same with `maxLevel` and level-filtered prefilter |
+| Prepare Workspace | `PrepareWorkspaceOrchestrator` (l.64-98) -> `PrepareWorkspacePhases.UpdateAndPushAsync` (restore=true, includeDeps=true) | two lanes; on `Pipelined=false` runs `UpdateDependenciesAsync`, returns `PushPending`; page (`WorkspaceRepositories.PrepareWorkspace.cs` l.114-144) then does `BuildPushPlanAsync` + `ExecutePushCoreAsync(synchronized:true)`; on `SynchronizedPushNotPossibleException` it only shows an error (no normal-push approval) |
+| REST | `WorkspaceOperationsEndpoints.cs` `/update` (l.95), `/push` (l.123-132), `/prepare-workspace` (l.152, then `PushPendingAsync` l.190 when `PushPending`) | `/update` and `/push` are standalone; `/prepare-workspace` composes via `PrepareAsync` |
+| Raw engine callers | `WorkspaceUpdateOperations.UpdateAndPushAsync`, `PrepareWorkspacePhases` | both resolve `UpdateAndPushOrchestrator` |
+
+Note: the "UI-owned Update then Push chain" exists in THREE page-side places, not two: popup (x2), Repositories partial (x2), Prepare Workspace partial (post-pipeline push). The architecture guard (T27) must scan `Components/**` for all of them, including `.cs` partials.
+
+## Findings re-check against current code
+
+| ID | Still applies | Evidence |
+|---|---|---|
+| F01 two implementations | yes | popup never calls `UpdateAndPushAsync` (grep of call sites) |
+| F02 ignores `Success=false` | yes (popup only) | popup l.693 and l.777 discard `DependencyUpdateRunResult`; page checks it at Update.cs l.294 and l.400 |
+| F03 frozen prefilter | yes | popup l.680-688, l.764-772; page passes `repoIdsToUpdate: null` with explanatory comment |
+| F04 link vs context data | yes | prefilter reads `WorkspaceRepository.GetByIdAsync(...).Repositories` counters, not context snapshots |
+| F05 push-mode divergence | yes | popup `ExecutePushAsync` l.919-936 `ShouldShowSynchronizedPushModal`; page always `synchronized:true` first |
+| F06 error propagation | yes | popup passes `(_, _) => { }` callbacks, `ShowRepoErrors` only |
+| F07 outcome overwritten | yes for popup; also page sequential fallback in principle | `WorkspaceUpdateOperations.UpdateAsync` does `Begin("Update")`, `WorkspacePushOperations.PushAsync` does `Begin("Push")`, `Begin` replaces the entry. `UpdateAndPushAsync` facade uses `Begin("Update and Push")` once, which is fine for the pipelined case |
+| F08 context per phase | yes | `ResolveOperationContextAsync` called separately in update and push phases (l.692/776, ExecutePushAsync l.910) |
+| F09 job key | yes | popup `WorkspaceJobKey` = `/workspaces/{id}` (l.311); page uses `PageJobKey` (context-aware). Lock semantics not re-verified yet - verify in P3 before touching keys |
+| F10 restore/commit options | yes | popup `commitMessage:null`, `includeDeps:true`, restore omitted -> `PushAsync` default true; Repositories modal default off; Prepare true |
+| F11 default-branch warning | yes | popup builds from `n.Repos` filtered `UnmatchedDeps > 0`; list capped by `WorkspacePendingActionsService.MaxListedActionRepos = 100` (l.30) |
+| F12 dismissal | yes | `PendingActionsService.Dismiss` called before `StartJob` |
+| F13 Update Only prefilter | yes | `StartUpdateJobAsync` l.614-636 same prefilter. Out of scope unless tests show it; record as follow-up |
+
+## Design decisions (proposed)
+
+1. `IWorkspaceUpdateAndPushOperations.ExecuteAsync(UpdateAndPushCommand, ...)` in `GrayMoon.Application`, implementation in `GrayMoon.App/Services/Application/` as a sealed scoped class. Command variants: `StartUpdateAndPush` and `ApproveNormalPushContinuation` (same entry).
+2. The coordinator composes existing pieces only: `UpdateAndPushOrchestrator.RunAsync` first; on `Pipelined=false` the existing `IWorkspaceUpdateOperations.UpdateAsync(null set)` -> fresh `IWorkspacePushOperations.GetPlanAsync` -> `PushAsync(synchronized:true)`. No change to orchestrator, lanes, Worker, package wait.
+3. Outcome: coordinator calls `outcomes.Begin(..., "Update and Push")` once and passes a recorder-aware path so nested Update/Push facades do not call `Begin` again. Narrowest option: add optional `WorkspaceOperationOutcomeStore.Recorder? recorder` parameter (default null = current behavior) to the two facade methods, or call the underlying handlers directly from the coordinator. To decide in P2 after reading `WorkspaceUpdateHandler` / `WorkspacePushHandler` signatures.
+4. Pending normal-push approval: in-memory, singleton store keyed by `(WorkspaceId, ContextId)` holding RunId, PendingApprovalId, repo ids, required package ids, options, synced repo ids, created time. Consumed once, expires, revalidated against a fresh plan at continuation. Needs a singleton because `ExecuteAsync` is scoped per call.
+5. Options are explicit in the command; UI keeps its own defaults (Repositories: restore off; popup: restore on, includeDeps on, no message; Prepare: restore on).
+6. Job runner: keep `BackgroundJobService.StartJob`; the job body only calls `ExecuteAsync` with a command built before the job starts (context captured once).
+
+## Open questions to settle before P1
+
+- Where the popup gets the selected context from today (`ResolveOperationContextAsync` is defined outside the files read; locate it and confirm NeedsRepair/deleted behavior).
+- Whether the default-branch preflight should be a new read-only `PreviewAsync` on the new interface or reuse `GetUpdatePlanAsync` (page already uses `GetUpdatePlanAsync` for Level Only, l.205).
+- Prepare Workspace: scope of P5 migration (PushPending path has no normal-push approval today; moving it onto the coordinator would ADD that approval - needs a product decision).
+
+## Checklist
+
+- [x] Baseline SHA recorded; working tree clean (only untracked `docs/` at workspace root).
+- [x] Call sites inventoried; F01-F13 rechecked.
+- [ ] Baseline `GrayMoon.App.Tests` result recorded (running).
+- [ ] P0 characterization tests (F02 returned failure, F03 evolving levels, NotPipelined no side effects, outcome overwrite, Feature context).
+- [ ] P1 contract and DI.
+- [ ] P2 coordinator.
+- [ ] P3 popup migration.
+- [ ] P4 Repositories migration.
+- [ ] P5 Prepare and REST audit, architecture guard.
+- [ ] P6 diagnostics, docs (`docs/architecture`), Desktop README bullet, full test run.
