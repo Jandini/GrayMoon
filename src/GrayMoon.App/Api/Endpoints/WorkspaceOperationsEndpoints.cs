@@ -1,4 +1,5 @@
 using GrayMoon.App.Models;
+using GrayMoon.Application;
 using GrayMoon.App.Services.GitChanges;
 using GrayMoon.App.Services.Queries;
 using GrayMoon.Application.Features;
@@ -25,6 +26,8 @@ public static class WorkspaceOperationsEndpoints
         group.MapGet("/operations", GetRunningOperation);
         group.MapPost("/update", Update);
         group.MapPost("/push", Push);
+        group.MapPost("/update-and-push", UpdateAndPush);
+        group.MapPost("/update-and-push/approve", ApproveUpdateAndPush);
         group.MapPost("/prepare-workspace", PrepareWorkspace);
         group.MapPost("/sync", Sync);
         group.MapPost("/return-to-default", ReturnToDefault);
@@ -134,6 +137,77 @@ public static class WorkspaceOperationsEndpoints
             return result.Success ? Results.Ok(result) : Results.BadRequest(result);
         }, cancellationToken);
 
+    /// <summary>
+    /// Combined Update and Push through the one shared entry point (the same one the Repositories page and the popup
+    /// use). A normal push that needs the user's consent is not done silently: 409 with a pendingApprovalId, which
+    /// /update-and-push/approve continues. reviewedDefaultBranchRepoIds null skips the default-branch re-check.
+    /// </summary>
+    internal static Task<IResult> UpdateAndPush(
+        int workspaceId,
+        UpdateAndPushApiRequest? body,
+        IWorkspaceUpdateAndPushOperations operations,
+        IWorkspaceFeatureContextResolver contextResolver,
+        IWorkspaceOperationRunner runner,
+        CancellationToken cancellationToken)
+        => WorkspaceCommandHttp.RunExclusiveAsync(runner, workspaceId, "Updating dependencies...", async (progress, ct) =>
+        {
+            var contextId = await SpecialContextAsync(workspaceId, contextResolver, ct);
+            var result = await operations.ExecuteAsync(
+                new StartUpdateAndPush(
+                    workspaceId,
+                    contextId,
+                    body?.MaxLevel,
+                    body?.CommitMessage,
+                    body?.IncludeDepsInCommitMessage ?? true,
+                    body?.RestorePackages ?? true,
+                    Origin: "Rest",
+                    ReviewedDefaultBranchRepoIds: body?.ReviewedDefaultBranchRepoIds?.ToHashSet()),
+                new UpdateAndPushObserver(message => progress.Report(message)),
+                ct);
+            return MapCombined(result);
+        }, cancellationToken);
+
+    internal static Task<IResult> ApproveUpdateAndPush(
+        int workspaceId,
+        ApproveUpdateAndPushApiRequest? body,
+        IWorkspaceUpdateAndPushOperations operations,
+        IWorkspaceFeatureContextResolver contextResolver,
+        IWorkspaceOperationRunner runner,
+        CancellationToken cancellationToken)
+    {
+        if (body == null || string.IsNullOrWhiteSpace(body.PendingApprovalId))
+            return Task.FromResult(Results.BadRequest("pendingApprovalId is required."));
+
+        return WorkspaceCommandHttp.RunExclusiveAsync(runner, workspaceId, "Preparing push...", async (progress, ct) =>
+        {
+            var contextId = await SpecialContextAsync(workspaceId, contextResolver, ct);
+            var result = await operations.ExecuteAsync(
+                new ApproveNormalPushContinuation(workspaceId, contextId, body.PendingApprovalId),
+                new UpdateAndPushObserver(message => progress.Report(message)),
+                ct);
+            return MapCombined(result);
+        }, cancellationToken);
+    }
+
+    internal static IResult MapCombined(UpdateAndPushExecutionResult r)
+    {
+        var body = new
+        {
+            success = r.Success,
+            status = r.Status.ToString(),
+            message = r.Summary,
+            pushed = r.PushedRepoCount > 0,
+            pendingApprovalId = r.PendingApprovalId,
+            push = r.Push,
+        };
+        return r.Status switch
+        {
+            UpdateAndPushStatus.Completed or UpdateAndPushStatus.NothingToPush => Results.Ok(body),
+            UpdateAndPushStatus.ApprovalRequired or UpdateAndPushStatus.Rejected => Results.Json(body, statusCode: StatusCodes.Status409Conflict),
+            _ => Results.BadRequest(body),
+        };
+    }
+
     private static Task<IResult> PrepareWorkspace(
         int workspaceId,
         PrepareWorkspaceApiRequest? body,
@@ -173,12 +247,8 @@ public static class WorkspaceOperationsEndpoints
                 });
             }
 
-            if (prepared.Pipeline is { } pipeline)
-            {
-                return pipeline.Success
-                    ? Results.Ok(new { success = true, pushed = pipeline.PushedRepoCount > 0 })
-                    : Results.BadRequest(new { success = false, error = pipeline.Update.Success ? "Push failed." : "Update failed.", push = pipeline.Push });
-            }
+            if (prepared.Combined is { } combined)
+                return MapCombined(combined);
 
             if (!prepared.PushPending)
             {
@@ -504,4 +574,18 @@ public sealed class GitChangesPathsApiRequest
     public int RepositoryId { get; set; }
     public GitChangeOperationScope Scope { get; set; }
     public IReadOnlyList<string>? Paths { get; set; }
+}
+
+public sealed class UpdateAndPushApiRequest
+{
+    public int? MaxLevel { get; set; }
+    public string? CommitMessage { get; set; }
+    public bool IncludeDepsInCommitMessage { get; set; } = true;
+    public bool RestorePackages { get; set; } = true;
+    public IReadOnlyList<int>? ReviewedDefaultBranchRepoIds { get; set; }
+}
+
+public sealed class ApproveUpdateAndPushApiRequest
+{
+    public string? PendingApprovalId { get; set; }
 }

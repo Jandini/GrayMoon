@@ -22,7 +22,7 @@ public sealed class DependencyUpdateOrchestrator(
     IServiceScopeFactory scopeFactory,
     IWorkspaceCapabilitiesResolver capabilitiesResolver,
     IWorkerSyncNotificationBarrier syncNotificationBarrier,
-    ILogger<DependencyUpdateOrchestrator> logger)
+    ILogger<DependencyUpdateOrchestrator> logger) : IDependencyUpdateLane
 {
     private readonly int _maxConcurrent = Math.Max(1, workspaceOptions?.Value?.MaxParallelOperations ?? 8);
 

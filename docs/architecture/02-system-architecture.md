@@ -157,7 +157,7 @@ Most `IWorkspace*Operations` methods take an explicit `WorkspaceFeatureContextId
 
 Blazor pages and REST endpoints should use this boundary instead of reaching directly into orchestration internals where a suitable application operation exists.
 
-This layer is also the intended future seam for automation such as MCP.
+This layer is also the intended future seam for automation such as MCP. There is no MCP server or MCP documentation yet; notes for building one are in section 15 (REST API) and section 8A.
 
 ### GrayMoon.Abstractions
 
@@ -507,6 +507,59 @@ batch-end recomputation
 
 The Worker remains responsible for concrete local operations.
 
+### 8A. Update and Push entry point
+
+Update and Push (the combined run that updates dependency levels and pushes them) has exactly one application entry point: `IWorkspaceUpdateAndPushOperations` (`GrayMoon.Application`), implemented by the scoped `WorkspaceUpdateAndPushOperations` (`GrayMoon.App/Services/Application`). Every start goes through `ExecuteAsync(UpdateAndPushCommand, UpdateAndPushObserver, ct)`:
+
+```text
+Repositories page   Update and Push, Level N Only
+Notification popup  Push Updated, Level N Only
+Prepare Workspace   Update and Push option (through PrepareWorkspacePhases)
+REST                POST /api/workspaces/{id}/update-and-push and /update-and-push/approve
+```
+
+Update Only and Push Only stay standalone operations. No page, component or endpoint chains an update and a push itself; `UpdateAndPushEntryPointArchitectureTests` scans `Components/**` member by member and fails when one does (its `KnownViolations` list is empty and must stay empty).
+
+Commands (both carry the Workspace and the `WorkspaceFeatureContextId`, which the caller captures once when the user starts the action):
+
+```text
+StartUpdateAndPush            MaxLevel (null = every level), CommitMessage, IncludeDepsInCommitMessage, RestorePackages,
+                              Origin (RepositoriesPage / NotificationPopup / PrepareWorkspace / Rest),
+                              ReviewedDefaultBranchRepoIds (null skips the re-check)
+ApproveNormalPushContinuation PendingApprovalId from an earlier ApprovalRequired result
+```
+
+Options are explicit in the command; callers keep their own defaults (Repositories: restore off; popup and Prepare Workspace: restore on, dependency names in the commit message, no custom message).
+
+Result: `UpdateAndPushExecutionResult` with `RunId`, `Status`, `Summary`, the update and push results, `PushedRepoCount` and `PendingApprovalId`. Statuses:
+
+```text
+Completed          update and push finished
+NothingToPush      the update finished and nothing needed pushing
+UpdateFailed       the update reported failure; nothing is pushed
+PushFailed         the push stopped; repository and level errors are in the result
+ApprovalRequired   a synchronized push is not possible; waits for the user's "Continue with normal push?"
+Rejected           refused before changing anything (missing or wrong context, default-branch state changed since the
+                   user confirmed, unknown / used / expired / mismatched approval)
+```
+
+Policy, in this order:
+
+1. Validate the context and begin one outcome record for the run (`WorkspaceOperationOutcomeStore.Begin(..., runId)`).
+2. For a start command carrying `ReviewedDefaultBranchRepoIds`, read the stored repository snapshots once (no Worker call) and refuse with `Rejected` when an in-scope repository is on its default branch that the user was not shown.
+3. Run the two-lane engine (`UpdateAndPushOrchestrator`). `Pipelined = false` guarantees it changed nothing. In that case run the sequential update; when it fails stop with `UpdateFailed` (a failed update never reaches the push); otherwise plan and run a synchronized push.
+4. When the synchronized push is not possible (`SynchronizedPushNotPossibleException`) return `ApprovalRequired` and keep a pending approval in `UpdateAndPushApprovalStore`. A normal push is never started without it.
+5. `ApproveNormalPushContinuation` consumes the approval, re-plans, pushes only the repositories that are both still pending and were approved with `synchronizedPush: false`, and does not run the update again.
+
+Supporting parts:
+
+- `UpdateAndPushOrchestrator` is the two-lane engine and is unchanged by the entry point. It depends on `IDependencyUpdateLane` (implemented by `DependencyUpdateOrchestrator`) and `IPushLane` (implemented by `WorkspacePushService`), registered in `Program.cs` as forwarding registrations to the concrete classes, so tests can substitute fake lanes (`UpdateAndPushOrchestratorPipelineTests`).
+- `UpdateAndPushApprovalStore` (singleton, in memory) holds each pending approval for 30 minutes, single use, bound to its Workspace and context. An App restart drops it; the user starts again.
+- `UpdateAndPushResultPresenter` turns a result into one notice (none, info, error or approval request); the Repositories page (errors already on the grid) and the popup both use it so the wording and the approval prompt cannot drift apart.
+- `GetDefaultBranchTargetsAsync` / `GetDefaultBranchReviewAsync` read the whole Feature context (not the capped notification list) to build the default-branch warning and the set of repositories on their default branch at warning time.
+- The popup and the page start the job through `BackgroundJobService`; the job body only calls `ExecuteAsync`. Locks and approvals are described in `04-runtime-communication-and-concurrency.md` section 3B.
+
+
 ---
 
 ## 9. App-Worker bridge
@@ -740,6 +793,7 @@ Examples include:
 list/get Workspaces
 list repository snapshots
 update dependencies
+update and push (with the normal-push approval continuation)
 push
 Prepare Workspace
 sync
@@ -755,6 +809,8 @@ update file versions
 Every `WorkspaceOperationsEndpoints` handler resolves and acts on the special Workspace context (`GetOrCreateSpecialWorkspaceContextIdAsync`). No endpoint maps `IWorkspaceFeatureOperations`: Features cannot be created, listed, repaired or removed through REST.
 
 Request security (Origin/host checks in `RequestSecurityMiddleware`, Worker secret on Worker-only endpoints) is described in 05 section 33.
+
+`POST /update-and-push` returns 200 for Completed and NothingToPush, 409 for ApprovalRequired (with `pendingApprovalId`) and Rejected, and 400 for UpdateFailed and PushFailed; `/update-and-push/approve` takes that `pendingApprovalId`. A client must ask its human before approving a normal push. Omitting `reviewedDefaultBranchRepoIds` skips the default-branch re-check, and no endpoint returns the default-branch review yet. `/prepare-workspace` reports its combined step the same way. There is no MCP server yet; when one is built it should call these operations or endpoints, never orchestrators or the Worker.
 
 The REST layer should delegate to the same Application operations used by the UI.
 
@@ -787,3 +843,5 @@ When adding functionality:
 - The Worker capability cache is not invalidated on profile save; hook syncs in that window may use the previous profile.
 - `IGitVersionService` has not been split out of `GitService`; only `SyncRepositoryCommand` uses the in-process snapshot reader.
 - Neither App nor Desktop blocks a second Worker install request; the install script mutex is the only guard.
+- Update and Push re-checks default-branch state once, when the run starts. A repository that moves onto its default branch while the run is in progress is not detected (a per-level check would add a read per level).
+- A connector token that expires or is revoked between runs is not detected before a run starts: the health flag is set at start-up and by the Connectors page only, and remote failures are recognised by message text. The plan is `docs/todo/connector-token-failure-handling.md`.

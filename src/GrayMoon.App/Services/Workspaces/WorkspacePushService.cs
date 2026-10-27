@@ -43,7 +43,7 @@ public sealed partial class WorkspacePushService(
     ConnectorRepository? connectorRepository = null,
     ConnectorHealthService? connectorHealthService = null,
     IWorkspaceCiProviderResolver? ciProviderResolver = null,
-    OverlayCommandTerminalService? overlayCommandTerminalService = null)
+    OverlayCommandTerminalService? overlayCommandTerminalService = null) : IPushLane
 {
     private readonly IWorkerBridge _workerBridge = workerBridge ?? throw new ArgumentNullException(nameof(workerBridge));
     private readonly WorkspaceService _workspaceService = workspaceService ?? throw new ArgumentNullException(nameof(workspaceService));

@@ -258,6 +258,12 @@
     OnProceed="OnDefaultBranchWarningProceedAsync"
     OnCancel="CloseDefaultBranchWarningModal" />
 
+<ConfirmModal IsVisible="_normalPushConfirm.IsVisible"
+              Message="@_normalPushConfirm.Message"
+              ConfirmButtonText="Continue"
+              OnConfirm="OnNormalPushConfirmedAsync"
+              OnCancel="CloseNormalPushConfirm" />
+
 <UndoPushModal IsVisible="_undoPushModal.IsVisible"
                Repos="_undoPushModal.Repos"
                OnProceed="OnUndoPushProceedAsync"
@@ -646,173 +652,135 @@
     }
 
     private Task RunUpdateAndPushAsync(WorkspaceNotification notification)
-    {
-        var workspaceId = notification.WorkspaceId;
-        if (IsWorkspaceJobRunning(workspaceId)) return Task.CompletedTask;
-        var defaultBranchRepos = notification.Repos
-            .Where(r => r.UnmatchedDeps > 0
-                && !string.IsNullOrWhiteSpace(r.DefaultBranchName)
-                && string.Equals(r.BranchName, r.DefaultBranchName, StringComparison.Ordinal))
-            .Select(r => new DefaultBranchWarningItem(r.RepositoryName, r.DefaultBranchName!))
-            .ToList();
-        if (defaultBranchRepos.Count > 0)
-        {
-            ShowDefaultBranchWarning(
-                $"Update on workspace '{notification.WorkspaceName}' will commit dependency changes directly to the default (protected) branch.",
-                defaultBranchRepos,
-                () => StartUpdateAndPushJobAsync(notification));
-            return Task.CompletedTask;
-        }
-        return StartUpdateAndPushJobAsync(notification);
-    }
-
-    private async Task StartUpdateAndPushJobAsync(WorkspaceNotification notification)
-    {
-        var workspaceId = notification.WorkspaceId;
-        PendingActionsService.Dismiss(workspaceId);
-        await using var titleScope = ServiceScopeFactory.CreateAsyncScope();
-        var capabilities = await titleScope.ServiceProvider.GetRequiredService<IWorkspaceCapabilitiesResolver>().GetAsync(workspaceId);
-        JobService.StartJob(WorkspaceJobKey(workspaceId), UpdateJobTitle(capabilities), async (job, ct) =>
-        {
-            List<WorkspaceRepositoryLink> freshLinks;
-            try
-            {
-                await using var preloadScope = ServiceScopeFactory.CreateAsyncScope();
-                var preloadWorkspaceRepo = preloadScope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
-                var preloadWs = await preloadWorkspaceRepo.GetByIdAsync(workspaceId);
-                var preloadLinks = preloadWs?.Repositories.ToList() ?? new List<WorkspaceRepositoryLink>();
-                var reposNeedingWork = preloadLinks
-                    .Where(wr => !wr.IsOnTag)
-                    .Where(wr => (wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0)
-                    .Select(wr => wr.RepositoryId)
-                    .ToHashSet();
-
-                await using var updateScope = ServiceScopeFactory.CreateAsyncScope();
-                var updateOps = updateScope.ServiceProvider.GetRequiredService<IWorkspaceUpdateOperations>();
-                var contextId = await ResolveOperationContextAsync(updateScope.ServiceProvider, workspaceId, ct);
-                await updateOps.UpdateAsync(
-                    workspaceId,
-                    contextId,
-                    ct,
-                    job.ToOperationProgress(),
-                    (_, _) => { },
-                    (_, _) => { },
-                    repoIdsToUpdate: reposNeedingWork,
-                    commitMessage: null,
-                    includeDepsInCommitMessage: true);
-
-                await using var reloadScope = ServiceScopeFactory.CreateAsyncScope();
-                var workspaceRepo = reloadScope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
-                var ws = await workspaceRepo.GetByIdAsync(workspaceId);
-                freshLinks = ws?.Repositories.ToList() ?? new List<WorkspaceRepositoryLink>();
-            }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception ex)
-            {
-                Logger.LogError(ex, "Notification panel Update & Push (update phase) failed for workspace {WorkspaceId}", workspaceId);
-                if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError("Update failed. Start the Worker and try again."));
-                throw;
-            }
-
-            job.ReportProgress("Preparing push...");
-            try
-            {
-                await ExecutePushAsync(workspaceId, freshLinks, job, ct);
-            }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception ex)
-            {
-                Logger.LogError(ex, "Notification panel Update & Push (push phase) failed for workspace {WorkspaceId}", workspaceId);
-                if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError("Push failed after update."));
-                throw;
-            }
-        });
-    }
+        => PrepareUpdateAndPushAsync(notification, maxLevel: null);
 
     private Task RunLevelOnlyUpdateAndPushAsync(WorkspaceNotification n)
+        => n.LowestLevelNeedingWork is { } level ? PrepareUpdateAndPushAsync(n, level) : Task.CompletedTask;
+
+    /// <summary>
+    /// Push Updated and Level Only: captures the Feature context once, reads the default-branch warning from the full
+    /// context-aware plan (not the capped notification rows), then hands one explicit command to the shared combined
+    /// operation. The popup never chains the update and the push itself.
+    /// </summary>
+    private async Task PrepareUpdateAndPushAsync(WorkspaceNotification n, int? maxLevel)
     {
         var workspaceId = n.WorkspaceId;
-        if (IsWorkspaceJobRunning(workspaceId)) return Task.CompletedTask;
-        if (!n.LowestLevelNeedingWork.HasValue) return Task.CompletedTask;
-        var level = n.LowestLevelNeedingWork.Value;
-        var defaultBranchRepos = n.Repos
-            .Where(r => r.UnmatchedDeps > 0
-                && !string.IsNullOrWhiteSpace(r.DefaultBranchName)
-                && string.Equals(r.BranchName, r.DefaultBranchName, StringComparison.Ordinal))
-            .Select(r => new DefaultBranchWarningItem(r.RepositoryName, r.DefaultBranchName!))
-            .ToList();
-        if (defaultBranchRepos.Count > 0)
+        if (IsWorkspaceJobRunning(workspaceId)) return;
+
+        StartUpdateAndPush command;
+        UpdateAndPushDefaultBranchReview defaultBranchReview;
+        string title;
+        try
         {
-            ShowDefaultBranchWarning(
-                $"Update on workspace '{n.WorkspaceName}' (up to Level {level}) will commit dependency changes directly to the default (protected) branch.",
-                defaultBranchRepos,
-                () => StartLevelOnlyUpdateAndPushJobAsync(n, level));
-            return Task.CompletedTask;
+            await using var scope = ServiceScopeFactory.CreateAsyncScope();
+            var contextId = await ResolveOperationContextAsync(scope.ServiceProvider, workspaceId, CancellationToken.None);
+            defaultBranchReview = await scope.ServiceProvider.GetRequiredService<IWorkspaceUpdateAndPushOperations>()
+                .GetDefaultBranchReviewAsync(workspaceId, contextId, maxLevel, CancellationToken.None);
+            var capabilities = await scope.ServiceProvider.GetRequiredService<IWorkspaceCapabilitiesResolver>().GetAsync(workspaceId);
+            title = maxLevel is { } level ? $"Updating Level {level}..." : UpdateJobTitle(capabilities);
+            command = new StartUpdateAndPush(
+                workspaceId,
+                contextId,
+                maxLevel,
+                CommitMessage: null,
+                IncludeDepsInCommitMessage: true,
+                RestorePackages: true,
+                Origin: "NotificationPopup",
+                ReviewedDefaultBranchRepoIds: defaultBranchReview.OnDefaultBranchRepoIds);
         }
-        return StartLevelOnlyUpdateAndPushJobAsync(n, level);
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Notification panel Update & Push could not be prepared for workspace {WorkspaceId}", workspaceId);
+            if (!_disposed) ToastService.ShowError("Update and Push could not be started.");
+            return;
+        }
+
+        if (defaultBranchReview.Targets.Count > 0)
+        {
+            var scopeText = maxLevel is { } l ? $" (up to Level {l})" : "";
+            ShowDefaultBranchWarning(
+                $"Update on workspace '{n.WorkspaceName}'{scopeText} will commit dependency changes directly to the default (protected) branch.",
+                defaultBranchReview.Targets.Select(t => new DefaultBranchWarningItem(t.RepositoryName, t.DefaultBranchName)).ToList(),
+                () => { StartUpdateAndPushJob(command, title); return Task.CompletedTask; });
+            return;
+        }
+
+        StartUpdateAndPushJob(command, title);
     }
 
-    private Task StartLevelOnlyUpdateAndPushJobAsync(WorkspaceNotification notification, int level)
+    private void StartUpdateAndPushJob(UpdateAndPushCommand command, string title)
     {
-        var workspaceId = notification.WorkspaceId;
+        var workspaceId = command.WorkspaceId;
         PendingActionsService.Dismiss(workspaceId);
-        JobService.StartJob(WorkspaceJobKey(workspaceId), $"Updating Level {level}...", async (job, ct) =>
+        JobService.StartJob(WorkspaceJobKey(workspaceId), title, async (job, ct) =>
         {
-            List<WorkspaceRepositoryLink> freshLinks;
             try
             {
-                await using var preloadScope = ServiceScopeFactory.CreateAsyncScope();
-                var preloadWorkspaceRepo = preloadScope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
-                var preloadWs = await preloadWorkspaceRepo.GetByIdAsync(workspaceId);
-                var preloadLinks = preloadWs?.Repositories.ToList() ?? new List<WorkspaceRepositoryLink>();
-                var reposNeedingWork = preloadLinks
-                    .Where(wr => !wr.IsOnTag && (wr.DependencyLevel ?? 0) <= level)
-                    .Where(wr => (wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0)
-                    .Select(wr => wr.RepositoryId)
-                    .ToHashSet();
-
-                await using var updateScope = ServiceScopeFactory.CreateAsyncScope();
-                var updateOps = updateScope.ServiceProvider.GetRequiredService<IWorkspaceUpdateOperations>();
-                var contextId = await ResolveOperationContextAsync(updateScope.ServiceProvider, workspaceId, ct);
-                await updateOps.UpdateAsync(
-                    workspaceId,
-                    contextId,
-                    ct,
-                    job.ToOperationProgress(),
-                    (_, _) => { },
-                    (_, _) => { },
-                    repoIdsToUpdate: reposNeedingWork,
-                    commitMessage: null,
-                    includeDepsInCommitMessage: true,
-                    maxLevel: level);
-
-                await using var reloadScope = ServiceScopeFactory.CreateAsyncScope();
-                var workspaceRepo = reloadScope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
-                var ws = await workspaceRepo.GetByIdAsync(workspaceId);
-                freshLinks = ws?.Repositories.ToList() ?? new List<WorkspaceRepositoryLink>();
+                await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                var operations = scope.ServiceProvider.GetRequiredService<IWorkspaceUpdateAndPushOperations>();
+                var result = await operations.ExecuteAsync(command, new UpdateAndPushObserver(ReportProgress: job.ReportProgress), ct);
+                if (!_disposed) _ = InvokeAsync(() => PresentUpdateAndPushResult(result));
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
-                Logger.LogError(ex, "Notification panel Level-Only Update & Push (update phase) failed for workspace {WorkspaceId}", workspaceId);
-                if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError("Update failed. Start the Worker and try again."));
-                throw;
-            }
-
-            job.ReportProgress("Preparing push...");
-            try
-            {
-                await ExecutePushAsync(workspaceId, freshLinks, job, ct, maxLevel: level);
-            }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception ex)
-            {
-                Logger.LogError(ex, "Notification panel Level-Only Update & Push (push phase) failed for workspace {WorkspaceId}", workspaceId);
-                if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError("Push failed after update."));
+                Logger.LogError(ex, "Notification panel Update & Push failed for workspace {WorkspaceId}", workspaceId);
+                if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError("Update and Push failed. Start the Worker and try again."));
                 throw;
             }
         });
-        return Task.CompletedTask;
+    }
+
+    /// <summary>The persistent outcome (shown on Repositories) is recorded by the operation; this only tells the user.</summary>
+    private void PresentUpdateAndPushResult(UpdateAndPushExecutionResult result)
+    {
+        var notice = UpdateAndPushResultPresenter.Present(result, errorsShownOnGrid: false);
+        switch (notice.Kind)
+        {
+            case UpdateAndPushNoticeKind.Info:
+                ToastService.Show(notice.Message);
+                break;
+            case UpdateAndPushNoticeKind.Error:
+                ToastService.ShowError(notice.Message);
+                break;
+            case UpdateAndPushNoticeKind.Approval:
+                _normalPushConfirm = new NormalPushConfirmState(true, notice.Message, notice.Approval);
+                StateHasChanged();
+                break;
+        }
+    }
+
+    private sealed record NormalPushConfirmState(bool IsVisible, string Message, ApproveNormalPushContinuation? Approval)
+    {
+        public NormalPushConfirmState() : this(false, "", null) { }
+    }
+
+    private NormalPushConfirmState _normalPushConfirm = new();
+
+    private void CloseNormalPushConfirm()
+    {
+        _normalPushConfirm = new NormalPushConfirmState();
+        StateHasChanged();
+    }
+
+    private async Task OnNormalPushConfirmedAsync()
+    {
+        var approval = _normalPushConfirm.Approval;
+        CloseNormalPushConfirm();
+        if (approval == null) return;
+
+        // StartJob silently starts nothing while the run that raised this confirmation still holds the lock.
+        for (var i = 0; i < 100 && IsWorkspaceJobRunning(approval.WorkspaceId) && !_disposed; i++)
+            await Task.Delay(100);
+
+        if (_disposed) return;
+        if (IsWorkspaceJobRunning(approval.WorkspaceId))
+        {
+            ToastService.ShowError("Another operation is still running. Run Update and Push again when it has finished.");
+            return;
+        }
+
+        StartUpdateAndPushJob(approval, "Preparing push...");
     }
 
     private Task RunUpdateFilesAsync(int workspaceId)

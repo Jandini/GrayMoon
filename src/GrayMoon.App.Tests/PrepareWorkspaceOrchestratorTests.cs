@@ -42,7 +42,7 @@ public sealed class PrepareWorkspaceOrchestratorTests
         Assert.False(result.Success);
         Assert.False(result.PushPending);
         Assert.Null(result.Update);
-        Assert.Null(result.Pipeline);
+        Assert.Null(result.Combined);
         Assert.Equal([RepoC], result.BranchErrors.Keys);
         Assert.Equal(1, phases.BranchCalls);
         Assert.Equal(0, phases.UpdateCalls);
@@ -218,17 +218,17 @@ public sealed class PrepareWorkspaceOrchestratorTests
         Assert.Equal(updateCalls, phases.UpdateCalls);
         Assert.Equal(pipelineCalls, phases.PipelineCalls);
         Assert.Equal(pushPending, result.PushPending);
-        Assert.Equal(update && push, result.Pipeline != null);
+        Assert.Equal(update && push, result.Combined != null);
     }
 
     [Fact]
-    public async Task Pipelined_run_reports_both_lanes_and_hands_nothing_back()
+    public async Task Combined_run_reports_both_lanes_and_hands_nothing_back()
     {
         var pushErrors = new Dictionary<int, string> { [RepoB] = "rejected" };
         var phases = new FakePhases
         {
             Branches = Outcome(created: [RepoA, RepoB]),
-            Pipeline = new UpdateAndPushResult(true, DependencyUpdateRunResult.Ok(Set(RepoA)), OperationResult.Fail("push failed", pushErrors), PushedRepoCount: 1),
+            Pipeline = Combined(UpdateAndPushStatus.PushFailed, DependencyUpdateRunResult.Ok(Set(RepoA)), OperationResult.Fail("push failed", pushErrors)),
             OnPipeline = overlay => overlay("Pushing Level 1"),
         };
         var progress = new List<string>();
@@ -238,40 +238,39 @@ public sealed class PrepareWorkspaceOrchestratorTests
         Assert.True(result.BranchesCreated);
         Assert.False(result.Success);
         Assert.False(result.PushPending);
-        Assert.True(result.Pipeline!.Update.Success);
-        Assert.False(result.Pipeline.Push!.Success);
+        Assert.True(result.Combined!.Update!.Success);
+        Assert.False(result.Combined.Push!.Success);
         Assert.Equal(Set(RepoA), result.SyncedRepoIds);
         Assert.Equal(0, phases.UpdateCalls);
         Assert.Equal(["Creating branches...", "Pushing Level 1"], progress);
     }
 
     [Fact]
-    public async Task Not_pipelined_runs_the_update_once_and_hands_the_push_back()
+    public async Task A_combined_run_that_needs_approval_is_returned_for_the_caller_to_ask_and_nothing_is_pushed_here()
     {
         var phases = new FakePhases
         {
             Branches = Outcome(created: [RepoA]),
-            Pipeline = UpdateAndPushResult.NotPipelined,
-            Update = DependencyUpdateRunResult.Ok(Set(RepoA)),
+            Pipeline = Combined(UpdateAndPushStatus.ApprovalRequired, DependencyUpdateRunResult.Ok(Set(RepoA)), null, approvalId: "abc"),
         };
 
         var result = await RunAsync(phases, new RecordedErrors(), update: true, push: true, requested: null);
 
         Assert.Equal(1, phases.PipelineCalls);
-        Assert.Equal(1, phases.UpdateCalls);
-        Assert.Null(result.Pipeline);
-        Assert.True(result.PushPending);
+        Assert.Equal(0, phases.UpdateCalls);
+        Assert.True(result.Combined!.NeedsApproval);
+        Assert.False(result.PushPending);
+        Assert.False(result.Success);
         Assert.Equal(Set(RepoA), result.SyncedRepoIds);
     }
 
     [Fact]
-    public async Task Not_pipelined_with_a_failed_update_does_not_push()
+    public async Task A_failed_update_in_the_combined_run_is_not_a_success_and_hands_nothing_back()
     {
         var phases = new FakePhases
         {
             Branches = Outcome(created: [RepoA]),
-            Pipeline = UpdateAndPushResult.NotPipelined,
-            Update = DependencyUpdateRunResult.Failed(),
+            Pipeline = Combined(UpdateAndPushStatus.UpdateFailed, DependencyUpdateRunResult.Failed(), null),
         };
 
         var result = await RunAsync(phases, new RecordedErrors(), update: true, push: true, requested: null);
@@ -319,6 +318,10 @@ public sealed class PrepareWorkspaceOrchestratorTests
             cancellationToken);
     }
 
+    private static UpdateAndPushExecutionResult Combined(
+        UpdateAndPushStatus status, DependencyUpdateRunResult update, OperationResult? push, string? approvalId = null)
+        => new("run", 1, new WorkspaceFeatureContextId(1), status, "summary", Update: update, Push: push, PendingApprovalId: approvalId);
+
     private static HashSet<int> Set(params int[] ids) => [.. ids];
 
     private static Dictionary<int, string?> Checked(params (int RepoId, string? Branch)[] entries)
@@ -349,7 +352,7 @@ public sealed class PrepareWorkspaceOrchestratorTests
         public Exception? BranchException { get; init; }
         public Action? OnBranches { get; init; }
         public DependencyUpdateRunResult Update { get; init; } = DependencyUpdateRunResult.Ok();
-        public UpdateAndPushResult Pipeline { get; init; } = new(true, DependencyUpdateRunResult.Ok(), OperationResult.Ok());
+        public UpdateAndPushExecutionResult Pipeline { get; init; } = Combined(UpdateAndPushStatus.Completed, DependencyUpdateRunResult.Ok(), OperationResult.Ok());
         public Exception? PipelineException { get; init; }
         public Action<Action<string>>? OnPipeline { get; init; }
 
@@ -388,7 +391,7 @@ public sealed class PrepareWorkspaceOrchestratorTests
             return Task.FromResult(Update);
         }
 
-        public Task<UpdateAndPushResult> UpdateAndPushAsync(
+        public Task<UpdateAndPushExecutionResult> UpdateAndPushAsync(
             int workspaceId,
             WorkspaceFeatureContextId contextId,
             string? commitMessage,

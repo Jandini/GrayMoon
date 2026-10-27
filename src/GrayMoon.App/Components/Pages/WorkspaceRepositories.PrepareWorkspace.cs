@@ -48,7 +48,7 @@ public sealed partial class WorkspaceRepositories
             : (IReadOnlySet<int>?)null;
 
         // Branch creation (hooks suppressed, state persisted inline), then - only when every targeted repository is on
-        // the new branch - the update, the push, or both as the two-lane Update and Push. A branch failure stops the
+        // the new branch - the update, the push, or both as the shared combined Update and Push. A branch failure stops the
         // orchestrator before anything else runs and is reported through the error callbacks.
         StartPageJob("Creating branches...", async (job, ct) =>
         {
@@ -70,10 +70,11 @@ public sealed partial class WorkspaceRepositories
                         setLevelError: (level, msg) => SafeInvoke(() => SetLevelError(level, msg)),
                         cancellationToken: ct));
 
-                if (result.Pipeline is { } pipeline)
+                if (result.Combined is { } combined)
                 {
                     pipelined = true;
-                    await ApplyPipelinedUpdateAndPushResultAsync(pipeline, "Workspace prepared. Nothing to push.");
+                    await ApplyUpdateAndPushExecutionResultAsync(combined);
+                    PresentUpdateAndPushNotice(combined);
                     return;
                 }
 
@@ -111,38 +112,47 @@ public sealed partial class WorkspaceRepositories
                     await RefreshAfterPipelinedRunAsync();
             }
 
-            // Phase 3: determine push plan and execute push (per-level restore handled inside push service)
-            job.ReportProgress("Preparing push...");
-            IReadOnlySet<int> pushRepoIds;
-            IReadOnlySet<string> requiredPackageIds;
-            try
-            {
-                var plan = await BuildPushPlanAsync("No repositories to push.", ct);
-                if (plan == null) return;
-                (pushRepoIds, requiredPackageIds) = plan.Value;
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError(ex, "Prepare Workspace: failed to get push plan for workspace {WorkspaceId}", WorkspaceId);
-                SafeInvoke(() => SetLevelError(0, ex.Message));
-                throw;
-            }
-
-            try
-            {
-                await ExecutePushCoreAsync(job, ct, pushRepoIds, synchronizedPush: true, requiredPackageIds, syncedRepoIds);
-            }
-            catch (SynchronizedPushNotPossibleException ex)
-            {
-                Logger.LogError(ex, "Prepare Workspace: synchronized push not possible for workspace {WorkspaceId}", WorkspaceId);
-                SafeInvoke(() => SetLevelError(0, ex.Message));
-                return;
-            }
+            await PreparePushOnlyAsync(job, ct, syncedRepoIds);
         }, new PageJobOptions { RefreshOnSuccess = false });
+    }
+
+    /// <summary>
+    /// Prepare Workspace with Push only: the standalone synchronized push after the branches exist. Update and Push never
+    /// reaches here - it runs as the shared combined operation, including its approval for a normal push.
+    /// </summary>
+    private async Task PreparePushOnlyAsync(BackgroundJobHandle job, CancellationToken ct, IReadOnlySet<int> syncedRepoIds)
+    {
+        // Phase 3: determine push plan and execute push (per-level restore handled inside push service)
+        job.ReportProgress("Preparing push...");
+        IReadOnlySet<int> pushRepoIds;
+        IReadOnlySet<string> requiredPackageIds;
+        try
+        {
+            var plan = await BuildPushPlanAsync("No repositories to push.", ct);
+            if (plan == null) return;
+            (pushRepoIds, requiredPackageIds) = plan.Value;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Prepare Workspace: failed to get push plan for workspace {WorkspaceId}", WorkspaceId);
+            SafeInvoke(() => SetLevelError(0, ex.Message));
+            throw;
+        }
+
+        try
+        {
+            await ExecutePushCoreAsync(job, ct, pushRepoIds, synchronizedPush: true, requiredPackageIds, syncedRepoIds);
+        }
+        catch (SynchronizedPushNotPossibleException ex)
+        {
+            Logger.LogError(ex, "Prepare Workspace: synchronized push not possible for workspace {WorkspaceId}", WorkspaceId);
+            SafeInvoke(() => SetLevelError(0, ex.Message));
+            return;
+        }
     }
 
     private sealed record PrepareWorkspaceModalState
