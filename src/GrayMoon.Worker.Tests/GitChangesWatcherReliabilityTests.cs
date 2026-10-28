@@ -8,7 +8,7 @@ using Microsoft.Extensions.Options;
 namespace GrayMoon.Worker.Tests;
 
 /// <summary>
-/// Watcher lifecycle guarantees from docs/todo/GRAYMOON_WATCHER_RELIABILITY_*: deterministic expiry and renewal,
+/// Watcher lifecycle guarantees (see docs/architecture/04-runtime-communication-and-concurrency.md, Watcher lifecycle): deterministic expiry and renewal,
 /// leases that cannot touch a newer entry, honest health, linked-worktree metadata watching and scan retry.
 /// </summary>
 [Trait("Category", "WatcherReliability")]

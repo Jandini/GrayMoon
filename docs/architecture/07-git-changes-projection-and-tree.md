@@ -38,7 +38,7 @@ flowchart TB
   end
 ```
 
-GrayMoon never runs git from the App. The Changes page never calls the Worker to paint the tree: it reads SQLite only. Worker scans happen on lease renewal, watcher debounce, periodic and reconnect audits, manual Refresh, post-mutation snapshots, and post-sync rescans.
+GrayMoon never runs git from the App. The Changes page never calls the Worker to paint the tree: it reads SQLite only. Worker scans happen on watcher debounce, periodic and reconnect audits, manual Refresh, post-mutation snapshots, and post-sync rescans.
 
 ## 2. How changed files are collected (Worker)
 
@@ -234,3 +234,5 @@ The inventory is uncapped and every path stays reachable (scroll, expand, search
 Reference timings (Windows laptop, in-memory SQLite, synthetic untracked trees; the benchmark code was removed afterwards): 25K paths: persist 1.2 s, read 62 ms, build tree 54 ms; 50K paths: persist 3.6 s, read 151 ms, build tree 137 ms.
 
 Follow-ups, none scheduled: `docs/todo/git-changes-large-changeset-scale.md`. Any follow-up must keep every changed path reachable and must not introduce caps or "first N" truncation.
+
+Watcher keepalive and audit gaps (repair time equals the audit interval, no audit on return from Idle, audit cost on very large workspaces) are listed under Known gaps in `04-runtime-communication-and-concurrency.md`.
