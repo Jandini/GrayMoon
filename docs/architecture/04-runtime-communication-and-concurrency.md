@@ -141,7 +141,7 @@ Choke points (registered in `Cli/Handlers/RunCommandHandler.cs`):
 - `RepositoryAccessCommandLineService` wraps `ICommandLineService` and `RepositoryAccessBoundedProcessRunner` wraps `IBoundedProcessRunner`; both use `RepositoryAccessGuard` on the process working directory (a process with no working directory takes no lease).
 - `GitAccessClassifier` picks the lease kind from the git subcommand: known read-only subcommands (`status`, `diff`, `log`, `rev-parse`, `for-each-ref`, `ls-files`, `ls-remote`, `check-ignore`, ...; `branch`/`config`/`tag`/`remote`/`stash`/`worktree` only in their listing forms) are ReadOnly. Anything else, and every non-git executable, is Mutating.
 - LibGit2Sharp openers take their own leases: `LibGit2SharpLocalGitSnapshotReader`, `LibGit2SharpGitIgnoreService` (the session holds its lease for its whole life), `LibGit2SharpConfigReader`, `GitVersionInputFingerprint` (all ReadOnly) and `RepositoryConfigurationInitializer` (Mutating, because it writes config).
-- `GitRepositoryWatcher` implements `IReleasable` (Release disposes both `FileSystemWatcher`s; it cannot restart in `OnError`) and `IRepositoryAccessObserver` (an ancestor watcher pauses while a claim beneath it is active). `GitRepositoryWatcherManager.Acquire` refuses covered paths. Released watchers are not recreated automatically; the next App lease renewal (`GetGitChangeStatus`) recreates them.
+- `GitRepositoryWatcher` implements `IReleasable` (Release disposes both `FileSystemWatcher`s; it cannot restart in `OnError`) and `IRepositoryAccessObserver` (an ancestor watcher pauses while a claim beneath it is active). `GitRepositoryWatcherManager.Acquire` refuses covered paths. Released watchers are not recreated automatically; the next `Acquire` (`GetGitChangeStatus`) or `Touch` recreates them (see "Watcher lifecycle").
 
 App side:
 
@@ -508,13 +508,20 @@ flowchart LR
 
 ### Watcher lifecycle
 
-A `GetGitChangeStatus` request establishes or renews a watcher lease for a repository path.
+A `GetGitChangeStatus` request acquires a lease on a repository path; `GitRepositoryWatcherManager.Touch` renews the watcher without a lease or a git scan. Both create the entry when it is missing. An entry has a deadline (`ExpiresAt`, idle grace `WatcherIdleGraceMinutes`, default 10) that every `Acquire`, `Touch` and release of the last lease pushes out. One sweeper (every 30 s) removes entries that hold no lease and are past their deadline, and prunes the matching tracker, snapshot cache and registry entries. Create, renew, release and expiry run under one lock, so an expiry and a renewal are ordered; watchers are disposed outside it. A lease captures its entry: releasing a lease whose entry was removed or replaced is a no-op and cannot decrement a newer entry.
 
-The watcher is not permanent forever.
+`Touch` returns `Renewed`, `Created`, `Recovered`, `Degraded` or `UnderRemoval`. `Created` and `Recovered` queue a refresh through `MarkDirty`, because changes made while nothing watched the folder are otherwise unseen.
 
-Leases expire after an idle grace period when the Workspace/page is no longer active.
+Health is real: `GitRepositoryWatcher.IsHealthy` is true only while the work-tree watcher and, when the repository has a readable git metadata directory, the metadata watcher are both running. `ActiveWatcherCount` counts entries; `HealthyWatcherCount` counts healthy ones. A failed start or restart leaves the entry `Degraded` (never half-started), and a later `Acquire` or `Touch` restarts it, at most once per 30 s; a successful recovery raises the overflow signal so the snapshot is treated as stale and re-scanned.
 
-A removal claim (section 2A) releases watchers beneath it; they come back with the next lease renewal.
+A linked worktree (every Feature checkout) has a `.git` file instead of a directory. The watcher reads its `gitdir:` line and watches that per-worktree directory (index, HEAD, merge and rebase markers) with the same relevance filter, so `git add` and `git commit` inside a Feature invalidate its status. Both watchers use a 64 KB buffer.
+
+A failed, cancelled or timed-out watcher-driven scan is retried with backoff (`WatcherScanRetryDelaysSeconds`, default 5, 30 and 120 s) through the tracker's debounce, then stops until the next event or App scan. Manual refresh semantics and suppression are unchanged. `PathUnderRemoval` and `RepositoryDisposed` are never retried.
+
+Removals are logged with a reason (`IdleExpired`, `ExplicitRemoval` for a removal claim, `WorkerShutdown`). A removal claim (section 2A) releases watchers beneath it; they come back with the next `Acquire` or `Touch`.
+
+The App keeps this alive only while it keeps asking: `GitChangesMonitoringBackgroundService` sweeps every active workspace each `WatcherRenewalIntervalMinutes`. A workspace is active while a circuit holds a lease (`WorkspaceGitChangesActivityBinder`, an interactive island in `MainLayout`, so the lease lives as long as the circuit) plus `WorkspaceActivityGraceMinutes` (default 8) after the last circuit leaves. `MainLayout` is rendered statically; a binder that was not an island gained and released its lease within one HTTP request and an open page never held it.
+
 
 ### Watcher event
 

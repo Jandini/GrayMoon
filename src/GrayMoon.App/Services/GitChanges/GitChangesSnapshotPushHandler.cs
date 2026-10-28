@@ -70,8 +70,9 @@ public sealed class GitChangesSnapshotPushHandler(
 
         if (existingContext != null && snapshot.Version <= existingContext.SnapshotVersion)
         {
-            logger.LogInformation(
-                "[GCDiag] GitChangesSnapshotUpdated: rejected stale context snapshot version {IncomingVersion} <= persisted {PersistedVersion} (workspace={WorkspaceId}, repo={RepositoryId}, path={RepositoryPath})",
+            // The same snapshot arrives from both the Worker push and the scan response; an equal version is a duplicate, only a lower one is stale.
+            logger.Log(snapshot.Version == existingContext.SnapshotVersion ? LogLevel.Debug : LogLevel.Information,
+                "[GCDiag] GitChangesSnapshotUpdated: rejected stale or duplicate context snapshot version {IncomingVersion} <= persisted {PersistedVersion} (workspace={WorkspaceId}, repo={RepositoryId}, path={RepositoryPath})",
                 snapshot.Version, existingContext.SnapshotVersion, notification.WorkspaceId, notification.RepositoryId, notification.RepositoryPath);
             return;
         }

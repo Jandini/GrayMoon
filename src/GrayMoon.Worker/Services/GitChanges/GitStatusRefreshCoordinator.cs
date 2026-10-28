@@ -188,19 +188,54 @@ public sealed class GitStatusRefreshCoordinator : IDisposable, IGitChangesRefres
     private async Task RunWatcherScanAsync(string repoPath, RepositoryRefreshTracker tracker)
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(Math.Max(1, _options.WatcherScanTimeoutSeconds)));
+        var failure = default(string);
         try
         {
-            await RunScanAsync(repoPath, tracker, cts.Token);
+            var result = await RunScanAsync(repoPath, tracker, cts.Token);
+            if (result.Success || result.ErrorCode is "PathUnderRemoval" or "RepositoryDisposed")
+            {
+                // Success, or an expected outcome that a retry cannot change.
+                tracker.ResetScanFailures();
+                return;
+            }
+
+            failure = $"{result.ErrorCode} {result.ErrorMessage}";
         }
         catch (OperationCanceledException)
         {
-            _logger.LogWarning("[GCDiag] Watcher-driven git status scan cancelled or timed out for {RepoPath} (timeout {TimeoutSeconds}s); no retry is scheduled, the persisted view stays stale until the next event or App scan", repoPath, Math.Max(1, _options.WatcherScanTimeoutSeconds));
+            failure = $"cancelled or timed out (timeout {Math.Max(1, _options.WatcherScanTimeoutSeconds)}s)";
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "[GCDiag] Watcher-driven git status scan failed for {RepoPath}; no retry is scheduled", repoPath);
+            failure = ex.Message;
+            _logger.LogWarning(ex, "[GCDiag] Watcher-driven git status scan failed for {RepoPath}", repoPath);
         }
+
+        ScheduleScanRetry(repoPath, tracker, failure);
     }
+
+    // A failed watcher-driven scan would otherwise leave the persisted view stale until the next event or App scan.
+    // The retry goes through the tracker's debounce, so new events, suppression and disposal behave as for any scan.
+    private void ScheduleScanRetry(string repoPath, RepositoryRefreshTracker tracker, string? failure)
+    {
+        var delays = _options.WatcherScanRetryDelaysSeconds ?? [];
+        var attempt = tracker.RecordScanFailure();
+        if (_disposed || attempt > delays.Length)
+        {
+            tracker.ResetScanFailures();
+            _logger.LogWarning(
+                "[GCDiag] Watcher-driven git status scan for {RepoPath} failed {Attempts} time(s) ({Failure}); giving up until the next event or App scan",
+                repoPath, attempt, failure);
+            return;
+        }
+
+        var delaySeconds = Math.Max(1, delays[attempt - 1]);
+        _logger.LogWarning(
+            "[GCDiag] Watcher-driven git status scan for {RepoPath} failed ({Failure}); retry {Attempt}/{Max} in {DelaySeconds}s",
+            repoPath, failure, attempt, delays.Length, delaySeconds);
+        tracker.ScheduleDebouncedRefresh(delaySeconds * 1000, () => _ = RunWatcherScanAsync(repoPath, tracker));
+    }
+
 
     private async Task<GitChangeStatusResult> RunScanAsync(string repoPath, RepositoryRefreshTracker tracker, CancellationToken cancellationToken, bool includeLineStats = false)
     {
@@ -304,6 +339,25 @@ internal sealed class RepositoryRefreshTracker : IDisposable
 
     /// <summary>What closing a suppression scope left behind. Counters are meaningful only when <see cref="Released"/>.</summary>
     public readonly record struct SuppressionEnd(bool Released, bool Dirtied, int Coalesced, int ManualBypasses, long StartedAt);
+
+    private int _scanFailures;
+
+    /// <summary>Counts a failed watcher-driven scan and returns the number of consecutive failures so far.</summary>
+    public int RecordScanFailure()
+    {
+        lock (_gate)
+        {
+            return ++_scanFailures;
+        }
+    }
+
+    public void ResetScanFailures()
+    {
+        lock (_gate)
+        {
+            _scanFailures = 0;
+        }
+    }
 
     public void BeginSuppression()
     {

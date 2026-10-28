@@ -61,6 +61,69 @@ public sealed class GitRepositoryWatcher : IDisposable, IReleasable, IRepository
     /// <summary>Why no metadata watcher is running (null when it is). A linked worktree has a <c>.git</c> file, not a directory.</summary>
     public string? MetadataWatcherSkipReason { get; private set; }
 
+    /// <summary>
+    /// True when every OS watcher this repository needs is running: the work tree and, when the repository has a
+    /// readable git metadata directory, that directory too. This is what an entry's health means; an entry whose
+    /// watcher failed to start or restart is degraded and must not be reported as watched.
+    /// </summary>
+    public bool IsHealthy => !_disposed && IsWorkTreeWatching && (_metadataDirectoryResolved ? IsMetadataWatching : true);
+
+    // Larger than the 8 KB default so a burst (checkout, build output) is less likely to overflow the buffer.
+    private const int WatcherBufferBytes = 64 * 1024;
+
+    private bool _metadataDirectoryResolved;
+
+    /// <summary>
+    /// Finds the directory holding this repository's index, HEAD and ref markers. A normal checkout has a
+    /// <c>.git</c> directory; a linked worktree has a <c>.git</c> file whose <c>gitdir:</c> line names a
+    /// per-worktree directory inside the main repository's <c>.git/worktrees</c>. Internal for unit tests.
+    /// </summary>
+    internal static string? ResolveGitMetadataDirectory(string repoPath, out string? skipReason)
+    {
+        skipReason = null;
+        var dotGit = Path.Combine(repoPath, ".git");
+        if (Directory.Exists(dotGit))
+        {
+            return dotGit;
+        }
+
+        if (!File.Exists(dotGit))
+        {
+            skipReason = ".git not found";
+            return null;
+        }
+
+        try
+        {
+            foreach (var line in File.ReadLines(dotGit))
+            {
+                const string prefix = "gitdir:";
+                if (!line.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var target = line[prefix.Length..].Trim();
+                var resolved = Path.GetFullPath(Path.IsPathRooted(target) ? target : Path.Combine(repoPath, target));
+                if (Directory.Exists(resolved))
+                {
+                    return resolved;
+                }
+
+                skipReason = $".git file points to a missing directory ({resolved})";
+                return null;
+            }
+
+            skipReason = ".git file has no gitdir line";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            skipReason = $".git file is unreadable ({ex.GetType().Name})";
+        }
+
+        return null;
+    }
+
     private void Start()
     {
         try
@@ -70,6 +133,7 @@ public sealed class GitRepositoryWatcher : IDisposable, IReleasable, IRepository
             {
                 IncludeSubdirectories = true,
                 NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.Size,
+                InternalBufferSize = WatcherBufferBytes,
             };
             _workTreeWatcher.Changed += OnWorkTreeChanged;
             _workTreeWatcher.Created += OnWorkTreeCreated;
@@ -78,14 +142,16 @@ public sealed class GitRepositoryWatcher : IDisposable, IReleasable, IRepository
             _workTreeWatcher.Error += OnError;
             _workTreeWatcher.EnableRaisingEvents = true;
 
-            MetadataWatcherSkipReason = null;
-            var gitDir = Path.Combine(_repoPath, ".git");
-            if (Directory.Exists(gitDir))
+            var gitDir = ResolveGitMetadataDirectory(_repoPath, out var skipReason);
+            MetadataWatcherSkipReason = skipReason;
+            _metadataDirectoryResolved = gitDir is not null;
+            if (gitDir is not null)
             {
                 _gitDirWatcher = new FileSystemWatcher(gitDir)
                 {
                     IncludeSubdirectories = true,
                     NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.DirectoryName,
+                    InternalBufferSize = WatcherBufferBytes,
                 };
                 _gitDirWatcher.Changed += OnGitMetadataEvent;
                 _gitDirWatcher.Created += OnGitMetadataEvent;
@@ -94,10 +160,6 @@ public sealed class GitRepositoryWatcher : IDisposable, IReleasable, IRepository
                 _gitDirWatcher.Error += OnError;
                 _gitDirWatcher.EnableRaisingEvents = true;
             }
-            else
-            {
-                MetadataWatcherSkipReason = File.Exists(gitDir) ? ".git is a file (linked worktree: index and HEAD live elsewhere and are not watched)" : ".git not found";
-            }
 
             _logger.LogInformation(
                 "[GCDiag] git watcher started for {RepoPath}: workTree={WorkTree} metadata={Metadata} metadataSkipReason={SkipReason}",
@@ -105,9 +167,49 @@ public sealed class GitRepositoryWatcher : IDisposable, IReleasable, IRepository
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "[GCDiag] Failed to start git repository watcher for {RepoPath} (entry will have no working OS watcher until recreated)", _repoPath);
+            _logger.LogWarning(ex, "[GCDiag] Failed to start git repository watcher for {RepoPath}; the entry is degraded until a renewal recovers it", _repoPath);
+            // Leave nothing half-started: health is derived from the OS watchers, and a partial set would look watched.
+            DisposeWatchers();
         }
     }
+
+    /// <summary>
+    /// Restarts the OS watchers when they are not healthy (a failed start or a failed restart after an error).
+    /// Returns whether the watcher is healthy afterwards. A restart can miss changes, so a successful recovery
+    /// raises <see cref="Overflowed"/> and the caller treats the current snapshot as stale.
+    /// </summary>
+    public bool TryRecover()
+    {
+        lock (_lifecycleLock)
+        {
+            if (_disposed)
+            {
+                return false;
+            }
+
+            if (IsHealthy)
+            {
+                return true;
+            }
+
+            DisposeWatchers();
+            Start();
+        }
+
+        var healthy = IsHealthy;
+        _logger.Log(
+            healthy ? LogLevel.Information : LogLevel.Warning,
+            "[GCDiag] git watcher recovery for {RepoPath}: healthy={Healthy}",
+            _repoPath, healthy);
+        if (healthy)
+        {
+            Overflowed?.Invoke();
+        }
+
+        return healthy;
+    }
+
+    private readonly object _lifecycleLock = new();
 
     private void OnWorkTreeChanged(object sender, FileSystemEventArgs e) =>
         HandleWorkTreeEvent(e, GitRepositoryObservedChangeKind.Changed, oldPath: null);
@@ -291,12 +393,24 @@ public sealed class GitRepositoryWatcher : IDisposable, IReleasable, IRepository
         }
 
         _logger.LogWarning(e.GetException(), "[GCDiag] Git repository watcher overflow/failure for {RepoPath}; recreating watcher", _repoPath);
-        DisposeWatchers();
+        lock (_lifecycleLock)
+        {
+            DisposeWatchers();
+        }
+
+        // The discontinuity is recorded (and a refresh queued) before the restart, so it is never lost if the restart fails.
         Overflowed?.Invoke();
 
         if (!_disposed)
         {
-            Start();
+            lock (_lifecycleLock)
+            {
+                if (!_disposed)
+                {
+                    Start();
+                }
+            }
+
             _logger.Log(
                 IsWorkTreeWatching ? LogLevel.Information : LogLevel.Warning,
                 "[GCDiag] git watcher restart after error finished for {RepoPath}: workTreeWatching={WorkTree}",
@@ -332,8 +446,11 @@ public sealed class GitRepositoryWatcher : IDisposable, IReleasable, IRepository
             return;
         }
 
-        _disposed = true;
-        DisposeWatchers();
+        lock (_lifecycleLock)
+        {
+            _disposed = true;
+            DisposeWatchers();
+        }
     }
 
     private void DisposeWatchers()

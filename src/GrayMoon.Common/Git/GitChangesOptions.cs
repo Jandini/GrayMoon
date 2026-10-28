@@ -22,6 +22,13 @@ public sealed class GitChangesOptions
     /// </summary>
     public int WatcherScanTimeoutSeconds { get; init; } = 120;
 
+    /// <summary>
+    /// Delays before each retry of a failed or timed-out watcher-driven status scan, in order; after the last
+    /// entry the Worker stops retrying until the next watcher event or App scan. Empty disables retries.
+    /// Default 5, 30, 120.
+    /// </summary>
+    public int[] WatcherScanRetryDelaysSeconds { get; init; } = [5, 30, 120];
+
     /// <summary>Idle time with no renewing operation before a repository's watcher lease is disposed.</summary>
     public int WatcherIdleGraceMinutes { get; init; } = 10;
 
