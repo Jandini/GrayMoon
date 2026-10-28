@@ -122,4 +122,42 @@ public sealed class WorkerDesktopNotificationPolicyTests
         Assert.Equal("GrayMoon Worker is offline", notification.Title);
         Assert.Equal(DesktopNotificationSeverity.Error, notification.Severity);
     }
+
+    [Fact]
+    public void Failed_update_notifies_once_when_the_old_worker_is_gone()
+    {
+        var policy = new WorkerDesktopNotificationPolicy();
+        policy.OnChange(WorkerConnectionState.Online, selfUpdateInProgress: false, "1.0.0");
+        policy.OnChange(WorkerConnectionState.Offline, selfUpdateInProgress: true, "1.0.0");
+
+        var failed = policy.OnChange(WorkerConnectionState.Offline, selfUpdateInProgress: false, null, installFailed: true);
+
+        Assert.NotNull(failed);
+        Assert.Equal("GrayMoon Worker update failed", failed.Title);
+        Assert.Equal(DesktopNotificationSeverity.Error, failed.Severity);
+        Assert.Equal("/worker", failed.NavigationPath);
+        Assert.Null(policy.OnChange(WorkerConnectionState.Offline, selfUpdateInProgress: false, null, installFailed: true));
+    }
+
+    [Fact]
+    public void Failed_update_with_the_old_worker_still_connected_reports_the_failure_not_update_required()
+    {
+        var policy = new WorkerDesktopNotificationPolicy();
+
+        var failed = policy.OnChange(WorkerConnectionState.VersionMismatch, selfUpdateInProgress: false, "1.0.0", installFailed: true);
+
+        Assert.Equal("GrayMoon Worker update failed", failed!.Title);
+        Assert.Null(policy.OnChange(WorkerConnectionState.VersionMismatch, selfUpdateInProgress: false, "1.0.0", installFailed: true));
+    }
+
+    [Fact]
+    public void A_later_failure_notifies_again_after_the_first_one_cleared()
+    {
+        var policy = new WorkerDesktopNotificationPolicy();
+        Assert.NotNull(policy.OnChange(WorkerConnectionState.Offline, selfUpdateInProgress: false, null, installFailed: true));
+
+        policy.OnChange(WorkerConnectionState.Online, selfUpdateInProgress: false, "2.0.0");
+
+        Assert.NotNull(policy.OnChange(WorkerConnectionState.Offline, selfUpdateInProgress: false, null, installFailed: true));
+    }
 }

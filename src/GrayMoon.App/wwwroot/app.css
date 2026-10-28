@@ -848,6 +848,14 @@ select:disabled,
     background-image: none;
 }
 
+/* Bootstrap's unchecked checkbox/radio is white on the dark theme. Put .form-check-input-gray
+   next to .form-check-input on every new checkbox or radio so it is gray until checked. */
+.form-check-input.form-check-input-gray:not(:checked) {
+    background-color: var(--bg-input);
+    border-color: var(--border-light);
+    background-image: none;
+}
+
 /* Modals */
 .modal.show {
     background-color: rgba(0, 0, 0, 0.6);

@@ -24,6 +24,9 @@ public sealed class WorkerConnectionTracker
     private bool _selfUpdateInProgress;
     private bool _logonPasswordRequired;
     private bool _offlineAfterLogonFailure;
+    private bool _installFailed;
+    private int _selfUpdateGeneration;
+    private readonly TimeSpan _selfUpdateTimeout;
     private event Action<WorkerConnectionState>? _onStateChanged;
 
     public WorkerConnectionTracker()
@@ -31,9 +34,13 @@ public sealed class WorkerConnectionTracker
     {
     }
 
-    internal WorkerConnectionTracker(string? appSemVer)
+    /// <summary>An update that neither finishes nor reports a failure within this time is treated as failed.</summary>
+    public static readonly TimeSpan DefaultSelfUpdateTimeout = TimeSpan.FromMinutes(15);
+
+    internal WorkerConnectionTracker(string? appSemVer, TimeSpan? selfUpdateTimeout = null)
     {
         _appSemVer = appSemVer;
+        _selfUpdateTimeout = selfUpdateTimeout ?? DefaultSelfUpdateTimeout;
     }
 
     public WorkerConnectionState State
@@ -69,6 +76,19 @@ public sealed class WorkerConnectionTracker
         {
             lock (_lock)
                 return _logonPasswordRequired;
+        }
+    }
+
+    /// <summary>
+    /// True after a Worker update ended without a working Worker: the install script reported a failure,
+    /// or the update timed out. Cleared when a new update starts or a matching Worker connects.
+    /// </summary>
+    public bool InstallFailed
+    {
+        get
+        {
+            lock (_lock)
+                return _installFailed;
         }
     }
 
@@ -108,7 +128,38 @@ public sealed class WorkerConnectionTracker
             if (_selfUpdateInProgress)
                 return false;
             _selfUpdateInProgress = true;
+            _installFailed = false;
+            StartSelfUpdateWatchdog(++_selfUpdateGeneration);
             return true;
+        });
+    }
+
+    /// <summary>
+    /// Records that the in-progress update failed (the install script reported it, or it timed out).
+    /// Ends the update so the badge leaves "installing" and the failure is shown. Ignored unless an
+    /// update is actually in progress.
+    /// </summary>
+    public void ReportInstallFailure() => RaiseIfChanged(FailSelfUpdateLocked);
+
+    private bool FailSelfUpdateLocked()
+    {
+        if (!_selfUpdateInProgress)
+            return false;
+        _selfUpdateInProgress = false;
+        _installFailed = true;
+        return true;
+    }
+
+    /// <summary>
+    /// A script that dies without reporting (killed, machine sleep) would leave "installing" set forever,
+    /// with no notification. Fails the update if it is still the same one after the timeout.
+    /// </summary>
+    private void StartSelfUpdateWatchdog(int generation)
+    {
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(_selfUpdateTimeout);
+            RaiseIfChanged(() => _selfUpdateGeneration == generation && FailSelfUpdateLocked());
         });
     }
 
@@ -210,6 +261,13 @@ public sealed class WorkerConnectionTracker
                 _selfUpdateInProgress = false;
                 endedUpdate = true;
             }
+        }
+
+        if (_installFailed && next == WorkerConnectionState.Online
+            && WorkerVersionPolicy.AreSameProductVersion(_workerVersions.Values.FirstOrDefault(), _appSemVer))
+        {
+            _installFailed = false;
+            endedUpdate = true;
         }
 
         if (_state == next)

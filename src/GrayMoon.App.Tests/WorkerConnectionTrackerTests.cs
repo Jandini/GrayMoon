@@ -159,4 +159,72 @@ public sealed class WorkerConnectionTrackerTests
         Assert.True(started.Wait(TimeSpan.FromSeconds(30)));
         Assert.True(tracker.IsSelfUpdateInProgress);
     }
+
+    [Fact]
+    public void ReportInstallFailure_ends_installing_and_clears_after_a_matching_worker_returns()
+    {
+        var tracker = new WorkerConnectionTracker("2.0.0");
+        tracker.OnWorkerConnected("old");
+        tracker.ReportWorkerSemVer("old", "1.0.0");
+        tracker.BeginSelfUpdate();
+        tracker.OnWorkerDisconnected("old");
+
+        var raised = new List<WorkerConnectionState>();
+        tracker.OnStateChanged(raised.Add);
+        raised.Clear();
+
+        tracker.ReportInstallFailure();
+
+        Assert.True(tracker.InstallFailed);
+        Assert.False(tracker.IsSelfUpdateInProgress);
+        Assert.Equal(WorkerConnectionState.Offline, Assert.Single(raised));
+
+        tracker.OnWorkerConnected("new");
+        tracker.ReportWorkerSemVer("new", "2.0.0");
+        Assert.False(tracker.InstallFailed);
+    }
+
+    [Fact]
+    public void ReportInstallFailure_is_ignored_when_no_update_is_running_and_a_new_update_clears_it()
+    {
+        var tracker = new WorkerConnectionTracker("2.0.0");
+        tracker.ReportInstallFailure();
+        Assert.False(tracker.InstallFailed);
+
+        tracker.BeginSelfUpdate();
+        tracker.ReportInstallFailure();
+        Assert.True(tracker.InstallFailed);
+
+        tracker.BeginSelfUpdate();
+        Assert.False(tracker.InstallFailed);
+        Assert.True(tracker.IsSelfUpdateInProgress);
+    }
+
+    [Fact]
+    public async Task An_update_that_never_finishes_is_failed_by_the_timeout()
+    {
+        var tracker = new WorkerConnectionTracker("2.0.0", TimeSpan.FromMilliseconds(50));
+        tracker.BeginSelfUpdate();
+
+        for (var i = 0; i < 100 && !tracker.InstallFailed; i++)
+            await Task.Delay(50);
+
+        Assert.True(tracker.InstallFailed);
+        Assert.False(tracker.IsSelfUpdateInProgress);
+    }
+
+    [Fact]
+    public async Task The_timeout_of_a_finished_update_does_not_fail_a_newer_one()
+    {
+        var tracker = new WorkerConnectionTracker("2.0.0", TimeSpan.FromMilliseconds(300));
+        tracker.BeginSelfUpdate();
+        tracker.EndSelfUpdate();
+        await Task.Delay(100);
+        tracker.BeginSelfUpdate();
+
+        await Task.Delay(250);
+
+        Assert.False(tracker.InstallFailed);
+        Assert.True(tracker.IsSelfUpdateInProgress);
+    }
 }

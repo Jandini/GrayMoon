@@ -13,12 +13,14 @@ internal sealed class WorkerDesktopNotificationPolicy
     private bool _selfUpdateInProgress;
     private bool _installingNotified;
     private bool _logonPasswordNotified;
+    private bool _installFailedNotified;
 
     public DesktopNotification? OnChange(
         WorkerConnectionState state,
         bool selfUpdateInProgress,
         string? workerSemVer,
-        bool logonPasswordRequired = false)
+        bool logonPasswordRequired = false,
+        bool installFailed = false)
     {
         if (selfUpdateInProgress && !_selfUpdateInProgress)
             _installingNotified = false;
@@ -36,6 +38,19 @@ internal sealed class WorkerDesktopNotificationPolicy
                 return null;
             _logonPasswordNotified = true;
             return LogonPasswordRequired();
+        }
+
+        if (!installFailed)
+            _installFailedNotified = false;
+
+        // A failed update is reported once, whether the old Worker is still connected (version mismatch)
+        // or already gone (offline). The update-required and offline messages would hide the failure.
+        if (installFailed && !selfUpdateInProgress)
+        {
+            if (_installFailedNotified)
+                return null;
+            _installFailedNotified = true;
+            return InstallFailed();
         }
 
         if (state == WorkerConnectionState.VersionMismatch && !selfUpdateInProgress)
@@ -73,6 +88,15 @@ internal sealed class WorkerDesktopNotificationPolicy
             "GrayMoon Worker is installing",
             "The GrayMoon Worker is updating and will reconnect when the install finishes.",
             DesktopNotificationSeverity.Info,
+            "/worker",
+            DateTimeOffset.UtcNow);
+
+    internal static DesktopNotification InstallFailed() =>
+        new(
+            Guid.NewGuid().ToString(),
+            "GrayMoon Worker update failed",
+            "The GrayMoon Worker could not be updated. Open the Worker page and install it manually.",
+            DesktopNotificationSeverity.Error,
             "/worker",
             DateTimeOffset.UtcNow);
 

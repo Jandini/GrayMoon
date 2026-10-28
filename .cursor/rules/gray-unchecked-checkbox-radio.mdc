@@ -1,0 +1,16 @@
+---
+description: New Blazor checkboxes and radios must be gray (not Bootstrap white) when unchecked
+alwaysApply: true
+---
+
+# Unchecked checkboxes and radios are gray
+
+Bootstrap draws an unchecked `form-check-input` white, which clashes with the dark theme. Whenever you add a new checkbox or radio button to a Blazor page, modal or component, give the input both classes:
+
+```razor
+<input class="form-check-input form-check-input-gray" type="checkbox" ... />
+```
+
+`.form-check-input-gray` (in `src/GrayMoon.App/wwwroot/app.css`) sets the gray `--bg-input` background and `--border-light` border while unchecked; the checked state keeps the normal accent color. Do not add one-off per-page overrides for this. Switches (`role="switch"`) are already gray and do not need the class.
+
+The same rule applies to WPF dialogs in GrayMoon.Desktop: use the dark `CheckBox` style (gray `#3e3e42` box) from `WorkerUpgradeDialog.xaml`, never the default white WPF checkbox.

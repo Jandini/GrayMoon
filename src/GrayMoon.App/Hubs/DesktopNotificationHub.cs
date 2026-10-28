@@ -28,7 +28,8 @@ namespace GrayMoon.App.Hubs;
 ///
 /// A startup Worker version mismatch is pushed once as "WorkerUpgradeRequired"
 /// (<see cref="WorkerUpgradePrompt"/>). GrayMoon.Desktop calls "UpgradeWorker" when the user
-/// accepts that dialog.
+/// accepts that dialog, or straight away when the prompt says AutoUpdate. The "always update"
+/// choice is stored by the "SetWorkerAutoUpdate" hub method (below).
 /// </summary>
 public sealed class DesktopNotificationHub(
     DesktopWorkspaceContextTracker workspaceContextTracker,
@@ -56,7 +57,10 @@ public sealed class DesktopNotificationHub(
 
         var workerUpgrade = workerUpgradeStartupPrompt.OnDesktopConnected();
         if (workerUpgrade is not null)
-            await Clients.Caller.SendAsync(WorkerUpgradePrompt.ClientEventName, workerUpgrade);
+        {
+            var autoUpdate = await appSettingRepository.GetBoolAsync(AppSettingRepository.WorkerAutoUpdateKey);
+            await Clients.Caller.SendAsync(WorkerUpgradePrompt.ClientEventName, workerUpgrade with { AutoUpdate = autoUpdate });
+        }
     }
 
     public override Task OnDisconnectedAsync(Exception? exception)
@@ -77,6 +81,13 @@ public sealed class DesktopNotificationHub(
         topBarState.SetVisible(visible);
         await Clients.All.SendAsync("TopBarVisibleChanged", visible);
     }
+
+    /// <summary>
+    /// Called by GrayMoon.Desktop when the user ticks "Always update the Worker" in the startup
+    /// upgrade dialog. This is the same stored setting as the checkbox on the Worker page.
+    /// </summary>
+    public Task SetWorkerAutoUpdate(bool enabled) =>
+        appSettingRepository.SetBoolAsync(AppSettingRepository.WorkerAutoUpdateKey, enabled);
 
     /// <summary>
     /// Called by GrayMoon.Desktop when the user accepts the startup Worker upgrade dialog.

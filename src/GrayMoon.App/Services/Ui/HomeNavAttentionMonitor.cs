@@ -22,11 +22,13 @@ public sealed class HomeNavAttentionMonitor : IDisposable
 
     public bool ShowDot => HomeNavNotification.ShouldShow(
         _workerConnectionTracker.State,
-        _workerConnectionTracker.IsSelfUpdateInProgress);
+        _workerConnectionTracker.IsSelfUpdateInProgress,
+        _workerConnectionTracker.InstallFailed);
 
     public string Title => HomeNavNotification.Title(
         _workerConnectionTracker.State,
-        _workerConnectionTracker.IsSelfUpdateInProgress);
+        _workerConnectionTracker.IsSelfUpdateInProgress,
+        _workerConnectionTracker.InstallFailed);
 
     public void EnsureStarted()
     {

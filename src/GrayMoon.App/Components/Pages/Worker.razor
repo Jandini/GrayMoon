@@ -2,6 +2,7 @@
 @page "/agent"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using GrayMoon.Abstractions.Worker
+@using GrayMoon.App.Repositories
 @using GrayMoon.App.Services
 @using GrayMoon.App.Services.Worker
 @using GrayMoon.App.Services.Security
@@ -18,6 +19,7 @@
 @inject WorkerRestartService WorkerRestart
 @inject WorkerSecretService WorkerSecret
 @inject WorkerPairingService WorkerPairing
+@inject AppSettingRepository AppSettings
 
 <PageTitle>Worker - GrayMoon</PageTitle>
 
@@ -68,6 +70,10 @@
                             @if (WorkerConnectionTracker.LogonPasswordRequired)
                             {
                                 <p class="small text-danger mt-3 mb-0">The Windows password stored for the Worker service is no longer valid. Install again and enter your current Windows password.</p>
+                            }
+                            else if (WorkerConnectionTracker.InstallFailed)
+                            {
+                                <p class="small text-danger mt-3 mb-0">The Worker update failed. Install the Worker manually with the command above.</p>
                             }
                             @if (ShowUnsecuredWorkerNotice)
                             {
@@ -142,7 +148,12 @@
                 @if (ActiveTab == "install")
                 {
                     <div class="card-footer card-footer-worker d-flex justify-content-between align-items-center">
-                        <small class="text-muted">@InstallFooterText</small>
+                        <div class="form-check m-0 text-nowrap" title="@AutoUpdateHint">
+                            <input class="form-check-input form-check-input-gray" type="checkbox" id="workerAutoUpdate"
+                                   checked="@_autoUpdateWorker" disabled="@_autoUpdateSaving"
+                                   @onchange="OnAutoUpdateChangedAsync" />
+                            <label class="form-check-label small text-muted" for="workerAutoUpdate">Always update the Worker automatically</label>
+                        </div>
                         <div class="d-flex align-items-center gap-2">
                             @if (ShowUpdateNowButton)
                             {
@@ -152,11 +163,11 @@
                             }
                             @if (ShowDesktopWorkerInstall)
                             {
-                                <button type="button" class="btn @(WorkerInstall.IsInstalling || WorkerRestart.IsRestarting ? "btn-secondary" : "btn-danger")" disabled="@(WorkerInstall.IsInstalling || WorkerRestart.IsRestarting)" @onclick="InstallWorkerAsync">
+                                <button type="button" class="btn @(WorkerInstall.IsInstalling || WorkerRestart.IsRestarting ? "btn-secondary" : "btn-danger")" title="@InstallButtonHint" disabled="@(WorkerInstall.IsInstalling || WorkerRestart.IsRestarting)" @onclick="InstallWorkerAsync">
                                     @(WorkerInstall.IsInstalling ? "Installing" : WorkerRestart.IsRestarting ? "Restarting" : "Install")
                                 </button>
                             }
-                            <button type="button" class="btn btn-outline-secondary" @onclick="DownloadWorker">Download</button>
+                            <button type="button" class="btn btn-outline-secondary" title="You can download and run the worker executable manually." @onclick="DownloadWorker">Download</button>
                         </div>
                     </div>
                 }
@@ -199,6 +210,13 @@
     private bool _isDesktopHost;
     private bool _desktopHostDetected;
     private WorkerPairingCode? _pairingCode;
+    private bool _autoUpdateWorker;
+    private bool _autoUpdateSaving;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _autoUpdateWorker = await AppSettings.GetBoolAsync(AppSettingRepository.WorkerAutoUpdateKey);
+    }
 
     protected override void OnInitialized()
     {
@@ -248,7 +266,7 @@
                     _ = InvokeAsync(LoadHostInfoAsync);
                 _ = InvokeAsync(() =>
                 {
-                    if (WorkerConnectionTracker.LogonPasswordRequired)
+                    if (WorkerConnectionTracker.LogonPasswordRequired || WorkerConnectionTracker.InstallFailed)
                     {
                         _isUpdating = false;
                         _waitingForReconnect = false;
@@ -387,12 +405,32 @@
         !WorkerRestart.IsRestarting
         && (WorkerConnectionTracker.State == WorkerConnectionState.Offline || WorkerConnectionTracker.State == WorkerConnectionState.VersionMismatch);
 
-    private string InstallFooterText =>
+    private const string AutoUpdateHint =
+        "When the Worker needs an update at startup, GrayMoon Desktop updates it without asking.";
+
+    private string InstallButtonHint =>
         WorkerRestart.IsRestarting
             ? "The Worker is restarting."
-            : ShowDesktopWorkerInstall
-                ? "GrayMoon Desktop can install the worker automatically."
-                : "You can download and run the worker executable manually.";
+            : "GrayMoon Desktop can install the worker automatically.";
+
+    private async Task OnAutoUpdateChangedAsync(ChangeEventArgs e)
+    {
+        var enabled = e.Value is true;
+        _autoUpdateSaving = true;
+        try
+        {
+            await AppSettings.SetBoolAsync(AppSettingRepository.WorkerAutoUpdateKey, enabled);
+            _autoUpdateWorker = enabled;
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError($"Could not save the setting: {ex.Message}");
+        }
+        finally
+        {
+            _autoUpdateSaving = false;
+        }
+    }
 
     private string InstallTabLabel => WorkerConnectionTracker.State == WorkerConnectionState.VersionMismatch ? "Update" : "Install";
 

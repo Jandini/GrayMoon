@@ -206,3 +206,7 @@ and design notes for work not yet built go in `docs/todo/`.
 pushing action) yourself, even if the user's request could be read as asking
 for one.** Leave the working tree's changes uncommitted; committing and
 pushing are the user's call to make, not the agent's.
+
+## Unchecked checkboxes and radios are gray
+
+Every new checkbox or radio gets `class="form-check-input form-check-input-gray"` so it is gray, not Bootstrap white, until checked (see `.cursor/rules/gray-unchecked-checkbox-radio.mdc`). Do not add per-page overrides.

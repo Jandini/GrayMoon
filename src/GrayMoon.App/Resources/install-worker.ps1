@@ -6,11 +6,19 @@
 
 $ErrorActionPreference = 'Stop'
 
+# GrayMoon address; also used to report an unattended failure back to GrayMoon.
+$baseUrl     = '{BASE_URL}'
+
 # Desktop launches this file in its own window and sets GRAYMOON_DESKTOP_INSTALL=1
 # so the window can pause on failure and return a process exit code.
 # A copied "irm | iex" session leaves the variable unset and stays open.
 function Complete-WorkerInstall {
     param([int]$Code = 0)
+
+    # Exit code 2 was already reported as the logon-password failure; every other failure is a generic one.
+    if ($Code -ne 0 -and $Code -ne 2) {
+        Report-WorkerInstallFailure 'install-failed'
+    }
 
     if ($env:GRAYMOON_DESKTOP_INSTALL -ne '1') {
         return
@@ -60,20 +68,28 @@ function Enable-UnattendedWorkerInstall {
 # Exit code 2 is the worker's logon-password failure (InstallCommandHandler.LogonPasswordRequiredExitCode).
 # An unattended upgrade cannot ask for the new Windows password, so tell GrayMoon to leave "installing"
 # and show the error badge. The user then runs an attended install, which prompts again.
+# Any other failure of a hidden upgrade is reported as 'install-failed' so GrayMoon can tell the user.
 function Report-WorkerInstallFailure {
-    if ($env:GRAYMOON_WORKER_NONINTERACTIVE -ne '1') {
+    param([string]$Reason = 'logon-password')
+
+    if ($env:GRAYMOON_WORKER_NONINTERACTIVE -ne '1' -or $script:GrayMoonFailureReported) {
         return
     }
 
+    $script:GrayMoonFailureReported = $true
     try {
-        Invoke-RestMethod -Method Post -Uri "$baseUrl/api/worker/install-failure" -ContentType 'application/json' -Body '{"reason":"logon-password"}' | Out-Null
+        $body = @{ reason = $Reason } | ConvertTo-Json -Compress
+        Invoke-RestMethod -Method Post -Uri "$baseUrl/api/worker/install-failure" -ContentType 'application/json' -Body $body | Out-Null
     }
     catch {
-        Write-Host 'WARNING: GrayMoon could not be told that the Worker password must be entered again.' -ForegroundColor Yellow
+        Write-Host 'WARNING: GrayMoon could not be told that the Worker install failed.' -ForegroundColor Yellow
     }
 }
 
-if ($env:GRAYMOON_DESKTOP_INSTALL -eq '1') {
+# Mark a hidden upgrade before anything can fail, so every failure below reaches Report-WorkerInstallFailure.
+Enable-UnattendedWorkerInstall
+
+if ($env:GRAYMOON_DESKTOP_INSTALL -eq '1' -or $env:GRAYMOON_WORKER_NONINTERACTIVE -eq '1') {
     trap {
         Write-Host ''
         Write-Host $_.Exception.Message -ForegroundColor Red
@@ -101,7 +117,6 @@ $workerExe    = Join-Path $workerPath 'graymoon-worker.exe'
 $downloadUrl = '{DOWNLOAD_URL}'
 $hubUrl      = '{HUB_URL}'
 $zipPath     = Join-Path $env:TEMP "graymoon-worker-windows-install-$([guid]::NewGuid().ToString('N')).zip"
-$baseUrl     = '{BASE_URL}'
 
 # The worker secret lives outside the install folder so updating the worker keeps it.
 # This script never contains the secret: GrayMoon Desktop writes the file itself, and a manual
@@ -219,7 +234,6 @@ try {
 
     # Delegate all service management (create/update, rights grant, start) to the worker.
     # Unattended self-update must not wait on a hidden password prompt.
-    Enable-UnattendedWorkerInstall
     Write-Host 'Installing service...' -ForegroundColor Yellow
     if ($env:GRAYMOON_WORKER_NONINTERACTIVE -eq '1') {
         & $workerExe install --hub-url $hubUrl --non-interactive

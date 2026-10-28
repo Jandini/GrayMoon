@@ -600,6 +600,7 @@ The App and the Worker are a matched pair. `WorkerConnectionTracker` states are 
 - On a mismatch, `WorkerBridge.SendCommandAsync` refuses every command except `SelfUpdate` and `GetHostInfo`. The `SelfUpdate` request shape (`installUrl`) must never change, so any older Worker can still be updated.
 - `IWorkerBridge.GetUnavailableReason()` lets an operation refuse before it mutates anything (Restore, Enable Workspace repository, AI provider probe, `FeatureFolderCleanupService`).
 - The self-update ends only when a Worker reports the same product version. While it runs, `WorkerConnectionTracker.IsSelfUpdateInProgress` is set, so the expected disconnect is not reported as an unexpected offline.
+- A self-update that fails is not left as `installing`. The unattended `install-worker.ps1` reports any failure to `POST /api/worker/install-failure` (reason `install-failed`, or `logon-password` for a stale service password), and an update that neither finishes nor reports within `WorkerConnectionTracker.DefaultSelfUpdateTimeout` (15 minutes) is failed the same way. `WorkerConnectionTracker.InstallFailed` then drives one "GrayMoon Worker update failed" Windows notification (`WorkerDesktopNotificationPolicy`), the Home nav circle, the red `error` badge and the red Install tab; it clears when a new update starts or a matching Worker connects. This applies to an update started from the startup dialog, the always-update setting and the Worker page alike.
 - There are no per-feature Worker capability flags. A new command ships with the matching App.
 - Known window: a Worker counts as Online until it reports its version, a moment after connecting.
 
@@ -772,10 +773,10 @@ Desktop mode maps an extra hub, `DesktopNotificationHub` at `/hubs/desktop` (onl
 ```text
 server -> Desktop   Notify, WorkspaceChanged, TopBarVisibleChanged,
                     WorkerUpgradeRequired (WorkerUpgradePrompt.ClientEventName)
-Desktop -> server   SetTopBarVisible(bool), UpgradeWorker() (WorkerUpgradePrompt.UpgradeMethodName)
+Desktop -> server   SetTopBarVisible(bool), SetWorkerAutoUpdate(bool), UpgradeWorker() (WorkerUpgradePrompt.UpgradeMethodName)
 ```
 
-On every connect the hub replays the current `WorkspaceChanged`, `TopBarVisibleChanged` and any pending `WorkerUpgradeRequired`. `UpgradeWorker` sends the Worker `SelfUpdate` with an `installUrl` of `{scheme}://{host}/api/worker/install`; a failed round trip while `IsSelfUpdateInProgress` is set means the install script already stopped the Worker and is treated as success. Concurrent installs (Desktop elevated install and Worker self-update) are serialized by the machine-wide mutex `Global\GrayMoonWorkerInstall` in the App-served `install-worker.ps1`, not by Desktop.
+On every connect the hub replays the current `WorkspaceChanged`, `TopBarVisibleChanged` and any pending `WorkerUpgradeRequired`; the prompt carries `AutoUpdate`, the stored `Worker.AutoUpdate` setting (also the checkbox on the Worker page Install tab), and Desktop then calls `UpgradeWorker` without showing the dialog. `SetWorkerAutoUpdate` stores that setting. `UpgradeWorker` sends the Worker `SelfUpdate` with an `installUrl` of `{scheme}://{host}/api/worker/install`; a failed round trip while `IsSelfUpdateInProgress` is set means the install script already stopped the Worker and is treated as success. Concurrent installs (Desktop elevated install and Worker self-update) are serialized by the machine-wide mutex `Global\GrayMoonWorkerInstall` in the App-served `install-worker.ps1`, not by Desktop.
 
 GrayMoon.App remains the core application.
 
