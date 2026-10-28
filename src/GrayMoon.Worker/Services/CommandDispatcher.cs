@@ -40,6 +40,7 @@ public sealed class CommandDispatcher(
     ICommandHandler<UpdateBranchFromDefaultRequest, UpdateBranchFromDefaultResponse> updateBranchFromDefaultCommand,
     ICommandHandler<FetchCommitsRequest, FetchCommitsResponse> fetchCommitsCommand,
     ICommandHandler<GetGitChangeStatusRequest, GetGitChangeStatusResponse> getGitChangeStatusCommand,
+    ICommandHandler<EnsureGitChangesWatchersRequest, EnsureGitChangesWatchersResponse> ensureGitChangesWatchersCommand,
     ICommandHandler<GetGitFileDiffRequest, GetGitFileDiffResponse> getGitFileDiffCommand,
     ICommandHandler<StageGitChangesRequest, GitMutationResponse> stageGitChangesCommand,
     ICommandHandler<UnstageGitChangesRequest, GitMutationResponse> unstageGitChangesCommand,
@@ -100,6 +101,7 @@ public sealed class CommandDispatcher(
         ["UpdateBranchFromDefault"] = async (req, ct) => await updateBranchFromDefaultCommand.ExecuteAsync((UpdateBranchFromDefaultRequest)req, ct),
         ["FetchCommits"] = async (req, ct) => await fetchCommitsCommand.ExecuteAsync((FetchCommitsRequest)req, ct),
         ["GetGitChangeStatus"] = async (req, ct) => await getGitChangeStatusCommand.ExecuteAsync((GetGitChangeStatusRequest)req, ct),
+        ["EnsureGitChangesWatchers"] = async (req, ct) => await ensureGitChangesWatchersCommand.ExecuteAsync((EnsureGitChangesWatchersRequest)req, ct),
         ["GetGitFileDiff"] = async (req, ct) => await getGitFileDiffCommand.ExecuteAsync((GetGitFileDiffRequest)req, ct),
         ["StageGitChanges"] = async (req, ct) => await stageGitChangesCommand.ExecuteAsync((StageGitChangesRequest)req, ct),
         ["UnstageGitChanges"] = async (req, ct) => await unstageGitChangesCommand.ExecuteAsync((UnstageGitChangesRequest)req, ct),
@@ -154,6 +156,9 @@ public sealed class CommandDispatcher(
                 capabilityProvider.Remember(r.WorkspaceId, r.Capabilities);
                 break;
             case FetchCommitsRequest r:
+                capabilityProvider.Remember(r.WorkspaceId, r.Capabilities);
+                break;
+            case EnsureGitChangesWatchersRequest r:
                 capabilityProvider.Remember(r.WorkspaceId, r.Capabilities);
                 break;
             case GetGitChangeStatusRequest r:

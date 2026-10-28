@@ -520,6 +520,8 @@ A failed, cancelled or timed-out watcher-driven scan is retried with backoff (`W
 
 Removals are logged with a reason (`IdleExpired`, `ExplicitRemoval` for a removal claim, `WorkerShutdown`). A removal claim (section 2A) releases watchers beneath it; they come back with the next `Acquire` or `Touch`.
 
+`EnsureGitChangesWatchers` (read pool, no git) is the Git-free renewal: one batch per workspace context, with paths resolved from workspace root, folder name and repository names exactly as `GetGitChangeStatus` does (names that are rooted or contain a separator are `Invalid`). It returns the Worker process id, the idle grace and one status per repository (`Renewed`, `Created`, `Recovered`, `Degraded`, `UnderRemoval`, `Missing`, `Invalid`); a folder listed twice is renewed once and a batch is capped at 500. The App resolves targets through `GitChangesMonitorTargets` (shared with the scanner). With `GitChanges:EnsureWatchersInSweep` (default false) each monitoring sweep sends this batch per context before the unchanged scan and logs the outcome with `[GCDiag] ensure watchers`.
+
 The App keeps this alive only while it keeps asking: `GitChangesMonitoringBackgroundService` sweeps every active workspace each `WatcherRenewalIntervalMinutes`. A workspace is active while a circuit holds a lease (`WorkspaceGitChangesActivityBinder`, an interactive island in `MainLayout`, so the lease lives as long as the circuit) plus `WorkspaceActivityGraceMinutes` (default 8) after the last circuit leaves. `MainLayout` is rendered statically; a binder that was not an island gained and released its lease within one HTTP request and an open page never held it.
 
 

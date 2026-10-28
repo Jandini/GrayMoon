@@ -80,7 +80,7 @@ public sealed class GitRepositoryWatcherManager(
     /// <summary>Number of entries whose OS watchers are actually running.</summary>
     public int HealthyWatcherCount => _entries.Values.Count(entry => entry.IsHealthy);
 
-    private TimeSpan IdleGrace => TimeSpan.FromMinutes(Math.Max(1, _options.WatcherIdleGraceMinutes));
+    public TimeSpan IdleGrace => TimeSpan.FromMinutes(Math.Max(1, _options.WatcherIdleGraceMinutes));
 
     public IDisposable Acquire(string repoPath)
     {

@@ -86,6 +86,15 @@ public sealed class GitChangesOptions
     /// </summary>
     public int SnapshotPathsInlineMax { get; init; } = 2_000;
 
+    /// <summary>
+    /// Phase 2 (off by default): each monitoring sweep also sends one Git-free <c>EnsureGitChangesWatchers</c> batch per
+    /// context before scanning, and logs what the Worker did for every watcher. The scan itself is unchanged.
+    /// </summary>
+    public bool EnsureWatchersInSweep { get; init; }
+
+    /// <summary>Timeout for one <c>EnsureGitChangesWatchers</c> call. Default 30 seconds.</summary>
+    public int WatcherEnsureTimeoutSeconds { get; init; } = 30;
+
     /// <summary>True when <paramref name="totalEntries"/> should use summary-first + lazy pages.</summary>
     public bool UseLargeHydration(int totalEntries) =>
         totalEntries > Math.Max(0, FullHydrationMaxEntries);

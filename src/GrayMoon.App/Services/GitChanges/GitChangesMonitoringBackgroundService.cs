@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using GrayMoon.App.Data;
 using GrayMoon.Common.Git;
 using GrayMoon.Application.Features;
 using Microsoft.Extensions.Options;
@@ -101,6 +102,54 @@ public sealed class GitChangesMonitoringBackgroundService(
         }
     }
 
+    private async Task EnsureWatchersAsync(
+        IServiceProvider services, int workspaceId, WorkspaceFeatureContextId contextId, CancellationToken cancellationToken)
+    {
+        var started = Stopwatch.GetTimestamp();
+        try
+        {
+            var targets = await GitChangesMonitorTargets.ResolveAsync(
+                services.GetRequiredService<AppDbContext>(),
+                services.GetRequiredService<IWorkspaceContextPathResolver>(),
+                workspaceId, contextId, null, cancellationToken);
+            if (targets.Count == 0)
+            {
+                return;
+            }
+
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, gitChangesOptions.Value.WatcherEnsureTimeoutSeconds)));
+            var first = targets[0];
+            var result = await services.GetRequiredService<IGitChangesWorkerClient>().EnsureWatchersAsync(
+                first.Root, first.WorkspaceName, first.WorkspaceRepositoryName, workspaceId,
+                targets.Select(t => new GitChangesEnsureRepository(t.RepositoryId, t.RepositoryName)).ToList(),
+                timeout.Token);
+
+            if (!result.Success)
+            {
+                logger.LogWarning(
+                    "[GCDiag] ensure watchers failed: workspace={WorkspaceId} context={ContextId} {Error}",
+                    workspaceId, contextId.Value, result.ErrorMessage);
+                return;
+            }
+
+            var counts = string.Join(' ', result.Results.GroupBy(r => r.Status).OrderBy(g => g.Key).Select(g => $"{g.Key}={g.Count()}"));
+            logger.Log(
+                result.Results.Any(r => r.Status is "Degraded" or "Created" or "Recovered") ? LogLevel.Information : LogLevel.Debug,
+                "[GCDiag] ensure watchers: workspace={WorkspaceId} context={ContextId} repos={Total} {Counts} worker={Worker} graceSec={Grace} elapsedMs={ElapsedMs}",
+                workspaceId, contextId.Value, targets.Count, counts, result.WorkerInstanceId, result.EffectiveGraceSeconds,
+                (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning("[GCDiag] ensure watchers timed out: workspace={WorkspaceId} context={ContextId}", workspaceId, contextId.Value);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "[GCDiag] ensure watchers threw: workspace={WorkspaceId} context={ContextId}", workspaceId, contextId.Value);
+        }
+    }
+
     private async Task MonitorActiveWorkspacesAsync(CancellationToken cancellationToken)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
@@ -156,6 +205,11 @@ public sealed class GitChangesMonitoringBackgroundService(
                     }
 
                     var contextStarted = Stopwatch.GetTimestamp();
+                    if (gitChangesOptions.Value.EnsureWatchersInSweep)
+                    {
+                        await EnsureWatchersAsync(scope.ServiceProvider, workspaceId, ctx.ContextId, cancellationToken);
+                    }
+
                     await scanner.ScanWorkspaceAsync(workspaceId, ctx.ContextId, cancellationToken);
                     logger.LogInformation(
                         "[GCDiag] sweep context done: workspace={WorkspaceId} context={ContextId} elapsedMs={ElapsedMs}",
