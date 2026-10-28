@@ -44,7 +44,7 @@ public sealed class InstallWorkerScriptTests
         Assert.Contains("install --hub-url $hubUrl --non-interactive", script, StringComparison.Ordinal);
         Assert.Contains("if ($installExit -eq 2)", script, StringComparison.Ordinal);
         Assert.Contains("/api/worker/install-failure", script, StringComparison.Ordinal);
-        Assert.Contains("\"reason\":\"logon-password\"", script, StringComparison.Ordinal);
+        Assert.Contains("'logon-password'", script, StringComparison.Ordinal);
         Assert.Contains("Report-WorkerInstallFailure", script, StringComparison.Ordinal);
     }
     [Fact]
@@ -77,5 +77,26 @@ public sealed class InstallWorkerScriptTests
         var installed = script.IndexOf("& $workerExe install", StringComparison.Ordinal);
         Assert.True(verified >= 0);
         Assert.True(installed > verified);
+    }
+
+    [Fact]
+    public void InstallScript_ReportsEveryUnattendedFailureNotOnlyTheLogonPassword()
+    {
+        var assembly = typeof(WorkerInstallService).Assembly;
+        using var stream = assembly.GetManifestResourceStream("GrayMoon.App.Resources.install-worker.ps1");
+        Assert.NotNull(stream);
+
+        using var reader = new StreamReader(stream!);
+        var script = reader.ReadToEnd();
+
+        // Every failing path ends in Complete-WorkerInstall with a nonzero code, which is where the generic report is sent.
+        Assert.Contains("Report-WorkerInstallFailure 'install-failed'", script, StringComparison.Ordinal);
+
+        // The hidden-run marker and the address must exist before the first early failure (the Administrator check).
+        var admin = script.IndexOf("must be run as Administrator", StringComparison.Ordinal);
+        var marked = script.IndexOf("# Mark a hidden upgrade before anything can fail", StringComparison.Ordinal);
+        var address = script.IndexOf("'{BASE_URL}'", StringComparison.Ordinal);
+        Assert.True(marked >= 0 && marked < admin);
+        Assert.True(address >= 0 && address < admin);
     }
 }

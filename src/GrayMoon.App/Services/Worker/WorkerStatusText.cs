@@ -3,9 +3,9 @@ namespace GrayMoon.App.Services.Worker;
 /// <summary>Label and tooltip for the top-right worker badge.</summary>
 internal static class WorkerStatusText
 {
-    public static string Label(bool selfUpdateInProgress, bool logonPasswordRequired, WorkerConnectionState state)
+    public static string Label(bool selfUpdateInProgress, bool logonPasswordRequired, WorkerConnectionState state, bool installFailed = false)
     {
-        if (logonPasswordRequired)
+        if (logonPasswordRequired || installFailed)
             return "error";
         if (selfUpdateInProgress)
             return "installing";
@@ -27,10 +27,13 @@ internal static class WorkerStatusText
         WorkerConnectionState state,
         string? workerSemVer,
         int pendingCount,
-        bool unsecuredWorker)
+        bool unsecuredWorker,
+        bool installFailed = false)
     {
         if (logonPasswordRequired)
             return "The Windows password for the Worker service is no longer valid. Click to install the Worker again.";
+        if (installFailed)
+            return "The Worker update failed. Click to install the Worker manually.";
         if (selfUpdateInProgress)
             return "Worker is installing an update.";
 

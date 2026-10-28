@@ -9,7 +9,7 @@
 @inject IToastService ToastService
 @rendermode @(new InteractiveServerRenderMode(prerender: true))
 
-@if (LogonPasswordRequired)
+@if (LogonPasswordRequired || InstallFailed)
 {
     <a href="/worker" class="badge bg-danger text-decoration-none ms-2"
        title="@TitleText"
@@ -44,6 +44,7 @@ else
     private string? WorkerSemVer => WorkerConnectionTracker.WorkerSemVer;
     private bool IsUpdating => WorkerConnectionTracker.IsSelfUpdateInProgress;
     private bool LogonPasswordRequired => WorkerConnectionTracker.LogonPasswordRequired;
+    private bool InstallFailed => WorkerConnectionTracker.InstallFailed;
 
     protected override void OnInitialized()
     {
@@ -87,6 +88,7 @@ else
     private bool ShowActivityFrame =>
         !IsUpdating
         && !LogonPasswordRequired
+        && !InstallFailed
         && State == WorkerConnectionState.Online
         && WorkerQueueStateService.GetTotalPendingCount() > 0;
 
@@ -97,7 +99,8 @@ else
     private string StateLabel => WorkerStatusText.Label(
         IsUpdating,
         LogonPasswordRequired,
-        State);
+        State,
+        InstallFailed);
 
     private string TitleText => WorkerStatusText.Title(
         IsUpdating,
@@ -105,7 +108,8 @@ else
         State,
         WorkerSemVer,
         WorkerQueueStateService.GetTotalPendingCount(),
-        WorkerSecret.UnsecuredWorkerConnected);
+        WorkerSecret.UnsecuredWorkerConnected,
+        InstallFailed);
 
     public void Dispose() => WorkerQueueStateService.RemoveQueueStateChanged(OnQueueStateChanged);
 }

@@ -77,4 +77,25 @@ public sealed class WorkerInstallFailureTests
             WorkerStatusText.Title(false, true, WorkerConnectionState.Offline, null, 0, false),
             StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void Generic_install_failure_report_ends_installing_and_marks_the_update_failed()
+    {
+        var tracker = new WorkerConnectionTracker("2.0.0");
+        tracker.OnWorkerConnected("old");
+        tracker.BeginSelfUpdate();
+        tracker.OnWorkerDisconnected("old");
+
+        var result = WorkerEndpoints.ReportInstallFailure(
+            new DefaultHttpContext().Request,
+            new WorkerEndpoints.WorkerInstallFailureRequest(WorkerEndpoints.InstallFailedReason),
+            tracker);
+
+        Assert.Equal(StatusCodes.Status200OK, Assert.IsAssignableFrom<IStatusCodeHttpResult>(result).StatusCode);
+        Assert.True(tracker.InstallFailed);
+        Assert.False(tracker.LogonPasswordRequired);
+        Assert.False(tracker.IsSelfUpdateInProgress);
+        Assert.Equal("error", WorkerStatusText.Label(false, false, tracker.State, tracker.InstallFailed));
+        Assert.Contains("manually", WorkerStatusText.Title(false, false, tracker.State, null, 0, false, tracker.InstallFailed));
+    }
 }

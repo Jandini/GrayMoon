@@ -21,6 +21,9 @@ public static class WorkerEndpoints
 
     public const string LogonPasswordFailureReason = "logon-password";
 
+    /// <summary>Any other unattended install failure (download, extract, service stop, install exit code).</summary>
+    public const string InstallFailedReason = "install-failed";
+
     public sealed record WorkerInstallFailureRequest(string? Reason);
 
     /// <summary>
@@ -35,10 +38,13 @@ public static class WorkerEndpoints
         if (request.Headers.ContainsKey("Origin"))
             return Results.StatusCode(StatusCodes.Status403Forbidden);
 
-        if (!string.Equals(body?.Reason, LogonPasswordFailureReason, StringComparison.Ordinal))
+        if (string.Equals(body?.Reason, LogonPasswordFailureReason, StringComparison.Ordinal))
+            tracker.ReportLogonPasswordFailure();
+        else if (string.Equals(body?.Reason, InstallFailedReason, StringComparison.Ordinal))
+            tracker.ReportInstallFailure();
+        else
             return Results.BadRequest();
 
-        tracker.ReportLogonPasswordFailure();
         // 200 with a body: Windows PowerShell 5.1's Invoke-RestMethod treats 204 as a failure.
         return Results.Ok(new { reported = true });
     }

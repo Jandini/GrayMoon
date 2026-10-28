@@ -33,4 +33,16 @@ public sealed class HomeNavNotificationTests
             "",
             HomeNavNotification.Title(WorkerConnectionState.Offline, selfUpdateInProgress: true));
     }
+
+    [Theory]
+    [InlineData(WorkerConnectionState.Offline)]
+    [InlineData(WorkerConnectionState.VersionMismatch)]
+    public void A_failed_update_shows_the_circle_even_when_the_old_worker_is_still_connected(WorkerConnectionState state)
+    {
+        Assert.True(HomeNavNotification.ShouldShow(state, selfUpdateInProgress: false, installFailed: true));
+        Assert.False(HomeNavNotification.ShouldShow(state, selfUpdateInProgress: true, installFailed: true));
+        Assert.Equal(
+            "Worker update failed - install it manually",
+            HomeNavNotification.Title(state, selfUpdateInProgress: false, installFailed: true));
+    }
 }

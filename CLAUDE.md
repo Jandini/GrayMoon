@@ -210,3 +210,7 @@ Repositories checked out on a tag (`IsOnTag` / `CheckedOutTag`, including Worksp
 ### CSS conventions for the loading overlay terminal
 
 Global terminal styles live in `wwwroot/css/loading-overlay.css`. The embedded GHA terminal in `WorkspaceActions` is a fixed 8-line board with a caption/progress header (`actions-gha-terminal__caption`, `actions-gha-terminal__scroll`, `actions-gha-terminal__progress`) in `GhaWorkflowLiveTerminal.razor.css`, not a split-pane layout. Line color variants: `--out` (green/yellow by scheme), `--err` (red), `--cmd` (gray). Scheme toggling uses `.loading-overlay-terminal--scheme-yellow`. High-specificity overrides needed to beat the running-row `td { color }` inheritance use `!important` in `loading-overlay.css`.
+
+### Unchecked checkboxes and radios are gray
+
+Bootstrap's unchecked `form-check-input` is white on the dark theme. When adding a new checkbox or radio, always use `class="form-check-input form-check-input-gray"` (defined in `wwwroot/app.css`) so it is gray until checked; do not write per-page overrides. Same rule as `.cursor/rules/gray-unchecked-checkbox-radio.mdc`. Switches (`role="switch"`) are already gray.

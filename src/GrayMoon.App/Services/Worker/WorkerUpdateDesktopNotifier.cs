@@ -49,7 +49,8 @@ public sealed class WorkerUpdateDesktopNotifier(
             state,
             workerConnectionTracker.IsSelfUpdateInProgress,
             workerConnectionTracker.WorkerSemVer,
-            workerConnectionTracker.LogonPasswordRequired);
+            workerConnectionTracker.LogonPasswordRequired,
+            workerConnectionTracker.InstallFailed);
         if (observation.SuppressUpdateNotification || notification is null)
             return;
 
