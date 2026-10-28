@@ -93,7 +93,7 @@ flowchart LR
   Diff -.-> Cap
 ```
 
-Routing is by command name in `SignalRConnectionHostedService`: `ReadOnlyCommands` = `GetGitChangeStatus`, `ListGitWorktrees`, `InspectWorktree`; `DiffCommands` = `GetGitFileDiff`; everything else goes to the main pool. Each pool is a bounded `Channel<JobEnvelope>` drained by its own hosted service (`MainJobBackgroundService`, `ReadJobBackgroundService`, `DiffJobBackgroundService`, all derived from `JobBackgroundService`).
+Routing is by command name in `SignalRConnectionHostedService`: `ReadOnlyCommands` = `GetGitChangeStatus`, `EnsureGitChangesWatchers`, `ListGitWorktrees`, `InspectWorktree`; `DiffCommands` = `GetGitFileDiff`; everything else goes to the main pool. Each pool is a bounded `Channel<JobEnvelope>` drained by its own hosted service (`MainJobBackgroundService`, `ReadJobBackgroundService`, `DiffJobBackgroundService`, all derived from `JobBackgroundService`).
 
 Sizes (`WorkerOptions`):
 
@@ -296,7 +296,7 @@ Must stay sequential:
 dependency-level loops                       DependencyUpdateOrchestrator, WorkspacePushService (section 6)
 writes through a shared scoped AppDbContext
 WorkspaceFeatureReconciler apply phase
-Git Changes monitoring and line-stats sweeps (each scan is already bounded)
+Git Changes audits and line-stats passes (each scan is already bounded)
 single-reader queues                         WorkspaceGitChangesWriteQueue, WorkerSyncNotificationQueue
 sync barrier                                 IWorkerSyncNotificationBarrier (implemented by WorkerSyncNotificationQueue): DependencyUpdateOrchestrator.RunAsync awaits it before reading stored state, so hook syncs already received are applied before a run plans or selects push levels
 FeatureRemovalQueue                          fixed at MaxConcurrentRemovals = 4 workers, FIFO
@@ -335,7 +335,7 @@ Repair (`repair-feature`) re-runs worktree create only for `Pending` / `NeedsRep
 
 ### 5D. Feature removal internals and pending-delete cleanup
 
-App side (`RemoveFeatureAsync`, from `FeatureRemovalQueue`, no lock): pauses the context's Git Changes sweep (section 9A), runs `UninitCodeGraph` first, marks the Feature and live rows `Removing`, removes Source worktrees concurrently (bounded by `MaxParallelOperations`), then the root worktree alone and only when every Source succeeded (D10). Each repository row becomes `Removed` in its own short-lived context right after its worktree is unregistered, so a crash can resume. Local branches are deleted afterwards (`-D` only when authorized) and, when requested, remote branches with a lease (`expectedSha`).
+App side (`RemoveFeatureAsync`, from `FeatureRemovalQueue`, no lock): pauses the context's Git Changes renewal and audits (section 9A), runs `UninitCodeGraph` first, marks the Feature and live rows `Removing`, removes Source worktrees concurrently (bounded by `MaxParallelOperations`), then the root worktree alone and only when every Source succeeded (D10). Each repository row becomes `Removed` in its own short-lived context right after its worktree is unregistered, so a crash can resume. Local branches are deleted afterwards (`-D` only when authorized) and, when requested, remote branches with a lease (`expectedSha`).
 
 Worker side (`RemoveGitWorktree` -> `GitWorktreeService.RemoveWorktreeAsync`):
 
@@ -520,9 +520,9 @@ A failed, cancelled or timed-out watcher-driven scan is retried with backoff (`W
 
 Removals are logged with a reason (`IdleExpired`, `ExplicitRemoval` for a removal claim, `WorkerShutdown`). A removal claim (section 2A) releases watchers beneath it; they come back with the next `Acquire` or `Touch`.
 
-`EnsureGitChangesWatchers` (read pool, no git) is the Git-free renewal: one batch per workspace context, with paths resolved from workspace root, folder name and repository names exactly as `GetGitChangeStatus` does (names that are rooted or contain a separator are `Invalid`). It returns the Worker process id, the idle grace and one status per repository (`Renewed`, `Created`, `Recovered`, `Degraded`, `UnderRemoval`, `Missing`, `Invalid`); a folder listed twice is renewed once and a batch is capped at 500. The App resolves targets through `GitChangesMonitorTargets` (shared with the scanner). With `GitChanges:EnsureWatchersInSweep` (default false) each monitoring sweep sends this batch per context before the unchanged scan and logs the outcome with `[GCDiag] ensure watchers`.
+`EnsureGitChangesWatchers` (read pool, no git) is the Git-free renewal: one batch per workspace context, with paths resolved from workspace root, folder name and repository names exactly as `GetGitChangeStatus` does (names that are rooted or contain a separator are `Invalid`). It returns the Worker process id, the idle grace and one status per repository (`Renewed`, `Created`, `Recovered`, `Degraded`, `UnderRemoval`, `Missing`, `Invalid`); a folder listed twice is renewed once and a batch is capped at 500. The App resolves targets through `GitChangesMonitorTargets` (shared with the scanner). The keeper sends it (below) and logs each outcome with `[GCDiag] ensure watchers`.
 
-The App keeps this alive only while it keeps asking: `GitChangesMonitoringBackgroundService` sweeps every active workspace each `WatcherRenewalIntervalMinutes`. A workspace is active while a circuit holds a lease (`WorkspaceGitChangesActivityBinder`, an interactive island in `MainLayout`, so the lease lives as long as the circuit) plus `WorkspaceActivityGraceMinutes` (default 8) after the last circuit leaves. `MainLayout` is rendered statically; a binder that was not an island gained and released its lease within one HTTP request and an open page never held it.
+The App keeps this alive with two independent loops. `GitChangesWatcherKeeper` ticks every `WatcherRenewalIntervalMinutes` (default 3, clamped below the idle grace) and sends one `EnsureGitChangesWatchers` batch per context for every context of every active workspace: it runs no git and never waits for a scan, runs at most `WatcherKeeperMaxParallelContexts` contexts at once, gives each call its own timeout (`WatcherEnsureTimeoutSeconds`, never more than half the interval), isolates failures per context, skips a context paused for removal, and warns once when the cadence would leave fewer than two attempts inside the Worker idle grace. `GitChangesAuditScheduler` is the repair path: one real status scan per context, single-flight and coalesced per context, at most `WatcherAuditMaxParallelContexts` at a time, each under `WatcherAuditTimeoutSeconds`. It runs every `WatcherAuditIntervalMinutes` (default 5, contexts staggered by 2 s), after a Worker reconnect (the keeper renews first, then audits), when an Ensure response carries a different Worker instance id (a Worker restart that raised no `Online` event), and on cold activation of a workspace (its Feature contexts; the special Workspace context is scanned by the page warm-up). Repeated `Online` reports within seconds produce one renewal pass and one audit per context. A change a watcher missed is repaired within the audit interval. Return from Idle or Hidden is not an audit trigger because the activity signal (`AppActivityTracker`) does not fire today. A workspace is active A workspace is active while a circuit holds a lease (`WorkspaceGitChangesActivityBinder`, an interactive island in `MainLayout`, so the lease lives as long as the circuit) plus `WorkspaceActivityGraceMinutes` (default 8) after the last circuit leaves. `MainLayout` is rendered statically; a binder that was not an island gained and released its lease within one HTTP request and an open page never held it.
 
 
 ### Watcher event
@@ -549,7 +549,7 @@ Worker: `IGitChangesRefreshSuppressor.BeginExternalRepositoryMutation(repoPath)`
 - Closing the last scope schedules exactly one debounced refresh, and only if a watcher event was seen.
 - Not suppressed: manual `RefreshNowAsync`, stage, unstage and commit.
 
-App: `IWorkspaceGitChangesMonitoringPause` makes the periodic monitoring sweep skip a Feature context while Remove Feature or Roll back deletes its worktrees. Ref-counted per context id; the special Workspace context is never paused.
+App: `IWorkspaceGitChangesMonitoringPause` makes the keeper and the audit scheduler skip a Feature context while Remove Feature or Roll back deletes its worktrees. Ref-counted per context id; the special Workspace context is never paused.
 
 ---
 
@@ -763,7 +763,7 @@ App and Worker are version-locked:
 - A Worker counts as `Online` until it reports its version, which happens a moment after it connects.
 - There are no per-feature Worker capability flags; a new Worker command ships with the matching App.
 
-`Online` transitions trigger `WorkspaceFeatureReconciler` (section 5E) and the pending-delete sweep (section 5D).
+`Online` transitions trigger `WorkspaceFeatureReconciler` (section 5E), the pending-delete sweep (section 5D), and the Git Changes keeper's watcher renewal pass followed by an audit scan of every active context (section 9A).
 
 ---
 

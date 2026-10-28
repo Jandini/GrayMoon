@@ -38,7 +38,7 @@ flowchart TB
   end
 ```
 
-GrayMoon never runs git from the App. The Changes page never calls the Worker to paint the tree: it reads SQLite only. Worker scans happen on lease renewal, watcher debounce, monitoring sweeps, manual Refresh, post-mutation snapshots, and post-sync rescans.
+GrayMoon never runs git from the App. The Changes page never calls the Worker to paint the tree: it reads SQLite only. Worker scans happen on lease renewal, watcher debounce, periodic and reconnect audits, manual Refresh, post-mutation snapshots, and post-sync rescans.
 
 ## 2. How changed files are collected (Worker)
 
@@ -49,7 +49,7 @@ GrayMoon never runs git from the App. The Changes page never calls the Worker to
 | Request | `GrayMoon.Worker/Jobs/Requests/GetGitChangeStatusRequest.cs` |
 | Response | `GrayMoon.Worker/Jobs/Response/GetGitChangeStatusResponse.cs` (`Snapshot: GitChangeSnapshot?`) |
 | Handler | `GetGitChangeStatusCommand` |
-| Pool | Worker **read** pool (`ReadOnlyCommands`: `GetGitChangeStatus`, `ListGitWorktrees`, `InspectWorktree`) |
+| Pool | Worker **read** pool (`ReadOnlyCommands`: `GetGitChangeStatus`, `EnsureGitChangesWatchers`, `ListGitWorktrees`, `InspectWorktree`) |
 | Scan implementation | `GitCliRepositoryGitChangesService.GetStatusAsync` |
 | Coalescing | `GitStatusRefreshCoordinator.RefreshNowAsync` |
 | Watchers | `GitRepositoryWatcher` / `GitRepositoryWatcherManager` |
@@ -71,7 +71,7 @@ git --no-optional-locks diff --numstat
 git --no-optional-locks diff --cached --numstat
 ```
 
-plus line counts for untracked text files under a soft 5 MiB per-file cap (`SoftSizeLimitBytes`). Watcher and background sweeps leave `includeLineStats` false; the App's `GitChangesLineStatsRefresh` later requests a stats-bearing scan when counts are missing.
+plus line counts for untracked text files under a soft 5 MiB per-file cap (`SoftSizeLimitBytes`). Watcher and audit scans leave `includeLineStats` false; the App's `GitChangesLineStatsRefresh` later requests a stats-bearing scan when counts are missing.
 
 `GitPorcelainV2Parser.Parse` turns the porcelain output into `IReadOnlyList<GitChangeEntry>`. There is **no change-count cap**, **no path pagination**, and **no path truncation** on the Worker today. Nested ignored directories are not listed as individual files; an untracked nested git repository appears as one directory entry ending in `/` (`--untracked-files=all`).
 
@@ -141,7 +141,7 @@ There is no incremental path-diff persist: every successful snapshot is a full r
 
 `WorkspaceGitChanges.Realtime.cs` handles `ContextGitChangesUpdated(workspaceId, contextId, repositoryId, contentDigest)`. When the digest equals the one of that repository already in `_view`, it does nothing (Outcome `NoOp`); a missing digest is never a no-op. Otherwise it patches **that repository only**. Full mode re-reads that repository's entries (`GetRepositoryAsync`). Summary mode reads only its status row and kind counts (`GetRepositorySummaryAsync`), drops its node caches, and re-fetches the first page of each expanded prefix (Outcome `PatchedOnly`). The drop and re-fetch run with intermediate tree paints suppressed (`_quietCacheRefreshDepth`; also a patch that finishes while another is re-fetching defers its paint to that one), so the repository's rows never flash empty or "Loading..." - this matters right after a reload, when the scan activated by route activity pushes one snapshot per repository. Fetches in flight are tracked by cache object, so a fetch started before an invalidation is discarded and never blocks its replacement. If the patched counts cross `FullHydrationMaxEntries` (and no filter is active) the page reloads into the other mode. It does not reload sibling repositories. Legacy `GitChangesUpdated` is ignored when the context event is authoritative. Unrelated contexts stay `NoOp`.
 
-Opening the page does not start a status scan. Scans are activated by workspace route activity (`WorkspaceGitChangesRouteActivity` → `WorkspaceGitChangesActivation`), monitoring (`GitChangesMonitoringBackgroundService`), line-stats fill-in, Sync post-hooks, and the Refresh button. Route activity is held by `WorkspaceGitChangesActivityBinder`, an interactive server island (`prerender: false`) in the static `MainLayout`, so the lease lives as long as the circuit; the watcher lifecycle that depends on it is in `04-runtime-communication-and-concurrency.md`.
+Opening the page does not start a status scan. Scans are activated by workspace route activity (`WorkspaceGitChangesRouteActivity` → `WorkspaceGitChangesActivation`), monitoring (`GitChangesWatcherKeeper` renews watchers without git, `GitChangesAuditScheduler` scans), line-stats fill-in, Sync post-hooks, and the Refresh button. Route activity is held by `WorkspaceGitChangesActivityBinder`, an interactive server island (`prerender: false`) in the static `MainLayout`, so the lease lives as long as the circuit; the watcher lifecycle that depends on it is in `04-runtime-communication-and-concurrency.md`.
 
 ### Tree construction
 
@@ -213,7 +213,7 @@ Worker:     GetGitChangeStatusCommand, GitCliRepositoryGitChangesService, GitSta
 App read:   IWorkspaceGitChangesReadService / WorkspaceGitChangesReadService,
             WorkspaceGitChangesView (+ Repository / Entry views)
 App write:  WorkspaceGitChangesWriteQueue, GitChangesSnapshotPushHandler,
-            GitChangesWorkspaceScanner, GitChangesMonitoringBackgroundService,
+            GitChangesWorkspaceScanner, GitChangesWatcherKeeper, GitChangesAuditScheduler,
             GitChangesLineStatsRefresh, WorkspaceGitChangesActivation
 App UI:     WorkspaceGitChanges*.cs / .razor, GitChangesTree.razor, GitChangesTreeBuilder,
             WorkspaceGitChangeSearchMatcher, IWorkspaceGitChangesOperations, GitChangesWorkerClient

@@ -291,7 +291,12 @@ try
     builder.Services.AddHostedService<TokenHealthBackgroundService>();
     builder.Services.AddSingleton<WorkspaceGitChangesWriteQueue>();
     builder.Services.AddHostedService(sp => sp.GetRequiredService<WorkspaceGitChangesWriteQueue>());
-    builder.Services.AddHostedService<GitChangesMonitoringBackgroundService>();
+    builder.Services.AddSingleton(TimeProvider.System);
+    builder.Services.AddSingleton<IGitChangesContextEnsurer, GitChangesContextEnsurer>();
+    builder.Services.AddSingleton<GitChangesAuditScheduler>();
+    builder.Services.AddSingleton<IGitChangesAuditScheduler>(sp => sp.GetRequiredService<GitChangesAuditScheduler>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<GitChangesAuditScheduler>());
+    builder.Services.AddHostedService<GitChangesWatcherKeeper>();
 
     // Connector services
     builder.Services.AddTransient<GitHubOverlayLoggingHandler>();
