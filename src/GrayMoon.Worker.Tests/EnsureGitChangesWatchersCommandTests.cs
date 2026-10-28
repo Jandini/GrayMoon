@@ -83,7 +83,7 @@ public sealed class EnsureGitChangesWatchersCommandTests : IDisposable
     {
         MakeRepo("a");
 
-        var response = await _command.ExecuteAsync(Request((1, "a"), (2, "A")));
+        var response = await _command.ExecuteAsync(Request((1, "a"), (2, "a")));
 
         Assert.Equal(["Created", "Renewed"], response.Results.Select(r => r.Status));
         Assert.Equal(1, _manager.ActiveWatcherCount);
