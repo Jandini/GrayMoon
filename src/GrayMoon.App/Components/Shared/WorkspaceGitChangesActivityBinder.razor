@@ -1,8 +1,12 @@
 @implements IDisposable
 @inject NavigationManager NavigationManager
 @inject WorkspaceGitChangesRouteActivity RouteActivity
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
 @* No markup - mounted once per circuit (MainLayout.razor) so any /workspaces/{id}/... page keeps
-   Git Changes activity (and Worker watchers) warm without page-level activation leases. *@
+   Git Changes activity (and Worker watchers) warm without page-level activation leases.
+   MainLayout itself is rendered statically, so this component must be an interactive island
+   (prerender: false): in the static request scope the lease was gained and released within one
+   request and an open page never held it. As an island it lives as long as the circuit. *@
 
 @code {
     protected override void OnInitialized()

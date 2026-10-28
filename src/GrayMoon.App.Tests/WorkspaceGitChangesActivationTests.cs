@@ -5,6 +5,7 @@ using GrayMoon.App.Services.Jobs;
 using GrayMoon.App.Services.Ui;
 using GrayMoon.Application.Features;
 using GrayMoon.Common.Git;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -23,6 +24,28 @@ public sealed class WorkspaceGitChangesActivationTests
         await WaitUntilAsync(() => scanner.Calls == 1);
         Assert.Equal(8, scanner.LastWorkspaceId);
         Assert.True(scanner.LastIncludeLineStats);
+
+        jobs.Dispose();
+    }
+
+    [Fact]
+    public async Task Cold_activation_audits_every_Feature_context_once_and_leaves_the_Workspace_context_to_the_warm_up()
+    {
+        var audit = new RecordingAuditScheduler();
+        var (activation, _, scanner, jobs) = CreateActivation(
+            workerConnected: true, audit, new FakeContextCatalog().With(8, 100).With(8, 101).With(8, 102));
+
+        using var lease = activation.Activate(8);
+        await WaitUntilAsync(() => scanner.Calls == 1);
+
+        Assert.Equal([101, 102], audit.Requests.Select(r => r.ContextId).Order());
+        Assert.All(audit.Requests, r => Assert.Equal(GitChangesAuditReason.Activation, r.Reason));
+
+        // Another route transition while the workspace is already active adds neither a scan nor an audit.
+        using var second = activation.Activate(8);
+        await Task.Delay(50);
+        Assert.Equal(1, scanner.Calls);
+        Assert.Equal(2, audit.Requests.Count);
 
         jobs.Dispose();
     }
@@ -104,7 +127,8 @@ public sealed class WorkspaceGitChangesActivationTests
         WorkspaceGitChangesActivation Activation,
         WorkspaceGitChangesActivityTracker Tracker,
         RecordingScanner Scanner,
-        BackgroundJobService Jobs) CreateActivation(bool workerConnected)
+        BackgroundJobService Jobs) CreateActivation(
+        bool workerConnected, RecordingAuditScheduler? audit = null, IServiceScopeFactory? scopes = null)
     {
         var tracker = new WorkspaceGitChangesActivityTracker(
             Options.Create(new GitChangesOptions { WorkspaceActivityGraceMinutes = 8 }));
@@ -116,8 +140,9 @@ public sealed class WorkspaceGitChangesActivationTests
             scanner,
             new FakeWorkerBridge(workerConnected),
             jobs,
+            audit ?? new RecordingAuditScheduler(),
             new NoopToastService(),
-            new FakeFeatureContextScopeFactory(new WorkspaceFeatureContextId(1)),
+            scopes ?? new FakeFeatureContextScopeFactory(new WorkspaceFeatureContextId(1)),
             NullLogger<WorkspaceGitChangesActivation>.Instance);
         return (activation, tracker, scanner, jobs);
     }

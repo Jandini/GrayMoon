@@ -106,6 +106,8 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid UpdateBranchFromDefault args"),
             "FetchCommits" => JsonSerializer.Deserialize<FetchCommitsRequest>(json, options)
                 ?? throw new ArgumentException("Invalid FetchCommits args"),
+"EnsureGitChangesWatchers" => JsonSerializer.Deserialize<EnsureGitChangesWatchersRequest>(json, options)
+    ?? throw new ArgumentException("Invalid EnsureGitChangesWatchers args"),
             "GetGitChangeStatus" => JsonSerializer.Deserialize<GetGitChangeStatusRequest>(json, options)
                 ?? throw new ArgumentException("Invalid GetGitChangeStatus args"),
             "GetGitFileDiff" => JsonSerializer.Deserialize<GetGitFileDiffRequest>(json, options)

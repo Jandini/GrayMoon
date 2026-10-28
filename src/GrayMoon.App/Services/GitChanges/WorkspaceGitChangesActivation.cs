@@ -7,7 +7,7 @@ namespace GrayMoon.App.Services.GitChanges;
 
 /// <summary>
 /// Leases Git Changes activity for a workspace while any GrayMoon page under that workspace is open,
-/// so background monitoring sweeps it and Worker-side watchers stay warm. A cold start (workspace
+/// so background monitoring keeps its Worker-side watchers renewed and audited. A cold start (workspace
 /// not already active) kicks off one circuit-scoped warm-up scan under
 /// <see cref="WorkspaceJobKeys.GitChangesScanKey"/> instead of waiting for the next periodic sweep.
 /// Called from the layout route binder, not from individual workspace pages.
@@ -22,6 +22,7 @@ public sealed class WorkspaceGitChangesActivation(
     IGitChangesWorkspaceScanner scanner,
     IWorkerBridge workerBridge,
     IBackgroundJobService jobService,
+    IGitChangesAuditScheduler auditScheduler,
     IToastService toastService,
     IServiceScopeFactory scopeFactory,
     ILogger<WorkspaceGitChangesActivation> logger) : IWorkspaceGitChangesActivation
@@ -30,6 +31,9 @@ public sealed class WorkspaceGitChangesActivation(
     {
         var wasActive = activityTracker.IsActive(workspaceId);
         var lease = activityTracker.Subscribe(workspaceId);
+        logger.LogInformation(
+            "[GCDiag] workspace activation: workspace={WorkspaceId} wasActive={WasActive} workerConnected={WorkerConnected} (warm-up scan runs only when not previously active; special Workspace context here, Feature contexts are audited by the scheduler)",
+            workspaceId, wasActive, workerBridge.IsWorkerConnected);
 
         if (wasActive || !workerBridge.IsWorkerConnected)
         {
@@ -50,6 +54,15 @@ public sealed class WorkspaceGitChangesActivation(
                 var contextResolver = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureContextResolver>();
                 // Warm-up from workspace entry targets the special Workspace checkout.
                 var contextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, ct);
+                // Every Feature context is audited once; the special Workspace context is scanned by the warm-up below.
+                foreach (var context in await contextResolver.ListForWorkspaceAsync(workspaceId, ct))
+                {
+                    if (!context.IsSpecialWorkspace)
+                    {
+                        auditScheduler.Request(workspaceId, context.ContextId, GitChangesAuditReason.Activation);
+                    }
+                }
+
                 await scanner.ScanWorkspaceAsync(workspaceId, contextId, ct, progress =>
                     job.ReportProgress($"Refreshing {progress.Completed} of {progress.Total} repositories..."), includeLineStats: true);
             }
@@ -68,4 +81,3 @@ public sealed class WorkspaceGitChangesActivation(
         return lease;
     }
 }
-

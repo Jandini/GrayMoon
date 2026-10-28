@@ -3,6 +3,7 @@ using GrayMoon.Worker.Jobs.Requests;
 using GrayMoon.Worker.Jobs.Response;
 using GrayMoon.Worker.Services.GitChanges;
 using GrayMoon.Worker.Services;
+using Microsoft.Extensions.Logging;
 
 namespace GrayMoon.Worker.Commands;
 
@@ -14,7 +15,8 @@ namespace GrayMoon.Worker.Commands;
 public sealed class GetGitChangeStatusCommand(
     GitStatusRefreshCoordinator coordinator,
     GitChangesRepositoryRegistry registry,
-    GitRepositoryWatcherManager watcherManager) : ICommandHandler<GetGitChangeStatusRequest, GetGitChangeStatusResponse>
+    GitRepositoryWatcherManager watcherManager,
+    ILogger<GetGitChangeStatusCommand> logger) : ICommandHandler<GetGitChangeStatusRequest, GetGitChangeStatusResponse>
 {
     public async Task<GetGitChangeStatusResponse> ExecuteAsync(GetGitChangeStatusRequest request, CancellationToken cancellationToken = default)
     {
@@ -32,7 +34,11 @@ public sealed class GetGitChangeStatusCommand(
         registry.Register(repoPath, request.WorkspaceId, request.RepositoryId);
 
         using var lease = watcherManager.Acquire(repoPath);
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
         var result = await coordinator.RefreshNowAsync(repoPath, cancellationToken, request.IncludeLineStats);
+        logger.LogDebug(
+            "[GCDiag] GetGitChangeStatus done: {RepoPath} success={Success} elapsedMs={ElapsedMs} watcherEntries={Entries}",
+            repoPath, result.Success, (long)System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds, watcherManager.ActiveWatcherCount);
 
         return new GetGitChangeStatusResponse
         {

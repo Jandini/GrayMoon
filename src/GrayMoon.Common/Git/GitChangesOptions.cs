@@ -22,12 +22,19 @@ public sealed class GitChangesOptions
     /// </summary>
     public int WatcherScanTimeoutSeconds { get; init; } = 120;
 
+    /// <summary>
+    /// Delays before each retry of a failed or timed-out watcher-driven status scan, in order; after the last
+    /// entry the Worker stops retrying until the next watcher event or App scan. Empty disables retries.
+    /// Default 5, 30, 120.
+    /// </summary>
+    public int[] WatcherScanRetryDelaysSeconds { get; init; } = [5, 30, 120];
+
     /// <summary>Idle time with no renewing operation before a repository's watcher lease is disposed.</summary>
     public int WatcherIdleGraceMinutes { get; init; } = 10;
 
     /// <summary>
-    /// How often the workspace background monitoring service (not the browser page) sweeps active
-    /// workspace repositories to seed/renew their Worker-side watcher lease. Must stay comfortably below
+    /// How often the Git-free watcher keeper (not the browser page) renews the Worker-side watchers of every
+    /// context of every active workspace. Must stay comfortably below
     /// <see cref="WatcherIdleGraceMinutes"/> or leases would expire between sweeps. Default 3.
     /// An active workspace is any GrayMoon circuit currently on a <c>/workspaces/{id}/...</c> route
     /// (plus the configured workspace activity grace after leaving).
@@ -37,7 +44,7 @@ public sealed class GitChangesOptions
     /// <summary>
     /// How long a workspace stays "active" (and therefore in scope for background monitoring) after its
     /// last GrayMoon circuit leaves any <c>/workspaces/{id}/...</c> page or disconnects. Kept just under
-    /// <see cref="WatcherIdleGraceMinutes"/> so the App stops sweeping a workspace slightly before its
+    /// <see cref="WatcherIdleGraceMinutes"/> so the App stops renewing a workspace slightly before its
     /// Worker-side watcher leases would idle out anyway. Default 8.
     /// </summary>
     public int WorkspaceActivityGraceMinutes { get; init; } = 8;
@@ -78,6 +85,24 @@ public sealed class GitChangesOptions
     /// Placeholder until a byte budget is chosen from M0. Default 2_000.
     /// </summary>
     public int SnapshotPathsInlineMax { get; init; } = 2_000;
+
+    /// <summary>Timeout for one <c>EnsureGitChangesWatchers</c> call. Default 30 seconds.</summary>
+    public int WatcherEnsureTimeoutSeconds { get; init; } = 30;
+
+    /// <summary>
+    /// How often each active context is audited with a real status scan (the repair path for a change a watcher
+    /// missed). The watcher keepalive never depends on it. Default 5.
+    /// </summary>
+    public int WatcherAuditIntervalMinutes { get; init; } = 5;
+
+    /// <summary>Upper bound for one audit scan of one context. Default 900 seconds.</summary>
+    public int WatcherAuditTimeoutSeconds { get; init; } = 900;
+
+    /// <summary>Contexts audited at the same time across all workspaces. Default 2.</summary>
+    public int WatcherAuditMaxParallelContexts { get; init; } = 2;
+
+    /// <summary>Contexts renewed at the same time by one keeper tick. Default 4.</summary>
+    public int WatcherKeeperMaxParallelContexts { get; init; } = 4;
 
     /// <summary>True when <paramref name="totalEntries"/> should use summary-first + lazy pages.</summary>
     public bool UseLargeHydration(int totalEntries) =>

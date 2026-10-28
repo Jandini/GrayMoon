@@ -431,7 +431,7 @@ Pool selection is by command name:
 
 | Pool | Commands | Option (default) |
 |---|---|---|
-| Read (`ReadOnlyCommands`) | `GetGitChangeStatus`, `ListGitWorktrees`, `InspectWorktree` | `MaxConcurrentReadCommands` (8) |
+| Read (`ReadOnlyCommands`) | `GetGitChangeStatus`, `EnsureGitChangesWatchers`, `ListGitWorktrees`, `InspectWorktree` | `MaxConcurrentReadCommands` (8) |
 | Diff (`DiffCommands`) | `GetGitFileDiff` | `MaxConcurrentDiffCommands` (4) |
 | Main | everything else, including worktree create/remove, CodeGraph and the AI commands | `MaxConcurrentCommands` (`ProcessorCount * 2`) |
 

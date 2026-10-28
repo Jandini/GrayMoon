@@ -25,8 +25,31 @@ public sealed class GitChangesDiffResult
 /// themselves (same convention as every other Worker-bridged handler in the App) - this client only knows
 /// the wire shape, not how to look up a workspace/repository.
 /// </summary>
+public sealed record GitChangesEnsureRepository(int RepositoryId, string RepositoryName);
+
+public sealed class GitChangesEnsureResult
+{
+    public bool Success { get; set; }
+    public string? ErrorMessage { get; set; }
+    public string WorkerInstanceId { get; set; } = string.Empty;
+    public int EffectiveGraceSeconds { get; set; }
+    public List<GitChangesEnsureRepositoryResult> Results { get; set; } = [];
+}
+
+public sealed class GitChangesEnsureRepositoryResult
+{
+    public int RepositoryId { get; set; }
+    public string Status { get; set; } = string.Empty;
+}
+
 public interface IGitChangesWorkerClient
 {
+    /// <summary>Renews the Worker file watchers of a batch of repositories without running git. The default (an old client) reports failure.</summary>
+    Task<GitChangesEnsureResult> EnsureWatchersAsync(
+        string workspaceRoot, string workspaceName, string? workspaceRepositoryName,
+        int workspaceId, IReadOnlyList<GitChangesEnsureRepository> repositories, CancellationToken cancellationToken)
+        => Task.FromResult(new GitChangesEnsureResult { Success = false, ErrorMessage = "Not supported by this client." });
+
     Task<GitChangesStatusResult> GetStatusAsync(
         string workspaceRoot, string workspaceName, string repositoryName, string? workspaceRepositoryName,
         int workspaceId, int repositoryId, CancellationToken cancellationToken,
@@ -69,6 +92,27 @@ public sealed class GitChangesWorkerClient(
         var response = await workerBridge.SendCommandAsync("GetGitChangeStatus", args, cancellationToken);
         return WorkerResponseJson.DeserializeWorkerResponse<GitChangesStatusResult>(response.Data)
             ?? new GitChangesStatusResult { Success = false, ErrorMessage = response.Error ?? "No response from worker." };
+    }
+
+    public async Task<GitChangesEnsureResult> EnsureWatchersAsync(
+        string workspaceRoot, string workspaceName, string? workspaceRepositoryName,
+        int workspaceId, IReadOnlyList<GitChangesEnsureRepository> repositories, CancellationToken cancellationToken)
+    {
+        var capabilities = await ResolveCapabilitiesAsync(workspaceId, cancellationToken);
+        var args = new
+        {
+            workspaceRoot, workspaceRepositoryName, workspaceName, workspaceId, capabilities,
+            repositories = repositories.Select(r => new { repositoryId = r.RepositoryId, repositoryName = r.RepositoryName }).ToList(),
+        };
+        var response = await workerBridge.SendCommandAsync("EnsureGitChangesWatchers", args, cancellationToken);
+        var result = WorkerResponseJson.DeserializeWorkerResponse<GitChangesEnsureResult>(response.Data);
+        if (result is null)
+        {
+            return new GitChangesEnsureResult { Success = false, ErrorMessage = response.Error ?? "No response from worker." };
+        }
+
+        result.Success = true;
+        return result;
     }
 
     public async Task<GitChangesDiffResult> GetDiffAsync(
