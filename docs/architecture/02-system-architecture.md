@@ -772,10 +772,10 @@ Desktop mode maps an extra hub, `DesktopNotificationHub` at `/hubs/desktop` (onl
 ```text
 server -> Desktop   Notify, WorkspaceChanged, TopBarVisibleChanged,
                     WorkerUpgradeRequired (WorkerUpgradePrompt.ClientEventName)
-Desktop -> server   SetTopBarVisible(bool), UpgradeWorker() (WorkerUpgradePrompt.UpgradeMethodName)
+Desktop -> server   SetTopBarVisible(bool), SetWorkerAutoUpdate(bool), UpgradeWorker() (WorkerUpgradePrompt.UpgradeMethodName)
 ```
 
-On every connect the hub replays the current `WorkspaceChanged`, `TopBarVisibleChanged` and any pending `WorkerUpgradeRequired`. `UpgradeWorker` sends the Worker `SelfUpdate` with an `installUrl` of `{scheme}://{host}/api/worker/install`; a failed round trip while `IsSelfUpdateInProgress` is set means the install script already stopped the Worker and is treated as success. Concurrent installs (Desktop elevated install and Worker self-update) are serialized by the machine-wide mutex `Global\GrayMoonWorkerInstall` in the App-served `install-worker.ps1`, not by Desktop.
+On every connect the hub replays the current `WorkspaceChanged`, `TopBarVisibleChanged` and any pending `WorkerUpgradeRequired`; the prompt carries `AutoUpdate`, the stored `Worker.AutoUpdate` setting (also the checkbox on the Worker page Install tab), and Desktop then calls `UpgradeWorker` without showing the dialog. `SetWorkerAutoUpdate` stores that setting. `UpgradeWorker` sends the Worker `SelfUpdate` with an `installUrl` of `{scheme}://{host}/api/worker/install`; a failed round trip while `IsSelfUpdateInProgress` is set means the install script already stopped the Worker and is treated as success. Concurrent installs (Desktop elevated install and Worker self-update) are serialized by the machine-wide mutex `Global\GrayMoonWorkerInstall` in the App-served `install-worker.ps1`, not by Desktop.
 
 GrayMoon.App remains the core application.
 

@@ -1,5 +1,7 @@
 using GrayMoon.App.Hubs;
+using GrayMoon.App.Repositories;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -20,6 +22,7 @@ public sealed class WorkerUpdateDesktopNotifier(
     WorkerConnectionTracker workerConnectionTracker,
     WorkerUpgradeStartupPrompt workerUpgradeStartupPrompt,
     IHubContext<DesktopNotificationHub> desktopHub,
+    IServiceScopeFactory scopeFactory,
     ILogger<WorkerUpdateDesktopNotifier> logger) : IHostedService
 {
     private readonly WorkerDesktopNotificationPolicy _policy = new();
@@ -57,7 +60,10 @@ public sealed class WorkerUpdateDesktopNotifier(
     {
         try
         {
-            await desktopHub.Clients.All.SendAsync(WorkerUpgradePrompt.ClientEventName, prompt);
+            using var scope = scopeFactory.CreateScope();
+            var settings = scope.ServiceProvider.GetRequiredService<AppSettingRepository>();
+            var autoUpdate = await settings.GetBoolAsync(AppSettingRepository.WorkerAutoUpdateKey);
+            await desktopHub.Clients.All.SendAsync(WorkerUpgradePrompt.ClientEventName, prompt with { AutoUpdate = autoUpdate });
         }
         catch (Exception ex)
         {

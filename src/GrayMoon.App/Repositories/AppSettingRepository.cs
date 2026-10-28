@@ -21,6 +21,9 @@ public sealed class AppSettingRepository(AppDbContext db)
     public const string SidebarCollapsedKey = "Sidebar.Collapsed";
     public const string TopBarShowKey = "TopBar.Show";
 
+    /// <summary>When true, GrayMoon Desktop starts the Worker update at startup without asking.</summary>
+    public const string WorkerAutoUpdateKey = "Worker.AutoUpdate";
+
     /// <summary>True once some Worker has presented the correct Worker secret (F2); from then on a Worker without a secret is rejected.</summary>
     public const string WorkerSecretSeenKey = "Security:WorkerSecretSeen";
 
