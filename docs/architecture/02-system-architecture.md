@@ -529,7 +529,7 @@ StartUpdateAndPush            MaxLevel (null = every level), CommitMessage, Incl
 ApproveNormalPushContinuation PendingApprovalId from an earlier ApprovalRequired result
 ```
 
-Options are explicit in the command; callers keep their own defaults (Repositories: restore off; popup and Prepare Workspace: restore on, dependency names in the commit message, no custom message).
+Options are explicit in the command; callers keep their own defaults (Repositories and the notification popup leave restore off; Prepare Workspace leaves restore on). The popup and Prepare Workspace include dependency names in the commit message and send no custom message.
 
 Result: `UpdateAndPushExecutionResult` with `RunId`, `Status`, `Summary`, the update and push results, `PushedRepoCount` and `PendingApprovalId`. Statuses:
 
