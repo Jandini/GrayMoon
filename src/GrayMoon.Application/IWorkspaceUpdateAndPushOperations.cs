@@ -64,7 +64,7 @@ public abstract record UpdateAndPushCommand(int WorkspaceId, WorkspaceFeatureCon
 /// <summary>
 /// Starts a combined run. <see cref="MaxLevel"/> null means every dependency level; a number means the levels at or
 /// below it. There is no repository subset: the update walks the levels live. Options are explicit; the caller chooses
-/// them (Repositories modal: restore off; popup: restore on). <see cref="ReviewedDefaultBranchRepoIds"/> is the set the
+/// them (Repositories modal and notification popup: restore off; Prepare Workspace: restore on). <see cref="ReviewedDefaultBranchRepoIds"/> is the set the
 /// user was shown when warned about default branches; when given, the run is refused if another in-scope repository has
 /// moved onto its default branch since (one cheap read of the stored branch state, no Worker call). Null skips the check.
 /// </summary>

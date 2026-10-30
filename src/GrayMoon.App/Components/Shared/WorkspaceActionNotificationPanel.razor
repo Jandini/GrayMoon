@@ -684,7 +684,8 @@
                 maxLevel,
                 CommitMessage: null,
                 IncludeDepsInCommitMessage: true,
-                RestorePackages: true,
+                // Same default as the Repositories "Update dependencies" dialog, whose Restore packages box starts unticked.
+                RestorePackages: false,
                 Origin: "NotificationPopup",
                 ReviewedDefaultBranchRepoIds: defaultBranchReview.OnDefaultBranchRepoIds);
         }
