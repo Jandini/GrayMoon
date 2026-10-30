@@ -153,11 +153,21 @@ public sealed class GitChangesAuditSchedulerTests
     {
         var rig = new AuditRig(new FakeContextCatalog().With(1, 10).With(2, 20));
 
+        // StartAsync queues the loop. Advance one interval after its timer is armed, then wait on the
+        // wall clock. Another advance while that scan is still queued would schedule a second pass.
         await rig.Scheduler.StartAsync(CancellationToken.None);
-        await Wait.PumpAsync(rig.Clock, () => rig.Scanner.Calls == 1, TimeSpan.FromMinutes(5));
-        await rig.Scheduler.WhenIdleAsync();
-        Assert.Equal(1, rig.Scanner.Calls);
-        await rig.Scheduler.StopAsync(CancellationToken.None);
+        try
+        {
+            await Wait.UntilAsync(() => rig.Clock.NextTimerDelay == rig.AuditInterval);
+            rig.Clock.Advance(rig.AuditInterval);
+            await Wait.UntilAsync(() => rig.Scanner.Calls >= 1);
+            await rig.Scheduler.WhenIdleAsync();
+            Assert.Equal(1, rig.Scanner.Calls);
+        }
+        finally
+        {
+            await rig.Scheduler.StopAsync(CancellationToken.None);
+        }
     }
 
     private sealed class AuditRig
@@ -166,11 +176,15 @@ public sealed class GitChangesAuditSchedulerTests
         {
             Tracker.OnWorkerConnected("w");
             Lease = Activity.Subscribe(1);
+            var gitChangesOptions = new GitChangesOptions { WatcherAuditMaxParallelContexts = maxParallel };
+            AuditInterval = TimeSpan.FromMinutes(Math.Max(1, gitChangesOptions.WatcherAuditIntervalMinutes));
             Scheduler = new GitChangesAuditScheduler(
                 Scanner, Activity, Pause, Tracker, catalog,
-                Options.Create(new GitChangesOptions { WatcherAuditMaxParallelContexts = maxParallel }),
+                Options.Create(gitChangesOptions),
                 Clock, NullLogger<GitChangesAuditScheduler>.Instance);
         }
+
+        public TimeSpan AuditInterval { get; }
 
         public IDisposable Lease { get; }
         public ManualClock Clock { get; } = new();
