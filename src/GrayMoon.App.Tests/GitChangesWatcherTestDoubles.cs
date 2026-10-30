@@ -35,6 +35,27 @@ internal sealed class ManualClock : TimeProvider
         return timer;
     }
 
+    /// <summary>Time until the soonest armed timer, or null when nothing is waiting.</summary>
+    public TimeSpan? NextTimerDelay
+    {
+        get
+        {
+            lock (_gate)
+            {
+                DateTimeOffset? next = null;
+                foreach (var timer in _timers)
+                {
+                    if (timer.Due is { } due && (next is null || due < next))
+                    {
+                        next = due;
+                    }
+                }
+
+                return next is { } dueAt ? dueAt - _now : null;
+            }
+        }
+    }
+
     /// <summary>Moves time forward, firing every timer that comes due on the way in order.</summary>
     public void Advance(TimeSpan by)
     {
