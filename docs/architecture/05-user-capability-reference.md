@@ -147,7 +147,7 @@ Only a fresh attach (not an adopt) then writes the managed `.gitignore` section 
 
 **Restore** (Workspaces page "Restore from repository", dialog title "Restore Workspace") is two steps.
 
-`PreflightRestoreAsync` reads `graymoon.json` from the repository's default branch through the GitHub contents API (no Worker, no clone, no database change), validates it (a missing file, invalid JSON, a newer schema and unknown profile values are blocking errors) and previews the profile, the Source repository count and the connectors and repositories missing on this computer. Restore is enabled only when the preflight is valid and the name, the folder and the Worker are all OK.
+`PreflightRestoreAsync` reads `graymoon.json` from the repository's default branch through the GitHub contents API (no Worker, no clone, no database change), validates it (a missing file, invalid JSON, a newer schema and unknown profile values are blocking errors) and previews the profile, the Source repository count and the connectors and repositories missing on this computer. Choosing a repository clears the previous preview immediately. Restore stays disabled while that read is in progress, and is enabled only when the preflight is valid and the name, the folder and the Worker are all OK.
 
 `RestoreFromRepositoryAsync`:
 
