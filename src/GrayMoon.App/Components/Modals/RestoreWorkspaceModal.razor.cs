@@ -86,10 +86,11 @@ public sealed partial class RestoreWorkspaceModal : ComponentBase, IDisposable
         _checking,
         WorkerUnavailable,
         _repositoryId,
-        PreflightPending ? null : _preflight,
+        _preflight,
         _name,
         _existingNames,
-        FolderState));
+        FolderState,
+        PreflightPending));
 
     protected override async Task OnParametersSetAsync()
     {
@@ -241,6 +242,11 @@ public sealed partial class RestoreWorkspaceModal : ComponentBase, IDisposable
         var nameChanged = !string.Equals(name, _name, StringComparison.Ordinal);
         _name = name;
         _autoName = autoName;
+
+        // The picker owns the click, so this dialog would otherwise keep the previous preview and an enabled
+        // Restore button until graymoon.json comes back. Paint the cleared check before that wait.
+        StateHasChanged();
+
         if (nameChanged)
             await CheckFolderAsync();
 
@@ -521,16 +527,21 @@ public sealed record RestoreRepositorySource(int RepositoryId, string Repository
 /// <summary>One repository the dialog offers: "org/repository", with the connector when that alone is ambiguous.</summary>
 public sealed record RestoreRepositoryChoice(int RepositoryId, string RepositoryName, string DisplayName);
 
-/// <summary>Everything that decides whether Restore is enabled.</summary>
-public sealed record RestoreReadiness(
-    bool Busy,
-    bool CheckingFolder,
-    string? WorkerUnavailable,
-    int? RepositoryId,
-    RestoreWorkspacePreflight? Preflight,
-    string Name,
-    IEnumerable<string> ExistingNames,
-    FolderCheck Folder);
+    /// <summary>Everything that decides whether Restore is enabled.</summary>
+    /// <param name="PreflightPending">
+    /// True while the definition of the current repository is still being read. A previous successful
+    /// <paramref name="Preflight"/> must not keep Restore enabled during that wait.
+    /// </param>
+    public sealed record RestoreReadiness(
+        bool Busy,
+        bool CheckingFolder,
+        string? WorkerUnavailable,
+        int? RepositoryId,
+        RestoreWorkspacePreflight? Preflight,
+        string Name,
+        IEnumerable<string> ExistingNames,
+        FolderCheck Folder,
+        bool PreflightPending = false);
 
 /// <summary>Outcome of the restore flow: the restore result plus whether the follow-up Sync was requested and how it ended.</summary>
 public sealed record RestoreFlowOutcome(RestoreWorkspaceResult Restore, bool SyncRequested, string? SyncError);
@@ -730,6 +741,7 @@ public static class RestoreWorkspaceFlow
     public static bool CanRestore(RestoreReadiness r) =>
         !r.Busy
         && !r.CheckingFolder
+        && !r.PreflightPending
         && r.WorkerUnavailable is null
         && r.RepositoryId is not null
         && r.Preflight is { Success: true }

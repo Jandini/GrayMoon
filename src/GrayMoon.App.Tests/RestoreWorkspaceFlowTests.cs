@@ -212,6 +212,7 @@ public sealed class RestoreWorkspaceFlowTests
         }));
 
         Assert.False(RestoreWorkspaceFlow.CanRestore(valid with { Preflight = null }));
+        Assert.False(RestoreWorkspaceFlow.CanRestore(valid with { PreflightPending = true }));
         Assert.False(RestoreWorkspaceFlow.CanRestore(valid with { Preflight = RestoreWorkspacePreflight.Failed("invalid") }));
         Assert.False(RestoreWorkspaceFlow.CanRestore(valid with { WorkerUnavailable = "Update the Worker." }));
         Assert.False(RestoreWorkspaceFlow.CanRestore(valid with { RepositoryId = null }));
@@ -284,9 +285,10 @@ public sealed class RestoreWorkspaceFlowTests
     {
         var gate = new RestorePreflightGate();
 
-        // Selecting repository 1 starts its check; Restore waits for it.
+        // Selecting repository 1 starts its check; Restore waits for it, even if an earlier check had succeeded.
         var invalid = gate.Begin(1);
         Assert.True(gate.IsPending);
+        Assert.False(RestoreWorkspaceFlow.CanRestore(new RestoreReadinessBuilder().Build() with { PreflightPending = true }));
         Assert.True(gate.TryComplete(invalid, selectedRepositoryId: 1));
 
         // Its definition was invalid: Restore stays disabled, but choosing another repository checks that one.
