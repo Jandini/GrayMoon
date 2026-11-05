@@ -1,11 +1,11 @@
 /* Keep modal inside viewport so only the packages div scrolls, not the page */
 .push-deps-modal {
-    max-height: calc(100vh - 2rem);
+    max-height: calc(var(--modal-vh) - 2rem);
     margin: 1rem auto;
 }
 
 .push-deps-modal .modal-content {
-    max-height: calc(100vh - 2rem);
+    max-height: calc(var(--modal-vh) - 2rem);
     display: flex;
     flex-direction: column;
 }

@@ -2,14 +2,8 @@
 
 @if (IsVisible)
 {
-    @*
-        The bulk-merge page job hides this dialog for the run (IsVisible=false) so only LoadingOverlay shows.
-        IsCoveredByOverlay still drops z-index under BackgroundJobOverlay when a drill-in single-PR job is
-        stacked on top - kept separate from IsRunning so it never touches IsCompletedView/the footer-mode
-        switches below, which must keep reflecting this dialog's own batch-run state, not the drill-in dialog's.
-        IsRunning remains in the z-index expression for retry/edge cases if the dialog is briefly still mounted.
-    *@
-    <div class="modal show d-block bulk-merge-pr-modal-container" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: @((IsRunning || IsCoveredByOverlay) ? 50 : 1074);"
+    @* The bulk-merge page job hides this dialog for the run (IsVisible=false) so only LoadingOverlay shows. *@
+    <div class="modal show d-block bulk-merge-pr-modal-container" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: 1074;"
          @onkeydown="HandleKeyDown"
          @ref="_modalElement">
         <div class="modal-dialog modal-dialog-centered bulk-merge-pr-modal-dialog">
@@ -205,8 +199,6 @@
     /// <summary>When false, hides the Return to default branch checkbox (Feature contexts).</summary>
     [Parameter] public bool ShowReturnToDefault { get; set; } = true;
     [Parameter] public bool IsRunning { get; set; }
-    /// <summary>True while a job started by the drill-in single-PR dialog (stacked on top of this one) is running. Only affects the z-index style (see the comment above the outer div) - never <see cref="IsCompletedView"/> or the footer-mode checks, which must stay driven by this dialog's own <see cref="IsRunning"/>/<see cref="HasRun"/> state.</summary>
-    [Parameter] public bool IsCoveredByOverlay { get; set; }
     [Parameter] public bool HasRun { get; set; }
     [Parameter] public EventCallback OnMerge { get; set; }
     [Parameter] public EventCallback OnRetryFailed { get; set; }

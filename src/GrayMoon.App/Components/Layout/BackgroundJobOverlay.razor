@@ -7,7 +7,6 @@
 @if (_job is { State: BackgroundJobState.Running })
 {
     <LoadingOverlay IsVisible="true"
-                    PageScoped="true"
                     Message="@_job.DisplayMessage"
                     TerminalBuffer="@_job.Terminal"
                     OnAbort="@HandleAbort"

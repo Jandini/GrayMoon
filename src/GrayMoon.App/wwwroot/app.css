@@ -63,6 +63,11 @@
     --sidebar-width: 180px;
     --topbar-height: 3.5rem;
 
+    /* Stacking scale. Page job overlays (LoadingOverlay) sit above dialogs but stay inside the page region
+       (below the top bar, right of the sidebar). Toasts/notifications sit above everything. */
+    --z-modal: 1055;
+    --z-loading-overlay: 1200;
+
     /* Bootstrap h2 base is calc(1.325rem + 0.9vw); page titles use 70% of that */
     --page-title-font-size: calc((1.325rem + 0.9vw) * 0.7);
     /* Kept at original (pre page-title-reduction) scale; intentionally not derived from --page-title-font-size */
@@ -885,8 +890,21 @@ select:disabled,
    Windows causes a barely-scrollable scrollbar on the .modal overlay.
    3.5rem = 2 x Bootstrap's default 1.75rem top/bottom margin.
    Scoped modal CSS with higher specificity overrides these where needed. */
+/* Dialogs that are not vertically centered start at the top of the viewport. Reserve the top bar's height
+   (0px when the top bar is hidden) so they open below it instead of over it. Centered dialogs keep centering
+   in the full viewport. --modal-vh is the viewport height a dialog may use; modal CSS must size against it
+   rather than 100vh. */
+.modal {
+    --modal-vh: 100vh;
+}
+
+.modal:has(> .modal-dialog:not(.modal-dialog-centered)) {
+    padding-top: var(--topbar-height);
+    --modal-vh: calc(100vh - var(--topbar-height));
+}
+
 .modal-dialog {
-    max-height: calc(100vh - 3.5rem);
+    max-height: calc(var(--modal-vh) - 3.5rem);
 }
 
 /* New Feature is a short form. A little wider than the default modal so the note and the CodeGraph option fit. */

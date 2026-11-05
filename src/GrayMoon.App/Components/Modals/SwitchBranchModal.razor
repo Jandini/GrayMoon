@@ -11,11 +11,8 @@
 
 @if (IsVisible)
 {
-    @*
-        z-index drops below the page's BackgroundJobOverlay (.loading-overlay--page, z-index: 100) while
-        a page job is running so the overlay covers this still-mounted dialog.
-    *@
-    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: @(IsBusy ? 50 : 1055);"
+    @* Page job overlays (--z-loading-overlay) stack above this dialog, so it can stay mounted underneath. *@
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: var(--z-modal);"
          @onkeydown="HandleKeyDown"
          @ref="modalElement">
         <div class="modal-dialog modal-lg">

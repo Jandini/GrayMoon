@@ -13,7 +13,7 @@
 }
 
 ::deep .bulk-merge-pr-modal-dialog .modal-content {
-    max-height: calc(100vh - 2rem);
+    max-height: calc(var(--modal-vh) - 2rem);
     display: flex;
     flex-direction: column;
     /* The method menu is taller than a short dialog (few PR rows). Global
@@ -183,7 +183,7 @@
    ReturnToDefaultOptionsModal's .return-to-default-options-scroll. */
 ::deep .bulk-merge-pr-scroll {
     flex: 1 1 auto;
-    max-height: min(26rem, calc(100vh - 20rem));
+    max-height: min(26rem, calc(var(--modal-vh) - 20rem));
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-width: thin;

@@ -489,7 +489,7 @@
     font-family: var(--bs-font-monospace);
     color: #f0f0f0;
     box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-    /* Above table rows/thead; below page-scoped loading overlay (z-index 100) */
+    /* Above table rows/thead; below the loading overlay (--z-loading-overlay) */
     z-index: 50;
     pointer-events: none;
     max-height: 14rem;

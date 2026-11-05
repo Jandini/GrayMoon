@@ -192,7 +192,7 @@
         </div>
     </div>
 
-<LoadingOverlay IsVisible="@_isUpdating" PageScoped="true" ShowCommandTerminal="false"
+<LoadingOverlay IsVisible="@_isUpdating" ShowCommandTerminal="false"
                 Message="@(_waitingForReconnect ? "Waiting for worker..." : "Updating worker...")"
                 OnAbort="@(_waitingForReconnect ? EventCallback.Factory.Create(this, AbortWorkerUpdateWait) : default)" />
 

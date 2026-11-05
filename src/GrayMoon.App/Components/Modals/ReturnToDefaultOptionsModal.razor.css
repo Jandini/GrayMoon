@@ -1,10 +1,10 @@
 /* Hug content; cap so a long repo list scrolls instead of filling the page */
 .return-to-default-options-modal {
-    max-height: calc(100vh - 2rem);
+    max-height: calc(var(--modal-vh) - 2rem);
 }
 
 .return-to-default-options-modal .modal-content {
-    max-height: calc(100vh - 2rem);
+    max-height: calc(var(--modal-vh) - 2rem);
     display: flex;
     flex-direction: column;
 }
@@ -20,7 +20,7 @@
 /* Height follows the item list; scroll only after the cap */
 .return-to-default-options-scroll {
     flex: 0 1 auto;
-    max-height: min(22rem, calc(100vh - 18rem));
+    max-height: min(22rem, calc(var(--modal-vh) - 18rem));
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-width: thin;

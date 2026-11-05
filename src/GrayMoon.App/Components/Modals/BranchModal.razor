@@ -3,12 +3,8 @@
 
 @if (IsVisible)
 {
-    @*
-        z-index drops below the page's BackgroundJobOverlay (.loading-overlay--page, z-index: 100) while
-        IsBusy so Fetch (and other page jobs started from this dialog) cover the still-mounted dialog
-        instead of the dialog staying visually on top.
-    *@
-    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: @(IsBusy ? 50 : 1055);"
+    @* Page job overlays (--z-loading-overlay) stack above this dialog, so it can stay mounted underneath. *@
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: var(--z-modal);"
          @onkeydown="HandleKeyDown"
          @ref="modalElement">
         <div class="modal-dialog branch-modal-dialog">

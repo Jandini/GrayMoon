@@ -12,7 +12,7 @@
 }
 
 ::deep .custom-deps-modal-dialog .modal-content {
-    max-height: calc(100vh - 2rem);
+    max-height: calc(var(--modal-vh) - 2rem);
 }
 
 .custom-deps-modal-body {

@@ -249,12 +249,12 @@
 }
 
 ::deep .modal-dialog {
-    max-height: calc(100vh - 2rem);
+    max-height: calc(var(--modal-vh) - 2rem);
     margin: 1rem auto;
 }
 
 ::deep .modal-content {
-    max-height: calc(100vh - 2rem);
+    max-height: calc(var(--modal-vh) - 2rem);
 }
 
 ::deep .modal-body.add-files-modal-body {

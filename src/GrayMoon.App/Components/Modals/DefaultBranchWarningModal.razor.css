@@ -1,6 +1,6 @@
 /* Constrain dialog to viewport; modal-dialog-scrollable makes the body scroll */
 .default-branch-warning-modal {
-    max-height: calc(100vh - 2rem);
+    max-height: calc(var(--modal-vh) - 2rem);
     margin: 1rem auto;
 }
 

@@ -7,7 +7,7 @@
 
 ::deep .modal-content {
     width: 100%;
-    max-height: calc(100vh - 2rem);
+    max-height: calc(var(--modal-vh) - 2rem);
 }
 
 ::deep .modal-body {
