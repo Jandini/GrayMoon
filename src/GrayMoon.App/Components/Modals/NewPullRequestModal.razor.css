@@ -13,12 +13,12 @@
 
 .new-pr-modal-dialog {
     margin: 1rem;
-    max-height: calc(100vh - 2rem);
+    max-height: calc(var(--modal-vh) - 2rem);
     width: calc(100% - 2rem);
 }
 
 .new-pr-modal-dialog > .modal-content {
-    max-height: calc(100vh - 2rem);
+    max-height: calc(var(--modal-vh) - 2rem);
     display: flex;
     flex-direction: column;
     overflow: hidden;
