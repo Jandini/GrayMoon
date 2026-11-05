@@ -63,6 +63,11 @@
     --sidebar-width: 180px;
     --topbar-height: 3.5rem;
 
+    /* Stacking scale. Page job overlays (LoadingOverlay) sit above dialogs but stay inside the page region
+       (below the top bar, right of the sidebar). Toasts/notifications sit above everything. */
+    --z-modal: 1055;
+    --z-loading-overlay: 1200;
+
     /* Bootstrap h2 base is calc(1.325rem + 0.9vw); page titles use 70% of that */
     --page-title-font-size: calc((1.325rem + 0.9vw) * 0.7);
     /* Kept at original (pre page-title-reduction) scale; intentionally not derived from --page-title-font-size */

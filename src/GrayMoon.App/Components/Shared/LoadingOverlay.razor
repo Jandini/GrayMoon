@@ -9,7 +9,7 @@
 @implements IAsyncDisposable
 @implements IDisposable
 
-<div class="loading-overlay @(PageScoped ? "loading-overlay--page" : "") @(IsVisible ? "show" : "") @(MatrixPreference.UseMatrixEffect ? "loading-overlay--matrix" : "loading-overlay--simple") @(!OverlayUiSettings.TransparentBackdrop ? "loading-overlay--backdrop-opaque" : "")" aria-hidden="@(!IsVisible)">
+<div class="loading-overlay @(IsVisible ? "show" : "") @(MatrixPreference.UseMatrixEffect ? "loading-overlay--matrix" : "loading-overlay--simple") @(!OverlayUiSettings.TransparentBackdrop ? "loading-overlay--backdrop-opaque" : "")" aria-hidden="@(!IsVisible)">
     @if (MatrixPreference.UseMatrixEffect)
     {
         <canvas id="@_canvasId" class="matrix-canvas"></canvas>
@@ -95,9 +95,6 @@
 
     /// <summary>When false, the live command terminal is never shown regardless of user toggle.</summary>
     [Parameter] public bool ShowCommandTerminal { get; set; } = true;
-
-    /// <summary>When true, the overlay is scoped to the article content area (position:absolute) instead of full-screen (position:fixed).</summary>
-    [Parameter] public bool PageScoped { get; set; }
 
     /// <summary>When set, terminal output is read from this per-job buffer instead of the global OverlayCommandTerminalService.</summary>
     [Parameter] public JobTerminalBuffer? TerminalBuffer { get; set; }

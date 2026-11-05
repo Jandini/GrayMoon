@@ -77,6 +77,4 @@
     text-decoration: none;
 }
 
-::deep .loading-overlay {
-    z-index: 11050;
-}
+

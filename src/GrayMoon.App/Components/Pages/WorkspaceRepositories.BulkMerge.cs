@@ -707,8 +707,7 @@ public sealed partial class WorkspaceRepositories
 
         // OpenMergeDialogAsync silently no-ops (no PR number resolved, e.g. an unhydrated row's PR info isn't
         // loaded yet) without ever setting _mergePrModal.IsVisible - leaving DrillInRepositoryId set with no
-        // dialog open would otherwise make this row's bulk modal drop under the overlay for any later,
-        // unrelated page job (see IsCoveredByOverlay's binding in WorkspaceRepositories.razor).
+        // dialog open would leave a stale drill-in marker on this row for any later, unrelated page job.
         if (!_mergePrModal.IsVisible && _bulkMergeModal.DrillInRepositoryId == row.RepositoryId)
             _bulkMergeModal.DrillInRepositoryId = null;
     }

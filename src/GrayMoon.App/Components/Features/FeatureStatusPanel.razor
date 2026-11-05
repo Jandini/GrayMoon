@@ -4,15 +4,8 @@
 
 @if (IsVisible && FeatureContextId is { } contextId)
 {
-    @*
-        z-index drops below the page's BackgroundJobOverlay (.loading-overlay--page, z-index: 100) while
-        _busy (Retry/Roll back) so that overlay - which already shows "Repairing feature..."/"Rolling back
-        feature..." - visually covers this still-mounted dialog instead of the dialog sticking out above it
-        during the delay. Same pattern as SwitchBranchModal/MergePullRequestModal. Deliberately does NOT also
-        render its own LoadingOverlay here - that duplicated the page's overlay (two spinners/messages on top
-        of each other) instead of replacing it.
-    *@
-    <div class="modal fade show d-block" tabindex="-1" style="background: rgba(0,0,0,.45); z-index: @(_busy ? 50 : 1055);" @onkeydown="HandleKeyDown" @ref="_modalElement" @onclick="CloseAsync">
+    @* Page job overlays (--z-loading-overlay) stack above this dialog, so it can stay mounted underneath. *@
+    <div class="modal fade show d-block" tabindex="-1" style="background: rgba(0,0,0,.45); z-index: var(--z-modal);" @onkeydown="HandleKeyDown" @ref="_modalElement" @onclick="CloseAsync">
         <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable" @onclick:stopPropagation>
             <div class="modal-content">
                 <div class="modal-header">

@@ -1,4 +1,4 @@
-/* Full-page loading overlay with optional Matrix rain canvas */
+/* Page-region loading overlay with optional Matrix rain canvas */
 /* Terminus woff2 bundled from https://github.com/jmegs/in-the-beginning-was-the-command-line (assets/fonts/terminus.woff2) */
 @font-face {
   font-family: "GrayMoon Terminus";
@@ -9,23 +9,18 @@
 }
 
 .loading-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 140ms ease;
-}
-
-/* Page-scoped variant: fixed below the top bar and right of the sidebar, always full remaining height. */
-.loading-overlay--page {
+  /* Always scoped to the page region: below the top bar, right of the sidebar, full remaining height.
+     Never covers the header or sidebar. */
   position: fixed;
   top: var(--topbar-height);
   left: var(--sidebar-width);
   right: 0;
   bottom: 0;
-  /* z-index below Bootstrap modals (1050+) so dialogs stay interactive above the overlay */
-  z-index: 100;
+  /* Above dialogs (--z-modal and the stacked 1074-1085 range) so a job started from a dialog covers it;
+     below toasts and notifications. */
+  z-index: var(--z-loading-overlay, 1200);
+  pointer-events: none;
+  opacity: 0;
   /* Sync left edge with sidebar width transition so the overlay tracks the sidebar on expand */
   transition: opacity 140ms ease, left 0.2s ease;
 }
@@ -372,7 +367,7 @@
   position: fixed;
   bottom: 0.75rem;
   right: 0.75rem;
-  z-index: 10000;
+  z-index: 4;
   font-size: 1rem;
   line-height: 1;
   padding: 0.2rem;

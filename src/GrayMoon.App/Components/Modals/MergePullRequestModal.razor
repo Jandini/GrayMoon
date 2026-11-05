@@ -6,14 +6,9 @@
 
 @if (IsVisible)
 {
-    @*
-        z-index drops below the page's BackgroundJobOverlay (.loading-overlay--page, z-index: 100) while
-        IsSyncingLocalState or IsMerging so that overlay visually covers the dialog for a push/pull triggered from
-        within it, or for the merge (and optional return-to-default) itself - without unmounting the dialog, which
-        would look like it closed and reopened.
-    *@
+    @* Page job overlays (--z-loading-overlay) stack above this dialog, so it can stay mounted underneath. *@
     @* z-index one below ConfirmModal's 1075 so the "merge anyway?" warning confirmation (nested on top of this dialog) always wins the stacking tie. *@
-    <div class="modal show d-block merge-pr-modal-container" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: @((IsSyncingLocalState || IsMerging) ? 50 : 1074);"
+    <div class="modal show d-block merge-pr-modal-container" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: 1074;"
          @onkeydown="HandleKeyDown"
          @ref="_modalElement">
         <div class="modal-dialog modal-dialog-centered merge-pr-modal-dialog">
