@@ -3,9 +3,9 @@
 [![Docker Build](https://github.com/Jandini/GrayMoon/actions/workflows/docker-build.yml/badge.svg)](https://github.com/Jandini/GrayMoon/actions/workflows/docker-build.yml)
 [![Wiki](https://img.shields.io/badge/docs-wiki-blue)](https://github.com/Jandini/GrayMoon/wiki)
 
-AI coding does not stay in one repository. A feature lands in a library, in the services that use it, and in the docs, often in the same hour. GrayMoon is the workspace for that work.
+GrayMoon helps teams work across many repositories as one coordinated workspace: clone related repositories together, branch across all of them at once, and carry one feature through commit, push, and pull request as a single change.
 
-You review the whole feature in one place. You commit it as one change across the repositories that moved. You open a pull request whose description is about the system, not about the small edits inside a single repo.
+AI coding does not stay in one repository. A feature lands in a library, in the services that use it, and in the docs, in the same time. GrayMoon is the repo orchestrator that keeps it together: one place to review it, one commit across the repositories that moved, one pull request whose description is about the system.
 
 ## One feature, across every repository
 
@@ -20,6 +20,12 @@ The commit covers the feature. One message, for every repository that changed. *
 The pull request covers the feature too. **Create PR** opens it in each repository that is ahead. **Write the title and description** uses the same AI providers to summarize the whole branch, not just the latest commits. **Merge PRs...** merges them from the grid. The method starts as Squash. The same step can return the repositories to the default branch.
 
 When a shared package has to move with the feature, a **.NET Dependency** workspace orders repositories into levels and pushes the update from the lowest level up, waiting for each package to appear on the feed. A **Basic** workspace is git only. The App orchestrates. The Worker on your machine does the git, the files, and the AI CLI calls.
+
+## Plain repositories, portable workspace
+
+A workspace is a set of ordinary git repositories, cloned side by side on disk - never submodules. No nested `.git`, no pointer commits to keep in sync, no detached-HEAD surprises. Every repository works the same in GrayMoon, your IDE, or a plain terminal.
+
+The workspace itself can be a git repository too, carrying its own `graymoon.json`: which repositories belong to it, the workspace profile, and the configured version files. **Restore from repository** reads that file and clones the whole workspace - every repository, set up and ready - in a few clicks. Moving your work to another machine, or bringing a teammate up to the same workspace, takes no time: point GrayMoon at the repository and Restore.
 
 ## How it looks
 
