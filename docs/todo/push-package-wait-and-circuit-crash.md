@@ -110,8 +110,6 @@ Only one other place, `Worker.razor:265`, asks the client with `graymoonDesktopB
 
 **P4 (optional). A "Continue waiting" action** on the failed-level callout that resumes the same operation at that level without re-pushing. A future configurable timeout covers slow publishers.
 
-**P5. Configuration.** Document `PushWaitDependencyTimeoutMinutesPerDependency` in the user wiki and state it is per package, not per level.
-
 ### Circuit crash
 
 **C1 (required). Guard every hub start.** Add `WorkspaceSyncHubConnectionHelper.TryStartAsync(HubConnection, ILogger, CancellationToken)` that catches `OperationCanceledException`, `ObjectDisposedException`, `InvalidOperationException` and any other exception, logs at debug, and returns whether the connection started. Use it in `WorkspaceRepositories.Realtime.cs`, `WorkspaceActions.razor.cs`, `WorkspaceGitChanges.Realtime.cs` and `WorkspaceActionNotificationPanel.razor` (replace its inline copy).
