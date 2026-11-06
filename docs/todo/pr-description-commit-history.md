@@ -1,6 +1,6 @@
 # PR description generation: how the input is prepared, and adding commit history
 
-Status: rollout steps 1 to 3 are implemented; step 4 (reading bodies as a fallback) is still open. Sections 1 and 2 describe the code before the change (`03e34d1`); the current behavior is in `docs/architecture/05-user-capability-reference.md` (AI generation).
+Status: rollout steps 1 to 3 are implemented; step 4 (reading bodies as a fallback) is still open. Sections 1 and 2 match `docs/architecture/05-user-capability-reference.md`. Section 3 is the original proposal.
 
 Differences from the proposal as built:
 
@@ -11,112 +11,29 @@ Differences from the proposal as built:
 
 ## 1. Short answer
 
-Yes, the pull request generator already looks at commits, but only in a thin way:
+Current behavior is in `docs/architecture/05-user-capability-reference.md` (AI generation). The pull request generator reads commit subjects and shortstat, oldest first, and does not read commit bodies.
 
-- It reads **commit subjects only** (`git log --format=%s`). Commit bodies are never read.
-- It collects at most **30 subjects** per repository, **newest first**, and the prompt shows only the **first 15** (only 5 when more than 8 repositories are in the PR). The rest become `- ... N more`.
-- So on a branch with 40 commits, the AI sees the 15 most recent subjects. The 25 oldest commits, which usually hold the foundational work, show up only indirectly through the net diff excerpts. Those excerpts are capped at about 8 KB per repository and ranked by file type and churn, not by commit.
+- One Worker call collects evidence for every repository. It does not fetch or change the repository.
+- Each repository contributes up to 200 commits (60 when more than 10 repositories are in the dialog). A longer branch keeps its oldest and newest halves and counts the dropped middle.
+- Subjects are ordered by committer time across repositories. `fixup!`, `squash!`, and `amend!` fold into their commit. A subject that appears in several repositories becomes one line. History lines do not show a commit id.
+- The prompt budget is 8,000 estimated tokens. History gets 20% of it. Low-signal commits, then small middle commits, are dropped first when the budget is tight.
+- The commit-message generator still uses the last 5 HEAD subjects per repository as a style reference only.
 
-The generator is fast because almost everything is bounded, and what it sees of the history leans toward recent commits.
+Step 4 of this note, reading commit bodies when subjects are not enough, is still open.
 
-(For the **commit message** generator, "recent commits" is literal: it reads the last 5 HEAD subjects per repository only as a *style reference*, and the prompt shows at most 6 of them.)
+## 2. Pipeline from click to provider
 
-## 2. Today: the pipeline from click to provider
+The New Pull Request dialog writes one title and one Markdown description for every pull request in the dialog. The control is the same AI provider button used on Changes.
 
-```
-NewPullRequestModal.Ai.cs                 App (Blazor)
-  CurrentAiScope()  -> AiPullRequestScope { repo, headBranch, selectedBase }[]
-        |
-WorkspaceAiGenerationOperations.GeneratePullRequestTextAsync / RunAsync      App
-  1. validate provider, CLI, graymoon.json ai section (before any Git work)
-  2. resolve repository names from the Workspace links (never from the caller)
-  3. compute GitEvidenceLimits from the prompt budget
-  4. ONE Worker call: CollectGitEvidence (all repositories)
-        |
-CollectGitEvidenceCommand -> GitEvidenceCollector.CollectPullRequestAsync    Worker
-  per repository, read-only, bounded git processes (30 s timeout each)
-        |
-  5. all-or-nothing checks (any failed repo, conflicts, zero files -> stop)
-  6. AiPromptBuilder.BuildPullRequest  -> PreparedAiPrompt                    Common
-  7. ONE Worker call: GenerateAiText (provider CLI, JSON schema)
-  8. AiGeneratedTextParser.TryParsePullRequest (title <= 256, description <= 30,000)
-```
+1. The App checks the provider, the CLI, and the `graymoon.json` `ai` section before any git work.
+2. Repository names come from the Workspace links.
+3. One Worker call, CollectGitEvidence, reads every repository. It does not fetch or change the checkout. Each git process is bounded.
+4. If any repository cannot be compared, nothing is generated and the message names the repositories.
+5. The prompt stays inside 8,000 estimated tokens. Evidence is treated as untrusted data and secrets are redacted. History is 20% of that budget.
+6. Text is written into a field that was empty and has not been edited. Otherwise it is offered as a suggestion with Replace, Copy, or Dismiss.
+7. A failure stays in the AI control. Commit and Create still work. When Cursor returns a valid result and the CLI then exits nonzero, the text is kept and an amber warning is shown.
 
-### 2.1 Evidence collection per repository (`GitEvidenceCollector.CollectPullRequestAsync`)
-
-| Step | Git command | What it yields |
-|---|---|---|
-| Resolve refs | `rev-parse --verify -q refs/heads/<head>^{commit}` and `refs/remotes/origin/<target>^{commit}` | `HeadOid`, `BaseOid`; full refs, so no tag/branch ambiguity |
-| Merge base | `merge-base <base> <head>` | `MergeBaseOid` (fails with a shallow-clone hint if missing) |
-| Commit count | `rev-list --count base..head` | `CommitCount` (0 means "no commits ahead", which is an error) |
-| Subjects | `log --no-merges --format=%s -z -n30 base..head` | `CommitSubjects`, newest first, subjects only |
-| Inventory | `diff <merge-base> <head> --raw --numstat -z -M` | every changed file with +/-, rename, binary, submodule |
-| Patches | one `diff -U3` limited to the chosen paths, plus up to 3 `diff -U2` reads for files with churn > 1,000 | trimmed hunks per file |
-
-The diff is three-dot (merge base to source tip), the same comparison GitHub shows, so it covers **the net result of every commit** on the branch. What it cannot show is the order of the work, its intent, or work that was done and then undone.
-
-Files are classified (`GitEvidenceClassifier`) and ranked before any patch is read:
-
-| Category | Weight |
-|---|---|
-| Source | 10 |
-| Test | 8 |
-| Project | 7 |
-| Ci | 6 |
-| Config | 5 |
-| Docs, Other | 3 |
-| Asset, Lock, Generated | 0 (listed only, never read) |
-
-`Score = weight x (1 + log2(1 + min(churn, 400)))`. Deletes count 0.4x, churn above 2,000 counts 0.5x. Sensitive, binary, submodule and symlink files score 0. At most 16 files per repository get a patch read.
-
-### 2.2 Limits applied (pull request)
-
-| Limit | Value | Where |
-|---|---|---|
-| Prompt budget | 8,000 tokens, about 25,600 chars at 3.2 chars/token | `AiPromptBudget.PullRequest` |
-| Evidence share used to size collection | 60% of budget, about 15,360 chars | `RunAsync` |
-| Patch bytes per repository | `clamp(15,360 / repos, 1,200, 8,000)` | `RunAsync` |
-| Patch bytes per file | 1,200 | `RunAsync` (`perFileBytes`) |
-| Files listed per repository (collected) | 200 (60 when more than 10 repos) | `RunAsync` |
-| Raw diff read per git process | 1 MB | `GitEvidenceLimits.MaxRawDiffBytes` |
-| Commit subjects collected | 30 | `GitEvidenceLimits.MaxCommitSubjects` |
-| Commit subjects shown | 15 (5 when more than 8 repos), each clipped to 120 chars | `AiPromptBuilder.BuildHeaders` |
-
-### 2.3 Packing the prompt (`AiPromptBuilder.Build`)
-
-Spending order, deterministic for equal input:
-
-1. System prompt and JSON schema (fixed).
-2. Scope line ("one pull request in each of N repositories ... merge base ...").
-3. Shared dependency facts, collapsed across repositories (one line per distinct package change).
-4. Per-repository headers: `compare: head -> origin/base (N commits)`, commit subjects, totals, top files. Headers may use at most 60% of the remaining space; the file list shrinks 12, 6, 3, 0 until it fits.
-5. Excerpts: each repository's best file first (so no repository has only a file list), then the rest by score. Identical hunks across repositories are shown once ("is also made in ..."). Patches pass through `EvidenceRedactor` and are trimmed at hunk boundaries.
-6. Coverage line: `N changed files, M listed, K with excerpts`, plus "evidence is partial" when something relevant did not fit.
-
-Example of what the provider receives for one repository today:
-
-```
-## repository GrayMoon
-compare: deeper-pr-description -> origin/main (40 commits)
-commit subjects:
-- Show coverage in the PR dialog
-- Fix typo
-- Address review comments
-- ... (12 more newest subjects)
-- ... 25 more
-totals: 23 files, +1180 -240
-files:
-- modified src/GrayMoon.Common/Ai/AiPromptBuilder.cs (+210 -30) [source]
-...
-```
-
-### 2.4 Where the description loses information today
-
-1. **Older commits vanish.** Newest-first plus a cap of 15 means that on a long branch the commits that introduced the feature drop out, while "Fix typo" and "Address review comments" stay in.
-2. **Diff excerpts are a sample.** About 8 KB per repository and 16 files at most. On a 50-file change, many meaningful files appear only as a line in the file list, so the commit subjects are the only other place their purpose is stated.
-3. **Multi-repository PRs are hit hardest.** With 9 or more repositories, each shows 5 subjects. The same workspace commit appears in every repository's list and uses up those few slots several times over.
-4. **Subjects are not guaranteed to summarize the commit.** The commit generator's rules ask for an imperative one-liner of at most 72 characters, but not for one that covers the *whole* commit, so a subject can describe only its largest part.
-
+On Changes the control is Commit Staged or Commit All, then the AI provider, then the chevron. Generate commit message starts ticked. Push committed starts unticked. Claude, Codex, and Cursor Agent are offered only when that CLI is installed. The pinned provider is remembered for the workspace on this machine.
 ## 3. Proposal: subject-first commit history
 
 ### 3.1 Principle

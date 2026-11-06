@@ -1,7 +1,7 @@
 # GrayMoon Current Architecture
 
-**State documented:** GrayMoon with worktree-backed Features, Workspace profiles, the Workspace repository (`graymoon.json`), AI-generated commit/PR text, and the Git Changes projection/tree pipeline  
-**Code baseline reviewed through:** `e4385f4a86e388f8af80e4a7f3ff5ba828ec0f6b`  
+**State documented:** GrayMoon with worktree-backed Features, Workspace profiles (Basic and .NET Dependency), the Workspace repository (`graymoon.json`) and a local-only workspace name, CodeGraph on New Feature, central package versions, AI-generated commit/PR text, Worker auto-update, and the Git Changes projection/tree pipeline  
+**Code baseline reviewed through:** `8257e162441e3b49eafa1bc73f4952a51bad66ab`  
 **Runtime:** .NET 10, ASP.NET Core / Blazor Server, EF Core 10, SQLite, GrayMoon.Worker .NET 10
 
 This folder is the current-state architecture reference for GrayMoon. Proposals and design notes for work not yet built live in `docs/todo/`; once shipped, their behavior is folded into these documents.
@@ -44,7 +44,7 @@ The companion Desktop shell is documented in `GrayMoon.Desktop/docs/architecture
 
 ## GrayMoon in one paragraph
 
-GrayMoon is a control plane for multi-repository .NET development. A Workspace groups related Git repositories, discovers their projects and package relationships, calculates dependency levels, coordinates branch and Git operations across them, updates package and configured-file versions, restores and pushes in dependency order, tracks pull requests and GitHub Actions, and provides a multi-repository Git Changes experience. GrayMoon.App owns orchestration and persisted state. GrayMoon.Worker (the Worker, executable `graymoon-worker`) runs on the developer machine and owns all local Git and filesystem work.
+GrayMoon is a control plane for a set of Git repositories. A Basic workspace is git only. A .NET Dependency workspace discovers projects and package relationships, calculates dependency levels, and updates, restores, and pushes in that order, including versions kept in `Directory.Packages.props`. Both profiles share branch operations, pull requests, GitHub Actions, and multi-repository Git Changes. GrayMoon.App owns orchestration and persisted state. GrayMoon.Worker (the Worker, executable `graymoon-worker`) runs on the developer machine and owns all local Git and filesystem work. The App must not touch local git.
 
 ## The most important architecture rule
 
@@ -165,7 +165,7 @@ GrayMoon's differentiating workflows are:
 
 ## Documentation policy going forward
 
-This folder is a **current-state reference**, not a historical archive, and it is the only documentation kept in the repository.
+This folder is a **current-state reference**, not a historical archive. The repository README is the developer entry point, `CLAUDE.md` and `AGENTS.md` hold build commands and coding rules, and `docs/todo/` holds proposals that are not built yet.
 
 When functionality changes:
 
