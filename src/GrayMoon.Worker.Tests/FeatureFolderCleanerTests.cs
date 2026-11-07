@@ -317,8 +317,35 @@ public sealed class FeatureFolderCleanerTests : IDisposable
         return root;
     }
 
-    private static void WriteMarker(string folder, string markerFolder) =>
+    private void WriteMarker(string folder, string markerFolder, string workspace = "Shop", string? feature = null) =>
         File.WriteAllText(
             Path.Combine(folder, PendingDeleteMarker.FileName),
-            new PendingDeleteMarker(markerFolder, "Shop", Path.GetFileName(folder), DateTime.UtcNow).Render());
+            new PendingDeleteMarker(
+                markerFolder,
+                workspace,
+                feature ?? Path.GetRelativePath(_storageRoot, folder).Replace(Path.DirectorySeparatorChar, '/'),
+                DateTime.UtcNow).Render());
+
+    [Fact]
+    public async Task Sweep_ignores_a_marker_for_another_workspace_or_feature_name()
+    {
+        var otherWorkspace = CreateFeature("a", ("Api/a.txt", "x"));
+        WriteMarker(otherWorkspace, otherWorkspace, workspace: "Elsewhere");
+        var otherFeature = CreateFeature("b", ("Api/a.txt", "x"));
+        WriteMarker(otherFeature, otherFeature, feature: "something-else");
+        var good = CreateFeature("c", ("Api/a.txt", "x"));
+        WriteMarker(good, good);
+
+        var command = new SweepPendingFeatureFoldersCommand(_cleaner);
+        var response = await command.ExecuteAsync(new SweepPendingFeatureFoldersRequest
+        {
+            FeatureStorageRoot = _storageRoot,
+            WorkspaceName = "Shop",
+        });
+
+        Assert.Equal(1, response.Removed);
+        Assert.True(Directory.Exists(otherWorkspace));
+        Assert.True(Directory.Exists(otherFeature));
+        Assert.False(Directory.Exists(good));
+    }
 }

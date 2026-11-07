@@ -362,7 +362,11 @@ Pending-delete cleanup (`FeatureFolderCleaner.CleanupAsync`, Worker commands `Cl
 - The sweep walks grouping folders at most `MaxFeatureNameDepth` = 8 levels (Feature names may contain `/`), deletes only folders whose marker names that same folder, and excludes Features still in the database. Empty parents are removed up to, never including, the storage root.
 - Legacy drive-root storage paths (`WorkerPath.IsLegacyWindowsDriveRootGraymoonPath`) are never marked or swept.
 
+- The sweep also requires the marker's `workspace` (when recorded) to equal the sweeping Workspace and its `feature` (when recorded) to equal the folder's path below the root, and re-runs the tree guards after the Worker releases its own handles, immediately before deleting.
+
 App `FeatureFolderCleanupService`: sweeps on Worker `Online` and on Workspace open (`RequestSweep`), at most once per Workspace per `MinInterval` = 15 min, skipped while `IsWorkspaceStructurallyBusy` or while `IWorkerBridge.GetUnavailableReason()` is set. Never throws.
+
+Retry timer: there is no always-on timer. `ArmRetry(workspaceId)` starts a per-Workspace loop (one at most) that sweeps every `RetryInterval` = 30 min, ignoring the 15 min throttle. It is armed by `FeatureRemovalQueue` when a removal finishes with `RemoveFeaturePendingDeletionFolder` set, and by any sweep (Worker connect, Workspace open) that reports `StillPending > 0`, which also re-arms it after a restart. Each sweep returns a `SweepState`: `Clean` (ran, nothing pending) and `NotApplicable` (no storage root) stop the loop; `StillPending`, `Failed` and `Skipped` (busy, Worker unavailable, throttled) keep it running. `StopAsync` cancels every loop. The loops are in memory only.
 
 ### 5E. Feature reconciliation
 
