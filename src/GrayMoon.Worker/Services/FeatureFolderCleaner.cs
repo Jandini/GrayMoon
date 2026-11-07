@@ -13,6 +13,8 @@ public enum FeatureFolderCleanupOutcome
     Refused = 2,
     /// <summary>The caller asked to clean only a marked folder, and this one carries no matching marker; nothing was touched.</summary>
     NotMarked = 3,
+    /// <summary>Only for a check-only request: something exists at the folder path, and nothing was touched.</summary>
+    Present = 4,
 }
 
 public sealed record FeatureFolderCleanupResult(FeatureFolderCleanupOutcome Outcome, int RemainingFileCount = 0, string? Message = null);
@@ -37,7 +39,8 @@ public sealed class FeatureFolderCleaner(ILogger<FeatureFolderCleaner> logger, I
         string? featureName,
         bool retry,
         bool requireMarker,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool checkOnly = false)
     {
         var guardFailure = ValidatePaths(featureStorageRoot, featureRootPath);
         if (guardFailure != null)
@@ -47,6 +50,14 @@ public sealed class FeatureFolderCleaner(ILogger<FeatureFolderCleaner> logger, I
         }
 
         var root = Normalize(featureRootPath!);
+        if (checkOnly)
+        {
+            // Read-only: a file, folder or link of that name all count as taken.
+            return Path.Exists(root)
+                ? new FeatureFolderCleanupResult(FeatureFolderCleanupOutcome.Present)
+                : new FeatureFolderCleanupResult(FeatureFolderCleanupOutcome.Removed);
+        }
+
         if (!Directory.Exists(root))
         {
             TryRemoveEmptyParents(Normalize(featureStorageRoot!), root);

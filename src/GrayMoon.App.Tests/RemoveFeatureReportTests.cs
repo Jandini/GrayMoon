@@ -525,6 +525,28 @@ public sealed class RemoveFeatureReportTests
         Assert.Equal($@"{ManagedStorageRoot}\old-feature", GetArg(call.Args, "featureRootPath"));
     }
 
+    [Fact]
+    public async Task Create_with_the_name_of_a_folder_that_already_exists_is_refused_before_anything_is_written()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        ctx.WorkerBridge.Respond(WorkerHubMethods.CleanupFeatureFolder, new { outcome = "Present" });
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var result = await ops.CreateFeatureAsync(ctx.WorkspaceId, "taken", WorkspaceFeatureBaseKindApplication.CurrentWorkspace);
+
+        Assert.False(result.Success);
+        Assert.Equal("FeatureFolderExists", result.Condition);
+        Assert.Contains($@"{ManagedStorageRoot}\taken", result.Error);
+        var check = ctx.WorkerBridge.Calls.Last(c => c.Command == WorkerHubMethods.CleanupFeatureFolder);
+        Assert.Equal(true, GetArg(check.Args, "checkOnly"));
+        Assert.Equal($@"{ManagedStorageRoot}\taken", GetArg(check.Args, "featureRootPath"));
+
+        await using var read = ctx.CreateScope();
+        var db = read.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.False(await db.WorkspaceFeatures.AnyAsync(f => f.Name == "taken"));
+    }
+
     private static object? GetArg(object args, string name) => args.GetType().GetProperty(name)?.GetValue(args);
 
     private static async Task SetManagedStorageRootAsync(SyncStateTestContext ctx)

@@ -134,6 +134,17 @@ public sealed class WorkspaceFeatureOperations(
                 + $"Close the programs using {pendingFolder} or choose another name.");
         }
 
+        // Never build a Feature on a folder that already exists, whoever made it: the new worktrees could overlap its files.
+        var takenFolder = await CleanupFeatureFolderForNameAsync(
+            workspaceId, name, onlyIfMarked: false, cancellationToken, checkOnly: true);
+        if (takenFolder is not null)
+        {
+            return FailCreate(
+                "FeatureFolderExists",
+                $"The folder {takenFolder} already exists, so a Feature named '{name}' cannot be created. "
+                + "Choose another name, or move or delete that folder first.");
+        }
+
         var links = await db.WorkspaceRepositories
             .AsNoTracking()
             .Include(l => l.Repository)
@@ -1220,7 +1231,8 @@ public sealed class WorkspaceFeatureOperations(
         int workspaceId,
         string? featureName,
         bool onlyIfMarked,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool checkOnly = false)
     {
         if (string.IsNullOrWhiteSpace(featureName))
             return null;
@@ -1242,8 +1254,8 @@ public sealed class WorkspaceFeatureOperations(
             return null;
 
         var featureRootPath = WorkerPath.Combine(storageRoot, featureName);
-        var outcome = await CleanupFeatureFolderAsync(storageRoot, featureRootPath, workspaceName, featureName, onlyIfMarked, cancellationToken);
-        return outcome == CleanupOutcomePendingDeletion ? featureRootPath : null;
+        var outcome = await CleanupFeatureFolderAsync(storageRoot, featureRootPath, workspaceName, featureName, onlyIfMarked, cancellationToken, checkOnly);
+        return outcome == (checkOnly ? CleanupOutcomePresent : CleanupOutcomePendingDeletion) ? featureRootPath : null;
     }
 
     /// <summary>
@@ -1351,6 +1363,7 @@ public sealed class WorkspaceFeatureOperations(
 
     private const string CleanupOutcomeRemoved = "Removed";
     private const string CleanupOutcomePendingDeletion = "PendingDeletion";
+    private const string CleanupOutcomePresent = "Present";
 
     /// <summary>
     /// Asks the Worker to delete a Feature's leftover folder, or mark it pending deletion when files are still in use.
@@ -1362,7 +1375,8 @@ public sealed class WorkspaceFeatureOperations(
         string workspaceName,
         string featureName,
         bool onlyIfMarked,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool checkOnly = false)
     {
         try
         {
@@ -1375,7 +1389,8 @@ public sealed class WorkspaceFeatureOperations(
                     workspaceName,
                     featureName,
                     retry = true,
-                    onlyIfMarked
+                    onlyIfMarked,
+                    checkOnly
                 },
                 cancellationToken);
             var result = response.Success
@@ -1389,7 +1404,7 @@ public sealed class WorkspaceFeatureOperations(
                 return null;
             }
 
-            if (result.Outcome != CleanupOutcomeRemoved)
+            if (!checkOnly && result.Outcome != CleanupOutcomeRemoved)
             {
                 logger.LogInformation(
                     "Feature folder {FeatureRootPath} left behind: {Outcome} ({Count} file(s)). {Message}",

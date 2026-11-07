@@ -1195,6 +1195,7 @@ Creation (structural lock `create-feature`):
 ```text
 reject a name that is already a branch in any repository (listed as "X of Y" repositories) or an existing Feature
 finish a pending-delete folder of the same name first
+reject the name when its folder already exists on disk (FeatureFolderExists; any file, folder or link, checked read only)
 record HEAD of every Workspace repository (one GetHeadCommits)
 commit the intent in one transaction: Feature Creating + context + one Pending row per repository
 git worktree add, Workspace repository first (its worktree is the Feature root

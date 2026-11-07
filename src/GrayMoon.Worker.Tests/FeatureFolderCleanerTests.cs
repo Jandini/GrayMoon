@@ -277,6 +277,39 @@ public sealed class FeatureFolderCleanerTests : IDisposable
     }
 
     [Fact]
+    public async Task Check_only_reports_an_existing_folder_without_touching_it()
+    {
+        var existing = CreateFeature("taken", ("notes.txt", "x"));
+        var empty = CreateFeature("empty");
+        var command = new CleanupFeatureFolderCommand(_cleaner);
+
+        var taken = await command.ExecuteAsync(new CleanupFeatureFolderRequest
+        {
+            FeatureStorageRoot = _storageRoot,
+            FeatureRootPath = existing,
+            CheckOnly = true,
+        });
+        var emptyFolder = await command.ExecuteAsync(new CleanupFeatureFolderRequest
+        {
+            FeatureStorageRoot = _storageRoot,
+            FeatureRootPath = empty,
+            CheckOnly = true,
+        });
+        var free = await command.ExecuteAsync(new CleanupFeatureFolderRequest
+        {
+            FeatureStorageRoot = _storageRoot,
+            FeatureRootPath = Path.Combine(_storageRoot, "free"),
+            CheckOnly = true,
+        });
+
+        Assert.Equal(nameof(FeatureFolderCleanupOutcome.Present), taken.Outcome);
+        Assert.Equal(nameof(FeatureFolderCleanupOutcome.Present), emptyFolder.Outcome);
+        Assert.Equal(nameof(FeatureFolderCleanupOutcome.Removed), free.Outcome);
+        Assert.True(File.Exists(Path.Combine(existing, "notes.txt")));
+        Assert.True(Directory.Exists(empty));
+    }
+
+    [Fact]
     public async Task Only_if_marked_leaves_an_unmarked_folder_alone_and_cleans_a_marked_one()
     {
         var unmarked = CreateFeature("mine", ("notes.txt", "x"));
