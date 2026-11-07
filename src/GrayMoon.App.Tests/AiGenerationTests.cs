@@ -549,6 +549,26 @@ public sealed class AiGenerationTests
     }
 
     [Fact]
+    public void Generated_text_that_overlapped_a_mutation_is_offered_with_a_reason_and_never_applied()
+    {
+        var overlapped = AiTextApplyPolicy.Decide("", "", false, AiTextApplyPolicy.StaleChangesReason, mutationOverlapped: true);
+        Assert.False(overlapped.ApplyDirectly);
+        Assert.Equal(AiTextApplyPolicy.MutationOverlapReason, overlapped.Reason);
+
+        // Existing user text: still a suggestion; the overlap reason is added for the user.
+        var existing = AiTextApplyPolicy.Decide("my own message", "my own message", false, AiTextApplyPolicy.StaleChangesReason, mutationOverlapped: true);
+        Assert.False(existing.ApplyDirectly);
+        Assert.Equal(AiTextApplyPolicy.MutationOverlapReason, existing.Reason);
+
+        // A moved scope or an edit keeps its own, more specific reason.
+        Assert.Equal(AiTextApplyPolicy.StaleChangesReason, AiTextApplyPolicy.Decide("", "", true, AiTextApplyPolicy.StaleChangesReason, true).Reason);
+        Assert.Equal(AiTextApplyPolicy.EditedReason, AiTextApplyPolicy.Decide("", "typed", false, AiTextApplyPolicy.StaleChangesReason, true).Reason);
+
+        // Not overlapped: unchanged behavior.
+        Assert.True(AiTextApplyPolicy.Decide("", "", false, AiTextApplyPolicy.StaleChangesReason, mutationOverlapped: false).ApplyDirectly);
+    }
+
+    [Fact]
     public void Commit_scope_fingerprint_changes_when_a_watcher_rescan_lands_and_ignores_non_targets()
     {
         static WorkspaceGitChangesRepositoryView Repo(int id, int staged, int changed, long ticks) => new()

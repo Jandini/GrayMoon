@@ -211,6 +211,25 @@ public sealed class WorkspaceGitChangesCommitGenerationTests
         Assert.False(push.Get(2));
     }
 
+    [Fact]
+    public async Task A_result_that_overlapped_a_mutation_is_a_suggestion_even_when_no_page_shows_the_context()
+    {
+        var memory = new WorkspaceGitChangesCommitMessageMemory();
+        var generation = NewGeneration(memory);
+
+        generation.TryStart(
+            Feature,
+            _ => Task.FromResult(WorkspaceGitChangesCommitGeneration.Outcome.Succeeded("ai text", "Claude", "", warning: null, mutationOverlap: true)),
+            consult: null);
+        await WaitUntilAsync(() => !generation.IsRunning(Feature));
+
+        Assert.Equal(string.Empty, memory.Get(1, 10));
+        var offer = generation.OfferFor(Feature);
+        Assert.NotNull(offer);
+        Assert.Equal("ai text", offer.Text);
+        Assert.Equal(AiTextApplyPolicy.MutationOverlapReason, offer.Reason);
+    }
+
     private static WorkspaceGitChangesCommitGeneration NewGeneration(WorkspaceGitChangesCommitMessageMemory memory) =>
         new(memory, NullLogger<WorkspaceGitChangesCommitGeneration>.Instance);
 
