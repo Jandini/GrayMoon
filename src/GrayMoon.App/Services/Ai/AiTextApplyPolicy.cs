@@ -16,15 +16,18 @@ public static class AiTextApplyPolicy
     public const string EditedReason = "You edited the text while it was being written.";
     public const string StaleChangesReason = "The changes moved on while it was being written; check it still fits.";
     public const string StaleBranchesReason = "A branch selection changed while it was being written; it describes the previous selection.";
+    public const string MutationOverlapReason = "Another operation was changing files while this was being written; check it still fits.";
 
-    public static AiApplyDecision Decide(string textAtClick, string textNow, bool scopeChanged, string staleReason)
+    public static AiApplyDecision Decide(string textAtClick, string textNow, bool scopeChanged, string staleReason, bool mutationOverlapped = false)
     {
         if (scopeChanged)
             return new AiApplyDecision(false, staleReason);
         if (!string.Equals(textAtClick, textNow, StringComparison.Ordinal))
             return new AiApplyDecision(false, EditedReason);
         if (!string.IsNullOrWhiteSpace(textAtClick))
-            return new AiApplyDecision(false, null);
+            return new AiApplyDecision(false, mutationOverlapped ? MutationOverlapReason : null);
+        if (mutationOverlapped)
+            return new AiApplyDecision(false, MutationOverlapReason);
         return new AiApplyDecision(true, null);
     }
 
