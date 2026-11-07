@@ -43,8 +43,8 @@ internal static class RunCommandHandler
 
         var version = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0";
         Log.Information(
-            "GrayMoon Worker. Version: {Version}. AppHubUrl: {AppHubUrl}, ListenPort: {ListenPort}, MaxConcurrentCommands: {MaxConcurrentCommands}, MaxConcurrentReadCommands: {MaxConcurrentReadCommands}, MaxConcurrentDiffCommands: {MaxConcurrentDiffCommands}",
-            version, options.AppHubUrl, options.ListenPort, options.MaxConcurrentCommands, options.MaxConcurrentReadCommands, options.MaxConcurrentDiffCommands);
+            "GrayMoon Worker. Version: {Version}. AppHubUrl: {AppHubUrl}, ListenPort: {ListenPort}, MaxConcurrentCommands: {MaxConcurrentCommands}, MaxConcurrentReadCommands: {MaxConcurrentReadCommands}, MaxConcurrentDiffCommands: {MaxConcurrentDiffCommands}, MaxConcurrentAiCommands: {MaxConcurrentAiCommands}",
+            version, options.AppHubUrl, options.ListenPort, options.MaxConcurrentCommands, options.MaxConcurrentReadCommands, options.MaxConcurrentDiffCommands, options.MaxConcurrentAiCommands);
 
         var builder = Host.CreateApplicationBuilder(args: Array.Empty<string>());
         builder.Configuration.Sources.Insert(0, new ChainedConfigurationSource { Configuration = appConfig });
@@ -113,6 +113,8 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<IReadJobQueue>(sp => sp.GetRequiredService<ReadJobQueue>());
         builder.Services.AddSingleton<DiffJobQueue>();
         builder.Services.AddSingleton<IDiffJobQueue>(sp => sp.GetRequiredService<DiffJobQueue>());
+        builder.Services.AddSingleton<AiJobQueue>();
+        builder.Services.AddSingleton<IAiJobQueue>(sp => sp.GetRequiredService<AiJobQueue>());
         builder.Services.AddSingleton<CommandJobCancellationRegistry>();
         builder.Services.AddSingleton<IRepositoryAccess, RepositoryAccess>();
         builder.Services.AddSingleton<CommandLineService>();
@@ -231,6 +233,7 @@ builder.Services.AddSingleton<ICommandHandler<EnsureGitChangesWatchersRequest, E
         builder.Services.AddHostedService<MainJobBackgroundService>();
         builder.Services.AddHostedService<ReadJobBackgroundService>();
         builder.Services.AddHostedService<DiffJobBackgroundService>();
+        builder.Services.AddHostedService<AiJobBackgroundService>();
 
         if (OperatingSystem.IsWindows())
             builder.Services.AddWindowsService();
