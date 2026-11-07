@@ -422,18 +422,19 @@ Cli/Handlers/RunCommandHandler.cs                  AddSingleton<ICommandHandler<
 Services/CommandDispatcher.cs                      constructor parameter + _executors entry
 Services/CommandJobFactory.cs                      DeserializeRequest case (without it the payload is not deserialized)
 GrayMoon.Abstractions/Worker/WorkerHubMethods.cs   name constant (preferred; older commands use literals)
-Hosted/SignalRConnectionHostedService.cs           pool selection, see below
+Services/WorkerCommandPoolRouter.cs               pool selection, called from Hosted/SignalRConnectionHostedService.cs, see below
 App call site                                      IWorkerBridge.SendCommandAsync(name, args, ct), deserialize WorkerCommandResponse.Data
 GrayMoon.Worker.Tests                              handler test
 ```
 
-Pool selection is by command name:
+Pool selection is by command name in `Services/WorkerCommandPoolRouter.cs` (called from `Hosted/SignalRConnectionHostedService.cs`):
 
 | Pool | Commands | Option (default) |
 |---|---|---|
 | Read (`ReadOnlyCommands`) | `GetGitChangeStatus`, `EnsureGitChangesWatchers`, `ListGitWorktrees`, `InspectWorktree` | `MaxConcurrentReadCommands` (8) |
 | Diff (`DiffCommands`) | `GetGitFileDiff` | `MaxConcurrentDiffCommands` (4) |
-| Main | everything else, including worktree create/remove, CodeGraph and the AI commands | `MaxConcurrentCommands` (`ProcessorCount * 2`) |
+| AI (`AiCommands`) | `CollectGitEvidence`, `GenerateAiText`, `GetAiProviders` | `MaxConcurrentAiCommands` (4) |
+| Main | everything else, including worktree create/remove and CodeGraph | `MaxConcurrentCommands` (`ProcessorCount * 2`) |
 
 Add a command to a fast pool only when it is a quick read that must not queue behind long writes.
 

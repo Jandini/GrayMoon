@@ -51,6 +51,14 @@ public sealed partial class WorkspaceGitChanges
     private bool _aiGenerating =>
         CurrentCommitGenerationKey is { } key && CommitGeneration.IsRunning(key);
 
+    /// <summary>
+    /// The AI provider control is off only while this page's own overlay job runs (a commit, which may itself be writing
+    /// the message as its first step). Generation takes no Workspace lock, so another operation on the Workspace (for
+    /// example Push Updated started on Repositories) does not disable it; <see cref="IsJobRunning"/> is for the
+    /// mutating buttons. A result that overlapped such an operation is offered as a suggestion, never applied silently.
+    /// </summary>
+    private bool IsAiControlDisabled => IsOwnPageJobRunning;
+
     private string? _aiError =>
         _aiLocalError ?? (CurrentCommitGenerationKey is { } key ? CommitGeneration.Error(key) : null);
 
@@ -227,7 +235,7 @@ public sealed partial class WorkspaceGitChanges
     /// </summary>
     private Task GenerateCommitMessageAsync()
     {
-        if (_aiGenerating || _aiMenu?.Pinned is not { IsAvailable: true } provider || _view is null || CurrentCommitGenerationKey is not { } key)
+        if (_aiGenerating || IsOwnPageJobRunning || _aiMenu?.Pinned is not { IsAvailable: true } provider || _view is null || CurrentCommitGenerationKey is not { } key)
             return Task.CompletedTask;
 
         var mode = OfferedCommitMode;
@@ -250,6 +258,8 @@ public sealed partial class WorkspaceGitChanges
         var messageAtClick = _workspaceCommitMessage;
         var fingerprint = AiTextApplyPolicy.CommitScopeFingerprint(mode, targets);
         var scope = BuildAiCommitScope(mode, targets);
+        // Read on the renderer thread at the click: true when another operation on this Workspace is changing files now.
+        var mutationBusyAtClick = IsJobRunning;
         _aiLocalError = null;
 
         CommitGeneration.TryStart(
@@ -262,7 +272,7 @@ public sealed partial class WorkspaceGitChanges
                         ops => ops.GenerateCommitMessageAsync(scope, provider.Id, progress: null, ct),
                         ct);
                     return result.Success
-                        ? WorkspaceGitChangesCommitGeneration.Outcome.Succeeded(result.Value!.Message, provider.Label, messageAtClick, result.Warning)
+                        ? WorkspaceGitChangesCommitGeneration.Outcome.Succeeded(result.Value!.Message, provider.Label, messageAtClick, result.Warning, mutationBusyAtClick)
                         : WorkspaceGitChangesCommitGeneration.Outcome.Failed(result.Failure!.Message, provider.Label, messageAtClick);
                 }
                 catch (OperationCanceledException)
@@ -301,7 +311,12 @@ public sealed partial class WorkspaceGitChanges
             var current = (_view?.Repositories ?? []).Where(r => WorkspaceCommitModeHelper.IsRepositoryTarget(mode, r.StagedCount, r.ChangedCount));
             var scopeChanged = OfferedCommitMode != mode
                                || !string.Equals(fingerprint, AiTextApplyPolicy.CommitScopeFingerprint(mode, current), StringComparison.Ordinal);
-            decision = AiTextApplyPolicy.Decide(outcome.TextAtClick, _workspaceCommitMessage, scopeChanged, AiTextApplyPolicy.StaleChangesReason);
+            decision = AiTextApplyPolicy.Decide(
+                outcome.TextAtClick,
+                _workspaceCommitMessage,
+                scopeChanged,
+                AiTextApplyPolicy.StaleChangesReason,
+                outcome.MutationOverlap || IsJobRunning);
             if (decision.ApplyDirectly && outcome.Text is not null)
                 ApplyCommitMessage(outcome.Text);
         });

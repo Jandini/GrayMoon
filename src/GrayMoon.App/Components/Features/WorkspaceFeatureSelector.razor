@@ -62,7 +62,7 @@
                  @onmouseleave="CloseToolMenu">
                 <button type="button"
                         class="workspace-feature-selector__add@(IsToolLaunchLocked(tool.Id) ? " is-starting" : "")"
-                        disabled="@(Disabled || IsToolLaunchLocked(tool.Id))"
+                        disabled="@IsToolLaunchLocked(tool.Id)"
                         aria-label="@tool.Title"
                         aria-haspopup="menu"
                         @onclick="() => LaunchAsync(tool)"
@@ -80,7 +80,7 @@
                 {
                     <span class="workspace-feature-selector__tool-hint" role="tooltip">@tool.Title</span>
                 }
-                @if (!Disabled && !IsToolLaunchLocked(tool.Id) && _openToolMenuId == tool.Id && _repositories.Count > 0)
+                @if (!IsToolLaunchLocked(tool.Id) && _openToolMenuId == tool.Id && _repositories.Count > 0)
                 {
                     <ul class="dropdown-menu show shadow workspace-feature-selector__dir-menu workspace-feature-selector__tool-menu"
                         role="menu">
@@ -232,6 +232,12 @@
     [Parameter] public EventCallback<WorkspaceFeatureContextId> SelectedContextIdChanged { get; set; }
     [Parameter] public EventCallback<string> OnRequestCreateFeature { get; set; }
     [Parameter] public EventCallback<WorkspaceFeatureContextId> OnRequestRemoveFeature { get; set; }
+    /// <summary>
+    /// Blocks switching context and New Feature (a running job belongs to the context it started in, and creating a
+    /// Feature needs the Workspace lock). It does not block the pinned Open in tool buttons: launching a tool only posts a
+    /// path to Desktop, takes no Workspace lock and reads no job state. Each tool locks only itself while its own
+    /// "Starting..." toast shows (<see cref="IsToolLaunchLocked"/>).
+    /// </summary>
     [Parameter] public bool Disabled { get; set; }
     [Parameter] public string InputId { get; set; } = "workspace-feature-selector";
     [Parameter] public string? WorkspaceName { get; set; }
@@ -792,7 +798,7 @@
 
     private void OnToolPointerEnter(string toolId)
     {
-        if (Disabled || IsToolLaunchLocked(toolId))
+        if (IsToolLaunchLocked(toolId))
             return;
 
         _ = EnsureLaunchRepositoriesAsync();

@@ -42,6 +42,8 @@ public sealed partial class WorkspaceGitChanges
     /// Use this to block starting another mutating action (commit buttons, stage-all, discard-all).
     /// Do NOT use this to disable the Feature selector - that falsely locks the selector while Push
     /// Updated runs on Repositories even when Changes is idle / showing "No changes".
+    /// Do NOT use this to disable the AI provider control either: generation takes no Workspace lock (see
+    /// <see cref="IsAiControlDisabled"/>).
     /// </summary>
     private bool IsJobRunning => JobService.IsRunning(PageJobKey);
 

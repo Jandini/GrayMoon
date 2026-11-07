@@ -27,12 +27,13 @@ public abstract class AiTextGenerationRuns<TText>(ILogger logger, string failedM
         string? Error,
         string ProviderLabel,
         string TextAtClick,
-        AiGenerationWarning? Warning = null)
+        AiGenerationWarning? Warning = null,
+        bool MutationOverlap = false)
     {
         public static Outcome CancelledResult { get; } = new(true, false, null, null, "", "");
 
-        public static Outcome Succeeded(TText text, string providerLabel, string textAtClick, AiGenerationWarning? warning = null) =>
-            new(false, true, text, null, providerLabel, textAtClick, warning);
+        public static Outcome Succeeded(TText text, string providerLabel, string textAtClick, AiGenerationWarning? warning = null, bool mutationOverlap = false) =>
+            new(false, true, text, null, providerLabel, textAtClick, warning, mutationOverlap);
 
         public static Outcome Failed(string error, string providerLabel, string textAtClick) =>
             new(false, false, null, error, providerLabel, textAtClick);
@@ -249,7 +250,8 @@ public abstract class AiTextGenerationRuns<TText>(ILogger logger, string failedM
                 outcome.TextAtClick,
                 CurrentText(key),
                 scopeChanged: false,
-                AiTextApplyPolicy.StaleChangesReason);
+                AiTextApplyPolicy.StaleChangesReason,
+                outcome.MutationOverlap);
         }
 
         var published = false;

@@ -24,4 +24,12 @@ public class WorkerOptions
     /// any other write/read command.
     /// </summary>
     public int MaxConcurrentDiffCommands { get; set; } = 4;
+
+    /// <summary>
+    /// Worker count for the dedicated AI command pool (CollectGitEvidence, GenerateAiText, GetAiProviders). A generation
+    /// is one provider CLI process that can run for minutes, so it must not hold a main-pool slot that Sync, push,
+    /// Update and hook syncs need, and must not sit in the read pool where it would starve status scans. Several
+    /// Feature contexts can generate at once, so the default is 4, not smaller than what AI could use before.
+    /// </summary>
+    public int MaxConcurrentAiCommands { get; set; } = 4;
 }

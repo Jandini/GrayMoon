@@ -30,21 +30,13 @@ public sealed class SignalRConnectionHostedService(
     IJobQueue jobQueue,
     IReadJobQueue readJobQueue,
     IDiffJobQueue diffJobQueue,
+    IAiJobQueue aiJobQueue,
     CommandJobFactory commandJobFactory,
     CommandJobCancellationRegistry cancellationRegistry,
     IWorkerSecretProvider workerSecretProvider,
     IOptions<WorkerOptions> options,
     ILogger<SignalRConnectionHostedService> logger) : IHostedService, IAsyncDisposable
 {
-    /// <summary>Commands that only read repository state (never touch the index or working tree) and can
-    /// run on the dedicated read pool instead of queuing behind long-running writes.</summary>
-    private static readonly HashSet<string> ReadOnlyCommands = ["GetGitChangeStatus", "EnsureGitChangesWatchers", WorkerHubMethods.ListGitWorktrees, WorkerHubMethods.InspectWorktree];
-
-    /// <summary>Diff commands get their own dedicated pool, separate from <see cref="ReadOnlyCommands"/>,
-    /// so opening a diff never queues behind a workspace status rescan (which can fan out many
-    /// GetGitChangeStatus calls) or any other command.</summary>
-    private static readonly HashSet<string> DiffCommands = ["GetGitFileDiff"];
-
     private readonly WorkerOptions _options = options.Value;
     private HubConnection? _connection;
     private CancellationTokenSource? _hostCts;
@@ -111,9 +103,13 @@ public sealed class SignalRConnectionHostedService(
                 }
 
                 var envelope = commandJobFactory.CreateCommandJob(requestId, command, args, operationId);
-                var targetQueue = DiffCommands.Contains(command)
-                    ? (IJobQueue)diffJobQueue
-                    : ReadOnlyCommands.Contains(command) ? (IJobQueue)readJobQueue : jobQueue;
+                IJobQueue targetQueue = WorkerCommandPoolRouter.Resolve(command) switch
+                {
+                    WorkerCommandPool.Diff => diffJobQueue,
+                    WorkerCommandPool.Read => readJobQueue,
+                    WorkerCommandPool.Ai => aiJobQueue,
+                    _ => jobQueue,
+                };
                 await targetQueue.EnqueueAsync(envelope, jobCts.Token);
             }
             catch (OperationCanceledException)
