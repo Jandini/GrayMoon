@@ -608,15 +608,16 @@ The App and the Worker are a matched pair. `WorkerConnectionTracker` states are 
 
 ## 10. Worker command pipeline
 
-The Worker has three bounded command pools:
+The Worker has four bounded command pools:
 
 ```text
 main command pool
 Git Changes status/read pool
 Git diff pool
+Git AI pool
 ```
 
-This prevents expensive or long-running mutations from making Git Changes status and diff feel unresponsive. The read pool takes `GetGitChangeStatus`, `ListGitWorktrees` and `InspectWorktree`; the AI commands run in the main pool. Pool sizes and routing are in 04.
+This prevents expensive or long-running mutations from making Git Changes status and diff feel unresponsive. The read pool takes `GetGitChangeStatus`, `ListGitWorktrees` and `InspectWorktree`; the AI commands run in their own AI pool. Pool sizes and routing are in 04.
 
 Core hosted services include:
 
@@ -626,6 +627,7 @@ HookListenerHostedService
 MainJobBackgroundService
 ReadJobBackgroundService
 DiffJobBackgroundService
+AiJobBackgroundService
 GitChangesSnapshotPublisher
 ```
 

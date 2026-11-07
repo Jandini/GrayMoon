@@ -46,12 +46,13 @@ AiGeneratedTextParser       strict JSON check; AiGenerationResult<T> is never pa
 ```
 
 - The App never runs git or an AI CLI. The Worker runs both, because it runs as the signed-in user and in Docker mode it is the only process on the host. The Worker refreshes PATH from the user environment at start (`HostEnvironmentPath.RefreshProcessPath`).
-- `CollectGitEvidence`, `GetAiProviders` and `GenerateAiText` (`WorkerHubMethods` constants) run on the Worker main pool; there is no AI-specific queue. The App reads CLI availability from `GetHostInfo` and does not call `GetAiProviders`.
+- `CollectGitEvidence`, `GetAiProviders` and `GenerateAiText` (`WorkerHubMethods` constants) run on the dedicated Worker AI pool (`MaxConcurrentAiCommands`, default 4), not the main pool. The App reads CLI availability from `GetHostInfo` (main pool) and does not call `GetAiProviders`. The AI pool is untracked like the read and diff pools: it does not feed `ReportQueueStatus`, so the Worker badge activity frame does not animate for a generation (the AI control and the commit overlay show their own progress).
 - Both `GitEvidenceCollector` and `AiCliRunner` launch processes through `BoundedProcessRunner` (Common: argument list, stdout cap, logs only executable, timing and sizes), wrapped in the Worker by `RepositoryAccessBoundedProcessRunner` (section 2A).
 - `AiCliRunner`: availability probe `<exe> --version` with a 15 s timeout, cached 5 min in the Worker; answer cap 256 KiB, stderr cap 16 KiB; each run gets its own empty folder `%TEMP%\graymoon-ai\<guid>`, deleted afterwards.
 - App side: `HostInfoCache` (singleton) holds the startup host check, including which AI CLIs are installed. Menus read that snapshot and do not probe. Generation timeout `AiGeneration:TimeoutSeconds` (default 120, clamped 10..600).
 - Click-to-write runs are not circuit work: `AiTextGenerationRuns<TText>` (singleton; `WorkspaceGitChangesCommitGeneration` for Changes, `WorkspacePullRequestTextGeneration` for New Pull Request) keeps at most one run per Workspace and Feature context, runs it in a fresh DI scope through `IScopedServiceExecutor`, and outlives the page, the dialog and the circuit (F5 / Ctrl+F5). Only Cancel for that context stops it. When it finishes, a page still showing that context does the live scope check and applies the text itself; otherwise the run decides against that context's memory (`WorkspaceGitChangesCommitMessageMemory`, `WorkspacePullRequestDraftMemory`) and stores the text, a suggestion or the error there. All of it is in memory and lost on App restart.
 - Commit generation runs inside the Git Changes commit job (overlay step label "ai", never the prompt); pull request generation runs without an overlay job.
+- Generation takes no Workspace or context lock. The Git Changes AI control is disabled only while its own page's overlay job runs (`IsOwnPageJobRunning`), not by `IsJobRunning`, so Push Updated or another operation on the Workspace does not block it. Evidence is read with `git --no-optional-locks` and never waits for `GitProcessRunner.RepoLocks`, so it can overlap a write. A result produced while the Workspace was mutation-busy (at the click or when the run finished, carried by `Outcome.MutationOverlap`) is always offered as a suggestion with `AiTextApplyPolicy.MutationOverlapReason`, never applied silently. The New Pull Request dialog keeps its own busy gate.
 
 ### 1B. Log correlation (App ↔ Worker)
 
@@ -88,12 +89,14 @@ flowchart LR
   Route -->|"everything else"| Main["main pool"]
   Route -->|"GetGitChangeStatus, ListGitWorktrees, InspectWorktree"| Read["read pool"]
   Route -->|"GetGitFileDiff"| Diff["diff pool"]
+  Route -->|"CollectGitEvidence, GenerateAiText, GetAiProviders"| Ai["AI pool"]
   Main -.-> Cap["bounded concurrency"]
   Read -.-> Cap
   Diff -.-> Cap
+  Ai -.-> Cap
 ```
 
-Routing is by command name in `SignalRConnectionHostedService`: `ReadOnlyCommands` = `GetGitChangeStatus`, `EnsureGitChangesWatchers`, `ListGitWorktrees`, `InspectWorktree`; `DiffCommands` = `GetGitFileDiff`; everything else goes to the main pool. Each pool is a bounded `Channel<JobEnvelope>` drained by its own hosted service (`MainJobBackgroundService`, `ReadJobBackgroundService`, `DiffJobBackgroundService`, all derived from `JobBackgroundService`).
+Routing is by command name in `WorkerCommandPoolRouter` (called from `SignalRConnectionHostedService`): `ReadOnlyCommands` = `GetGitChangeStatus`, `EnsureGitChangesWatchers`, `ListGitWorktrees`, `InspectWorktree`; `DiffCommands` = `GetGitFileDiff`; `AiCommands` = `CollectGitEvidence`, `GenerateAiText`, `GetAiProviders`; everything else goes to the main pool. Each pool is a bounded `Channel<JobEnvelope>` drained by its own hosted service (`MainJobBackgroundService`, `ReadJobBackgroundService`, `DiffJobBackgroundService`, `AiJobBackgroundService`, all derived from `JobBackgroundService`).
 
 Sizes (`WorkerOptions`):
 
@@ -101,9 +104,10 @@ Sizes (`WorkerOptions`):
 MaxConcurrentCommands       main pool   default Environment.ProcessorCount * 2
 MaxConcurrentReadCommands   read pool   default 8
 MaxConcurrentDiffCommands   diff pool   default 4
+MaxConcurrentAiCommands     AI pool     default 4
 ```
 
-The main pool also carries Sync, push, restore, worktree create/remove (`CreateGitWorktree`, `RemoveGitWorktree`), Feature folder cleanup, the CodeGraph commands, the AI commands and every hook notify job.
+The main pool also carries Sync, push, restore, worktree create/remove (`CreateGitWorktree`, `RemoveGitWorktree`), Feature folder cleanup, the CodeGraph commands and every hook notify job.
 
 This isolation matters.
 
