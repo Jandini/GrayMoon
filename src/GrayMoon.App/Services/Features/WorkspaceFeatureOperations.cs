@@ -117,6 +117,21 @@ public sealed class WorkspaceFeatureOperations(
         if (await db.WorkspaceFeatures.AnyAsync(f => f.WorkspaceId == workspaceId && f.Name.ToLower() == normalizedName, cancellationToken))
             return FailCreate("DuplicateName", $"A Feature named '{name}' already exists.");
 
+        // A '/' in a name nests the folder (features\team\login) and the Git branch (team/login). A Feature whose name is the
+        // folder-path prefix of another would contain the other Feature's worktrees, and Git cannot hold both branches.
+        var existingNames = await db.WorkspaceFeatures.AsNoTracking()
+            .Where(f => f.WorkspaceId == workspaceId)
+            .Select(f => f.Name)
+            .ToListAsync(cancellationToken);
+        var nestedWith = existingNames.FirstOrDefault(existing => FeatureNamesNest(existing, name));
+        if (nestedWith is not null)
+        {
+            return FailCreate(
+                "NestedFeatureName",
+                $"'{name}' cannot be used because the Feature '{nestedWith}' already exists and one name would sit inside the other "
+                + "(folders and Git branches cannot be nested like that). Choose a name that does not start with the other name and a '/'.");
+        }
+
         var workspace = await db.Workspaces.FirstOrDefaultAsync(w => w.WorkspaceId == workspaceId, cancellationToken)
             ?? throw new InvalidOperationException($"Workspace {workspaceId} was not found.");
 
@@ -1359,6 +1374,15 @@ public sealed class WorkspaceFeatureOperations(
         public string? Outcome { get; set; }
         public int RemainingFileCount { get; set; }
         public string? Message { get; set; }
+    }
+
+    /// <summary>True when one Feature name is the other followed by '/' (case-insensitive), so one folder and branch would contain the other.</summary>
+    internal static bool FeatureNamesNest(string first, string second)
+    {
+        var a = first.Trim().Trim('/');
+        var b = second.Trim().Trim('/');
+        return a.StartsWith(b + "/", StringComparison.OrdinalIgnoreCase)
+            || b.StartsWith(a + "/", StringComparison.OrdinalIgnoreCase);
     }
 
     private const string CleanupOutcomeRemoved = "Removed";

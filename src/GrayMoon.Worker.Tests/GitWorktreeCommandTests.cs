@@ -185,6 +185,21 @@ public sealed class GitWorktreeCommandTests : IDisposable
     }
 
     [Fact]
+    public async Task FindBranchCollisions_reports_a_local_branch_named_like_a_folder_prefix_of_the_new_name()
+    {
+        var mainPath = Path.Combine(_root, "main5b");
+        Directory.CreateDirectory(mainPath);
+        await InitGitWithCommitAsync(mainPath);
+        await RunGitAsync(mainPath, "branch team");
+        await RunGitAsync(mainPath, "branch other/x");
+
+        Assert.Equal(["team"], await _reader.FindBranchCollisionsAsync(mainPath, "team/login", CancellationToken.None));
+        Assert.Equal(["team"], await _reader.FindBranchCollisionsAsync(mainPath, "team/a/b", CancellationToken.None));
+        Assert.Empty(await _reader.FindBranchCollisionsAsync(mainPath, "teammate/login", CancellationToken.None));
+        Assert.Empty(await _reader.FindBranchCollisionsAsync(mainPath, "other/y", CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Remove_without_force_fails_when_dirty()
     {
         var mainPath = Path.Combine(_root, "main3");

@@ -1194,6 +1194,7 @@ Creation (structural lock `create-feature`):
 
 ```text
 reject a name that is already a branch in any repository (listed as "X of Y" repositories) or an existing Feature
+reject a name that nests with an existing Feature (NestedFeatureName: "team" vs "team/login", either direction, case-insensitive)
 finish a pending-delete folder of the same name first
 reject the name when its folder already exists on disk (FeatureFolderExists; any file, folder or link, checked read only)
 record HEAD of every Workspace repository (one GetHeadCommits)

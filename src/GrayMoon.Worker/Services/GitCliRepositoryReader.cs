@@ -79,9 +79,33 @@ public sealed class GitCliRepositoryReader(GitProcessRunner runner, ILogger<GitC
         if (exitCode != 0)
             return [];
 
-        return (stdout ?? "")
+        var collisions = (stdout ?? "")
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .ToList();
+
+        // Git cannot hold "team" and "team/login" as local branches at once, so an existing local branch named like a
+        // folder-path prefix of the new name blocks it too. The pattern above only finds names below the new one.
+        var segments = name.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+        for (var length = 1; length < segments.Length; length++)
+        {
+            var ancestor = string.Join('/', segments.Take(length));
+            var (ancestorExit, ancestorOut, _) = await runner.RunAsync(
+                "git",
+                ["for-each-ref", "--format=%(refname)", $"refs/heads/{ancestor}"],
+                repoPath,
+                null,
+                ct);
+            if (ancestorExit != 0)
+                continue;
+
+            var exact = (ancestorOut ?? "")
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Any(r => string.Equals(r, $"refs/heads/{ancestor}", StringComparison.Ordinal));
+            if (exact && !collisions.Contains(ancestor, StringComparer.Ordinal))
+                collisions.Add(ancestor);
+        }
+
+        return collisions;
     }
 
     public async Task<string?> RevParseAsync(string repoPath, string rev, CancellationToken ct)
