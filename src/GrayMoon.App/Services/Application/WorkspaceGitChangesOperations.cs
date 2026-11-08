@@ -1,14 +1,23 @@
-using GrayMoon.App.Repositories;
+using GrayMoon.App.Data;
 using GrayMoon.App.Services.GitChanges;
 using GrayMoon.Application.Features;
 using GrayMoon.Common.Git;
+using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Services.Application;
 
+/// <summary>
+/// Git Changes operations for one repository. The page runs these for many repositories at once (Commit All, Stage All),
+/// so everything here must be safe to call in parallel on the one instance of the page's scope. Each call therefore reads
+/// what it needs through its own short-lived <see cref="AppDbContext"/> from the factory. The scoped
+/// <c>WorkspaceRepository</c> owns a single context, which EF Core does not allow two overlapping queries on; using it here
+/// made parallel commits throw "A second operation was started on this context instance", and the repository whose call lost
+/// the race was never sent to the Worker.
+/// </summary>
 public sealed class WorkspaceGitChangesOperations(
     IWorkspaceGitChangesReadService readService,
     IGitChangesWorkerClient workerClient,
-    WorkspaceRepository workspaceRepository,
+    IDbContextFactory<AppDbContext> dbContextFactory,
     IWorkspaceContextPathResolver pathResolver) : IWorkspaceGitChangesOperations
 {
     public async Task<WorkspaceGitChangesView?> GetAsync(
@@ -16,9 +25,13 @@ public sealed class WorkspaceGitChangesOperations(
         WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken)
     {
-        var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
-        if (workspace == null)
-            return null;
+        await using (var db = await dbContextFactory.CreateDbContextAsync(cancellationToken))
+        {
+            var exists = await db.Workspaces.AsNoTracking()
+                .AnyAsync(w => w.WorkspaceId == workspaceId, cancellationToken);
+            if (!exists)
+                return null;
+        }
 
         return await readService.GetContextAsync(workspaceId, contextId, cancellationToken);
     }
@@ -61,12 +74,23 @@ public sealed class WorkspaceGitChangesOperations(
         Func<string, string, string, string?, Task<T>> action)
         where T : new()
     {
-        var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
-        if (workspace == null)
+        bool workspaceExists;
+        string? repoName;
+        await using (var db = await dbContextFactory.CreateDbContextAsync(cancellationToken))
+        {
+            workspaceExists = await db.Workspaces.AsNoTracking()
+                .AnyAsync(w => w.WorkspaceId == workspaceId, cancellationToken);
+            repoName = workspaceExists
+                ? await db.WorkspaceRepositories.AsNoTracking()
+                    .Where(l => l.WorkspaceId == workspaceId && l.RepositoryId == repositoryId && l.Repository != null)
+                    .Select(l => l.Repository!.RepositoryName)
+                    .FirstOrDefaultAsync(cancellationToken)
+                : null;
+        }
+
+        if (!workspaceExists)
             return Fail<T>("Workspace not found.");
 
-        var link = workspace.Repositories.FirstOrDefault(r => r.RepositoryId == repositoryId);
-        var repoName = link?.Repository?.RepositoryName;
         if (string.IsNullOrWhiteSpace(repoName))
             return Fail<T>("Repository is not in the given workspace.");
 
