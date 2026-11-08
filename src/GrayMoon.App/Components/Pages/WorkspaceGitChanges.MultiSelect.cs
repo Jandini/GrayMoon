@@ -58,30 +58,57 @@ public sealed partial class WorkspaceGitChanges
 
         StartPageJob(label, async (job, ct) =>
         {
+            string NameOf(int id) =>
+                _view?.Repositories.FirstOrDefault(r => r.WorkspaceRepositoryId == id)?.RepositoryName ?? $"repository {id}";
+
+            var outcomes = new RepositoryOutcomes(targets.Keys.Select(id => (id, NameOf(id))));
+            var contextId = RequireSelectedContextId();
             var completed = 0;
             using var semaphore = new SemaphoreSlim(Math.Max(1, GitChangesOptions.Value.MaxParallelRepositoryOperations));
 
             var tasks = targets.Select(async kvp =>
             {
                 var (workspaceRepositoryId, paths) = (kvp.Key, kvp.Value);
-                await semaphore.WaitAsync(ct);
+                var name = NameOf(workspaceRepositoryId);
+                try
+                {
+                    await semaphore.WaitAsync(ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    outcomes.Failed(workspaceRepositoryId, name, "Cancelled before it started.");
+                    throw;
+                }
+
                 try
                 {
                     var resolved = await ResolveRepositoryAsync(workspaceRepositoryId);
                     if (resolved == null)
                     {
+                        outcomes.Failed(workspaceRepositoryId, name, "Repository not found or workspace root is not configured.");
                         return;
                     }
 
                     var result = unstage
-                        ? await GitChangesOperations.UnstageAsync(WorkspaceId, RequireSelectedContextId(), resolved.Value.RepositoryId, GitChangeOperationScope.ExplicitPaths, paths, ct)
-                        : await GitChangesOperations.StageAsync(WorkspaceId, RequireSelectedContextId(), resolved.Value.RepositoryId, GitChangeOperationScope.ExplicitPaths, paths, ct);
+                        ? await GitChangesOperations.UnstageAsync(WorkspaceId, contextId, resolved.Value.RepositoryId, GitChangeOperationScope.ExplicitPaths, paths, ct)
+                        : await GitChangesOperations.StageAsync(WorkspaceId, contextId, resolved.Value.RepositoryId, GitChangeOperationScope.ExplicitPaths, paths, ct);
 
-                    await PersistMutationResultAsync(workspaceRepositoryId, resolved.Value.RepositoryId, result.Success, result.Snapshot, result.ErrorMessage, reload: false);
+                    await PersistMutationResultAsync(workspaceRepositoryId, resolved.Value.RepositoryId, result.Success, result.Snapshot, result.ErrorMessage, reload: false, showError: false);
+
+                    if (result.Success)
+                        outcomes.Succeeded(workspaceRepositoryId, name);
+                    else
+                        outcomes.Failed(workspaceRepositoryId, name, result.ErrorMessage ?? "Operation failed.");
+                }
+                catch (OperationCanceledException)
+                {
+                    outcomes.Failed(workspaceRepositoryId, name, "Cancelled.");
+                    throw;
                 }
                 catch (Exception ex)
                 {
                     Logger.LogError(ex, "Multi-select {Action} failed for workspace-repository {WorkspaceRepositoryId}", unstage ? "unstage" : "stage", workspaceRepositoryId);
+                    outcomes.Failed(workspaceRepositoryId, name, $"Unexpected error ({ex.GetType().Name}) - see logs.");
                 }
                 finally
                 {
@@ -95,6 +122,7 @@ public sealed partial class WorkspaceGitChanges
 
             await Task.WhenAll(tasks);
 
+            ReportBulkOutcomes(job, outcomes, unstage ? "Unstaged" : "Staged", unstage ? "Not unstaged" : "Not staged");
             SafeInvoke(ClearMultiSelection);
         });
     }

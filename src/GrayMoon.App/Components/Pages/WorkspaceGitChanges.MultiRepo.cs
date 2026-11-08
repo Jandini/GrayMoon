@@ -1,3 +1,4 @@
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services;
 using GrayMoon.App.Services.GitChanges;
@@ -210,27 +211,36 @@ public sealed partial class WorkspaceGitChanges
                 job.ReportProgress(committingLabel);
             }
 
-            var succeeded = new List<(string RepositoryName, int RepositoryId)>();
-            var failed = new List<(string Repository, string Error)>();
+            // One outcome per target repository. A repository that ends without one is reported as failed (see
+            // RepositoryOutcomes.Complete), so a repository can never vanish from the result.
+            var outcomes = new RepositoryOutcomes(targets.Select(t => (t.WorkspaceRepositoryId, t.RepositoryName)));
+            var repositoryIds = new System.Collections.Concurrent.ConcurrentDictionary<int, int>();
             var completed = 0;
 
             using var semaphore = new SemaphoreSlim(Math.Max(1, GitChangesOptions.Value.MaxParallelRepositoryOperations));
 
             var tasks = targets.Select(async repo =>
             {
-                await semaphore.WaitAsync(ct);
+                try
+                {
+                    await semaphore.WaitAsync(ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    outcomes.Failed(repo.WorkspaceRepositoryId, repo.RepositoryName, "Cancelled before it started.");
+                    throw;
+                }
+
                 try
                 {
                     var resolved = await ResolveRepositoryAsync(repo.WorkspaceRepositoryId);
                     if (resolved == null)
                     {
-                        lock (failed)
-                        {
-                            failed.Add((repo.RepositoryName, "Repository not found or workspace root is not configured."));
-                        }
-
+                        outcomes.Failed(repo.WorkspaceRepositoryId, repo.RepositoryName, "Repository not found or workspace root is not configured.");
                         return;
                     }
+
+                    repositoryIds[repo.WorkspaceRepositoryId] = resolved.Value.RepositoryId;
 
                     Logger.LogInformation(
                         "Workspace commit requested: Mode={Mode}, Repository={Repository}, StageAllFirst={StageAllFirst}",
@@ -239,27 +249,33 @@ public sealed partial class WorkspaceGitChanges
                     var result = await GitChangesOperations.CommitAsync(
                         WorkspaceId, committedContextId, resolved.Value.RepositoryId, message, stageAllFirst, ct);
 
-                    await PersistMutationResultAsync(repo.WorkspaceRepositoryId, resolved.Value.RepositoryId, result.Success, result.Snapshot, result.ErrorMessage, reload: false);
+                    var nothingToCommit = !result.Success && string.Equals(result.ErrorCode, "NothingStaged", StringComparison.Ordinal);
+                    await PersistMutationResultAsync(
+                        repo.WorkspaceRepositoryId, resolved.Value.RepositoryId, result.Success, result.Snapshot, result.ErrorMessage,
+                        reload: false, showError: false);
 
-                    lock (failed)
+                    if (result.Success)
                     {
-                        if (result.Success)
-                        {
-                            succeeded.Add((repo.RepositoryName, resolved.Value.RepositoryId));
-                        }
-                        else
-                        {
-                            failed.Add((repo.RepositoryName, result.ErrorMessage ?? "Commit failed."));
-                        }
+                        outcomes.Succeeded(repo.WorkspaceRepositoryId, repo.RepositoryName);
                     }
+                    else if (nothingToCommit)
+                    {
+                        outcomes.Skipped(repo.WorkspaceRepositoryId, repo.RepositoryName, "no changes to commit");
+                    }
+                    else
+                    {
+                        outcomes.Failed(repo.WorkspaceRepositoryId, repo.RepositoryName, result.ErrorMessage ?? "Commit failed.");
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    outcomes.Failed(repo.WorkspaceRepositoryId, repo.RepositoryName, "Cancelled.");
+                    throw;
                 }
                 catch (Exception ex)
                 {
                     Logger.LogError(ex, "Workspace commit failed for repository {RepositoryName}", repo.RepositoryName);
-                    lock (failed)
-                    {
-                        failed.Add((repo.RepositoryName, "Unexpected error - see logs."));
-                    }
+                    outcomes.Failed(repo.WorkspaceRepositoryId, repo.RepositoryName, $"Unexpected error ({ex.GetType().Name}) - see logs.");
                 }
                 finally
                 {
@@ -269,9 +285,45 @@ public sealed partial class WorkspaceGitChanges
                 }
             });
 
-            await Task.WhenAll(tasks);
+            try
+            {
+                await Task.WhenAll(tasks);
+            }
+            catch (OperationCanceledException)
+            {
+                // Tasks that never ran have no outcome; Complete() reports them as failed so the run still says what happened.
+                var partial = outcomes.Complete();
+                Logger.LogWarning("Workspace commit cancelled: {Summary}", RepositoryOutcomes.Summarize(partial, "Committed", "Not committed"));
+                throw;
+            }
 
-            if (succeeded.Count > 0)
+            var results = outcomes.Complete();
+            var succeeded = results
+                .Where(r => r.Kind == RepositoryOutcomeKind.Succeeded && repositoryIds.ContainsKey(r.Key))
+                .Select(r => (RepositoryName: r.Repository, RepositoryId: repositoryIds[r.Key]))
+                .ToList();
+            var failedCount = RepositoryOutcomes.Count(results, RepositoryOutcomeKind.Failed);
+            var summary = RepositoryOutcomes.Summarize(results, "Committed", "Not committed");
+
+            // One line per run in the log, so a missing repository is visible without reading stack traces.
+            Logger.LogInformation(
+                "Workspace commit finished: Mode={Mode}, Requested={Requested}, Committed={Committed}, Skipped={Skipped}, Failed={Failed}. {Summary}",
+                mode, targets.Count, succeeded.Count, RepositoryOutcomes.Count(results, RepositoryOutcomeKind.Skipped), failedCount, summary);
+
+            // The job terminal keeps the full per-repository result; the toast carries the same summary.
+            foreach (var outcome in results.Where(r => r.Kind != RepositoryOutcomeKind.Succeeded))
+            {
+                job.Terminal.Append(
+                    "commit",
+                    outcome.Kind == RepositoryOutcomeKind.Failed ? WorkerCommandStreamKind.Stderr : WorkerCommandStreamKind.Stdout,
+                    $"{outcome.Repository}: {(outcome.Kind == RepositoryOutcomeKind.Failed ? "NOT committed" : "skipped")} - {outcome.Detail}");
+            }
+
+            job.Terminal.Append("commit", failedCount > 0 ? WorkerCommandStreamKind.Stderr : WorkerCommandStreamKind.Stdout, summary);
+
+            // The message is only consumed when every repository was handled. If any repository failed it stays in the
+            // box and in memory, so the same message can be committed again after the cause is fixed.
+            if (succeeded.Count > 0 && failedCount == 0)
             {
                 // Clear this context's message even if the page was disposed (user navigated away mid-commit).
                 // SafeInvoke no-ops when disposed, which previously left the message in memory so it
@@ -288,17 +340,13 @@ public sealed partial class WorkspaceGitChanges
                 });
             }
 
-            SafeInvoke(() => ToastService.Show(failed.Count == 0
-                ? $"Committed in {succeeded.Count} repositor{(succeeded.Count == 1 ? "y" : "ies")}."
-                : $"Committed in {succeeded.Count} repositor{(succeeded.Count == 1 ? "y" : "ies")}. Failed in {failed.Count}: {string.Join(", ", failed.Select(f => f.Repository))}."));
-
-            if (failed.Count > 0)
+            SafeInvoke(() =>
             {
-                foreach (var (repository, error) in failed)
-                {
-                    Logger.LogWarning("Workspace commit failed for {Repository}: {Error}", repository, error);
-                }
-            }
+                if (failedCount > 0)
+                    ToastService.ShowError(summary + " The commit message was kept.");
+                else
+                    ToastService.Show(summary);
+            });
 
             // Runs inside the same job/terminal as the commit above - the overlay is never hidden and
             // re-shown between the two phases. Only repositories that committed successfully are pushed;
@@ -353,29 +401,52 @@ public sealed partial class WorkspaceGitChanges
 
         StartPageJob(label, async (job, ct) =>
         {
+            var outcomes = new RepositoryOutcomes(targets.Select(t => (t.WorkspaceRepositoryId, t.RepositoryName)));
+            var contextId = RequireSelectedContextId();
             var completed = 0;
             using var semaphore = new SemaphoreSlim(Math.Max(1, GitChangesOptions.Value.MaxParallelRepositoryOperations));
 
             var tasks = targets.Select(async repo =>
             {
-                await semaphore.WaitAsync(ct);
+                try
+                {
+                    await semaphore.WaitAsync(ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    outcomes.Failed(repo.WorkspaceRepositoryId, repo.RepositoryName, "Cancelled before it started.");
+                    throw;
+                }
+
                 try
                 {
                     var resolved = await ResolveRepositoryAsync(repo.WorkspaceRepositoryId);
                     if (resolved == null)
                     {
+                        outcomes.Failed(repo.WorkspaceRepositoryId, repo.RepositoryName, "Repository not found or workspace root is not configured.");
                         return;
                     }
 
                     var result = unstageStagedSection
-                        ? await GitChangesOperations.UnstageAsync(WorkspaceId, RequireSelectedContextId(), resolved.Value.RepositoryId, GitChangeOperationScope.Repository, [], ct)
-                        : await GitChangesOperations.StageAsync(WorkspaceId, RequireSelectedContextId(), resolved.Value.RepositoryId, GitChangeOperationScope.Repository, [], ct);
+                        ? await GitChangesOperations.UnstageAsync(WorkspaceId, contextId, resolved.Value.RepositoryId, GitChangeOperationScope.Repository, [], ct)
+                        : await GitChangesOperations.StageAsync(WorkspaceId, contextId, resolved.Value.RepositoryId, GitChangeOperationScope.Repository, [], ct);
 
-                    await PersistMutationResultAsync(repo.WorkspaceRepositoryId, resolved.Value.RepositoryId, result.Success, result.Snapshot, result.ErrorMessage, reload: false);
+                    await PersistMutationResultAsync(repo.WorkspaceRepositoryId, resolved.Value.RepositoryId, result.Success, result.Snapshot, result.ErrorMessage, reload: false, showError: false);
+
+                    if (result.Success)
+                        outcomes.Succeeded(repo.WorkspaceRepositoryId, repo.RepositoryName);
+                    else
+                        outcomes.Failed(repo.WorkspaceRepositoryId, repo.RepositoryName, result.ErrorMessage ?? "Operation failed.");
+                }
+                catch (OperationCanceledException)
+                {
+                    outcomes.Failed(repo.WorkspaceRepositoryId, repo.RepositoryName, "Cancelled.");
+                    throw;
                 }
                 catch (Exception ex)
                 {
                     Logger.LogError(ex, "Bulk section {Action} failed for repository {RepositoryName}", unstageStagedSection ? "unstage" : "stage", repo.RepositoryName);
+                    outcomes.Failed(repo.WorkspaceRepositoryId, repo.RepositoryName, $"Unexpected error ({ex.GetType().Name}) - see logs.");
                 }
                 finally
                 {
@@ -388,6 +459,35 @@ public sealed partial class WorkspaceGitChanges
             });
 
             await Task.WhenAll(tasks);
+
+            ReportBulkOutcomes(job, outcomes, unstageStagedSection ? "Unstaged" : "Staged", unstageStagedSection ? "Not unstaged" : "Not staged");
         });
+    }
+
+    /// <summary>
+    /// Names every repository a multi-repository stage/unstage did not handle, with the reason, in the log, the job
+    /// terminal and an error toast. Success stays quiet (the lists update by themselves). Without this a repository whose
+    /// call failed was only visible in the log, and a later Commit Staged then skipped it because nothing was staged there.
+    /// </summary>
+    private void ReportBulkOutcomes(BackgroundJobHandle job, RepositoryOutcomes outcomes, string pastVerb, string notVerb)
+    {
+        var results = outcomes.Complete();
+        var failedCount = RepositoryOutcomes.Count(results, RepositoryOutcomeKind.Failed);
+        var summary = RepositoryOutcomes.Summarize(results, pastVerb, notVerb);
+        Logger.LogInformation(
+            "Workspace {Verb} finished: Requested={Requested}, Succeeded={Succeeded}, Failed={Failed}. {Summary}",
+            pastVerb, results.Count, RepositoryOutcomes.Count(results, RepositoryOutcomeKind.Succeeded), failedCount, summary);
+
+        if (failedCount == 0)
+        {
+            return;
+        }
+
+        foreach (var outcome in results.Where(r => r.Kind == RepositoryOutcomeKind.Failed))
+        {
+            job.Terminal.Append("stage", WorkerCommandStreamKind.Stderr, $"{outcome.Repository}: {notVerb.ToLowerInvariant()} - {outcome.Detail}");
+        }
+
+        SafeInvoke(() => ToastService.ShowError(summary));
     }
 }

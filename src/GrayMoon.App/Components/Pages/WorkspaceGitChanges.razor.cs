@@ -924,9 +924,11 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     /// <paramref name="reload"/> is false for multi-repository fan-out, which reloads once after every
     /// repository's result has been persisted rather than once per repository.
     /// </summary>
-    private async Task PersistMutationResultAsync(int workspaceRepositoryId, int repositoryId, bool success, GitChangeSnapshot? snapshot, string? errorMessage, bool reload = true)
+    /// <param name="showError">False for the multi-repository operations, which name the repository and the reason in
+    /// their own summary instead of one anonymous toast per failure.</param>
+    private async Task PersistMutationResultAsync(int workspaceRepositoryId, int repositoryId, bool success, GitChangeSnapshot? snapshot, string? errorMessage, bool reload = true, bool showError = true)
     {
-        if (!success)
+        if (!success && showError)
         {
             ToastService.ShowError(errorMessage ?? "Operation failed.");
         }
