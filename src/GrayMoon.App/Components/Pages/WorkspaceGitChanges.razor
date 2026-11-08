@@ -229,7 +229,14 @@
                 @if (_selectedRow is not { Kind: GitChangesTreeRowKind.File })
                 {
                     <div class="git-changes-diff-placeholder text-muted">
-                        <div>Select a file to view its diff</div>
+                        @if (_hideTreePendingRestore)
+                        {
+                            <div>Loading diff…</div>
+                        }
+                        else
+                        {
+                            <div>Select a file to view its diff</div>
+                        }
                     </div>
                 }
                 else

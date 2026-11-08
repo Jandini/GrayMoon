@@ -21,11 +21,20 @@ public sealed partial class WorkspaceGitChanges
     private bool _diffReviewExpandedLoaded;
 
     /// <summary>
-    /// Wider review hides the file tree only while a file is selected. With no file, the empty
-    /// "Select a file" pane has no control to bring the tree back (that button lives on the diff).
+    /// True from the start of LoadAsync until a remembered file is selected (or restore gives up), when
+    /// wider review is on. Covers Summary hydration's intermediate RefreshTreeAsync paints so the file
+    /// tree never appears before the restored selection owns DiffReviewHidesFileTree.
+    /// </summary>
+    private bool _hideTreePendingRestore;
+
+    /// <summary>
+    /// Wider review hides the file tree while a file is selected, or while a remembered selection is
+    /// being prepared during load. With no file and no pending restore, the empty "Select a file" pane
+    /// has no control to bring the tree back (that button lives on the diff).
     /// </summary>
     private bool DiffReviewHidesFileTree =>
-        _diffReviewExpanded && _selectedRow is { Kind: GitChangesTreeRowKind.File };
+        _diffReviewExpanded
+        && (_selectedRow is { Kind: GitChangesTreeRowKind.File } || _hideTreePendingRestore);
 
     private DotNetObjectReference<WorkspaceGitChanges>? _diffReviewEscDotNetRef;
 
@@ -65,6 +74,21 @@ public sealed partial class WorkspaceGitChanges
 
     private async Task ToggleDiffReviewExpandedAsync()
         => await SetDiffReviewExpandedAsync(!_diffReviewExpanded);
+
+    /// <summary>
+    /// When wider review can no longer hide the tree (no selected file), persist collapsed so the next
+    /// file selection does not hide the tree again. Matches Escape / the show-tree control.
+    /// </summary>
+    private Task CollapseDiffReviewWhenTreeForcedVisibleAsync()
+    {
+        if (_disposed || !_diffReviewExpanded)
+            return Task.CompletedTask;
+
+        if (_selectedRow is { Kind: GitChangesTreeRowKind.File } || _hideTreePendingRestore)
+            return Task.CompletedTask;
+
+        return SetDiffReviewExpandedAsync(false);
+    }
 
     private async Task SetDiffReviewExpandedAsync(bool expanded)
     {
@@ -161,6 +185,11 @@ public sealed partial class WorkspaceGitChanges
         _selectedDiff = null;
         _diffError = null;
         _markdownPreviewError = null;
+
+        // Load before the loading paint so a persisted wider-review preference does not flash the
+        // file tree while the Worker fetches the diff (including on navigate-back restore).
+        await EnsureDiffReviewExpandedLoadedAsync();
+
         _isDiffLoading = true;
         StateHasChanged();
 
@@ -173,7 +202,6 @@ public sealed partial class WorkspaceGitChanges
 
             await ClearMarkdownViewerAsync();
             await EnsureMdPreferenceLoadedAsync();
-            await EnsureDiffReviewExpandedLoadedAsync();
             // Preference load syncs Escape only the first time. A later file selection has to
             // re-bind it after an empty selection unbound it while the tree was forced visible.
             await SyncDiffReviewEscListenerAsync();
