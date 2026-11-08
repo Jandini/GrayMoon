@@ -38,7 +38,7 @@
                 <p class="workspace-action-card__desc">@GetDescription(n)</p>
                 @if (n.Repos.Count > 0)
                 {
-                    var showCommitBadges = n.Repos.Any(r => r.OutgoingCommits > 0 || r.IncomingCommits > 0 || r.NewBranchNoPush);
+                    var showCommitBadges = n.Repos.Any(r => r.OutgoingCommits > 0 || r.IncomingCommits > 0);
                     <div class="notif-repo-list">
                         @foreach (var repo in n.Repos)
                         {
@@ -59,7 +59,6 @@
                                                   RepositoryId="repo.RepositoryId"
                                                   Outgoing="repo.OutgoingCommits"
                                                   Incoming="repo.IncomingCommits"
-                                                  BranchHasUpstream="@(repo.NewBranchNoPush ? false : null)"
                                                   BranchName="repo.BranchName"
                                                   Disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
                                                   OnPushClick="() => OnPushBadgeClickAsync(n, repo)"
@@ -964,12 +963,12 @@
                 var ws = await workspaceRepo.GetByIdAsync(workspaceId);
                 var repoIds = (ws?.Repositories ?? []).Select(wr => wr.RepositoryId).ToHashSet();
                 repoIdsThatNeedPush = await workspaceRepo.GetRepositoryIdsThatNeedPushForNotificationAsync(
-                    workspaceId, contextId.Value, repoIds, maxLevel: null, includeNeverPushedUpstream: true, CancellationToken.None);
+                    workspaceId, contextId.Value, repoIds, maxLevel: null, includeNeverPushedUpstream: false, CancellationToken.None);
             }
             else
             {
                 repoIdsThatNeedPush = n.Repos
-                    .Where(r => r.OutgoingCommits > 0 || r.NewBranchNoPush)
+                    .Where(r => r.OutgoingCommits > 0)
                     .Select(r => r.RepositoryId)
                     .ToHashSet();
             }

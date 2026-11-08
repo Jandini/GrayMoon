@@ -9,7 +9,6 @@ public sealed record NotificationRepo(
     int TotalDeps,
     int OutgoingCommits,
     int IncomingCommits,
-    bool NewBranchNoPush,
     IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)> MismatchedDeps,
     string? BranchName,
     string? DefaultBranchName);
@@ -88,7 +87,7 @@ public sealed class WorkspacePendingActionsService(
         IReadOnlyDictionary<int, IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)>>? mismatchedDeps = null)
     {
         bool hasUnmatched = links.Any(wr => !IsOnTag(wr) && ((wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0));
-        bool isPushRecommended = links.Any(wr => !IsOnTag(wr) && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false));
+        bool isPushRecommended = links.Any(wr => !IsOnTag(wr) && (wr.OutgoingCommits ?? 0) > 0);
         bool hasIncoming = links.Any(wr =>
             !IsOnTag(wr)
             && (wr.IncomingCommits ?? 0) > 0);
@@ -99,7 +98,6 @@ public sealed class WorkspacePendingActionsService(
                 (wr.UnmatchedDeps ?? 0) > 0 ||
                 (wr.OutOfDateFileRepos ?? 0) > 0 ||
                 (wr.OutgoingCommits ?? 0) > 0 ||
-                wr.BranchHasUpstream == false ||
                 (wr.IncomingCommits ?? 0) > 0))
             .OrderBy(wr => wr.DependencyLevel ?? 0)
             .ThenBy(wr => wr.RepositoryName)
@@ -119,7 +117,6 @@ public sealed class WorkspacePendingActionsService(
                     wr.Dependencies ?? 0,
                     wr.OutgoingCommits ?? 0,
                     wr.IncomingCommits ?? 0,
-                    wr.BranchHasUpstream == false,
                     depLines,
                     wr.BranchName,
                     wr.DefaultBranchName);
