@@ -184,14 +184,24 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         _initialLoadTask = LoadAsync();
     }
 
-    /// <summary>Set when a load finished without error; the next render then restores the remembered file selection.</summary>
-    private bool _restoreSelectionAfterPaint;
+    /// <summary>
+    /// Set when LoadAsync prepared a remembered file selection but deferred the Worker diff fetch until
+    /// after the first splitter paint (diff must not gate that paint).
+    /// </summary>
+    private bool _loadRestoredDiffAfterPaint;
 
     // Reads the persisted SQLite projection only - never sends a Worker command. Opening or reloading
     // this page must never trigger a status scan.
     private async Task LoadAsync()
     {
         _errorMessage = null;
+        _loadRestoredDiffAfterPaint = false;
+
+        // Wider-review preference + pending-hide must be known before LoadProjectionAsync: Summary mode
+        // calls RefreshTreeAsync while hydrating, and any of those paints would flash the file tree if
+        // DiffReviewHidesFileTree is still false.
+        await EnsureDiffReviewExpandedLoadedAsync();
+        await ApplyPendingRestoreHideAsync();
 
         // Fetched before the StateHasChanged below (rather than after, alongside the heavier git-status
         // read further down) so the header's Workspace name is already correct by the time this
@@ -214,30 +224,75 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             ClearFilterIfNoChangesRemain();
             RebuildRows();
             await ClearSelectionIfStaleAsync();
+
+            // Select the remembered file before the splitter paints so wider review never shows the
+            // tree then hides it. Only the Worker diff fetch stays until after paint.
+            if (_errorMessage == null && await TryPrepareRestoredSelectionAsync())
+            {
+                _isDiffLoading = true;
+                _hideTreePendingRestore = false;
+                _loadRestoredDiffAfterPaint = true;
+            }
+            else
+            {
+                _hideTreePendingRestore = false;
+                // Remembered file is gone (or unrestorable): tree is forced visible — treat like the
+                // user showed it, so the next file click does not hide it again from the old preference.
+                await CollapseDiffReviewWhenTreeForcedVisibleAsync();
+            }
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Failed to load Git Changes for workspace {WorkspaceId}", WorkspaceId);
             _errorMessage = "Failed to load Changes.";
+            _hideTreePendingRestore = false;
+            _loadRestoredDiffAfterPaint = false;
         }
 
-        _restoreSelectionAfterPaint = _errorMessage == null;
         StateHasChanged();
     }
 
     private async Task CompletePendingPaintAsync()
     {
-        if (!_restoreSelectionAfterPaint)
+        if (!_loadRestoredDiffAfterPaint)
             return;
 
-        _restoreSelectionAfterPaint = false;
+        _loadRestoredDiffAfterPaint = false;
 
-        // Restoring a remembered file selection re-fetches its diff from the Worker, which can be slow
-        // (and, unlike the tree read above, is a real Worker command) - it must never gate the tree
-        // render above. TryRestoreSelectionAsync only does work when this page instance has no
-        // selection yet (first load / workspace switch); later reloads triggered by Refresh or a
-        // mutation already have a selection and return immediately.
-        await TryRestoreSelectionAsync();
+        // Diff fetch is a real Worker command - never gate the tree/splitter paint above.
+        if (_selectedRow is not { Kind: GitChangesTreeRowKind.File } row)
+            return;
+
+        await LoadDiffAsync(row);
+
+        if (_disposed)
+            return;
+
+        // Diff failed (worker offline, path gone after an external commit, etc.) - drop auto-selection
+        // so the page stays on the empty "Select a file" placeholder instead of a stuck error pane.
+        if (_diffError != null || _selectedDiff == null)
+            await ClearSelectionQuietlyAsync(clearMemory: true);
+    }
+
+    /// <summary>
+    /// When wider review is on and a remembered file will be restored, hide the tree for every paint
+    /// until that file is selected (including Summary hydration's intermediate RefreshTreeAsync paints).
+    /// </summary>
+    private async Task ApplyPendingRestoreHideAsync()
+    {
+        _hideTreePendingRestore = false;
+        if (_disposed
+            || !_diffReviewExpanded
+            || _selectedRow is { Kind: GitChangesTreeRowKind.File })
+        {
+            return;
+        }
+
+        // Circuit memory covers SPA navigate-away-and-back; localStorage covers F5.
+        _hideTreePendingRestore = SelectionMemory.TryGet(WorkspaceId, out _)
+            || await LoadPersistedSelectionAsync() is not null;
+        if (_hideTreePendingRestore)
+            await SyncDiffReviewEscListenerAsync();
     }
     /// <summary>
     /// The Refresh button: a real, user-triggered rescan of every repository in the workspace (not just
@@ -344,29 +399,24 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     }
 
     /// <summary>
-    /// After a fresh page instance loads (SPA navigate-away-and-back), re-apply the circuit-scoped
-    /// remembered file selection and reload its diff. Skipped when this page instance already has a
-    /// selection (e.g. post-mutation reload) - ClearSelectionIfStaleAsync handles that path.
-    /// Never fails the page load: if the file was committed away outside GrayMoon (or the diff cannot
-    /// be loaded), selection and memory are cleared quietly.
+    /// Re-selects the remembered file (expanding ancestors as needed) without fetching its diff.
+    /// Used from LoadAsync before the splitter paints so wider review never flashes the file tree.
+    /// Skipped when this page instance already has a selection (e.g. post-mutation reload).
+    /// Returns true when a file was selected and the caller should load its diff after paint.
     /// </summary>
-    private async Task TryRestoreSelectionAsync()
+    private async Task<bool> TryPrepareRestoredSelectionAsync()
     {
         try
         {
             if (_disposed || _selectedRow is { Kind: GitChangesTreeRowKind.File })
-            {
-                return;
-            }
+                return false;
 
             // The in-memory memory dies with the circuit (F5 / Ctrl+F5), so fall back to browser localStorage.
             if (!SelectionMemory.TryGet(WorkspaceId, out var remembered))
             {
                 var persisted = await LoadPersistedSelectionAsync();
                 if (persisted is null || _disposed)
-                {
-                    return;
-                }
+                    return false;
 
                 remembered = persisted;
             }
@@ -374,7 +424,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             if (!await SelectionStillExistsAsync(remembered.WorkspaceRepositoryId, remembered.FilePath, remembered.IsStagedSection))
             {
                 ForgetSelection();
-                return;
+                return false;
             }
 
             await EnsureAncestorsExpandedAsync(remembered.FilePath, remembered.WorkspaceRepositoryId, remembered.IsStagedSection);
@@ -383,25 +433,13 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             if (row == null)
             {
                 // Still in the view but not rendered (active filter) - keep memory for a later visit.
-                return;
+                return false;
             }
 
             _selectedRow = row;
             _scrollSelectionIntoViewPending = true;
             _scrollSelectionAttempts = 0;
-            await LoadDiffAsync(row);
-
-            if (_disposed)
-            {
-                return;
-            }
-
-            // Diff failed (worker offline, path gone after an external commit, etc.) - drop auto-selection
-            // so the page stays on the empty "Select a file" placeholder instead of a stuck error pane.
-            if (_diffError != null || _selectedDiff == null)
-            {
-                await ClearSelectionQuietlyAsync(clearMemory: true);
-            }
+            return true;
         }
         catch (Exception ex)
         {
@@ -414,6 +452,8 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             {
                 Logger.LogDebug(clearEx, "Failed to clear selection after restore failure");
             }
+
+            return false;
         }
     }
 
@@ -581,6 +621,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         _selectedDiff = null;
         _diffError = null;
         _scrollSelectionIntoViewPending = false;
+        _hideTreePendingRestore = false;
 
         if (clearMemory)
         {
@@ -593,7 +634,8 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         }
 
         await ClearMarkdownViewerAsync();
-        await SyncDiffReviewEscListenerAsync();
+        // Tree is forced visible without a file — same as the user showing it (persist collapsed).
+        await CollapseDiffReviewWhenTreeForcedVisibleAsync();
     }
 
     /// <summary>Fixed tree row height in px; must match <c>GitChangesTree.razor</c> and the scroll helper's index maths.</summary>
