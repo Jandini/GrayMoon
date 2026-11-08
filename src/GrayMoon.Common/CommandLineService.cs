@@ -27,7 +27,7 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
         CancellationToken cancellationToken = default,
         bool streamStderrAsStdout = false,
         bool mirrorFailureOutputAsStderr = false,
-        TimeSpan? timeout = null)
+        TimeSpan? timeout = null, TimeSpan? idleTimeout = null)
     {
         arguments ??= "";
         var sw = Stopwatch.StartNew();
@@ -74,16 +74,17 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
         // Timeout and stream consumers must start before any stdin write: a child that emits stdout while
         // still reading stdin can fill the OS pipe and deadlock the parent if we write-all-first.
         using var timeoutCts = new CancellationTokenSource(effectiveTimeout);
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+        using var idleWatch = IdleWatch.Create(idleTimeout);
+        using var linkedCts = idleWatch.Link(cancellationToken, timeoutCts.Token);
         var runToken = linkedCts.Token;
 
         var stdoutTask = ConsumeStreamAsync(
             process.StandardOutput,
-            segment => OnStreamSegment(fileName, suppressStreamLogging, suppressOverlayStdout, WorkerCommandStreamKind.Stdout, segment),
+            segment => OnStreamSegment(idleWatch, fileName, suppressStreamLogging, suppressOverlayStdout, WorkerCommandStreamKind.Stdout, segment),
             runToken);
         var stderrTask = ConsumeStreamAsync(
             process.StandardError,
-            segment => OnStreamSegment(fileName, suppressStreamLogging, suppressOverlay: false, stderrStreamKind, segment),
+            segment => OnStreamSegment(idleWatch, fileName, suppressStreamLogging, suppressOverlay: false, stderrStreamKind, segment),
             runToken);
 
         try
@@ -96,9 +97,9 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
 
             await process.WaitForExitAsync(runToken);
         }
-        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when ((timeoutCts.IsCancellationRequested || idleWatch.IsIdle) && !cancellationToken.IsCancellationRequested)
         {
-            return await HandleTimeoutAsync(process, stdoutTask, stderrTask, sw, fileName, LogSafe.ForLog(arguments), effectiveTimeout);
+            return await HandleTimeoutAsync(process, stdoutTask, stderrTask, sw, fileName, LogSafe.ForLog(arguments), idleWatch.IsIdle && !timeoutCts.IsCancellationRequested ? idleTimeout : null, effectiveTimeout);
         }
         catch (OperationCanceledException)
         {
@@ -126,7 +127,7 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
         CancellationToken cancellationToken = default,
         bool streamStderrAsStdout = false,
         bool mirrorFailureOutputAsStderr = false,
-        TimeSpan? timeout = null)
+        TimeSpan? timeout = null, TimeSpan? idleTimeout = null)
     {
         arguments ??= [];
         var sw = Stopwatch.StartNew();
@@ -177,16 +178,17 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
         // See the string-stdin overload: consumers + timeout before stdin write avoid pipe deadlocks
         // (e.g. a command fed a large stdin path list that also writes a large amount to stdout).
         using var timeoutCts = new CancellationTokenSource(effectiveTimeout);
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+        using var idleWatch = IdleWatch.Create(idleTimeout);
+        using var linkedCts = idleWatch.Link(cancellationToken, timeoutCts.Token);
         var runToken = linkedCts.Token;
 
         var stdoutTask = ConsumeStreamPreservingLineEndingsAsync(
             process.StandardOutput,
-            segment => OnStreamSegment(fileName, suppressStreamLogging, suppressOverlayStdout, WorkerCommandStreamKind.Stdout, segment),
+            segment => OnStreamSegment(idleWatch, fileName, suppressStreamLogging, suppressOverlayStdout, WorkerCommandStreamKind.Stdout, segment),
             runToken);
         var stderrTask = ConsumeStreamPreservingLineEndingsAsync(
             process.StandardError,
-            segment => OnStreamSegment(fileName, suppressStreamLogging, suppressOverlay: false, stderrStreamKind, segment),
+            segment => OnStreamSegment(idleWatch, fileName, suppressStreamLogging, suppressOverlay: false, stderrStreamKind, segment),
             runToken);
 
         try
@@ -202,9 +204,9 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
 
             await process.WaitForExitAsync(runToken);
         }
-        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when ((timeoutCts.IsCancellationRequested || idleWatch.IsIdle) && !cancellationToken.IsCancellationRequested)
         {
-            return await HandleTimeoutAsync(process, stdoutTask, stderrTask, sw, fileName, loggedArguments, effectiveTimeout);
+            return await HandleTimeoutAsync(process, stdoutTask, stderrTask, sw, fileName, loggedArguments, idleWatch.IsIdle && !timeoutCts.IsCancellationRequested ? idleTimeout : null, effectiveTimeout);
         }
         catch (OperationCanceledException)
         {
@@ -265,6 +267,7 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
         Stopwatch sw,
         string fileName,
         string loggedArguments,
+        TimeSpan? idleTimeout,
         TimeSpan timeout)
     {
         KillProcessTreeSafely(process);
@@ -272,10 +275,12 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
         await AwaitStreamSafelyAsync(stderrTask);
         sw.Stop();
 
-        var message = $"Operation timed out after {timeout.TotalSeconds:0}s.";
+        var message = idleTimeout is { } idle
+            ? $"Operation was stopped: no output for {idle.TotalSeconds:0}s (the process appeared stuck)."
+            : $"Operation timed out after {timeout.TotalSeconds:0}s.";
         logger.LogWarning(
-            "Command {Executable} {Parameters} timed out after {ElapsedMs}ms (limit {TimeoutSeconds}s) and was killed",
-            fileName, loggedArguments, sw.ElapsedMilliseconds, timeout.TotalSeconds);
+            "Command {Executable} {Parameters} timed out after {ElapsedMs}ms ({Reason}) and was killed",
+            fileName, loggedArguments, sw.ElapsedMilliseconds, idleTimeout is { } i ? $"no output for {i.TotalSeconds:0}s" : $"limit {timeout.TotalSeconds:0}s");
         ReportAmbient(new CommandLineStreamEvent(WorkerCommandStreamKind.Stderr, message));
 
         return new CommandLineResult(-1, stdout, message);
@@ -631,8 +636,9 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
         return true;
     }
 
-    private void OnStreamSegment(string fileName, bool suppressStreamLogging, bool suppressOverlay, WorkerCommandStreamKind kind, string segment)
+    private void OnStreamSegment(IdleWatch idleWatch, string fileName, bool suppressStreamLogging, bool suppressOverlay, WorkerCommandStreamKind kind, string segment)
     {
+        idleWatch.NoteActivity();
         if (!suppressStreamLogging)
         {
             var label = kind == WorkerCommandStreamKind.Stderr ? "stderr" : "stdout";
@@ -666,4 +672,47 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
             // Streaming must not break process execution
         }
     }
+}
+
+/// <summary>
+/// Inactivity watchdog: a process that keeps producing output is alive, so every output segment pushes the
+/// deadline out again; only a process that stays silent for the whole window is cancelled. Disabled when no
+/// window is given (zero cost, never cancels).
+/// </summary>
+internal sealed class IdleWatch : IDisposable
+{
+    private readonly CancellationTokenSource? _cts;
+    private readonly TimeSpan _window;
+
+    private IdleWatch(TimeSpan? window)
+    {
+        if (window is { } w && w > TimeSpan.Zero && w != Timeout.InfiniteTimeSpan)
+        {
+            _window = w;
+            _cts = new CancellationTokenSource(w);
+        }
+    }
+
+    public static IdleWatch Create(TimeSpan? window) => new(window);
+
+    public bool IsIdle => _cts?.IsCancellationRequested == true;
+
+    public void NoteActivity()
+    {
+        try
+        {
+            _cts?.CancelAfter(_window);
+        }
+        catch (ObjectDisposedException)
+        {
+            // The call already finished.
+        }
+    }
+
+    public CancellationTokenSource Link(CancellationToken external, CancellationToken timeout)
+        => _cts is null
+            ? CancellationTokenSource.CreateLinkedTokenSource(external, timeout)
+            : CancellationTokenSource.CreateLinkedTokenSource(external, timeout, _cts.Token);
+
+    public void Dispose() => _cts?.Dispose();
 }

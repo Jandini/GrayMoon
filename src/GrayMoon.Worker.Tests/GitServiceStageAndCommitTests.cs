@@ -271,7 +271,7 @@ public sealed class GitServiceStageAndCommitTests : IDisposable
             CancellationToken cancellationToken = default,
             bool streamStderrAsStdout = false,
             bool mirrorFailureOutputAsStderr = false,
-            TimeSpan? timeout = null)
+            TimeSpan? timeout = null, TimeSpan? idleTimeout = null)
         {
             Calls.Add(new RecordedCall(fileName, arguments, null, stdin == null ? null : Encoding.UTF8.GetBytes(stdin)));
             return inner.RunAsync(fileName, arguments, workingDirectory, stdin, cancellationToken, streamStderrAsStdout, mirrorFailureOutputAsStderr, timeout);
@@ -285,7 +285,7 @@ public sealed class GitServiceStageAndCommitTests : IDisposable
             CancellationToken cancellationToken = default,
             bool streamStderrAsStdout = false,
             bool mirrorFailureOutputAsStderr = false,
-            TimeSpan? timeout = null)
+            TimeSpan? timeout = null, TimeSpan? idleTimeout = null)
         {
             Calls.Add(new RecordedCall(fileName, null, [.. arguments], stdinBytes));
             return inner.RunAsync(fileName, arguments, workingDirectory, stdinBytes, cancellationToken, streamStderrAsStdout, mirrorFailureOutputAsStderr, timeout);

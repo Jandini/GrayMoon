@@ -20,13 +20,13 @@ public sealed class RepositoryAccessCommandLineService(ICommandLineService inner
         CancellationToken cancellationToken = default,
         bool streamStderrAsStdout = false,
         bool mirrorFailureOutputAsStderr = false,
-        TimeSpan? timeout = null)
+        TimeSpan? timeout = null, TimeSpan? idleTimeout = null)
         => RepositoryAccessGuard.RunAsync(
             access,
             workingDirectory,
             GitAccessClassifier.Classify(fileName, arguments),
             cancellationToken,
-            ct => inner.RunAsync(fileName, arguments, workingDirectory, stdin, ct, streamStderrAsStdout, mirrorFailureOutputAsStderr, timeout));
+            ct => inner.RunAsync(fileName, arguments, workingDirectory, stdin, ct, streamStderrAsStdout, mirrorFailureOutputAsStderr, timeout, idleTimeout));
 
     public Task<CommandLineResult> RunAsync(
         string fileName,
@@ -36,13 +36,13 @@ public sealed class RepositoryAccessCommandLineService(ICommandLineService inner
         CancellationToken cancellationToken = default,
         bool streamStderrAsStdout = false,
         bool mirrorFailureOutputAsStderr = false,
-        TimeSpan? timeout = null)
+        TimeSpan? timeout = null, TimeSpan? idleTimeout = null)
         => RepositoryAccessGuard.RunAsync(
             access,
             workingDirectory,
             GitAccessClassifier.Classify(fileName, arguments),
             cancellationToken,
-            ct => inner.RunAsync(fileName, arguments, workingDirectory, stdinBytes, ct, streamStderrAsStdout, mirrorFailureOutputAsStderr, timeout));
+            ct => inner.RunAsync(fileName, arguments, workingDirectory, stdinBytes, ct, streamStderrAsStdout, mirrorFailureOutputAsStderr, timeout, idleTimeout));
 }
 
 /// <summary>

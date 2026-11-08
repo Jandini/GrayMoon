@@ -103,7 +103,7 @@ public sealed class GitCloneFailureTests : IDisposable
     private sealed class ScriptedCloneCommandLine(CommandLineResult? result, bool cancel) : ICommandLineService
     {
         public Task<CommandLineResult> RunAsync(string fileName, string arguments, string? workingDirectory = null, string? stdin = null,
-            CancellationToken cancellationToken = default, bool streamStderrAsStdout = false, bool mirrorFailureOutputAsStderr = false, TimeSpan? timeout = null)
+            CancellationToken cancellationToken = default, bool streamStderrAsStdout = false, bool mirrorFailureOutputAsStderr = false, TimeSpan? timeout = null, TimeSpan? idleTimeout = null)
         {
             if (cancel)
                 throw new OperationCanceledException();
@@ -111,7 +111,7 @@ public sealed class GitCloneFailureTests : IDisposable
         }
 
         public Task<CommandLineResult> RunAsync(string fileName, IReadOnlyList<string> arguments, string? workingDirectory = null, byte[]? stdinBytes = null,
-            CancellationToken cancellationToken = default, bool streamStderrAsStdout = false, bool mirrorFailureOutputAsStderr = false, TimeSpan? timeout = null)
+            CancellationToken cancellationToken = default, bool streamStderrAsStdout = false, bool mirrorFailureOutputAsStderr = false, TimeSpan? timeout = null, TimeSpan? idleTimeout = null)
             => Task.FromResult(result ?? new CommandLineResult(0, "", ""));
     }
 }

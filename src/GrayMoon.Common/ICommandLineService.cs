@@ -28,6 +28,10 @@ public interface ICommandLineService
     /// waiting forever. Defaults to <see cref="ProcessExecutionOptions.DefaultTimeoutSeconds"/> when not
     /// specified - there is always a bound, even if the caller passes nothing.
     /// </param>
+    /// <param name="idleTimeout">
+    /// Optional inactivity bound: the process is killed only after it has written nothing to stdout or stderr for this long;
+    /// every output line (including carriage-return progress updates) restarts the window. Independent of <paramref name="timeout"/>.
+    /// </param>
     /// <returns>Exit code (or -1 if process failed to start, or timed out), stdout, and stderr.</returns>
     Task<CommandLineResult> RunAsync(
         string fileName,
@@ -37,7 +41,7 @@ public interface ICommandLineService
         CancellationToken cancellationToken = default,
         bool streamStderrAsStdout = false,
         bool mirrorFailureOutputAsStderr = false,
-        TimeSpan? timeout = null);
+        TimeSpan? timeout = null, TimeSpan? idleTimeout = null);
 
     /// <summary>
     /// Runs the executable with an explicit argument list instead of a single argument string - no shell
@@ -55,5 +59,5 @@ public interface ICommandLineService
         CancellationToken cancellationToken = default,
         bool streamStderrAsStdout = false,
         bool mirrorFailureOutputAsStderr = false,
-        TimeSpan? timeout = null);
+        TimeSpan? timeout = null, TimeSpan? idleTimeout = null);
 }

@@ -69,6 +69,34 @@ public sealed class GitProcessRunnerTests
     }
 
     [Theory]
+    [InlineData("-c core.longpaths=true clone --progress \"https://example.com/repo.git\"")]
+    [InlineData("-c core.askpass=true -c credential.helper= -c \"http.extraHeader=Authorization: Bearer a b\" -c core.longpaths=true clone --progress \"https://example.com/repo.git\"")]
+    public void ResolveTimeout_StringOverload_RecognisesClone_BehindGlobalOptions(string arguments)
+    {
+        var runner = CreateRunner(defaultSeconds: 60, networkSeconds: 180, cloneSeconds: 0);
+
+        Assert.Equal(Timeout.InfiniteTimeSpan, runner.ResolveTimeout("git", arguments));
+        Assert.Equal(TimeSpan.FromSeconds(180), runner.ResolveIdleTimeout("git", arguments));
+    }
+
+    [Fact]
+    public void ResolveTimeout_StringOverload_RecognisesFetch_BehindAuthPrefix()
+    {
+        var runner = CreateRunner(networkSeconds: 180);
+
+        Assert.Equal(TimeSpan.FromSeconds(180), runner.ResolveTimeout("git", "-c \"http.extraHeader=Authorization: Bearer a b\" fetch origin"));
+        Assert.Null(runner.ResolveIdleTimeout("git", "fetch origin"));
+    }
+
+    [Fact]
+    public void ResolveTimeout_ArgumentListOverload_RecognisesClone_BehindGlobalOptions()
+    {
+        var runner = CreateRunner(cloneSeconds: 0);
+
+        Assert.Equal(Timeout.InfiniteTimeSpan, runner.ResolveTimeout("git", ["-c", "core.longpaths=true", "clone", "url"]));
+        Assert.Equal(TimeSpan.FromSeconds(180), runner.ResolveIdleTimeout("git", ["-c", "core.longpaths=true", "clone", "url"]));
+    }
+    [Theory]
     [InlineData("status --porcelain=v2 -z --branch")]
     [InlineData("rev-parse --verify HEAD")]
     [InlineData("commit -F -")]

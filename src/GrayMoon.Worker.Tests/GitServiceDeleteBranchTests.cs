@@ -156,7 +156,7 @@ public sealed class GitServiceDeleteBranchTests : IDisposable
             CancellationToken cancellationToken = default,
             bool streamStderrAsStdout = false,
             bool mirrorFailureOutputAsStderr = false,
-            TimeSpan? timeout = null)
+            TimeSpan? timeout = null, TimeSpan? idleTimeout = null)
         {
             StringArgumentCalls.Add(arguments);
             _ambientEnvironment[arguments] = GitProcessEnvironmentAmbient.Current.Value;
@@ -178,7 +178,7 @@ public sealed class GitServiceDeleteBranchTests : IDisposable
             CancellationToken cancellationToken = default,
             bool streamStderrAsStdout = false,
             bool mirrorFailureOutputAsStderr = false,
-            TimeSpan? timeout = null)
+            TimeSpan? timeout = null, TimeSpan? idleTimeout = null)
             => inner.RunAsync(fileName, arguments, workingDirectory, stdinBytes, cancellationToken, streamStderrAsStdout, mirrorFailureOutputAsStderr, timeout);
     }
 }

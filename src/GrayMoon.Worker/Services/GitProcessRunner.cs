@@ -52,6 +52,14 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, IOptions<G
     /// </summary>
     private readonly TimeSpan _cloneTimeout = ResolveCloneTimeout(gitProcessOptions.Value);
 
+    /// <summary>
+    /// Clone's liveness bound: killed only after this long with no stdout/stderr at all. Git is run with
+    /// <c>--progress</c> so a healthy clone prints a progress update at least once a second; null disables it.
+    /// </summary>
+    private readonly TimeSpan? _cloneIdleTimeout = gitProcessOptions.Value.CloneIdleTimeoutSeconds > 0
+        ? TimeSpan.FromSeconds(gitProcessOptions.Value.CloneIdleTimeoutSeconds)
+        : null;
+
     internal static readonly ConcurrentDictionary<string, SemaphoreSlim> RepoLocks =
         new(StringComparer.OrdinalIgnoreCase);
 
@@ -119,7 +127,8 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, IOptions<G
         string arguments,
         string workingDirectory,
         string? bearerToken,
-        CancellationToken ct)
+        CancellationToken ct,
+        Action? beforeAttempt = null)
     {
         var pipeline = operation switch
         {
@@ -139,16 +148,16 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, IOptions<G
 
         (int ExitCode, string? Stdout, string? Stderr) raw;
         if (string.IsNullOrWhiteSpace(bearerToken))
-            raw = await pipeline.ExecuteAsync(async c => await RunAsync("git", arguments, workingDirectory, c, intent: intent), ct);
+            raw = await pipeline.ExecuteAsync(async c => { beforeAttempt?.Invoke(); return await RunAsync("git", arguments, workingDirectory, c, intent: intent); }, ct);
         else if (await SupportsEnvConfigAsync())
         {
             using var _ = new GitProcessEnvironmentScope(GitRemoteAuth.BuildEnvironment(bearerToken, GitRemoteAuth.ReadExistingConfigCount()));
-            raw = await pipeline.ExecuteAsync(async c => await RunAsync("git", arguments, workingDirectory, c, intent: intent), ct);
+            raw = await pipeline.ExecuteAsync(async c => { beforeAttempt?.Invoke(); return await RunAsync("git", arguments, workingDirectory, c, intent: intent); }, ct);
         }
         else
         {
             var authedArguments = $"{GitRemoteAuth.BuildArgumentPrefix(bearerToken)} {arguments}";
-            raw = await pipeline.ExecuteAsync(async c => await RunAsync("git", authedArguments, workingDirectory, c, intent: intent), ct);
+            raw = await pipeline.ExecuteAsync(async c => { beforeAttempt?.Invoke(); return await RunAsync("git", authedArguments, workingDirectory, c, intent: intent); }, ct);
         }
 
         // Stdout and stderr are redacted before any caller can log them. The authorization URL, when valid, is
@@ -194,7 +203,7 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, IOptions<G
         var stderrAsOut = streamStderrAsStdout ?? gitLike;
         var mirror = mirrorFailureOutputAsStderr ?? gitLike;
         var timeout = ResolveTimeout(fileName, arguments);
-        var r = await commandLine.RunAsync(fileName, arguments, workingDirectory, null, ct, stderrAsOut, mirror, timeout);
+        var r = await commandLine.RunAsync(fileName, arguments, workingDirectory, null, ct, stderrAsOut, mirror, timeout, ResolveIdleTimeout(fileName, arguments));
         return (r.ExitCode, r.Stdout, r.Stderr);
     }
 
@@ -231,7 +240,7 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, IOptions<G
     {
         var gitLike = IsGitLikeProgressStreaming(fileName, arguments);
         var timeout = ResolveTimeout(fileName, arguments);
-        var r = await commandLine.RunAsync(fileName, arguments, workingDirectory, stdinContent, ct, gitLike, gitLike, timeout);
+        var r = await commandLine.RunAsync(fileName, arguments, workingDirectory, stdinContent, ct, gitLike, gitLike, timeout, ResolveIdleTimeout(fileName, arguments));
         return (r.ExitCode, r.Stdout, r.Stderr);
     }
 
@@ -312,7 +321,7 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, IOptions<G
     {
         var gitLike = string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase);
         var timeout = ResolveTimeout(fileName, arguments);
-        var r = await commandLine.RunAsync(fileName, arguments, workingDirectory, stdinBytes, ct, gitLike, gitLike, timeout);
+        var r = await commandLine.RunAsync(fileName, arguments, workingDirectory, stdinBytes, ct, gitLike, gitLike, timeout, ResolveIdleTimeout(fileName, arguments));
         return (r.ExitCode, r.Stdout, r.Stderr);
     }
 
@@ -367,6 +376,16 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, IOptions<G
     /// or the default (everything else - status, diff/show, rev-parse, cat-file, add, restore, reset,
     /// commit, branch/tag queries, config, etc.).
     /// </summary>
+    internal TimeSpan? ResolveIdleTimeout(string fileName, string arguments)
+        => string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase) && StartsWithSubcommand(arguments, "clone")
+            ? _cloneIdleTimeout
+            : null;
+
+    internal TimeSpan? ResolveIdleTimeout(string fileName, IReadOnlyList<string> arguments)
+        => string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase) && StartsWithSubcommand(arguments, "clone")
+            ? _cloneIdleTimeout
+            : null;
+
     internal TimeSpan ResolveTimeout(string fileName, string arguments)
     {
         if (IsGitVersionInvocation(fileName, arguments))
@@ -418,47 +437,103 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, IOptions<G
     /// </summary>
     private static bool StartsWithNetworkSubcommand(string arguments)
     {
-        foreach (var sub in NetworkSubcommands)
-        {
-            if (StartsWithSubcommand(arguments, sub))
-                return true;
-        }
-
-        return false;
+        var sub = FindSubcommand(arguments);
+        return sub != null && Array.IndexOf(NetworkSubcommands, sub) >= 0;
     }
 
     private static bool StartsWithNetworkSubcommand(IReadOnlyList<string> arguments)
     {
-        foreach (var arg in arguments)
+        var sub = FindSubcommand(arguments);
+        return sub != null && Array.IndexOf(NetworkSubcommands, sub) >= 0;
+    }
+
+    internal static string? FindSubcommand(IReadOnlyList<string> arguments)
+    {
+        for (var i = 0; i < arguments.Count; i++)
         {
+            var arg = arguments[i];
             if (arg.Length == 0)
                 continue;
-
-            return Array.IndexOf(NetworkSubcommands, arg) >= 0;
+            if (arg[0] != '-')
+                return arg;
+            if (arg is "-C" or "-c")
+                i++;
         }
 
-        return false;
+        return null;
     }
 
     private static bool StartsWithSubcommand(string arguments, string subcommand)
+        => string.Equals(FindSubcommand(arguments), subcommand, StringComparison.Ordinal);
+
+    /// <summary>
+    /// The git subcommand of a joined argument string, skipping leading global options (<c>-c key=value</c>,
+    /// <c>-C path</c>, other <c>-x</c> flags) with quote-aware tokenizing. Clone is always invoked with
+    /// <c>-c core.longpaths=true</c> (and, for authenticated remotes, a quoted <c>-c "http.extraHeader=..."</c>)
+    /// ahead of the subcommand, so a plain leading-token check would never recognise it and the invocation would
+    /// silently fall into the 60 s default tier.
+    /// </summary>
+    internal static string? FindSubcommand(string arguments)
     {
-        var trimmed = arguments.TrimStart();
-        return trimmed.StartsWith(subcommand, StringComparison.Ordinal)
-            && (trimmed.Length == subcommand.Length || trimmed[subcommand.Length] == ' ');
+        var i = 0;
+        var skipNext = false;
+        while (TryReadToken(arguments, ref i, out var token))
+        {
+            if (skipNext)
+            {
+                skipNext = false;
+                continue;
+            }
+
+            if (token.Length == 0)
+                continue;
+            if (token[0] != '-')
+                return token;
+            if (token is "-C" or "-c")
+                skipNext = true;
+        }
+
+        return null;
+    }
+
+    private static bool TryReadToken(string s, ref int i, out string token)
+    {
+        while (i < s.Length && s[i] == ' ')
+            i++;
+        if (i >= s.Length)
+        {
+            token = "";
+            return false;
+        }
+
+        var sb = new System.Text.StringBuilder();
+        var quoted = false;
+        for (; i < s.Length; i++)
+        {
+            var c = s[i];
+            if (c == '\\' && quoted && i + 1 < s.Length)
+            {
+                sb.Append(s[++i]);
+                continue;
+            }
+
+            if (c == '"')
+            {
+                quoted = !quoted;
+                continue;
+            }
+
+            if (c == ' ' && !quoted)
+                break;
+            sb.Append(c);
+        }
+
+        token = sb.ToString();
+        return true;
     }
 
     private static bool StartsWithSubcommand(IReadOnlyList<string> arguments, string subcommand)
-    {
-        foreach (var arg in arguments)
-        {
-            if (arg.Length == 0)
-                continue;
-
-            return string.Equals(arg, subcommand, StringComparison.Ordinal);
-        }
-
-        return false;
-    }
+        => string.Equals(FindSubcommand(arguments), subcommand, StringComparison.Ordinal);
 }
 
 /// <summary>
