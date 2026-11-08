@@ -114,7 +114,7 @@ public sealed class GetHeadCommitsCommandTests : IDisposable
             CancellationToken cancellationToken = default,
             bool streamStderrAsStdout = false,
             bool mirrorFailureOutputAsStderr = false,
-            TimeSpan? timeout = null)
+            TimeSpan? timeout = null, TimeSpan? idleTimeout = null)
         {
             _calls.Enqueue(new RecordedCall(fileName, arguments, workingDirectory));
             return inner.RunAsync(fileName, arguments, workingDirectory, stdin, cancellationToken, streamStderrAsStdout, mirrorFailureOutputAsStderr, timeout);
@@ -127,7 +127,7 @@ public sealed class GetHeadCommitsCommandTests : IDisposable
             CancellationToken cancellationToken = default,
             bool streamStderrAsStdout = false,
             bool mirrorFailureOutputAsStderr = false,
-            TimeSpan? timeout = null)
+            TimeSpan? timeout = null, TimeSpan? idleTimeout = null)
         {
             _calls.Enqueue(new RecordedCall(fileName, string.Join(' ', arguments), workingDirectory));
             return inner.RunAsync(fileName, arguments, workingDirectory, stdin, cancellationToken, streamStderrAsStdout, mirrorFailureOutputAsStderr, timeout);

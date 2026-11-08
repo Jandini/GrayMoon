@@ -56,7 +56,7 @@ public sealed class GetHostInfoCommandTests
             CancellationToken cancellationToken = default,
             bool streamStderrAsStdout = false,
             bool mirrorFailureOutputAsStderr = false,
-            TimeSpan? timeout = null) =>
+            TimeSpan? timeout = null, TimeSpan? idleTimeout = null) =>
             HoldAsync(Stdout(fileName, arguments), cancellationToken);
 
         public Task<CommandLineResult> RunAsync(
@@ -67,7 +67,7 @@ public sealed class GetHostInfoCommandTests
             CancellationToken cancellationToken = default,
             bool streamStderrAsStdout = false,
             bool mirrorFailureOutputAsStderr = false,
-            TimeSpan? timeout = null) =>
+            TimeSpan? timeout = null, TimeSpan? idleTimeout = null) =>
             HoldAsync("1.2.3", cancellationToken);
 
         private async Task<CommandLineResult> HoldAsync(string stdout, CancellationToken cancellationToken)

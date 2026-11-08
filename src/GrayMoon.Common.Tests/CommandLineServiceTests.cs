@@ -24,6 +24,35 @@ public sealed class CommandLineServiceTests
     }
 
     [Fact]
+    public async Task RunAsync_IdleTimeout_KillsProcessThatStaysSilent()
+    {
+        var service = CreateService();
+        var (fileName, arguments) = TestProcess.SleepSeconds(30);
+
+        var sw = Stopwatch.StartNew();
+        var result = await service.RunAsync(fileName, arguments, timeout: TimeSpan.FromSeconds(120), idleTimeout: TimeSpan.FromSeconds(2));
+        sw.Stop();
+
+        Assert.Equal(-1, result.ExitCode);
+        Assert.Contains("no output", result.Stderr);
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(25), $"Silent process should be stopped by the idle bound, took {sw.Elapsed}.");
+    }
+
+    [Fact]
+    public async Task RunAsync_IdleTimeout_DoesNotKillProcessThatKeepsProducingOutput()
+    {
+        var service = CreateService();
+        // Roughly 6 s of runtime with a line every second - longer than the 4 s idle window, so only the
+        // output resetting the window lets it finish.
+        var (fileName, arguments) = OperatingSystem.IsWindows()
+            ? ("cmd.exe", "/c ping -n 7 127.0.0.1")
+            : ("/bin/sh", "-c \"for i in 1 2 3 4 5 6; do echo tick; sleep 1; done\"");
+
+        var result = await service.RunAsync(fileName, arguments, timeout: TimeSpan.FromSeconds(60), idleTimeout: TimeSpan.FromSeconds(4));
+
+        Assert.Equal(0, result.ExitCode);
+    }
+    [Fact]
     public async Task RunAsync_MissingExecutable_ReturnsFailedStartInsteadOfThrowing()
     {
         var service = CreateService();

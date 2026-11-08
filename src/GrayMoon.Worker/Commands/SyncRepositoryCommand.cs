@@ -103,7 +103,14 @@ public sealed class SyncRepositoryCommand(
                 if (string.IsNullOrWhiteSpace(cloneUrl))
                     return NotCloned("This repository has no clone URL, so it cannot be cloned.");
 
-                var clone = await git.CloneAsync(workspacePath, cloneUrl, bearerToken, cancellationToken);
+                // While git writes the working tree, nearly every path looks changed, so a watcher-driven status scan
+                // of the half-written clone would be enormous and pointless. Hold watcher scans back until it ends.
+                GitCloneResult clone;
+                using (refreshSuppressor?.BeginExternalRepositoryMutation(repoPath))
+                {
+                    clone = await git.CloneAsync(workspacePath, cloneUrl, bearerToken, cancellationToken);
+                }
+
                 if (!clone.Success || !WorkerRepositoryPaths.HasGitMetadata(repoPath))
                 {
                     var leftInPlace = Directory.Exists(repoPath) && !TryRemoveSafeCloneResidue(workspacePath, repoPath);

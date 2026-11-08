@@ -61,7 +61,7 @@ internal sealed class CountingCommandLine(ICommandLineService inner) : ICommandL
     public List<string> Calls { get; } = [];
 
     public Task<CommandLineResult> RunAsync(string fileName, string arguments, string? workingDirectory = null, string? stdin = null,
-        CancellationToken cancellationToken = default, bool streamStderrAsStdout = false, bool mirrorFailureOutputAsStderr = false, TimeSpan? timeout = null)
+        CancellationToken cancellationToken = default, bool streamStderrAsStdout = false, bool mirrorFailureOutputAsStderr = false, TimeSpan? timeout = null, TimeSpan? idleTimeout = null)
     {
         lock (Calls)
             Calls.Add(arguments);
@@ -69,7 +69,7 @@ internal sealed class CountingCommandLine(ICommandLineService inner) : ICommandL
     }
 
     public Task<CommandLineResult> RunAsync(string fileName, IReadOnlyList<string> arguments, string? workingDirectory = null, byte[]? stdinBytes = null,
-        CancellationToken cancellationToken = default, bool streamStderrAsStdout = false, bool mirrorFailureOutputAsStderr = false, TimeSpan? timeout = null)
+        CancellationToken cancellationToken = default, bool streamStderrAsStdout = false, bool mirrorFailureOutputAsStderr = false, TimeSpan? timeout = null, TimeSpan? idleTimeout = null)
     {
         lock (Calls)
             Calls.Add(string.Join(' ', arguments));

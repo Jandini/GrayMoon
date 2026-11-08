@@ -35,12 +35,33 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         if (!Directory.Exists(workingDir))
             Directory.CreateDirectory(workingDir);
 
-        var args = $"{CloneLongPathsPrefix}clone \"{cloneUrl}\"";
+        // --progress forces git to report progress on stderr even though it is not a terminal; that stream is the
+        // liveness signal the runner's idle timeout watches (see GitProcessOptions.CloneIdleTimeoutSeconds).
+        var args = $"{CloneLongPathsPrefix}clone --progress \"{cloneUrl}\"";
+
+        var cloneFolderName = CloneFolderName(cloneUrl);
+        var cloneTarget = cloneFolderName == null ? null : Path.Combine(workingDir, cloneFolderName);
+        if (cloneTarget != null && Directory.Exists(cloneTarget) && Directory.EnumerateFileSystemEntries(cloneTarget).Any())
+        {
+            logger.LogError("Git clone of {Url} refused: destination {Dir} already exists and is not empty.", cloneUrl, cloneTarget);
+            return GitCloneResult.FromFailure(new GitRemoteFailure(128, GitRemoteFailureKind.Unknown,
+                $"Cannot clone: the folder '{cloneFolderName}' already exists in '{workingDir}' and is not empty.", null, null, null));
+        }
+
+        // A killed or failed attempt leaves a half-written folder behind. Remove it before each attempt (and after the
+        // last), otherwise the retry fails with git's misleading "destination path already exists" and hides the real error.
+        void DiscardPartialClone()
+        {
+            if (cloneTarget != null)
+                DeletePartialClone(cloneTarget, deleteRoot: true);
+        }
+
         var sw = Stopwatch.StartNew();
-        var run = await runner.RunRemoteAsync(GitRemoteOperation.Clone, args, workingDir, bearerToken, ct);
+        var run = await runner.RunRemoteAsync(GitRemoteOperation.Clone, args, workingDir, bearerToken, ct, DiscardPartialClone);
         sw.Stop();
         if (run.ExitCode != 0)
         {
+            DiscardPartialClone();
             var failure = GitHubSsoAuthorization.Describe(run.ExitCode, run.Stdout, run.Stderr, run.AuthorizationUrl);
             LogIfAuthFailure("clone", workingDir, run.Stdout, run.Stderr);
             logger.LogError("Git clone failed after retries in {ElapsedMs}ms. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", sw.ElapsedMilliseconds, run.ExitCode, run.Stdout, run.Stderr);
@@ -48,6 +69,51 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         }
         logger.LogInformation("Git clone completed in {ElapsedMs}ms: {Url} -> {Dir}", sw.ElapsedMilliseconds, cloneUrl, workingDir);
         return GitCloneResult.Succeeded(run.ExitCode);
+    }
+
+    /// <summary>Folder name <c>git clone &lt;url&gt;</c> creates by default (last path segment without <c>.git</c>); null when unknown.</summary>
+    internal static string? CloneFolderName(string cloneUrl)
+    {
+        var s = cloneUrl.Trim().TrimEnd('/', '\\');
+        if (s.EndsWith("/.git", StringComparison.OrdinalIgnoreCase))
+            s = s[..^5];
+        var i = s.LastIndexOfAny(['/', '\\', ':']);
+        var name = i >= 0 ? s[(i + 1)..] : s;
+        if (name.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
+            name = name[..^4];
+        return string.IsNullOrWhiteSpace(name) || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ? null : name;
+    }
+
+    private void DeletePartialClone(string path, bool deleteRoot)
+    {
+        try
+        {
+            if (!Directory.Exists(path))
+                return;
+
+            foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
+            {
+                try { File.SetAttributes(file, FileAttributes.Normal); } catch { /* best-effort */ }
+            }
+
+            if (deleteRoot)
+            {
+                Directory.Delete(path, recursive: true);
+                return;
+            }
+
+            foreach (var entry in Directory.EnumerateFileSystemEntries(path))
+            {
+                if (Directory.Exists(entry))
+                    Directory.Delete(entry, recursive: true);
+                else
+                    File.Delete(entry);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not remove partial clone at {Path}.", path);
+        }
     }
 
     public async Task AddSafeDirectoryAsync(string repoPath, CancellationToken ct)
@@ -963,12 +1029,24 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         if (!Directory.Exists(targetDir))
             Directory.CreateDirectory(targetDir);
 
-        var args = $"{CloneLongPathsPrefix}clone \"{cloneUrl}\" .";
+        var args = $"{CloneLongPathsPrefix}clone --progress \"{cloneUrl}\" .";
+
+        if (Directory.EnumerateFileSystemEntries(targetDir).Any())
+        {
+            logger.LogError("Git clone of {Url} refused: destination {Dir} is not empty.", cloneUrl, targetDir);
+            return GitCloneResult.FromFailure(new GitRemoteFailure(128, GitRemoteFailureKind.Unknown,
+                $"Cannot clone: the folder '{targetDir}' is not empty.", null, null, null));
+        }
+
+        // The folder was empty (or created here), so anything in it after a failed attempt is a partial clone.
+        void DiscardPartialClone() => DeletePartialClone(targetDir, deleteRoot: false);
+
         var sw = Stopwatch.StartNew();
-        var run = await runner.RunRemoteAsync(GitRemoteOperation.Clone, args, targetDir, bearerToken, ct);
+        var run = await runner.RunRemoteAsync(GitRemoteOperation.Clone, args, targetDir, bearerToken, ct, DiscardPartialClone);
         sw.Stop();
         if (run.ExitCode != 0)
         {
+            DiscardPartialClone();
             var failure = GitHubSsoAuthorization.Describe(run.ExitCode, run.Stdout, run.Stderr, run.AuthorizationUrl);
             LogIfAuthFailure("clone", targetDir, run.Stdout, run.Stderr);
             logger.LogError("Git clone into {Dir} failed after retries in {ElapsedMs}ms. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", targetDir, sw.ElapsedMilliseconds, run.ExitCode, run.Stdout, run.Stderr);

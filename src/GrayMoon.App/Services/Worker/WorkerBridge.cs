@@ -78,9 +78,27 @@ public sealed class WorkerBridge(
         var argsJson = args != null ? JsonSerializer.SerializeToElement(args) : (JsonElement?)null;
 
         var sink = TerminalSinkContext.Current;
-        Action<WorkerCommandStreamLine>? onLine = sink != null ? sink.Append : null;
 
         using var timeoutCts = new CancellationTokenSource(_commandTimeout);
+
+        // The command timeout is an inactivity bound, not a total one: every line the Worker streams back (git clone
+        // progress, for one) proves the command is alive and restarts the window. A huge clone can therefore take
+        // as long as it needs, while a Worker that goes silent for the whole window is still failed.
+        void OnLine(WorkerCommandStreamLine line)
+        {
+            try
+            {
+                timeoutCts.CancelAfter(_commandTimeout);
+            }
+            catch (ObjectDisposedException)
+            {
+                // The call already finished.
+            }
+
+            sink?.Append(line);
+        }
+
+        Action<WorkerCommandStreamLine> onLine = OnLine;
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
         var task = WorkerResponseDelivery.WaitAsync(requestId, linkedCts.Token, onLine);
         var sw = Stopwatch.StartNew();
@@ -121,11 +139,11 @@ public sealed class WorkerBridge(
             // are needed to get this "fail fast, let the user retry" behavior everywhere.
             cancelSender.NotifyCancel(requestId);
             logger.LogWarning(
-                "Worker command {Command} ({RequestId}) timed out after {TimeoutSeconds}s waiting for a response",
+                "Worker command {Command} ({RequestId}) timed out: no response or output for {TimeoutSeconds}s",
                 command, requestId, _commandTimeout.TotalSeconds);
             if (isSelfUpdate)
                 EndSelfUpdateIfStillConnected();
-            return new WorkerCommandResponse(false, null, $"Worker command timed out after {_commandTimeout.TotalSeconds:0}s.");
+            return new WorkerCommandResponse(false, null, $"Worker command timed out: no response or output for {_commandTimeout.TotalSeconds:0}s.");
         }
         catch (OperationCanceledException)
         {

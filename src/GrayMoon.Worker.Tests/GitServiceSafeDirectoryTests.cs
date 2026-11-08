@@ -76,11 +76,11 @@ public sealed class GitServiceSafeDirectoryTests : IDisposable
         public List<string> SafeDirectoryWrites { get; } = [];
 
         public Task<CommandLineResult> RunAsync(string fileName, string arguments, string? workingDirectory = null, string? stdin = null,
-            CancellationToken cancellationToken = default, bool streamStderrAsStdout = false, bool mirrorFailureOutputAsStderr = false, TimeSpan? timeout = null)
+            CancellationToken cancellationToken = default, bool streamStderrAsStdout = false, bool mirrorFailureOutputAsStderr = false, TimeSpan? timeout = null, TimeSpan? idleTimeout = null)
             => Task.FromResult(Handle(arguments));
 
         public Task<CommandLineResult> RunAsync(string fileName, IReadOnlyList<string> arguments, string? workingDirectory = null, byte[]? stdinBytes = null,
-            CancellationToken cancellationToken = default, bool streamStderrAsStdout = false, bool mirrorFailureOutputAsStderr = false, TimeSpan? timeout = null)
+            CancellationToken cancellationToken = default, bool streamStderrAsStdout = false, bool mirrorFailureOutputAsStderr = false, TimeSpan? timeout = null, TimeSpan? idleTimeout = null)
             => Task.FromResult(Handle(string.Join(' ', arguments)));
 
         private CommandLineResult Handle(string arguments)

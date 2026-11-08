@@ -84,6 +84,8 @@ public sealed class GitStatusRefreshCoordinator : IDisposable, IGitChangesRefres
         return result;
     }
 
+    internal const string TooManyChangesErrorCode = "TooManyChanges";
+
     private static GitChangeStatusResult PathUnderRemovalResult() => new()
     {
         Success = false,
@@ -97,7 +99,22 @@ public sealed class GitStatusRefreshCoordinator : IDisposable, IGitChangesRefres
     {
         try
         {
-            return await _gitChangesService.GetStatusAsync(repoPath, version, cancellationToken, includeLineStats);
+            var result = await _gitChangesService.GetStatusAsync(repoPath, version, cancellationToken, includeLineStats);
+            var limit = _options.MaxChangesPerSnapshot;
+            if (limit > 0 && result.Success && result.Snapshot is { } snapshot && snapshot.Changes.Count > limit)
+            {
+                _logger.LogWarning(
+                    "[GCDiag] Git status for {RepoPath} reported {Count} changed paths, above the limit of {Limit}; not cached or sent to the App (a clone still checking out looks like this)",
+                    repoPath, snapshot.Changes.Count, limit);
+                return new GitChangeStatusResult
+                {
+                    Success = false,
+                    ErrorCode = TooManyChangesErrorCode,
+                    ErrorMessage = $"Too many changed paths to track ({snapshot.Changes.Count:N0}; limit {limit:N0}). The repository may still be cloning or checking out.",
+                };
+            }
+
+            return result;
         }
         catch (PathUnderRemovalException)
         {
@@ -192,7 +209,7 @@ public sealed class GitStatusRefreshCoordinator : IDisposable, IGitChangesRefres
         try
         {
             var result = await RunScanAsync(repoPath, tracker, cts.Token);
-            if (result.Success || result.ErrorCode is "PathUnderRemoval" or "RepositoryDisposed")
+            if (result.Success || result.ErrorCode is "PathUnderRemoval" or "RepositoryDisposed" or TooManyChangesErrorCode)
             {
                 // Success, or an expected outcome that a retry cannot change.
                 tracker.ResetScanFailures();

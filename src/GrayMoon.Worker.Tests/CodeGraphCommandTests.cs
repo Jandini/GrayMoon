@@ -399,7 +399,7 @@ public sealed class CodeGraphCommandTests : IDisposable
             CancellationToken cancellationToken = default,
             bool streamStderrAsStdout = false,
             bool mirrorFailureOutputAsStderr = false,
-            TimeSpan? timeout = null) =>
+            TimeSpan? timeout = null, TimeSpan? idleTimeout = null) =>
             throw new NotSupportedException();
 
         public async Task<CommandLineResult> RunAsync(
@@ -410,7 +410,7 @@ public sealed class CodeGraphCommandTests : IDisposable
             CancellationToken cancellationToken = default,
             bool streamStderrAsStdout = false,
             bool mirrorFailureOutputAsStderr = false,
-            TimeSpan? timeout = null)
+            TimeSpan? timeout = null, TimeSpan? idleTimeout = null)
         {
             var block = Block;
             // Streamed like CommandLineService does, before the call is announced, so a test sees it once started.

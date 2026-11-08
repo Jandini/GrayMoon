@@ -50,7 +50,7 @@ public sealed class GitServiceParallelCloneTests : IDisposable
             CancellationToken cancellationToken = default,
             bool streamStderrAsStdout = false,
             bool mirrorFailureOutputAsStderr = false,
-            TimeSpan? timeout = null)
+            TimeSpan? timeout = null, TimeSpan? idleTimeout = null)
         {
             if (arguments.Contains("clone ", StringComparison.Ordinal))
             {
@@ -73,7 +73,7 @@ public sealed class GitServiceParallelCloneTests : IDisposable
             CancellationToken cancellationToken = default,
             bool streamStderrAsStdout = false,
             bool mirrorFailureOutputAsStderr = false,
-            TimeSpan? timeout = null)
+            TimeSpan? timeout = null, TimeSpan? idleTimeout = null)
             => Task.FromResult(new CommandLineResult(0, string.Empty, string.Empty));
     }
 }

@@ -28,4 +28,12 @@ public sealed class GitProcessOptions
     /// a clone runs to completion (or failure) with no time bound. Set to a positive value to bound it.
     /// </summary>
     public int CloneTimeoutSeconds { get; init; } = 0;
+
+    /// <summary>
+    /// Clone liveness bound: a clone is killed only after it has produced no output at all (stdout or stderr) for this many
+    /// seconds. Git is started with <c>--progress</c>, so a healthy clone reports progress continuously and never trips this,
+    /// however long it takes overall; a stalled one is stopped and reported instead of hanging. Covers the silent phase before
+    /// the first progress line too, so keep it generous. Default 180; 0 disables.
+    /// </summary>
+    public int CloneIdleTimeoutSeconds { get; init; } = 180;
 }
