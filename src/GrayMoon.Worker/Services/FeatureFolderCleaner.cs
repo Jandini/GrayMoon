@@ -13,6 +13,8 @@ public enum FeatureFolderCleanupOutcome
     Refused = 2,
     /// <summary>The caller asked to clean only a marked folder, and this one carries no matching marker; nothing was touched.</summary>
     NotMarked = 3,
+    /// <summary>Only for a check-only request: something exists at the folder path, and nothing was touched.</summary>
+    Present = 4,
 }
 
 public sealed record FeatureFolderCleanupResult(FeatureFolderCleanupOutcome Outcome, int RemainingFileCount = 0, string? Message = null);
@@ -37,7 +39,8 @@ public sealed class FeatureFolderCleaner(ILogger<FeatureFolderCleaner> logger, I
         string? featureName,
         bool retry,
         bool requireMarker,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool checkOnly = false)
     {
         var guardFailure = ValidatePaths(featureStorageRoot, featureRootPath);
         if (guardFailure != null)
@@ -47,6 +50,14 @@ public sealed class FeatureFolderCleaner(ILogger<FeatureFolderCleaner> logger, I
         }
 
         var root = Normalize(featureRootPath!);
+        if (checkOnly)
+        {
+            // Read-only: a file, folder or link of that name all count as taken.
+            return Path.Exists(root)
+                ? new FeatureFolderCleanupResult(FeatureFolderCleanupOutcome.Present)
+                : new FeatureFolderCleanupResult(FeatureFolderCleanupOutcome.Removed);
+        }
+
         if (!Directory.Exists(root))
         {
             TryRemoveEmptyParents(Normalize(featureStorageRoot!), root);
@@ -64,6 +75,15 @@ public sealed class FeatureFolderCleaner(ILogger<FeatureFolderCleaner> logger, I
         if (requireMarker && (existingMarker == null || !MarkerNames(existingMarker, root)))
             return new FeatureFolderCleanupResult(FeatureFolderCleanupOutcome.NotMarked);
 
+        // A sweep only finishes a removal that was recorded for this Workspace and this Feature name. A marker that names
+        // another Workspace or Feature (copied folder, shared storage root, forged file) is never acted on.
+        if (requireMarker && existingMarker != null
+            && MarkerConflictsWithRequest(existingMarker, Normalize(featureStorageRoot!), root, workspaceName) is { } conflict)
+        {
+            logger.LogWarning("Ignoring pending-delete marker in {Folder}: {Conflict}", root, conflict);
+            return new FeatureFolderCleanupResult(FeatureFolderCleanupOutcome.NotMarked, Message: conflict);
+        }
+
         // The Worker's own handles (watchers, git processes) never block this delete; the marker is for foreign programs.
         IRepositoryExclusiveScope? removalScope = null;
         try
@@ -78,6 +98,14 @@ public sealed class FeatureFolderCleaner(ILogger<FeatureFolderCleaner> logger, I
         using var scope = removalScope;
         if (scope != null)
         {
+            // Re-check right before deleting: a repository or worktree may have appeared since the first check.
+            var lateFailure = ValidateTree(Normalize(featureStorageRoot!), root);
+            if (lateFailure != null)
+            {
+                logger.LogWarning("Feature folder cleanup refused for {FeatureRootPath}: {Guard}", root, lateFailure);
+                return new FeatureFolderCleanupResult(FeatureFolderCleanupOutcome.Refused, Message: lateFailure);
+            }
+
             await GitWorktreeService.DeleteFolderRecursivelyWithRetryAsync(root, ct, retry);
             TryDeleteEmptyFolder(root);
         }
@@ -160,6 +188,28 @@ public sealed class FeatureFolderCleaner(ILogger<FeatureFolderCleaner> logger, I
         }
 
         return marked;
+    }
+
+    /// <summary>
+    /// Null when the marker's recorded Workspace and Feature (when present) match the sweep's Workspace and the folder's
+    /// path below the storage root; otherwise a short reason. Absent names (older markers) are tolerated.
+    /// </summary>
+    private static string? MarkerConflictsWithRequest(PendingDeleteMarker marker, string storageRoot, string root, string? workspaceName)
+    {
+        if (!string.IsNullOrWhiteSpace(workspaceName) && !string.IsNullOrWhiteSpace(marker.Workspace)
+            && !string.Equals(marker.Workspace.Trim(), workspaceName.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            return $"it belongs to workspace \"{marker.Workspace}\", not \"{workspaceName}\".";
+        }
+
+        if (!string.IsNullOrWhiteSpace(marker.Feature))
+        {
+            var folderFeature = Path.GetRelativePath(storageRoot, root).Replace(Path.DirectorySeparatorChar, '/');
+            if (!string.Equals(marker.Feature.Trim().Trim('/'), folderFeature, StringComparison.OrdinalIgnoreCase))
+                return $"it names Feature \"{marker.Feature}\" but the folder is \"{folderFeature}\".";
+        }
+
+        return null;
     }
 
     private static bool MarkerNames(PendingDeleteMarker marker, string folder)

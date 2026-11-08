@@ -17,7 +17,8 @@ public sealed class CleanupFeatureFolderCommand(FeatureFolderCleaner cleaner)
             request.FeatureName,
             request.Retry,
             request.OnlyIfMarked,
-            cancellationToken);
+            cancellationToken,
+            request.CheckOnly);
 
         return new CleanupFeatureFolderResponse
         {

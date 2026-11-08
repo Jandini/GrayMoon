@@ -31,4 +31,11 @@ public sealed class CleanupFeatureFolderRequest
     /// <summary>When true, only a folder carrying a matching pending-delete marker is touched (Create Feature reusing a name).</summary>
     [JsonPropertyName("onlyIfMarked")]
     public bool OnlyIfMarked { get; set; }
+
+    /// <summary>
+    /// When true, nothing is deleted or marked: the answer is <c>Present</c> when anything exists at the Feature folder path
+    /// and <c>Removed</c> when nothing does (Create Feature refusing a name whose folder is already taken).
+    /// </summary>
+    [JsonPropertyName("checkOnly")]
+    public bool CheckOnly { get; set; }
 }

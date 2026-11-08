@@ -1194,7 +1194,9 @@ Creation (structural lock `create-feature`):
 
 ```text
 reject a name that is already a branch in any repository (listed as "X of Y" repositories) or an existing Feature
+reject a name that nests with an existing Feature (NestedFeatureName: "team" vs "team/login", either direction, case-insensitive)
 finish a pending-delete folder of the same name first
+reject the name when its folder already exists on disk (FeatureFolderExists; any file, folder or link, checked read only)
 record HEAD of every Workspace repository (one GetHeadCommits)
 commit the intent in one transaction: Feature Creating + context + one Pending row per repository
 git worktree add, Workspace repository first (its worktree is the Feature root
@@ -1248,7 +1250,7 @@ Confirming (`FeatureRemovalDeparture`) queues the removal in `FeatureRemovalQueu
 
 Per repository, Sources first and the root last: CodeGraph is stopped and uninitialized first; `git worktree remove` (`--force` only when discard was authorized, unlock only when authorized), guarded residue cleanup, then the local branch is deleted (`-D` only when authorized) and, when requested, the remote branch with a lease (`DeleteBranch` with the expected SHA; refused when the remote tip moved). Remove judges the Feature branch (`refs/heads/<FeatureName>`), not whatever the worktree has checked out; a drifted branch is reported as kept. A repository whose removal fails stays Removing with its error and the Feature becomes NeedsRepair ("Removal incomplete"), with metadata kept; the Workspace context is refreshed without checking out, switching branch or pulling.
 
-GrayMoon never looks for or ends the programs using a Feature (other than CodeGraph's own index processes). When files are still in use, the Feature is removed anyway and its folder is left with a `GRAYMOON-PENDING-DELETE.md` marker (readable by a person or an AI agent working there); the dialog result shows this as information, not a warning. The folder is deleted silently later: when the Worker connects (every GrayMoon start), when the Workspace is opened (at most every 15 minutes, skipped while the Workspace is structurally busy), or before a new Feature reuses the name. Only marked folders under the Workspace's managed Feature storage root are deleted, never one that holds a Git repository, a still-registered worktree, or a Feature that exists.
+GrayMoon never looks for or ends the programs using a Feature (other than CodeGraph's own index processes). When files are still in use, the Feature is removed anyway and its folder is left with a `GRAYMOON-PENDING-DELETE.md` marker (readable by a person or an AI agent working there); the dialog result shows this as information, not a warning. The folder is deleted silently later: when the Worker connects (every GrayMoon start), when the Workspace is opened (at most every 15 minutes, skipped while the Workspace is structurally busy), or before a new Feature reuses the name. While a folder is still in use, GrayMoon also retries it every 30 minutes; this timer only runs after a removal left a folder behind and stops once nothing is left. Only marked folders under the Workspace's managed Feature storage root are deleted, never one that holds a Git repository, a still-registered worktree, or a Feature that exists.
 
 ### Versions from default
 

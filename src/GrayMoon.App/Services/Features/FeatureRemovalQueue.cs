@@ -15,6 +15,7 @@ namespace GrayMoon.App.Services.Features;
 public sealed class FeatureRemovalQueue(
     IServiceScopeFactory scopeFactory,
     IToastService toastService,
+    IFeatureFolderCleanupService folderCleanup,
     ILogger<FeatureRemovalQueue> logger)
     : BackgroundService, IFeatureRemovalQueue
 {
@@ -98,6 +99,11 @@ public sealed class FeatureRemovalQueue(
         }
 
         _pending.TryRemove(removal.FeatureContextId.Value, out _);
+
+        // A folder the Worker had to leave behind (something still has it open) is retried every 30 minutes until it is gone.
+        if (result.Success && !string.IsNullOrEmpty(result.RemoveFeaturePendingDeletionFolder))
+            folderCleanup.ArmRetry(removal.WorkspaceId);
+
         Announce(removal, result);
     }
 

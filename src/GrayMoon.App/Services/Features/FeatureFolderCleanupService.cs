@@ -20,6 +20,12 @@ public interface IFeatureFolderCleanupService
 
     /// <summary>Sweeps every Workspace that has a managed Feature storage root (each one throttled like <see cref="RequestSweep"/>).</summary>
     Task SweepAllAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Starts the retry timer for a Workspace that has a folder left pending deletion (no-op when it already runs). Every
+    /// <c>RetryInterval</c> it sweeps that Workspace, and it stops by itself once a sweep leaves nothing pending. Never throws.
+    /// </summary>
+    void ArmRetry(int workspaceId);
 }
 
 /// <summary>
@@ -40,6 +46,27 @@ public sealed class FeatureFolderCleanupService(
     /// <summary>Minimum gap between two sweeps of the same Workspace. Overridable in tests.</summary>
     internal TimeSpan MinInterval { get; set; } = TimeSpan.FromMinutes(15);
 
+    /// <summary>Gap between retry sweeps of a Workspace that still has a folder pending deletion. Overridable in tests.</summary>
+    internal TimeSpan RetryInterval { get; set; } = TimeSpan.FromMinutes(30);
+
+    /// <summary>One retry loop per Workspace that has something pending; guarded by <see cref="_throttleLock"/>.</summary>
+    private readonly Dictionary<int, CancellationTokenSource> _retryLoops = [];
+
+    /// <summary>What one sweep of one Workspace found.</summary>
+    internal enum SweepState
+    {
+        /// <summary>Not run (throttled, busy or Worker unavailable); nothing learned, try again later.</summary>
+        Skipped,
+        /// <summary>The Workspace has nothing to sweep (no managed storage root, or it no longer exists).</summary>
+        NotApplicable,
+        /// <summary>The Worker could not be asked or its answer was unusable; the state is unknown.</summary>
+        Failed,
+        /// <summary>The sweep ran and no folder is left pending deletion.</summary>
+        Clean,
+        /// <summary>The sweep ran and at least one folder is still in use.</summary>
+        StillPending,
+    }
+
     public Task StartAsync(CancellationToken cancellationToken)
     {
         connectionTracker.OnStateChanged(OnWorkerStateChanged);
@@ -49,7 +76,108 @@ public sealed class FeatureFolderCleanupService(
     public Task StopAsync(CancellationToken cancellationToken)
     {
         connectionTracker.RemoveStateChanged(OnWorkerStateChanged);
+        List<CancellationTokenSource> loops;
+        lock (_throttleLock)
+        {
+            loops = [.. _retryLoops.Values];
+            _retryLoops.Clear();
+        }
+
+        foreach (var loop in loops)
+            loop.Cancel();
         return Task.CompletedTask;
+    }
+
+    /// <summary>True while the Workspace's retry loop is running.</summary>
+    internal bool IsRetrying(int workspaceId)
+    {
+        lock (_throttleLock)
+            return _retryLoops.ContainsKey(workspaceId);
+    }
+
+    public void ArmRetry(int workspaceId)
+    {
+        CancellationTokenSource loop;
+        lock (_throttleLock)
+        {
+            if (_retryLoops.ContainsKey(workspaceId))
+                return;
+            loop = new CancellationTokenSource();
+            _retryLoops[workspaceId] = loop;
+        }
+
+        logger.LogInformation(
+            "Feature folder cleanup retry started. WorkspaceId={WorkspaceId} Every={Minutes} min", workspaceId, RetryInterval.TotalMinutes);
+        _ = Task.Run(() => RunRetryLoopAsync(workspaceId, loop));
+    }
+
+    /// <summary>Sweeps one Workspace every <see cref="RetryInterval"/> until a sweep finds nothing pending (or the service stops).</summary>
+    private async Task RunRetryLoopAsync(int workspaceId, CancellationTokenSource loop)
+    {
+        try
+        {
+            while (!loop.IsCancellationRequested)
+            {
+                await Task.Delay(RetryInterval, loop.Token);
+
+                SweepState state;
+                try
+                {
+                    state = await SweepWorkspaceCoreAsync(workspaceId, ignoreThrottle: true, loop.Token);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    logger.LogWarning(ex, "Feature folder cleanup retry failed. WorkspaceId={WorkspaceId}", workspaceId);
+                    continue;
+                }
+
+                // Clean and NotApplicable already stopped this loop (see ObserveSweep); anything else keeps it running.
+                if (state is SweepState.Clean or SweepState.NotApplicable)
+                    return;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Stopped: service shutting down, or a sweep elsewhere found nothing left.
+        }
+        finally
+        {
+            StopRetry(workspaceId, loop);
+        }
+    }
+
+    /// <summary>Stops and forgets the Workspace's retry loop. With <paramref name="only"/>, only if that exact loop is still the registered one.</summary>
+    private void StopRetry(int workspaceId, CancellationTokenSource? only = null)
+    {
+        CancellationTokenSource? loop;
+        lock (_throttleLock)
+        {
+            if (!_retryLoops.TryGetValue(workspaceId, out loop) || (only != null && !ReferenceEquals(loop, only)))
+                loop = null;
+            else
+                _retryLoops.Remove(workspaceId);
+        }
+
+        if (loop == null)
+            return;
+
+        logger.LogInformation("Feature folder cleanup retry stopped. WorkspaceId={WorkspaceId}", workspaceId);
+        loop.Cancel();
+    }
+
+    /// <summary>Starts the retry loop when a sweep left something pending; stops it when nothing is left to retry.</summary>
+    private void ObserveSweep(int workspaceId, SweepState state)
+    {
+        switch (state)
+        {
+            case SweepState.StillPending:
+                ArmRetry(workspaceId);
+                break;
+            case SweepState.Clean:
+            case SweepState.NotApplicable:
+                StopRetry(workspaceId);
+                break;
+        }
     }
 
     private void OnWorkerStateChanged(WorkerConnectionState state)
@@ -124,17 +252,32 @@ public sealed class FeatureFolderCleanupService(
     }
 
     /// <summary>One sweep of one Workspace; returns false when it was skipped (throttled, busy, no Worker or no storage root).</summary>
-    internal async Task<bool> SweepWorkspaceAsync(int workspaceId, CancellationToken cancellationToken)
+    internal async Task<bool> SweepWorkspaceAsync(int workspaceId, CancellationToken cancellationToken) =>
+        await SweepWorkspaceCoreAsync(workspaceId, ignoreThrottle: false, cancellationToken) is not (SweepState.Skipped or SweepState.NotApplicable);
+
+    /// <summary>
+    /// One sweep of one Workspace. <paramref name="ignoreThrottle"/> is for the retry timer (its interval is longer than the
+    /// throttle anyway). Every result is fed to <see cref="ObserveSweep"/>, so a sweep from any trigger arms the retry timer
+    /// when something is still pending and stops it when nothing is.
+    /// </summary>
+    internal async Task<SweepState> SweepWorkspaceCoreAsync(int workspaceId, bool ignoreThrottle, CancellationToken cancellationToken)
     {
-        if (operationLock.IsWorkspaceStructurallyBusy(workspaceId) || !TryClaimSweep(workspaceId))
-            return false;
+        var state = await SweepWorkspaceOnceAsync(workspaceId, ignoreThrottle, cancellationToken);
+        ObserveSweep(workspaceId, state);
+        return state;
+    }
+
+    private async Task<SweepState> SweepWorkspaceOnceAsync(int workspaceId, bool ignoreThrottle, CancellationToken cancellationToken)
+    {
+        if (operationLock.IsWorkspaceStructurallyBusy(workspaceId) || !TryClaimSweep(workspaceId, ignoreThrottle))
+            return SweepState.Skipped;
 
         await using var scope = scopeFactory.CreateAsyncScope();
         var workerBridge = scope.ServiceProvider.GetRequiredService<IWorkerBridge>();
         if (workerBridge.GetUnavailableReason() != null)
         {
             ReleaseClaim(workspaceId);
-            return false;
+            return SweepState.Skipped;
         }
 
         var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
@@ -157,7 +300,7 @@ public sealed class FeatureFolderCleanupService(
         }
 
         if (string.IsNullOrWhiteSpace(storageRoot) || WorkerPath.IsLegacyWindowsDriveRootGraymoonPath(storageRoot))
-            return false;
+            return SweepState.NotApplicable;
 
         var response = await workerBridge.SendCommandAsync(
             WorkerHubMethods.SweepPendingFeatureFolders,
@@ -173,26 +316,32 @@ public sealed class FeatureFolderCleanupService(
             logger.LogWarning(
                 "Feature folder cleanup failed. WorkspaceId={WorkspaceId} Error={Error}",
                 workspaceId, FeatureOperationLog.Redact(response.Error));
-            return true;
+            return SweepState.Failed;
         }
 
         var result = WorkerResponseJson.DeserializeWorkerResponse<SweepResult>(response.Data);
-        if (result is { } counts && counts.Removed + counts.StillPending + counts.Refused > 0)
+        if (result is not { } counts)
+        {
+            logger.LogWarning("Feature folder cleanup got an unreadable answer from the Worker. WorkspaceId={WorkspaceId}", workspaceId);
+            return SweepState.Failed;
+        }
+
+        if (counts.Removed + counts.StillPending + counts.Refused > 0)
         {
             logger.LogInformation(
                 "Feature folder cleanup. WorkspaceId={WorkspaceId} Removed={Removed} StillPending={StillPending} Refused={Refused}",
                 workspaceId, counts.Removed, counts.StillPending, counts.Refused);
         }
 
-        return true;
+        return counts.StillPending > 0 ? SweepState.StillPending : SweepState.Clean;
     }
 
-    private bool TryClaimSweep(int workspaceId)
+    private bool TryClaimSweep(int workspaceId, bool ignoreThrottle)
     {
         lock (_throttleLock)
         {
             var now = DateTime.UtcNow;
-            if (_lastSweepUtc.TryGetValue(workspaceId, out var last) && now - last < MinInterval)
+            if (!ignoreThrottle && _lastSweepUtc.TryGetValue(workspaceId, out var last) && now - last < MinInterval)
                 return false;
             _lastSweepUtc[workspaceId] = now;
             return true;

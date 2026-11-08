@@ -117,6 +117,21 @@ public sealed class WorkspaceFeatureOperations(
         if (await db.WorkspaceFeatures.AnyAsync(f => f.WorkspaceId == workspaceId && f.Name.ToLower() == normalizedName, cancellationToken))
             return FailCreate("DuplicateName", $"A Feature named '{name}' already exists.");
 
+        // A '/' in a name nests the folder (features\team\login) and the Git branch (team/login). A Feature whose name is the
+        // folder-path prefix of another would contain the other Feature's worktrees, and Git cannot hold both branches.
+        var existingNames = await db.WorkspaceFeatures.AsNoTracking()
+            .Where(f => f.WorkspaceId == workspaceId)
+            .Select(f => f.Name)
+            .ToListAsync(cancellationToken);
+        var nestedWith = existingNames.FirstOrDefault(existing => FeatureNamesNest(existing, name));
+        if (nestedWith is not null)
+        {
+            return FailCreate(
+                "NestedFeatureName",
+                $"'{name}' cannot be used because the Feature '{nestedWith}' already exists and one name would sit inside the other "
+                + "(folders and Git branches cannot be nested like that). Choose a name that does not start with the other name and a '/'.");
+        }
+
         var workspace = await db.Workspaces.FirstOrDefaultAsync(w => w.WorkspaceId == workspaceId, cancellationToken)
             ?? throw new InvalidOperationException($"Workspace {workspaceId} was not found.");
 
@@ -132,6 +147,17 @@ public sealed class WorkspaceFeatureOperations(
                 "FeatureFolderPendingDeletion",
                 $"A previous Feature named '{name}' is still being cleaned up because some of its files are in use. "
                 + $"Close the programs using {pendingFolder} or choose another name.");
+        }
+
+        // Never build a Feature on a folder that already exists, whoever made it: the new worktrees could overlap its files.
+        var takenFolder = await CleanupFeatureFolderForNameAsync(
+            workspaceId, name, onlyIfMarked: false, cancellationToken, checkOnly: true);
+        if (takenFolder is not null)
+        {
+            return FailCreate(
+                "FeatureFolderExists",
+                $"The folder {takenFolder} already exists, so a Feature named '{name}' cannot be created. "
+                + "Choose another name, or move or delete that folder first.");
         }
 
         var links = await db.WorkspaceRepositories
@@ -1220,7 +1246,8 @@ public sealed class WorkspaceFeatureOperations(
         int workspaceId,
         string? featureName,
         bool onlyIfMarked,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool checkOnly = false)
     {
         if (string.IsNullOrWhiteSpace(featureName))
             return null;
@@ -1242,8 +1269,8 @@ public sealed class WorkspaceFeatureOperations(
             return null;
 
         var featureRootPath = WorkerPath.Combine(storageRoot, featureName);
-        var outcome = await CleanupFeatureFolderAsync(storageRoot, featureRootPath, workspaceName, featureName, onlyIfMarked, cancellationToken);
-        return outcome == CleanupOutcomePendingDeletion ? featureRootPath : null;
+        var outcome = await CleanupFeatureFolderAsync(storageRoot, featureRootPath, workspaceName, featureName, onlyIfMarked, cancellationToken, checkOnly);
+        return outcome == (checkOnly ? CleanupOutcomePresent : CleanupOutcomePendingDeletion) ? featureRootPath : null;
     }
 
     /// <summary>
@@ -1349,8 +1376,18 @@ public sealed class WorkspaceFeatureOperations(
         public string? Message { get; set; }
     }
 
+    /// <summary>True when one Feature name is the other followed by '/' (case-insensitive), so one folder and branch would contain the other.</summary>
+    internal static bool FeatureNamesNest(string first, string second)
+    {
+        var a = first.Trim().Trim('/');
+        var b = second.Trim().Trim('/');
+        return a.StartsWith(b + "/", StringComparison.OrdinalIgnoreCase)
+            || b.StartsWith(a + "/", StringComparison.OrdinalIgnoreCase);
+    }
+
     private const string CleanupOutcomeRemoved = "Removed";
     private const string CleanupOutcomePendingDeletion = "PendingDeletion";
+    private const string CleanupOutcomePresent = "Present";
 
     /// <summary>
     /// Asks the Worker to delete a Feature's leftover folder, or mark it pending deletion when files are still in use.
@@ -1362,7 +1399,8 @@ public sealed class WorkspaceFeatureOperations(
         string workspaceName,
         string featureName,
         bool onlyIfMarked,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool checkOnly = false)
     {
         try
         {
@@ -1375,7 +1413,8 @@ public sealed class WorkspaceFeatureOperations(
                     workspaceName,
                     featureName,
                     retry = true,
-                    onlyIfMarked
+                    onlyIfMarked,
+                    checkOnly
                 },
                 cancellationToken);
             var result = response.Success
@@ -1389,7 +1428,7 @@ public sealed class WorkspaceFeatureOperations(
                 return null;
             }
 
-            if (result.Outcome != CleanupOutcomeRemoved)
+            if (!checkOnly && result.Outcome != CleanupOutcomeRemoved)
             {
                 logger.LogInformation(
                     "Feature folder {FeatureRootPath} left behind: {Outcome} ({Count} file(s)). {Message}",
