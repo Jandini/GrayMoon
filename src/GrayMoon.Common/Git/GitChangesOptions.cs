@@ -86,6 +86,15 @@ public sealed class GitChangesOptions
     /// </summary>
     public int SnapshotPathsInlineMax { get; init; } = 2_000;
 
+    /// <summary>
+    /// Most changed paths one status scan may report. A scan above it (typically a clone still checking out its working
+    /// tree, where every file not yet written shows as changed) is reported as a failed scan with error code
+    /// <c>TooManyChanges</c> instead of being cached and sent: a Worker-to-App message beyond SignalR
+    /// <c>MaximumReceiveMessageSize</c> (10 MB) makes the server close the connection, which put the Worker offline in a loop.
+    /// Default 15_000.
+    /// </summary>
+    public int MaxChangesPerSnapshot { get; init; } = 15_000;
+
     /// <summary>Timeout for one <c>EnsureGitChangesWatchers</c> call. Default 30 seconds.</summary>
     public int WatcherEnsureTimeoutSeconds { get; init; } = 30;
 
