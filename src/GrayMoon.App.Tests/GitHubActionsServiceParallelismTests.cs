@@ -225,7 +225,7 @@ public sealed class GitHubActionsServiceParallelismTests
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
             var dbContext = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options);
-            await dbContext.Database.EnsureCreatedAsync();
+            await dbContext.Database.CreateSchemaAsync();
 
             var context = new ActionsTestContext(connection, dbContext, limit);
             await context.SeedAsync(repositoryCount);

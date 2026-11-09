@@ -35,7 +35,7 @@ public sealed class EnsureGitChangesWatchersCommandTests : IDisposable
     {
         _manager.Dispose();
         _coordinator.Dispose();
-        try { Directory.Delete(_root, true); } catch { }
+        TestDirectory.Delete(_root);
     }
 
     private EnsureGitChangesWatchersRequest Request(params (int Id, string? Name)[] repos) => new()

@@ -118,6 +118,6 @@ public sealed class GitIgnoreSessionTests : IDisposable
     private sealed class TempDirectory : IDisposable
     {
         public string Path { get; } = Directory.CreateTempSubdirectory("graymoon-nogit-").FullName;
-        public void Dispose() { try { Directory.Delete(Path, true); } catch { } }
+        public void Dispose() { TestDirectory.Delete(Path); }
     }
 }

@@ -13,7 +13,6 @@ internal sealed class TempWorkspaceRoot : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(Path, true); }
-        catch { /* best-effort */ }
+        TestDirectory.Delete(Path);
     }
 }

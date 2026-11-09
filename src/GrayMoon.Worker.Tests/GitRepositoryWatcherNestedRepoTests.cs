@@ -64,7 +64,7 @@ public sealed class GitRepositoryWatcherNestedRepoTests
         }
         finally
         {
-            try { Directory.Delete(root, true); } catch { /* best-effort */ }
+            TestDirectory.Delete(root);
         }
     }
 }

@@ -12,7 +12,7 @@ public sealed class GitServiceParallelCloneTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_workspace, true); } catch { /* best-effort */ }
+        TestDirectory.Delete(_workspace);
     }
 
     [Fact]

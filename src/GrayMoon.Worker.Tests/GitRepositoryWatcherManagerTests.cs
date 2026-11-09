@@ -95,7 +95,7 @@ public sealed class GitRepositoryWatcherManagerTests : IDisposable
         }
         finally
         {
-            try { Directory.Delete(otherDir, true); } catch { }
+            TestDirectory.Delete(otherDir);
         }
     }
 

@@ -178,7 +178,7 @@ public sealed class CsProjFileServiceIgnoredDirTests : IDisposable
     private sealed class TempFolder : IDisposable
     {
         public string Path { get; } = Directory.CreateTempSubdirectory("graymoon-plain-").FullName;
-        public void Dispose() { try { Directory.Delete(Path, true); } catch { } }
+        public void Dispose() { TestDirectory.Delete(Path); }
     }
 
     /// <summary>Records every path the walk asks the ignore rules about, so a test can prove a folder was never entered.</summary>

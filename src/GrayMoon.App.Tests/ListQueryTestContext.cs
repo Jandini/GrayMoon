@@ -35,7 +35,7 @@ public sealed class ListQueryTestContext : IAsyncDisposable
             .Options;
 
         var dbContext = new AppDbContext(options);
-        await dbContext.Database.EnsureCreatedAsync();
+        await dbContext.Database.CreateSchemaAsync();
 
         var connector = new Connector
         {

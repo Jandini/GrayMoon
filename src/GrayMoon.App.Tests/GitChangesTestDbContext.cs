@@ -30,7 +30,7 @@ public sealed class GitChangesTestDbContext : IAsyncDisposable
 
         var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
         var dbContext = new AppDbContext(options);
-        await dbContext.Database.EnsureCreatedAsync();
+        await dbContext.Database.CreateSchemaAsync();
 
         var ctx = new GitChangesTestDbContext(connection, options, dbContext);
         await ctx.SeedAsync();

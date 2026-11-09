@@ -228,7 +228,7 @@ public sealed class WorkspacePageAccessTests
 
             var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
             var dbContext = new AppDbContext(options);
-            await dbContext.Database.EnsureCreatedAsync();
+            await dbContext.Database.CreateSchemaAsync();
 
             return new AccessTestContext(connection, dbContext, options);
         }

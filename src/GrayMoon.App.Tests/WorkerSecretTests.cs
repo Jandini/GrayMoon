@@ -27,15 +27,6 @@ public class WorkerSecretTests
         }
     }
 
-    private sealed class ManualTimeProvider(DateTimeOffset start) : TimeProvider
-    {
-        private DateTimeOffset _now = start;
-
-        public override DateTimeOffset GetUtcNow() => _now;
-
-        public void Advance(TimeSpan by) => _now += by;
-    }
-
     private sealed class TempSecretFolder : IDisposable
     {
         public TempSecretFolder()
@@ -389,7 +380,7 @@ public class WorkerSecretTests
     public void Pairing_code_expires_after_ten_minutes()
     {
         using var folder = new TempSecretFolder();
-        var time = new ManualTimeProvider(new DateTimeOffset(2026, 10, 3, 12, 0, 0, TimeSpan.Zero));
+        var time = new ManualClock(new DateTimeOffset(2026, 10, 3, 12, 0, 0, TimeSpan.Zero));
         var pairing = CreatePairing(CreateService(folder), time);
 
         var code = pairing.CreateCode();
@@ -403,7 +394,7 @@ public class WorkerSecretTests
     {
         using var folder = new TempSecretFolder();
         var secrets = CreateService(folder);
-        var time = new ManualTimeProvider(new DateTimeOffset(2026, 10, 3, 12, 0, 0, TimeSpan.Zero));
+        var time = new ManualClock(new DateTimeOffset(2026, 10, 3, 12, 0, 0, TimeSpan.Zero));
         var pairing = CreatePairing(secrets, time);
 
         var code = pairing.CreateCode();

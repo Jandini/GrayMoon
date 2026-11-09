@@ -206,29 +206,33 @@ public sealed class PushUndoReturnCapabilitiesTests : IDisposable
     }
 
     /// <summary>A clone of an origin whose main has one commit, checked out on a local feature branch.</summary>
-    private async Task<string> CloneOnFeatureBranchAsync()
+    private Task<string> CloneOnFeatureBranchAsync()
     {
-        var seed = Path.Combine(_root, "seed");
-        Directory.CreateDirectory(seed);
-        await RunGitAsync(seed, "init -b main");
-        await RunGitAsync(seed, "config user.email test@example.com");
-        await RunGitAsync(seed, "config user.name Test");
-        await File.WriteAllTextAsync(Path.Combine(seed, "README.md"), "hello\n");
-        await RunGitAsync(seed, "add -A");
-        await RunGitAsync(seed, "commit -m init");
+        GitTemplateCache.CopyTo("feature-branch-clone", _root, template =>
+        {
+            var seed = Path.Combine(template, "seed");
+            Directory.CreateDirectory(seed);
+            GitConfigTestSupport.Git(seed, "init -b main");
+            GitConfigTestSupport.Git(seed, "config user.email test@example.com");
+            GitConfigTestSupport.Git(seed, "config user.name Test");
+            File.WriteAllText(Path.Combine(seed, "README.md"), "hello\n");
+            GitConfigTestSupport.Git(seed, "add -A");
+            GitConfigTestSupport.Git(seed, "commit -m init");
 
-        var origin = Path.Combine(_root, "origin.git");
-        await RunGitAsync(_root, $"clone --bare \"{seed}\" \"{origin}\"");
+            var origin = Path.Combine(template, "origin.git");
+            GitConfigTestSupport.Git(template, $"clone --bare \"{seed}\" \"{origin}\"");
 
-        var workspace = Path.Combine(_root, "ws");
-        Directory.CreateDirectory(workspace);
-        await RunGitAsync(workspace, $"clone \"{origin}\" repo");
+            var workspace = Path.Combine(template, "ws");
+            Directory.CreateDirectory(workspace);
+            GitConfigTestSupport.Git(workspace, $"clone \"{origin}\" repo");
 
-        var repoPath = Path.Combine(workspace, "repo");
-        await RunGitAsync(repoPath, "config user.email test@example.com");
-        await RunGitAsync(repoPath, "config user.name Test");
-        await RunGitAsync(repoPath, "checkout -b feature/x");
-        return repoPath;
+            var repoPath = Path.Combine(workspace, "repo");
+            GitConfigTestSupport.Git(repoPath, "config user.email test@example.com");
+            GitConfigTestSupport.Git(repoPath, "config user.name Test");
+            GitConfigTestSupport.Git(repoPath, "checkout -b feature/x");
+        });
+
+        return Task.FromResult(Path.Combine(_root, "ws", "repo"));
     }
 
     private static async Task RunGitAsync(string workingDirectory, string args)

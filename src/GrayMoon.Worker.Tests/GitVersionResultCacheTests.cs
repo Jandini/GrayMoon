@@ -455,20 +455,14 @@ public sealed class GitVersionResultCacheTests : IDisposable
     private static string ToolManifest(string version)
         => "{\"version\":1,\"isRoot\":true,\"tools\":{\"gitversion.tool\":{\"version\":\"" + version + "\",\"commands\":[\"dotnet-gitversion\"]}}}\n";
 
-    private async Task<string> InitAsync(string name, bool withManifest = true)
+    private Task<string> InitAsync(string name, bool withManifest = true)
     {
         var repo = Path.Combine(_root, name);
-        Directory.CreateDirectory(repo);
-        await GitAsync(repo, "init -b main");
-        await GitAsync(repo, "config user.email t@example.com");
-        await GitAsync(repo, "config user.name T");
-        await File.WriteAllTextAsync(Path.Combine(repo, "README.md"), "init\n");
-        await GitAsync(repo, "add -A");
-        await GitAsync(repo, "commit -m init");
+        GitScenarios.CommittedRepository(repo, new CommitSpec(Content: "init\n", UserName: "T", UserEmail: "t@example.com"));
         // Untracked, so it does not move HEAD; it only makes the tool identity resolvable without GitVersion installed.
         if (withManifest)
-            await File.WriteAllTextAsync(Path.Combine(repo, "dotnet-tools.json"), ToolManifest("5.12.0"));
-        return repo;
+            File.WriteAllText(Path.Combine(repo, "dotnet-tools.json"), ToolManifest("5.12.0"));
+        return Task.FromResult(repo);
     }
 
     private static async Task CommitAsync(string repo, string file, string message)

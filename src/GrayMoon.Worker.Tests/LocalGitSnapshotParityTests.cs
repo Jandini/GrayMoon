@@ -586,33 +586,8 @@ public sealed class LocalGitSnapshotParityTests : IDisposable
     }
 
     /// <summary>A bare remote whose default branch is <paramref name="defaultBranch"/>, with one commit (tagged nothing) on it.</summary>
-    private async Task<string> SeedOriginAsync(string defaultBranch)
-    {
-        var origin = Path.Combine(_root, "origin.git");
-        var seed = Path.Combine(_root, "seed");
-
-        // The seeded remote is identical in every test, so build it once and copy it (see GitTemplateCache).
-        GitTemplateCache.CopyTo($"parity-seeded-remote-{defaultBranch}", _root, template =>
-        {
-            var templateOrigin = Path.Combine(template, "origin.git");
-            var templateSeed = Path.Combine(template, "seed");
-            Directory.CreateDirectory(templateOrigin);
-            Directory.CreateDirectory(templateSeed);
-            GitConfigTestSupport.Git(templateOrigin, $"init --bare -b {defaultBranch}");
-            GitConfigTestSupport.Git(templateSeed, $"init -b {defaultBranch}");
-            GitConfigTestSupport.Git(templateSeed, "config user.email t@example.com");
-            GitConfigTestSupport.Git(templateSeed, "config user.name T");
-            GitConfigTestSupport.Git(templateSeed, $"remote add origin \"{templateOrigin}\"");
-            File.WriteAllText(Path.Combine(templateSeed, "README.md"), "init\n");
-            GitConfigTestSupport.Git(templateSeed, "add -A");
-            GitConfigTestSupport.Git(templateSeed, "commit -q -m init");
-            GitConfigTestSupport.Git(templateSeed, $"push origin {defaultBranch}");
-        });
-
-        // The copied seed still pushes to the template's remote; point it at this test's own copy.
-        await GitAsync(seed, $"remote set-url origin \"{origin}\"");
-        return origin;
-    }
+    private Task<string> SeedOriginAsync(string defaultBranch) =>
+        Task.FromResult(GitScenarios.SeededRemote(_root, defaultBranch));
 
     /// <summary>Adds a commit to the remote's default branch through the seed clone.</summary>
     private async Task PushFromSeedAsync(string file)

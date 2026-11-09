@@ -19,6 +19,9 @@ public sealed class PackageWaitDiagnosticsTests
     private const string NuGetIndexUrl = "https://nuget.test/v3/index.json";
     private const string SecretToken = "super-secret-token";
 
+    /// <summary>0.6 s per dependency: a wait that must time out does so quickly, yet long after the 20 ms poll has seen every package that is there.</summary>
+    private const double ShortTimeoutMinutes = 0.01;
+
     [Fact]
     public async Task Lookup_distinguishes_absence_from_registry_errors_without_changing_the_exists_decision()
     {
@@ -175,7 +178,7 @@ public sealed class PackageWaitDiagnosticsTests
         nuget.VersionsByPackage["found.a"] = ["1.2.3"];
         nuget.VersionsByPackage["found.b"] = ["1.2.3"];
         var logs = new CapturingLoggerProvider();
-        await using var ctx = await CreateContextAsync(nuget, logs);
+        await using var ctx = await CreateContextAsync(nuget, logs, timeoutMinutesPerDependency: ShortTimeoutMinutes);
         var graph = await SeedGraphAsync(ctx,
         [
             new GraphRepo("producer-a", 1, "Found.A", "1.2.3"),
@@ -272,8 +275,7 @@ public sealed class PackageWaitDiagnosticsTests
         var nuget = new ScriptedNuGetHandler { PackageFailuresRemaining = 2, FailureStatus = HttpStatusCode.ServiceUnavailable };
         nuget.VersionsByPackage["found.a"] = ["1.2.3"];
         var logs = new CapturingLoggerProvider();
-        // Two failures then a success needs a third poll (2 s apart); the default 6 s window is too tight on a loaded runner.
-        await using var ctx = await CreateContextAsync(nuget, logs, timeoutMinutesPerDependency: 0.5);
+        await using var ctx = await CreateContextAsync(nuget, logs);
         await SeedGraphAsync(ctx,
             [new GraphRepo("producer-a", 1, "Found.A", "1.2.3"), new GraphRepo("consumer-one", 2, null, "2.0.0")],
             [new GraphEdge("consumer-one", "Found.A", "1.2.3")]);
@@ -297,7 +299,7 @@ public sealed class PackageWaitDiagnosticsTests
         var nuget = new ScriptedNuGetHandler();
         nuget.VersionsByPackage["level.one"] = ["1.0.0"];
         var logs = new CapturingLoggerProvider();
-        await using var ctx = await CreateContextAsync(nuget, logs);
+        await using var ctx = await CreateContextAsync(nuget, logs, timeoutMinutesPerDependency: ShortTimeoutMinutes);
         var repos = new List<GraphRepo> { new("level-1", 1, "Level.One", "1.0.0"), new("level-2", 2, "Level.Two", "1.0.0") };
         var edges = new List<GraphEdge> { new("level-2", "Level.One", "1.0.0"), new("level-3", "Level.Two", "1.0.0") };
         repos.Add(new GraphRepo("level-3", 3, "Level.Three", "1.0.0"));
@@ -328,7 +330,7 @@ public sealed class PackageWaitDiagnosticsTests
     {
         var nuget = new ScriptedNuGetHandler();
         var logs = new CapturingLoggerProvider();
-        await using var ctx = await CreateContextAsync(nuget, logs);
+        await using var ctx = await CreateContextAsync(nuget, logs, timeoutMinutesPerDependency: ShortTimeoutMinutes);
         var graph = await SeedGraphAsync(ctx,
             [new GraphRepo("level-1", 1, "Level.One", "1.0.0"), new GraphRepo("level-2", 2, null, "1.0.0")],
             [new GraphEdge("level-2", "Level.One", "1.0.0")]);
@@ -381,7 +383,7 @@ public sealed class PackageWaitDiagnosticsTests
         return errors;
     }
 
-    private static Task<SyncStateTestContext> CreateContextAsync(ScriptedNuGetHandler nuget, CapturingLoggerProvider logs, double timeoutMinutesPerDependency = 0.1)
+    private static Task<SyncStateTestContext> CreateContextAsync(ScriptedNuGetHandler nuget, CapturingLoggerProvider logs, double timeoutMinutesPerDependency = 0.5)
         => SyncStateTestContext.CreateAsync(configureServices: services =>
         {
             services.AddLogging(builder =>
@@ -391,7 +393,14 @@ public sealed class PackageWaitDiagnosticsTests
             });
             services.AddSingleton(logs);
             services.AddSingleton<ILoggerProvider>(logs);
-            services.Configure<WorkspaceOptions>(options => options.PushWaitDependencyTimeoutMinutesPerDependency = timeoutMinutesPerDependency);
+            services.Configure<WorkspaceOptions>(options =>
+            {
+                // The wait polls often so a test spends milliseconds, not real seconds, per poll. The timeout is
+                // generous for waits that must succeed and short (but far longer than one poll) for waits that must time out.
+                options.PushWaitDependencyTimeoutMinutesPerDependency = timeoutMinutesPerDependency;
+                options.PushWaitPollIntervalSeconds = 0.02;
+                options.PushWaitTickMilliseconds = 10;
+            });
             services.AddSingleton(new HttpClient(nuget));
             services.AddScoped<NuGetService>();
             services.AddScoped<PackageRegistrySyncService>();

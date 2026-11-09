@@ -120,7 +120,7 @@ public sealed class BatchLookupTests
         int workspaceId;
         await using (var db = new AppDbContext(options))
         {
-            await db.Database.EnsureCreatedAsync();
+            await db.Database.CreateSchemaAsync();
             var connector = new Connector
             {
                 ConnectorName = "github",

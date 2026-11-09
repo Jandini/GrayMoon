@@ -20,7 +20,7 @@ public sealed class WorktreeRemovalReleasesHandlesTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_root, true); } catch { /* best-effort */ }
+        TestDirectory.Delete(_root);
     }
 
     [Fact]
@@ -34,14 +34,7 @@ public sealed class WorktreeRemovalReleasesHandlesTests : IDisposable
         var worktrees = new GitWorktreeService(runner, reader, NullLogger<GitWorktreeService>.Instance, access);
 
         var mainPath = Path.Combine(_root, "main");
-        Directory.CreateDirectory(mainPath);
-        await Git(mainPath, "init");
-        await Git(mainPath, "config user.email test@example.com");
-        await Git(mainPath, "config user.name Test");
-        await Git(mainPath, "checkout -B main");
-        await File.WriteAllTextAsync(Path.Combine(mainPath, "README.md"), "x\n");
-        await Git(mainPath, "add README.md");
-        await Git(mainPath, "commit -m init");
+        GitScenarios.CommittedRepository(mainPath);
         var head = (await reader.GetHeadCommitAsync(mainPath, CancellationToken.None))!;
 
         var worktreePath = Path.Combine(_root, "features", "F-1", "main");

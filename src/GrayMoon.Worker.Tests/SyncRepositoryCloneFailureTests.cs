@@ -16,7 +16,7 @@ public sealed class SyncRepositoryCloneFailureTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_root, true); } catch { /* best-effort */ }
+        TestDirectory.Delete(_root);
     }
 
     [Fact]

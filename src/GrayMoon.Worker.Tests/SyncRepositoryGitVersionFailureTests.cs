@@ -147,21 +147,8 @@ public sealed class SyncRepositoryGitVersionFailureTests : IDisposable
             WorkspaceId = 1,
         });
 
-    private async Task<string> CloneEmptyOriginAsync()
-    {
-        var origin = Path.Combine(_root, "origin.git");
-        Directory.CreateDirectory(origin);
-        await RunGitAsync(origin, "init --bare -b main");
-
-        var workspace = Path.Combine(_root, "ws");
-        Directory.CreateDirectory(workspace);
-        await RunGitAsync(workspace, $"clone \"{origin}\" repo");
-
-        var repoPath = Path.Combine(workspace, "repo");
-        await RunGitAsync(repoPath, "config user.email test@example.com");
-        await RunGitAsync(repoPath, "config user.name Test");
-        return repoPath;
-    }
+    private Task<string> CloneEmptyOriginAsync() =>
+        Task.FromResult(GitScenarios.ClonedRepository(_root, commit: false));
 
     private static async Task<string> CurrentBranchAsync(string repoPath)
     {

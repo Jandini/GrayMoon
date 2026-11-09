@@ -158,19 +158,7 @@ public sealed class DiscardWorkspaceRootCommandTests : IDisposable
     /// <summary>Creates a remote with one commit and attaches it to an empty root exactly like a restore does.</summary>
     private async Task<string> CloneIntoRootAsync()
     {
-        var bare = Path.Combine(_baseDir, "remote.git");
-        Directory.CreateDirectory(bare);
-        Assert.Equal(0, RunGit(bare, "init", "--bare", "--initial-branch=main"));
-
-        var source = Path.Combine(_baseDir, "source");
-        Directory.CreateDirectory(source);
-        Assert.Equal(0, RunGit(source, "init", "--initial-branch=main"));
-        File.WriteAllText(Path.Combine(source, "README.md"), "from remote\n");
-        Assert.Equal(0, RunGit(source, "add", "--all"));
-        Assert.Equal(0, RunGit(source,
-            "-c", "user.name=GrayMoon Test", "-c", "user.email=graymoon-test@example.com", "-c", "commit.gpgsign=false",
-            "commit", "-m", "Initial commit"));
-        Assert.Equal(0, RunGit(source, "push", bare, "main"));
+        var bare = GitScenarios.BareRemote(_baseDir, withCommit: true);
 
         var attached = await _attach.ExecuteAsync(new AttachWorkspaceRepositoryRequest
         {

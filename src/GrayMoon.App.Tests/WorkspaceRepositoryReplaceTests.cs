@@ -406,7 +406,7 @@ public sealed class WorkspaceRepositoryReplaceTests
             var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
             var factory = new GitChangesTestDbContext.TestDbContextFactory(options);
             var db = factory.CreateDbContext();
-            await db.Database.EnsureCreatedAsync();
+            await db.Database.CreateSchemaAsync();
 
             var connector = new Connector
             {

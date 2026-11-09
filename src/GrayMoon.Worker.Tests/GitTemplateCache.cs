@@ -37,6 +37,30 @@ internal static class GitTemplateCache
         }, LazyThreadSafetyMode.ExecutionAndPublication)).Value;
 
         CopyDirectory(template, destination);
+        Rebase(destination, template);
+    }
+
+    /// <summary>
+    /// A cloned or seeded repository records the path of its remote in <c>config</c>. After the copy that path still
+    /// names the template, so a test would push into the shared template. Every config file is rewritten to name the
+    /// test's own copy instead, at no cost in git processes (unlike <c>git remote set-url</c>).
+    /// </summary>
+    private static void Rebase(string destination, string template)
+    {
+        foreach (var config in Directory.EnumerateFiles(destination, "config", SearchOption.AllDirectories))
+        {
+            var text = File.ReadAllText(config);
+            if (!text.Contains("url", StringComparison.Ordinal))
+                continue;
+
+            // git writes a Windows path with either separator, and doubles a backslash inside a config value.
+            var rewritten = text
+                .Replace(template.Replace("\\", "\\\\"), destination.Replace("\\", "\\\\"), StringComparison.OrdinalIgnoreCase)
+                .Replace(template, destination, StringComparison.OrdinalIgnoreCase)
+                .Replace(template.Replace('\\', '/'), destination.Replace('\\', '/'), StringComparison.OrdinalIgnoreCase);
+            if (rewritten != text)
+                File.WriteAllText(config, rewritten);
+        }
     }
 
     private static void CopyDirectory(string source, string destination)

@@ -20,7 +20,7 @@ public sealed class NestedFeatureRemovalTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_root, true); } catch { /* best-effort */ }
+        TestDirectory.Delete(_root);
     }
 
     [Fact]
@@ -104,16 +104,10 @@ public sealed class NestedFeatureRemovalTests : IDisposable
             ? commandLine.RunAsync("ping", ["-n", "60", "127.0.0.1"], directory, null, CancellationToken.None, false, false, null)
             : commandLine.RunAsync("sleep", ["60"], directory, null, CancellationToken.None, false, false, null);
 
-    private static async Task InitRepo(string path)
+    private static Task InitRepo(string path)
     {
-        Directory.CreateDirectory(path);
-        await Git(path, "init");
-        await Git(path, "config user.email test@example.com");
-        await Git(path, "config user.name Test");
-        await Git(path, "checkout -B main");
-        await File.WriteAllTextAsync(Path.Combine(path, "README.md"), "x\n");
-        await Git(path, "add README.md");
-        await Git(path, "commit -m init");
+        GitScenarios.CommittedRepository(path);
+        return Task.CompletedTask;
     }
 
     private static async Task Git(string workingDirectory, string arguments)

@@ -22,7 +22,7 @@ public sealed class GetHeadCommitsCommandTests : IDisposable
     }
     public void Dispose()
     {
-        try { Directory.Delete(_root, true); } catch { /* best-effort */ }
+        TestDirectory.Delete(_root);
     }
     [Fact]
     public async Task Resolves_head_once_per_unique_repository()

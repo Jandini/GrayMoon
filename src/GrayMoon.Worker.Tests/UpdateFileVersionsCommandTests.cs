@@ -20,7 +20,7 @@ public sealed class UpdateFileVersionsCommandTests : IDisposable
     }
     public void Dispose()
     {
-        try { Directory.Delete(_root, true); } catch { /* best-effort */ }
+        TestDirectory.Delete(_root);
     }
     [Fact]
     public async Task Substitutes_gitversion_branch_and_commit_preserving_prefix_suffix()

@@ -137,7 +137,7 @@ public sealed class WorkspaceFeatureContextOrphanCleanupTests
         await freshConnection.OpenAsync();
         var freshOptions = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(freshConnection).Options;
         await using var freshDb = new AppDbContext(freshOptions);
-        await freshDb.Database.EnsureCreatedAsync();
+        await freshDb.Database.CreateSchemaAsync();
 
         var fixturePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "graymoon-0.1.0.db");
         var workingCopyPath = Path.Combine(Path.GetTempPath(), $"schema-parity-{Guid.NewGuid():N}.db");
@@ -237,7 +237,7 @@ public sealed class WorkspaceFeatureContextOrphanCleanupTests
     {
         var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
         var db = new AppDbContext(options);
-        await db.Database.EnsureCreatedAsync();
+        await db.Database.CreateSchemaAsync();
 
         var indexDefinitions = new List<string>();
         await using (var indexCmd = connection.CreateCommand())

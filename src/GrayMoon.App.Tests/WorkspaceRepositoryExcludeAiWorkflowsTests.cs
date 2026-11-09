@@ -48,7 +48,7 @@ public sealed class WorkspaceRepositoryExcludeAiWorkflowsTests
             var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
             var factory = new GitChangesTestDbContext.TestDbContextFactory(options);
             var db = factory.CreateDbContext();
-            await db.Database.EnsureCreatedAsync();
+            await db.Database.CreateSchemaAsync();
 
             var workspace = new Workspace { Name = "test-workspace" };
             db.Workspaces.Add(workspace);

@@ -9,7 +9,17 @@ internal sealed class ManualClock : TimeProvider
 {
     private readonly object _gate = new();
     private readonly List<ManualTimer> _timers = [];
-    private DateTimeOffset _now = new(2026, 10, 28, 9, 0, 0, TimeSpan.Zero);
+    private DateTimeOffset _now;
+
+    public ManualClock()
+        : this(new DateTimeOffset(2026, 10, 28, 9, 0, 0, TimeSpan.Zero))
+    {
+    }
+
+    public ManualClock(DateTimeOffset start)
+    {
+        _now = start;
+    }
 
     public override long TimestampFrequency => TimeSpan.TicksPerSecond;
 

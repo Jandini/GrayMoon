@@ -82,7 +82,7 @@ public sealed class FeatureNameIndexCollationMigrationTests
     {
         var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
         var db = new AppDbContext(options);
-        await db.Database.EnsureCreatedAsync();
+        await db.Database.CreateSchemaAsync();
 
         // Simulates a database created before E1: the Name column (and so the index on it) has the
         // database's default BINARY collation, not NOCASE. EnsureCreatedAsync() builds the current (NOCASE)
