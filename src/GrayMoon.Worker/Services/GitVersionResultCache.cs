@@ -85,7 +85,11 @@ public sealed class GitVersionResultCache(ILogger<GitVersionResultCache>? logger
                 }
                 catch (OperationCanceledException) when (!ct.IsCancellationRequested && attempt < 3)
                 {
-                    continue; // the request that was running it was cancelled, not this one
+                    // The request that was running it was cancelled, not this one. Its entry is still registered until
+                    // its own cleanup runs; drop exactly that entry so the retry leads a run of its own instead of
+                    // re-reading the cancelled one and using up its attempts.
+                    _inFlight.TryRemove(new KeyValuePair<(Key Key, string Inputs), TaskCompletionSource<RepositoryVersionResult>>(flightKey, running));
+                    continue;
                 }
             }
 
@@ -122,7 +126,8 @@ public sealed class GitVersionResultCache(ILogger<GitVersionResultCache>? logger
             }
             finally
             {
-                _inFlight.TryRemove(flightKey, out _);
+                // Only this run's own entry: a retrying waiter may already have registered its replacement.
+                _inFlight.TryRemove(new KeyValuePair<(Key Key, string Inputs), TaskCompletionSource<RepositoryVersionResult>>(flightKey, completion));
             }
         }
     }
