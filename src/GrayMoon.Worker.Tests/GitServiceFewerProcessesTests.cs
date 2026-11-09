@@ -451,6 +451,8 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
     }
 
     [Fact]
+
+    [Trait("Category", "Long")]
     public async Task Commit_counts_agree_with_the_probe_by_probe_logic_across_repository_states()
     {
         var origin = await SeedOriginAsync("main");

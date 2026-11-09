@@ -24,6 +24,8 @@ public sealed class NestedFeatureRemovalTests : IDisposable
     }
 
     [Fact]
+
+    [Trait("Category", "Long")]
     public async Task Sources_removed_concurrently_then_the_containing_root_worktree_are_removed_with_live_watchers_and_processes()
     {
         var access = new RepositoryAccess(NullLogger<RepositoryAccess>.Instance);

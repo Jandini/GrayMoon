@@ -227,6 +227,8 @@ public class GitChangesEntryPageReadServiceTests
     }
 
     [Fact]
+
+    [Trait("Category", "Long")]
     public async Task SearchEntriesAsync_reaches_every_match_in_a_20K_inventory()
     {
         await using var ctx = await GitChangesTestDbContext.CreateAsync();
@@ -325,7 +327,9 @@ public class GitChangesEntryPageReadServiceTests
         }).ToArray();
 
         var hubContext = new FakeHubContext<WorkspaceSyncHub>();
-        var handler = GitChangesPushHandlerTestFactory.Create(ctx, hubContext);
+        // The read service under test reads the context tables only, so the legacy mirror tables are not written.
+        var handler = GitChangesPushHandlerTestFactory.Create(
+            ctx, hubContext, options: new GrayMoon.Common.Git.GitChangesOptions { WriteLegacyGitChangesTables = false });
 
         await handler.HandleAsync(new GitChangesSnapshotNotification
         {
