@@ -14,13 +14,15 @@ public sealed class WorkerBridgeActivityTimeoutTests
     public async Task Streamed_output_keeps_a_command_alive_past_the_timeout()
     {
         var hub = new CapturingHub();
-        var bridge = CreateBridge(hub, timeoutSeconds: 1);
+        var clock = new ManualClock();
+        var bridge = CreateBridge(hub, timeoutSeconds: 1, clock);
 
         var run = bridge.SendCommandAsync("SyncRepository", new { });
         var requestId = await hub.RequestIdAsync();
         for (var i = 0; i < 6; i++)
         {
-            await Task.Delay(400); // 2.4 s in total, longer than the 1 s window
+            clock.Advance(TimeSpan.FromMilliseconds(400)); // 2.4 s in total, longer than the 1 s window
+            Assert.False(run.IsCompleted);
             WorkerResponseDelivery.ReportStreamLine(requestId, new WorkerCommandStreamLine(null, WorkerCommandStreamKind.Stdout, "Receiving objects: 1%"));
         }
 
@@ -34,15 +36,21 @@ public sealed class WorkerBridgeActivityTimeoutTests
     public async Task A_silent_command_times_out()
     {
         var hub = new CapturingHub();
-        var bridge = CreateBridge(hub, timeoutSeconds: 1);
+        var clock = new ManualClock();
+        var bridge = CreateBridge(hub, timeoutSeconds: 1, clock);
 
-        var response = await bridge.SendCommandAsync("SyncRepository", new { });
+        var run = bridge.SendCommandAsync("SyncRepository", new { });
+        await hub.RequestIdAsync();
+        clock.Advance(TimeSpan.FromMilliseconds(999));
+        Assert.False(run.IsCompleted);
+        clock.Advance(TimeSpan.FromMilliseconds(1));
+        var response = await run;
 
         Assert.False(response.Success);
         Assert.Contains("no response or output", response.Error, StringComparison.Ordinal);
     }
 
-    private static WorkerBridge CreateBridge(CapturingHub hub, int timeoutSeconds)
+    private static WorkerBridge CreateBridge(CapturingHub hub, int timeoutSeconds, TimeProvider clock)
     {
         var tracker = new WorkerConnectionTracker("2.0.0");
         tracker.OnWorkerConnected("worker-1");
@@ -52,7 +60,8 @@ public sealed class WorkerBridgeActivityTimeoutTests
             tracker,
             new WorkerCommandCancelSender(hub, tracker, NullLogger<WorkerCommandCancelSender>.Instance),
             Options.Create(new WorkerBridgeOptions { CommandTimeoutSeconds = timeoutSeconds }),
-            NullLogger<WorkerBridge>.Instance);
+            NullLogger<WorkerBridge>.Instance,
+            clock);
     }
 
     private sealed class CapturingHub : IHubContext<WorkerHub>

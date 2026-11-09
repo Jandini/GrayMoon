@@ -201,30 +201,51 @@ public sealed class WorkerConnectionTrackerTests
     }
 
     [Fact]
-    public async Task An_update_that_never_finishes_is_failed_by_the_timeout()
+    public void An_update_that_never_finishes_is_failed_by_the_timeout()
     {
-        var tracker = new WorkerConnectionTracker("2.0.0", TimeSpan.FromMilliseconds(50));
+        var clock = new ManualClock();
+        var tracker = new WorkerConnectionTracker("2.0.0", TimeSpan.FromMinutes(15), clock);
         tracker.BeginSelfUpdate();
 
-        for (var i = 0; i < 100 && !tracker.InstallFailed; i++)
-            await Task.Delay(50);
+        clock.Advance(TimeSpan.FromMinutes(15) - TimeSpan.FromTicks(1));
+        Assert.False(tracker.InstallFailed);
+        Assert.True(tracker.IsSelfUpdateInProgress);
 
+        clock.Advance(TimeSpan.FromTicks(1));
         Assert.True(tracker.InstallFailed);
         Assert.False(tracker.IsSelfUpdateInProgress);
     }
 
     [Fact]
-    public async Task The_timeout_of_a_finished_update_does_not_fail_a_newer_one()
+    public void The_timeout_of_a_finished_update_does_not_fail_a_newer_one()
     {
-        var tracker = new WorkerConnectionTracker("2.0.0", TimeSpan.FromMilliseconds(300));
+        var clock = new ManualClock();
+        var tracker = new WorkerConnectionTracker("2.0.0", TimeSpan.FromMinutes(10), clock);
         tracker.BeginSelfUpdate();
         tracker.EndSelfUpdate();
-        await Task.Delay(100);
+        clock.Advance(TimeSpan.FromMinutes(4));
         tracker.BeginSelfUpdate();
 
-        await Task.Delay(250);
-
+        // Past the first update's deadline (10 min), before the newer one's (14 min).
+        clock.Advance(TimeSpan.FromMinutes(7));
         Assert.False(tracker.InstallFailed);
         Assert.True(tracker.IsSelfUpdateInProgress);
+
+        clock.Advance(TimeSpan.FromMinutes(3));
+        Assert.True(tracker.InstallFailed);
+        Assert.False(tracker.IsSelfUpdateInProgress);
+    }
+
+    [Fact]
+    public void A_finished_update_leaves_no_timeout_armed()
+    {
+        var clock = new ManualClock();
+        var tracker = new WorkerConnectionTracker("2.0.0", TimeSpan.FromMinutes(10), clock);
+        tracker.BeginSelfUpdate();
+        Assert.NotNull(clock.NextTimerDelay);
+
+        tracker.EndSelfUpdate();
+
+        Assert.Null(clock.NextTimerDelay);
     }
 }

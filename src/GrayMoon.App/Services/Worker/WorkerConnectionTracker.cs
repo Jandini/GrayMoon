@@ -27,6 +27,8 @@ public sealed class WorkerConnectionTracker
     private bool _installFailed;
     private int _selfUpdateGeneration;
     private readonly TimeSpan _selfUpdateTimeout;
+    private readonly TimeProvider _time;
+    private ITimer? _selfUpdateWatchdog;
     private event Action<WorkerConnectionState>? _onStateChanged;
 
     public WorkerConnectionTracker()
@@ -37,10 +39,11 @@ public sealed class WorkerConnectionTracker
     /// <summary>An update that neither finishes nor reports a failure within this time is treated as failed.</summary>
     public static readonly TimeSpan DefaultSelfUpdateTimeout = TimeSpan.FromMinutes(15);
 
-    internal WorkerConnectionTracker(string? appSemVer, TimeSpan? selfUpdateTimeout = null)
+    internal WorkerConnectionTracker(string? appSemVer, TimeSpan? selfUpdateTimeout = null, TimeProvider? timeProvider = null)
     {
         _appSemVer = appSemVer;
         _selfUpdateTimeout = selfUpdateTimeout ?? DefaultSelfUpdateTimeout;
+        _time = timeProvider ?? TimeProvider.System;
     }
 
     public WorkerConnectionState State
@@ -147,6 +150,7 @@ public sealed class WorkerConnectionTracker
             return false;
         _selfUpdateInProgress = false;
         _installFailed = true;
+        StopSelfUpdateWatchdogLocked();
         return true;
     }
 
@@ -156,11 +160,20 @@ public sealed class WorkerConnectionTracker
     /// </summary>
     private void StartSelfUpdateWatchdog(int generation)
     {
-        _ = Task.Run(async () =>
-        {
-            await Task.Delay(_selfUpdateTimeout);
-            RaiseIfChanged(() => _selfUpdateGeneration == generation && FailSelfUpdateLocked());
-        });
+        // Must run while holding the instance lock. The timer is armed here, not on a pool thread, so the
+        // deadline is fixed at the moment the update begins.
+        StopSelfUpdateWatchdogLocked();
+        _selfUpdateWatchdog = _time.CreateTimer(
+            _ => RaiseIfChanged(() => _selfUpdateGeneration == generation && FailSelfUpdateLocked()),
+            null,
+            _selfUpdateTimeout,
+            Timeout.InfiniteTimeSpan);
+    }
+
+    private void StopSelfUpdateWatchdogLocked()
+    {
+        _selfUpdateWatchdog?.Dispose();
+        _selfUpdateWatchdog = null;
     }
 
     public void EndSelfUpdate()
@@ -170,6 +183,7 @@ public sealed class WorkerConnectionTracker
             if (!_selfUpdateInProgress)
                 return false;
             _selfUpdateInProgress = false;
+            StopSelfUpdateWatchdogLocked();
             return true;
         });
     }
@@ -187,6 +201,7 @@ public sealed class WorkerConnectionTracker
                 return false;
             _logonPasswordRequired = true;
             _selfUpdateInProgress = false;
+            StopSelfUpdateWatchdogLocked();
             _offlineAfterLogonFailure = _connectionIds.Count == 0;
             return true;
         });
@@ -259,6 +274,7 @@ public sealed class WorkerConnectionTracker
             if (WorkerVersionPolicy.AreSameProductVersion(workerVersion, _appSemVer))
             {
                 _selfUpdateInProgress = false;
+                StopSelfUpdateWatchdogLocked();
                 endedUpdate = true;
             }
         }
