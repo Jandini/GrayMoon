@@ -96,6 +96,8 @@ public sealed partial class WorkspaceRepositories
         {
             if (!persistedPrs.TryGetValue(repositoryId, out var pr) || pr == null)
                 continue;
+            if (pr.IsInParentRepository)
+                continue; // upstream pull requests are link-only
             if (!string.Equals(pr.State, "open", StringComparison.OrdinalIgnoreCase))
                 continue;
             if (!linkByRepoId.TryGetValue(repositoryId, out var link) || link.Repository == null)

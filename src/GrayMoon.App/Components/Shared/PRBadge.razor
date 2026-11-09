@@ -25,66 +25,19 @@ else if (IsOnTag)
 {
     <span>&nbsp;</span>
 }
-else if (PullRequest != null && PullRequest.IsMerged)
+else if (PullRequest != null && (PullRequest.IsMerged || PullRequest.IsClosed || string.Equals(PullRequest.State, "open", StringComparison.OrdinalIgnoreCase)))
 {
-    <a href="@PullRequest.HtmlUrl"
-       target="_blank"
-       rel="noopener noreferrer"
-       class="badge pr-badge pr-badge-merged"
-       title="PR #@PullRequest.Number merged">merged</a>
-    @if (PullRequest.ChangedFiles is int)
+    <PullRequestChip Pr="@PullRequest"
+                     ParentRepositoryName="@ParentRepositoryName"
+                     OnMergeClick="@OnMergeClick" />
+    @if (PullRequest.ParentPullRequest is { } upstreamPr)
     {
-        <a href="@($"{PullRequest.HtmlUrl}/changes")"
-           target="_blank"
-           rel="noopener noreferrer"
-           class="badge pr-badge pr-badge-merged pr-badge-files-changed"
-           title="@($"{PullRequest.ChangedFiles} file{(PullRequest.ChangedFiles == 1 ? "" : "s")} changed")">
-            @PullRequest.ChangedFiles
-        </a>
+        @* Fork and upstream both have a pull request: the upstream one follows, link-only. *@
+        <span class="pr-upstream-chip">
+            <PullRequestChip Pr="@upstreamPr"
+                             ParentRepositoryName="@ParentRepositoryName" />
+        </span>
     }
-}
-else if (PullRequest != null && PullRequest.IsClosed)
-{
-    <a href="@PullRequest.HtmlUrl"
-       target="_blank"
-       rel="noopener noreferrer"
-       class="badge pr-badge pr-badge-closed"
-       title="PR #@PullRequest.Number closed">closed</a>
-    @if (PullRequest.ChangedFiles is int)
-    {
-        <a href="@($"{PullRequest.HtmlUrl}/changes")"
-           target="_blank"
-           rel="noopener noreferrer"
-           class="badge pr-badge pr-badge-closed pr-badge-files-changed"
-           title="@($"{PullRequest.ChangedFiles} file{(PullRequest.ChangedFiles == 1 ? "" : "s")} changed")">
-            @PullRequest.ChangedFiles
-        </a>
-    }
-}
-else if (PullRequest != null && string.Equals(PullRequest.State, "open", StringComparison.OrdinalIgnoreCase))
-{
-    var openClass = GetOpenPrMergeabilityClass(PullRequest);
-    var openTitle = GetOpenPrMergeabilityTitle(PullRequest);
-    <span class="pr-merge-chip">
-        <button type="button"
-                class="badge pr-merge-chip__merge @openClass"
-                title="@(PullRequest.Mergeable == true ? $"Merge pull request #{PullRequest.Number}" : openTitle)"
-                @onclick="HandleMergeClick"
-                @onclick:preventDefault
-                @onclick:stopPropagation>
-            #@PullRequest.Number
-        </button>
-        @if (PullRequest.ChangedFiles is int)
-        {
-            <a href="@($"{PullRequest.HtmlUrl}/changes")"
-               target="_blank"
-               rel="noopener noreferrer"
-               class="badge pr-merge-chip__files @openClass"
-               title="@($"PR #{PullRequest.Number} - {PullRequest.ChangedFiles} file{(PullRequest.ChangedFiles == 1 ? "" : "s")} changed")">
-                @PullRequest.ChangedFiles
-            </a>
-        }
-    </span>
 }
 else if (ShowsCreateBadge(IsOnTag, IsPrVerified, PullRequest, DefaultBranchAheadCommits, HeadCommit, FeatureBaseCommitSha))
 {
@@ -104,6 +57,8 @@ else
 
 @code {
     [Parameter] public PullRequestInfo? PullRequest { get; set; }
+    /// <summary>Name (<c>owner/repo</c>) of the upstream repository for a fork, used in the titles of upstream pull request chips.</summary>
+    [Parameter] public string? ParentRepositoryName { get; set; }
     [Parameter] public int UncommittedChangedFileCount { get; set; }
     /// <summary>Git Changes page URL. Used by the red uncommitted-count badge.</summary>
     [Parameter] public string? ChangesUrl { get; set; }
@@ -181,43 +136,5 @@ else
     {
         if (OnUpgradeClick.HasDelegate)
             await OnUpgradeClick.InvokeAsync();
-    }
-
-    private async Task HandleMergeClick()
-    {
-        if (PullRequest != null && OnMergeClick.HasDelegate)
-            await OnMergeClick.InvokeAsync(PullRequest.Number);
-    }
-
-    private static string GetOpenPrMergeabilityClass(PullRequestInfo pr)
-    {
-        var state = pr.MergeableState ?? string.Empty;
-        if (pr.Mergeable == null || string.Equals(state, "unknown", StringComparison.OrdinalIgnoreCase))
-            return "pr-badge-open-unknown";
-        if (pr.Mergeable == false || string.Equals(state, "dirty", StringComparison.OrdinalIgnoreCase))
-            return "pr-badge-open-conflict";
-        if (string.Equals(state, "unstable", StringComparison.OrdinalIgnoreCase))
-            return "pr-badge-open-checks";
-        if (string.Equals(state, "blocked", StringComparison.OrdinalIgnoreCase))
-            return "pr-badge-open-blocked";
-        if (pr.Mergeable == true || string.Equals(state, "clean", StringComparison.OrdinalIgnoreCase))
-            return "pr-badge-open-mergeable";
-        return "pr-badge-open-unknown";
-    }
-
-    private static string GetOpenPrMergeabilityTitle(PullRequestInfo pr)
-    {
-        var state = pr.MergeableState ?? string.Empty;
-        if (pr.Mergeable == null || string.Equals(state, "unknown", StringComparison.OrdinalIgnoreCase))
-            return "PR #" + pr.Number + " - mergeability unknown";
-        if (pr.Mergeable == false || string.Equals(state, "dirty", StringComparison.OrdinalIgnoreCase))
-            return "PR #" + pr.Number + " - merge conflicts";
-        if (string.Equals(state, "unstable", StringComparison.OrdinalIgnoreCase))
-            return "PR #" + pr.Number + " - checks running";
-        if (string.Equals(state, "blocked", StringComparison.OrdinalIgnoreCase))
-            return "PR #" + pr.Number + " - Cannot merge (review or requirements)";
-        if (pr.Mergeable == true || string.Equals(state, "clean", StringComparison.OrdinalIgnoreCase))
-            return "PR #" + pr.Number + " - mergeable";
-        return "PR #" + pr.Number;
     }
 }

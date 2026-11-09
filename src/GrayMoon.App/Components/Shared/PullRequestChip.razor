@@ -1,0 +1,132 @@
+@using GrayMoon.App.Models
+@using Microsoft.AspNetCore.Components.Web
+
+@* One pull request chip (merged / closed / open). An open pull request in the cloned repository is a merge button plus a changed-files link; a pull request in the upstream repository (IsInParentRepository) is link-only. *@
+@if (Pr.IsMerged)
+{
+    <a href="@Pr.HtmlUrl"
+       target="_blank"
+       rel="noopener noreferrer"
+       class="badge pr-badge pr-badge-merged"
+       title="@($"PR #{Pr.Number} merged{Suffix}")">merged</a>
+    @if (Pr.ChangedFiles is int)
+    {
+        <a href="@($"{Pr.HtmlUrl}/changes")"
+           target="_blank"
+           rel="noopener noreferrer"
+           class="badge pr-badge pr-badge-merged pr-badge-files-changed"
+           title="@FilesTitle(Pr.ChangedFiles.Value)">
+            @Pr.ChangedFiles
+        </a>
+    }
+}
+else if (Pr.IsClosed)
+{
+    <a href="@Pr.HtmlUrl"
+       target="_blank"
+       rel="noopener noreferrer"
+       class="badge pr-badge pr-badge-closed"
+       title="@($"PR #{Pr.Number} closed{Suffix}")">closed</a>
+    @if (Pr.ChangedFiles is int)
+    {
+        <a href="@($"{Pr.HtmlUrl}/changes")"
+           target="_blank"
+           rel="noopener noreferrer"
+           class="badge pr-badge pr-badge-closed pr-badge-files-changed"
+           title="@FilesTitle(Pr.ChangedFiles.Value)">
+            @Pr.ChangedFiles
+        </a>
+    }
+}
+else
+{
+    var openClass = GetOpenPrMergeabilityClass(Pr);
+    var openTitle = GetOpenPrMergeabilityTitle(Pr);
+    <span class="pr-merge-chip">
+        @if (Pr.IsInParentRepository)
+        {
+            <a href="@Pr.HtmlUrl"
+               target="_blank"
+               rel="noopener noreferrer"
+               class="badge pr-merge-chip__merge pr-merge-chip__link @openClass"
+               title="@($"{openTitle}{Suffix} - open on the provider")">
+                #@Pr.Number
+            </a>
+        }
+        else
+        {
+            <button type="button"
+                    class="badge pr-merge-chip__merge @openClass"
+                    title="@(Pr.Mergeable == true ? $"Merge pull request #{Pr.Number}" : openTitle)"
+                    @onclick="HandleMergeClick"
+                    @onclick:preventDefault
+                    @onclick:stopPropagation>
+                #@Pr.Number
+            </button>
+        }
+        @if (Pr.ChangedFiles is int)
+        {
+            <a href="@($"{Pr.HtmlUrl}/changes")"
+               target="_blank"
+               rel="noopener noreferrer"
+               class="badge pr-merge-chip__files @openClass"
+               title="@($"PR #{Pr.Number} - {Pr.ChangedFiles} file{(Pr.ChangedFiles == 1 ? "" : "s")} changed{Suffix}")">
+                @Pr.ChangedFiles
+            </a>
+        }
+    </span>
+}
+
+@code {
+    [Parameter, EditorRequired] public PullRequestInfo Pr { get; set; } = default!;
+
+    /// <summary>Name of the upstream repository (for example <c>owner/repo</c>) used in titles when <see cref="PullRequestInfo.IsInParentRepository"/> is set.</summary>
+    [Parameter] public string? ParentRepositoryName { get; set; }
+
+    /// <summary>Raised with the PR number when the user clicks the merge segment of an open PR in the cloned repository.</summary>
+    [Parameter] public EventCallback<int> OnMergeClick { get; set; }
+
+    private string Suffix => Pr.IsInParentRepository
+        ? (string.IsNullOrWhiteSpace(ParentRepositoryName) ? " (upstream)" : $" (upstream: {ParentRepositoryName})")
+        : string.Empty;
+
+    private string FilesTitle(int files) => $"{files} file{(files == 1 ? "" : "s")} changed{Suffix}";
+
+    private async Task HandleMergeClick()
+    {
+        if (!Pr.IsInParentRepository && OnMergeClick.HasDelegate)
+            await OnMergeClick.InvokeAsync(Pr.Number);
+    }
+
+    internal static string GetOpenPrMergeabilityClass(PullRequestInfo pr)
+    {
+        var state = pr.MergeableState ?? string.Empty;
+        if (pr.Mergeable == null || string.Equals(state, "unknown", StringComparison.OrdinalIgnoreCase))
+            return "pr-badge-open-unknown";
+        if (pr.Mergeable == false || string.Equals(state, "dirty", StringComparison.OrdinalIgnoreCase))
+            return "pr-badge-open-conflict";
+        if (string.Equals(state, "unstable", StringComparison.OrdinalIgnoreCase))
+            return "pr-badge-open-checks";
+        if (string.Equals(state, "blocked", StringComparison.OrdinalIgnoreCase))
+            return "pr-badge-open-blocked";
+        if (pr.Mergeable == true || string.Equals(state, "clean", StringComparison.OrdinalIgnoreCase))
+            return "pr-badge-open-mergeable";
+        return "pr-badge-open-unknown";
+    }
+
+    internal static string GetOpenPrMergeabilityTitle(PullRequestInfo pr)
+    {
+        var state = pr.MergeableState ?? string.Empty;
+        if (pr.Mergeable == null || string.Equals(state, "unknown", StringComparison.OrdinalIgnoreCase))
+            return "PR #" + pr.Number + " - mergeability unknown";
+        if (pr.Mergeable == false || string.Equals(state, "dirty", StringComparison.OrdinalIgnoreCase))
+            return "PR #" + pr.Number + " - merge conflicts";
+        if (string.Equals(state, "unstable", StringComparison.OrdinalIgnoreCase))
+            return "PR #" + pr.Number + " - checks running";
+        if (string.Equals(state, "blocked", StringComparison.OrdinalIgnoreCase))
+            return "PR #" + pr.Number + " - Cannot merge (review or requirements)";
+        if (pr.Mergeable == true || string.Equals(state, "clean", StringComparison.OrdinalIgnoreCase))
+            return "PR #" + pr.Number + " - mergeable";
+        return "PR #" + pr.Number;
+    }
+}

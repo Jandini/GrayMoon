@@ -12,18 +12,32 @@ public sealed class GitHubPullRequestService(
     private int MaxConcurrency => Math.Max(1, workspaceOptions.Value.MaxParallelOperations);
 
     /// <summary>Fetches PR info for the given repo and branch using the repo's connector. Returns null when not GitHub, connector invalid, or no PR.</summary>
-    public async Task<PullRequestInfo?> GetPullRequestForBranchAsync(Repository repository, Connector? connector, string? branchName, CancellationToken cancellationToken = default)
+    public Task<PullRequestInfo?> GetPullRequestForBranchAsync(Repository repository, Connector? connector, string? branchName, CancellationToken cancellationToken = default)
     {
-        if (repository == null || string.IsNullOrWhiteSpace(branchName))
+        if (repository == null)
+            return Task.FromResult<PullRequestInfo?>(null);
+        return GetPullRequestForBranchAsync(connector, repository.CloneUrl, repository.CloneUrl, branchName, cancellationToken);
+    }
+
+    /// <summary>
+    /// Fetches the pull request for <paramref name="branchName"/> that lives in <paramref name="targetCloneUrl"/>'s repository,
+    /// where the branch itself lives in <paramref name="headCloneUrl"/>'s repository. Both URLs are the same for the cloned repository
+    /// itself; for a fork's upstream, target is the parent and head is the fork.
+    /// </summary>
+    public async Task<PullRequestInfo?> GetPullRequestForBranchAsync(Connector? connector, string? targetCloneUrl, string? headCloneUrl, string? branchName, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(branchName))
             return null;
         if (connector == null || connector.ConnectorType != ConnectorType.GitHub || string.IsNullOrWhiteSpace(connector.UserToken))
             return null;
-        if (!RepositoryUrlHelper.TryParseGitHubOwnerRepo(repository.CloneUrl, out var owner, out var repo) || owner == null || repo == null)
+        if (!RepositoryUrlHelper.TryParseGitHubOwnerRepo(targetCloneUrl, out var owner, out var repo) || owner == null || repo == null)
+            return null;
+        if (!RepositoryUrlHelper.TryParseGitHubOwnerRepo(headCloneUrl, out var headOwner, out _) || headOwner == null)
             return null;
 
         try
         {
-            var dto = await gitHubService.GetPullRequestForBranchAsync(connector, owner, repo, branchName, cancellationToken);
+            var dto = await gitHubService.GetPullRequestForBranchAsync(connector, owner, repo, headOwner, branchName, cancellationToken);
             if (dto == null)
                 return null;
 
@@ -50,7 +64,7 @@ public sealed class GitHubPullRequestService(
         }
         catch (Exception ex)
         {
-            logger.LogDebug(ex, "GetPullRequestForBranch failed. Repo={Repo}, Branch={Branch}", repository.RepositoryName, branchName);
+            logger.LogDebug(ex, "GetPullRequestForBranch failed. Repo={Repo}/{Owner}, Branch={Branch}", repo, owner, branchName);
             return null;
         }
     }
@@ -60,18 +74,31 @@ public sealed class GitHubPullRequestService(
     /// head ref is that branch, so a leftover merged PR from a previous branch cannot be attributed to the current one.
     /// Used after merge when GitHub has already deleted the head branch and the list-by-head lookup comes back empty.
     /// </summary>
-    public async Task<PullRequestInfo?> GetPullRequestByNumberAsync(
+    public Task<PullRequestInfo?> GetPullRequestByNumberAsync(
         Repository repository,
         Connector? connector,
         int prNumber,
         string? headBranch,
         CancellationToken cancellationToken = default)
     {
-        if (repository == null || prNumber <= 0)
+        if (repository == null)
+            return Task.FromResult<PullRequestInfo?>(null);
+        return GetPullRequestByNumberAsync(connector, repository.CloneUrl, prNumber, headBranch, cancellationToken);
+    }
+
+    /// <summary>Same as the <see cref="Repository"/> overload, for a pull request in the repository at <paramref name="targetCloneUrl"/> (the cloned repository or its upstream).</summary>
+    public async Task<PullRequestInfo?> GetPullRequestByNumberAsync(
+        Connector? connector,
+        string? targetCloneUrl,
+        int prNumber,
+        string? headBranch,
+        CancellationToken cancellationToken = default)
+    {
+        if (prNumber <= 0)
             return null;
         if (connector == null || connector.ConnectorType != ConnectorType.GitHub || string.IsNullOrWhiteSpace(connector.UserToken))
             return null;
-        if (!RepositoryUrlHelper.TryParseGitHubOwnerRepo(repository.CloneUrl, out var owner, out var repo) || owner == null || repo == null)
+        if (!RepositoryUrlHelper.TryParseGitHubOwnerRepo(targetCloneUrl, out var owner, out var repo) || owner == null || repo == null)
             return null;
 
         try
@@ -89,7 +116,7 @@ public sealed class GitHubPullRequestService(
         }
         catch (Exception ex)
         {
-            logger.LogDebug(ex, "GetPullRequestByNumber failed. Repo={Repo}, PrNumber={PrNumber}", repository.RepositoryName, prNumber);
+            logger.LogDebug(ex, "GetPullRequestByNumber failed. Repo={Repo}/{Owner}, PrNumber={PrNumber}", repo, owner, prNumber);
             return null;
         }
     }

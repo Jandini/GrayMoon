@@ -75,7 +75,11 @@ public sealed partial class WorkspaceRepositories
             if (!RepositoryUrlHelper.TryParseGitHubOwnerRepo(repo.CloneUrl, out var owner, out var repoName) || owner == null || repoName == null)
                 continue;
 
-            var hasOpenPr = wr.PullRequest != null && string.Equals(wr.PullRequest.State, "open", StringComparison.OrdinalIgnoreCase);
+            // An open pull request in the cloned repository or in its upstream (fork) already covers this branch.
+            var hasOpenPr = wr.PullRequest != null
+                && (string.Equals(wr.PullRequest.State, "open", StringComparison.OrdinalIgnoreCase)
+                    || (wr.PullRequest.ParentPullRequestNumber.HasValue
+                        && string.Equals(wr.PullRequest.ParentState, "open", StringComparison.OrdinalIgnoreCase)));
             if (hasOpenPr) continue;
 
             parentByRepoId.TryGetValue(wr.RepositoryId, out var parentBranch);

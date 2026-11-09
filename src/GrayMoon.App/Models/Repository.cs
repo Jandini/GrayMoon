@@ -41,4 +41,11 @@ public class Repository
     /// <summary>Comma-separated repository topics from GitHub.</summary>
     [MaxLength(2000)]
     public string? Topics { get; set; }
+
+    /// <summary>True when the provider reports this repository as a fork of another repository.</summary>
+    public bool IsFork { get; set; }
+
+    /// <summary>Clone URL of the repository this one was forked from (the immediate parent). Null when not a fork or when the parent could not be resolved yet.</summary>
+    [MaxLength(500)]
+    public string? ParentCloneUrl { get; set; }
 }

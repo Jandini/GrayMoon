@@ -113,6 +113,8 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddSingleton<IWorkspaceCheckoutRefresh, WorkspaceCheckoutRefresh>();
         services.AddScoped<GitHubService>();
         services.AddScoped<GitHubPullRequestService>();
+        services.AddScoped<GrayMoon.App.Services.GitProviders.GitHubGitProvider>();
+        services.AddScoped<GrayMoon.App.Services.GitProviders.IGitProviderResolver, GrayMoon.App.Services.GitProviders.GitProviderResolver>();
         services.AddScoped<GitHubPullRequestMergeService>();
         services.AddScoped<WorkspacePullRequestService>();
         services.AddScoped<RepositoryBranchWriter>();

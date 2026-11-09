@@ -943,6 +943,10 @@ Explicit refresh requests a real status rescan.
 
 ---
 
+## 22A. Forked repositories
+
+A repository that is a fork shows a teal **Fork** badge in Workspace Repositories (clickable, opens the original repository), Repositories and the repository modal. Pull request lookup for a fork checks the fork (`head=forkOwner:branch`) and the upstream repository. One found PR shows one badge, as for any repository; PRs in both show two badges, the second labelled with the upstream repository. A PR that exists only upstream is link-only: GrayMoon does not merge, close, edit or review it, and it is not an "open PR" for merge actions, but it counts as an existing PR (Create PR is not offered) and an open upstream PR blocks "all Feature PRs completed". Create PR always creates the PR inside the fork.
+
 ## 23. Pull request column
 
 ### States

@@ -37,7 +37,9 @@ public sealed class RepositoryListQueryService(AppDbContext dbContext) : IReposi
                 r.Visibility,
                 r.Archived,
                 r.Topics,
-                r.CloneUrl))
+                r.CloneUrl,
+                r.IsFork,
+                r.ParentCloneUrl))
             .Take(take)
             .ToListAsync(cancellationToken);
 
@@ -86,7 +88,9 @@ public sealed class RepositoryListQueryService(AppDbContext dbContext) : IReposi
                 r.Visibility,
                 r.Archived,
                 r.Topics,
-                r.CloneUrl))
+                r.CloneUrl,
+                r.IsFork,
+                r.ParentCloneUrl))
             .ToListAsync(cancellationToken);
 
         var order = repositoryIds

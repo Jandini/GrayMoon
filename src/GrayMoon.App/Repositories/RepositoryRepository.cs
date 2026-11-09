@@ -34,6 +34,19 @@ public sealed class GitHubRepositoryRepository(
             .ToListAsync();
     }
 
+    /// <summary>Stored fork parent clone URLs keyed by (connector, provider repository id), so a fetch only asks the provider about forks whose parent is not known yet.</summary>
+    public async Task<IReadOnlyDictionary<(int ConnectorId, long ProviderRepositoryId), string>> GetKnownForkParentsAsync(CancellationToken cancellationToken = default)
+    {
+        var rows = await _dbContext.Repositories
+            .AsNoTracking()
+            .Where(r => r.IsFork && r.ParentCloneUrl != null && r.GitHubRepositoryId > 0)
+            .Select(r => new { r.ConnectorId, r.GitHubRepositoryId, r.ParentCloneUrl })
+            .ToListAsync(cancellationToken);
+        return rows
+            .GroupBy(r => (r.ConnectorId, r.GitHubRepositoryId))
+            .ToDictionary(g => g.Key, g => g.First().ParentCloneUrl!);
+    }
+
     public async Task<Repository?> GetByIdAsync(int repositoryId, CancellationToken cancellationToken = default)
     {
         return await _dbContext.Repositories
@@ -150,7 +163,9 @@ public sealed class GitHubRepositoryRepository(
                 || !string.Equals(match.Visibility, incoming.Visibility, StringComparison.OrdinalIgnoreCase)
                 || match.Archived != incoming.Archived
                 || !string.Equals(match.Topics ?? string.Empty, incoming.Topics ?? string.Empty, StringComparison.Ordinal)
-                || !string.Equals(match.NodeId, incoming.NodeId, StringComparison.Ordinal))
+                || !string.Equals(match.NodeId, incoming.NodeId, StringComparison.Ordinal)
+                || match.IsFork != incoming.IsFork
+                || !string.Equals(match.ParentCloneUrl, ResolveParentCloneUrl(match, incoming), StringComparison.Ordinal))
             {
                 if (nameChanged || urlChanged)
                 {
@@ -165,6 +180,7 @@ public sealed class GitHubRepositoryRepository(
                         match.RepositoryId, match.RepositoryName, incoming.RepositoryName, match.CloneUrl, incoming.CloneUrl, match.ConnectorId, match.OrgName);
                 }
 
+                var parentCloneUrl = ResolveParentCloneUrl(match, incoming);
                 await _dbContext.Repositories
                     .Where(r => r.RepositoryId == match.RepositoryId)
                     .ExecuteUpdateAsync(s => s
@@ -174,7 +190,9 @@ public sealed class GitHubRepositoryRepository(
                         .SetProperty(r => r.Visibility, incoming.Visibility)
                     .SetProperty(r => r.Archived, incoming.Archived)
                         .SetProperty(r => r.Topics, incoming.Topics)
-                        .SetProperty(r => r.NodeId, incoming.NodeId));
+                        .SetProperty(r => r.NodeId, incoming.NodeId)
+                        .SetProperty(r => r.IsFork, incoming.IsFork)
+                        .SetProperty(r => r.ParentCloneUrl, parentCloneUrl));
                 updateCount++;
             }
         }
@@ -198,6 +216,7 @@ public sealed class GitHubRepositoryRepository(
             matchedIncomingIndexes.Add(i);
 
             // Update in-place (always update GitHubRepositoryId if we now have it)
+            var parentCloneUrlB = ResolveParentCloneUrl(match, incoming);
             await _dbContext.Repositories
                 .Where(r => r.RepositoryId == match.RepositoryId)
                 .ExecuteUpdateAsync(s => s
@@ -208,7 +227,9 @@ public sealed class GitHubRepositoryRepository(
                     .SetProperty(r => r.Archived, incoming.Archived)
                     .SetProperty(r => r.Topics, incoming.Topics)
                     .SetProperty(r => r.GitHubRepositoryId, incoming.GitHubRepositoryId)
-                    .SetProperty(r => r.NodeId, incoming.NodeId));
+                    .SetProperty(r => r.NodeId, incoming.NodeId)
+                    .SetProperty(r => r.IsFork, incoming.IsFork)
+                    .SetProperty(r => r.ParentCloneUrl, parentCloneUrlB));
             updateCount++;
         }
 
@@ -252,6 +273,7 @@ public sealed class GitHubRepositoryRepository(
                 "MergeRepositories: Rename detected via URL heuristic. RepositoryId={RepositoryId}, OldName={OldName}, NewName={NewName}, OldCloneUrl={OldCloneUrl}, NewCloneUrl={NewCloneUrl}, ConnectorId={ConnectorId}, OrgName={OrgName}",
                 matched.RepositoryId, matched.RepositoryName, incoming.RepositoryName, matched.CloneUrl, incoming.CloneUrl, matched.ConnectorId, matched.OrgName);
 
+            var parentCloneUrlC = ResolveParentCloneUrl(matched, incoming);
             await _dbContext.Repositories
                 .Where(r => r.RepositoryId == matched.RepositoryId)
                 .ExecuteUpdateAsync(s => s
@@ -262,7 +284,9 @@ public sealed class GitHubRepositoryRepository(
                     .SetProperty(r => r.Archived, incoming.Archived)
                     .SetProperty(r => r.Topics, incoming.Topics)
                     .SetProperty(r => r.GitHubRepositoryId, incoming.GitHubRepositoryId)
-                    .SetProperty(r => r.NodeId, incoming.NodeId));
+                    .SetProperty(r => r.NodeId, incoming.NodeId)
+                    .SetProperty(r => r.IsFork, incoming.IsFork)
+                    .SetProperty(r => r.ParentCloneUrl, parentCloneUrlC));
             updateCount++;
         }
 
@@ -388,6 +412,17 @@ public sealed class GitHubRepositoryRepository(
             MergedRepositoryIdMap = new Dictionary<int, int>(),
             KeptForFeatures = keptForFeatures
         };
+    }
+
+    /// <summary>
+    /// Parent clone URL to persist for <paramref name="incoming"/>: none for a non-fork; for a fork the freshly resolved URL, falling back to
+    /// the stored one when this fetch could not resolve it (a failed parent lookup must not erase what is already known).
+    /// </summary>
+    private static string? ResolveParentCloneUrl(Repository existing, Repository incoming)
+    {
+        if (!incoming.IsFork)
+            return null;
+        return string.IsNullOrWhiteSpace(incoming.ParentCloneUrl) ? existing.ParentCloneUrl : incoming.ParentCloneUrl;
     }
 
     private static bool IsLikelyRename(Repository oldRepo, Repository newRepo)

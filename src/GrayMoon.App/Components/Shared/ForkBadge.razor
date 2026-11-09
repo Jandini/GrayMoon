@@ -1,0 +1,39 @@
+@using GrayMoon.App.Services.GitHub
+
+@* "forked" badge. With Clickable it opens the repository this one was forked from; otherwise it is informational only. *@
+@{
+    var parentUrl = RepositoryUrlHelper.GetRepositoryUrl(ParentCloneUrl);
+    var parentName = DescribeParent(ParentCloneUrl);
+    var title = parentName == null
+        ? "Forked repository"
+        : Clickable && parentUrl != null
+            ? $"Forked from {parentName} - click to open the original repository"
+            : $"Forked from {parentName}";
+}
+@if (Clickable && parentUrl != null)
+{
+    <a href="@parentUrl"
+       target="_blank"
+       rel="noopener noreferrer"
+       class="badge repo-fork-badge repo-fork-badge--link text-nowrap"
+       title="@title"
+       @onclick:stopPropagation>forked</a>
+}
+else
+{
+    <span class="badge repo-fork-badge text-nowrap" title="@title">forked</span>
+}
+
+@code {
+    /// <summary>Clone URL of the repository this one was forked from; null when it could not be resolved.</summary>
+    [Parameter] public string? ParentCloneUrl { get; set; }
+
+    /// <summary>True in Workspace Repositories, where the badge opens the original repository.</summary>
+    [Parameter] public bool Clickable { get; set; }
+
+    /// <summary><c>owner/repo</c> of the parent for titles, or null when the URL cannot be parsed.</summary>
+    internal static string? DescribeParent(string? parentCloneUrl) =>
+        RepositoryUrlHelper.TryParseGitHubOwnerRepo(parentCloneUrl, out var owner, out var repo) && owner != null && repo != null
+            ? $"{owner}/{repo}"
+            : null;
+}

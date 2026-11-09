@@ -59,7 +59,19 @@ public sealed record WorkspaceRepositoryLinkListItemDto(
     /// <summary>Role of the repository in this Workspace (shared across contexts); the Workspace-role row sorts first and is never in a level group.</summary>
     WorkspaceRepositoryRole Role = WorkspaceRepositoryRole.Source,
     /// <summary>True while a Feature seed has not yet had its own GitVersion computed; the Version cell stays empty until it arrives.</summary>
-    bool? GitVersionPending = null);
+    bool? GitVersionPending = null,
+    /// <summary>True when the provider reports the repository as a fork.</summary>
+    bool IsFork = false,
+    /// <summary>Clone URL of the repository this fork was forked from; null when not a fork or not resolved yet.</summary>
+    string? ParentCloneUrl = null,
+    /// <summary>Pull request for the same branch in the upstream repository (fork only); null fields when there is none.</summary>
+    int? ParentPullRequestNumber = null,
+    string? ParentPullRequestState = null,
+    string? ParentPullRequestHtmlUrl = null,
+    DateTimeOffset? ParentPullRequestMergedAt = null,
+    bool? ParentPullRequestMergeable = null,
+    string? ParentPullRequestMergeableState = null,
+    int? ParentPullRequestChangedFiles = null);
 
 public sealed record WorkspaceRepositoryLinkListPageResult(
     IReadOnlyList<WorkspaceRepositoryLinkListItemDto> Items,

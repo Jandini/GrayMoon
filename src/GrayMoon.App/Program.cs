@@ -178,6 +178,8 @@ try
     builder.Services.AddScoped<GitHubActionsService>();
     builder.Services.AddScoped<GhaWorkflowLiveFeedService>();
     builder.Services.AddScoped<GitHubPullRequestService>();
+    builder.Services.AddScoped<GrayMoon.App.Services.GitProviders.GitHubGitProvider>();
+    builder.Services.AddScoped<GrayMoon.App.Services.GitProviders.IGitProviderResolver, GrayMoon.App.Services.GitProviders.GitProviderResolver>();
     builder.Services.AddScoped<GitHubPullRequestMergeService>();
     builder.Services.AddScoped<WorkspacePullRequestRepository>();
     builder.Services.AddScoped<WorkspacePullRequestService>();

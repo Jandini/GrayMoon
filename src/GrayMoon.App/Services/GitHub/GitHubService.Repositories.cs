@@ -24,6 +24,26 @@ public sealed partial class GitHubService
         return await GetRepositoriesPagedAsync(connector, "user/repos?visibility=all", progress, batchProgress, cancellationToken);
     }
 
+    /// <summary>
+    /// Clone URL of the repository <paramref name="owner"/>/<paramref name="repo"/> was forked from (immediate parent), via
+    /// <c>GET /repos/{owner}/{repo}</c> (the list endpoint does not return it). Null when the repository is not a fork or the
+    /// parent is not visible; throws on transport/API failure so callers can tell "not a fork" from "could not find out".
+    /// </summary>
+    public async Task<string?> GetForkParentCloneUrlAsync(Connector connector, string owner, string repo, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(owner))
+            throw new ArgumentException("Owner is required.", nameof(owner));
+        if (string.IsNullOrWhiteSpace(repo))
+            throw new ArgumentException("Repository is required.", nameof(repo));
+
+        EnsureConnectorConfigured(connector);
+
+        var dto = await GetETaggedAsync<GitHubRepositoryDto>(
+            connector, $"repos/{Uri.EscapeDataString(owner)}/{Uri.EscapeDataString(repo)}", cancellationToken);
+        var cloneUrl = dto?.Parent?.CloneUrl?.Trim();
+        return string.IsNullOrWhiteSpace(cloneUrl) ? null : cloneUrl;
+    }
+
     private async Task<List<GitHubRepositoryDto>> GetRepositoriesPagedAsync(string requestUri)
     {
         var results = new List<GitHubRepositoryDto>();

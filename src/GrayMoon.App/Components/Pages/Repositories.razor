@@ -170,6 +170,10 @@
                                                 {
                                                     <strong>@repository.RepositoryName</strong>
                                                 }
+                                                @if (repository.IsFork)
+                                                {
+                                                    <ForkBadge ParentCloneUrl="@repository.ParentCloneUrl" />
+                                                }
                                             </td>
                                             <td class="col-owner">@(string.IsNullOrWhiteSpace(repository.OrgName) ? "-" : repository.OrgName)</td>
                                             <td class="col-topics">

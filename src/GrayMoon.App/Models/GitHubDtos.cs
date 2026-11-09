@@ -45,6 +45,21 @@ public class GitHubRepositoryDto
 
     [JsonPropertyName("topics")]
     public List<string> Topics { get; set; } = new();
+
+    [JsonPropertyName("fork")]
+    public bool Fork { get; set; }
+
+    [JsonPropertyName("parent")]
+    public GitHubRepositoryParentDto? Parent { get; set; }
+}
+
+public class GitHubRepositoryParentDto
+{
+    [JsonPropertyName("full_name")]
+    public string FullName { get; set; } = string.Empty;
+
+    [JsonPropertyName("clone_url")]
+    public string CloneUrl { get; set; } = string.Empty;
 }
 
 public class GitHubWorkflowDto
