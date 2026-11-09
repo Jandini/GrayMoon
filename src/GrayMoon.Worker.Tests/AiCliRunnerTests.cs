@@ -22,13 +22,7 @@ public sealed class AiCliRunnerTests : IDisposable
 
     public void Dispose()
     {
-        try
-        {
-            Directory.Delete(_bin, recursive: true);
-        }
-        catch (IOException)
-        {
-        }
+        TestDirectory.Delete(_bin);
     }
 
     private AiCliRunner Runner() => new(

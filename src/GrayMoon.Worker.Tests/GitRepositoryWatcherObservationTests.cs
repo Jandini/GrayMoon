@@ -149,7 +149,7 @@ public sealed class GitRepositoryWatcherObservationTests
         }
         finally
         {
-            try { Directory.Delete(tempDir, true); } catch { /* best-effort */ }
+            TestDirectory.Delete(tempDir);
         }
     }
 
@@ -179,7 +179,7 @@ public sealed class GitRepositoryWatcherObservationTests
         }
         finally
         {
-            try { Directory.Delete(tempDir, true); } catch { /* best-effort */ }
+            TestDirectory.Delete(tempDir);
         }
     }
 
@@ -214,7 +214,7 @@ public sealed class GitRepositoryWatcherObservationTests
         }
         finally
         {
-            try { Directory.Delete(tempDir, true); } catch { /* best-effort */ }
+            TestDirectory.Delete(tempDir);
         }
     }
 

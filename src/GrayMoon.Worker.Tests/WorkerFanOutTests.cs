@@ -22,7 +22,7 @@ public sealed class WorkerFanOutTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_temp, true); } catch { /* best-effort */ }
+        TestDirectory.Delete(_temp);
     }
 
     [Fact]

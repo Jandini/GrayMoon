@@ -47,6 +47,7 @@ public static partial class Migrations
         (13, "Git Changes path indexes", dbContext => MigrateGitChangesPathIndexesAsync(dbContext)),
         (14, "Git Changes content digest", dbContext => MigrateGitChangesContentDigestAsync(dbContext)),
         (15, "Fork support columns", dbContext => MigrateForkSupportAsync(dbContext)),
+        (16, "Repair special Workspace context backfill", dbContext => MigrateSpecialWorkspaceContextBackfillRepairAsync(dbContext)),
     };
 
     public static async Task RunAllAsync(AppDbContext dbContext, ILogger? logger = null)

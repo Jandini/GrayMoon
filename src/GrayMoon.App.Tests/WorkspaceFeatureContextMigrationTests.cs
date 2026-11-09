@@ -14,7 +14,7 @@ public sealed class WorkspaceFeatureContextMigrationTests
         await connection.OpenAsync();
         var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
         await using var db = new AppDbContext(options);
-        await db.Database.EnsureCreatedAsync();
+        await db.Database.CreateSchemaAsync();
 
         var connector = new Connector
         {
@@ -85,7 +85,7 @@ public sealed class WorkspaceFeatureContextMigrationTests
         await connection.OpenAsync();
         var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
         await using var db = new AppDbContext(options);
-        await db.Database.EnsureCreatedAsync();
+        await db.Database.CreateSchemaAsync();
 
         db.Workspaces.AddRange(
             new Workspace { Name = "one" },
@@ -106,7 +106,7 @@ public sealed class WorkspaceFeatureContextMigrationTests
         await connection.OpenAsync();
         var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
         await using var db = new AppDbContext(options);
-        await db.Database.EnsureCreatedAsync();
+        await db.Database.CreateSchemaAsync();
 
         var connector = new Connector
         {

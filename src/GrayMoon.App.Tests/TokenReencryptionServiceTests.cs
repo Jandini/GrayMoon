@@ -19,7 +19,7 @@ public class TokenReencryptionServiceTests
     {
         var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
         var db = new AppDbContext(options);
-        await db.Database.EnsureCreatedAsync();
+        await db.Database.CreateSchemaAsync();
         return db;
     }
 

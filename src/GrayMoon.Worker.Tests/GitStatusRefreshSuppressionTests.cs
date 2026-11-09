@@ -290,7 +290,7 @@ public sealed class GitStatusRefreshSuppressionTests
         }
         finally
         {
-            try { Directory.Delete(root, true); } catch { /* best-effort */ }
+            TestDirectory.Delete(root);
         }
     }
 

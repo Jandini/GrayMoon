@@ -132,7 +132,7 @@ public sealed partial class WorkspacePushService
             requiredPackages,
             blockedRepositories,
             (int)timeout.TotalSeconds,
-            PackageWaitDiagnostics.PollIntervalSeconds,
+            workspaceOptions.Value.PushWaitPollIntervalSeconds,
             connectors.Count == 0 ? "none" : string.Join(",", connectors.Keys.OrderBy(id => id)),
             names.Count == 0 ? "Unknown" : string.Join(",", names));
     }

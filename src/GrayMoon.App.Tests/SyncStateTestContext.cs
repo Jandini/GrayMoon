@@ -61,6 +61,7 @@ public sealed class SyncStateTestContext : IAsyncDisposable
             $"Data Source=file:gm{Guid.NewGuid():N}?mode=memory&cache=shared;Pooling=False;Default Timeout=5";
         var connection = new SqliteConnection(connectionString);
         await connection.OpenAsync();
+        TestDatabaseSchema.CopyInto(connection);
 
         var workerBridge = new FakeWorkerBridge();
         var hubContext = new FakeHubContext<WorkspaceSyncHub>();
@@ -152,7 +153,6 @@ public sealed class SyncStateTestContext : IAsyncDisposable
     {
         await using var scope = _provider.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        await db.Database.EnsureCreatedAsync();
 
         var connector = new Connector
         {

@@ -42,8 +42,15 @@ jobs:
       - name: Build
         run: dotnet build GrayMoon.slnx --configuration Release --no-restore -p:Version=${{ steps.gitversion.outputs.version }} -p:DisableGitVersionTask=true
 
+      # Tests marked [Trait("Category", "Long")] (scale and stress tests) run only for a pull request, so a PR gets
+      # them once and pushes, tags and manual runs stay fast. A pull request still runs the whole suite.
       - name: Test
-        run: dotnet test GrayMoon.slnx --configuration Release --no-build --logger "trx;LogFileName=test-results.trx"
+        run: |
+          FILTER=()
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            FILTER=(--filter "Category!=Long")
+          fi
+          dotnet test GrayMoon.slnx --configuration Release --no-build "${FILTER[@]}" --logger "trx;LogFileName=test-results.trx"
 
       - name: Upload test results
         if: always()

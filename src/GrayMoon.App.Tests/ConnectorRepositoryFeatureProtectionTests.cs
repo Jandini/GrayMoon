@@ -157,7 +157,7 @@ internal sealed class MergeTestContext : IAsyncDisposable
     {
         await using var scope = _provider.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        await db.Database.EnsureCreatedAsync();
+        await db.Database.CreateSchemaAsync();
 
         var connector = new Connector
         {

@@ -170,21 +170,7 @@ public sealed class SyncRepositoryLocalSnapshotTests : IDisposable
             .ToList());
     }
 
-    private async Task<string> SeedOriginAsync()
-    {
-        var origin = Path.Combine(_root, "origin.git");
-        Directory.CreateDirectory(origin);
-        await GitAsync(origin, "init --bare -b main");
-
-        var seed = Path.Combine(_root, "seed");
-        Directory.CreateDirectory(seed);
-        await GitAsync(seed, "init -b main");
-        await ConfigureUserAsync(seed);
-        await GitAsync(seed, $"remote add origin \"{origin}\"");
-        await CommitAsync(seed, "README.md", "init");
-        await GitAsync(seed, "push origin main");
-        return origin;
-    }
+    private Task<string> SeedOriginAsync() => Task.FromResult(GitScenarios.SeededRemote(_root));
 
     /// <summary>Clones to <c>ws/repo</c>, the layout <see cref="NewRequest"/> points at.</summary>
     private async Task<string> CloneAsync()
@@ -192,17 +178,11 @@ public sealed class SyncRepositoryLocalSnapshotTests : IDisposable
         var origin = await SeedOriginAsync();
         var workspace = Path.Combine(_root, "ws");
         Directory.CreateDirectory(workspace);
-        await GitAsync(workspace, $"clone -q \"{origin}\" repo");
-        var repo = Path.Combine(workspace, "repo");
-        await ConfigureUserAsync(repo);
-        return repo;
+        await GitAsync(workspace, $"clone -q --config user.email=t@example.com --config user.name=T \"{origin}\" repo");
+        return Path.Combine(workspace, "repo");
     }
 
-    private static async Task ConfigureUserAsync(string repo)
-    {
-        await GitAsync(repo, "config user.email t@example.com");
-        await GitAsync(repo, "config user.name T");
-    }
+
 
     private static async Task CommitAsync(string repoPath, string fileName, string message)
     {

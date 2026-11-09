@@ -304,23 +304,8 @@ public sealed class SyncRepositoryReadOverlapTests : IDisposable
     };
 
     /// <summary>A clone with one pushed commit on main, so fetch succeeds and main has an upstream.</summary>
-    private async Task<string> CloneCommittedRepositoryAsync()
-    {
-        var origin = Path.Combine(_root, "origin.git");
-        Directory.CreateDirectory(origin);
-        await RunGitAsync(origin, "init --bare -b main");
-
-        var workspace = Path.Combine(_root, "ws");
-        Directory.CreateDirectory(workspace);
-        await RunGitAsync(workspace, $"clone \"{origin}\" repo");
-
-        var repoPath = Path.Combine(workspace, "repo");
-        await RunGitAsync(repoPath, "config user.email test@example.com");
-        await RunGitAsync(repoPath, "config user.name Test");
-        await CommitAsync(repoPath, "README.md", "init");
-        await RunGitAsync(repoPath, "push -u origin main");
-        return repoPath;
-    }
+    private Task<string> CloneCommittedRepositoryAsync() =>
+        Task.FromResult(GitScenarios.ClonedRepository(_root, new CommitSpec(Content: "init\n"), push: true));
 
     private static async Task CommitAsync(string repoPath, string fileName, string message)
     {

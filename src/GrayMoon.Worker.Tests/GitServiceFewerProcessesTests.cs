@@ -451,6 +451,8 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
     }
 
     [Fact]
+
+    [Trait("Category", "Long")]
     public async Task Commit_counts_agree_with_the_probe_by_probe_logic_across_repository_states()
     {
         var origin = await SeedOriginAsync("main");
@@ -1078,22 +1080,8 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
     /// A bare remote whose default branch is <paramref name="defaultBranch"/>, with one commit on it. The first
     /// clone of it (see <see cref="CloneAsync"/>) therefore has an <c>origin/HEAD</c>.
     /// </summary>
-    private async Task<string> SeedOriginAsync(string defaultBranch)
-    {
-        var origin = Path.Combine(_root, "origin.git");
-        Directory.CreateDirectory(origin);
-        await GitAsync(origin, $"init --bare -b {defaultBranch}");
-
-        var seed = Path.Combine(_root, "seed");
-        Directory.CreateDirectory(seed);
-        await GitAsync(seed, $"init -b {defaultBranch}");
-        await GitAsync(seed, "config user.email t@example.com");
-        await GitAsync(seed, "config user.name T");
-        await GitAsync(seed, $"remote add origin \"{origin}\"");
-        await CommitAsync(seed, "README.md", "init");
-        await GitAsync(seed, $"push origin {defaultBranch}");
-        return origin;
-    }
+    private Task<string> SeedOriginAsync(string defaultBranch) =>
+        Task.FromResult(GitScenarios.SeededRemote(_root, defaultBranch));
 
     /// <summary>Adds a commit to the remote's default branch through the seed clone.</summary>
     private async Task PushFromSeedAsync(string origin, string file, string text)
@@ -1124,11 +1112,8 @@ public sealed class GitServiceFewerProcessesTests : IDisposable
         var workspace = Path.Combine(_root, "ws");
         Directory.CreateDirectory(workspace);
         var name = _clones++ == 0 ? "repo" : $"repo{_clones}";
-        await GitAsync(workspace, $"clone \"{origin}\" {name}");
-        var repo = Path.Combine(workspace, name);
-        await GitAsync(repo, "config user.email t@example.com");
-        await GitAsync(repo, "config user.name T");
-        return repo;
+        await GitAsync(workspace, $"clone --config user.email=t@example.com --config user.name=T \"{origin}\" {name}");
+        return Path.Combine(workspace, name);
     }
 
     private static async Task CommitAsync(string repoPath, string fileName, string message)

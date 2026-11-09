@@ -14,14 +14,18 @@ public sealed class TempGitRepositoryFixture : IDisposable
     {
         RepositoryPath = Directory.CreateTempSubdirectory("graymoon-git-changes-test-").FullName;
 
-        RunGit("init", "--initial-branch=main");
-        RunGit("config", "user.name", "GrayMoon Test");
-        RunGit("config", "user.email", "graymoon-test@example.com");
-        RunGit("config", "commit.gpgsign", "false");
+        // The same five setup processes for every instance, so run them once and copy the result.
+        GitTemplateCache.CopyTo("temp-git-repository", RepositoryPath, template =>
+        {
+            Run(template, "init", "--initial-branch=main");
+            Run(template, "config", "user.name", "GrayMoon Test");
+            Run(template, "config", "user.email", "graymoon-test@example.com");
+            Run(template, "config", "commit.gpgsign", "false");
 
-        // Force off regardless of the developer/CI machine's global or system git config, so line-ending
-        // content assertions in these tests are deterministic on every platform.
-        RunGit("config", "core.autocrlf", "false");
+            // Force off regardless of the developer/CI machine's global or system git config, so line-ending
+            // content assertions in these tests are deterministic on every platform.
+            Run(template, "config", "core.autocrlf", "false");
+        });
     }
 
     public string WriteFile(string relativePath, string content)
@@ -41,11 +45,13 @@ public sealed class TempGitRepositoryFixture : IDisposable
 
     public string ReadFile(string relativePath) => File.ReadAllText(Path.Combine(RepositoryPath, relativePath));
 
-    public (int ExitCode, string Stdout, string Stderr) RunGit(params string[] args)
+    public (int ExitCode, string Stdout, string Stderr) RunGit(params string[] args) => Run(RepositoryPath, args);
+
+    private static (int ExitCode, string Stdout, string Stderr) Run(string workingDirectory, params string[] args)
     {
         var startInfo = new ProcessStartInfo("git")
         {
-            WorkingDirectory = RepositoryPath,
+            WorkingDirectory = workingDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,

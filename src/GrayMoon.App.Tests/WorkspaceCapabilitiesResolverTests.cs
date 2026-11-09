@@ -209,7 +209,7 @@ public sealed class WorkspaceCapabilitiesResolverTests
 
             var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
             var dbContext = new AppDbContext(options);
-            await dbContext.Database.EnsureCreatedAsync();
+            await dbContext.Database.CreateSchemaAsync();
 
             return new ResolverTestContext(connection, dbContext, options);
         }

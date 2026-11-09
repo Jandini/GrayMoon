@@ -15,7 +15,7 @@ public class MigrationsTests
         var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
 
         await using var dbContext = new AppDbContext(options);
-        await dbContext.Database.EnsureCreatedAsync();
+        await dbContext.Database.CreateSchemaAsync();
 
         await Migrations.SeedDefaultWorkspaceRootPathAsync(dbContext);
 
@@ -31,7 +31,7 @@ public class MigrationsTests
         var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
 
         await using var dbContext = new AppDbContext(options);
-        await dbContext.Database.EnsureCreatedAsync();
+        await dbContext.Database.CreateSchemaAsync();
 
         dbContext.Settings.Add(new Models.Setting { Key = AppSettingRepository.WorkspaceRootPathKey, Value = @"D:\Custom" });
         await dbContext.SaveChangesAsync();
@@ -50,7 +50,7 @@ public class MigrationsTests
         var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
 
         await using var dbContext = new AppDbContext(options);
-        await dbContext.Database.EnsureCreatedAsync();
+        await dbContext.Database.CreateSchemaAsync();
 
         await Migrations.SeedDefaultWorkspaceRootPathAsync(dbContext);
         await Migrations.SeedDefaultWorkspaceRootPathAsync(dbContext);

@@ -35,7 +35,7 @@ public sealed class GitVersionParityTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_root, true); } catch { /* best-effort; git marks some files read-only */ }
+        TestDirectory.Delete(_root);
     }
 
     [FactIfGitVersion]

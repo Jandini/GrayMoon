@@ -200,7 +200,7 @@ public sealed class HostPrerequisiteRequirementsTests
             await connection.OpenAsync();
             var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
             var context = new ProviderTestContext(connection, options);
-            await context._dbContext.Database.EnsureCreatedAsync();
+            await context._dbContext.Database.CreateSchemaAsync();
             return context;
         }
 

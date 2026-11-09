@@ -107,27 +107,35 @@ public sealed class SyncRepositoryTagPinTests : IDisposable
 
     private string RepoPath() => Path.Combine(_root, "ws", "repo");
 
-    private async Task<(string Origin, string TaggedCommit, string Tip)> CreateOriginAsync()
+    private Task<(string Origin, string TaggedCommit, string Tip)> CreateOriginAsync()
     {
-        var origin = Path.Combine(_root, "repo.git");
-        Directory.CreateDirectory(origin);
-        await RunGitAsync(origin, "init --bare -b main");
+        // The same two-commit history in every test: built once, with its two commit ids recorded beside it.
+        GitTemplateCache.CopyTo("tag-pin-origin", _root, template =>
+        {
+            var templateOrigin = Path.Combine(template, "repo.git");
+            Directory.CreateDirectory(templateOrigin);
+            GitConfigTestSupport.Git(templateOrigin, "init --bare -b main");
 
-        var seed = Path.Combine(_root, "seed");
-        await RunGitAsync(_root, $"clone \"{origin}\" seed");
-        await RunGitAsync(seed, "config user.email test@example.com");
-        await RunGitAsync(seed, "config user.name Test");
-        await File.WriteAllTextAsync(Path.Combine(seed, "a.txt"), "a\n");
-        await RunGitAsync(seed, "add -A");
-        await RunGitAsync(seed, "commit -m tagged");
-        await RunGitAsync(seed, "tag v1.0.0");
-        var tagged = await HeadAsync(seed);
-        await File.WriteAllTextAsync(Path.Combine(seed, "b.txt"), "b\n");
-        await RunGitAsync(seed, "add -A");
-        await RunGitAsync(seed, "commit -m tip");
-        await RunGitAsync(seed, "push origin main");
-        await RunGitAsync(seed, "push origin v1.0.0");
-        return (origin, tagged, await HeadAsync(seed));
+            var seed = Path.Combine(template, "seed");
+            GitConfigTestSupport.Git(template, $"clone \"{templateOrigin}\" seed");
+            GitConfigTestSupport.Git(seed, "config user.email test@example.com");
+            GitConfigTestSupport.Git(seed, "config user.name Test");
+            File.WriteAllText(Path.Combine(seed, "a.txt"), "a\n");
+            GitConfigTestSupport.Git(seed, "add -A");
+            GitConfigTestSupport.Git(seed, "commit -m tagged");
+            GitConfigTestSupport.Git(seed, "tag v1.0.0");
+            var tagged = GitConfigTestSupport.Git(seed, "rev-parse HEAD").Trim().ToLowerInvariant();
+            File.WriteAllText(Path.Combine(seed, "b.txt"), "b\n");
+            GitConfigTestSupport.Git(seed, "add -A");
+            GitConfigTestSupport.Git(seed, "commit -m tip");
+            GitConfigTestSupport.Git(seed, "push origin main");
+            GitConfigTestSupport.Git(seed, "push origin v1.0.0");
+            var tip = GitConfigTestSupport.Git(seed, "rev-parse HEAD").Trim().ToLowerInvariant();
+            File.WriteAllText(Path.Combine(template, "commits.txt"), tagged + "\n" + tip);
+        });
+
+        var commits = File.ReadAllText(Path.Combine(_root, "commits.txt")).Split('\n');
+        return Task.FromResult((Path.Combine(_root, "repo.git"), commits[0], commits[1]));
     }
 
     private async Task WriteDefinitionAsync(string origin, string tag, string commit)

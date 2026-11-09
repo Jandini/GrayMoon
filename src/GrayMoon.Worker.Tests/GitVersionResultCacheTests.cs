@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Reflection;
 using GrayMoon.Abstractions.Worker;
 using GrayMoon.Common;
 using GrayMoon.Common.Git;
@@ -317,6 +318,31 @@ public sealed class GitVersionResultCacheTests : IDisposable
     }
 
     [Fact]
+    public async Task A_request_waiting_on_a_cancelled_run_that_has_not_cleaned_up_yet_still_gets_its_own_answer()
+    {
+        // The state the cancel race leaves behind: the first run has reported itself cancelled but its own cleanup
+        // has not yet removed its in-flight entry, so a retrying waiter finds the cancelled entry again. The waiter
+        // must drop that entry and run for itself, not re-read it until its attempts are used up.
+        var repo = await InitAsync("repo");
+        var options = new RepositoryVersionOptions();
+        var fingerprint = GitVersionInputFingerprint.TryCompute(repo, options)!;
+        var inputs = fingerprint.Head + fingerprint.HeadIdentity + fingerprint.Refs + fingerprint.Config + fingerprint.Tool + fingerprint.Invocation;
+
+        const BindingFlags Private = BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
+        var inFlightField = typeof(GitVersionResultCache).GetField("_inFlight", Private)!;
+        var inFlight = inFlightField.GetValue(_cache)!;
+        var key = typeof(GitVersionResultCache).GetMethod("MakeKey", Private)!.Invoke(null, [repo, options])!;
+        var flightKey = Activator.CreateInstance(inFlightField.FieldType.GetGenericArguments()[0], key, inputs)!;
+        var stale = new TaskCompletionSource<RepositoryVersionResult>();
+        stale.SetCanceled();
+        Assert.True((bool)inFlight.GetType().GetMethod("TryAdd")!.Invoke(inFlight, [flightKey, stale])!);
+
+        var result = await _cache.GetOrRunAsync(repo, options, _ => Task.FromResult(Success("second")), CancellationToken.None);
+
+        Assert.Equal("second", result.InformationalVersion);
+    }
+
+    [Fact]
     public async Task The_cache_is_bounded()
     {
         var small = new GitVersionResultCache(_log, maxEntries: 2);
@@ -455,20 +481,14 @@ public sealed class GitVersionResultCacheTests : IDisposable
     private static string ToolManifest(string version)
         => "{\"version\":1,\"isRoot\":true,\"tools\":{\"gitversion.tool\":{\"version\":\"" + version + "\",\"commands\":[\"dotnet-gitversion\"]}}}\n";
 
-    private async Task<string> InitAsync(string name, bool withManifest = true)
+    private Task<string> InitAsync(string name, bool withManifest = true)
     {
         var repo = Path.Combine(_root, name);
-        Directory.CreateDirectory(repo);
-        await GitAsync(repo, "init -b main");
-        await GitAsync(repo, "config user.email t@example.com");
-        await GitAsync(repo, "config user.name T");
-        await File.WriteAllTextAsync(Path.Combine(repo, "README.md"), "init\n");
-        await GitAsync(repo, "add -A");
-        await GitAsync(repo, "commit -m init");
+        GitScenarios.CommittedRepository(repo, new CommitSpec(Content: "init\n", UserName: "T", UserEmail: "t@example.com"));
         // Untracked, so it does not move HEAD; it only makes the tool identity resolvable without GitVersion installed.
         if (withManifest)
-            await File.WriteAllTextAsync(Path.Combine(repo, "dotnet-tools.json"), ToolManifest("5.12.0"));
-        return repo;
+            File.WriteAllText(Path.Combine(repo, "dotnet-tools.json"), ToolManifest("5.12.0"));
+        return Task.FromResult(repo);
     }
 
     private static async Task CommitAsync(string repo, string file, string message)

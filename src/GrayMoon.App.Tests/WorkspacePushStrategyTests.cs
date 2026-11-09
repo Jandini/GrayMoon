@@ -399,7 +399,13 @@ public sealed class WorkspacePushStrategyTests
     {
         await using var ctx = await CreateContextAsync(
             new RecordingNuGetHandler(),
-            options => options.PushWaitDependencyTimeoutMinutesPerDependency = 0.1);
+            options =>
+            {
+                // A short wait that polls often: the test needs the timeout to happen, not to watch real seconds pass.
+                options.PushWaitDependencyTimeoutMinutesPerDependency = 0.005;
+                options.PushWaitPollIntervalSeconds = 0.02;
+                options.PushWaitTickMilliseconds = 10;
+            });
         await ctx.UseDotNetDependencyProfileAsync();
         var graph = await SeedDependencyGraphAsync(ctx, matchConnector: false);
         RespondPushCommands(ctx);

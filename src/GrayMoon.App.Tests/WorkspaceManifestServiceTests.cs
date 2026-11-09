@@ -648,7 +648,7 @@ internal sealed class ManifestTestFixture : IAsyncDisposable
         await connection.OpenAsync();
         var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
         await using (var db = new AppDbContext(options))
-            await db.Database.EnsureCreatedAsync();
+            await db.Database.CreateSchemaAsync();
         return new ManifestTestFixture(connection, options, contextIsSpecialWorkspace);
     }
 

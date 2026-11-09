@@ -300,6 +300,17 @@ public static partial class Migrations
             """);
     }
 
+    /// <summary>
+    /// Strict step 16. Re-runs the special Workspace context backfill after every column it writes exists.
+    /// The legacy baseline runs the same backfill, but on a pre-Feature database it throws part-way
+    /// (the Git Changes copy writes <c>ContentDigest</c>, which strict step 14 adds later). The tolerant
+    /// baseline logs that and moves on, leaving later Workspaces without a context and the Git Changes,
+    /// selected-context and later copies undone. The backfill skips anything already copied, so running it
+    /// again is a no-op for a database the baseline finished and a repair for one it did not.
+    /// </summary>
+    public static Task MigrateSpecialWorkspaceContextBackfillRepairAsync(AppDbContext dbContext, ILogger? logger = null)
+        => BackfillSpecialWorkspaceContextsAsync(dbContext);
+
     private static async Task BackfillSpecialWorkspaceContextsAsync(AppDbContext dbContext)
     {
         var now = DateTime.UtcNow;

@@ -13,4 +13,10 @@ public class WorkspaceOptions
 
     /// <summary>Expected time per dependency build in minutes, used to compute push wait timeout. Timeout = (number of dependencies) × this value. Default 5.</summary>
     public double PushWaitDependencyTimeoutMinutesPerDependency { get; set; } = 5.0;
+
+    /// <summary>Seconds between package registry lookups while a push waits for the packages it depends on. Default 2. Tests shorten it so a wait does not take real seconds.</summary>
+    public double PushWaitPollIntervalSeconds { get; set; } = 2.0;
+
+    /// <summary>Milliseconds between checks of the wait loop (progress text, CI watch, deadline). Default 1000. Tests shorten it together with <see cref="PushWaitPollIntervalSeconds"/>.</summary>
+    public int PushWaitTickMilliseconds { get; set; } = 1000;
 }

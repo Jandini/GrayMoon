@@ -28,8 +28,11 @@ public sealed class WorkerBridge(
     WorkerConnectionTracker connectionTracker,
     WorkerCommandCancelSender cancelSender,
     IOptions<WorkerBridgeOptions> options,
-    ILogger<WorkerBridge> logger) : IWorkerBridge
+    ILogger<WorkerBridge> logger,
+    TimeProvider? timeProvider = null) : IWorkerBridge
 {
+    private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
+
     internal const string NotConnectedMessage = "Worker not connected. Start the GrayMoon Worker to sync repositories.";
 
     private readonly TimeSpan _commandTimeout = TimeSpan.FromSeconds(Math.Max(1, options.Value.CommandTimeoutSeconds));
@@ -79,7 +82,7 @@ public sealed class WorkerBridge(
 
         var sink = TerminalSinkContext.Current;
 
-        using var timeoutCts = new CancellationTokenSource(_commandTimeout);
+        using var timeoutCts = new CancellationTokenSource(_commandTimeout, _time);
 
         // The command timeout is an inactivity bound, not a total one: every line the Worker streams back (git clone
         // progress, for one) proves the command is alive and restarts the window. A huge clone can therefore take

@@ -20,7 +20,7 @@ public sealed class CheckFileVersionsCommandTests : IDisposable
     }
     public void Dispose()
     {
-        try { Directory.Delete(_root, true); } catch { /* best-effort */ }
+        TestDirectory.Delete(_root);
     }
     [Fact]
     public async Task Compares_all_three_token_kinds_independently()

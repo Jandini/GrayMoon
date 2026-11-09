@@ -47,7 +47,7 @@ public sealed class WorkerRepositoryPathsTests
         }
         finally
         {
-            try { Directory.Delete(root, true); } catch { /* best-effort */ }
+            TestDirectory.Delete(root);
         }
     }
 }

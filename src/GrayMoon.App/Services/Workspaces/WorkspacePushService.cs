@@ -45,6 +45,9 @@ public sealed partial class WorkspacePushService(
     IWorkspaceCiProviderResolver? ciProviderResolver = null,
     OverlayCommandTerminalService? overlayCommandTerminalService = null) : IPushLane
 {
+    /// <summary>Guards against a configuration of zero or less, which would end every wait at once. Far below any real timeout, so tests can use a wait of well under a second.</summary>
+    private const double MinimumPushWaitMinutesPerDependency = 0.001;
+
     private readonly IWorkerBridge _workerBridge = workerBridge ?? throw new ArgumentNullException(nameof(workerBridge));
     private readonly WorkspaceService _workspaceService = workspaceService ?? throw new ArgumentNullException(nameof(workspaceService));
     private readonly WorkspaceRepository _workspaceRepository = workspaceRepository ?? throw new ArgumentNullException(nameof(workspaceRepository));
@@ -362,7 +365,9 @@ public sealed partial class WorkspacePushService(
 
         if (totalDeps > 0)
         {
-            var minutesPerDep = Math.Max(0.1, workspaceOptions.Value.PushWaitDependencyTimeoutMinutesPerDependency);
+            var minutesPerDep = Math.Max(MinimumPushWaitMinutesPerDependency, workspaceOptions.Value.PushWaitDependencyTimeoutMinutesPerDependency);
+            var pollIntervalSeconds = Math.Max(0.001, workspaceOptions.Value.PushWaitPollIntervalSeconds);
+            var tick = TimeSpan.FromMilliseconds(Math.Max(1, workspaceOptions.Value.PushWaitTickMilliseconds));
             var timeoutMinutes = totalDeps * minutesPerDep;
             var totalTimeout = TimeSpan.FromMinutes(timeoutMinutes);
             using var timeoutCts = new CancellationTokenSource(totalTimeout);
@@ -473,7 +478,7 @@ public sealed partial class WorkspacePushService(
 
                 await ciRunWatch.TickAsync(pushedRepos, links, linkedToken);
 
-                if ((DateTime.UtcNow - lastPollUtc).TotalSeconds >= PackageWaitDiagnostics.PollIntervalSeconds)
+                if ((DateTime.UtcNow - lastPollUtc).TotalSeconds >= pollIntervalSeconds)
                 {
                     lastPollUtc = DateTime.UtcNow;
                     int[] toCheck;
@@ -562,7 +567,7 @@ public sealed partial class WorkspacePushService(
 
                 if (getFoundCount() >= totalDeps)
                     break;
-                await Task.Delay(TimeSpan.FromSeconds(1), linkedToken);
+                await Task.Delay(tick, linkedToken);
             }
             }
             catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)

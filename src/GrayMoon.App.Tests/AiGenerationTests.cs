@@ -512,7 +512,7 @@ public sealed class AiGenerationTests
         await connection.OpenAsync();
         var options = new DbContextOptionsBuilder<GrayMoon.App.Data.AppDbContext>().UseSqlite(connection).Options;
         await using var db = new GrayMoon.App.Data.AppDbContext(options);
-        await db.Database.EnsureCreatedAsync();
+        await db.Database.CreateSchemaAsync();
         await using (var drop = connection.CreateCommand())
         {
             drop.CommandText = "ALTER TABLE \"Workspaces\" DROP COLUMN \"PinnedAiProviderId\"";

@@ -37,7 +37,7 @@ public sealed class RemoveWorktreeResidueTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_root, true); } catch { /* best-effort */ }
+        TestDirectory.Delete(_root);
     }
 
     // ---- Safety guards (pure, one test per guard) --------------------------------------------------
@@ -584,16 +584,10 @@ public sealed class RemoveWorktreeResidueTests : IDisposable
         await Task.CompletedTask;
     }
 
-    private static async Task InitGitWithCommitAsync(string repoPath)
+    private static Task InitGitWithCommitAsync(string repoPath)
     {
-        await RunGitAsync(repoPath, "init");
-        await RunGitAsync(repoPath, "config user.email test@example.com");
-        await RunGitAsync(repoPath, "config user.name Test");
-        // Ensure default branch is main for stable assertions across Git versions.
-        await RunGitAsync(repoPath, "checkout -B main");
-        await File.WriteAllTextAsync(Path.Combine(repoPath, "README.md"), "x\n");
-        await RunGitAsync(repoPath, "add README.md");
-        await RunGitAsync(repoPath, "commit -m init");
+        GitScenarios.CommittedRepository(repoPath);
+        return Task.CompletedTask;
     }
 
     private static async Task RunGitAsync(string repoPath, string args)

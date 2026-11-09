@@ -27,7 +27,7 @@ public sealed class WorkspaceRepositoryRoleGuardTests
         await connection.OpenAsync();
         var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
         var db = new AppDbContext(options);
-        await db.Database.EnsureCreatedAsync();
+        await db.Database.CreateSchemaAsync();
         return (connection, db);
     }
 

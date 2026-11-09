@@ -67,7 +67,7 @@ public class SqlitePerformanceTests
         int secondLink;
         await using (var db = await factory.CreateDbContextAsync())
         {
-            await db.Database.EnsureCreatedAsync();
+            await db.Database.CreateSchemaAsync();
             var connector = new Connector
             {
                 ConnectorName = "github",
@@ -113,7 +113,7 @@ public class SqlitePerformanceTests
         var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connectionString).Options;
         await using (var db = new AppDbContext(options))
         {
-            await db.Database.EnsureCreatedAsync();
+            await db.Database.CreateSchemaAsync();
             var connector = new Connector
             {
                 ConnectorName = "github",
@@ -319,7 +319,7 @@ public class SqlitePerformanceTests
         await connection.OpenAsync();
         var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
         await using var db = new AppDbContext(options);
-        await db.Database.EnsureCreatedAsync();
+        await db.Database.CreateSchemaAsync();
 
         AssertNamedIndex<WorkspaceFeatureContext>(db, "IX_WorkspaceFeatureContexts_WorkspaceId", unique: false);
         AssertNamedIndex<WorkspaceFeatureRepository>(db, "IX_WorkspaceFeatureRepositories_WorkspaceRepositoryId", unique: false);

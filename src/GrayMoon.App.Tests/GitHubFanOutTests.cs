@@ -351,7 +351,7 @@ public sealed partial class GitHubFanOutTests
             await using (var scope = provider.CreateAsyncScope())
             {
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                await db.Database.EnsureCreatedAsync();
+                await db.Database.CreateSchemaAsync();
 
                 var ids = new List<int>();
                 if (repoCount > 0)

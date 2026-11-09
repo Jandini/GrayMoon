@@ -112,6 +112,13 @@ Current strict steps:
 10  Workspace pinned AI provider column                    (Workspaces.PinnedAiProviderId)
 11  WorkspaceProjects identity key                         (ProjectIdentityKey column + backfill from path / package id; unique (context, repo, name) index becomes
                                                            non-unique, unique IX_WorkspaceProjects_Context_Repo_Identity added; no rows deleted)
+12  Ambiguous package reference usage                      (ambiguous package reference usage rows)
+13  Git Changes path indexes                               (IX_WorkspaceGitContextChangeEntries_Context_Repo_Path, _Context_Path)
+14  Git Changes content digest                             (WorkspaceGitContextRepositoryStatuses.ContentDigest, PathCount)
+15  Fork support columns                                   (IsFork, ParentCloneUrl, pull request Parent* columns)
+16  Repair special Workspace context backfill              (re-runs the baseline's special Workspace context backfill once every column exists; the
+                                                           baseline copy throws part-way on a 0.1.0 database because step 14 adds ContentDigest later,
+                                                           which left later Workspaces uncopied. Idempotent: it skips anything already copied)
 ```
 
 A brand-new database also starts at `user_version` 0, so it runs the baseline and every strict step right after `EnsureCreated()`. Every step must therefore be a no-op against the current model's shape (guard with `pragma_table_info(...)`, `sqlite_master`, `CREATE ... IF NOT EXISTS`), and a backfill must run only on the branch that actually created the column (see `AddWorkspaceProfileColumnIfMissingAsync`).

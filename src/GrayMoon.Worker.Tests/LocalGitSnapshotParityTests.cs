@@ -586,21 +586,8 @@ public sealed class LocalGitSnapshotParityTests : IDisposable
     }
 
     /// <summary>A bare remote whose default branch is <paramref name="defaultBranch"/>, with one commit (tagged nothing) on it.</summary>
-    private async Task<string> SeedOriginAsync(string defaultBranch)
-    {
-        var origin = Path.Combine(_root, "origin.git");
-        Directory.CreateDirectory(origin);
-        await GitAsync(origin, $"init --bare -b {defaultBranch}");
-
-        var seed = Path.Combine(_root, "seed");
-        Directory.CreateDirectory(seed);
-        await GitAsync(seed, $"init -b {defaultBranch}");
-        await ConfigureUserAsync(seed);
-        await GitAsync(seed, $"remote add origin \"{origin}\"");
-        await CommitAsync(seed, "README.md", "init");
-        await GitAsync(seed, $"push origin {defaultBranch}");
-        return origin;
-    }
+    private Task<string> SeedOriginAsync(string defaultBranch) =>
+        Task.FromResult(GitScenarios.SeededRemote(_root, defaultBranch));
 
     /// <summary>Adds a commit to the remote's default branch through the seed clone.</summary>
     private async Task PushFromSeedAsync(string file)
@@ -626,10 +613,8 @@ public sealed class LocalGitSnapshotParityTests : IDisposable
         var workspace = Path.Combine(_root, "ws");
         Directory.CreateDirectory(workspace);
         var name = $"repo{_clones++}";
-        await GitAsync(workspace, $"clone \"{origin}\" {name}");
-        var repo = Path.Combine(workspace, name);
-        await ConfigureUserAsync(repo);
-        return repo;
+        await GitAsync(workspace, $"clone --config user.email=t@example.com --config user.name=T \"{origin}\" {name}");
+        return Path.Combine(workspace, name);
     }
 
     /// <summary>A commit with a fixed committer date (git would give commits made in the same second the same date).</summary>

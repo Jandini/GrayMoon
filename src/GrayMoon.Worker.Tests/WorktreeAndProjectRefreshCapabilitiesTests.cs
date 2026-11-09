@@ -32,8 +32,7 @@ public sealed class WorktreeAndProjectRefreshCapabilitiesTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_root, true); }
-        catch { /* best-effort */ }
+        TestDirectory.Delete(_root);
     }
 
     [Fact]

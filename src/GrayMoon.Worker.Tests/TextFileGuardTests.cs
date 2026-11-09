@@ -12,7 +12,7 @@ public sealed class TextFileGuardTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_root, true); } catch { /* best-effort */ }
+        TestDirectory.Delete(_root);
     }
 
     private static readonly byte[] BinaryBytes = [0x4D, 0x5A, 0x90, 0x00, 0x03, 0x00, 0x56, 0x45, 0x52, 0x3D];

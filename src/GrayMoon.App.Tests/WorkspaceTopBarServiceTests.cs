@@ -43,7 +43,7 @@ public sealed class WorkspaceTopBarServiceTests
 
         var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
         var dbContext = new AppDbContext(options);
-        await dbContext.Database.EnsureCreatedAsync();
+        await dbContext.Database.CreateSchemaAsync();
 
         var workspace = new Workspace { Name = "Acme Workspace" };
         dbContext.Workspaces.Add(workspace);

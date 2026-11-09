@@ -16,7 +16,7 @@ public sealed class WorkspaceProfileMigrationTests
         await connection.OpenAsync();
         var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
         await using var db = new AppDbContext(options);
-        await db.Database.EnsureCreatedAsync();
+        await db.Database.CreateSchemaAsync();
 
         await RemoveProfileColumnsAsync(connection);
         await InsertPreProfileWorkspaceAsync(connection, "AVR");
@@ -40,7 +40,7 @@ public sealed class WorkspaceProfileMigrationTests
         await connection.OpenAsync();
         var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
         await using var db = new AppDbContext(options);
-        await db.Database.EnsureCreatedAsync();
+        await db.Database.CreateSchemaAsync();
 
         await RemoveProfileColumnsAsync(connection);
         await InsertPreProfileWorkspaceAsync(connection, "AVR");
@@ -63,7 +63,7 @@ public sealed class WorkspaceProfileMigrationTests
         await connection.OpenAsync();
         var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
         await using var db = new AppDbContext(options);
-        await db.Database.EnsureCreatedAsync();
+        await db.Database.CreateSchemaAsync();
 
         await RemoveProfileColumnsAsync(connection);
         await InsertPreProfileWorkspaceAsync(connection, "AVR");
@@ -101,7 +101,7 @@ public sealed class WorkspaceProfileMigrationTests
         await connection.OpenAsync();
         var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
         await using var db = new AppDbContext(options);
-        await db.Database.EnsureCreatedAsync();
+        await db.Database.CreateSchemaAsync();
 
         Assert.Equal(3, await ProfileColumnCountAsync(connection));
 
@@ -125,7 +125,7 @@ public sealed class WorkspaceProfileMigrationTests
         await connection.OpenAsync();
         var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
         await using var db = new AppDbContext(options);
-        await db.Database.EnsureCreatedAsync();
+        await db.Database.CreateSchemaAsync();
 
         await RemoveProfileColumnsAsync(connection);
         await InsertPreProfileWorkspaceAsync(connection, "AVR");

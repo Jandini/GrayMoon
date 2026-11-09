@@ -16,7 +16,7 @@ public sealed class GitServiceSafeDirectoryTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_repo, true); } catch { /* best-effort */ }
+        TestDirectory.Delete(_repo);
     }
 
     private (GitService Git, ScriptedCommandLine Script) Create(CommandLineResult probe)

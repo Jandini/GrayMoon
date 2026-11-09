@@ -91,24 +91,8 @@ public sealed class SyncRepositoryHookInstallTests : IDisposable
                 Capabilities = capabilities,
             });
 
-    private async Task<string> CloneCommittedRepositoryAsync()
-    {
-        var origin = Path.Combine(_root, "origin.git");
-        Directory.CreateDirectory(origin);
-        await RunGitAsync(origin, "init --bare -b main");
-
-        var workspace = Path.Combine(_root, "ws");
-        Directory.CreateDirectory(workspace);
-        await RunGitAsync(workspace, $"clone \"{origin}\" repo");
-
-        var repoPath = Path.Combine(workspace, "repo");
-        await RunGitAsync(repoPath, "config user.email test@example.com");
-        await RunGitAsync(repoPath, "config user.name Test");
-        await File.WriteAllTextAsync(Path.Combine(repoPath, "README.md"), "hello\n");
-        await RunGitAsync(repoPath, "add -A");
-        await RunGitAsync(repoPath, "commit -m init");
-        return repoPath;
-    }
+    private Task<string> CloneCommittedRepositoryAsync() =>
+        Task.FromResult(GitScenarios.ClonedRepository(_root, new CommitSpec(Content: "hello\n")));
 
     private static async Task RunGitAsync(string workingDirectory, string args)
     {

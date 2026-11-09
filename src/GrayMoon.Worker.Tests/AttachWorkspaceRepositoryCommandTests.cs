@@ -310,27 +310,7 @@ public sealed class AttachWorkspaceRepositoryCommandTests : IDisposable
     };
 
     /// <summary>Creates a bare repository (HEAD on main) and, optionally, pushes one commit with README.md to it.</summary>
-    private string CreateRemote(bool withCommit)
-    {
-        var bare = Path.Combine(_baseDir, "remote.git");
-        Directory.CreateDirectory(bare);
-        Assert.Equal(0, RunGit(bare, "init", "--bare", "--initial-branch=main").ExitCode);
-
-        if (withCommit)
-        {
-            var source = Path.Combine(_baseDir, "source");
-            Directory.CreateDirectory(source);
-            Assert.Equal(0, RunGit(source, "init", "--initial-branch=main").ExitCode);
-            File.WriteAllText(Path.Combine(source, "README.md"), "from remote\n");
-            Assert.Equal(0, RunGit(source, "add", "--all").ExitCode);
-            Assert.Equal(0, RunGit(source,
-                "-c", "user.name=GrayMoon Test", "-c", "user.email=graymoon-test@example.com", "-c", "commit.gpgsign=false",
-                "commit", "-m", "Initial commit").ExitCode);
-            Assert.Equal(0, RunGit(source, "push", bare, "main").ExitCode);
-        }
-
-        return bare;
-    }
+    private string CreateRemote(bool withCommit) => GitScenarios.BareRemote(_baseDir, withCommit);
 
     private static (int ExitCode, string Stdout, string Stderr) RunGit(string workingDirectory, params string[] args)
     {

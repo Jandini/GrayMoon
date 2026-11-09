@@ -12,7 +12,6 @@ namespace GrayMoon.App.Services.Workspaces;
 /// </summary>
 internal static class PackageWaitDiagnostics
 {
-    internal const int PollIntervalSeconds = 2;
     internal static readonly TimeSpan WorkflowLookupBound = TimeSpan.FromSeconds(3);
     internal const int ConsumerNameBatchSize = 12;
     internal const int WorkflowLookupBudget = 4;

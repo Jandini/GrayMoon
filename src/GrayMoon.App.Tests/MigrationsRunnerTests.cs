@@ -14,7 +14,7 @@ public class MigrationsRunnerTests
         await connection.OpenAsync();
         var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
         await using var db = new AppDbContext(options);
-        await db.Database.EnsureCreatedAsync();
+        await db.Database.CreateSchemaAsync();
 
         // Fresh db already has the current schema from EnsureCreated; the legacy baseline step must be a
         // tolerant no-op here, not throw. The highest version is LegacyBaselineVersion once no strict steps
@@ -46,7 +46,7 @@ public class MigrationsRunnerTests
             var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connectionString).Options;
             await using (var db = new AppDbContext(options))
             {
-                await db.Database.EnsureCreatedAsync();
+                await db.Database.CreateSchemaAsync();
                 await Migrations.RunAllAsync(db, NullLogger.Instance);
             }
 
@@ -83,7 +83,7 @@ public class MigrationsRunnerTests
         await connection.OpenAsync();
         var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
         await using var db = new AppDbContext(options);
-        await db.Database.EnsureCreatedAsync();
+        await db.Database.CreateSchemaAsync();
         await db.Database.ExecuteSqlRawAsync("PRAGMA user_version = 5;");
 
         var ex = await Assert.ThrowsAsync<DatabaseMigrationException>(() =>

@@ -46,19 +46,14 @@ public sealed class UpdateAndPushApprovalStoreTests
     [Fact]
     public void Expired_approval_is_refused()
     {
-        var clock = new MutableTimeProvider(new DateTimeOffset(2026, 10, 27, 12, 0, 0, TimeSpan.Zero));
+        var clock = new ManualClock(new DateTimeOffset(2026, 10, 27, 12, 0, 0, TimeSpan.Zero));
         var store = new UpdateAndPushApprovalStore(clock);
         var id = store.Add("run", 1, Context, null, false, new HashSet<int>(), new HashSet<int>());
 
-        clock.Now += UpdateAndPushApprovalStore.Lifetime + TimeSpan.FromSeconds(1);
+        clock.Advance(UpdateAndPushApprovalStore.Lifetime + TimeSpan.FromSeconds(1));
 
         Assert.Null(store.TryConsume(1, Context, id));
     }
 
-    private sealed class MutableTimeProvider(DateTimeOffset start) : TimeProvider
-    {
-        public DateTimeOffset Now { get; set; } = start;
 
-        public override DateTimeOffset GetUtcNow() => Now;
-    }
 }

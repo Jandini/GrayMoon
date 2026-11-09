@@ -215,7 +215,7 @@ public sealed class WorkspaceOpenInRecentToolsDbTests
 
             var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
             await using (var db = new AppDbContext(options))
-                await db.Database.EnsureCreatedAsync();
+                await db.Database.CreateSchemaAsync();
             return new RecentToolsDb(connection, options);
         }
 

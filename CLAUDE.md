@@ -52,6 +52,15 @@ dotnet tool restore
 docker build --build-arg VERSION=1.0.0 -t graymoon .
 ```
 
+### Test setup conventions
+
+Test time is dominated by setup, so shared setup lives in fixtures; do not repeat it per test.
+
+- **Worker git tests**: start from `GitScenarios` (`CommittedRepository`, `ClonedRepository`, `SeededRemote`, `BareRemote`) or `TempGitRepositoryFixture`, never from your own `git init`/`config`/`commit`. They build the scenario once per run and copy it per test (`GitTemplateCache`). Add a scenario when a setup shape appears in a second class.
+- **Worker temp directories**: clean up with `TestDirectory.Delete`, not `Directory.Delete` inside a swallowing `try/catch`. Git's read-only object files and long paths otherwise leak the directory.
+- **App database tests**: call `db.Database.CreateSchemaAsync()` (or `TestDatabaseSchema.CopyInto`) instead of `EnsureCreatedAsync()`; it restores a prebuilt schema in about a millisecond instead of rebuilding it in about 100 ms.
+- **Long tests**: a scale or stress test that takes many seconds gets `[Trait("Category", "Long")]`. CI runs it only for a pull request; run it locally with `--filter "Category=Long"`, or skip it with `--filter "Category!=Long"`.
+- **Time**: a test must never depend on real elapsed time. Inject a `TimeProvider` and drive `ManualClock` (App.Tests) so the outcome is the same on a loaded CI runner. If a service has a poll or timeout setting, shorten it in the test instead of waiting.
 ## Architecture
 
 GrayMoon is a **two-process** system - never combine them:

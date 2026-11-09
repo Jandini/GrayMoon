@@ -106,12 +106,15 @@ public sealed class ProjectIdentityDiagnosticsTests
     }
 
     [Fact]
-    public async Task A_workspace_of_39_repositories_and_thousands_of_projects_reconciles_and_rescans_quickly()
+
+    [Trait("Category", "Long")]
+    public async Task A_workspace_of_39_repositories_reconciles_and_rescans_with_work_proportional_to_what_changed()
     {
         const int repositoryCount = 39;
-        const int projectsPerRepository = 100;
+        const int projectsPerRepository = 25;
 
-        await using var ctx = await GeneratedPackageTestContext.CreateAsync();
+        var commands = new SqlCommandCounter();
+        await using var ctx = await GeneratedPackageTestContext.CreateAsync(commands);
         await using var scope = ctx.CreateScope();
         var repo = ctx.Repo(scope);
         var db = ctx.Db(scope);
@@ -140,28 +143,31 @@ public sealed class ProjectIdentityDiagnosticsTests
             return ProjectScanOutcome.Scanned(id, projects);
         }).ToList();
 
-        var first = Stopwatch.StartNew();
+        commands.Reset();
         await repo.ReconcileProjectSnapshotAsync(ctx.WorkspaceId, ctx.SpecialContextId, Outcomes(), mergeEdges: true, persistDependencyLevel: true);
-        first.Stop();
+        var firstCommands = commands.Count;
 
         Assert.Equal(repositoryCount * projectsPerRepository, await db.WorkspaceProjects.CountAsync(p => repoIds.Contains(p.RepositoryId)));
         var edgesAfterFirst = await db.ProjectDependencies.CountAsync();
         Assert.True(edgesAfterFirst >= (repositoryCount - 1) * projectsPerRepository);
 
-        var repeat = Stopwatch.StartNew();
+        commands.Reset();
         await repo.ReconcileProjectSnapshotAsync(ctx.WorkspaceId, ctx.SpecialContextId, Outcomes(), mergeEdges: true, persistDependencyLevel: true);
-        repeat.Stop();
+        var repeatCommands = commands.Count;
 
         Assert.Equal(edgesAfterFirst, await db.ProjectDependencies.CountAsync());
 
         // A partial scan (one repository) must not cost a full-workspace rewrite.
-        var partial = Stopwatch.StartNew();
+        commands.Reset();
         await repo.ReconcileProjectSnapshotAsync(ctx.WorkspaceId, ctx.SpecialContextId, [Outcomes()[5]], mergeEdges: true, persistDependencyLevel: true);
-        partial.Stop();
+        var partialCommands = commands.Count;
 
-        Console.WriteLine($"PERF 39 repos x 100 projects: first={first.ElapsedMilliseconds}ms repeat={repeat.ElapsedMilliseconds}ms partial={partial.ElapsedMilliseconds}ms");
-        Assert.True(first.Elapsed < TimeSpan.FromSeconds(60), $"first reconcile took {first.Elapsed}");
-        Assert.True(repeat.Elapsed < TimeSpan.FromSeconds(60), $"repeat reconcile took {repeat.Elapsed}");
-        Assert.True(partial.Elapsed < repeat.Elapsed + TimeSpan.FromSeconds(1), $"partial {partial.Elapsed} vs full repeat {repeat.Elapsed}");
+        // Work, not elapsed time: the number of SQL commands is the same on any machine, and it is what grows when
+        // reconciliation starts doing something per row it used to do once per batch. A repeat of an unchanged scan
+        // writes nothing new, and a one-repository scan must not cost a full-workspace rewrite.
+        var projectCount = repositoryCount * projectsPerRepository;
+        Assert.True(firstCommands <= 3 * projectCount + 20 * repositoryCount, $"first reconcile ran {firstCommands} commands for {projectCount} projects");
+        Assert.True(repeatCommands <= firstCommands, $"repeat reconcile ran {repeatCommands} commands, more than the first ({firstCommands})");
+        Assert.True(partialCommands * 10 <= repeatCommands, $"partial reconcile ran {partialCommands} commands vs {repeatCommands} for a full repeat");
     }
 }

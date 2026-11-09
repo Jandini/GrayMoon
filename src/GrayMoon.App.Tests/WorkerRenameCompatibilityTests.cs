@@ -71,7 +71,7 @@ public sealed class WorkerRenameCompatibilityTests
         await connection.OpenAsync();
         var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
         await using var dbContext = new AppDbContext(options);
-        await dbContext.Database.EnsureCreatedAsync();
+        await dbContext.Database.CreateSchemaAsync();
 
         Assert.Equal("AgentScannedAt", ColumnName(dbContext, typeof(WorkspaceGitRepositoryStatus)));
         Assert.Equal("AgentScannedAt", ColumnName(dbContext, typeof(WorkspaceGitContextRepositoryStatus)));
