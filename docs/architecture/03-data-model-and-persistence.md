@@ -629,7 +629,7 @@ ContentDigest, PathCount (nullable; migration 14)
 last error
 ```
 
-Feature contexts use `WorkspaceGitContextRepositoryStatuses` (unique `WorkspaceFeatureContextId + WorkspaceRepositoryId`) and `WorkspaceGitContextChangeEntries` with the same shape. `ContentDigest` (SHA-256 over every entry plus the status fields the page shows) and `PathCount` are computed in `GitChangesSnapshotPushHandler` so the page can skip a repaint for identical content. The special Workspace context writes both the legacy tables and the context tables.
+Feature contexts use `WorkspaceGitContextRepositoryStatuses` (unique `WorkspaceFeatureContextId + WorkspaceRepositoryId`) and `WorkspaceGitContextChangeEntries` with the same shape. `ContentDigest` (SHA-256 over every entry plus the status fields the page shows) and `PathCount` are computed in `GitChangesSnapshotPushHandler` so the page can skip a repaint for identical content. Legacy writes are off by default (`GitChangesOptions.WriteLegacyGitChangesTables`), so the special Workspace context writes only the context tables. The legacy `WorkspaceGitRepositoryStatus` and entry tables are used only by the one-time upgrade copy and by row cleanup. The Merge pull request dialog and bulk merge read the uncommitted count (staged + changed) from the special Workspace context status row; no row means 0.
 
 ### WorkspaceGitChangeEntry
 
@@ -952,6 +952,6 @@ Membership changes (adding Sources, changing membership in the Repositories moda
 
 ### Known gaps
 
-- The special Workspace still dual-writes the legacy link/status tables and the context tables (sections 3 and 13); readers have not moved to the context tables only.
+- The special Workspace still dual-writes the legacy link columns and the context state rows (section 3). The legacy Git Changes status/entry tables are no longer written by default (section 13); only the upgrade copy and cleanup use them.
 - `WorkspaceFileLineStatuses.WorkspaceFeatureContextId` has no foreign key (fresh and upgraded databases alike), so it relies on the explicit delete at Remove Feature.
 - The `RepositoryBranches` unique index excludes `IsTag` (section 5).

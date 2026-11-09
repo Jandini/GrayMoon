@@ -73,6 +73,92 @@ public sealed class WorkspacePullRequestServiceTests
         Assert.Null(await ctx.ReadPullRequestAsync());
     }
 
+    [Fact]
+    public async Task Local_git_state_reads_counts_from_the_workspace_context_status_when_no_legacy_row_exists()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await SeedContextStatusAsync(ctx, staged: 2, changed: 3);
+
+        var state = await GetLocalGitStateAsync(ctx);
+
+        Assert.True(state.HasLocalWarning);
+        Assert.Equal(5, state.UncommittedChangesCount);
+    }
+
+    [Fact]
+    public async Task Local_git_state_prefers_the_context_status_over_a_stale_legacy_row()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await SeedLegacyStatusAsync(ctx, staged: 9, changed: 9);
+        await SeedContextStatusAsync(ctx, staged: 1, changed: 0);
+
+        var state = await GetLocalGitStateAsync(ctx);
+
+        Assert.Equal(1, state.UncommittedChangesCount);
+    }
+
+    [Fact]
+    public async Task Local_git_state_ignores_a_stale_legacy_row_when_the_context_has_no_status()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await SeedLegacyStatusAsync(ctx, staged: 4, changed: 4);
+
+        var state = await GetLocalGitStateAsync(ctx);
+
+        Assert.False(state.HasLocalWarning);
+        Assert.Equal(0, state.UncommittedChangesCount);
+    }
+
+    [Fact]
+    public async Task Local_git_state_ignores_feature_context_status_rows()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var featureContextId = await SeedFeatureWithContextPrAsync(ctx, prNumber: 1, state: "open");
+        await SeedContextStatusAsync(ctx, staged: 7, changed: 7, featureContextId);
+
+        var state = await GetLocalGitStateAsync(ctx);
+
+        Assert.Equal(0, state.UncommittedChangesCount);
+    }
+
+    private static async Task<LocalGitState> GetLocalGitStateAsync(SyncStateTestContext ctx)
+    {
+        await using var scope = ctx.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<WorkspacePullRequestService>()
+            .GetLocalGitStateAsync(ctx.WorkspaceId, ctx.RepositoryId);
+    }
+
+    private static async Task SeedLegacyStatusAsync(SyncStateTestContext ctx, int staged, int changed)
+    {
+        await using var scope = ctx.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        db.WorkspaceGitRepositoryStatuses.Add(new WorkspaceGitRepositoryStatus
+        {
+            WorkspaceRepositoryId = ctx.WorkspaceRepositoryId,
+            StagedCount = staged,
+            ChangedCount = changed,
+        });
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task SeedContextStatusAsync(
+        SyncStateTestContext ctx, int staged, int changed, WorkspaceFeatureContextId? contextId = null)
+    {
+        var id = contextId ?? await ctx.GetSpecialContextIdAsync();
+        await using var scope = ctx.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        db.WorkspaceGitContextRepositoryStatuses.Add(new WorkspaceGitContextRepositoryStatus
+        {
+            WorkspaceFeatureContextId = id.Value,
+            WorkspaceRepositoryId = ctx.WorkspaceRepositoryId,
+            StagedCount = staged,
+            ChangedCount = changed,
+            WorkerScannedAt = DateTimeOffset.UtcNow,
+            PersistedAt = DateTimeOffset.UtcNow,
+        });
+        await db.SaveChangesAsync();
+    }
+
     private static async Task<WorkspaceFeatureContextId> SeedFeatureWithContextPrAsync(
         SyncStateTestContext ctx, int prNumber, string state)
     {

@@ -616,7 +616,7 @@ flowchart LR
   D --> E["page re-reads"]
 ```
 
-`GitChangesSnapshotPushHandler` resolves the context from the reported repository path, writes the context tables, and broadcasts `ContextGitChangesUpdated(workspaceId, contextId, repositoryId)`. Legacy dual-write (`GitChangesOptions.WriteLegacyGitChangesTables`) also writes the legacy tables and broadcasts `GitChangesUpdated(workspaceId, repositoryId)` for the special Workspace.
+`GitChangesSnapshotPushHandler` resolves the context from the reported repository path, writes the context tables, and broadcasts `ContextGitChangesUpdated(workspaceId, contextId, repositoryId)`. When `GitChangesOptions.WriteLegacyGitChangesTables` is enabled (default off; the Merge dialog does not depend on it), the handler also writes the legacy tables and broadcasts `GitChangesUpdated(workspaceId, repositoryId)` for the special Workspace.
 
 Each snapshot carries the **full** `GitChangeEntry` list for that repository over Worker↔App SignalR (`GitChangesSnapshotNotification`). The App's hub `MaximumReceiveMessageSize` is 10 MiB. The Changes page then re-reads the **entire** context projection into the circuit (`LoadAsync`), not only the updated repository's rows.
 

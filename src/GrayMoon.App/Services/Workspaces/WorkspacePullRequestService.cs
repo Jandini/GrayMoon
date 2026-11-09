@@ -3,6 +3,7 @@ using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services.GitProviders;
+using GrayMoon.Application.Features;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -48,6 +49,7 @@ public sealed class WorkspacePullRequestService(
     IGitProviderResolver gitProviderResolver,
     GitHubPullRequestMergeService gitHubPullRequestMergeService,
     IDbContextFactory<AppDbContext> dbContextFactory,
+    IWorkspaceFeatureContextResolver featureContextResolver,
     IOptions<WorkspaceOptions> workspaceOptions,
     IGitHubRateLimitTracker rateLimitTracker,
     ILogger<WorkspacePullRequestService> logger)
@@ -374,11 +376,12 @@ public sealed class WorkspacePullRequestService(
     /// <summary>Fetches a fresh, on-demand mergeability snapshot (PR, reviews, checks, repo merge settings) for the merge confirmation dialog's periodic silent refresh (no spinner to split around, so one combined call is simplest). Always hits GitHub live (ETag-conditional) - never served from the polled PR cache. Also folds in the workspace's own persisted Git Changes projection (uncommitted changes / unpushed commits), a GrayMoon-local, informational-only signal that never blocks the merge itself.</summary>
     public async Task<PullRequestMergeDetails?> GetMergeDetailsAsync(int workspaceId, int repositoryId, int prNumber, CancellationToken cancellationToken = default)
     {
-        var link = await GetLinkWithConnectorAndGitStatusAsync(workspaceId, repositoryId, cancellationToken);
-        if (link?.Repository == null)
+        var loaded = await GetLinkWithUncommittedCountAsync(workspaceId, repositoryId, cancellationToken);
+        if (loaded?.Link.Repository == null)
             return null;
 
-        var (hasUncommitted, uncommittedCount, unpushedCount, incomingCount) = ComputeLocalGitState(link);
+        var link = loaded.Value.Link;
+        var (hasUncommitted, uncommittedCount, unpushedCount, incomingCount) = ComputeLocalGitState(link, loaded.Value.UncommittedChangesCount);
 
         return await gitHubPullRequestMergeService.GetMergeDetailsAsync(
             link.Repository,
@@ -399,11 +402,11 @@ public sealed class WorkspacePullRequestService(
     /// </summary>
     public async Task<LocalGitState> GetLocalGitStateAsync(int workspaceId, int repositoryId, CancellationToken cancellationToken = default)
     {
-        var link = await GetLinkWithConnectorAndGitStatusAsync(workspaceId, repositoryId, cancellationToken);
-        if (link == null)
+        var loaded = await GetLinkWithUncommittedCountAsync(workspaceId, repositoryId, cancellationToken);
+        if (loaded == null)
             return default;
 
-        var (hasWarning, uncommittedCount, unpushedCount, incomingCount) = ComputeLocalGitState(link);
+        var (hasWarning, uncommittedCount, unpushedCount, incomingCount) = ComputeLocalGitState(loaded.Value.Link, loaded.Value.UncommittedChangesCount);
         return new LocalGitState(hasWarning, uncommittedCount, unpushedCount, incomingCount);
     }
 
@@ -428,15 +431,16 @@ public sealed class WorkspacePullRequestService(
     /// </summary>
     public async Task<PullRequestMergeReviewDetails?> GetMergeReviewDetailsAsync(int workspaceId, int repositoryId, int prNumber, string? headSha, CancellationToken cancellationToken = default)
     {
-        var link = await GetLinkWithConnectorAndGitStatusAsync(workspaceId, repositoryId, cancellationToken);
-        if (link?.Repository == null)
+        var loaded = await GetLinkWithUncommittedCountAsync(workspaceId, repositoryId, cancellationToken);
+        if (loaded?.Link.Repository == null)
             return null;
 
+        var link = loaded.Value.Link;
         var review = await gitHubPullRequestMergeService.GetMergeReviewDetailsAsync(link.Repository, link.Repository.Connector, prNumber, headSha, cancellationToken);
         if (review == null)
             return null;
 
-        var (hasUncommitted, uncommittedCount, unpushedCount, incomingCount) = ComputeLocalGitState(link);
+        var (hasUncommitted, uncommittedCount, unpushedCount, incomingCount) = ComputeLocalGitState(link, loaded.Value.UncommittedChangesCount);
 
         return new PullRequestMergeReviewDetails(
             review.ApprovedCount,
@@ -453,23 +457,34 @@ public sealed class WorkspacePullRequestService(
             incomingCount);
     }
 
-    private static (bool HasUncommittedChanges, int UncommittedChangesCount, int UnpushedCommitsCount, int IncomingCommitsCount) ComputeLocalGitState(WorkspaceRepositoryLink link)
+    private static (bool HasUncommittedChanges, int UncommittedChangesCount, int UnpushedCommitsCount, int IncomingCommitsCount) ComputeLocalGitState(
+        WorkspaceRepositoryLink link, int uncommittedChangesCount)
     {
-        var uncommittedChangesCount = (link.GitStatus?.StagedCount ?? 0) + (link.GitStatus?.ChangedCount ?? 0);
         var unpushedCommitsCount = link.OutgoingCommits ?? 0;
         var incomingCommitsCount = link.BranchHasUpstream == false ? 0 : link.IncomingCommits ?? 0;
         return (uncommittedChangesCount > 0, uncommittedChangesCount, unpushedCommitsCount, incomingCommitsCount);
     }
 
-    private async Task<WorkspaceRepositoryLink?> GetLinkWithConnectorAndGitStatusAsync(int workspaceId, int repositoryId, CancellationToken cancellationToken)
+    /// <summary>
+    /// Loads the link (with repository and connector) plus its uncommitted count. The merge dialog describes the
+    /// Workspace checkout, so the count comes from the special Workspace context's Git Changes status row
+    /// (staged + changed), the same projection the Changes page reads. No status row means nothing was scanned: 0.
+    /// </summary>
+    private async Task<(WorkspaceRepositoryLink Link, int UncommittedChangesCount)?> GetLinkWithUncommittedCountAsync(
+        int workspaceId, int repositoryId, CancellationToken cancellationToken)
     {
+        var link = await GetLinkWithConnectorAsync(workspaceId, repositoryId, cancellationToken);
+        if (link == null)
+            return null;
+
+        var contextId = await featureContextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        return await dbContext.WorkspaceRepositories
+        var uncommitted = await dbContext.WorkspaceGitContextRepositoryStatuses
             .AsNoTracking()
-            .Include(wr => wr.Repository)
-            .ThenInclude(r => r!.Connector)
-            .Include(wr => wr.GitStatus)
-            .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId, cancellationToken);
+            .Where(s => s.WorkspaceFeatureContextId == contextId.Value && s.WorkspaceRepositoryId == link.WorkspaceRepositoryId)
+            .Select(s => s.StagedCount + s.ChangedCount)
+            .FirstOrDefaultAsync(cancellationToken);
+        return (link, uncommitted);
     }
 
     /// <summary>Updates only the pull request title on GitHub. Leaves body, state, and base branch unchanged.</summary>
