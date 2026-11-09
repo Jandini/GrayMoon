@@ -20,8 +20,11 @@ public sealed partial class WorkspaceRepositories
     private async Task OpenMergeDialogAsync(WorkspaceRepositoryLink link)
     {
         var prInfo = GetPrInfoForRepository(link.RepositoryId);
-        var prNumber = prInfo?.Number;
-        if (prNumber is not > 0)
+        // A pull request that lives in the upstream repository is link-only: merging targets the cloned repository.
+        if (prInfo is null or { IsInParentRepository: true })
+            return;
+        var prNumber = prInfo.Number;
+        if (prNumber <= 0)
             return;
 
         _mergePrModal = new MergePullRequestModalState
@@ -29,13 +32,13 @@ public sealed partial class WorkspaceRepositories
             IsVisible = true,
             RepositoryId = link.RepositoryId,
             RepositoryName = link.Repository?.RepositoryName,
-            PrNumber = prNumber.Value,
+            PrNumber = prNumber,
             // Already known from the polled PR badge state - link the header immediately and seed the Conflicts
             // row so it doesn't render blank while the (now ETag-cheap) snapshot call below confirms it.
             PrHtmlUrl = string.IsNullOrWhiteSpace(prInfo?.HtmlUrl) ? null : prInfo.HtmlUrl,
             Details = new PullRequestMergeDetails
             {
-                Number = prNumber.Value,
+                Number = prNumber,
                 HtmlUrl = prInfo?.HtmlUrl ?? string.Empty,
                 ChangedFiles = prInfo?.ChangedFiles,
                 Mergeable = prInfo?.Mergeable,
@@ -50,11 +53,11 @@ public sealed partial class WorkspaceRepositories
         try
         {
             snapshot = await ScopedExecutor.ExecuteAsync<WorkspacePullRequestService, PullRequestMergeSnapshot?>(
-                svc => svc.GetMergeSnapshotAsync(WorkspaceId, link.RepositoryId, prNumber.Value));
+                svc => svc.GetMergeSnapshotAsync(WorkspaceId, link.RepositoryId, prNumber));
         }
         catch (Exception ex)
         {
-            Logger.LogWarning(ex, "Failed to load merge snapshot for repo {RepositoryId}, PR #{PrNumber}", link.RepositoryId, prNumber.Value);
+            Logger.LogWarning(ex, "Failed to load merge snapshot for repo {RepositoryId}, PR #{PrNumber}", link.RepositoryId, prNumber);
         }
 
         if (_disposed || !_mergePrModal.IsVisible || _mergePrModal.RepositoryId != link.RepositoryId)

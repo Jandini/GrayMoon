@@ -46,6 +46,7 @@ public static partial class Migrations
         (12, "Ambiguous package reference usage", dbContext => MigrateAmbiguousPackageReferencesAsync(dbContext)),
         (13, "Git Changes path indexes", dbContext => MigrateGitChangesPathIndexesAsync(dbContext)),
         (14, "Git Changes content digest", dbContext => MigrateGitChangesContentDigestAsync(dbContext)),
+        (15, "Fork support columns", dbContext => MigrateForkSupportAsync(dbContext)),
     };
 
     public static async Task RunAllAsync(AppDbContext dbContext, ILogger? logger = null)
@@ -84,7 +85,10 @@ public static partial class Migrations
         await MigrateWorkspaceGitRepositoryStatusLineStatsAsync(dbContext, logger);
         // Role must exist before any legacy step loads WorkspaceRepositoryLink through EF (strict step 5 repeats it idempotently).
         await MigrateWorkspaceRepositoryRoleAsync(dbContext, logger);
+        await MigrateForkSupportAsync(dbContext, logger);
         await MigrateWorkspaceFeatureContextSchemaAsync(dbContext, logger);
+        // The Feature context tables exist now; add their fork columns before anything reads them through EF.
+        await MigrateForkSupportAsync(dbContext, logger);
     }
 
     /// <summary>

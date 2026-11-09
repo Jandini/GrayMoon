@@ -91,7 +91,8 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
                             && (wr.PullRequest == null
                                 || (wr.PullRequest.MergedAt == null
                                     && wr.PullRequest.State != "open"
-                                    && wr.PullRequest.State != "closed"))),
+                                    && wr.PullRequest.State != "closed"
+                                && wr.PullRequest.ParentPullRequestNumber == null))),
                         OpenPr = g.Count(wr => wr.PullRequest != null
                             && wr.PullRequest.PullRequestNumber != null
                             && wr.PullRequest.State == "open"),
@@ -133,7 +134,8 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
                         && (wr.PullRequest == null
                             || (wr.PullRequest.MergedAt == null
                                 && wr.PullRequest.State != "open"
-                                && wr.PullRequest.State != "closed"))),
+                                && wr.PullRequest.State != "closed"
+                                && wr.PullRequest.ParentPullRequestNumber == null))),
                     OpenPr = g.Count(wr => wr.PullRequest != null
                         && wr.PullRequest.PullRequestNumber != null
                         && wr.PullRequest.State == "open"),
@@ -183,7 +185,7 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
                     OutOfSync = g.Count(x => x.state == null || x.state.SyncStatus != RepoSyncStatus.InSync),
                     CreatablePr = g.Count(x => x.state != null
                         && string.IsNullOrEmpty(x.state.CheckedOutTag)
-                        && (x.pr == null || (x.pr.MergedAt == null && x.pr.State != "open" && x.pr.State != "closed"))
+                        && (x.pr == null || (x.pr.MergedAt == null && x.pr.State != "open" && x.pr.State != "closed" && x.pr.ParentPullRequestNumber == null))
                         && (
                             (x.state.DefaultBranchAheadCommits ?? 0) > 0
                             || db.WorkspaceFeatureRepositories.Any(fr =>
@@ -193,7 +195,8 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
                                 && x.state.HeadCommit != null
                                 && fr.BaseCommitSha != x.state.HeadCommit))),
                     OpenPr = g.Count(x => x.pr != null && x.pr.PullRequestNumber != null && x.pr.State == "open"),
-                    AnyPr = g.Count(x => x.pr != null && x.pr.PullRequestNumber != null),
+                    AnyPr = g.Count(x => x.pr != null && (x.pr.PullRequestNumber != null || x.pr.ParentPullRequestNumber != null)),
+                    ParentOpenPr = g.Count(x => x.pr != null && x.pr.ParentPullRequestNumber != null && x.pr.ParentState == "open"),
                 })
                 .FirstOrDefaultAsync(cancellationToken);
 
@@ -209,7 +212,7 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
                 null,
                 basicCreatable,
                 basicOpen,
-                (basicFeature?.AnyPr ?? 0) > 0 && !basicOpen && !basicCreatable,
+                (basicFeature?.AnyPr ?? 0) > 0 && !basicOpen && !basicCreatable && (basicFeature?.ParentOpenPr ?? 0) == 0,
                 (basicFeature?.OutOfDateFiles ?? 0) > 0);
         }
 
@@ -236,7 +239,7 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
                     : null),
                 CreatablePr = g.Count(x => x.state != null
                     && string.IsNullOrEmpty(x.state.CheckedOutTag)
-                    && (x.pr == null || (x.pr.MergedAt == null && x.pr.State != "open" && x.pr.State != "closed"))
+                    && (x.pr == null || (x.pr.MergedAt == null && x.pr.State != "open" && x.pr.State != "closed" && x.pr.ParentPullRequestNumber == null))
                     && (
                         (x.state.DefaultBranchAheadCommits ?? 0) > 0
                         || db.WorkspaceFeatureRepositories.Any(fr =>
@@ -246,13 +249,16 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
                             && x.state.HeadCommit != null
                             && fr.BaseCommitSha != x.state.HeadCommit))),
                 OpenPr = g.Count(x => x.pr != null && x.pr.PullRequestNumber != null && x.pr.State == "open"),
-                AnyPr = g.Count(x => x.pr != null && x.pr.PullRequestNumber != null),
+                AnyPr = g.Count(x => x.pr != null && (x.pr.PullRequestNumber != null || x.pr.ParentPullRequestNumber != null)),
+                    ParentOpenPr = g.Count(x => x.pr != null && x.pr.ParentPullRequestNumber != null && x.pr.ParentState == "open"),
             })
             .FirstOrDefaultAsync(cancellationToken);
 
         var hasOpenPr = (feature?.OpenPr ?? 0) > 0;
         var hasCreatablePr = (feature?.CreatablePr ?? 0) > 0;
-        var allFeaturePrsCompleted = (feature?.AnyPr ?? 0) > 0 && !hasOpenPr && !hasCreatablePr;
+        // An upstream pull request that is still open keeps the Feature unfinished, but it is not a pull request GrayMoon can merge,
+        // so it must not turn on HasOpenPr (the merge actions).
+        var allFeaturePrsCompleted = (feature?.AnyPr ?? 0) > 0 && !hasOpenPr && !hasCreatablePr && (feature?.ParentOpenPr ?? 0) == 0;
 
         return new WorkspaceRepositoryHeaderStateDto(
             feature?.Total ?? 0,
@@ -680,7 +686,17 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
                 FeatureBaseCommitSha: null,
                 ParentBranchName: null,
                 FeaturePinnedTag: null,
-                Role: wr.Role));
+                Role: wr.Role,
+                GitVersionPending: null,
+                IsFork: wr.Repository != null && wr.Repository.IsFork,
+                ParentCloneUrl: wr.Repository != null ? wr.Repository.ParentCloneUrl : null,
+                ParentPullRequestNumber: wr.PullRequest != null ? wr.PullRequest.ParentPullRequestNumber : null,
+                ParentPullRequestState: wr.PullRequest != null ? wr.PullRequest.ParentState : null,
+                ParentPullRequestHtmlUrl: wr.PullRequest != null ? wr.PullRequest.ParentHtmlUrl : null,
+                ParentPullRequestMergedAt: wr.PullRequest != null ? wr.PullRequest.ParentMergedAt : null,
+                ParentPullRequestMergeable: wr.PullRequest != null ? wr.PullRequest.ParentMergeable : null,
+                ParentPullRequestMergeableState: wr.PullRequest != null ? wr.PullRequest.ParentMergeableState : null,
+                ParentPullRequestChangedFiles: wr.PullRequest != null ? wr.PullRequest.ParentChangedFiles : null));
         }
 
         var cid = contextId.Value.Value;
@@ -734,7 +750,16 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
             ParentBranchName: x.featureRepo != null ? x.featureRepo.ParentBranchName : null,
             FeaturePinnedTag: x.featureRepo != null ? x.featureRepo.PinnedTag : null,
             Role: x.wr.Role,
-            GitVersionPending: x.state != null ? x.state.GitVersionPending : null));
+            GitVersionPending: x.state != null ? x.state.GitVersionPending : null,
+            IsFork: x.wr.Repository != null && x.wr.Repository.IsFork,
+            ParentCloneUrl: x.wr.Repository != null ? x.wr.Repository.ParentCloneUrl : null,
+            ParentPullRequestNumber: x.pr != null ? x.pr.ParentPullRequestNumber : null,
+            ParentPullRequestState: x.pr != null ? x.pr.ParentState : null,
+            ParentPullRequestHtmlUrl: x.pr != null ? x.pr.ParentHtmlUrl : null,
+            ParentPullRequestMergedAt: x.pr != null ? x.pr.ParentMergedAt : null,
+            ParentPullRequestMergeable: x.pr != null ? x.pr.ParentMergeable : null,
+            ParentPullRequestMergeableState: x.pr != null ? x.pr.ParentMergeableState : null,
+            ParentPullRequestChangedFiles: x.pr != null ? x.pr.ParentChangedFiles : null));
     }
 
     private static WorkspaceRepositoryLinkListCursor ToCursor(WorkspaceRepositoryLinkListItemDto dto) =>

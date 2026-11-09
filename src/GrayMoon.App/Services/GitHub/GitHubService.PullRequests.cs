@@ -9,18 +9,28 @@ namespace GrayMoon.App.Services.GitHub;
 public sealed partial class GitHubService
 {
     /// <summary>Gets the pull request for the given branch in the repo, if any. Fetches up to 5 and returns the first one opened by a human (user.type != "Bot"), falling back to the first match when all are bots. Returns null when no PR or API error.</summary>
-    public async Task<GitHubPullRequestDto?> GetPullRequestForBranchAsync(Connector connector, string owner, string repo, string branch, CancellationToken cancellationToken = default)
+    public Task<GitHubPullRequestDto?> GetPullRequestForBranchAsync(Connector connector, string owner, string repo, string branch, CancellationToken cancellationToken = default) =>
+        GetPullRequestForBranchAsync(connector, owner, repo, owner, branch, cancellationToken);
+
+    /// <summary>
+    /// Same as the overload without <paramref name="headOwner"/>, but the branch may live in a different repository owner than
+    /// the repository that is searched: the pull request is looked up in <c>{owner}/{repo}</c> with head <c>{headOwner}:{branch}</c>.
+    /// This is how a fork's branch is found as a pull request into its upstream repository.
+    /// </summary>
+    public async Task<GitHubPullRequestDto?> GetPullRequestForBranchAsync(Connector connector, string owner, string repo, string headOwner, string branch, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(owner))
             throw new ArgumentException("Owner is required.", nameof(owner));
         if (string.IsNullOrWhiteSpace(repo))
             throw new ArgumentException("Repository is required.", nameof(repo));
+        if (string.IsNullOrWhiteSpace(headOwner))
+            throw new ArgumentException("Head owner is required.", nameof(headOwner));
         if (string.IsNullOrWhiteSpace(branch))
             return null;
 
         EnsureConnectorConfigured(connector);
 
-        var head = $"{owner}:{Uri.EscapeDataString(branch)}";
+        var head = $"{Uri.EscapeDataString(headOwner)}:{Uri.EscapeDataString(branch)}";
         var requestUri = $"repos/{owner}/{repo}/pulls?state=all&head={head}&per_page=5";
 
         try

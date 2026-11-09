@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
+using GrayMoon.App.Services.GitProviders;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -44,7 +45,7 @@ public sealed record PullRequestMergeReviewDetails(
 /// <summary>Single service for PR persistence and refresh. Fetches via GitHub API and persists via WorkspacePullRequestRepository.</summary>
 public sealed class WorkspacePullRequestService(
     WorkspacePullRequestRepository pullRequestRepository,
-    GitHubPullRequestService gitHubPullRequestService,
+    IGitProviderResolver gitProviderResolver,
     GitHubPullRequestMergeService gitHubPullRequestMergeService,
     IDbContextFactory<AppDbContext> dbContextFactory,
     IOptions<WorkspaceOptions> workspaceOptions,
@@ -56,7 +57,7 @@ public sealed class WorkspacePullRequestService(
     // app-level cache. The cache still absorbs near-simultaneous duplicate calls (multiple tabs, poll racing a
     // forced action) within that short window.
     private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(3);
-    private readonly ConcurrentDictionary<(int RepoId, string Branch), (PullRequestInfo? Result, DateTime FetchedAt)> _cache = new();
+    private readonly ConcurrentDictionary<(int RepoId, string Branch), (BranchPullRequests Result, DateTime FetchedAt)> _cache = new();
 
     private int MaxConcurrency => Math.Max(1, workspaceOptions.Value.MaxParallelOperations);
 
@@ -105,10 +106,10 @@ public sealed class WorkspacePullRequestService(
             outcomes[wr.RepositoryId] = PullRequestRefreshOutcome.Cleared;
 
         var toRefresh = links.Where(wr => wr.Repository != null && !string.IsNullOrWhiteSpace(wr.BranchName)).ToList();
-        var mutations = toClear.Select(wr => (wr.WorkspaceRepositoryId, (PullRequestInfo?)null)).ToList();
+        var mutations = toClear.Select(wr => (wr.WorkspaceRepositoryId, BranchPullRequests.None)).ToList();
         if (toRefresh.Count == 0)
         {
-            await pullRequestRepository.UpsertManyAsync(mutations, cancellationToken);
+            await pullRequestRepository.UpsertBranchPullRequestsManyAsync(mutations, cancellationToken);
             return outcomes;
         }
 
@@ -123,7 +124,7 @@ public sealed class WorkspacePullRequestService(
                 if (!force && _cache.TryGetValue(cacheKey, out var cached) && DateTime.UtcNow - cached.FetchedAt < CacheTtl)
                 {
                     logger.LogTrace("PR cache hit for repo {RepositoryId}, branch {Branch}", wr.RepositoryId, branch);
-                    return (Wr: wr, Pr: (PullRequestInfo?)null, Outcome: PullRequestRefreshOutcome.CacheHit);
+                    return (Wr: wr, Prs: BranchPullRequests.None, Outcome: PullRequestRefreshOutcome.CacheHit);
                 }
 
                 // Skip the call entirely while the connector is paused for rate-limit backoff (shared across
@@ -133,25 +134,21 @@ public sealed class WorkspacePullRequestService(
                 if (!string.IsNullOrWhiteSpace(connectorName) && rateLimitTracker.GetPausedUntil(connectorName) is { } pausedUntil)
                 {
                     logger.LogTrace("PR refresh skipped (rate-limited until {PausedUntil}) for repo {RepositoryId}", pausedUntil, wr.RepositoryId);
-                    return (Wr: wr, Pr: (PullRequestInfo?)null, Outcome: PullRequestRefreshOutcome.Failed);
+                    return (Wr: wr, Prs: BranchPullRequests.None, Outcome: PullRequestRefreshOutcome.Failed);
                 }
 
-                var pr = await gitHubPullRequestService.GetPullRequestForBranchAsync(wr.Repository!, wr.Repository!.Connector, branch, cancellationToken);
                 // After GitHub auto-deletes the head branch on merge, the list-by-head lookup is empty even
-                // though GET /pulls/{number} still returns the merged PR. Fall back so post-merge
-                // return-to-default still sees MergedAt and does not abort as "not safe".
-                if (pr == null && wr.PullRequest?.PullRequestNumber is int persistedNumber and > 0)
-                {
-                    pr = await gitHubPullRequestService.GetPullRequestByNumberAsync(
-                        wr.Repository!, wr.Repository!.Connector, persistedNumber, branch, cancellationToken);
-                }
-                _cache[cacheKey] = (pr, DateTime.UtcNow);
-                return (Wr: wr, Pr: pr, Outcome: PullRequestRefreshOutcome.Refreshed);
+                // though GET /pulls/{number} still returns the merged PR. The persisted numbers let the lookup
+                // fall back so post-merge return-to-default still sees MergedAt and does not abort as "not safe".
+                var prs = await FindBranchPullRequestsAsync(
+                    wr.Repository!, branch, wr.PullRequest?.PullRequestNumber, wr.PullRequest?.ParentPullRequestNumber, cancellationToken);
+                _cache[cacheKey] = (prs, DateTime.UtcNow);
+                return (Wr: wr, Prs: prs, Outcome: PullRequestRefreshOutcome.Refreshed);
             }
             catch (Exception ex)
             {
                 logger.LogWarning(ex, "RefreshPullRequest failed. WorkspaceId={WorkspaceId}, RepositoryId={RepositoryId}", workspaceId, wr.RepositoryId);
-                return (Wr: wr, Pr: (PullRequestInfo?)null, Outcome: PullRequestRefreshOutcome.Failed);
+                return (Wr: wr, Prs: BranchPullRequests.None, Outcome: PullRequestRefreshOutcome.Failed);
             }
             finally
             {
@@ -164,10 +161,10 @@ public sealed class WorkspacePullRequestService(
         {
             outcomes[result.Wr.RepositoryId] = result.Outcome;
             if (result.Outcome == PullRequestRefreshOutcome.Refreshed)
-                mutations.Add((result.Wr.WorkspaceRepositoryId, result.Pr));
+                mutations.Add((result.Wr.WorkspaceRepositoryId, result.Prs));
         }
 
-        await pullRequestRepository.UpsertManyAsync(mutations, cancellationToken);
+        await pullRequestRepository.UpsertBranchPullRequestsManyAsync(mutations, cancellationToken);
 
         logger.LogTrace("Refreshed PR for {Count} repo(s) in workspace {WorkspaceId}", toRefresh.Count, workspaceId);
         return outcomes;
@@ -185,7 +182,7 @@ public sealed class WorkspacePullRequestService(
         if (workspaceRepositoryId == 0)
             return;
 
-        await pullRequestRepository.UpsertAsync(workspaceRepositoryId, null, cancellationToken);
+        await pullRequestRepository.UpsertBranchPullRequestsManyAsync([(workspaceRepositoryId, BranchPullRequests.None)], cancellationToken);
     }
 
     /// <summary>
@@ -232,10 +229,10 @@ public sealed class WorkspacePullRequestService(
             outcomes[wr.RepositoryId] = PullRequestRefreshOutcome.Cleared;
 
         var toRefresh = links.Where(wr => wr.Repository != null && !string.IsNullOrWhiteSpace(branchByRepositoryId.GetValueOrDefault(wr.RepositoryId))).ToList();
-        var mutations = toClear.Select(wr => (wr.WorkspaceRepositoryId, (PullRequestInfo?)null)).ToList();
+        var mutations = toClear.Select(wr => (wr.WorkspaceRepositoryId, BranchPullRequests.None)).ToList();
         if (toRefresh.Count == 0)
         {
-            await pullRequestRepository.UpsertContextManyAsync(contextId, mutations, cancellationToken);
+            await pullRequestRepository.UpsertContextBranchPullRequestsManyAsync(contextId, mutations, cancellationToken);
             return outcomes;
         }
 
@@ -248,23 +245,23 @@ public sealed class WorkspacePullRequestService(
                 var branch = branchByRepositoryId[wr.RepositoryId]!;
                 var cacheKey = (wr.RepositoryId, branch);
                 if (!force && _cache.TryGetValue(cacheKey, out var cached) && DateTime.UtcNow - cached.FetchedAt < CacheTtl)
-                    return (Wr: wr, Pr: cached.Result, Outcome: PullRequestRefreshOutcome.CacheHit);
+                    return (Wr: wr, Prs: cached.Result, Outcome: PullRequestRefreshOutcome.CacheHit);
 
                 var connectorName = wr.Repository!.Connector?.ConnectorName;
                 if (!string.IsNullOrWhiteSpace(connectorName) && rateLimitTracker.GetPausedUntil(connectorName) is { } pausedUntil)
                 {
                     logger.LogTrace("Context PR refresh skipped (rate-limited until {PausedUntil}) for repo {RepositoryId}", pausedUntil, wr.RepositoryId);
-                    return (Wr: wr, Pr: (PullRequestInfo?)null, Outcome: PullRequestRefreshOutcome.Failed);
+                    return (Wr: wr, Prs: BranchPullRequests.None, Outcome: PullRequestRefreshOutcome.Failed);
                 }
 
-                var pr = await gitHubPullRequestService.GetPullRequestForBranchAsync(wr.Repository!, wr.Repository!.Connector, branch, cancellationToken);
-                _cache[cacheKey] = (pr, DateTime.UtcNow);
-                return (Wr: wr, Pr: pr, Outcome: PullRequestRefreshOutcome.Refreshed);
+                var prs = await FindBranchPullRequestsAsync(wr.Repository!, branch, null, null, cancellationToken);
+                _cache[cacheKey] = (prs, DateTime.UtcNow);
+                return (Wr: wr, Prs: prs, Outcome: PullRequestRefreshOutcome.Refreshed);
             }
             catch (Exception ex)
             {
                 logger.LogWarning(ex, "RefreshContextPullRequest failed. WorkspaceId={WorkspaceId}, ContextId={ContextId}, RepositoryId={RepositoryId}", workspaceId, contextId, wr.RepositoryId);
-                return (Wr: wr, Pr: (PullRequestInfo?)null, Outcome: PullRequestRefreshOutcome.Failed);
+                return (Wr: wr, Prs: BranchPullRequests.None, Outcome: PullRequestRefreshOutcome.Failed);
             }
             finally
             {
@@ -281,17 +278,53 @@ public sealed class WorkspacePullRequestService(
             // written into a different context's row the first time that context asks for it.
             if (result.Outcome is PullRequestRefreshOutcome.Refreshed or PullRequestRefreshOutcome.CacheHit)
             {
-                mutations.Add((result.Wr.WorkspaceRepositoryId, result.Pr));
+                mutations.Add((result.Wr.WorkspaceRepositoryId, result.Prs));
+                // The merged head commit comes from the pull request GrayMoon can act on: the cloned repository's own one.
                 if (mergedHeadShaByRepositoryId != null
-                    && result.Pr?.IsMerged == true
-                    && !string.IsNullOrWhiteSpace(result.Pr.HeadSha))
-                    mergedHeadShaByRepositoryId[result.Wr.RepositoryId] = result.Pr.HeadSha;
+                    && result.Prs.Own?.IsMerged == true
+                    && !string.IsNullOrWhiteSpace(result.Prs.Own.HeadSha))
+                    mergedHeadShaByRepositoryId[result.Wr.RepositoryId] = result.Prs.Own.HeadSha;
             }
         }
 
-        await pullRequestRepository.UpsertContextManyAsync(contextId, mutations, cancellationToken);
+        await pullRequestRepository.UpsertContextBranchPullRequestsManyAsync(contextId, mutations, cancellationToken);
 
         return outcomes;
+    }
+
+    /// <summary>
+    /// Looks up the pull request for <paramref name="branch"/> in the cloned repository and, for a fork with a known parent, in the parent
+    /// (upstream) repository, concurrently. A provider lookup that fails yields null for that side, never an exception, so one repository
+    /// being unreadable (for example a private upstream) cannot hide the other's pull request.
+    /// <paramref name="persistedOwnNumber"/> / <paramref name="persistedParentNumber"/> enable the by-number fallback used after a merge
+    /// deleted the head branch (the list-by-head lookup is then empty although GET by number still returns the merged pull request).
+    /// </summary>
+    private async Task<BranchPullRequests> FindBranchPullRequestsAsync(
+        Repository repository,
+        string branch,
+        int? persistedOwnNumber,
+        int? persistedParentNumber,
+        CancellationToken cancellationToken)
+    {
+        if (repository.Connector is not { } connector)
+            return BranchPullRequests.None;
+
+        var provider = gitProviderResolver.Get(connector.ConnectorType);
+        var ownTask = FindOneAsync(repository.CloneUrl, persistedOwnNumber);
+        var parentTask = repository.IsFork && !string.IsNullOrWhiteSpace(repository.ParentCloneUrl)
+            ? FindOneAsync(repository.ParentCloneUrl, persistedParentNumber)
+            : Task.FromResult<PullRequestInfo?>(null);
+
+        await Task.WhenAll(ownTask, parentTask);
+        return new BranchPullRequests(await ownTask, await parentTask);
+
+        async Task<PullRequestInfo?> FindOneAsync(string targetCloneUrl, int? persistedNumber)
+        {
+            var pr = await provider.FindPullRequestForBranchAsync(connector, targetCloneUrl, repository.CloneUrl, branch, cancellationToken);
+            if (pr == null && persistedNumber is > 0)
+                pr = await provider.GetPullRequestByNumberAsync(connector, targetCloneUrl, persistedNumber.Value, branch, cancellationToken);
+            return pr;
+        }
     }
 
     /// <summary>Drops every cached PR lookup for a repository. Call on branch change so the old branch's entry cannot be served after a later checkout back onto it.</summary>

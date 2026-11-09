@@ -53,6 +53,10 @@
                     {
                         <span class="badge repo-archived-badge">archived</span>
                     }
+                    @if (repo.IsFork)
+                    {
+                        <ForkBadge ParentCloneUrl="@repo.ParentCloneUrl" Clickable="true" />
+                    }
                     <div class="gm-menu-panel">
                         <GitHubSectionsMenu BaseUrls="@(new List<string> { repoUrl })"
                                             PrPullMap="@singleRepoPrPullMap"
@@ -72,6 +76,10 @@
                     @if (repo.Archived)
                     {
                         <span class="badge repo-archived-badge">archived</span>
+                    }
+                    @if (repo.IsFork)
+                    {
+                        <ForkBadge ParentCloneUrl="@repo.ParentCloneUrl" Clickable="true" />
                     }
                 </span>
             }
@@ -146,6 +154,7 @@
                 </span>
                 <span class="metrics-block metrics-pr text-nowrap">
                     <PRBadge PullRequest="@PrInfo"
+                            ParentRepositoryName="@(repo.IsFork ? ForkBadge.DescribeParent(repo.ParentCloneUrl) : null)"
                             UncommittedChangedFileCount="@Link.UncommittedChangedFileCount"
                             ChangesUrl="@ContextNavigation.AppendContextQuery($"/workspaces/{WorkspaceId}/changes?q={Uri.EscapeDataString($"repo:{repo.RepositoryName}")}", SelectedContextId, IsSpecialWorkspace)"
                             DefaultBranchAheadCommits="@Link.DefaultBranchAheadCommits"

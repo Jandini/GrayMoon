@@ -115,6 +115,10 @@
                                                                 {
                                                                     <span class="badge repo-archived-badge">archived</span>
                                                                 }
+                                                                @if (repository.IsFork)
+                                                                {
+                                                                    <ForkBadge ParentCloneUrl="@repository.ParentCloneUrl" />
+                                                                }
                                                             </span>
                                                         </td>
                                                         <td>

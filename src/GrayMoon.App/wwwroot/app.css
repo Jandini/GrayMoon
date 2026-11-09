@@ -710,11 +710,11 @@ select:disabled,
     font-weight: normal;
 }
 
-.table tbody td a {
+.table tbody td a:not(.badge) {
     color: var(--accent-blue) !important;
 }
 
-.table tbody td a:hover {
+.table tbody td a:not(.badge):hover {
     color: var(--accent-blue-hover) !important;
 }
 
@@ -1685,4 +1685,44 @@ table.resizable-columns th:hover .resize-handle::after {
         animation: none;
         background: var(--success);
     }
+}
+
+/* Forked repository badge (Workspace Repositories, Repositories, repository picker modal). Teal, distinct from the purple archived badge and the PR chip colors. */
+.repo-fork-badge {
+    background-color: #0d9488;
+    color: #fff !important;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.4em 0.5em;
+    margin-left: 0.4rem;
+    flex-shrink: 0;
+    text-decoration: none;
+}
+.repo-name-cell .repo-fork-badge {
+    margin-left: 0;
+}
+a.repo-fork-badge--link:hover,
+a.repo-fork-badge--link:focus-visible {
+    background-color: #0f766e;
+    color: #fff !important;
+    text-decoration: none;
+}
+
+/* Pull request in the upstream repository of a fork, shown after the fork's own chip. */
+.repositories-table td.col-pr .pr-upstream-chip {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 0.35rem;
+    padding-left: 0.35rem;
+    border-left: 1px solid rgba(128, 128, 128, 0.45);
+    vertical-align: middle;
+}
+.repositories-table td.col-pr a.pr-merge-chip__link:hover,
+.repositories-table td.col-pr a.pr-merge-chip__link:focus-visible {
+    text-decoration: none;
+    filter: brightness(1.1);
+}
+.table tbody td a.repo-fork-badge {
+    color: #fff !important;
+    text-decoration: none;
 }

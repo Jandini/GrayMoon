@@ -56,9 +56,12 @@ public sealed class GitHubRepositoryService(
             }
         });
 
+        // Read once, before the parallel fan-out: the repository repository shares this scoped DbContext.
+        var knownForkParents = await repositoryRepository.GetKnownForkParentsAsync(cancellationToken);
+
         using var gate = new SemaphoreSlim(Math.Max(1, workspaceOptions.Value.MaxParallelOperations));
         var fetches = await Task.WhenAll(activeConnectors.Select(connector =>
-            FetchConnectorAsync(connector, gate, batchProgress, sharedStateLock, uniqueCloneUrls, progress, cancellationToken)));
+            FetchConnectorAsync(connector, gate, batchProgress, sharedStateLock, uniqueCloneUrls, progress, knownForkParents, cancellationToken)));
 
         // Apply the results in connector order. The status writes share this service's scoped DbContext, so they stay sequential.
         for (var i = 0; i < activeConnectors.Count; i++)
@@ -95,6 +98,54 @@ public sealed class GitHubRepositoryService(
         };
     }
 
+    /// <summary>
+    /// Fills <see cref="Repository.ParentCloneUrl"/> for every fork in <paramref name="repositories"/>. The list endpoint does not return the
+    /// parent, so a stored parent is reused (zero extra calls on a normal refresh) and only forks with an unknown parent are asked about,
+    /// with bounded concurrency. A failed lookup leaves the parent empty (it is retried on the next fetch) and never fails the fetch.
+    /// </summary>
+    private async Task ResolveForkParentsAsync(
+        Connector connector,
+        IReadOnlyList<Repository> repositories,
+        IReadOnlyDictionary<(int ConnectorId, long ProviderRepositoryId), string> knownForkParents,
+        CancellationToken cancellationToken)
+    {
+        var pending = new List<Repository>();
+        foreach (var repository in repositories.Where(r => r.IsFork))
+        {
+            if (knownForkParents.TryGetValue((repository.ConnectorId, repository.GitHubRepositoryId), out var known))
+                repository.ParentCloneUrl = known;
+            else
+                pending.Add(repository);
+        }
+
+        if (pending.Count == 0)
+            return;
+
+        using var gate = new SemaphoreSlim(Math.Max(1, workspaceOptions.Value.MaxParallelOperations));
+        await Task.WhenAll(pending.Select(async repository =>
+        {
+            await gate.WaitAsync(cancellationToken);
+            try
+            {
+                if (!RepositoryUrlHelper.TryParseGitHubOwnerRepo(repository.CloneUrl, out var owner, out var name) || owner == null || name == null)
+                    return;
+                repository.ParentCloneUrl = await gitHubService.GetForkParentCloneUrlAsync(connector, owner, name, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "Could not resolve the fork parent for {Owner}/{Repository} on connector {ConnectorName}", repository.OrgName, repository.RepositoryName, connector.ConnectorName);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }));
+    }
+
     private async Task<ConnectorFetch> FetchConnectorAsync(
         Connector connector,
         SemaphoreSlim gate,
@@ -102,6 +153,7 @@ public sealed class GitHubRepositoryService(
         object sharedStateLock,
         HashSet<string> uniqueCloneUrls,
         IProgress<int>? progress,
+        IReadOnlyDictionary<(int ConnectorId, long ProviderRepositoryId), string> knownForkParents,
         CancellationToken cancellationToken)
     {
         await gate.WaitAsync(cancellationToken);
@@ -120,8 +172,11 @@ public sealed class GitHubRepositoryService(
                 NodeId = string.IsNullOrWhiteSpace(repo.NodeId) ? null : repo.NodeId,
                 Topics = repo.Topics != null && repo.Topics.Count > 0
                     ? string.Join(",", repo.Topics.Where(t => !string.IsNullOrWhiteSpace(t)))
-                    : null
+                    : null,
+                IsFork = repo.Fork
             }).ToList();
+
+            await ResolveForkParentsAsync(connector, persisted, knownForkParents, cancellationToken);
 
             lock (sharedStateLock)
             {

@@ -79,6 +79,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
         modelBuilder.Entity<Repository>(entity =>
         {
             entity.ToTable("Repositories");
+            entity.Property(repository => repository.IsFork).HasDefaultValue(false);
             // Non-unique index for name lookups - renames must not be blocked by a unique constraint.
             entity.HasIndex(repository => new { repository.ConnectorId, repository.RepositoryName, repository.OrgName })
                 .IsUnique(false)

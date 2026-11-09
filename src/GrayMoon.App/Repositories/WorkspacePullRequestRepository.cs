@@ -22,9 +22,8 @@ public sealed class WorkspacePullRequestRepository(IDbContextFactory<AppDbContex
         foreach (var link in links)
         {
             if (link.PullRequest == null) continue;
-            result[link.RepositoryId] = link.PullRequest.PullRequestNumber.HasValue
-                ? link.PullRequest.ToPullRequestInfo()
-                : null;
+            // A row that records no pull request in either repository means "checked, none" (null value, key present).
+            result[link.RepositoryId] = link.PullRequest.ToPullRequestInfo();
         }
         return result;
     }
@@ -50,9 +49,7 @@ public sealed class WorkspacePullRequestRepository(IDbContextFactory<AppDbContex
         foreach (var row in rows)
         {
             if (row.WorkspaceRepository == null) continue;
-            result[row.WorkspaceRepository.RepositoryId] = row.PullRequestNumber.HasValue
-                ? row.ToPullRequestInfo()
-                : null;
+            result[row.WorkspaceRepository.RepositoryId] = row.ToPullRequestInfo();
         }
         return result;
     }
@@ -245,6 +242,110 @@ public sealed class WorkspacePullRequestRepository(IDbContextFactory<AppDbContex
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// Fork-aware counterpart of <see cref="UpsertManyAsync"/>: writes both the pull request in the cloned repository and the one in its
+    /// upstream repository on one factory context and one save. <see cref="BranchPullRequests.None"/> clears both slots and keeps the row.
+    /// </summary>
+    public async Task UpsertBranchPullRequestsManyAsync(
+        IReadOnlyList<(int WorkspaceRepositoryId, BranchPullRequests Prs)> items,
+        CancellationToken cancellationToken = default)
+    {
+        if (items.Count == 0)
+            return;
+
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var ids = items.Select(i => i.WorkspaceRepositoryId).Distinct().ToList();
+        var existing = await dbContext.WorkspaceRepositoryPullRequests
+            .Where(prr => ids.Contains(prr.WorkspaceRepositoryId))
+            .ToListAsync(cancellationToken);
+        var byId = existing.ToDictionary(prr => prr.WorkspaceRepositoryId);
+        var now = DateTime.UtcNow;
+        foreach (var (workspaceRepositoryId, prs) in items)
+        {
+            if (!byId.TryGetValue(workspaceRepositoryId, out var row))
+            {
+                row = new WorkspaceRepositoryPullRequest { WorkspaceRepositoryId = workspaceRepositoryId };
+                dbContext.WorkspaceRepositoryPullRequests.Add(row);
+                byId[workspaceRepositoryId] = row;
+            }
+
+            ApplyLegacy(row, prs.Own, now);
+            ApplyParent(row, prs.Parent);
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>Fork-aware counterpart of <see cref="UpsertContextManyAsync"/>. A <see cref="BranchPullRequests"/> with neither slot deletes the row.</summary>
+    public async Task UpsertContextBranchPullRequestsManyAsync(
+        int contextId,
+        IReadOnlyList<(int WorkspaceRepositoryId, BranchPullRequests Prs)> items,
+        CancellationToken cancellationToken = default)
+    {
+        if (items.Count == 0)
+            return;
+
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var ids = items.Select(i => i.WorkspaceRepositoryId).Distinct().ToList();
+        var existing = await dbContext.WorkspaceRepositoryContextPullRequests
+            .Where(prr => prr.WorkspaceFeatureContextId == contextId && ids.Contains(prr.WorkspaceRepositoryId))
+            .ToListAsync(cancellationToken);
+        var byId = existing.ToDictionary(prr => prr.WorkspaceRepositoryId);
+        var now = DateTime.UtcNow;
+        foreach (var (workspaceRepositoryId, prs) in items)
+        {
+            byId.TryGetValue(workspaceRepositoryId, out var row);
+            if (prs.Own == null && prs.Parent == null)
+            {
+                if (row != null)
+                {
+                    dbContext.WorkspaceRepositoryContextPullRequests.Remove(row);
+                    byId.Remove(workspaceRepositoryId);
+                }
+
+                continue;
+            }
+
+            if (row == null)
+            {
+                row = new WorkspaceRepositoryContextPullRequest
+                {
+                    WorkspaceFeatureContextId = contextId,
+                    WorkspaceRepositoryId = workspaceRepositoryId
+                };
+                dbContext.WorkspaceRepositoryContextPullRequests.Add(row);
+                byId[workspaceRepositoryId] = row;
+            }
+
+            ApplyContext(row, prs.Own, now);
+            ApplyParent(row, prs.Parent);
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static void ApplyParent(WorkspaceRepositoryPullRequest row, PullRequestInfo? pr)
+    {
+        row.ParentPullRequestNumber = pr?.Number;
+        row.ParentState = pr?.State;
+        row.ParentMergeable = pr?.Mergeable;
+        row.ParentMergeableState = pr?.MergeableState;
+        row.ParentHtmlUrl = pr?.HtmlUrl;
+        row.ParentMergedAt = pr?.MergedAt;
+        row.ParentChangedFiles = pr?.ChangedFiles;
+    }
+
+    private static void ApplyParent(WorkspaceRepositoryContextPullRequest row, PullRequestInfo? pr)
+    {
+        row.ParentPullRequestNumber = pr?.Number;
+        row.ParentState = pr?.State;
+        row.ParentMergeable = pr?.Mergeable;
+        row.ParentMergeableState = pr?.MergeableState;
+        row.ParentHtmlUrl = pr?.HtmlUrl;
+        row.ParentMergedAt = pr?.MergedAt;
+        row.ParentChangedFiles = pr?.ChangedFiles;
+    }
+
     private static void ApplyLegacy(WorkspaceRepositoryPullRequest row, PullRequestInfo? pr, DateTime now)
     {
         row.PullRequestNumber = pr?.Number;
@@ -257,15 +358,15 @@ public sealed class WorkspacePullRequestRepository(IDbContextFactory<AppDbContex
         row.LastCheckedAt = now;
     }
 
-    private static void ApplyContext(WorkspaceRepositoryContextPullRequest row, PullRequestInfo pr, DateTime now)
+    private static void ApplyContext(WorkspaceRepositoryContextPullRequest row, PullRequestInfo? pr, DateTime now)
     {
-        row.PullRequestNumber = pr.Number;
-        row.State = pr.State;
-        row.Mergeable = pr.Mergeable;
-        row.MergeableState = pr.MergeableState;
-        row.HtmlUrl = pr.HtmlUrl;
-        row.MergedAt = pr.MergedAt;
-        row.ChangedFiles = pr.ChangedFiles;
+        row.PullRequestNumber = pr?.Number;
+        row.State = pr?.State;
+        row.Mergeable = pr?.Mergeable;
+        row.MergeableState = pr?.MergeableState;
+        row.HtmlUrl = pr?.HtmlUrl;
+        row.MergedAt = pr?.MergedAt;
+        row.ChangedFiles = pr?.ChangedFiles;
         row.LastCheckedAt = now;
     }
 }

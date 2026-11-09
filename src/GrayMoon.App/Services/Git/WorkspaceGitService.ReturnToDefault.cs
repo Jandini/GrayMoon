@@ -108,9 +108,8 @@ public sealed partial class WorkspaceGitService
             .AsNoTracking()
             .Include(x => x.PullRequest)
             .FirstOrDefaultAsync(x => x.WorkspaceId == workspaceId && x.RepositoryId == repositoryId, cancellationToken);
-        var prInfo = wrWithPr?.PullRequest?.PullRequestNumber.HasValue == true
-            ? wrWithPr.PullRequest.ToPullRequestInfo()
-            : null;
+        // Composed over the cloned repository and (for a fork) its upstream: a pull request merged or closed in either one makes the branch safe to drop.
+        var prInfo = wrWithPr?.PullRequest?.ToPullRequestInfo();
         // "Delete local branches" is the user's own confirmation, given on a dialog that lists how many
         // commits each repository would lose and only enables Proceed after a countdown. Requiring a merged
         // or closed pull request on top of it made git fall back to "git branch -d", which refuses to delete

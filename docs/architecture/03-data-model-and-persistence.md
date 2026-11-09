@@ -180,6 +180,7 @@ GitHubRepositoryId / provider identity
 visibility/archive metadata
 ```
 
+Fork fields: `IsFork` and `ParentCloneUrl` (the immediate parent's clone URL, provider-neutral, null when not a fork). Both are set by repository sync (`GitHubRepositoryService`; the parent comes from `GET repos/{owner}/{repo}` because the list endpoint only returns the `fork` flag, and is looked up once per fork then reused from the stored value). Both pull request tables (`WorkspaceRepositoryPullRequests` and `WorkspaceRepositoryContextPullRequests`) carry nullable `Parent*` columns (`ParentPullRequestNumber`, `ParentState`, `ParentMergeable`, `ParentMergeableState`, `ParentHtmlUrl`, `ParentMergedAt`, `ParentChangedFiles`) describing the pull request for the same head branch in the upstream repository. They are real columns so SQL header counts can see upstream PRs. `PullRequestInfo.Compose(own, parent)` builds the model: only own PR, only upstream PR (flagged `IsInParentRepository`, link-only), both (own is primary, upstream in `ParentPullRequest`), or none. Added by strict step 15 and, idempotently, in the legacy baseline so EF reads during baseline do not fail.
 The database uses provider identity where available and does not rely solely on repository name.
 
 ### WorkspaceRepositoryLink

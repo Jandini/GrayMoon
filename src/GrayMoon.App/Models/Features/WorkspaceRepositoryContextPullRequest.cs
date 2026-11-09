@@ -29,14 +29,43 @@ public sealed class WorkspaceRepositoryContextPullRequest
     public int? ChangedFiles { get; set; }
     public DateTime LastCheckedAt { get; set; }
 
-    public PullRequestInfo ToPullRequestInfo() => new()
-    {
-        Number = PullRequestNumber ?? 0,
-        State = State ?? string.Empty,
-        MergedAt = MergedAt,
-        HtmlUrl = HtmlUrl ?? string.Empty,
-        Mergeable = Mergeable,
-        MergeableState = MergeableState,
-        ChangedFiles = ChangedFiles
-    };
+    /// <summary>Pull request for the same branch in the repository this one was forked from (upstream). Null columns when there is none.</summary>
+    public int? ParentPullRequestNumber { get; set; }
+    public string? ParentState { get; set; }
+    public bool? ParentMergeable { get; set; }
+    public string? ParentMergeableState { get; set; }
+    public string? ParentHtmlUrl { get; set; }
+    public DateTimeOffset? ParentMergedAt { get; set; }
+    public int? ParentChangedFiles { get; set; }
+
+    /// <summary>The pull request in the cloned repository, or null when the row records none.</summary>
+    public PullRequestInfo? ToOwnPullRequestInfo() => PullRequestNumber.HasValue
+        ? new PullRequestInfo
+        {
+            Number = PullRequestNumber.Value,
+            State = State ?? string.Empty,
+            MergedAt = MergedAt,
+            HtmlUrl = HtmlUrl ?? string.Empty,
+            Mergeable = Mergeable,
+            MergeableState = MergeableState,
+            ChangedFiles = ChangedFiles
+        }
+        : null;
+
+    /// <summary>The pull request in the upstream repository (fork only), or null when the row records none.</summary>
+    public PullRequestInfo? ToParentPullRequestInfo() => ParentPullRequestNumber.HasValue
+        ? new PullRequestInfo
+        {
+            Number = ParentPullRequestNumber.Value,
+            State = ParentState ?? string.Empty,
+            MergedAt = ParentMergedAt,
+            HtmlUrl = ParentHtmlUrl ?? string.Empty,
+            Mergeable = ParentMergeable,
+            MergeableState = ParentMergeableState,
+            ChangedFiles = ParentChangedFiles
+        }
+        : null;
+
+    /// <summary>The single value the grid shows (see <see cref="PullRequestInfo.Compose"/>), or null when neither repository has a pull request.</summary>
+    public PullRequestInfo? ToPullRequestInfo() => PullRequestInfo.Compose(ToOwnPullRequestInfo(), ToParentPullRequestInfo());
 }

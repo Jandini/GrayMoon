@@ -41,10 +41,12 @@ internal static class WorkspaceRepositoryLinkListMapper
                 RepositoryName = dto.RepositoryName,
                 CloneUrl = dto.CloneUrl,
                 Archived = dto.Archived,
+                IsFork = dto.IsFork,
+                ParentCloneUrl = dto.ParentCloneUrl,
             },
         };
 
-        if (dto.PullRequestNumber.HasValue || !string.IsNullOrEmpty(dto.PullRequestState))
+        if (dto.PullRequestNumber.HasValue || !string.IsNullOrEmpty(dto.PullRequestState) || dto.ParentPullRequestNumber.HasValue)
         {
             link.PullRequest = new WorkspaceRepositoryPullRequest
             {
@@ -56,6 +58,13 @@ internal static class WorkspaceRepositoryLinkListMapper
                 Mergeable = dto.PullRequestMergeable,
                 MergeableState = dto.PullRequestMergeableState,
                 ChangedFiles = dto.PullRequestChangedFiles,
+                ParentPullRequestNumber = dto.ParentPullRequestNumber,
+                ParentState = dto.ParentPullRequestState,
+                ParentHtmlUrl = dto.ParentPullRequestHtmlUrl,
+                ParentMergedAt = dto.ParentPullRequestMergedAt,
+                ParentMergeable = dto.ParentPullRequestMergeable,
+                ParentMergeableState = dto.ParentPullRequestMergeableState,
+                ParentChangedFiles = dto.ParentPullRequestChangedFiles,
             };
         }
 
@@ -64,20 +73,36 @@ internal static class WorkspaceRepositoryLinkListMapper
 
     public static PullRequestInfo? ToPullRequestInfo(WorkspaceRepositoryLinkListItemDto dto)
     {
-        if (!dto.PullRequestNumber.HasValue && string.IsNullOrEmpty(dto.PullRequestState))
+        PullRequestInfo? own = null;
+        if (dto.PullRequestNumber.HasValue || !string.IsNullOrEmpty(dto.PullRequestState))
         {
-            return null;
+            own = new PullRequestInfo
+            {
+                Number = dto.PullRequestNumber ?? 0,
+                State = dto.PullRequestState ?? string.Empty,
+                HtmlUrl = dto.PullRequestHtmlUrl ?? string.Empty,
+                MergedAt = dto.PullRequestMergedAt,
+                Mergeable = dto.PullRequestMergeable,
+                MergeableState = dto.PullRequestMergeableState,
+                ChangedFiles = dto.PullRequestChangedFiles,
+            };
         }
 
-        return new PullRequestInfo
+        PullRequestInfo? parent = null;
+        if (dto.ParentPullRequestNumber.HasValue)
         {
-            Number = dto.PullRequestNumber ?? 0,
-            State = dto.PullRequestState ?? string.Empty,
-            HtmlUrl = dto.PullRequestHtmlUrl ?? string.Empty,
-            MergedAt = dto.PullRequestMergedAt,
-            Mergeable = dto.PullRequestMergeable,
-            MergeableState = dto.PullRequestMergeableState,
-            ChangedFiles = dto.PullRequestChangedFiles,
-        };
+            parent = new PullRequestInfo
+            {
+                Number = dto.ParentPullRequestNumber.Value,
+                State = dto.ParentPullRequestState ?? string.Empty,
+                HtmlUrl = dto.ParentPullRequestHtmlUrl ?? string.Empty,
+                MergedAt = dto.ParentPullRequestMergedAt,
+                Mergeable = dto.ParentPullRequestMergeable,
+                MergeableState = dto.ParentPullRequestMergeableState,
+                ChangedFiles = dto.ParentPullRequestChangedFiles,
+            };
+        }
+
+        return PullRequestInfo.Compose(own, parent);
     }
 }

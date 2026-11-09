@@ -23,7 +23,9 @@ public sealed record RepositoryListItemDto(
     string Visibility,
     bool Archived,
     string? Topics,
-    string CloneUrl);
+    string CloneUrl,
+    bool IsFork = false,
+    string? ParentCloneUrl = null);
 
 public sealed record RepositoryListPageResult(
     IReadOnlyList<RepositoryListItemDto> Items,
