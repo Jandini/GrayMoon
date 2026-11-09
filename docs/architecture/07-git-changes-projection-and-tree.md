@@ -1,7 +1,7 @@
 # 07 - Git Changes Projection and File Tree
 
 **State documented:** current Git Changes end-to-end path (Worker scan → App persistence → Blazor tree)  
-**Scope:** how changed files are collected, stored, loaded into the circuit, and rendered. Large change sets are handled by summary-first open, lazy paged expand, virtualization, server-side search and a content digest; the work that is not built yet (folder rollup table, chunked Worker transfer, deltas) is in `docs/todo/git-changes-large-changeset-scale.md`.
+**Scope:** how changed files are collected, stored, loaded into the circuit, and rendered. Large change sets are handled by summary-first open, lazy paged expand, virtualization, server-side search and a content digest; the work that is not built yet (folder rollup table, chunked Worker transfer, deltas) is in `docs/todo/ideas/git-changes-large-changeset-scale.md`.
 
 This document is the precise current-state reference for the Changes page inventory and tree. Product-facing workflow text is in `01-product-model-and-user-workflows.md` (section 18). Watcher leases, pools and mutation consistency are in `04-runtime-communication-and-concurrency.md` (sections 9-13). Page capabilities are in `05-user-capability-reference.md` (sections 21-22). Persisted tables are in `03-data-model-and-persistence.md` (section 13).
 
@@ -191,7 +191,7 @@ Worker→App snapshots and SQLite replace are still O(paths) per repository (not
 | Diff | On demand, one file; soft size / binary / encoding states in `GitDiffDocument` |
 | SignalR receive cap | 10 MiB (shared with Sync and other large commands) |
 
-Circuit open, expand, virtualize, search and live-update shape no longer grow with path count. SQLite replace and Worker→App payload size remain O(paths); possible follow-ups are in `docs/todo/git-changes-large-changeset-scale.md`.
+Circuit open, expand, virtualize, search and live-update shape no longer grow with path count. SQLite replace and Worker→App payload size remain O(paths); possible follow-ups are in `docs/todo/ideas/git-changes-large-changeset-scale.md`.
 
 ## 7. Why UX degrades around ~5K+ files
 
@@ -233,6 +233,6 @@ The inventory is uncapped and every path stays reachable (scroll, expand, search
 
 Reference timings (Windows laptop, in-memory SQLite, synthetic untracked trees; the benchmark code was removed afterwards): 25K paths: persist 1.2 s, read 62 ms, build tree 54 ms; 50K paths: persist 3.6 s, read 151 ms, build tree 137 ms.
 
-Follow-ups, none scheduled: `docs/todo/git-changes-large-changeset-scale.md`. Any follow-up must keep every changed path reachable and must not introduce caps or "first N" truncation.
+Follow-ups, none scheduled: `docs/todo/ideas/git-changes-large-changeset-scale.md`. Any follow-up must keep every changed path reachable and must not introduce caps or "first N" truncation.
 
 Watcher keepalive and audit gaps (repair time equals the audit interval, no audit on return from Idle, audit cost on very large workspaces) are listed under Known gaps in `04-runtime-communication-and-concurrency.md`.
