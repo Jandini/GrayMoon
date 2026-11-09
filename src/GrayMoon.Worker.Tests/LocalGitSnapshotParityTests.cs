@@ -589,16 +589,28 @@ public sealed class LocalGitSnapshotParityTests : IDisposable
     private async Task<string> SeedOriginAsync(string defaultBranch)
     {
         var origin = Path.Combine(_root, "origin.git");
-        Directory.CreateDirectory(origin);
-        await GitAsync(origin, $"init --bare -b {defaultBranch}");
-
         var seed = Path.Combine(_root, "seed");
-        Directory.CreateDirectory(seed);
-        await GitAsync(seed, $"init -b {defaultBranch}");
-        await ConfigureUserAsync(seed);
-        await GitAsync(seed, $"remote add origin \"{origin}\"");
-        await CommitAsync(seed, "README.md", "init");
-        await GitAsync(seed, $"push origin {defaultBranch}");
+
+        // The seeded remote is identical in every test, so build it once and copy it (see GitTemplateCache).
+        GitTemplateCache.CopyTo($"parity-seeded-remote-{defaultBranch}", _root, template =>
+        {
+            var templateOrigin = Path.Combine(template, "origin.git");
+            var templateSeed = Path.Combine(template, "seed");
+            Directory.CreateDirectory(templateOrigin);
+            Directory.CreateDirectory(templateSeed);
+            GitConfigTestSupport.Git(templateOrigin, $"init --bare -b {defaultBranch}");
+            GitConfigTestSupport.Git(templateSeed, $"init -b {defaultBranch}");
+            GitConfigTestSupport.Git(templateSeed, "config user.email t@example.com");
+            GitConfigTestSupport.Git(templateSeed, "config user.name T");
+            GitConfigTestSupport.Git(templateSeed, $"remote add origin \"{templateOrigin}\"");
+            File.WriteAllText(Path.Combine(templateSeed, "README.md"), "init\n");
+            GitConfigTestSupport.Git(templateSeed, "add -A");
+            GitConfigTestSupport.Git(templateSeed, "commit -q -m init");
+            GitConfigTestSupport.Git(templateSeed, $"push origin {defaultBranch}");
+        });
+
+        // The copied seed still pushes to the template's remote; point it at this test's own copy.
+        await GitAsync(seed, $"remote set-url origin \"{origin}\"");
         return origin;
     }
 
@@ -626,10 +638,8 @@ public sealed class LocalGitSnapshotParityTests : IDisposable
         var workspace = Path.Combine(_root, "ws");
         Directory.CreateDirectory(workspace);
         var name = $"repo{_clones++}";
-        await GitAsync(workspace, $"clone \"{origin}\" {name}");
-        var repo = Path.Combine(workspace, name);
-        await ConfigureUserAsync(repo);
-        return repo;
+        await GitAsync(workspace, $"clone --config user.email=t@example.com --config user.name=T \"{origin}\" {name}");
+        return Path.Combine(workspace, name);
     }
 
     /// <summary>A commit with a fixed committer date (git would give commits made in the same second the same date).</summary>

@@ -9,14 +9,16 @@ internal static class GitConfigTestSupport
     public static string CreateRepo(string root, string name)
     {
         var path = Path.Combine(root, name);
-        Directory.CreateDirectory(path);
-        Git(path, "init");
-        Git(path, "config user.email test@example.com");
-        Git(path, "config user.name Test");
-        Git(path, "checkout -B main");
-        File.WriteAllText(Path.Combine(path, "README.md"), "x\n");
-        Git(path, "add README.md");
-        Git(path, "commit -m init");
+        GitTemplateCache.CopyTo("config-test-repo", path, template =>
+        {
+            Git(template, "init");
+            Git(template, "config user.email test@example.com");
+            Git(template, "config user.name Test");
+            Git(template, "checkout -B main");
+            File.WriteAllText(Path.Combine(template, "README.md"), "x\n");
+            Git(template, "add README.md");
+            Git(template, "commit -m init");
+        });
         return path;
     }
 
