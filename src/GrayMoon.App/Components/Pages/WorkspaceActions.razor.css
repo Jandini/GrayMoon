@@ -314,20 +314,24 @@
     opacity: 1;
 }
 
-/* Actions grid: workflow name → GitHub Actions workflow tab (not default blue link) */
-.actions-workflow-link {
+/* Actions grid: Workflow column → GitHub workflow tab. Must beat .table tbody td a:not(.badge) blue. */
+.actions-table td a.actions-workflow-link,
+.actions-table td .actions-workflow-link {
     color: rgba(236, 240, 245, 0.9) !important;
-    text-decoration: none;
+    text-decoration: none !important;
 }
 
-.actions-workflow-link:hover,
-.actions-workflow-link:focus {
+.actions-table td a.actions-workflow-link:hover,
+.actions-table td a.actions-workflow-link:focus,
+.actions-table td .actions-workflow-link:hover,
+.actions-table td .actions-workflow-link:focus {
     color: rgba(255, 255, 255, 0.98) !important;
-    text-decoration: underline;
+    text-decoration: underline !important;
     text-decoration-color: rgba(255, 255, 255, 0.45);
 }
 
-.actions-workflow-link:focus-visible {
+.actions-table td a.actions-workflow-link:focus-visible,
+.actions-table td .actions-workflow-link:focus-visible {
     outline: none;
     box-shadow: 0 0 0 1px var(--focus-ring-outer);
     border-radius: 0.125rem;
