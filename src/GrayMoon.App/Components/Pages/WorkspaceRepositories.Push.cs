@@ -112,6 +112,8 @@ public sealed partial class WorkspaceRepositories
     {
         try
         {
+            // The context the badge was clicked in, not the one selected when the links have loaded.
+            var contextId = RequireSelectedContextId();
             var allLinks = await GetAllLinksForOperationAsync();
             var repoIdsThatNeedPush = allLinks
                 .Where(wr => !wr.IsOnTag && (wr.OutgoingCommits ?? 0) > 0)
@@ -125,7 +127,7 @@ public sealed partial class WorkspaceRepositories
 
             var depInfo = await WorkspaceDependencyService.GetPushDependencyInfoForRepoAsync(
                 WorkspaceId,
-                RequireSelectedContextId().Value,
+                contextId.Value,
                 repositoryId,
                 CancellationToken.None);
 

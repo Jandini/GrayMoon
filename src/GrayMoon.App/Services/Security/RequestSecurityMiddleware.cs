@@ -18,6 +18,12 @@ namespace GrayMoon.App.Services.Security;
 /// <c>Security:AllowedOrigins</c>). An Origin whose host merely equals the request's <c>Host</c> or
 /// <c>X-Forwarded-Host</c> header proves nothing: under DNS rebinding the hostile page's own name arrives
 /// in both. With an empty allowlist only loopback is accepted and one warning is logged at startup.
+///
+/// The request's own <c>Host</c> is held to the same list, for every path and method. A page reached through
+/// a rebound name is same-origin with GrayMoon, so its GET requests carry no <c>Origin</c> and the Origin rules
+/// above never see them; the <c>Host</c> header still names the hostile host, and that is what is refused here.
+/// Exempt are <c>/health</c> and the Worker paths, which <see cref="WorkerSecretMiddleware"/> authenticates
+/// with the Worker secret, and a request with no <c>Host</c> at all, which no browser sends.
 /// </summary>
 public sealed class RequestSecurityMiddleware
 {
@@ -25,6 +31,13 @@ public sealed class RequestSecurityMiddleware
 
     private readonly RequestDelegate _next;
     private readonly IReadOnlyCollection<string> _allowedHosts;
+    private readonly ILogger<RequestSecurityMiddleware> _logger;
+    private int _hostRejectionLogged;
+
+    /// <summary>The plain-text body of a request refused for its <c>Host</c>. It names the fix and never echoes the header.</summary>
+    internal const string HostRejectedMessage =
+        "GrayMoon does not accept requests for this host name. Open GrayMoon as http://localhost:<port>, or set " +
+        "GRAYMOON_AllowedHosts to the host names or addresses people type in the browser, separated by ';'.";
 
     // Explicit constructor: it builds the allowlist once and logs the empty-allowlist warning once.
     public RequestSecurityMiddleware(
@@ -34,6 +47,7 @@ public sealed class RequestSecurityMiddleware
         ILogger<RequestSecurityMiddleware> logger)
     {
         _next = next;
+        _logger = logger;
         _allowedHosts = BuildAllowedHosts(configuration["AllowedHosts"], options.Value.AllowedOrigins);
         if (_allowedHosts.Count == 0)
         {
@@ -48,6 +62,23 @@ public sealed class RequestSecurityMiddleware
     {
         var path = context.Request.Path.Value ?? string.Empty;
         var origin = context.Request.Headers.Origin.ToString();
+
+        var requestHost = context.Request.Host.Host;
+        if (!IsRequestHostAllowed(requestHost, path, _allowedHosts))
+        {
+            // Logged once: a browser on a host that is not listed repeats the request for every asset.
+            if (Interlocked.Exchange(ref _hostRejectionLogged, 1) == 0)
+            {
+                _logger.LogWarning(
+                    "Rejected a request for host '{Host}': it is not this machine (localhost) and is not listed in GRAYMOON_AllowedHosts. " +
+                    "Further rejections are not logged.", requestHost);
+            }
+
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            context.Response.ContentType = "text/plain; charset=utf-8";
+            await context.Response.WriteAsync(HostRejectedMessage);
+            return;
+        }
 
         if (IsHubPath(path, out var isWorkerHub))
         {
@@ -95,6 +126,22 @@ public sealed class RequestSecurityMiddleware
         hosts.Add(entry);
     }
 
+    /// <summary>True when the request's own <c>Host</c> is acceptable: a loopback name, a listed host, or no
+    /// host at all (no browser sends that). <c>/health</c> and the Worker paths are not checked here: a
+    /// container probe and a Worker on another machine address the App by names nobody lists, and the Worker
+    /// paths are authenticated by <see cref="WorkerSecretMiddleware"/>.</summary>
+    internal static bool IsRequestHostAllowed(string requestHost, string path, IReadOnlyCollection<string> allowedHosts)
+    {
+        if (string.IsNullOrEmpty(requestHost))
+            return true;
+
+        if (path.Equals("/health", StringComparison.OrdinalIgnoreCase) ||
+            WorkerSecretMiddleware.Classify(path) != WorkerSecretMiddleware.ProtectedPath.None)
+            return true;
+
+        return IsAllowedHost(requestHost, allowedHosts);
+    }
+
     /// <summary>True when a non-GET <c>/api/</c> or <c>/repos/</c> request carrying an <c>Origin</c> header
     /// is allowed: the Origin's host must be a loopback name or a listed host, and the request must carry
     /// <c>X-GrayMoon-Request: 1</c>, which a cross-site page cannot add without triggering a CORS preflight.
@@ -105,7 +152,7 @@ public sealed class RequestSecurityMiddleware
         if (!TryGetOriginHost(origin, out var originHost))
             return false;
 
-        if (!IsAllowedOriginHost(originHost, allowedHosts))
+        if (!IsAllowedHost(originHost, allowedHosts))
             return false;
 
         return requestHeaderValue == "1";
@@ -124,7 +171,7 @@ public sealed class RequestSecurityMiddleware
         if (!TryGetOriginHost(origin, out var originHost))
             return false;
 
-        return IsAllowedOriginHost(originHost, allowedHosts);
+        return IsAllowedHost(originHost, allowedHosts);
     }
 
     internal static bool IsRestPath(string path) =>
@@ -154,7 +201,8 @@ public sealed class RequestSecurityMiddleware
         return false;
     }
 
-    private static bool IsAllowedOriginHost(string originHost, IReadOnlyCollection<string> allowedHosts)
+    /// <summary>True for a loopback name or a listed host; used for an Origin's host and for the request's Host.</summary>
+    private static bool IsAllowedHost(string originHost, IReadOnlyCollection<string> allowedHosts)
     {
         if (IsLoopbackHost(originHost))
             return true;

@@ -2,7 +2,7 @@
 
 Notes for work that is not built, or only partly built. Anything fully shipped is deleted: its behavior belongs in `docs/architecture/`. A note that is partly shipped keeps only what is still open, and says what is built in a short section at the top.
 
-Last checked against the code: 2026-11-10 (branch `code-review-fixes`, on top of `565f02a1`).
+Last checked against the code: 2026-11-11 (branch `code-review-fixes`, on top of `565f02a1`).
 
 ## `defects/` - something is wrong or missing today, and the cause is known
 
@@ -13,6 +13,10 @@ Last checked against the code: 2026-11-10 (branch `code-review-fixes`, on top of
 | [generated-package-context-write](defects/generated-package-context-write.md) | A Feature that cannot see a version file can delete workspace-global generated package rows. | Not built |
 | [sqlite-synchronous-per-connection](defects/sqlite-synchronous-per-connection.md) | `PRAGMA synchronous=NORMAL` only runs on the startup connection. | Not built |
 | [worker-damaged-install-probe](defects/worker-damaged-install-probe.md) | No startup probe reports a damaged Worker install once. | Not built |
+| [connector-refresh-empty-answer](defects/connector-refresh-empty-answer.md) | A connector that answers with zero repositories loses its stored ones; an all-empty refresh never purges. | Not built, to confirm first |
+| [worker-response-dropped-while-reconnecting](defects/worker-response-dropped-while-reconnecting.md) | A command result produced during a reconnect is dropped and the App waits out the timeout. | Not built, to confirm first |
+| [silent-catch-blocks](defects/silent-catch-blocks.md) | Five catch blocks on state-changing or status paths swallow the failure without a log line. | Not built |
+| [convention-test-coverage](defects/convention-test-coverage.md) | The convention tests check fewer fields, columns, folders and pages than the rules name. | Not built |
 
 ## `ideas/` - proposals and design notes, nothing is committed to
 

@@ -14,18 +14,14 @@ public sealed class WorkspacePageJobDisciplineTests
     private static readonly Regex CaptureLine = new(@"^var \w+ = RequireSelectedContextId\(\);$", RegexOptions.Compiled);
 
     /// <summary>
-    /// Uses of <c>RequireSelectedContextId()</c> that are not a queue-time capture and are not inside a job or
-    /// <c>svc =&gt;</c> lambda: they run on the dispatcher in the event handler itself. File name, trimmed line.
+    /// Uses of <c>RequireSelectedContextId()</c> that are not a capture into a local. Each one runs on the
+    /// dispatcher before the first <c>await</c> of its event handler, so it reads the context the user acted in.
+    /// A read after an <c>await</c> does not belong here: capture it at the top of the method. File name, trimmed line.
     /// </summary>
     private static readonly (string File, string Line)[] AllowedDirectUses =
     [
         ("WorkspaceGitChanges.Ai.cs", "RequireSelectedContextId(),"),
         ("WorkspaceRepositories.Update.cs", "RequireSelectedContextId(),"),
-        ("WorkspaceRepositories.Push.cs", "RequireSelectedContextId().Value,"),
-        ("WorkspaceRepositories.Dependencies.cs", "await updateOperations.RecomputeAndBroadcastWorkspaceSyncedAsync(WorkspaceId, RequireSelectedContextId());"),
-        ("WorkspaceRepositories.Loading.cs", "var mismatchedFiles = await fileVersionService.GetMismatchedFileVersionLinesForRepoAsync(WorkspaceId, RequireSelectedContextId(), repositoryId);"),
-        ("WorkspaceRepositories.Loading.cs", "var fileStatuses = await fileVersionService.GetFileLineStatusForRepoAsync(WorkspaceId, RequireSelectedContextId(), repositoryId);"),
-        ("WorkspaceRepositories.Loading.cs", "var allFileLines = await fileVersionService.GetAllFileVersionLinesForRepoAsync(WorkspaceId, RequireSelectedContextId(), repositoryId, repoVersionMap);"),
     ];
 
     [Theory]

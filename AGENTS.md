@@ -215,6 +215,9 @@ runs on the thread pool while the dispatcher may be rendering the page.
    `ScopedExecutor.ExecuteAsync(svc => ...)` lambda that runs in a job: the
    user can change `?context=` mid-job and the job then targets another
    context's branches. Drop the result when the generation changed. [13]
+   The same applies to an event handler that awaits without a job: read the
+   context (and `_selectedContextId` / `_isFeatureContext`) before the first
+   `await`, never after it.
 4. **A job must never touch page-owned disposables after the page is
    disposed** (see "Background job system" in `CLAUDE.md`).
 5. **Do not gate one-time setup on `firstRender` when it needs loaded data.**
@@ -224,9 +227,10 @@ runs on the thread pool while the dispatcher may be rendering the page.
    or on any render while the connection is still null and the data is
    present. [5]
 6. **Check that a job actually started.** `StartJob` / `StartWorkspaceJob` can
-   return the handle of another running operation, or refuse. A caller without
-   an `IsJobRunning` guard must check the result and must not report "running"
-   or "completed" for work that was dropped. [12]
+   return the handle of another running operation, or refuse. The service
+   then shows the tab a warning toast itself, so do not add another one. A
+   caller without an `IsJobRunning` guard must check the result and must not
+   report "running" or "completed" for work that was dropped. [12]
 7. **Every async load that can be restarted needs a generation guard and its
    own `CancellationTokenSource`.** Reopening a modal, changing a parameter
    (`RunId`), or typing a new search cancels the previous load and ignores its
@@ -375,6 +379,11 @@ runs on the thread pool while the dispatcher may be rendering the page.
 2. **An Origin whose host equals the request Host is not proof** (DNS
    rebinding). Accept loopback or a host listed in `GRAYMOON_AllowedHosts`.
    Do not add `AllowedHosts "*"` style defaults. [7]
+   An Origin check alone does not cover reads: a same-origin GET carries no
+   Origin. `RequestSecurityMiddleware` therefore also holds the request's
+   `Host` to the same list on every path. Only `/health` and the Worker paths
+   are exempt; a path joins that exemption only when it has its own
+   authentication.
 3. **An endpoint that returns a credential requires the paired Worker
    secret**, whatever the other middleware allows. Never return a PAT to an
    unauthenticated caller. [7]

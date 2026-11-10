@@ -101,7 +101,7 @@ public sealed class BackgroundJobServiceWorkspaceLockTests
     public async Task StartJob_on_second_workspace_key_does_not_run_a_second_body()
     {
         var runner = new WorkspaceOperationRunner(NullLogger<WorkspaceOperationRunner>.Instance);
-        using var service = new BackgroundJobService(runner, NullLogger<BackgroundJobService>.Instance);
+        using var service = new BackgroundJobService(runner, new GrayMoon.App.Services.Ui.ToastService(), NullLogger<BackgroundJobService>.Instance);
         var firstEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var firstRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var secondWorkRan = false;
@@ -143,7 +143,7 @@ public sealed class BackgroundJobServiceWorkspaceLockTests
     public async Task GetJob_attaches_only_on_originating_page_path()
     {
         var runner = new WorkspaceOperationRunner(NullLogger<WorkspaceOperationRunner>.Instance);
-        using var service = new BackgroundJobService(runner, NullLogger<BackgroundJobService>.Instance);
+        using var service = new BackgroundJobService(runner, new GrayMoon.App.Services.Ui.ToastService(), NullLogger<BackgroundJobService>.Instance);
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -174,7 +174,7 @@ public sealed class BackgroundJobServiceWorkspaceLockTests
     public async Task Scan_key_does_not_take_the_workspace_lock()
     {
         var runner = new WorkspaceOperationRunner(NullLogger<WorkspaceOperationRunner>.Instance);
-        using var service = new BackgroundJobService(runner, NullLogger<BackgroundJobService>.Instance);
+        using var service = new BackgroundJobService(runner, new GrayMoon.App.Services.Ui.ToastService(), NullLogger<BackgroundJobService>.Instance);
         var scanEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var scanRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var mutationRan = false;
@@ -204,7 +204,7 @@ public sealed class BackgroundJobServiceWorkspaceLockTests
     {
         var runner = new WorkspaceOperationRunner(NullLogger<WorkspaceOperationRunner>.Instance);
         var logger = new RecordingLogger<BackgroundJobService>();
-        using var service = new BackgroundJobService(runner, logger);
+        using var service = new BackgroundJobService(runner, new GrayMoon.App.Services.Ui.ToastService(), logger);
 
         service.StartJob("/workspaces/8/changes:scan", "Refreshing...", (_, _) =>
             throw new InvalidOperationException("scan boom"));

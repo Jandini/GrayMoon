@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using GrayMoon.App.Services.Ui;
 using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Services.Jobs;
@@ -14,8 +15,9 @@ public interface IBackgroundJobService
     /// <summary>
     /// Starts a new background job for jobKey. If a Running job already exists for the key,
     /// or the Workspace or context lock is held by another operation, the work is dropped and the returned handle
-    /// shows the running job with <see cref="BackgroundJobHandle.WasStarted"/> false. Otherwise creates a new
-    /// handle, stores it, and launches the work.
+    /// shows the running job with <see cref="BackgroundJobHandle.WasStarted"/> false, and this tab is told with a
+    /// warning toast (<see cref="BackgroundJobService.StartRefusedMessage"/>), so a caller need not report it again.
+    /// Otherwise creates a new handle, stores it, and launches the work.
     /// Workspace mutation keys share one process-wide run per workspace.
     /// </summary>
     BackgroundJobHandle StartJob(string jobKey, string displayMessage,
@@ -37,12 +39,18 @@ public sealed class BackgroundJobService : IBackgroundJobService, IDisposable
     private readonly ConcurrentDictionary<string, BackgroundJobHandle> _jobs = new(StringComparer.OrdinalIgnoreCase);
     private readonly IWorkspaceOperationRunner _runner;
     private readonly ILogger<BackgroundJobService> _logger;
+    private readonly IToastService _toast;
+
+    /// <summary>The warning shown in this tab when a start is refused because another operation is running.</summary>
+    internal const string StartRefusedMessage = "Another operation is still running, so this one was not started. Try again when it finishes.";
 
     public event Action? Changed;
 
-    public BackgroundJobService(IWorkspaceOperationRunner runner, ILogger<BackgroundJobService> logger)
+    // Both this service and the toast service are scoped to the circuit, so the toast reaches the tab that asked.
+    public BackgroundJobService(IWorkspaceOperationRunner runner, IToastService toast, ILogger<BackgroundJobService> logger)
     {
         _runner = runner;
+        _toast = toast;
         _logger = logger;
         _runner.Changed += RaiseChanged;
     }
@@ -74,6 +82,7 @@ public sealed class BackgroundJobService : IBackgroundJobService, IDisposable
             _logger.LogInformation(
                 "Background job {JobKey} was not started: '{Running}' is already running for this key.",
                 jobKey, existing.DisplayMessage);
+            _toast.ShowWarning(StartRefusedMessage);
             return existing.AsNotStarted();
         }
 
@@ -171,6 +180,7 @@ public sealed class BackgroundJobService : IBackgroundJobService, IDisposable
         _logger.LogInformation(
             "Background job {JobKey} was not started: '{Running}' ({RunningKey}) holds the lock.",
             jobKey, operation.DisplayMessage, operation.OverlayKey);
+        _toast.ShowWarning(StartRefusedMessage);
         return handle.AsNotStarted();
     }
 

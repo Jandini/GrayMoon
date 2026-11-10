@@ -324,6 +324,111 @@ public class RequestSecurityMiddlewareTests
         Assert.Empty(originsLogger.Warnings);
     }
 
+    // --- Host rule ---------------------------------------------------------------
+
+    // A page reached through a rebound name is same-origin with GrayMoon: its GETs carry no Origin, so only
+    // the Host header shows where the browser thinks it is.
+    [Theory]
+    [InlineData("/api/workspaces/1/git-changes")]
+    [InlineData("/api/workspaces/1/files")]
+    [InlineData("/repos")]
+    [InlineData("/api/about")]
+    [InlineData("/")]
+    [InlineData("/workspaces/1")]
+    public async Task Middleware_GET_for_a_rebound_host_without_origin_is_403(string path)
+    {
+        var (middleware, flag, logger) = CreateMiddlewareWithFlag();
+        var context = CreateContext(path, "GET", host: "rebind.evil.example.com:8384");
+        context.Response.Body = new MemoryStream();
+
+        await middleware.InvokeAsync(context);
+
+        Assert.False(flag.Called);
+        Assert.Equal(StatusCodes.Status403Forbidden, context.Response.StatusCode);
+        Assert.Contains(logger.Warnings, w => w.Contains("rebind.evil.example.com"));
+    }
+
+    [Fact]
+    public async Task Middleware_GET_for_an_unlisted_host_is_403_when_other_hosts_are_listed()
+    {
+        var (middleware, flag, _) = CreateMiddlewareWithFlag(allowedHosts: "localhost;nas.local");
+        var context = CreateContext("/api/workspaces", "GET", host: "rebind.evil.example.com");
+        context.Response.Body = new MemoryStream();
+
+        await middleware.InvokeAsync(context);
+
+        Assert.False(flag.Called);
+        Assert.Equal(StatusCodes.Status403Forbidden, context.Response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Rejected_host_response_names_the_variable_and_does_not_echo_the_host()
+    {
+        var (middleware, _, logger) = CreateMiddlewareWithFlag(allowedHosts: "localhost");
+        var body = new MemoryStream();
+        for (var i = 0; i < 3; i++)
+        {
+            var context = CreateContext("/", "GET", host: "rebind.evil.example.com");
+            context.Response.Body = body;
+            await middleware.InvokeAsync(context);
+        }
+
+        var text = System.Text.Encoding.UTF8.GetString(body.ToArray());
+        Assert.Contains("GRAYMOON_AllowedHosts", text);
+        Assert.DoesNotContain("evil", text);
+        // Logged once, not once per rejected asset request.
+        Assert.Single(logger.Warnings);
+    }
+
+    [Theory]
+    [InlineData("localhost:8384")]
+    [InlineData("LOCALHOST")]
+    [InlineData("127.0.0.1:8384")]
+    [InlineData("[::1]:8384")]
+    public async Task Middleware_GET_for_a_loopback_host_passes_with_an_empty_allowlist(string host)
+    {
+        var (middleware, flag, _) = CreateMiddlewareWithFlag();
+        var context = CreateContext("/api/workspaces", "GET", host: host);
+
+        await middleware.InvokeAsync(context);
+
+        Assert.True(flag.Called);
+    }
+
+    [Theory]
+    [InlineData("nas.local:8384", "localhost;nas.local")]
+    [InlineData("192.168.1.10", "192.168.1.10")]
+    [InlineData("graymoon.example.com", "*.example.com")]
+    public async Task Middleware_GET_for_a_listed_host_passes(string host, string allowedHosts)
+    {
+        var (middleware, flag, _) = CreateMiddlewareWithFlag(allowedHosts: allowedHosts);
+        var context = CreateContext("/workspaces/1", "GET", host: host);
+
+        await middleware.InvokeAsync(context);
+
+        Assert.True(flag.Called);
+    }
+
+    // A Worker on another machine and a container probe address the App by names nobody lists. The Worker
+    // paths are authenticated by the Worker secret (WorkerSecretMiddleware), so the Host rule leaves them alone.
+    [Theory]
+    [InlineData("/health", "GET")]
+    [InlineData("/hub/worker", "GET")]
+    [InlineData("/hub/worker/negotiate", "POST")]
+    [InlineData("/hub/agent", "GET")]
+    [InlineData("/repos/1/connector", "GET")]
+    [InlineData("/workspaces/1/capabilities", "GET")]
+    [InlineData("/api/worker/pair", "POST")]
+    public async Task Middleware_health_and_worker_paths_pass_for_an_unlisted_host(string path, string method)
+    {
+        var (middleware, flag, _) = CreateMiddlewareWithFlag();
+        var context = CreateContext(path, method, host: "192.168.1.10:8384");
+
+        await middleware.InvokeAsync(context);
+
+        Assert.True(flag.Called);
+    }
+
     [Fact]
     public async Task Middleware_GET_on_api_path_is_unaffected_even_with_foreign_origin()
     {

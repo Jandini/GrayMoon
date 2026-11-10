@@ -227,6 +227,24 @@ public sealed class SignalRReconnectShutdownTests
         await loop!.WaitAsync(TimeSpan.FromSeconds(30));
     }
 
+    [Fact]
+    public async Task Start_returns_while_the_App_is_down_and_stop_ends_the_connect_loop()
+    {
+        // Nothing listens on the hub URL. The host starts hosted services one after another, so a start that
+        // waits for the App would keep the hook listener and the job pools from starting.
+        await using var service = NewService();
+
+        await service.StartAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+
+        var connect = service.ConnectTask;
+        Assert.NotNull(connect);
+        Assert.False(connect!.IsCompleted);
+
+        await service.StopAsync(CancellationToken.None);
+
+        await connect.WaitAsync(TimeSpan.FromSeconds(30));
+    }
+
     private static SignalRConnectionHostedService NewService()
     {
         var options = Options.Create(new WorkerOptions { AppHubUrl = $"http://127.0.0.1:{FakeAppApi.FindClosedPort()}/hub/worker" });

@@ -65,10 +65,20 @@ public sealed class SignalRConnectionHostedService(
         }
     }
 
-    public async Task StartAsync(CancellationToken cancellationToken)
+    /// <summary>The first connect loop started by <see cref="StartAsync"/>, or null before the start.</summary>
+    internal Task? ConnectTask { get; private set; }
+
+    /// <summary>
+    /// Builds the connection and returns. The connect loop runs in the background: the host starts its hosted
+    /// services one after another, so waiting here for the App would keep the hook listener and the job pools from
+    /// starting for as long as the App is down.
+    /// </summary>
+    public Task StartAsync(CancellationToken cancellationToken)
     {
         BuildConnection(cancellationToken);
-        await ConnectWithRetryAsync(_shutdownToken);
+        var shutdownToken = _shutdownToken;
+        ConnectTask = Task.Run(() => ConnectWithRetryAsync(shutdownToken), CancellationToken.None);
+        return Task.CompletedTask;
     }
 
     /// <summary>Creates the connection and its handlers without connecting.</summary>
@@ -188,8 +198,18 @@ public sealed class SignalRConnectionHostedService(
             }
             catch (Exception ex)
             {
+                if (cancellationToken.IsCancellationRequested)
+                    return;
+
                 logger.LogWarning(ex, "Failed to connect to hub. Retrying in 5s...");
-                await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
             }
         }
     }

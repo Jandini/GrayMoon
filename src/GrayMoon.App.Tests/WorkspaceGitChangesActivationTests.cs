@@ -134,7 +134,7 @@ public sealed class WorkspaceGitChangesActivationTests
             Options.Create(new GitChangesOptions { WorkspaceActivityGraceMinutes = 8 }));
         var scanner = new RecordingScanner();
         var runner = new WorkspaceOperationRunner(NullLogger<WorkspaceOperationRunner>.Instance);
-        var jobs = new BackgroundJobService(runner, NullLogger<BackgroundJobService>.Instance);
+        var jobs = new BackgroundJobService(runner, new NoopToastService(), NullLogger<BackgroundJobService>.Instance);
         var activation = new WorkspaceGitChangesActivation(
             tracker,
             scanner,

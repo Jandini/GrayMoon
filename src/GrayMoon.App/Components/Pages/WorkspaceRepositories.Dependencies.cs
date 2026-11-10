@@ -289,12 +289,14 @@ public sealed partial class WorkspaceRepositories
 
         try
         {
+            // The context the user saved in, not the one selected when the save finishes.
+            var contextId = RequireSelectedContextId();
             await using var scope = ServiceScopeFactory.CreateAsyncScope();
             var customDepRepo = scope.ServiceProvider.GetRequiredService<WorkspaceRepositoryCustomDependencyRepository>();
             var updateOperations = scope.ServiceProvider.GetRequiredService<IWorkspaceUpdateOperations>();
 
             await customDepRepo.ReplaceCustomDependenciesForDependentAsync(WorkspaceId, dependentRepoId, selected);
-            await updateOperations.RecomputeAndBroadcastWorkspaceSyncedAsync(WorkspaceId, RequireSelectedContextId());
+            await updateOperations.RecomputeAndBroadcastWorkspaceSyncedAsync(WorkspaceId, contextId);
             await ReloadWorkspaceDataFromFreshScopeAsync();
 
             CloseCustomDependenciesModal();

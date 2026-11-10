@@ -224,13 +224,16 @@ public sealed class BackgroundJobRefusedStartTests
     [Fact]
     public async Task Second_start_for_a_running_key_is_refused_and_its_work_is_not_run()
     {
+        var toast = new ToastService();
         using var jobs = new BackgroundJobService(
             new WorkspaceOperationRunner(NullLogger<WorkspaceOperationRunner>.Instance),
+            toast,
             NullLogger<BackgroundJobService>.Instance);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var secondRan = false;
 
         var first = jobs.StartJob("/connectors", "First", (_, _) => release.Task);
+        Assert.False(toast.IsVisible);
         var second = jobs.StartJob("/connectors", "Second", (_, _) =>
         {
             secondRan = true;
@@ -241,6 +244,9 @@ public sealed class BackgroundJobRefusedStartTests
         Assert.False(second.WasStarted);
         Assert.Equal("First", second.DisplayMessage);
         Assert.Equal(BackgroundJobState.Running, second.State);
+        // The user is told: a click that did nothing must not look like it ran.
+        Assert.True(toast.IsWarning);
+        Assert.Equal(BackgroundJobService.StartRefusedMessage, toast.Message);
 
         // The refused caller cannot overwrite the running job's message.
         second.ReportProgress("Second is running");
@@ -257,8 +263,10 @@ public sealed class BackgroundJobRefusedStartTests
     {
         var runner = new WorkspaceOperationRunner(NullLogger<WorkspaceOperationRunner>.Instance);
         // Two circuits (browser tabs) share the process-wide runner.
-        using var tabA = new BackgroundJobService(runner, NullLogger<BackgroundJobService>.Instance);
-        using var tabB = new BackgroundJobService(runner, NullLogger<BackgroundJobService>.Instance);
+        var toastA = new ToastService();
+        var toastB = new ToastService();
+        using var tabA = new BackgroundJobService(runner, toastA, NullLogger<BackgroundJobService>.Instance);
+        using var tabB = new BackgroundJobService(runner, toastB, NullLogger<BackgroundJobService>.Instance);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var secondRan = false;
         var key = WorkspaceJobKeys.RepositoriesOverlayKey(4711);
@@ -273,6 +281,10 @@ public sealed class BackgroundJobRefusedStartTests
         Assert.True(first.WasStarted);
         Assert.False(second.WasStarted);
         Assert.Equal("Sync", second.DisplayMessage);
+        // Only the tab whose start was refused is told.
+        Assert.Equal(BackgroundJobService.StartRefusedMessage, toastB.Message);
+        Assert.True(toastB.IsWarning);
+        Assert.False(toastA.IsVisible);
 
         release.SetResult();
         await WaitForCompletedAsync(first);

@@ -1311,7 +1311,7 @@ a non-GET request with an Origin header is rejected (403) unless:
   the Origin's host is a loopback name (localhost, 127.0.0.1, ::1, 0.0.0.0) or a listed host (below)
   and the request also carries X-GrayMoon-Request: 1
     (a cross-site page cannot add that header without a CORS preflight, which GrayMoon does not allow)
-GET requests are never affected
+GET requests are not affected by the Origin rule; the request host rule below covers them
 ```
 
 ### SignalR hubs
@@ -1328,8 +1328,8 @@ GET requests are never affected
 listed hosts = the AllowedHosts setting (';' separated; set with the GRAYMOON_AllowedHosts environment variable)
                plus the optional Security:AllowedOrigins entries
 a bare * is not a host and is ignored; *.example.com matches any subdomain
-empty list   -> only loopback Origins are accepted, and the App logs one warning at startup that names
-                GRAYMOON_AllowedHosts
+empty list   -> only loopback Origins and loopback request hosts are accepted, and the App logs one
+                warning at startup that names GRAYMOON_AllowedHosts
 ```
 
 An Origin whose host equals the request's `Host` or `X-Forwarded-Host` header is **not** accepted on that
@@ -1343,10 +1343,26 @@ has to be listed.
   The same setting drives ASP.NET Core host filtering, so once it is set every name used to reach the App
   (including `localhost`, which a Worker on the Docker host uses) must be in the list.
 
-Known limit: GET requests carry no Origin header on a same-origin page, so with no listed hosts a
-rebinding page can still read `GET /api/...` data. Setting `GRAYMOON_AllowedHosts` closes that too (host
-filtering then rejects the foreign `Host`). Credentials are never exposed this way: the connector token
-endpoint requires the Worker secret (below).
+### Request host (every path, every method)
+
+```text
+a request whose Host header is a loopback name or a listed host passes
+a request with no Host header passes (no browser sends one)
+/health and the Worker paths (/hub/worker, /hub/agent, /repos/{id}/connector,
+  /workspaces/{id}/capabilities, /api/worker/pair) are not checked: a container probe and a Worker on
+  another machine use names nobody lists, and the Worker paths require the Worker secret (below)
+any other request is rejected (403) with a plain-text message that names GRAYMOON_AllowedHosts;
+  the first rejection is logged as a warning with the host, later ones are not logged
+```
+
+This is what stops a DNS-rebinding page from reading data. Such a page is same-origin with GrayMoon, so
+its GET requests carry no Origin header and the rules above never see them; the `Host` header still names
+the hostile host. The check runs with an empty list too (loopback only), so pages and `GET /api/...` data
+are not readable through a rebound name in any configuration.
+
+Behind a reverse proxy, list the name the proxy sends as `Host` as well as the public name: a proxy that
+replaces `Host` with its upstream name (the nginx default without `proxy_set_header Host $host`) is
+otherwise rejected.
 
 Git hooks post to the **Worker's** local listener (`127.0.0.1:<port>/hook/*`), not to the App, so they are
 outside this middleware.
