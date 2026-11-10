@@ -432,6 +432,17 @@ public sealed class HookListenerHostedServiceTests : IAsyncLifetime
         TestDirectory.Delete(_root);
     }
 
+    [Fact]
+    public async Task Stopping_and_disposing_more_than_once_never_throws()
+    {
+        // On Linux a Stop followed by Close made the managed HttpListener rebind its port and throw
+        // "Address already in use" out of shutdown; the listener is now closed exactly once.
+        await _listener.StopAsync(CancellationToken.None);
+        await _listener.StopAsync(CancellationToken.None);
+        await _listener.DisposeAsync();
+        await _listener.DisposeAsync();
+    }
+
     private static int FreePort()
     {
         var probe = new TcpListener(IPAddress.Loopback, 0);

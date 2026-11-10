@@ -121,7 +121,10 @@ public sealed class RepositoryAccessTests
             lease.Dispose();
         });
 
-        using var claim = await _access.AcquireExclusiveAsync([RepoA], CancellationToken.None, Fast);
+        // A long grace period: with the 150 ms of Fast, a busy test run could delay the 40 ms release past the grace
+        // period and the holder was cancelled after all. The claim still returns as soon as the lease is released.
+        var patient = new RepositoryAccessTimings(TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(1));
+        using var claim = await _access.AcquireExclusiveAsync([RepoA], CancellationToken.None, patient);
 
         Assert.False(lease.Yield.IsCancellationRequested);
     }

@@ -1,7 +1,7 @@
 # GrayMoon Current Architecture
 
 **State documented:** GrayMoon with worktree-backed Features, Workspace profiles (Basic and .NET Dependency), the Workspace repository (`graymoon.json`) and a local-only workspace name, CodeGraph on New Feature, central package versions, AI-generated commit/PR text, Worker auto-update, and the Git Changes projection/tree pipeline  
-**Code baseline reviewed through:** `ae1b748c7f4cdc442145c28d5056aa611a2e4567`  
+**Code baseline reviewed through:** `94f308c0bbd335e2590e0f2854cf91f1c8f4b953`  
 **Runtime:** .NET 10, ASP.NET Core / Blazor Server, EF Core 10, SQLite, GrayMoon.Worker .NET 10
 
 This folder is the current-state architecture reference for GrayMoon. Proposals and design notes for work not yet built live in `docs/todo/`; once shipped, their behavior is folded into these documents.

@@ -55,11 +55,12 @@ public sealed class HookListenerHostedService(
 
     private async Task ListenAsync(CancellationToken ct)
     {
-        while (!ct.IsCancellationRequested && _listener != null)
+        // Shutdown sets the field to null; the loop keeps its own reference so that cannot fault a pending accept.
+        while (!ct.IsCancellationRequested && _listener is { } listener)
         {
             try
             {
-                var context = await _listener.GetContextAsync().WaitAsync(ct);
+                var context = await listener.GetContextAsync().WaitAsync(ct);
                 if (!_inFlight.Wait(0, CancellationToken.None))
                 {
                     // Hooks are tiny local POSTs; this many in flight means something is flooding the port.
@@ -231,15 +232,34 @@ public sealed class HookListenerHostedService(
     public Task StopAsync(CancellationToken cancellationToken)
     {
         _cts?.Cancel();
-        _listener?.Stop();
-        _listener?.Close();
+        CloseListener();
         return _listenTask ?? Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Closes the listener once. Close already stops it; on Linux a Stop followed by Close (or a second Close)
+    /// makes the managed HttpListener look its endpoint up again and rebind the port, which throws "Address already
+    /// in use" when anything else took the port in between. A failure to close must never fail shutdown.
+    /// </summary>
+    private void CloseListener()
+    {
+        var listener = Interlocked.Exchange(ref _listener, null);
+        if (listener == null)
+            return;
+        try
+        {
+            listener.Close();
+        }
+        catch (Exception ex) when (ex is HttpListenerException or ObjectDisposedException)
+        {
+            logger.LogDebug(ex, "Hook listener reported an error while closing");
+        }
     }
 
     public async ValueTask DisposeAsync()
     {
         _cts?.Cancel();
-        _listener?.Close();
+        CloseListener();
         if (_listenTask != null)
         {
             try
