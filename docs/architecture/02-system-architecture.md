@@ -847,4 +847,4 @@ When adding functionality:
 - `IGitVersionService` has not been split out of `GitService`; only `SyncRepositoryCommand` uses the in-process snapshot reader.
 - Neither App nor Desktop blocks a second Worker install request; the install script mutex is the only guard.
 - Update and Push re-checks default-branch state once, when the run starts. A repository that moves onto its default branch while the run is in progress is not detected (a per-level check would add a read per level).
-- A connector token that expires or is revoked between runs is not detected before a run starts: the health flag is set at start-up and by the Connectors page only, and remote failures are recognised by message text. The plan is `docs/todo/connector-token-failure-handling.md`.
+- A connector token that expires or is revoked between runs is not detected before a run starts: the health flag is set at start-up and by the Connectors page only, and remote failures are recognised by message text. The plan is `docs/todo/ideas/connector-token-failure-handling.md`.

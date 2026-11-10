@@ -1,7 +1,7 @@
 # GrayMoon Current Architecture
 
 **State documented:** GrayMoon with worktree-backed Features, Workspace profiles (Basic and .NET Dependency), the Workspace repository (`graymoon.json`) and a local-only workspace name, CodeGraph on New Feature, central package versions, AI-generated commit/PR text, Worker auto-update, and the Git Changes projection/tree pipeline  
-**Code baseline reviewed through:** `8257e162441e3b49eafa1bc73f4952a51bad66ab`  
+**Code baseline reviewed through:** `ae1b748c7f4cdc442145c28d5056aa611a2e4567`  
 **Runtime:** .NET 10, ASP.NET Core / Blazor Server, EF Core 10, SQLite, GrayMoon.Worker .NET 10
 
 This folder is the current-state architecture reference for GrayMoon. Proposals and design notes for work not yet built live in `docs/todo/`; once shipped, their behavior is folded into these documents.
@@ -38,7 +38,7 @@ Read these documents in order:
    Rules for adding or changing functionality without violating GrayMoon architecture, plus the list of known gaps and open review findings.
 
 7. [07 - Git Changes Projection and File Tree](07-git-changes-projection-and-tree.md)  
-   End-to-end Changes inventory: Worker status scan, SignalR snapshot push, SQLite projection, circuit load, tree builder and render path, and current scale behavior and limits. Unbuilt scale follow-ups live in `docs/todo/git-changes-large-changeset-scale.md`.
+   End-to-end Changes inventory: Worker status scan, SignalR snapshot push, SQLite projection, circuit load, tree builder and render path, and current scale behavior and limits. Unbuilt scale follow-ups live in `docs/todo/ideas/git-changes-large-changeset-scale.md`.
 
 The companion Desktop shell is documented in `GrayMoon.Desktop/docs/architecture/` in the sibling repository.
 

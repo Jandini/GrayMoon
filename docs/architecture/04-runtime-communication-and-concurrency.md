@@ -339,7 +339,7 @@ Repair (`repair-feature`) re-runs worktree create only for `Pending` / `NeedsRep
 
 ### 5D. Feature removal internals and pending-delete cleanup
 
-App side (`RemoveFeatureAsync`, from `FeatureRemovalQueue`, no lock): pauses the context's Git Changes renewal and audits (section 9A), runs `UninitCodeGraph` first, marks the Feature and live rows `Removing`, removes Source worktrees concurrently (bounded by `MaxParallelOperations`), then the root worktree alone and only when every Source succeeded (D10). Each repository row becomes `Removed` in its own short-lived context right after its worktree is unregistered, so a crash can resume. Local branches are deleted afterwards (`-D` only when authorized) and, when requested, remote branches with a lease (`expectedSha`).
+App side (`RemoveFeatureAsync`, from `FeatureRemovalQueue`, no lock): pauses the context's Git Changes renewal and audits (section 9A), marks the Feature and live rows `Removing` and saves, then runs `UninitCodeGraph`, removes Source worktrees concurrently (bounded by `MaxParallelOperations`), then the root worktree alone and only when every Source succeeded (D10). Each repository row becomes `Removed` in its own short-lived context right after its worktree is unregistered, so a crash can resume. Local branches are deleted afterwards (`-D` only when authorized) and, when requested, remote branches with a lease (`expectedSha`).
 
 Worker side (`RemoveGitWorktree` -> `GitWorktreeService.RemoveWorktreeAsync`):
 
@@ -616,7 +616,7 @@ flowchart LR
   D --> E["page re-reads"]
 ```
 
-`GitChangesSnapshotPushHandler` resolves the context from the reported repository path, writes the context tables, and broadcasts `ContextGitChangesUpdated(workspaceId, contextId, repositoryId)`. When `GitChangesOptions.WriteLegacyGitChangesTables` is enabled (default off; the Merge dialog does not depend on it), the handler also writes the legacy tables and broadcasts `GitChangesUpdated(workspaceId, repositoryId)` for the special Workspace.
+`GitChangesSnapshotPushHandler` resolves the context from the reported repository path, writes the context tables, and broadcasts `ContextGitChangesUpdated(workspaceId, contextId, repositoryId, contentDigest)`. When `GitChangesOptions.WriteLegacyGitChangesTables` is enabled (default off; the Merge dialog does not depend on it), the handler also writes the legacy tables and broadcasts `GitChangesUpdated(workspaceId, repositoryId)` for the special Workspace.
 
 Each snapshot carries the **full** `GitChangeEntry` list for that repository over Worker↔App SignalR (`GitChangesSnapshotNotification`). The App's hub `MaximumReceiveMessageSize` is 10 MiB. The Changes page then re-reads the **entire** context projection into the circuit (`LoadAsync`), not only the updated repository's rows.
 
@@ -770,7 +770,7 @@ Current `WorkspaceSyncHub` events:
 ```text
 ContextRepositorySynced(workspaceId, contextId, repositoryId)
 ContextSynced(workspaceId, contextId)
-ContextGitChangesUpdated(workspaceId, contextId, repositoryId)
+ContextGitChangesUpdated(workspaceId, contextId, repositoryId, contentDigest)
 RepositorySynced(workspaceId, repositoryId)       legacy
 WorkspaceSynced(workspaceId)                      legacy
 GitChangesUpdated(workspaceId, repositoryId)      legacy, special Workspace only
@@ -857,6 +857,6 @@ Worker rules:
 - `FetchAsync` is always `fetch origin --prune --tags`; there is no narrower fetch policy for Sync.
 - The watcher does not filter ignored build output; it drops only `.git` and nested repositories.
 - The App has no single-flight for Worker install / `SelfUpdate`; the `Global\GrayMoonWorkerInstall` mutex in the install script is the guard.
-- Update and Push does not re-check default-branch state per level (see `02-system-architecture.md` section 17); a connector token that goes bad between runs is only noticed when a call fails (plan: `docs/todo/connector-token-failure-handling.md`).
+- Update and Push does not re-check default-branch state per level (see `02-system-architecture.md` section 17); a connector token that goes bad between runs is only noticed when a call fails (plan: `docs/todo/ideas/connector-token-failure-handling.md`).
 - A remote default branch switched to an already existing branch is not detected by origin/HEAD repair.
-- Git Changes snapshots are full-list end-to-end on the Worker-to-App side: full porcelain status, full snapshot SignalR payloads (a 50K-path repository is about 8.9 MiB against the 10 MiB receive cap) and full SQLite replace. The circuit side is paged and virtualized. Details in `07-git-changes-projection-and-tree.md` section 9; follow-ups in `docs/todo/git-changes-large-changeset-scale.md`.
+- Git Changes snapshots are full-list end-to-end on the Worker-to-App side: full porcelain status, full snapshot SignalR payloads (a 50K-path repository is about 8.9 MiB against the 10 MiB receive cap) and full SQLite replace. The circuit side is paged and virtualized. Details in `07-git-changes-projection-and-tree.md` section 9; follow-ups in `docs/todo/ideas/git-changes-large-changeset-scale.md`.
