@@ -1,4 +1,13 @@
 - When you complete a task, write a single sentence about the completed task.
 - **Line endings:** Always use **Windows (CRLF)** in generated or edited code. Do not use LF-only.
 - **Hyphens only:** Never use em dash or en dash; ASCII hyphen-minus (`-`) only.
+- Page state is assigned only on the Blazor dispatcher (`InvokeAsync` / `SafeInvoke`), never from a job body; capture `RequireSelectedContextId()` before a job is queued, not inside its lambda.
+- A singleton never holds per-circuit state; every subscription to a singleton is removed in `Dispose`.
+- A Feature context writes `WorkspaceRepositoryContextState` through `WorkspaceRepositoryStateWriter`, never the shared `WorkspaceRepositoryLink`.
+- A sync or merge deletes rows only for sources whose fetch succeeded.
+- A best-effort step still reports its outcome: no swallowed exceptions, no ignored Worker responses, non-zero exit is `Success=false`.
+- Worker code validates every external path (`GitRepositoryPathValidator`), uses `ArgumentList` with `--` (no interpolated command lines), and never assumes `.git` is a directory.
+- Secrets, allowlists and origin checks are required by default.
+- A fix ships with a regression test that fails on the old code.
+- These and the other defect-prevention rules are in `AGENTS.md` ("Rules from the 2026-11-10 code review").
 - Full coding conventions and architecture notes: `CLAUDE.md` and `AGENTS.md` in the repository root, and `docs/architecture/` (the only docs folder; update it in the same change as the behavior it describes).

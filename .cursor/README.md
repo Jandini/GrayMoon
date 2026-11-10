@@ -21,7 +21,13 @@ This folder contains rules and instructions for Cursor when working on this repo
 | `feature-context-scoping.mdc` | Feature (worktree) data must be filtered by `WorkspaceFeatureContextId` |
 | `ui-application-facades.mdc` | Pages call `IWorkspace*Operations`, not internal services |
 | `desktop-readme-on-feature-change.mdc` | Update the Desktop README "Recent GrayMoon changes" list |
-| `no-commit-or-push.mdc` | Never commit or push; propose a commit message instead |
+| `blazor-page-jobs.mdc` | Page state only on the dispatcher, context captured before a job is queued, restartable loads guarded |
+| `service-lifetimes-and-subscriptions.mdc` | No per-circuit state in singletons; subscriptions removed in `Dispose` |
+| `destructive-and-merge-operations.mdc` | Deletes only after a successful fetch, full dependent cleanup, re-check before queued destructive work |
+| `failures-and-cancellation.mdc` | Best-effort steps report their outcome; wait loop, cancellation and reader loop rules |
+| `worker-input-and-processes.mdc` | Worker path validation, `ArgumentList`, `.git` may be a file, bounded listener and queues |
+| `trust-boundaries.mdc` | Secure-by-default secrets, hosts and origins; sanitized AI prompts |
+| `no-commit-or-push.mdc` | No commit or push without an explicit request; propose a commit message instead |
 | `gray-unchecked-checkbox-radio.mdc` | New checkboxes and radios use `form-check-input-gray` so they are gray until checked |
 
 The same conventions are described in more detail in `CLAUDE.md` and `AGENTS.md` in the repository root. The architecture (current state only) is in `docs/architecture/`; update the relevant file there in the same change as the behavior.

@@ -1,0 +1,21 @@
+---
+description: Secure by default - secrets and allowlists required, Origin equal to Host is not proof, prompts sanitized
+alwaysApply: true
+---
+
+# Trust boundaries
+
+From the 2026-11-10 code review. Details: `AGENTS.md`, "Trust boundaries (App)".
+
+1. **Secure by default.** A secret, allowlist or origin check is required from
+   the first start. An empty allowlist means loopback only with a startup
+   warning, never "allow all". No `AllowedHosts "*"` style defaults.
+2. **An Origin whose host equals the request Host is not proof** (DNS
+   rebinding). Accept loopback or a host in `GRAYMOON_AllowedHosts`.
+3. **An endpoint returning a credential requires the paired Worker secret.**
+4. **Everything in an AI prompt passes `Sanitize` and `EvidenceRedactor`**,
+   including commit subjects and branch names.
+5. **Raw value for I/O, escape only for output.** A server-side fetch of a
+   user-supplied URL has a size cap and a deliberate host policy.
+6. **Tokens never reach a command line, a log or disk** (`GitRemoteAuth`,
+   `LogSafe`).
