@@ -14,7 +14,7 @@ Git Changes page, which then failed to load with
 
 ### Why this happens
 
-`AppDbContext` is registered as **scoped** (`Program.cs`, built from
+`AppDbContext` is registered as **scoped** (`GrayMoonServiceRegistration.cs`, built from
 `IDbContextFactory<AppDbContext>` - see "DbContext lifetime" in `CLAUDE.md`). In
 GrayMoon.App, a Blazor Server **circuit is one browser tab**, and a circuit is one
 DI scope. That means:

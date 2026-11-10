@@ -11,8 +11,6 @@ public sealed class EventSubscriptionConventionTests
     /// <summary>Subscriptions that are deliberately never removed. "Component: subscription" with the reason.</summary>
     private static readonly Dictionary<string, string> Exceptions = new(StringComparer.Ordinal)
     {
-        ["Components/Pages/Workspaces: WorkerConnectionTracker.OnStateChanged(OnWorkerConnectionStateChanged)"] =
-            "OPEN: Dispose sets _disposed but never calls RemoveStateChanged, so the singleton tracker keeps the page alive. Remove this entry with the fix.",
     };
 
     private static readonly Regex Subscribe = new(

@@ -39,7 +39,7 @@ public sealed class RequestPathValidationConventionTests
 
         // Known open violations, recorded so they cannot spread. Remove the entry with the fix.
         ["ResolveGeneratedPackageReferencesItem.FilePath"] = "OPEN: ResolveGeneratedPackageReferencesCommand combines it with the repository path unvalidated (read only).",
-        ["SyncRepositoryDependenciesItem.ProjectPath"] = "OPEN: reaches CsProjFileService.UpdatePackageVersionsAsync unvalidated, and that method writes the file.",
+        ["SyncRepositoryDependenciesProjectUpdate.ProjectPath"] = "OPEN: reaches CsProjFileService.UpdatePackageVersionsAsync unvalidated, and that method writes the file.",
     };
 
     [Fact]

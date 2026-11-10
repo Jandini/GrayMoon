@@ -428,6 +428,7 @@
     public void Dispose()
     {
         _disposed = true;
+        WorkerConnectionTracker.RemoveStateChanged(OnWorkerConnectionStateChanged);
         _fetchRepositoriesCts?.Cancel();
         _fetchRepositoriesCts?.Dispose();
         _directoryInfoCts?.Cancel();
