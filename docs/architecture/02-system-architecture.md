@@ -337,7 +337,7 @@ The legacy source-derived key (key id `default`) is decrypt-only and never encry
 
 ### How tokens reach Git
 
-The App never sends a token in a Worker command payload. The Worker asks for it when a remote operation needs it: `WorkerTokenProvider` calls App `GET /repos/{id}/connector` with the Worker secret header and caches the token per connector (`InvalidateByConnectorId`). Worker secret and request security are in 05 section 33.
+The App never sends a token in a Worker command payload. The Worker asks for it when a remote operation needs it: `WorkerTokenProvider` calls App `GET /repos/{id}/connector` with the Worker secret header on every request and keeps no token in memory, so a rotated or revoked token is picked up by the next operation (`InvalidateByConnectorId` has nothing to clear). Worker secret and request security are in 05 section 33.
 
 Git remote authentication is injected per process by `Worker/Services/GitRemoteAuth`, never written into repository config:
 
@@ -623,7 +623,7 @@ Git diff pool
 Git AI pool
 ```
 
-This prevents expensive or long-running mutations from making Git Changes status and diff feel unresponsive. The read pool takes `GetGitChangeStatus`, `ListGitWorktrees` and `InspectWorktree`; the AI commands run in their own AI pool. Pool sizes and routing are in 04.
+This prevents expensive or long-running mutations from making Git Changes status and diff feel unresponsive. The read pool takes `GetGitChangeStatus`, `ListGitWorktrees` and `InspectWorktree`; the AI commands run in their own AI pool. The `RequestCommand` handler never waits for room in a full queue, so a `CancelCommand` is always delivered at once. Pool sizes, routing and cancellation are in 04.
 
 Core hosted services include:
 
@@ -715,6 +715,24 @@ Managed Git hooks POST notifications to this listener.
 The hook listener turns them into Worker notification jobs, which collect repository state and push it back to the App over SignalR.
 
 Hook failure must not block the developer's normal Git command.
+
+### Trust boundary
+
+The listener is bound to loopback, but a loopback caller is not trusted: any local process, or a web page through a cross-site POST, can reach it. `HookListenerHostedService` therefore checks every request before a job is queued:
+
+| Check | Answer when it fails |
+|---|---|
+| `Content-Type` is `application/json` (a browser form or "simple" fetch cannot send it without a preflight) | 400 |
+| Body is at most 64 KB (`MaxBodyBytes`), declared or chunked; no more than that is buffered | 413 |
+| Body is JSON with `repositoryId`, `workspaceId` and `repositoryPath` | 400 |
+| `repositoryPath` is a working tree GrayMoon manages (`HookRepositoryPathPolicy`) | 400 |
+
+`HookRepositoryPathPolicy` accepts a path that is an existing directory with `.git` (a directory, or the pointer file of a Feature worktree) and either:
+
+- lies under a workspace root the App has named in a command since the Worker started (`KnownWorkspaceRoots`, fed by `WorkerRepositoryPaths.GetWorkspacePath`, at most 256 roots), or
+- belongs to a repository whose hooks folder holds a GrayMoon sync hook for the same workspace and repository ids. This covers the time right after a Worker restart, before the App has sent a command, and a Feature worktree that is still being created. The check reads the `.git` pointer, `commondir` and the hook files; git is not started for an unvetted path.
+
+A network path (`\\host\share`) is accepted only under a known root and is never probed otherwise. Rejections are logged as warnings with the reason; the response carries only the status code.
 
 ---
 

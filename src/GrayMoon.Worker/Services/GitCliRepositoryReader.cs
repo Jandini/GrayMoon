@@ -38,6 +38,27 @@ public sealed class GitCliRepositoryReader(GitProcessRunner runner, ILogger<GitC
             mirrorFailureOutputAsStderr,
             GitLockIntent.Read);
 
+    /// <summary>
+    /// The read lane for a command that carries a ref, branch or revision name. The name is its own argument (never
+    /// part of a command line string), so quotes or spaces in it cannot become further arguments, and callers put
+    /// <c>--end-of-options</c> in front of it so a name that starts with <c>-</c> is not read as an option.
+    /// </summary>
+    private Task<(int ExitCode, string? Stdout, string? Stderr)> RunGitReadAsync(
+        IReadOnlyList<string> arguments,
+        string repoPath,
+        CancellationToken ct,
+        bool? streamStderrAsStdout = null,
+        bool? mirrorFailureOutputAsStderr = null)
+        => runner.RunAsync(
+            "git",
+            ["--no-optional-locks", .. arguments],
+            repoPath,
+            null,
+            ct,
+            GitLockIntent.Read,
+            streamStderrAsStdout,
+            mirrorFailureOutputAsStderr);
+
     public async Task<string?> GetCurrentBranchNameAsync(string repoPath, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
@@ -209,7 +230,7 @@ public sealed class GitCliRepositoryReader(GitProcessRunner runner, ILogger<GitC
         // after a checkout - an expected, already-handled miss here (falls back to unknown counts below),
         // not a real command failure, so it must not be mirrored to the overlay as a red stderr line.
         var (exitLR, stdoutLR, stderrLR) = await RunGitReadAsync(
-            $"rev-list --left-right --count {originBranch}...HEAD",
+            ["rev-list", "--left-right", "--count", "--end-of-options", $"{originBranch}...HEAD"],
             repoPath,
             ct,
             streamStderrAsStdout: true,
@@ -247,7 +268,7 @@ public sealed class GitCliRepositoryReader(GitProcessRunner runner, ILogger<GitC
         // that is an expected, already-handled miss here, not a real command failure, so it must not be
         // mirrored to the overlay as a red stderr line (see RefExistsAsync for the same policy).
         var (exitCode, stdout, stderr) = await RunGitReadAsync(
-            $"rev-list --left-right --count {defaultBranch}...HEAD",
+            ["rev-list", "--left-right", "--count", "--end-of-options", $"{defaultBranch}...HEAD"],
             repoPath,
             ct,
             streamStderrAsStdout: true,
@@ -540,7 +561,7 @@ public sealed class GitCliRepositoryReader(GitProcessRunner runner, ILogger<GitC
     public async Task<string?> GetUpstreamRefAsync(string repoPath, string branchName, CancellationToken ct)
     {
         var (exitCode, stdout, _) = await RunGitReadAsync(
-            $"for-each-ref --format=%(upstream:short) refs/heads/{branchName}",
+            ["for-each-ref", "--format=%(upstream:short)", "--", $"refs/heads/{branchName}"],
             repoPath,
             ct);
 
@@ -563,7 +584,7 @@ public sealed class GitCliRepositoryReader(GitProcessRunner runner, ILogger<GitC
             return false;
 
         var (exit, _, _) = await RunGitReadAsync(
-            $"rev-parse --verify --quiet {revision}",
+            ["rev-parse", "--verify", "--quiet", "--end-of-options", revision],
             repoPath,
             ct,
             streamStderrAsStdout: true,
@@ -650,10 +671,10 @@ public sealed class GitCliRepositoryReader(GitProcessRunner runner, ILogger<GitC
         var divergenceRef = divergenceLocal != null && OriginDefaultRef.IsPlainRefName(divergenceLocal)
             ? $"refs/heads/{divergenceLocal}"
             : null;
-        var patterns = divergenceRef == null || divergenceRef == branchRef ? branchRef : $"{branchRef} {divergenceRef}";
+        string[] patterns = divergenceRef == null || divergenceRef == branchRef ? [branchRef] : [branchRef, divergenceRef];
 
         var (exitCode, stdout, _) = await RunGitReadAsync(
-            $"for-each-ref --format=%(HEAD)%09%(refname)%09%(upstream:short)%09%(upstream:track) {patterns}",
+            ["for-each-ref", "--format=%(HEAD)%09%(refname)%09%(upstream:short)%09%(upstream:track)", "--", .. patterns],
             repoPath,
             ct);
         if (exitCode != 0)
@@ -722,7 +743,7 @@ public sealed class GitCliRepositoryReader(GitProcessRunner runner, ILogger<GitC
         // that is an expected, already-handled miss here, not a real command failure, so it must not be
         // mirrored to the overlay as a red stderr line (see RefExistsAsync for the same policy).
         var (exitDefault, stdoutDefault, stderrDefault) = await RunGitReadAsync(
-            $"rev-list --count {compareRef}..HEAD",
+            ["rev-list", "--count", "--end-of-options", $"{compareRef}..HEAD"],
             repoPath,
             ct,
             streamStderrAsStdout: true,

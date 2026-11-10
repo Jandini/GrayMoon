@@ -78,7 +78,7 @@ Test time is dominated by setup, so shared setup lives in fixtures; do not repea
 | Worker commands, hook listener, process launch, git | "Worker: input, processes and git" |
 | Middleware, endpoints, secrets, AI prompts, downloads | "Trust boundaries (App)" |
 
-The source review and its fix plan are `docs/code-review/2026-11-10-code-review.md` and `2026-11-10-fix-plan.md` in the workspace root (one level above this repository). Some findings are still open in the code; an existing violation is not a pattern to copy.
+The source review and its fix plan are `docs/code-review/2026-11-10-code-review.md` and `2026-11-10-fix-plan.md` in the workspace root (one level above this repository). All numbered findings were fixed on `code-review-fixes` (statuses are in the review); the rules stay, and an existing violation is never a pattern to copy.
 
 ## Architecture
 

@@ -79,7 +79,9 @@ public sealed class GitChangesSnapshotPushHandler(
 
         var writeLegacy = options.WriteLegacyGitChangesTables && contextInfo.IsSpecialWorkspace;
 
-        // Legacy table version gate only while dual-write is on for the special Workspace.
+        // Legacy table version gate only while dual-write is on for the special Workspace. The context tables are the
+        // source of truth and already accepted this version, so a legacy row that is ahead (the flag was off for a
+        // while, or the row is left over) skips only the legacy write. Returning here would drop the context write.
         WorkspaceGitRepositoryStatus? existingLegacy = null;
         if (writeLegacy)
         {
@@ -88,9 +90,10 @@ public sealed class GitChangesSnapshotPushHandler(
             if (existingLegacy != null && snapshot.Version <= existingLegacy.SnapshotVersion)
             {
                 logger.LogInformation(
-                    "[GCDiag] GitChangesSnapshotUpdated: rejected stale legacy snapshot version {IncomingVersion} <= persisted {PersistedVersion} (workspace={WorkspaceId}, repo={RepositoryId})",
+                    "[GCDiag] GitChangesSnapshotUpdated: legacy tables not written, snapshot version {IncomingVersion} <= persisted legacy {PersistedVersion}; context tables are still written (workspace={WorkspaceId}, repo={RepositoryId})",
                     snapshot.Version, existingLegacy.SnapshotVersion, notification.WorkspaceId, notification.RepositoryId);
-                return;
+                writeLegacy = false;
+                existingLegacy = null;
             }
         }
 

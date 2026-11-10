@@ -258,7 +258,9 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, IOptions<G
         string? workingDirectory,
         byte[]? stdinBytes,
         CancellationToken ct,
-        GitLockIntent intent = GitLockIntent.Write)
+        GitLockIntent intent = GitLockIntent.Write,
+        bool? streamStderrAsStdout = null,
+        bool? mirrorFailureOutputAsStderr = null)
     {
         if (intent == GitLockIntent.Write && RequiresRepoLock(fileName) && !string.IsNullOrWhiteSpace(workingDirectory))
         {
@@ -266,7 +268,7 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, IOptions<G
             await repoLock.WaitAsync(ct);
             try
             {
-                return await RunCoreAsync(fileName, arguments, workingDirectory, stdinBytes, ct);
+                return await RunCoreAsync(fileName, arguments, workingDirectory, stdinBytes, ct, streamStderrAsStdout, mirrorFailureOutputAsStderr);
             }
             finally
             {
@@ -274,7 +276,7 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, IOptions<G
             }
         }
 
-        return await RunCoreAsync(fileName, arguments, workingDirectory, stdinBytes, ct);
+        return await RunCoreAsync(fileName, arguments, workingDirectory, stdinBytes, ct, streamStderrAsStdout, mirrorFailureOutputAsStderr);
     }
 
     /// <summary>
@@ -317,11 +319,13 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, IOptions<G
         IReadOnlyList<string> arguments,
         string? workingDirectory,
         byte[]? stdinBytes,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool? streamStderrAsStdout = null,
+        bool? mirrorFailureOutputAsStderr = null)
     {
         var gitLike = string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase);
         var timeout = ResolveTimeout(fileName, arguments);
-        var r = await commandLine.RunAsync(fileName, arguments, workingDirectory, stdinBytes, ct, gitLike, gitLike, timeout, ResolveIdleTimeout(fileName, arguments));
+        var r = await commandLine.RunAsync(fileName, arguments, workingDirectory, stdinBytes, ct, streamStderrAsStdout ?? gitLike, mirrorFailureOutputAsStderr ?? gitLike, timeout, ResolveIdleTimeout(fileName, arguments));
         return (r.ExitCode, r.Stdout, r.Stderr);
     }
 

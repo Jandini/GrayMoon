@@ -2,6 +2,7 @@
 using GrayMoon.App.Services.GitChanges;
 using GrayMoon.Application.Features;
 using GrayMoon.Common.Git;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace GrayMoon.App.Tests;
@@ -76,6 +77,42 @@ public class GitChangesSnapshotPushHandlerTests
         Assert.Single(ctx.DbContext.WorkspaceGitContextChangeEntries);
         Assert.DoesNotContain(hubContext.ClientsImpl.AllProxy.Sent, s => s.Method == "GitChangesUpdated");
         Assert.Contains(hubContext.ClientsImpl.AllProxy.Sent, s => s.Method == "ContextGitChangesUpdated");
+    }
+
+    [Fact]
+    public async Task Legacy_row_ahead_of_the_context_row_skips_only_the_legacy_write()
+    {
+        await using var ctx = await GitChangesTestDbContext.CreateAsync();
+        var hubContext = new FakeHubContext<WorkspaceSyncHub>();
+        var handler = GitChangesPushHandlerTestFactory.Create(ctx, hubContext);
+
+        await handler.HandleAsync(new GitChangesSnapshotNotification
+        {
+            WorkspaceId = ctx.WorkspaceId,
+            RepositoryId = ctx.RepositoryId,
+            Snapshot = MakeSnapshot(5, MakeEntry("old.txt")),
+        }, CancellationToken.None);
+
+        // The legacy row is ahead of the context row (dual-write was toggled, or the row is left over).
+        await ctx.DbContext.WorkspaceGitRepositoryStatuses.ExecuteUpdateAsync(s => s.SetProperty(x => x.SnapshotVersion, 10L));
+        hubContext.ClientsImpl.AllProxy.Sent.Clear();
+
+        await handler.HandleAsync(new GitChangesSnapshotNotification
+        {
+            WorkspaceId = ctx.WorkspaceId,
+            RepositoryId = ctx.RepositoryId,
+            Snapshot = MakeSnapshot(6, MakeEntry("new.txt")),
+        }, CancellationToken.None);
+
+        var context = Assert.Single(ctx.DbContext.WorkspaceGitContextRepositoryStatuses.AsNoTracking());
+        Assert.Equal(6, context.SnapshotVersion);
+        Assert.Equal("new.txt", Assert.Single(ctx.DbContext.WorkspaceGitContextChangeEntries.AsNoTracking()).Path);
+        Assert.Contains(hubContext.ClientsImpl.AllProxy.Sent, s => s.Method == "ContextGitChangesUpdated");
+
+        var legacy = Assert.Single(ctx.DbContext.WorkspaceGitRepositoryStatuses.AsNoTracking());
+        Assert.Equal(10, legacy.SnapshotVersion);
+        Assert.Equal("old.txt", Assert.Single(ctx.DbContext.WorkspaceGitChangeEntries.AsNoTracking()).Path);
+        Assert.DoesNotContain(hubContext.ClientsImpl.AllProxy.Sent, s => s.Method == "GitChangesUpdated");
     }
 
     [Fact]

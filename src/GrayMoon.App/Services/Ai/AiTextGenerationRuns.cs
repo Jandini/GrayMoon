@@ -39,9 +39,51 @@ public abstract class AiTextGenerationRuns<TText>(ILogger logger, string failedM
             new(false, false, null, error, providerLabel, textAtClick);
     }
 
+    /// <summary>
+    /// One run's cancellation. Cancel and Dispose go through the same lock, so a Cancel click that arrives while the
+    /// run is finishing either cancels a live source or does nothing; it never reaches a disposed one.
+    /// </summary>
+    private sealed class RunHandle : IDisposable
+    {
+        private readonly CancellationTokenSource _cts = new();
+        private readonly object _lock = new();
+        private bool _disposed;
+
+        public CancellationToken Token => _cts.Token;
+
+        public bool IsCancellationRequested
+        {
+            get
+            {
+                lock (_lock)
+                    return _disposed || _cts.IsCancellationRequested;
+            }
+        }
+
+        public void Cancel()
+        {
+            lock (_lock)
+            {
+                if (!_disposed)
+                    _cts.Cancel();
+            }
+        }
+
+        public void Dispose()
+        {
+            lock (_lock)
+            {
+                if (_disposed)
+                    return;
+                _disposed = true;
+                _cts.Dispose();
+            }
+        }
+    }
+
     private sealed class Slot
     {
-        public CancellationTokenSource? Cts;
+        public RunHandle? Cts;
         public string? Error;
         public AiGenerationWarning? Warning;
         public Offer? Offer;
@@ -93,7 +135,7 @@ public abstract class AiTextGenerationRuns<TText>(ILogger logger, string failedM
         Func<CancellationToken, Task<Outcome>> run,
         Func<Outcome, Task<AiApplyDecision?>>? consult)
     {
-        var cts = new CancellationTokenSource();
+        var cts = new RunHandle();
         lock (_gate)
         {
             if (_slots.TryGetValue(key, out var existing) && existing.Cts is not null)
@@ -117,9 +159,11 @@ public abstract class AiTextGenerationRuns<TText>(ILogger logger, string failedM
 
     public void Cancel(Key key)
     {
-        CancellationTokenSource? cts;
+        RunHandle? cts;
         lock (_gate)
             cts = _slots.TryGetValue(key, out var slot) ? slot.Cts : null;
+        // Outside _gate (cancellation callbacks run inline), inside the run's own lock: a run that finished in between
+        // has disposed its handle and this is a no-op.
         cts?.Cancel();
     }
 
@@ -200,7 +244,7 @@ public abstract class AiTextGenerationRuns<TText>(ILogger logger, string failedM
 
     private async Task FinishAsync(
         Key key,
-        CancellationTokenSource cts,
+        RunHandle cts,
         Func<CancellationToken, Task<Outcome>> run,
         Func<Outcome, Task<AiApplyDecision?>>? consult)
     {
@@ -292,7 +336,7 @@ public abstract class AiTextGenerationRuns<TText>(ILogger logger, string failedM
             Changed?.Invoke(key);
     }
 
-    private void EndRun(Key key, CancellationTokenSource cts)
+    private void EndRun(Key key, RunHandle cts)
     {
         lock (_gate)
         {
@@ -304,6 +348,6 @@ public abstract class AiTextGenerationRuns<TText>(ILogger logger, string failedM
         Changed?.Invoke(key);
     }
 
-    private bool SameRun(Key key, CancellationTokenSource cts) =>
+    private bool SameRun(Key key, RunHandle cts) =>
         _slots.TryGetValue(key, out var slot) && ReferenceEquals(slot.Cts, cts);
 }

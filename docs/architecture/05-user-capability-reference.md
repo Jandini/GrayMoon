@@ -909,6 +909,8 @@ unavailable/unsupported diff
 
 `.md`, `.markdown`, `.mdown`, `.mkdn`, `.mkd`, `.mdwn`, `.mkdown`, `.mdtxt`, `.mdtext`, `.markdn`, and `.mdc` (Cursor project rules) open on Preview, with Source still available as the Monaco diff. Other extensions stay on the Monaco diff only.
 
+Preview images are embedded by the App as data URIs (`MarkdownImageEmbedder`), because the page has no access to the repository files and no GitHub session. Repository-relative images are read through the Worker; remote `http(s)` images are downloaded by the App from any host. Arbitrary hosts are a deliberate choice (README badges and screenshots live on CDNs), bounded instead by size and count: at most 24 images per document, 2 MB per remote image, 256 KB per SVG, and an SVG with script or event handlers is not embedded. The `src` is read out of rendered HTML, so it is HTML-decoded for the request or the Worker path (`a.svg?x=1&amp;y=2` is requested as `?x=1&y=2`) and matched in its escaped form only when the output is rewritten. A remote image that could not be embedded becomes a small text chip with its `alt` text.
+
 ### Implementation
 
 ```text
@@ -1089,6 +1091,8 @@ incoming commits
 ```
 
 The service can identify the lowest dependency level that needs work.
+
+The popup lists at most 100 repositories, but its actions (Update, Push, Pull, Undo Push Commits) and the default-branch warning in front of Update and Push work on every repository of the selected context, read from that context's own branch, tag and counters. The context is fixed when the button is pressed. Pull with nothing left to pull reports "Nothing to pull."; an action whose repositories cannot be loaded reports "<action> could not be started." and starts nothing.
 
 ---
 
@@ -1394,6 +1398,8 @@ SelfUpdate rejects an installUrl that is not http(s) or contains ' " % ^ \ ` $ &
   it runs cmd.exe /c start "" /b powershell.exe ... irm '<url>' | iex (Windows only)
 the Worker hook listener allows at most 64 in-flight requests (503 above that); a port bind failure
   gives an actionable error and fails startup
+it answers 400 to a body that is not application/json or whose repositoryPath is not a managed
+  working tree, and 413 to a body over 64 KB; nothing is queued for a rejected request
 ```
 
 ### Implementation
@@ -1471,7 +1477,9 @@ exit                 App validates the commit/PR shape, the text is kept and an 
 ### Flow
 
 ```text
-resolve provider and model, check availability (the startup GetHostInfo; menus do not probe)
+resolve provider and model, check availability (the startup GetHostInfo; menus do not probe); a provider
+                            the Worker's host check does not list (older Worker) is filled in by HostInfoCache
+                            as not installed, so it is shown as unavailable with a reason, never an exception
 Worker CollectGitEvidence   one request for all repositories, bounded fan-out, never mutates or fetches;
                             PR: also every commit's subject and shortstat, oldest first (git log --reverse
                             --shortstat, no bodies), up to 200 per repository (60 above 10 repositories);
@@ -1480,7 +1488,9 @@ CommitHistoryCondenser      PR: folds fixup!/squash!/amend! into their commit, d
                             subject committed in several repositories into one line, marks small low-signal
                             commits, redacts subjects, orders by committer time
 AiPromptBuilder             one prompt under a hard budget (commit 4,000 / PR 8,000 estimated tokens),
-                            secrets redacted, evidence wrapped as untrusted data; PR splits it into headers
+                            secrets redacted, evidence wrapped as untrusted data (every piece of repository
+                            text, including the commit prompt's recent subjects used as a style reference, is
+                            redacted and cannot close the evidence block); PR splits it into headers
                             and facts (45%), history (20%, low-signal then small middle commits dropped first,
                             the first and last 10 kept longest) and excerpts (the rest)
 Worker GenerateAiText       one CLI process in its own empty temp folder, no tools (Cursor: read-only ask mode),
@@ -1499,7 +1509,7 @@ All three Worker commands run on the main pool. The App never runs git or an AI 
 ```text
 Components/Ai: AiProviderControl, AiMenuCheckItem, AiSuggestionPanel; wwwroot/css/ai-generation.css (gm-ai-error / gm-ai-warning), js/gm-ai-menu.js
 WorkspaceGitChanges.Ai.cs / NewPullRequestModal.Ai.cs
-AiTextGenerationRuns<TText>          app-wide click-to-write runs, one per Workspace and Feature context, outside any page or circuit; Error, Warning and Offer are per context
+AiTextGenerationRuns<TText>          app-wide click-to-write runs, one per Workspace and Feature context, outside any page or circuit; Error, Warning and Offer are per context; Cancel and the end of a run share one locked handle, so a late Cancel is a no-op
 WorkspaceGitChangesCommitGeneration   the commit message runs (stores into WorkspaceGitChangesCommitMessageMemory)
 WorkspacePullRequestTextGeneration    the New PR title and description runs (stores into WorkspacePullRequestDraftMemory)
 WorkspacePullRequestDraftMemory       the New PR title and description, per Workspace and Feature context

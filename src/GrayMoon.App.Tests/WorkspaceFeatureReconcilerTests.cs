@@ -44,6 +44,180 @@ public sealed class WorkspaceFeatureReconcilerTests
         Assert.Equal(WorkspaceFeatureReconciler.InterruptedRemoving, feature.LastError);
     }
 
+    /// <summary>
+    /// Review 2026-11-10 (P3). A queued removal takes no Workspace lock, so the reconciler has to ask the queue:
+    /// a Worker reconnect in the middle of a removal must not flip the Feature to NeedsRepair or re-inspect its rows.
+    /// </summary>
+    [Fact]
+    public async Task Removal_still_pending_in_the_queue_is_left_alone()
+    {
+        var queue = new PendingQueue();
+        await using var ctx = await SyncStateTestContext.CreateAsync(
+            configureServices: s => s.AddSingleton<IFeatureRemovalQueue>(queue));
+        await SeedFeatureAsync(ctx, WorkspaceFeatureLifecycleState.Removing, WorkspaceFeatureRepositoryState.Removing);
+        StubHealthyList(ctx);
+        queue.Pending = true;
+
+        await ReconcileAsync(ctx);
+
+        var feature = await ReadFeatureAsync(ctx);
+        Assert.Equal(WorkspaceFeatureLifecycleState.Removing, feature.LifecycleState);
+        Assert.Null(feature.LastError);
+        Assert.Equal(WorkspaceFeatureRepositoryState.Removing, (await ReadRepoRowAsync(ctx)).State);
+        Assert.DoesNotContain(ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.InspectWorktree);
+
+        // Once the queue no longer holds it, a Feature still in Removing really was interrupted.
+        queue.Pending = false;
+        await ReconcileAsync(ctx);
+
+        feature = await ReadFeatureAsync(ctx);
+        Assert.Equal(WorkspaceFeatureLifecycleState.NeedsRepair, feature.LifecycleState);
+        Assert.Equal(WorkspaceFeatureReconciler.InterruptedRemoving, feature.LastError);
+    }
+
+    /// <summary>
+    /// Review 2026-11-10 (P3). The removal queue lives in memory, so a Feature still marked Removing when the App
+    /// starts was cut short by the previous shutdown. The queue releases it at startup, without waiting for a Worker.
+    /// </summary>
+    [Fact]
+    public async Task Queue_startup_releases_a_Feature_left_in_Removing()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await SeedFeatureAsync(ctx, WorkspaceFeatureLifecycleState.Removing, WorkspaceFeatureRepositoryState.Removing);
+        ctx.WorkerBridge.IsWorkerConnected = false;
+
+        using var queue = new FeatureRemovalQueue(
+            ctx.Resolve<IServiceScopeFactory>(),
+            new NoFolderCleanup(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<FeatureRemovalQueue>.Instance);
+        await queue.StartAsync(CancellationToken.None);
+        try
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            while ((await ReadFeatureAsync(ctx)).LifecycleState == WorkspaceFeatureLifecycleState.Removing
+                && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(20);
+            }
+        }
+        finally
+        {
+            await queue.StopAsync(CancellationToken.None);
+        }
+
+        var feature = await ReadFeatureAsync(ctx);
+        Assert.Equal(WorkspaceFeatureLifecycleState.NeedsRepair, feature.LifecycleState);
+        Assert.Equal(WorkspaceFeatureReconciler.InterruptedRemoving, feature.LastError);
+        // The repository row keeps its state, so Remove can be run again and continue.
+        Assert.Equal(WorkspaceFeatureRepositoryState.Removing, (await ReadRepoRowAsync(ctx)).State);
+        Assert.Empty(ctx.WorkerBridge.Calls);
+    }
+
+    [Fact]
+    public async Task Queue_startup_leaves_other_lifecycle_states_alone()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await SeedFeatureAsync(ctx, WorkspaceFeatureLifecycleState.Ready, WorkspaceFeatureRepositoryState.Ready);
+
+        using var queue = new FeatureRemovalQueue(
+            ctx.Resolve<IServiceScopeFactory>(),
+            new NoFolderCleanup(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<FeatureRemovalQueue>.Instance);
+
+        Assert.Equal(0, await queue.RecoverInterruptedRemovalsAsync(CancellationToken.None));
+        Assert.Equal(WorkspaceFeatureLifecycleState.Ready, (await ReadFeatureAsync(ctx)).LifecycleState);
+    }
+
+    /// <summary>
+    /// Shutdown while a removal is in the middle of a Worker call: the Feature must not stay in Removing, where nothing
+    /// would pick it up until the next Worker connect.
+    /// </summary>
+    [Fact]
+    public async Task Removal_cut_short_by_shutdown_is_marked_NeedsRepair_right_away()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await SeedFeatureAsync(ctx, WorkspaceFeatureLifecycleState.Ready, WorkspaceFeatureRepositoryState.Ready);
+        int featureContextId;
+        await using (var scope = ctx.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            featureContextId = await db.WorkspaceFeatureContexts
+                .Where(c => c.Kind == WorkspaceFeatureContextKind.Feature)
+                .Select(c => c.WorkspaceFeatureContextId)
+                .SingleAsync();
+        }
+
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, new
+        {
+            exists = true,
+            isDirty = false,
+            hasUpstream = true,
+            aheadOfUpstream = 0,
+            aheadOfDefault = 0,
+            branch = FeatureName,
+            featureBranchExists = true,
+            featureBranchAheadOfDefault = 0,
+            featureBranchHasUpstream = true,
+            featureBranchAheadOfUpstream = 0,
+        });
+        var removeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        ctx.WorkerBridge.RespondAsync(WorkerHubMethods.RemoveGitWorktree, async (_, token) =>
+        {
+            removeStarted.TrySetResult();
+            await Task.Delay(Timeout.Infinite, token);
+            return new WorkerCommandResponse(true, new { success = true }, null);
+        });
+
+        using var queue = new FeatureRemovalQueue(
+            ctx.Resolve<IServiceScopeFactory>(),
+            new NoFolderCleanup(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<FeatureRemovalQueue>.Instance);
+        await queue.StartAsync(CancellationToken.None);
+        Assert.True(await queue.TryEnqueueAsync(
+            new WorkspaceFeatureContextId(featureContextId),
+            new RemoveFeatureOptions { AllowDiscardUncommitted = true, AllowForceDeleteLocalBranches = true }));
+        await removeStarted.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal(WorkspaceFeatureLifecycleState.Removing, (await ReadFeatureAsync(ctx)).LifecycleState);
+
+        await queue.StopAsync(CancellationToken.None);
+
+        var feature = await ReadFeatureAsync(ctx);
+        Assert.Equal(WorkspaceFeatureLifecycleState.NeedsRepair, feature.LifecycleState);
+        Assert.Equal(WorkspaceFeatureReconciler.InterruptedRemoving, feature.LastError);
+        Assert.False(queue.IsPending(new WorkspaceFeatureContextId(featureContextId)));
+    }
+
+    private sealed class NoFolderCleanup : IFeatureFolderCleanupService
+    {
+        public void RequestSweep(int workspaceId)
+        {
+        }
+
+        public Task SweepAllAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public void ArmRetry(int workspaceId)
+        {
+        }
+    }
+
+    private sealed class PendingQueue : IFeatureRemovalQueue
+    {
+        public bool Pending { get; set; }
+
+        public event Action<FeatureRemovalCompleted>? Completed
+        {
+            add { }
+            remove { }
+        }
+
+        public bool IsPending(WorkspaceFeatureContextId featureContextId) => Pending;
+
+        public Task<bool> TryEnqueueAsync(
+            WorkspaceFeatureContextId featureContextId,
+            RemoveFeatureOptions options,
+            CancellationToken cancellationToken = default) => Task.FromResult(false);
+    }
+
     [Fact]
     public async Task Running_structural_operation_leaves_Creating_alone()
     {

@@ -106,7 +106,7 @@ stateDiagram-v2
 ```
 
 - A failed create writes Feature `LastError` "One or more worktrees failed to create." plus a per-repository error.
-- `WorkspaceFeatureReconciler` runs when the Worker comes online (throttled): it marks a Feature stuck in `Creating`/`Removing` as NeedsRepair ("Interrupted while creating" / "Interrupted while removing"), marks rows whose worktree is gone ("Worktree is missing"), and returns rows to Ready when their worktree is registered. It never deletes worktrees or adopts untracked ones.
+- `WorkspaceFeatureReconciler` runs when the Worker comes online (throttled): it marks a Feature stuck in `Creating`/`Removing` as NeedsRepair ("Interrupted while creating" / "Interrupted while removing"), marks rows whose worktree is gone ("Worktree is missing"), and returns rows to Ready when their worktree is registered. It never deletes worktrees or adopts untracked ones, and it leaves a Feature alone while its removal is still queued or running. A Feature left in `Removing` by a shutdown is marked the same way when GrayMoon starts.
 - A terminal checkout of another branch inside a Feature worktree is drift, shown as a warning; it never moves a Feature to NeedsRepair.
 
 The context selector lists every Feature with a friendly label (`FeatureSelectorPresentation`): Ready (no label), "Setting up...", "Removing...", "Needs attention", "Removal incomplete". Only Ready and NeedsRepair Features are selectable. A NeedsRepair Feature opens read-only (Sync, Push and Update disabled) with the banner "This Feature needs attention. Use Repair to continue." and a Repair button (section 22A). A `Creating` Feature still offers Remove (escape hatch for a stuck create); a `Removing` one does not.
@@ -898,6 +898,8 @@ Plus "Delete local Feature branches" (on by default when any exists) and "Delete
 
 After confirming, the user is returned to the special Workspace view and the removal runs in the background (`FeatureRemovalQueue`, up to 4 Features at once, others queued); the outcome arrives as a toast on whatever page is open, with a per-repository report. Sources are removed first, the root last. The main Workspace checkouts are refreshed but never switched or pulled. If some files are still in use, the Feature is removed anyway and its folder is marked pending deletion and cleaned up later in the background, without asking the user. GrayMoon never inspects or ends other programs that use the Feature (apart from CodeGraph's own processes, section 22C).
 
+The removal re-checks each repository when it actually starts. "Discard uncommitted changes" covers only the repositories the dialog listed with uncommitted work; a repository that was clean in the dialog and has changes by then is skipped with "changed since the check, run Remove again." and keeps its worktree, the other repositories are still removed, and the Feature shows as needing attention until Remove is run again. A removal interrupted by closing GrayMoon is shown as "Interrupted while removing" on the next start and can be continued.
+
 Constraints:
 
 ```text
@@ -918,7 +920,7 @@ the Branch-menu actions Prepare Workspace, New Branch, Switch Branch and Return 
 A NeedsRepair Feature shows "This Feature needs attention. Use Repair to continue." and a Repair button that opens the Feature Status dialog (`FeatureStatusPanel`) with each repository's state and error:
 
 - **Retry** (`RepairFeatureAsync`): re-runs worktree creation only for repositories that are Pending or NeedsRepair (creation is idempotent, Ready rows are kept), then seeds projections once all are Ready.
-- **Roll back** (`RollbackFeatureAsync`): removes the worktrees and branches that were created, non-force; refused while a repository has uncommitted work. It never deletes the default branch or the branch of the primary checkout. Sources first, root last.
+- **Roll back** (`RollbackFeatureAsync`): removes the worktrees and branches that were created, non-force; refused while a repository has uncommitted work. It never deletes the default branch or the branch of the primary checkout. Sources first, root last. The Feature folder is then deleted, or marked pending deletion when files in it are still in use, so the same name can be created again.
 - **Continue removal**: shown instead when an earlier removal did not finish ("Removal incomplete"); repair is not offered then.
 
 ### 22B. Feature branch rules

@@ -24,6 +24,8 @@ public static class WorkerRepositoryPaths
     {
         if (string.IsNullOrWhiteSpace(root))
             throw new ArgumentException("Workspace root path is required.", nameof(root));
+        // Every command resolves its workspace here, so this is where the Worker learns which roots it manages.
+        KnownWorkspaceRoots.Shared.Add(root);
         var safe = SanitizeDirectoryName(workspaceName ?? "");
         return Path.Combine(root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), safe);
     }

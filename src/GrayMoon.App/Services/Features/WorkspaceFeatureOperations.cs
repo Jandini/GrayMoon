@@ -755,6 +755,16 @@ public sealed class WorkspaceFeatureOperations(
         }
     }
 
+    /// <summary>Shown for a repository that was clean in the Remove analysis and has uncommitted work when the removal runs.</summary>
+    internal const string ChangedSinceCheckMessage = "changed since the check, run Remove again.";
+
+    /// <summary>
+    /// True when the analysed plan showed uncommitted, staged or conflicted work in this repository, so the user's
+    /// "discard uncommitted" choice covers it. A repository missing from the plan was never shown and is not covered.
+    /// </summary>
+    internal static bool RemovePlanShowedUncommittedWork(RemoveFeatureRepositoryPlan? planRow) =>
+        planRow is not null && (planRow.HasUncommittedChanges || planRow.HasStagedChanges || planRow.HasConflicts);
+
     private async Task<RemovalPhaseOne> RemoveFeatureCoreAsync(
         WorkspaceFeatureContextId featureContextId,
         WorkspaceFeatureContextInfo info,
@@ -856,9 +866,30 @@ public sealed class WorkspaceFeatureOperations(
 
                     var mainPath = await pathResolver.GetRepositoryPathAsync(
                         specialContextId, row.WorkspaceRepositoryId, cancellationToken);
-                    // Force worktree remove only when the user authorized discarding dirty Feature files.
+                    // Force worktree remove only when the user authorized discarding dirty Feature files AND
+                    // the analysis they approved showed this repository as dirty. The discard choice covers
+                    // what the Remove dialog listed, not work saved after it (review 2026-11-10, finding 18).
                     // AllowForceDeleteLocalBranches does not imply discard permission.
-                    var force = options.AllowDiscardUncommitted;
+                    var force = options.AllowDiscardUncommitted
+                        && RemovePlanShowedUncommittedWork(driftByWrId.GetValueOrDefault(row.WorkspaceRepositoryId));
+                    if (!force)
+                    {
+                        // The removal is queued and runs unattended, so re-check now: a repository that was
+                        // clean at analysis and is dirty at execution is skipped, never force-removed. An
+                        // Unknown probe falls through to the non-force remove, which git itself refuses on a
+                        // dirty worktree.
+                        var current = await InspectWorktreeDiskStatusAsync(mainPath, row.WorktreePath, null, null, cancellationToken);
+                        if (!current.StatusUnknown && current.IsDirty == true)
+                        {
+                            var changed = string.IsNullOrWhiteSpace(repoName)
+                                ? ChangedSinceCheckMessage
+                                : $"{repoName}: {ChangedSinceCheckMessage}";
+                            logger.FeatureRepositoryFailed("Remove", info.WorkspaceId, info.FeatureName, repoName, changed);
+                            errorsByWrId[row.WorkspaceRepositoryId] = changed;
+                            return;
+                        }
+                    }
+
                     var response = await workerBridge.SendCommandAsync(
                         WorkerHubMethods.RemoveGitWorktree,
                         new
@@ -2330,6 +2361,20 @@ public sealed class WorkspaceFeatureOperations(
         db.WorkspaceFeatureContexts.Remove(contextRow);
         db.WorkspaceFeatures.Remove(featureRow);
         await db.SaveChangesAsync(cancellationToken);
+
+        // Every worktree is unregistered and the Feature's rows are gone. The Worker deletes the Feature root only
+        // when it is empty, so a file that is not part of any worktree (codegraph.json, .codegraph) would leave the
+        // root behind and block the next Create of the same name with FeatureFolderExists. Ask for the same cleanup
+        // Remove uses: delete the folder, or mark it pending deletion so Create can finish it later (review
+        // 2026-11-10, finding 19). Never fails the roll back: the helper logs and returns null on any Worker problem.
+        var pendingDeletionFolder = await CleanupFeatureFolderForNameAsync(
+            info.WorkspaceId, info.FeatureName, onlyIfMarked: false, cancellationToken);
+        if (pendingDeletionFolder is not null)
+        {
+            logger.LogInformation(
+                "Feature roll back left its folder pending deletion. WorkspaceId={WorkspaceId} FeatureName={FeatureName} Folder={Folder}",
+                info.WorkspaceId, featureName, pendingDeletionFolder);
+        }
 
         return new RollbackFeatureResult(true, null, results);
     }

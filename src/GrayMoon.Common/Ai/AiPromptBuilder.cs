@@ -75,10 +75,11 @@ public static class AiPromptBuilder
                 : "all changes (HEAD to working tree, new files included)")
             .Append('\n');
 
-        // Style reference: a few recent subjects so the message matches the repositories' own convention.
+        // Style reference: a few recent subjects so the message matches the repositories' own convention. They are
+        // repository text like every excerpt: secrets are redacted and the evidence tags cannot be closed from inside.
         var recent = repositories
             .SelectMany(r => r.RecentSubjects)
-            .Select(s => Clip(OneLine(s), MaxSubjectChars))
+            .Select(s => Sanitize(Clip(EvidenceRedactor.Redact(OneLine(s), out _), MaxSubjectChars)))
             .Where(s => s.Length > 0)
             .Distinct(StringComparer.Ordinal)
             .Take(6)

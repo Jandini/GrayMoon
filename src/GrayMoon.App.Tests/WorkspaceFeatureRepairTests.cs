@@ -171,6 +171,66 @@ public sealed class WorkspaceFeatureRepairTests
         Assert.False(await db.WorkspaceFeatures.AnyAsync(f => f.Name == FeatureName));
     }
 
+    /// <summary>
+    /// Review 2026-11-10, finding 19. Removing the worktrees leaves the Feature folder behind when it still holds
+    /// non-worktree files (codegraph.json, .codegraph). Rollback must ask the Worker to delete or mark that folder,
+    /// or the next Create with the same name fails with "folder exists".
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Rollback_asks_the_Worker_to_clean_the_Feature_folder_and_succeeds_either_way(bool cleanupAnswers)
+    {
+        const string storageRoot = @"C:\gm-test-root\.graymoon\test-ws\features";
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var featureContextId = await SeedRemovableFeatureWithTwoReposAsync(ctx);
+        await using (var seed = ctx.CreateScope())
+        {
+            var seedDb = seed.ServiceProvider.GetRequiredService<AppDbContext>();
+            var workspace = await seedDb.Workspaces.SingleAsync(w => w.WorkspaceId == ctx.WorkspaceId);
+            workspace.ManagedFeatureStorageRoot = storageRoot;
+            await seedDb.SaveChangesAsync();
+        }
+
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree());
+        ctx.WorkerBridge.Respond(WorkerHubMethods.ListGitWorktrees, args => new WorkerCommandResponse(true, new
+        {
+            worktrees = new object[]
+            {
+                new { worktreePath = GetMainRepositoryPath(args), branchName = "feature/x", isBare = false },
+                new { worktreePath = ApiWorktreePath, branchName = FeatureName, isBare = false },
+                new { worktreePath = WebWorktreePath, branchName = FeatureName, isBare = false },
+            },
+        }, null));
+        ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new { success = true });
+        ctx.WorkerBridge.Respond("DeleteBranch", new { success = true });
+        if (cleanupAnswers)
+            ctx.WorkerBridge.Respond(WorkerHubMethods.CleanupFeatureFolder, new { outcome = "Removed" });
+        else
+            ctx.WorkerBridge.Respond(WorkerHubMethods.CleanupFeatureFolder, null, success: false, error: "disk problem");
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var result = await ops.RollbackFeatureAsync(featureContextId);
+
+        Assert.True(result.Success, result.Error);
+        var cleanup = Assert.Single(ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.CleanupFeatureFolder);
+        Assert.Equal(storageRoot + @"\" + FeatureName, GetArg(cleanup.Args, "featureRootPath"));
+        Assert.Equal(storageRoot, GetArg(cleanup.Args, "featureStorageRoot"));
+        Assert.Equal(false, GetArg(cleanup.Args, "onlyIfMarked"));
+        Assert.Equal(false, GetArg(cleanup.Args, "checkOnly"));
+
+        // The folder is cleaned only after every worktree is gone.
+        var calls = ctx.WorkerBridge.Calls.Select(c => c.Command).ToList();
+        Assert.True(calls.LastIndexOf(WorkerHubMethods.RemoveGitWorktree) < calls.IndexOf(WorkerHubMethods.CleanupFeatureFolder));
+
+        await using var read = ctx.CreateScope();
+        var db = read.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.False(await db.WorkspaceFeatures.AnyAsync(f => f.Name == FeatureName));
+    }
+
+    private static object? GetArg(object args, string name) => args.GetType().GetProperty(name)?.GetValue(args);
+
     [Fact]
     public async Task Rollback_refuses_when_a_repo_is_dirty()
     {

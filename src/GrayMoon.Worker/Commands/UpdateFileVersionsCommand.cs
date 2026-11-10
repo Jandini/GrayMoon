@@ -2,6 +2,7 @@ using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Jobs.Requests;
 using GrayMoon.Worker.Jobs.Response;
 using GrayMoon.Common.FileVersions;
+using GrayMoon.Common.Git;
 using GrayMoon.Worker.Services;
 namespace GrayMoon.Worker.Commands;
 public sealed class UpdateFileVersionsCommand() : ICommandHandler<UpdateFileVersionsRequest, UpdateFileVersionsResponse>
@@ -17,7 +18,11 @@ public sealed class UpdateFileVersionsCommand() : ICommandHandler<UpdateFileVers
             return new UpdateFileVersionsResponse { UpdatedCount = 0 };
         var workspacePath = WorkerRepositoryPaths.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
-        var fullFilePath = Path.Combine(repoPath, filePath.Replace('/', Path.DirectorySeparatorChar));
+        // The App is not a trusted source of paths: a rooted or ".." path must never reach the file write below.
+        var validation = GitRepositoryPathValidator.Validate(repoPath, filePath);
+        if (!validation.IsValid || validation.FullPath is null)
+            return new UpdateFileVersionsResponse { UpdatedCount = 0, ErrorMessage = $"{validation.ErrorMessage ?? "Invalid path."} Skipped: {filePath}" };
+        var fullFilePath = validation.FullPath;
         if (!File.Exists(fullFilePath))
             return new UpdateFileVersionsResponse { UpdatedCount = 0, ErrorMessage = $"File not found: {filePath}" };
         var patternEntries = FileVersionTokenParser.ParsePatternLines(versionPattern);

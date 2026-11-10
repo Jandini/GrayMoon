@@ -111,6 +111,14 @@ MaxConcurrentAiCommands     AI pool     default 4
 
 The main pool also carries Sync, push, restore, worktree create/remove (`CreateGitWorktree`, `RemoveGitWorktree`), Feature folder cleanup, the CodeGraph commands and every hook notify job.
 
+Intake and cancellation (`CommandRequestIntake`, in `SignalRConnectionHostedService.cs`):
+
+- The .NET SignalR client runs one handler at a time, so the `RequestCommand` handler never waits. It registers the request in `CommandJobCancellationRegistry`, starts the queue write and returns. When the pool's queue is full the write waits for room in the background, in arrival order; nothing is rejected.
+- `CancelCommand` is therefore delivered at once whatever the queues hold. It ends a wait for room (the caller gets `Command cancelled.`), makes a queued job skip, and cancels a running job through its linked token. Stopping the Worker ends every wait for room the same way.
+- A `CancelCommand` for a request that is not registered (it finished already, or its `RequestCommand` has not arrived yet) is remembered so a late `RequestCommand` is answered `Command cancelled.` without running. At most `MaxPendingCancellations` = 256 are remembered; the oldest is dropped first.
+- Push and undo-push send their follow-up `SyncCommand` (commit counts, version, projects) before the command returns, with the job's cancellation token. The scan holds the job's pool slot and counts as pending work; cancelling the job ends the scan and the push or reset keeps its own result.
+- A closed connection starts the reconnect loop only while the Worker is running; the loop observes the shutdown token that `StopAsync` cancels.
+
 This isolation matters.
 
 A long push, restore, or repository sync should not force a user to wait behind the same queue for a diff or Git status scan.
@@ -339,17 +347,21 @@ CodeGraph         when Create asked for an index: InitializeCodeGraphAsync (the 
 - Worktree paths are built from the persisted `ManagedFeatureStorageRoot` with `WorkerPath.Combine`. Do not call the path resolver inside the intent transaction: it opens a second `AppDbContext` and deadlocks SQLite against this write and against `WorkspaceGitChangesWriteQueue`.
 - Any failure after the intent commit lands in `NeedsRepair`; the failure write uses `CancellationToken.None`, so Abort still persists it.
 - `GetHeadCommits` (Worker) runs with an internal `SemaphoreSlim` of `DefaultMaxConcurrent` = 8 (a constant, not `MaxParallelOperations`).
-- Per worktree (`GitWorktreeService.CreateWorktreeAsync`): `git worktree list --porcelain` pre-check; idempotent success if the path already hosts the expected branch (or is detached at the base SHA); else `WorktreePathConflict` / `BranchOccupied` / `PathExists` (an existing empty folder is allowed); `EnsureWindowsLongPaths`; `git worktree add -b <name> <path> <sha>` or `--detach <path> <sha>`, never `--force`; verify list, `VerifyFailed` if not listed.
+- Per worktree (`GitWorktreeService.CreateWorktreeAsync`): `git worktree list --porcelain` pre-check; idempotent success if the path already hosts the expected branch (or is detached at the base SHA); else `WorktreePathConflict` / `BranchOccupied` / `PathExists` (an existing empty folder is allowed); `EnsureWindowsLongPaths`; `git worktree add -b <name> <path> <sha>` or `--detach <path> <sha>`, never `--force`; verify list, `VerifyFailed` if not listed. From the on-disk checks until git returns it holds a Mutating lease on the worktree path: while a removal or a leftover-folder sweep (`FeatureFolderCleaner`) claims that folder or the Feature root above it the create fails with `PathUnderRemoval`, and a claim that starts during the add waits for it, so the sweep's re-check sees the new worktree and refuses to delete.
 - `CreateGitWorktreeCommand` first rewrites the main checkout's hooks (so the new worktree's `post-checkout` is attributed by path), then wraps `git worktree add` in `IWorktreeCreateHookDeferral.BeginCreate(worktreePath)` and `BeginExternalRepositoryMutation(mainPath)`.
 - Hook deferral (`WorktreeCreateHookDeferral`): a `Checkout` notify job for a worktree being created is held (one per path, re-created with `FreshWorktree = true`) and re-enqueued once no create has been active for `QuietPeriod` = 500 ms, so held syncs do not occupy main-pool slots the remaining creates need. A fresh-worktree `CheckoutHookSyncCommand` skips the token lookup and network fetch, projects, commit counts and remote branches, but still runs GitVersion; `SyncCommandHandler` skips PR reconciliation for it.
 - Finalization barrier (`FeatureFinalizationCoordinator`, App singleton): `Arm(contextId)` before the first worktree of Create or Repair, disposed in a `finally` after the seed and lifecycle change. `SyncCommandHandler` waits on `WaitForFinalizationAsync` for a finalizing Feature context (bounded by `MaxBarrierWait` = 15 min, then applies anyway), so the deferred GitVersion lands after the seed and is never overwritten by it. In memory only: a restart drops it and Repair's idempotent seed reconciles. `AcquireProjectionAsync(contextId)` serializes every writer of a context's `WorkspaceProjects` / `ProjectDependencies` (the seed and the project merges), so the unique (context, repository, name) index is never raced.
 - Telemetry (Information): App `Feature Create timing` per stage, `Feature Create repository timing` (`GateWaitMs`, `PathMs`, `WorkerRoundTripMs`, `DbMs`, `TotalMs`); Worker `GetHeadCommits timing`, `CreateGitWorktree timing`, `Git worktree created ... PreListMs LongPathsMs AddMs VerifyListMs`, `NotifySync completed ... hook=...`. See section 19 for `FeatureOperationLog`.
 
-Repair (`repair-feature`) re-runs worktree create only for `Pending` / `NeedsRepair` rows, keeps `Ready` rows and re-seeds idempotently. Rollback (`rollback-feature`) refuses dirty repositories, removes Sources first and the root last, non-force.
+Repair (`repair-feature`) re-runs worktree create only for `Pending` / `NeedsRepair` rows, keeps `Ready` rows and re-seeds idempotently. Rollback (`rollback-feature`) refuses dirty repositories, removes Sources first and the root last, non-force. After the rows are deleted it sends `CleanupFeatureFolder` (`onlyIfMarked: false`) for the Feature root, so a folder that still holds non-worktree files (`codegraph.json`, `.codegraph`) is deleted or marked pending deletion and a later Create with the same name is not refused with "folder exists". A cleanup that cannot run does not fail the rollback.
 
 ### 5D. Feature removal internals and pending-delete cleanup
 
 App side (`RemoveFeatureAsync`, from `FeatureRemovalQueue`, no lock): pauses the context's Git Changes renewal and audits (section 9A), marks the Feature and live rows `Removing` and saves, then runs `UninitCodeGraph`, removes Source worktrees concurrently (bounded by `MaxParallelOperations`), then the root worktree alone and only when every Source succeeded (D10). Each repository row becomes `Removed` in its own short-lived context right after its worktree is unregistered, so a crash can resume. Local branches are deleted afterwards (`-D` only when authorized) and, when requested, remote branches with a lease (`expectedSha`).
+
+Re-check when the queued removal runs: "discard uncommitted" applies only to a repository the analyzed plan showed with uncommitted, staged or conflicted work (`RemovePlanShowedUncommittedWork`). Every other repository is re-probed with `InspectWorktree` and removed without `--force`. One that became dirty since the analysis is skipped with "changed since the check, run Remove again."; its row stays `Removing` with that error, the other repositories proceed, the root worktree is kept and the Feature becomes `NeedsRepair`. When the probe cannot answer, the non-force `git worktree remove` is still sent and git refuses a dirty worktree.
+
+Shutdown and restart: the queue is in memory. A removal cut short by shutdown marks its Feature `NeedsRepair` ("Interrupted while removing") before the worker exits (own 5 s token), and removals still waiting are dropped with a Warning (their Features are unchanged). At startup, before the workers run, `RecoverInterruptedRemovalsAsync` marks every Feature still in `Removing` the same way, so recovery does not wait for a Worker connect. Repository rows keep their state, so Remove can be run again and continues.
 
 Worker side (`RemoveGitWorktree` -> `GitWorktreeService.RemoveWorktreeAsync`):
 
@@ -380,7 +392,7 @@ Retry timer: there is no always-on timer. `ArmRetry(workspaceId)` starts a per-W
 
 ### 5E. Feature reconciliation
 
-`WorkspaceFeatureReconciler` (hosted) runs on every Worker `Online` transition, at most once per 60 s, single-flight, with at most 4 concurrent Worker calls. It never deletes worktrees and takes no lock; Workspaces that are structurally busy are skipped.
+`WorkspaceFeatureReconciler` (hosted) runs on every Worker `Online` transition, at most once per 60 s, single-flight, with at most 4 concurrent Worker calls. It never deletes worktrees and takes no lock; Workspaces that are structurally busy are skipped. A Feature whose removal is still held by `FeatureRemovalQueue` (`IFeatureRemovalQueue.IsPending`) is skipped too, both for the stuck-state check and for row reconciliation, because a queued removal takes no structural lock.
 
 ```text
 Feature stuck Creating / Removing                          -> NeedsRepair ("Interrupted while creating" / "Interrupted while removing")
@@ -506,6 +518,8 @@ Different hooks may gather different state.
 For example, pre-push is intentionally not a general-purpose fetch operation.
 
 `reference-transaction` reports a branch made or deleted outside GrayMoon: `RefsHookSyncCommand` debounces per repository (`RepositoryPassCoalescer`, 250 ms) and sends a branch-lists-only snapshot (`RepositoryStateSnapshot.IsBranchRefsOnly`). `SyncCommandHandler` applies it without deriving sync status, reconciling pull requests or recomputing dependencies, and without touching tags or the checked-out state.
+
+The listener queues a job only for a request that passes its checks (JSON content type, 64 KB body cap, a `repositoryPath` GrayMoon manages; 02 section 11). A rejected request gets 400 or 413 and no job; the hook scripts ignore the status, so the Git command is never affected.
 
 Notify jobs (`NotifySyncJob`) run on the Worker main pool. `Checkout` jobs for worktrees being created are deferred (section 5C).
 

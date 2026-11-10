@@ -73,15 +73,21 @@ public sealed class MarkdownImageEmbedder(
             }
         }
 
-        async Task<string?> LoadAsync(string src) => IsHttpUrl(src)
-            ? await TryDownloadRemoteAsync(src, githubBearerToken, cancellationToken)
-            : await TryLoadRepoFileAsync(
-                workspaceRoot,
-                workspaceName,
-                repositoryName,
-                workspaceRepositoryName,
-                ResolveRepoRelativePath(markdownDir, src),
-                cancellationToken);
+        // The src comes out of rendered HTML, so it is HTML-escaped ("a.svg?x=1&amp;y=2"). The escaped text stays the
+        // key for the replacement in the output; the request and the repository path use the decoded value.
+        async Task<string?> LoadAsync(string src)
+        {
+            var raw = System.Net.WebUtility.HtmlDecode(src);
+            return IsHttpUrl(raw)
+                ? await TryDownloadRemoteAsync(raw, githubBearerToken, cancellationToken)
+                : await TryLoadRepoFileAsync(
+                    workspaceRoot,
+                    workspaceName,
+                    repositoryName,
+                    workspaceRepositoryName,
+                    ResolveRepoRelativePath(markdownDir, raw),
+                    cancellationToken);
+        }
 
         // Load in document-order batches of at most MaxParallelOperations. A batch never holds more sources
         // than there are embeds left under MaxImages, so the cap holds exactly and the result is the same
@@ -137,6 +143,7 @@ public sealed class MarkdownImageEmbedder(
 
         return RemoteImgTag.Replace(html, static match =>
         {
+            // Already HTML-escaped (it was read out of an attribute); decoded below so the title is escaped once.
             var src = match.Groups["src"].Value;
             if (src.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
             {
@@ -149,7 +156,7 @@ public sealed class MarkdownImageEmbedder(
                 ? altMatch.Groups["v"].Value.Trim()
                 : "image";
 
-            return $"<span class=\"markdown-img-fallback\" title=\"{HtmlAttributeEncode(src)}\">{HtmlEncode(label)}</span>";
+            return $"<span class=\"markdown-img-fallback\" title=\"{HtmlAttributeEncode(System.Net.WebUtility.HtmlDecode(src))}\">{HtmlEncode(label)}</span>";
         });
     }
 

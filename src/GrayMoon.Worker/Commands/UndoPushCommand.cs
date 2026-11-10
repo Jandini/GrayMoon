@@ -50,22 +50,37 @@ public sealed class UndoPushCommand(
         var (success, errorMessage) = await git.ResetToRemoteAsync(repoPath, branch, request.KeepChanges, request.BearerToken, cancellationToken);
 
         if (success)
-            _ = SendPostResetSyncAsync(request, repoPath, branch);
+            await SendPostResetSyncAsync(request, repoPath, branch, cancellationToken);
 
         return new UndoPushResponse { Success = success, ErrorMessage = success ? null : errorMessage };
     }
 
-    private async Task SendPostResetSyncAsync(UndoPushRequest request, string repoPath, string branch)
+    /// <summary>Test seam: replaces the hub send (and the connected check) for the post-reset sync.</summary>
+    internal Func<RepositorySyncNotification, CancellationToken, Task>? SendSyncOverride { get; init; }
+
+    /// <summary>
+    /// Sends the post-reset sync before the command returns, so the scan runs inside this job's pool slot, counts as
+    /// pending work, and ends with the job's cancellation.
+    /// </summary>
+    private async Task SendPostResetSyncAsync(UndoPushRequest request, string repoPath, string branch, CancellationToken cancellationToken)
     {
         try
         {
             var connection = hubProvider.Connection;
-            if (connection?.State != HubConnectionState.Connected) return;
+            if (SendSyncOverride == null && connection?.State != HubConnectionState.Connected) return;
 
-            var notification = await BuildPostResetNotificationAsync(request, repoPath, branch);
-            await connection.InvokeAsync(WorkerHubMethods.SyncCommand, notification, CancellationToken.None);
+            var notification = await BuildPostResetNotificationAsync(request, repoPath, branch, cancellationToken);
+            if (SendSyncOverride != null)
+                await SendSyncOverride(notification, cancellationToken);
+            else
+                await connection!.InvokeAsync(WorkerHubMethods.SyncCommand, notification, cancellationToken);
             logger.LogInformation("Post-reset SyncCommand sent: workspace={WorkspaceId}, repo={RepoId}, outgoing={Outgoing}",
                 request.WorkspaceId, request.RepositoryId, notification.OutgoingCommits);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The reset itself already succeeded; only the follow-up scan was cancelled.
+            logger.LogDebug("Post-reset SyncCommand cancelled for repo {RepoId}", request.RepositoryId);
         }
         catch (Exception ex)
         {
@@ -73,16 +88,16 @@ public sealed class UndoPushCommand(
         }
     }
 
-    internal async Task<RepositorySyncNotification> BuildPostResetNotificationAsync(UndoPushRequest request, string repoPath, string branch)
+    internal async Task<RepositorySyncNotification> BuildPostResetNotificationAsync(UndoPushRequest request, string repoPath, string branch, CancellationToken cancellationToken = default)
     {
-        var defaultRef = await reader.GetDefaultBranchOriginRefAsync(repoPath, CancellationToken.None);
-        var divergenceRef = OriginDefaultRef.ToOriginBranchRef(await reader.GetDivergenceBaseBranchAsync(repoPath, CancellationToken.None))
+        var defaultRef = await reader.GetDefaultBranchOriginRefAsync(repoPath, cancellationToken);
+        var divergenceRef = OriginDefaultRef.ToOriginBranchRef(await reader.GetDivergenceBaseBranchAsync(repoPath, cancellationToken))
             ?? defaultRef;
-        var (outgoing, incoming, hasUpstream) = await reader.GetCommitCountsAsync(repoPath, branch, defaultRef, CancellationToken.None);
-        var (defaultBehind, defaultAhead, _) = await reader.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, CancellationToken.None);
+        var (outgoing, incoming, hasUpstream) = await reader.GetCommitCountsAsync(repoPath, branch, defaultRef, cancellationToken);
+        var (defaultBehind, defaultAhead, _) = await reader.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, cancellationToken);
         var versionResult = await versionProviderFactory
             .Create(request.Capabilities)
-            .GetVersionAsync(repoPath, new RepositoryVersionOptions { NonNormalize = true }, CancellationToken.None);
+            .GetVersionAsync(repoPath, new RepositoryVersionOptions { NonNormalize = true }, cancellationToken);
         var versionBranch = versionResult.Result?.BranchName ?? versionResult.Result?.EscapedBranchName ?? branch;
 
         return new RepositorySyncNotification

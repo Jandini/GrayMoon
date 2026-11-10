@@ -56,7 +56,7 @@ public sealed class PushRepositoryCommand(
         if (!integrate.Success)
         {
             if (integrate.Branch != null)
-                await SendPostOperationSyncIfRequestedAsync(request, repoPath, integrate.Branch);
+                await SendPostOperationSyncAsync(request, repoPath, integrate.Branch, cancellationToken);
 
             return new PushRepositoryResponse
             {
@@ -82,14 +82,14 @@ public sealed class PushRepositoryCommand(
 
         if (outgoing <= 0 && hasUpstream)
         {
-            await SendPostOperationSyncIfRequestedAsync(request, repoPath, branch);
+            await SendPostOperationSyncAsync(request, repoPath, branch, cancellationToken);
             return new PushRepositoryResponse { Success = true };
         }
 
         var setTracking = !hasUpstream;
         var (pushSuccess, errorMessage) = await git.PushAsync(repoPath, branch, bearerToken, setTracking: setTracking, ct: cancellationToken);
 
-        await SendPostOperationSyncIfRequestedAsync(request, repoPath, branch);
+        await SendPostOperationSyncAsync(request, repoPath, branch, cancellationToken);
 
         return new PushRepositoryResponse
         {
@@ -98,26 +98,34 @@ public sealed class PushRepositoryCommand(
         };
     }
 
-    private Task SendPostOperationSyncIfRequestedAsync(PushRepositoryRequest request, string repoPath, string branch)
-    {
-        if (request.RefreshVersionAfterPush)
-            return SendPostOperationSyncAsync(request, repoPath, branch, versionOnly: true);
+    /// <summary>Test seam: replaces the hub send (and the connected check) for the post-push sync.</summary>
+    internal Func<RepositorySyncNotification, CancellationToken, Task>? SendSyncOverride { get; init; }
 
-        _ = SendPostOperationSyncAsync(request, repoPath, branch, versionOnly: false);
-        return Task.CompletedTask;
-    }
-
-    private async Task SendPostOperationSyncAsync(PushRepositoryRequest request, string repoPath, string branch, bool versionOnly)
+    /// <summary>
+    /// Sends the post-push sync before the command returns, so the scan runs inside this job's pool slot, counts as
+    /// pending work, and ends with the job's cancellation. A plain push sends the full state; with
+    /// <c>RefreshVersionAfterPush</c> only the version is recomputed.
+    /// </summary>
+    private async Task SendPostOperationSyncAsync(PushRepositoryRequest request, string repoPath, string branch, CancellationToken cancellationToken)
     {
+        var versionOnly = request.RefreshVersionAfterPush;
         try
         {
             var connection = hubProvider.Connection;
-            if (connection?.State != HubConnectionState.Connected) return;
+            if (SendSyncOverride == null && connection?.State != HubConnectionState.Connected) return;
 
-            var notification = await BuildPostOperationNotificationAsync(request, repoPath, branch, versionOnly);
-            await connection.InvokeAsync(WorkerHubMethods.SyncCommand, notification, CancellationToken.None);
+            var notification = await BuildPostOperationNotificationAsync(request, repoPath, branch, versionOnly, cancellationToken);
+            if (SendSyncOverride != null)
+                await SendSyncOverride(notification, cancellationToken);
+            else
+                await connection!.InvokeAsync(WorkerHubMethods.SyncCommand, notification, cancellationToken);
             logger.LogInformation("Post-push SyncCommand sent: workspace={WorkspaceId}, repo={RepoId}, outgoing={Outgoing}, versionOnly={VersionOnly}",
                 request.WorkspaceId, request.RepositoryId, notification.OutgoingCommits, versionOnly);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The push itself already has its outcome; only the follow-up scan was cancelled.
+            logger.LogDebug("Post-push SyncCommand cancelled for repo {RepoId}", request.RepositoryId);
         }
         catch (Exception ex)
         {
@@ -125,10 +133,10 @@ public sealed class PushRepositoryCommand(
         }
     }
 
-    internal async Task<RepositorySyncNotification> BuildPostOperationNotificationAsync(PushRepositoryRequest request, string repoPath, string branch, bool versionOnly)
+    internal async Task<RepositorySyncNotification> BuildPostOperationNotificationAsync(PushRepositoryRequest request, string repoPath, string branch, bool versionOnly, CancellationToken cancellationToken = default)
     {
         var capabilities = request.EffectiveCapabilities;
-        var defaultRef = await reader.GetDefaultBranchOriginRefAsync(repoPath, CancellationToken.None);
+        var defaultRef = await reader.GetDefaultBranchOriginRefAsync(repoPath, cancellationToken);
         int? outgoing = null;
         int? incoming = null;
         bool? hasUpstream = null;
@@ -136,15 +144,15 @@ public sealed class PushRepositoryCommand(
         int? defaultAhead = null;
         if (!versionOnly)
         {
-            var divergenceRef = OriginDefaultRef.ToOriginBranchRef(await reader.GetDivergenceBaseBranchAsync(repoPath, CancellationToken.None))
+            var divergenceRef = OriginDefaultRef.ToOriginBranchRef(await reader.GetDivergenceBaseBranchAsync(repoPath, cancellationToken))
                 ?? defaultRef;
-            (outgoing, incoming, hasUpstream) = await reader.GetCommitCountsAsync(repoPath, branch, defaultRef, CancellationToken.None);
-            (defaultBehind, defaultAhead, _) = await reader.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, CancellationToken.None);
+            (outgoing, incoming, hasUpstream) = await reader.GetCommitCountsAsync(repoPath, branch, defaultRef, cancellationToken);
+            (defaultBehind, defaultAhead, _) = await reader.GetCommitCountsVsDefaultAsync(repoPath, divergenceRef, cancellationToken);
         }
 
         var versionResult = await versionProviderFactory
             .Create(capabilities)
-            .GetVersionAsync(repoPath, new RepositoryVersionOptions { NonNormalize = true }, CancellationToken.None);
+            .GetVersionAsync(repoPath, new RepositoryVersionOptions { NonNormalize = true }, cancellationToken);
         var versionBranch = versionResult.Result?.BranchName ?? versionResult.Result?.EscapedBranchName ?? branch;
         List<RepositorySyncProjectNotification>? syncProjects = null;
         var projectsProbed = request.EffectiveCapabilities.ShouldDiscoverProjects;
@@ -152,7 +160,7 @@ public sealed class PushRepositoryCommand(
         {
             try
             {
-                var projects = await csProjFileService.FindAsync(repoPath, CancellationToken.None);
+                var projects = await csProjFileService.FindAsync(repoPath, cancellationToken);
                 syncProjects = RepositorySyncProjectMapper.ToNotifications(projects);
             }
             catch (ProjectDiscoveryException ex)

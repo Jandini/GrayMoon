@@ -6,7 +6,7 @@ using GrayMoon.Worker.Services;
 
 namespace GrayMoon.Worker.Commands;
 
-public sealed class UpdateBranchFromDefaultCommand(IGitService git, IGitRepositoryReader reader, ILogger<UpdateBranchFromDefaultCommand> logger) : ICommandHandler<UpdateBranchFromDefaultRequest, UpdateBranchFromDefaultResponse>
+public sealed class UpdateBranchFromDefaultCommand(IGitService git, IGitRepositoryReader reader, GitProcessRunner runner, ILogger<UpdateBranchFromDefaultCommand> logger) : ICommandHandler<UpdateBranchFromDefaultRequest, UpdateBranchFromDefaultResponse>
 {
     public async Task<UpdateBranchFromDefaultResponse> ExecuteAsync(UpdateBranchFromDefaultRequest request, CancellationToken cancellationToken = default)
     {
@@ -27,9 +27,9 @@ public sealed class UpdateBranchFromDefaultCommand(IGitService git, IGitReposito
             };
         }
 
-        // Guard: refuse to start if a merge is already in progress (MERGE_HEAD exists).
-        var mergeHeadPath = Path.Combine(repoPath, ".git", "MERGE_HEAD");
-        if (File.Exists(mergeHeadPath))
+        // Guard: refuse to start if a merge is already in progress (MERGE_HEAD exists). In a Feature worktree
+        // ".git" is a file, so git names the path.
+        if (await IsMergeInProgressAsync(runner, repoPath, cancellationToken))
         {
             logger.LogWarning("UpdateBranchFromDefault refused for {RepoPath}: MERGE_HEAD already present", repoPath);
             return new UpdateBranchFromDefaultResponse
@@ -94,5 +94,22 @@ public sealed class UpdateBranchFromDefaultCommand(IGitService git, IGitReposito
             DefaultBranchBehind = defaultBehind,
             DefaultBranchAhead = defaultAhead
         };
+    }
+
+    /// <summary>
+    /// True when <c>MERGE_HEAD</c> exists for the checkout at <paramref name="repoPath"/>. Git names the file, so
+    /// the answer is right in a linked worktree (a Feature) and a submodule, where <c>.git</c> is a file. A folder
+    /// Git cannot resolve is not a usable repository; the fetch that follows reports that.
+    /// </summary>
+    internal static async Task<bool> IsMergeInProgressAsync(GitProcessRunner runner, string repoPath, CancellationToken cancellationToken)
+    {
+        var (exitCode, stdout, _) = await runner.RunAsync(
+            "git", ["rev-parse", "--git-path", "MERGE_HEAD"], repoPath, null, cancellationToken, GitLockIntent.Read);
+        var relative = (stdout ?? "").Trim();
+        if (exitCode != 0 || relative.Length == 0)
+            return false;
+
+        // Git prints the path relative to the working directory it ran in, or absolute for a linked worktree.
+        return File.Exists(Path.GetFullPath(Path.Combine(repoPath, relative)));
     }
 }

@@ -344,6 +344,7 @@
     private bool showRepositoriesModal;
     private ElementReference _deleteModalElement;
     private bool showDeleteModal;
+    private bool _deleteModalFocused;
     private bool isSaving;
     private bool isSavingRepositories;
     private bool isDeleting;
@@ -782,8 +783,18 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (showDeleteModal)
-            await _deleteModalElement.FocusAsync();
+        // Focus the dialog once when it opens. Focusing on every render took the focus away from the
+        // acknowledgement checkbox and the buttons each time the dialog re-rendered.
+        if (showDeleteModal && !_deleteModalFocused)
+        {
+            _deleteModalFocused = true;
+            try { await _deleteModalElement.FocusAsync(); }
+            catch (Exception ex) when (ex is JSDisconnectedException or InvalidOperationException) { }
+        }
+        else if (!showDeleteModal)
+        {
+            _deleteModalFocused = false;
+        }
     }
 
     private async Task ShowDeleteModal(WorkspaceModel workspace)

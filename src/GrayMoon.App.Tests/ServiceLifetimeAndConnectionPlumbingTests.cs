@@ -76,7 +76,7 @@ public sealed class ToastServiceLifetimeTests
     [Fact]
     public void Toast_service_is_registered_scoped()
     {
-        var program = File.ReadAllText(Path.Combine(SourceTree.AppProjectDirectory, "Program.cs"));
+        var program = File.ReadAllText(Path.Combine(SourceTree.AppProjectDirectory, "GrayMoonServiceRegistration.cs"));
         Assert.Contains("AddScoped<IToastService, ToastService>()", program);
         Assert.DoesNotContain("AddSingleton<IToastService", program);
     }
@@ -84,7 +84,7 @@ public sealed class ToastServiceLifetimeTests
     [Fact]
     public void No_singleton_or_hosted_service_injects_the_toast_service()
     {
-        var program = File.ReadAllText(Path.Combine(SourceTree.AppProjectDirectory, "Program.cs"));
+        var program = File.ReadAllText(Path.Combine(SourceTree.AppProjectDirectory, "GrayMoonServiceRegistration.cs"));
         var consumers = typeof(ToastService).Assembly.GetTypes()
             .Where(t => t is { IsClass: true, IsAbstract: false })
             .Where(t => t.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)

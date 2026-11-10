@@ -2,6 +2,7 @@ using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Jobs.Requests;
 using GrayMoon.Worker.Jobs.Response;
 using GrayMoon.Common.FileVersions;
+using GrayMoon.Common.Git;
 using Microsoft.Extensions.Logging;
 using GrayMoon.Worker.Services;
 namespace GrayMoon.Worker.Commands;
@@ -25,13 +26,18 @@ public sealed class CheckFileVersionsCommand(ILogger<CheckFileVersionsCommand> l
             if (string.IsNullOrWhiteSpace(repositoryName) || string.IsNullOrWhiteSpace(filePath) || string.IsNullOrWhiteSpace(pattern))
                 continue;
             var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
-            var fullFilePath = Path.Combine(repoPath, filePath.Replace('/', Path.DirectorySeparatorChar));
-            var fileName = Path.GetFileName(fullFilePath);
+            // The App is not a trusted source of paths: a rooted or ".." path is never opened. It reports as a
+            // missing file, which is what the App shows for a configured file that cannot be read.
+            var validation = GitRepositoryPathValidator.Validate(repoPath, filePath);
+            var fullFilePath = validation.IsValid ? validation.FullPath : null;
+            var fileName = Path.GetFileName(filePath.Replace('\\', '/').TrimEnd('/'));
             var patternEntries = FileVersionTokenParser.ParsePatternLines(pattern);
             if (patternEntries.Count == 0)
                 continue;
             var expectedTokenCount = patternEntries.Count(e => expectedValues.ContainsKey(e.Token.TokenKey));
-            if (!File.Exists(fullFilePath))
+            if (fullFilePath is null)
+                logger.LogWarning("CheckFileVersions rejected {FilePath}: {Reason}", filePath, validation.ErrorMessage);
+            if (fullFilePath is null || !File.Exists(fullFilePath))
             {
                 results.Add(new CheckFileVersionsResult
                 {

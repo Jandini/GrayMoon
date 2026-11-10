@@ -727,7 +727,8 @@ Security (open review findings):
 
 - **Self-update URL trust.** The App builds `installUrl` from `NavigationManager.BaseUri` (`Worker.razor`) and from the request scheme and Host (`DesktopNotificationHub.UpgradeWorker`). The Worker's `SelfUpdateCommand` rejects non-http(s) URLs and shell-special characters, but checks neither host nor path before running `irm '<url>' | iex`.
 - **Origin check.** `RequestSecurityMiddleware` accepts any loopback host on any port (and `0.0.0.0`) and compares hosts only (no scheme or port). GET requests are not checked, so with no `GRAYMOON_AllowedHosts` value a DNS-rebinding page can still read `GET /api/...` data (not credentials); see 05 section 33.
-- **Hook listener.** `127.0.0.1:9191/hook/*` has no secret, no Origin rejection, no Content-Type check and no body cap (`ReadToEndAsync`); only an in-flight cap of 64 exists.
+- **Hook listener.** `127.0.0.1:9191/hook/*` has no secret. It requires `application/json`, caps the body at 64 KB and accepts only a `repositoryPath` GrayMoon manages (02 section 11), so a web page or a stray local POST cannot start a scan; a local process that can write a hook file into a repository can still trigger a scan of that repository.
+- **Repository names in Worker requests.** Relative file and project paths are validated (`GitRepositoryPathValidator`), but most commands still pass `repositoryName` to `WorkerRepositoryPaths.Resolve` unchecked, so a rooted or `..` name from the App resolves outside the workspace folder. `EnsureGitChangesWatchersCommand` is the one that rejects it. The validator does not reject a path that passes through a reparse point inside the repository.
 - **Data layer.** `Cache=Shared` is forced on the connection string; schema uses `EnsureCreated()` (synchronous call) plus hand-written migrations, not EF Core migrations.
 
 Behavior:
@@ -736,9 +737,7 @@ Behavior:
 - **REST and Features.** REST acts only on the special Workspace; there are no Feature endpoints and no endpoint uses `IWorkspaceFeatureOperations`.
 - **Hooks are never removed** when a repository leaves a Workspace or the Workspace is deleted; renamed foreign hooks (`<hook>.replaced-by-graymoon`) stop running.
 - **Large tag lists.** The branch inventory's unique index `(WorkspaceRepositoryId, BranchName, IsRemote)` has no `IsTag`, so a tag and a local branch with the same name collide; `SwitchBranchModal` renders every tag without virtualization.
-- **`dotnet restore` failures are reported as success.** `DotnetRestoreCommand` logs a non-zero exit as a warning and returns `Success = true`.
 - **DependencyStats Feature fallback.** `RecomputeAndPersistRepositoryDependencyStatsAsync` falls back to the shared link `GitVersion` for a Feature repository with no context-state row (`GetValueOrDefault(..., x.GitVersion)`), contrary to rule 20A.2.
-- **Reconciler vs background removal.** `WorkspaceFeatureReconciler` marks `Removing` Features `NeedsRepair` ("Interrupted while removing") unless the Workspace is structurally busy, but queued removals take no structural lock, so a Worker reconnect during a removal can flag it (seen in code, not reproduced).
 - **Bulk branch dialog.** `BranchModal` shows no branch occupancy; `WorkspaceBranchHandler.CheckoutBranchForWorkspaceAsync` skips held repositories but fails open (`OccupancyCheckDegraded`) when occupancy cannot be read.
 - **Git lock scope.** `GitProcessRunner` serializes git per working-tree path, so a Workspace checkout and its Feature worktrees do not share a lock; ref updates in the shared common git dir rely on git's own `*.lock` files.
 - **Copy absolute path** in Git Changes (`WorkspaceGitChanges.CopyPath.cs`) always joins with `\`, wrong for a Linux Worker.

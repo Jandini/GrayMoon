@@ -16,8 +16,6 @@ internal sealed class WorkerTokenProvider(
     private readonly WorkerOptions _options = options.Value;
     private readonly ILogger<WorkerTokenProvider> _logger = logger;
 
-    private readonly object _lock = new();
-    private readonly Dictionary<int, string> _tokenByConnectorId = new();
 
     public async Task<string?> GetTokenForRepositoryAsync(int repositoryId, CancellationToken cancellationToken)
     {
@@ -58,10 +56,6 @@ internal sealed class WorkerTokenProvider(
                 return null;
             }
 
-            lock (_lock)
-            {
-                _tokenByConnectorId[payload.ConnectorId] = payload.Token!;
-            }
 
             return payload.Token;
         }
@@ -76,15 +70,12 @@ internal sealed class WorkerTokenProvider(
         }
     }
 
+    /// <summary>
+    /// Nothing to drop: every call to <see cref="GetTokenForRepositoryAsync"/> asks the App, so no token outlives the
+    /// operation that requested it and a rotated or revoked token is never served from this process.
+    /// </summary>
     public void InvalidateByConnectorId(int connectorId)
     {
-        if (connectorId <= 0)
-            return;
-
-        lock (_lock)
-        {
-            _tokenByConnectorId.Remove(connectorId);
-        }
     }
 
     private sealed record ConnectorTokenResponse(int ConnectorId, string Token);

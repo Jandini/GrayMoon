@@ -82,13 +82,32 @@ public sealed class GitChangesLineStatsRefresh(
 
         var key = new RepoKey(workspaceId, repositoryId, contextId?.Value);
         var cts = new CancellationTokenSource();
-        if (_repoDebounce.TryRemove(key, out var previous))
-        {
-            CancelAndDispose(previous);
-        }
-
-        _repoDebounce[key] = cts;
+        SwapDebounce(key, cts);
         _ = RunRepositoryDebouncedAsync(key, cts);
+    }
+
+    /// <summary>
+    /// Puts <paramref name="cts"/> in the slot and cancels whatever it replaced, as one atomic exchange. A remove
+    /// followed by a separate set lets two concurrent requests both believe the slot was empty; the first one's
+    /// source is then overwritten without being cancelled and its numstat runs as a duplicate.
+    /// </summary>
+    private void SwapDebounce(RepoKey key, CancellationTokenSource cts)
+    {
+        while (true)
+        {
+            if (_repoDebounce.TryGetValue(key, out var previous))
+            {
+                if (_repoDebounce.TryUpdate(key, cts, previous))
+                {
+                    CancelAndDispose(previous);
+                    return;
+                }
+            }
+            else if (_repoDebounce.TryAdd(key, cts))
+            {
+                return;
+            }
+        }
     }
 
     private bool IsInterested(int workspaceId)

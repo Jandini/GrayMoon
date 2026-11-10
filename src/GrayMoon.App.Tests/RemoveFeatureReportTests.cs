@@ -547,6 +547,138 @@ public sealed class RemoveFeatureReportTests
         Assert.False(await db.WorkspaceFeatures.AnyAsync(f => f.Name == "taken"));
     }
 
+    private static object DirtyInspectWorktree() => new
+    {
+        exists = true,
+        isDirty = true,
+        hasUpstream = true,
+        aheadOfUpstream = 0,
+        aheadOfDefault = 0,
+        branch = "feat-refresh",
+        featureBranchExists = true,
+        featureBranchAheadOfDefault = 0,
+        featureBranchHasUpstream = true,
+        featureBranchAheadOfUpstream = 0,
+    };
+
+    /// <summary>
+    /// Review 2026-11-10, finding 18. The user approved discarding what the Remove dialog listed (graymoon-api).
+    /// graymoon-web was clean in that analysis and has uncommitted work when the queued removal runs: it must be
+    /// skipped with a message, never force-removed. The repository that was shown dirty is still force-removed.
+    /// </summary>
+    [Fact]
+    public async Task Repository_that_became_dirty_after_the_analysis_is_skipped_and_never_force_removed()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var featureContextId = await SeedRemovableFeatureWithTwoReposAsync(ctx);
+
+        int webWrId;
+        await using (var seed = ctx.CreateScope())
+        {
+            var seedDb = seed.ServiceProvider.GetRequiredService<AppDbContext>();
+            webWrId = await seedDb.WorkspaceFeatureRepositories
+                .Where(r => r.WorkspaceFeatureContextId == featureContextId.Value
+                    && r.WorkspaceRepositoryId != ctx.WorkspaceRepositoryId)
+                .Select(r => r.WorkspaceRepositoryId)
+                .SingleAsync();
+        }
+
+        // What the dialog showed: graymoon-api has uncommitted work, graymoon-web is clean.
+        var analyzed = new RemoveFeaturePlan
+        {
+            Success = true,
+            Classification = RemoveFeatureClassification.Active,
+            Repositories =
+            [
+                new RemoveFeatureRepositoryPlan
+                {
+                    WorkspaceRepositoryId = ctx.WorkspaceRepositoryId,
+                    RepositoryName = "graymoon-api",
+                    WorktreeExists = true,
+                    LiveStatusEstablished = true,
+                    HasUncommittedChanges = true,
+                    FeatureBranchName = "feat-refresh",
+                    CheckedOutBranch = "feat-refresh",
+                    FeatureBranchAheadOfDefault = 0,
+                },
+                new RemoveFeatureRepositoryPlan
+                {
+                    WorkspaceRepositoryId = webWrId,
+                    RepositoryName = "graymoon-web",
+                    WorktreeExists = true,
+                    LiveStatusEstablished = true,
+                    FeatureBranchName = "feat-refresh",
+                    CheckedOutBranch = "feat-refresh",
+                    FeatureBranchAheadOfDefault = 0,
+                },
+            ],
+        };
+
+        // By the time the queued removal runs, both worktrees are dirty.
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, DirtyInspectWorktree());
+        ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new { success = true });
+        ctx.WorkerBridge.Respond("DeleteBranch", new { success = true });
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var result = await ops.RemoveFeatureAsync(
+            featureContextId,
+            new RemoveFeatureOptions
+            {
+                AllowDiscardUncommitted = true,
+                AllowForceDeleteLocalBranches = true,
+                AnalyzedPlan = analyzed,
+            });
+
+        Assert.False(result.Success);
+        Assert.Contains("graymoon-web", result.Error);
+        Assert.Contains("changed since the check, run Remove again", result.Error);
+
+        // Only the repository the user saw as dirty reached the Worker, and only that one with force.
+        var remove = Assert.Single(ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.RemoveGitWorktree);
+        Assert.EndsWith("graymoon-api", GetWorktreePath(remove.Args), StringComparison.Ordinal);
+        Assert.Equal(true, GetArg(remove.Args, "force"));
+
+        await using var read = ctx.CreateScope();
+        var db = read.ServiceProvider.GetRequiredService<AppDbContext>();
+        var feature = await db.WorkspaceFeatures.SingleAsync(f => f.Name == "feat-refresh" && f.WorkspaceId == ctx.WorkspaceId);
+        Assert.Equal(WorkspaceFeatureLifecycleState.NeedsRepair, feature.LifecycleState);
+        var rows = await db.WorkspaceFeatureRepositories
+            .Where(r => r.WorkspaceFeatureContextId == featureContextId.Value)
+            .ToListAsync();
+        var webRow = Assert.Single(rows, r => r.WorkspaceRepositoryId == webWrId);
+        Assert.Equal(WorkspaceFeatureRepositoryState.Removing, webRow.State);
+        Assert.Contains("changed since the check", webRow.LastError);
+        Assert.Equal(
+            WorkspaceFeatureRepositoryState.Removed,
+            Assert.Single(rows, r => r.WorkspaceRepositoryId == ctx.WorkspaceRepositoryId).State);
+    }
+
+    /// <summary>
+    /// Finding 18, the race-free half: a repository the analysis showed clean is removed without force even when the
+    /// user ticked "discard uncommitted", so git itself refuses if the worktree turns dirty after the re-check.
+    /// </summary>
+    [Fact]
+    public async Task Repository_shown_clean_in_the_analysis_is_removed_without_force_even_when_discard_was_authorized()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var featureContextId = await SeedRemovableFeatureAsync(ctx);
+
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree());
+        ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new { success = true });
+        ctx.WorkerBridge.Respond("DeleteBranch", new { success = true });
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var result = await ops.RemoveFeatureAsync(
+            featureContextId,
+            new RemoveFeatureOptions { AllowDiscardUncommitted = true, AllowForceDeleteLocalBranches = true });
+
+        Assert.True(result.Success, result.Error);
+        var remove = Assert.Single(ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.RemoveGitWorktree);
+        Assert.Equal(false, GetArg(remove.Args, "force"));
+    }
+
     private static object? GetArg(object args, string name) => args.GetType().GetProperty(name)?.GetValue(args);
 
     private static async Task SetManagedStorageRootAsync(SyncStateTestContext ctx)

@@ -2,6 +2,7 @@
 @implements IDisposable
 @using GrayMoon.App.Models
 @using GrayMoon.App.Repositories
+@using GrayMoon.App.Services.Queries
 @using GrayMoon.Application.Features
 @using GrayMoon.Application.Workspaces
 @using Microsoft.AspNetCore.SignalR.Client
@@ -410,26 +411,26 @@
             await action();
     }
 
-    private Task RunUndoPushAsync(WorkspaceNotification n)
+    private async Task RunUndoPushAsync(WorkspaceNotification n)
     {
         var workspaceId = n.WorkspaceId;
-        if (IsWorkspaceJobRunning(workspaceId)) return Task.CompletedTask;
+        if (IsWorkspaceJobRunning(workspaceId)) return;
 
-        var repos = n.Repos
-            .Where(r => r.OutgoingCommits > 0)
-            .Select(r => (r.RepositoryName, r.OutgoingCommits))
-            .ToList();
+        // Every repository of the selected context, not the popup's listed rows (those stop at the list cap).
+        var selected = await TryLoadSelectedContextLinksAsync(workspaceId, "Undo Push Commits");
+        if (selected is not { } context || _disposed || IsWorkspaceJobRunning(workspaceId)) return;
 
-        if (repos.Count == 0) return Task.CompletedTask;
+        var repos = NotificationPanelRepoSets.WithOutgoing(context.Links);
+        if (repos.Count == 0) return;
 
+        var contextId = context.ContextId;
         _undoPushModal = _undoPushModal with
         {
             IsVisible = true,
             Repos = repos,
-            PendingAction = keepChanges => StartUndoPushJobAsync(n, keepChanges),
+            PendingAction = keepChanges => StartUndoPushJobAsync(workspaceId, contextId, keepChanges),
         };
         StateHasChanged();
-        return Task.CompletedTask;
     }
 
     private async Task OnUndoPushProceedAsync(bool keepChanges)
@@ -446,9 +447,8 @@
         StateHasChanged();
     }
 
-    private Task StartUndoPushJobAsync(WorkspaceNotification notification, bool keepChanges)
+    private Task StartUndoPushJobAsync(int workspaceId, WorkspaceFeatureContextId contextId, bool keepChanges)
     {
-        var workspaceId = notification.WorkspaceId;
         if (IsWorkspaceJobRunning(workspaceId)) return Task.CompletedTask;
         PendingActionsService.Dismiss(workspaceId);
         JobService.StartJob(WorkspaceJobKey(workspaceId), "Reverting outgoing commits...", async (job, ct) =>
@@ -457,7 +457,6 @@
             {
                 await using var scope = ServiceScopeFactory.CreateAsyncScope();
                 var syncOps = scope.ServiceProvider.GetRequiredService<IWorkspaceSyncOperations>();
-                var contextId = await ResolveOperationContextAsync(scope.ServiceProvider, workspaceId, ct);
                 var result = await syncOps.UndoPushAsync(workspaceId, contextId, keepChanges, job.ToOperationProgress(), ct);
                 result.ShowRepoErrors(msg => { if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError(msg)); });
             }
@@ -513,8 +512,8 @@
         _hubConnection.On<int, int>("ContextSynced", (workspaceId, contextId) => RefreshForSelectedContextAsync(workspaceId, contextId));
         _hubConnection.On<int, int, int>("ContextRepositorySynced", (workspaceId, contextId, _) => RefreshForSelectedContextAsync(workspaceId, contextId));
 
-        try { await _hubConnection.StartAsync(); }
-        catch (Exception ex) { Logger.LogDebug(ex, "Notification panel hub connection failed"); }
+        // Never throws and logs a failed start; the popup then simply gets no live refresh until the next navigation.
+        await WorkspaceSyncHubConnectionHelper.TryStartAsync(_hubConnection, Logger);
     }
 
     private async Task RefreshForSelectedContextAsync(int workspaceId, int syncedContextId)
@@ -583,32 +582,37 @@
         WorkspaceSyncHubConnectionHelper.DisposeFireAndForget(_hubConnection);
     }
 
-    private Task RunUpdateAsync(WorkspaceNotification n)
+    private async Task RunUpdateAsync(WorkspaceNotification n)
     {
         var workspaceId = n.WorkspaceId;
-        if (IsWorkspaceJobRunning(workspaceId)) return Task.CompletedTask;
-        var defaultBranchRepos = n.Repos
-            .Where(r => r.UnmatchedDeps > 0
-                && !string.IsNullOrWhiteSpace(r.DefaultBranchName)
-                && string.Equals(r.BranchName, r.DefaultBranchName, StringComparison.Ordinal))
-            .Select(r => new DefaultBranchWarningItem(r.RepositoryName, r.DefaultBranchName!))
+        if (IsWorkspaceJobRunning(workspaceId)) return;
+
+        // The warning covers every repository of the selected context. The popup's own rows stop at the list cap,
+        // so a repository past it was committed to on its default branch without the warning.
+        var selected = await TryLoadSelectedContextLinksAsync(workspaceId, "Update");
+        if (selected is not { } context || _disposed || IsWorkspaceJobRunning(workspaceId)) return;
+
+        var contextId = context.ContextId;
+        var defaultBranchRepos = NotificationPanelRepoSets.UpdateOnDefaultBranch(context.Links)
+            .Select(r => new DefaultBranchWarningItem(r.RepositoryName, r.DefaultBranchName))
             .ToList();
         if (defaultBranchRepos.Count > 0)
         {
             ShowDefaultBranchWarning(
                 $"Update on workspace '{n.WorkspaceName}' will commit dependency changes directly to the default (protected) branch.",
                 defaultBranchRepos,
-                () => StartUpdateJobAsync(workspaceId));
-            return Task.CompletedTask;
+                () => StartUpdateJobAsync(workspaceId, contextId));
+            return;
         }
-        return StartUpdateJobAsync(workspaceId);
+        await StartUpdateJobAsync(workspaceId, contextId);
     }
 
     private static string UpdateJobTitle(WorkspaceCapabilities capabilities) =>
         capabilities.UsesDependencyAwareUpdate ? "Updating dependencies..." : "Updating version files...";
 
-    private async Task StartUpdateJobAsync(int workspaceId)
+    private async Task StartUpdateJobAsync(int workspaceId, WorkspaceFeatureContextId contextId)
     {
+        if (IsWorkspaceJobRunning(workspaceId)) return;
         PendingActionsService.Dismiss(workspaceId);
         await using var titleScope = ServiceScopeFactory.CreateAsyncScope();
         var capabilities = await titleScope.ServiceProvider.GetRequiredService<IWorkspaceCapabilitiesResolver>().GetAsync(workspaceId);
@@ -616,19 +620,13 @@
         {
             try
             {
-                await using var preloadScope = ServiceScopeFactory.CreateAsyncScope();
-                var preloadWorkspaceRepo = preloadScope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
-                var preloadWs = await preloadWorkspaceRepo.GetByIdAsync(workspaceId);
-                var preloadLinks = preloadWs?.Repositories.ToList() ?? new List<WorkspaceRepositoryLink>();
-                var reposNeedingWork = preloadLinks
-                    .Where(wr => !wr.IsOnTag)
-                    .Where(wr => (wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0)
-                    .Select(wr => wr.RepositoryId)
-                    .ToHashSet();
-
                 await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                // Read from the context the job was queued for: a Feature's tag, dependency and version-file
+                // state is not on the Workspace link.
+                var reposNeedingWork = NotificationPanelRepoSets.NeedingUpdate(
+                    await LoadContextLinksAsync(scope.ServiceProvider, workspaceId, contextId, ct));
+
                 var updateOps = scope.ServiceProvider.GetRequiredService<IWorkspaceUpdateOperations>();
-                var contextId = await ResolveOperationContextAsync(scope.ServiceProvider, workspaceId, ct);
                 await updateOps.UpdateAsync(
                     workspaceId,
                     contextId,
@@ -820,29 +818,33 @@
         return Task.CompletedTask;
     }
 
-    private Task RunPushAsync(WorkspaceNotification n)
+    private async Task RunPushAsync(WorkspaceNotification n)
     {
         var workspaceId = n.WorkspaceId;
-        if (IsWorkspaceJobRunning(workspaceId)) return Task.CompletedTask;
-        var defaultBranchRepos = n.Repos
-            .Where(r => r.OutgoingCommits > 0
-                && !string.IsNullOrWhiteSpace(r.DefaultBranchName)
-                && string.Equals(r.BranchName, r.DefaultBranchName, StringComparison.Ordinal))
-            .Select(r => new DefaultBranchWarningItem(r.RepositoryName, r.DefaultBranchName!))
+        if (IsWorkspaceJobRunning(workspaceId)) return;
+
+        // Same as Update: warn for every repository of the selected context, not only the listed rows.
+        var selected = await TryLoadSelectedContextLinksAsync(workspaceId, "Push");
+        if (selected is not { } context || _disposed || IsWorkspaceJobRunning(workspaceId)) return;
+
+        var contextId = context.ContextId;
+        var defaultBranchRepos = NotificationPanelRepoSets.PushOnDefaultBranch(context.Links)
+            .Select(r => new DefaultBranchWarningItem(r.RepositoryName, r.DefaultBranchName))
             .ToList();
         if (defaultBranchRepos.Count > 0)
         {
             ShowDefaultBranchWarning(
                 $"Pushing workspace '{n.WorkspaceName}' will commit directly to the default (protected) branch.",
                 defaultBranchRepos,
-                () => StartPushJobAsync(workspaceId));
-            return Task.CompletedTask;
+                () => StartPushJobAsync(workspaceId, contextId));
+            return;
         }
-        return StartPushJobAsync(workspaceId);
+        await StartPushJobAsync(workspaceId, contextId);
     }
 
-    private Task StartPushJobAsync(int workspaceId)
+    private Task StartPushJobAsync(int workspaceId, WorkspaceFeatureContextId contextId)
     {
+        if (IsWorkspaceJobRunning(workspaceId)) return Task.CompletedTask;
         PendingActionsService.Dismiss(workspaceId);
         JobService.StartJob(WorkspaceJobKey(workspaceId), "Preparing push...", async (job, ct) =>
         {
@@ -853,7 +855,7 @@
                 var ws = await workspaceRepo.GetByIdAsync(workspaceId);
                 if (ws == null) return;
                 var links = ws.Repositories.ToList();
-                await ExecutePushAsync(workspaceId, links, job, ct);
+                await ExecutePushAsync(workspaceId, contextId, links, job, ct);
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
@@ -868,6 +870,7 @@
 
     private async Task ExecutePushAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
         List<WorkspaceRepositoryLink> links,
         BackgroundJobHandle job,
         CancellationToken ct,
@@ -875,7 +878,6 @@
     {
         await using var scope = ServiceScopeFactory.CreateAsyncScope();
         var pushOps = scope.ServiceProvider.GetRequiredService<IWorkspacePushOperations>();
-        var contextId = await ResolveOperationContextAsync(scope.ServiceProvider, workspaceId, ct);
 
         var plan = await pushOps.GetPlanAsync(workspaceId, contextId, maxLevel, ct);
         if (!plan.HasUnpushed || plan.RepositoryIds.Count == 0)
@@ -1109,30 +1111,42 @@
         return Task.CompletedTask;
     }
 
-    private Task RunPullAsync(int workspaceId)
+    private async Task RunPullAsync(int workspaceId)
     {
-        if (IsWorkspaceJobRunning(workspaceId)) return Task.CompletedTask;
+        if (IsWorkspaceJobRunning(workspaceId)) return;
+
+        // The context is fixed when the button is pressed, not when the job gets to run.
+        WorkspaceFeatureContextId contextId;
+        try
+        {
+            await using var contextScope = ServiceScopeFactory.CreateAsyncScope();
+            contextId = await ResolveOperationContextAsync(contextScope.ServiceProvider, workspaceId, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Notification panel Pull could not be prepared for workspace {WorkspaceId}", workspaceId);
+            if (!_disposed) ToastService.ShowError("Pull could not be started.");
+            return;
+        }
+
+        if (_disposed || IsWorkspaceJobRunning(workspaceId)) return;
         PendingActionsService.Dismiss(workspaceId);
         JobService.StartJob(WorkspaceJobKey(workspaceId), "Synchronizing commits...", async (job, ct) =>
         {
             try
             {
                 await using var scope = ServiceScopeFactory.CreateAsyncScope();
-                var workspaceRepo = scope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
-                var ws = await workspaceRepo.GetByIdAsync(workspaceId);
-                if (ws == null) return;
-                var links = ws.Repositories.ToList();
-
-                var repoIds = links
-                    .Where(wr =>
-                        !wr.IsOnTag
-                        && (wr.IncomingCommits ?? 0) > 0)
-                    .Select(wr => wr.RepositoryId)
-                    .ToList();
-                if (repoIds.Count == 0) return;
+                // Incoming commits and tag pins of the context the job was queued for (a Feature's are not on
+                // the Workspace link).
+                var repoIds = NotificationPanelRepoSets.WithIncoming(
+                    await LoadContextLinksAsync(scope.ServiceProvider, workspaceId, contextId, ct));
+                if (repoIds.Count == 0)
+                {
+                    if (!_disposed) _ = InvokeAsync(() => ToastService.Show("Nothing to pull."));
+                    return;
+                }
 
                 var syncOps = scope.ServiceProvider.GetRequiredService<IWorkspaceSyncOperations>();
-                var contextId = await ResolveOperationContextAsync(scope.ServiceProvider, workspaceId, ct);
                 var result = repoIds.Count == 1
                     ? await syncOps.PullAsync(workspaceId, contextId, repoIds[0], job.ToOperationProgress(), ct)
                     : await syncOps.PullLevelAsync(workspaceId, contextId, repoIds, job.ToOperationProgress(), ct);
@@ -1146,7 +1160,38 @@
                 throw;
             }
         });
-        return Task.CompletedTask;
+    }
+
+    /// <summary>Every repository of one context, with that context's branch, tag and counters.</summary>
+    private static async Task<IReadOnlyList<WorkspaceRepositoryLinkListItemDto>> LoadContextLinksAsync(
+        IServiceProvider sp, int workspaceId, WorkspaceFeatureContextId contextId, CancellationToken ct)
+    {
+        var contextInfo = await sp.GetRequiredService<IWorkspaceFeatureContextResolver>()
+            .GetRequiredAsync(contextId, workspaceId, ct);
+        return await sp.GetRequiredService<IWorkspaceRepositoryLinkListQueryService>()
+            .GetAllSnapshotsAsync(workspaceId, contextId, contextInfo.IsSpecialWorkspace, ct);
+    }
+
+    /// <summary>
+    /// Resolves the selected context and loads its repositories before a job is queued. Returns null, after
+    /// telling the user, when that fails: the action is then not started.
+    /// </summary>
+    private async Task<(WorkspaceFeatureContextId ContextId, IReadOnlyList<WorkspaceRepositoryLinkListItemDto> Links)?> TryLoadSelectedContextLinksAsync(
+        int workspaceId, string actionName)
+    {
+        try
+        {
+            await using var scope = ServiceScopeFactory.CreateAsyncScope();
+            var contextId = await ResolveOperationContextAsync(scope.ServiceProvider, workspaceId, CancellationToken.None);
+            var links = await LoadContextLinksAsync(scope.ServiceProvider, workspaceId, contextId, CancellationToken.None);
+            return (contextId, links);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Notification panel {Action} could not be prepared for workspace {WorkspaceId}", actionName, workspaceId);
+            if (!_disposed) ToastService.ShowError($"{actionName} could not be started.");
+            return null;
+        }
     }
 
     private static async Task<WorkspaceFeatureContextId> ResolveOperationContextAsync(

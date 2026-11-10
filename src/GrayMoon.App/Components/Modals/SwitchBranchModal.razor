@@ -1042,7 +1042,10 @@
             return selectedBranch == currentTag || GetFeatureCheckoutRefusal() != null;
         if (GetFeatureCheckoutRefusal() != null)
             return true;
-        if (TryGetOccupancy(selectedBranch, out var occ)
+        // The Remotes tab selects "origin/x", which checks out local branch "x": look the occupancy up under that
+        // name, or a branch held by a Feature or an outside worktree is offered for check out from this tab.
+        var occupancyKey = activeTab == "remote" ? BranchOccupancyKey.For(selectedBranch) : selectedBranch;
+        if (TryGetOccupancy(occupancyKey, out var occ)
             && (occ.RequiresFeatureCleanup || occ.RequiresExternalCleanup || !occ.AllowCheckout))
             return true;
         return selectedBranch == currentBranchLocal;
