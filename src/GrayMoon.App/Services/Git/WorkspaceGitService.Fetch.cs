@@ -120,7 +120,7 @@ public sealed partial class WorkspaceGitService
         {
             if (!string.IsNullOrWhiteSpace(error)) continue;
             if (data?.Tags == null && string.IsNullOrWhiteSpace(data?.CurrentTag)) continue;
-            await PersistBranchesAsync(wrId, localBranches: null, remoteBranches: null, defaultBranchName: null,
+            await PersistBranchesAsync(contextId, wrId, localBranches: null, remoteBranches: null, defaultBranchName: null,
                 tags: data?.Tags, currentTag: data?.CurrentTag, cancellationToken);
         }
 

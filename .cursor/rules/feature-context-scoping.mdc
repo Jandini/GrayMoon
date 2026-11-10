@@ -50,6 +50,16 @@ persists onto the wrong row.
    `_selectedContextId`/`_isFeatureContext` fields). A half-migrated method is
    a silent no-op fix, not a real one.
 
+6. **`WorkspaceRepositoryStateWriter` is the only writer of per-context
+   repository state.** Do not set `BranchName`, `CheckedOutTag`,
+   `BranchHasUpstream`, sync status or sync error on a
+   `WorkspaceRepositoryLink` directly from a push, commit-sync, bookkeeping
+   or UI path. Post-operation bookkeeping reads branch and tag from the
+   context the operation ran in, not from the shared link.
+7. **UI summaries for a context (notification panels, warnings, counters)
+   query by workspace and context**, never from a capped display list or
+   from special-Workspace link columns when the context is a Feature.
+
 ## Before merging a change that touches Feature/worktree data
 
 - Grep the table/column you changed for every other query/write that reads it

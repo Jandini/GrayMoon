@@ -99,6 +99,8 @@ public sealed class FeatureFolderCleaner(ILogger<FeatureFolderCleaner> logger, I
         if (scope != null)
         {
             // Re-check right before deleting: a repository or worktree may have appeared since the first check.
+            // Nothing can appear after this one: a worktree add holds a lease on its folder for as long as it runs,
+            // which the claim above has waited for and now refuses (GitWorktreeService.CreateWorktreeAsync).
             var lateFailure = ValidateTree(Normalize(featureStorageRoot!), root);
             if (lateFailure != null)
             {

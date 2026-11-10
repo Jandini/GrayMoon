@@ -1,3 +1,4 @@
+using GrayMoon.App.Services.Orchestration;
 using GrayMoon.Application;
 
 namespace GrayMoon.App.Services.Application;
@@ -7,6 +8,9 @@ public enum UpdateAndPushNoticeKind
     /// <summary>Nothing to tell the user.</summary>
     None,
     Info,
+
+    /// <summary>The run finished, but a follow-up step (package restore) failed.</summary>
+    Warning,
     Error,
 
     /// <summary>Ask whether to continue with a normal push; <see cref="UpdateAndPushNotice.Approval"/> is the command to run on yes.</summary>
@@ -34,6 +38,10 @@ public static class UpdateAndPushResultPresenter
 
         return result.Status switch
         {
+            // Done with a warning: the push landed, a package restore after it failed. Said on both surfaces; the
+            // grid shows which repository, not that the run as a whole finished.
+            UpdateAndPushStatus.Completed when PushOperationResult.DescribeWarnings(result.Push) is { } warning
+                => new(UpdateAndPushNoticeKind.Warning, warning),
             UpdateAndPushStatus.Completed => new(UpdateAndPushNoticeKind.None, ""),
             UpdateAndPushStatus.NothingToPush => new(UpdateAndPushNoticeKind.Info, result.Summary),
             UpdateAndPushStatus.ApprovalRequired when result.PendingApprovalId is { Length: > 0 } id

@@ -47,7 +47,7 @@ public sealed class WorkspaceAiGenerationOperations(
 
         var options = AiProviderIds.All.Select(id =>
         {
-            var cli = installed.First(p => p.ProviderId == id);
+            var cli = installed.FirstOrDefault(p => p.ProviderId == id) ?? NotReported(id);
             var choice = AiProviderConfiguration.Resolve(ai.Section, id);
             var problem = cli.IsInstalled ? choice.Error : cli.Problem;
             return new AiProviderOption(
@@ -69,6 +69,14 @@ public sealed class WorkspaceAiGenerationOperations(
 
     public Task PinProviderAsync(int workspaceId, string? providerId, CancellationToken cancellationToken) =>
         pins.SetAsync(workspaceId, providerId, cancellationToken);
+
+    /// <summary>
+    /// A provider this App knows but the Worker's host check did not list (an older Worker, or a partial answer).
+    /// It is shown as unavailable with the reason instead of failing the whole menu or the generation.
+    /// </summary>
+    private static AiProviderAvailability NotReported(string providerId) =>
+        new(providerId, false, null, providerId != AiProviderIds.Cursor,
+            $"The Worker did not report the {AiProviderIds.DisplayName(providerId)} CLI. Update the Worker and try again.");
 
     public async Task<AiGenerationResult<GeneratedCommitMessage>> GenerateCommitMessageAsync(
         AiCommitScope scope,
@@ -182,7 +190,7 @@ public sealed class WorkspaceAiGenerationOperations(
         var choice = AiProviderConfiguration.Resolve(ai.Section, providerId);
         if (!choice.IsValid)
             return GenerationRun.Fail(AiGenerationErrorKind.Configuration, choice.Error!);
-        var cli = (await availability.GetAsync(workerBridge, cancellationToken)).First(p => p.ProviderId == providerId);
+        var cli = (await availability.GetAsync(workerBridge, cancellationToken)).FirstOrDefault(p => p.ProviderId == providerId) ?? NotReported(providerId);
         if (!cli.IsInstalled)
             return GenerationRun.Fail(AiGenerationErrorKind.NotInstalled, cli.Problem ?? $"{AiProviderIds.DisplayName(providerId)} CLI is not available on the Worker.");
 

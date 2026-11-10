@@ -37,6 +37,7 @@ public sealed partial class WorkspaceRepositories
         if (workspace == null || repositoryIds == null || repositoryIds.Count == 0 || IsJobRunning)
             return;
 
+        var jobContextId = RequireSelectedContextId();
         JobService.StartJob(PageJobKey,
             repositoryIds.Count == 1 ? "Fetching latest branch state..." : $"Fetching latest branch state for {repositoryIds.Count} repositories...",
             async (job, ct) =>
@@ -44,7 +45,7 @@ public sealed partial class WorkspaceRepositories
                 try
                 {
                     var plan = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, ReturnToDefaultPlan>(
-                        svc => svc.AnalyzeReturnToDefaultAsync(WorkspaceId, RequireSelectedContextId(), repositoryIds, job.ToOperationProgress(), ct));
+                        svc => svc.AnalyzeReturnToDefaultAsync(WorkspaceId, jobContextId, repositoryIds, job.ToOperationProgress(), ct));
 
                     if (plan.AnalysisFailed)
                     {
@@ -134,13 +135,14 @@ public sealed partial class WorkspaceRepositories
 
         // Same overlay as a level or Return all: analysis fetches branch state through the Worker,
         // and that output only reaches the loading-overlay terminal inside a page job.
+        var jobContextId = RequireSelectedContextId();
         JobService.StartJob(PageJobKey, "Fetching latest branch state...", async (job, ct) =>
         {
             ReturnToDefaultRepositoryPlan? repo;
             try
             {
                 var plan = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, ReturnToDefaultPlan>(
-                    svc => svc.AnalyzeReturnToDefaultAsync(WorkspaceId, RequireSelectedContextId(), [repositoryId], job.ToOperationProgress(), ct));
+                    svc => svc.AnalyzeReturnToDefaultAsync(WorkspaceId, jobContextId, [repositoryId], job.ToOperationProgress(), ct));
 
                 if (plan.AnalysisFailed)
                 {
@@ -205,7 +207,7 @@ public sealed partial class WorkspaceRepositories
             job.ReportProgress(ReturningToDefaultMessage(defaultBranch));
             try
             {
-                await ExecuteReturnToDefaultSingleRepoCoreAsync(job, ct, repositoryId, deleteRemoteBranch: false, allowForceDeleteLocalBranch: true);
+                await ExecuteReturnToDefaultSingleRepoCoreAsync(jobContextId, job, ct, repositoryId, deleteRemoteBranch: false, allowForceDeleteLocalBranch: true);
             }
             catch (OperationCanceledException)
             {
@@ -233,8 +235,9 @@ public sealed partial class WorkspaceRepositories
         if (workspace == null || IsJobRunning)
             return Task.CompletedTask;
 
+        var jobContextId = RequireSelectedContextId();
         StartPageJob(ReturningToDefaultMessage(defaultBranchName), (job, ct) =>
-            ExecuteReturnToDefaultSingleRepoCoreAsync(job, ct, repositoryId, deleteRemoteBranch, allowForceDeleteLocalBranch),
+            ExecuteReturnToDefaultSingleRepoCoreAsync(jobContextId, job, ct, repositoryId, deleteRemoteBranch, allowForceDeleteLocalBranch),
             new PageJobOptions
             {
                 RefreshOnSuccess = false,
@@ -254,6 +257,7 @@ public sealed partial class WorkspaceRepositories
             : $"Returning to {defaultBranchName}...";
 
     private async Task ExecuteReturnToDefaultSingleRepoCoreAsync(
+        GrayMoon.Application.Features.WorkspaceFeatureContextId jobContextId,
         BackgroundJobHandle job,
         CancellationToken ct,
         int repositoryId,
@@ -266,7 +270,7 @@ public sealed partial class WorkspaceRepositories
             CloseOpenPullRequest: false);
 
         var result = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, OperationResult>(
-            svc => svc.ExecuteReturnToDefaultAsync(WorkspaceId, RequireSelectedContextId(), [repositoryId], options, job.ToOperationProgress(), ct));
+            svc => svc.ExecuteReturnToDefaultAsync(WorkspaceId, jobContextId, [repositoryId], options, job.ToOperationProgress(), ct));
 
         if (result.Success)
         {
@@ -295,6 +299,7 @@ public sealed partial class WorkspaceRepositories
             return Task.CompletedTask;
         }
 
+        var jobContextId = RequireSelectedContextId();
         StartPageJob("Returning to default branch...", async (job, ct) =>
         {
             var options = new ReturnToDefaultOptions(
@@ -303,7 +308,7 @@ public sealed partial class WorkspaceRepositories
                 CloseOpenPullRequest: false);
 
             var result = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, OperationResult>(
-                svc => svc.ExecuteReturnToDefaultAsync(WorkspaceId, RequireSelectedContextId(), repositoryIds, options, job.ToOperationProgress(), ct));
+                svc => svc.ExecuteReturnToDefaultAsync(WorkspaceId, jobContextId, repositoryIds, options, job.ToOperationProgress(), ct));
 
             SafeInvoke(() =>
             {
@@ -365,6 +370,7 @@ public sealed partial class WorkspaceRepositories
             ? "This will checkout the default branch, remove the current branch locally, and pull the latest. Uncommitted local changes can block checkout."
             : $"This will return {totalCount} repositories to their default branch: checkout default, remove the current branch locally, and pull. Uncommitted local changes can block checkout for that repo.";
 
+        var jobContextId = RequireSelectedContextId();
         JobService.StartJob(PageJobKey,
             totalCount == 1 ? "Fetching latest branch state..." : $"Fetching latest branch state for {totalCount} repositories...",
             async (job, ct) =>
@@ -372,7 +378,7 @@ public sealed partial class WorkspaceRepositories
                 try
                 {
                     var plan = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, ReturnToDefaultPlan>(
-                        svc => svc.AnalyzeReturnToDefaultAsync(WorkspaceId, RequireSelectedContextId(), eligibleIds, job.ToOperationProgress(), ct));
+                        svc => svc.AnalyzeReturnToDefaultAsync(WorkspaceId, jobContextId, eligibleIds, job.ToOperationProgress(), ct));
 
                     if (plan.AnalysisFailed)
                     {
@@ -432,6 +438,7 @@ public sealed partial class WorkspaceRepositories
             return Task.CompletedTask;
 
         var total = repositoryIds.Count;
+        var jobContextId = RequireSelectedContextId();
         StartPageJob("Returning to default branch...", async (job, ct) =>
         {
             var options = new ReturnToDefaultOptions(
@@ -440,7 +447,7 @@ public sealed partial class WorkspaceRepositories
                 CloseOpenPullRequest: true);
 
             var result = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, OperationResult>(
-                svc => svc.ExecuteReturnToDefaultAsync(WorkspaceId, RequireSelectedContextId(), repositoryIds, options, job.ToOperationProgress(), ct));
+                svc => svc.ExecuteReturnToDefaultAsync(WorkspaceId, jobContextId, repositoryIds, options, job.ToOperationProgress(), ct));
 
             var failureCount = result.RepoErrors?.Count ?? 0;
             var successCount = total - failureCount;

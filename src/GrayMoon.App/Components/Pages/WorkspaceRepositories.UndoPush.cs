@@ -42,12 +42,13 @@ public sealed partial class WorkspaceRepositories
 
         CloseUndoPushModal();
 
+        var jobContextId = RequireSelectedContextId();
         JobService.StartJob(PageJobKey, "Reverting outgoing commits...", async (job, ct) =>
         {
             try
             {
                 var result = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, OperationResult>(svc =>
-                    svc.UndoPushAsync(WorkspaceId, RequireSelectedContextId(), keepChanges, job.ToOperationProgress(), ct));
+                    svc.UndoPushAsync(WorkspaceId, jobContextId, keepChanges, job.ToOperationProgress(), ct));
                 SafeInvoke(() =>
                 {
                     ApplyRepositoryErrors(result.RepoErrors);

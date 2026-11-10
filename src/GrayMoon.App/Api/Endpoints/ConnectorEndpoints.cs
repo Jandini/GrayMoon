@@ -1,5 +1,7 @@
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
+using GrayMoon.App.Services.Security;
 using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Api.Endpoints;
@@ -17,10 +19,20 @@ public static class ConnectorEndpoints
 
     private static async Task<IResult> GetConnectorForRepository(
         int repoId,
+        HttpContext httpContext,
         AppDbContext dbContext,
+        WorkerSecretService workerSecret,
         ILoggerFactory loggerFactory)
     {
         var logger = loggerFactory.CreateLogger("GrayMoon.App.Api.Connectors");
+
+        // This endpoint returns a credential, so it checks the Worker secret itself and does not rely
+        // on WorkerSecretMiddleware being in the pipeline or on any setting.
+        if (!IsPairedWorkerRequest(httpContext.Request, workerSecret))
+        {
+            logger.LogWarning("GetConnectorForRepository: rejected a request for repository {RepositoryId} without a valid worker secret.", repoId);
+            return Results.Unauthorized();
+        }
 
         if (repoId <= 0)
             return Results.BadRequest("repoId must be greater than 0.");
@@ -51,5 +63,11 @@ public static class ConnectorEndpoints
             token
         });
     }
+
+    /// <summary>True only for a request that carries the paired Worker secret and no <c>Origin</c> header
+    /// (a browser page always sends one on a cross-site request; the Worker never does).</summary>
+    internal static bool IsPairedWorkerRequest(HttpRequest request, WorkerSecretService workerSecret) =>
+        !request.Headers.ContainsKey("Origin") &&
+        workerSecret.Check(request.Headers[WorkerSecretHeader.Name].ToString()) == WorkerSecretCheck.Valid;
 }
 

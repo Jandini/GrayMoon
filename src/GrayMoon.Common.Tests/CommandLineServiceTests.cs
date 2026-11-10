@@ -53,6 +53,32 @@ public sealed class CommandLineServiceTests
         Assert.Equal(0, result.ExitCode);
     }
     [Fact]
+    public async Task RunAsync_BytesStdin_ReturnsTheExitCodeWhenTheProcessExitsBeforeReadingStdin()
+    {
+        var service = CreateService();
+        var fileName = OperatingSystem.IsWindows() ? "cmd.exe" : "/bin/sh";
+        IReadOnlyList<string> arguments = OperatingSystem.IsWindows() ? ["/c", "exit 3"] : ["-c", "exit 3"];
+
+        // Far larger than any pipe buffer, so the write is still in flight when the process exits.
+        var result = await service.RunAsync(fileName, arguments, stdinBytes: new byte[8 * 1024 * 1024], timeout: TimeSpan.FromSeconds(30));
+
+        Assert.Equal(3, result.ExitCode);
+    }
+
+    [Fact]
+    public async Task RunAsync_StringStdin_ReturnsTheExitCodeWhenTheProcessExitsBeforeReadingStdin()
+    {
+        var service = CreateService();
+        var (fileName, arguments) = OperatingSystem.IsWindows()
+            ? ("cmd.exe", "/c exit 3")
+            : ("/bin/sh", "-c \"exit 3\"");
+
+        var result = await service.RunAsync(fileName, arguments, stdin: new string('x', 8 * 1024 * 1024), timeout: TimeSpan.FromSeconds(30));
+
+        Assert.Equal(3, result.ExitCode);
+    }
+
+    [Fact]
     public async Task RunAsync_MissingExecutable_ReturnsFailedStartInsteadOfThrowing()
     {
         var service = CreateService();

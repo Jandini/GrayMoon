@@ -9,10 +9,11 @@ namespace GrayMoon.App.Services.Security;
 /// or read <c>/workspaces/{id}/capabilities</c> (F2).
 ///
 /// - A <b>wrong</b> secret is always rejected (401).
-/// - A <b>missing</b> secret is accepted with a warning until some Worker has proved it has the secret
-///   (<see cref="WorkerSecretService.Seen"/>) or <c>Security:RequireWorkerSecret</c> is on; then it is 401.
-///   That keeps an already-installed Worker working through the first upgrade, while a Worker that has
-///   once been paired can never be impersonated by a program that simply omits the header.
+/// - A <b>missing</b> secret is rejected (401) by default, from the first start: the App generates the
+///   secret at startup and the Worker page hands it to a Worker through a one-time pairing code.
+///   Only the explicit opt-out <c>Security:RequireWorkerSecret=false</c> accepts a Worker without a secret
+///   (with a warning) until some Worker has proved it has one (<see cref="WorkerSecretService.Seen"/>).
+/// - <c>/repos/{id}/connector</c> returns a credential, so it requires the secret whatever that setting says.
 /// - The two Worker API paths and <c>/api/worker/pair</c> reject any request that carries an
 ///   <c>Origin</c> header (403): the Worker and the install script never send one, a browser page always does.
 /// </summary>
@@ -58,9 +59,9 @@ public sealed class WorkerSecretMiddleware(
                 return;
 
             default:
-                if (secrets.Seen || options.Value.RequireWorkerSecret)
+                if (kind == ProtectedPath.Connector || secrets.Seen || options.Value.RequireWorkerSecret)
                 {
-                    logger.LogWarning("Rejected a request to {Path}: no worker secret was presented. Reinstall the Worker from GrayMoon > Worker.", path);
+                    logger.LogWarning("Rejected a request to {Path}: no worker secret was presented. Pair the Worker with this GrayMoon: open GrayMoon > Worker, copy a pairing code and reinstall the Worker.", path);
                     context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                     return;
                 }

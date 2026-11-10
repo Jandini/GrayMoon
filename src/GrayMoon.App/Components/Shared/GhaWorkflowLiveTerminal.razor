@@ -2,6 +2,7 @@
 @using GrayMoon.App.Models
 @inject GhaWorkflowLiveFeedService GhaWorkflowLiveFeedService
 @inject LoadingOverlayUiSettingsService OverlayUiSettings
+@inject ILogger<GhaWorkflowLiveTerminal> Logger
 @implements IAsyncDisposable
 
 @if (RunId > 0 && !string.IsNullOrWhiteSpace(ConnectorName) && !string.IsNullOrWhiteSpace(Owner) && !string.IsNullOrWhiteSpace(RepositoryName))
@@ -60,7 +61,8 @@
 
     private readonly string[] _boardSlots  = new string[BodyLineCount];
     private readonly string[] _timingSlots = new string[BodyLineCount];
-    private string _boardCaption = "Steps · Waiting…";
+    private const string WaitingCaption = "Steps · Waiting…";
+    private string _boardCaption = WaitingCaption;
     private string? _stepProgress;
 
     // Spinner - runs on its own 200ms loop, independent of the API poll
@@ -71,6 +73,8 @@
     private string _spinnerText = "";   // "  ...⠙" suffix appended to the in-progress slot
 
     private GhaWorkflowLiveFeedState? _feedState;
+    // The run the loops were started for; a different run on the same instance restarts them.
+    private LiveTerminalTarget? _polledTarget;
     private CancellationTokenSource? _cts;
     private Task? _pollTask;
     private Task? _spinnerTask;
@@ -100,36 +104,85 @@
 
     protected override Task OnParametersSetAsync()
     {
-        if (RunId > 0 && _pollTask == null)
-        {
-            _feedState = new GhaWorkflowLiveFeedState
-            {
-                ConnectorName = ConnectorName,
-                Owner = Owner,
-                RepositoryName = RepositoryName,
-                RunId = RunId,
-                WorkflowDisplayName = WorkflowDisplayName
-            };
-            _cts = new CancellationTokenSource();
-            _pollTask     = PollLoopAsync(_cts.Token);
-            _spinnerTask  = SpinnerLoopAsync(_cts.Token);
-            _progressTask = ProgressLoopAsync(_cts.Token);
-        }
+        var target = new LiveTerminalTarget(ConnectorName, Owner, RepositoryName, RunId);
+        if (!LiveTerminalPolling.ShouldRestart(_polledTarget, target))
+            return Task.CompletedTask;
 
+        // The run (or repository) changed under the same component instance: stop the loops of the old run and
+        // start over, or the terminal keeps showing the steps of a run that is no longer the one on screen.
+        StopLoops();
+        _polledTarget = target.IsPollable ? target : null;
+        if (!target.IsPollable)
+            return Task.CompletedTask;
+
+        _feedState = new GhaWorkflowLiveFeedState
+        {
+            ConnectorName = ConnectorName,
+            Owner = Owner,
+            RepositoryName = RepositoryName,
+            RunId = RunId,
+            WorkflowDisplayName = WorkflowDisplayName
+        };
+        _boardCaption = WaitingCaption;
+        _stepProgress = null;
+        _progressInitialized = false;
+        _progressTargetPct = 0;
+        _progressDisplayPct = 0;
+        _spinnerStepKey = null;
+        UpdateBoard();
+
+        _cts = new CancellationTokenSource();
+        _pollTask     = PollLoopAsync(_feedState, _cts.Token);
+        _spinnerTask  = SpinnerLoopAsync(_cts.Token);
+        _progressTask = ProgressLoopAsync(_cts.Token);
         return Task.CompletedTask;
     }
 
-    private async Task PollLoopAsync(CancellationToken cancellationToken)
+    /// <summary>Cancels the current loops. They end on their own; nothing here waits for them.</summary>
+    private void StopLoops()
     {
-        try
+        var cts = _cts;
+        _cts = null;
+        _pollTask = null;
+        _spinnerTask = null;
+        _progressTask = null;
+        if (cts == null) return;
+        try { cts.Cancel(); }
+        catch (ObjectDisposedException) { }
+        cts.Dispose();
+    }
+
+    private async Task PollLoopAsync(GhaWorkflowLiveFeedState feedState, CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
         {
-            while (!cancellationToken.IsCancellationRequested)
+            int delayMs;
+            try
             {
-                var delayMs = await PollOnceAsync(cancellationToken);
+                delayMs = await PollOnceAsync(feedState, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return; // disposed, or restarted for another run
+            }
+            catch (Exception ex)
+            {
+                // One failed poll (network, GitHub 5xx, a request timeout) is "not yet": log it and ask again.
+                // Ending the loop here froze the terminal on its last frame until the page was reopened.
+                Logger.LogDebug(ex, "Live workflow poll failed for run {RunId} of {Owner}/{Repository}",
+                    feedState.RunId, feedState.Owner, feedState.RepositoryName);
+                delayMs = LiveTerminalPolling.RetryDelayAfterFailureMs;
+            }
+
+            try
+            {
                 await Task.Delay(delayMs, cancellationToken);
             }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
         }
-        catch (OperationCanceledException) { /* disposed */ }
     }
 
     private async Task SpinnerLoopAsync(CancellationToken cancellationToken)
@@ -153,16 +206,17 @@
         catch (OperationCanceledException) { /* disposed */ }
     }
 
-    private async Task<int> PollOnceAsync(CancellationToken cancellationToken)
+    private async Task<int> PollOnceAsync(GhaWorkflowLiveFeedState feedState, CancellationToken cancellationToken)
     {
-        if (_feedState == null)
-            return GhaWorkflowLiveFeedService.PollIntervalWaitingJobsMs;
-
-        var update = await GhaWorkflowLiveFeedService.PollOnceAsync(_feedState, cancellationToken);
+        var update = await GhaWorkflowLiveFeedService.PollOnceAsync(feedState, cancellationToken);
 
         // All state mutations run on the Blazor circuit thread to stay consistent with the spinner loop
         await InvokeAsync(() =>
         {
+            // A poll that finished after the run changed belongs to the old run: do not paint it.
+            if (cancellationToken.IsCancellationRequested || !ReferenceEquals(_feedState, feedState))
+                return;
+
             if (!string.Equals(_boardCaption, update.Caption, StringComparison.Ordinal)
                 || !string.Equals(_stepProgress, update.StepProgress, StringComparison.Ordinal))
             {
@@ -335,17 +389,23 @@
     public async ValueTask DisposeAsync()
     {
         OverlayUiSettings.Changed -= OnOverlayUiSettingsChanged;
+        var tasks = new[] { _pollTask, _spinnerTask, _progressTask }.Where(t => t != null).Cast<Task>().ToList();
+        var cts = _cts;
+        _cts = null;
         try
         {
-            _cts?.Cancel();
-            var tasks = new List<Task?> { _pollTask, _spinnerTask, _progressTask };
-            await Task.WhenAll(tasks.Where(t => t != null)!);
+            cts?.Cancel();
+            await Task.WhenAll(tasks);
         }
-        catch (OperationCanceledException) { /* ok */ }
+        catch (Exception ex)
+        {
+            // Disposal must not throw: a loop that faulted (renderer already gone, a late poll error) is only logged.
+            if (ex is not OperationCanceledException)
+                Logger.LogDebug(ex, "Live workflow terminal loop ended with an error during dispose");
+        }
         finally
         {
-            _cts?.Dispose();
-            _cts = null;
+            cts?.Dispose();
         }
     }
 }

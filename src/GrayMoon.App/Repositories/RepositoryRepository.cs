@@ -101,9 +101,17 @@ public sealed class GitHubRepositoryRepository(
     /// Updates existing rows in-place - preserving RepositoryId and all workspace links.
     /// Adds new rows for genuinely new repositories, removes rows no longer returned by GitHub.
     /// Handles multiple simultaneous renames in a single pass.
+    /// <para>
+    /// <paramref name="failedConnectorIds"/> lists the connectors whose fetch failed (401, rate limit, timeout).
+    /// Being absent from <paramref name="repositories"/> says nothing about their repositories, so none of them
+    /// is deleted. <c>null</c> or empty means every asked connector answered.
+    /// </para>
     /// </summary>
-    public async Task<MergeRepositoriesResult> MergeRepositoriesAsync(IReadOnlyCollection<Repository> repositories)
+    public async Task<MergeRepositoriesResult> MergeRepositoriesAsync(
+        IReadOnlyCollection<Repository> repositories,
+        IReadOnlyCollection<int>? failedConnectorIds = null)
     {
+        var failed = failedConnectorIds?.ToHashSet() ?? [];
         // Clear any stale Repository tracker state from previous operations in this circuit-scope DbContext.
         foreach (var entry in _dbContext.ChangeTracker.Entries<Repository>().ToList())
             entry.State = Microsoft.EntityFrameworkCore.EntityState.Detached;
@@ -312,8 +320,10 @@ public sealed class GitHubRepositoryRepository(
         //           instead of deleted, so a connector refresh can never silently drop a Feature's
         //           repository and leave its worktree without a database row.
         // ---------------------------------------------------------------------------
+        //           "Not in the fetched set" is no reason to delete for a connector whose fetch failed.
         var candidateDeleteIds = existing
             .Where(r => !matchedExistingIds.Contains(r.RepositoryId))
+            .Where(r => !failed.Contains(r.ConnectorId))
             .Select(r => r.RepositoryId)
             .ToList();
 

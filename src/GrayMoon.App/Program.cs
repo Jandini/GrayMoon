@@ -41,6 +41,16 @@ try
 {
     var builder = WebApplication.CreateBuilder(args);
 
+    // In Development the container is checked when it is built: a scoped service injected into a singleton
+    // (for example the per-circuit IToastService into a hosted service) stops startup instead of sharing
+    // one instance between every browser tab.
+    builder.Host.UseDefaultServiceProvider((context, options) =>
+    {
+        var isDevelopment = context.HostingEnvironment.IsDevelopment();
+        options.ValidateScopes = isDevelopment;
+        options.ValidateOnBuild = isDevelopment;
+    });
+
     // Desktop mode: launched with --desktop <pipe-name> by GrayMoon.Desktop.exe
     var desktopPipeIndex = Array.IndexOf(args, "--desktop");
     var isDesktopMode = desktopPipeIndex >= 0 && desktopPipeIndex + 1 < args.Length;
@@ -73,246 +83,13 @@ try
             retainedFileCountLimit: 14,
             outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj} req={GrayMoonRequestId} op={GrayMoonOperationId}{NewLine}{Exception}"));
 
-    builder.Services.Configure<WorkspaceOptions>(builder.Configuration.GetSection("Workspace"));
-    builder.Services.Configure<GitChangesOptions>(builder.Configuration.GetSection("GitChanges"));
-    // Legacy section name (before the Agent -> Worker rename) is applied first so an existing override keeps
-    // working; the current section wins when both are set.
-    builder.Services.Configure<WorkerBridgeOptions>(builder.Configuration.GetSection(WorkerBridgeOptions.LegacySectionName));
-    builder.Services.Configure<WorkerBridgeOptions>(builder.Configuration.GetSection(WorkerBridgeOptions.SectionName));
-    builder.Services.Configure<SecurityOptions>(builder.Configuration.GetSection(SecurityOptions.SectionName));
-    builder.Services.Configure<AiGenerationOptions>(builder.Configuration.GetSection(AiGenerationOptions.SectionName));
-
-    // Add services to the container.
-    builder.Services.AddRazorComponents()
-        .AddInteractiveServerComponents();
-
-    // Default SignalR incoming message limit is 32KB. SyncRepository ResponseCommand carries branch lists
-    // plus full .csproj/package graphs; larger repos exceed that and the server closes the connection,
-    // which surfaces on the worker as HubException during InvokeAsync (not a git failure).
-    // SyncCommand no longer awaits worker responses inline - it enqueues to WorkerSyncNotificationQueue and
-    // returns immediately - so the default MaximumParallelInvocationsPerClient = 1 is sufficient.
-    builder.Services.AddSignalR(options =>
-    {
-        options.MaximumReceiveMessageSize = 10 * 1024 * 1024;
-    });
-
     // Database (SQLite) for persisted data - stored in db/ for easy container volume mounting.
     // WAL + busy_timeout so a large workspace's reads/writes do not block other circuits as hard.
     var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=db/graymoon.db";
     connectionString = EnsureConnectionSetting(connectionString, "Cache=", "Cache=Shared");
     connectionString = EnsureConnectionSetting(connectionString, "Default Timeout=", "Default Timeout=5");
     connectionString = EnsureConnectionSetting(connectionString, "Foreign Keys=", "Foreign Keys=True");
-    // AddDbContext + AddDbContextFactory together fails on EF Core 10 (scoped
-    // IDbContextOptionsConfiguration resolved from the root provider). Register the
-    // factory only, then supply scoped AppDbContext instances from it.
-    // busy_timeout and foreign_keys are per connection; the interceptor sets them on every open.
-    builder.Services.AddDbContextFactory<AppDbContext>(options =>
-        options.UseSqlite(connectionString).AddInterceptors(SqliteConnectionPragmasInterceptor.Instance));
-    builder.Services.AddScoped(sp => sp.GetRequiredService<IDbContextFactory<AppDbContext>>().CreateDbContext());
-    builder.Services.AddScoped<ConnectorRepository>();
-    builder.Services.AddScoped<GitHubRepositoryRepository>();
-    builder.Services.AddScoped<WorkspaceProjectRepository>();
-    builder.Services.AddScoped<WorkspaceFileRepository>();
-    builder.Services.AddScoped<WorkspaceFileVersionConfigRepository>();
-    builder.Services.AddScoped<WorkspaceRepositoryCustomDependencyRepository>();
-    builder.Services.AddScoped<WorkspaceRepository>();
-    builder.Services.AddScoped<AppSettingRepository>();
-    builder.Services.AddScoped<NavbarCollapseService>();
-    builder.Services.AddSingleton<DesktopTopBarState>();
-    builder.Services.AddSingleton<WorkerConnectionTracker>();
-    builder.Services.AddSingleton<WorkerUpgradeStartupPrompt>();
-    builder.Services.AddScoped<HostPrerequisiteInstallService>();
-    builder.Services.AddScoped<HostPrerequisiteRequirementsProvider>();
-    builder.Services.AddScoped<WorkerInstallService>();
-    builder.Services.AddScoped<WorkerRestartService>();
-    builder.Services.AddHostedService<WorkerUpdateDesktopNotifier>();
-    builder.Services.AddSingleton<WorkerQueueStateService>();
-    builder.Services.AddSingleton<WorkerCommandCancelSender>();
-    builder.Services.AddSingleton<OverlayCommandTerminalService>();
-    builder.Services.AddSingleton<IToastService, ToastService>();
-    builder.Services.AddSingleton<MatrixOverlayPreferenceService>();
-    builder.Services.AddSingleton<CommandTerminalOverlayPreferenceService>();
-    builder.Services.AddSingleton<MergePullRequestReturnToDefaultPreferenceService>();
-    builder.Services.AddSingleton<LoadingOverlayUiSettingsService>();
-    builder.Services.AddSingleton<IGitHubRateLimitTracker, GitHubRateLimitTracker>();
-    builder.Services.AddSingleton<IGitHubETagCache, GitHubETagCache>();
-    builder.Services.AddSingleton<IGhaLiveFeedJobsCache, GhaLiveFeedJobsCache>();
-    builder.Services.AddSingleton<IGitHubApiUsageRecorder, GitHubApiUsageRecorder>();
-    builder.Services.AddHostedService<GitHubApiUsageLoggerBackgroundService>();
-    builder.Services.AddScoped<SyncCommandHandler>();
-    builder.Services.AddScoped<IWorkerBridge, WorkerBridge>();
-    builder.Services.AddScoped<WorkspaceService>();
-    builder.Services.AddScoped<IWorkspaceFeatureContextResolver, WorkspaceFeatureContextResolver>();
-    builder.Services.AddScoped<IWorkspaceCapabilitiesResolver, WorkspaceCapabilitiesResolver>();
-    builder.Services.AddScoped<IWorkspacePageAccessResolver, WorkspacePageAccessResolver>();
-    builder.Services.AddScoped<IWorkspaceContextPathResolver, WorkspaceContextPathResolver>();
-    builder.Services.AddScoped<IWorkspaceSelectedFeatureContextService, WorkspaceSelectedFeatureContextService>();
-    builder.Services.AddScoped<IWorkspaceHookContextAttributor, WorkspaceHookContextAttributor>();
-    builder.Services.AddScoped<FeatureCodeGraphService>();
-    builder.Services.AddScoped<IWorkspaceFeatureOperations, WorkspaceFeatureOperations>();
-    builder.Services.AddSingleton<IWorkspaceFeatureReconciler, WorkspaceFeatureReconciler>();
-    builder.Services.AddHostedService(sp => (WorkspaceFeatureReconciler)sp.GetRequiredService<IWorkspaceFeatureReconciler>());
-    builder.Services.AddSingleton<FeatureRemovalQueue>();
-    builder.Services.AddSingleton<IFeatureRemovalQueue>(sp => sp.GetRequiredService<FeatureRemovalQueue>());
-    builder.Services.AddHostedService(sp => sp.GetRequiredService<FeatureRemovalQueue>());
-    builder.Services.AddSingleton<IWorkspaceCheckoutRefresh, WorkspaceCheckoutRefresh>();
-    builder.Services.AddScoped<IFeatureRemovalDeparture, FeatureRemovalDeparture>();
-    builder.Services.AddSingleton<FeatureFolderCleanupService>();
-    builder.Services.AddSingleton<IFeatureFolderCleanupService>(sp => sp.GetRequiredService<FeatureFolderCleanupService>());
-    builder.Services.AddHostedService(sp => sp.GetRequiredService<FeatureFolderCleanupService>());
-    builder.Services.AddScoped<WorkspaceContextNavigationService>();
-    builder.Services.AddScoped<IWorkspaceExternalWorktreeOperations, WorkspaceExternalWorktreeOperations>();
-    builder.Services.AddScoped<IWorkspaceNativeLaunchService, WorkspaceNativeLaunchService>();
-    builder.Services.AddHttpContextAccessor();
-    builder.Services.AddScoped<WorkspaceOpenInRecentTools>();
-    builder.Services.AddScoped<IWorkspaceBranchOccupancyService, WorkspaceBranchOccupancyService>();
-    builder.Services.AddScoped<IFeatureBranchGuard, FeatureBranchGuard>();
-    builder.Services.AddScoped<WorkspaceGitService>();
-    builder.Services.AddScoped<ConnectorHealthService>();
-    builder.Services.AddScoped<HomeNavAttentionMonitor>();
-    builder.Services.AddScoped<GitHubRepositoryService>();
-    builder.Services.AddScoped<IRepositoryListQueryService, RepositoryListQueryService>();
-    builder.Services.AddScoped<IWorkspaceProjectListQueryService, WorkspaceProjectListQueryService>();
-    builder.Services.AddScoped<IWorkspaceRepositoryLinkListQueryService, WorkspaceRepositoryLinkListQueryService>();
-    builder.Services.AddMemoryCache();
-    builder.Services.AddScoped<GitHubActionsService>();
-    builder.Services.AddScoped<GhaWorkflowLiveFeedService>();
-    builder.Services.AddScoped<GitHubPullRequestService>();
-    builder.Services.AddScoped<GrayMoon.App.Services.GitProviders.GitHubGitProvider>();
-    builder.Services.AddScoped<GrayMoon.App.Services.GitProviders.IGitProviderResolver, GrayMoon.App.Services.GitProviders.GitProviderResolver>();
-    builder.Services.AddScoped<GitHubPullRequestMergeService>();
-    builder.Services.AddScoped<WorkspacePullRequestRepository>();
-    builder.Services.AddScoped<WorkspacePullRequestService>();
-    builder.Services.AddScoped<RepositoryBranchWriter>();
-    builder.Services.AddScoped<WorkspaceRepositoryStateWriter>();
-    builder.Services.AddScoped<WorkspaceStateRecomputeScope>();
-    builder.Services.AddSingleton<SyncRecomputeCoalescer>();
-    builder.Services.AddSingleton<FileVersionCheckCoalescer>();
-    builder.Services.AddSingleton<FeatureFinalizationCoordinator>();
-    builder.Services.AddScoped<WorkspaceActionRepository>();
-    builder.Services.AddScoped<WorkspaceActionService>();
-    builder.Services.AddScoped<GitHubActionsCiProvider>();
-    builder.Services.AddScoped<IWorkspaceCiProviderResolver, WorkspaceCiProviderResolver>();
-    builder.Services.AddScoped<PackageRegistrySyncService>();
-    builder.Services.AddScoped<IWorkspaceFileSearchService, WorkspaceFileSearchService>();
-    builder.Services.AddScoped<WorkspaceFileVersionService>();
-    builder.Services.AddScoped<WorkspaceCommitSyncHandler>();
-    builder.Services.AddScoped<WorkspaceBranchUpdateHandler>();
-    builder.Services.AddScoped<WorkspaceSyncHandler>();
-    builder.Services.AddScoped<DependencyUpdateOrchestrator>();
-    builder.Services.AddScoped<IDependencyUpdateLane>(sp => sp.GetRequiredService<DependencyUpdateOrchestrator>());
-    builder.Services.AddScoped<UpdateAndPushOrchestrator>();
-    builder.Services.AddScoped<WorkspaceUpdateHandler>();
-    builder.Services.AddScoped<PushOrchestrator>();
-    builder.Services.AddScoped<WorkspacePushService>();
-    builder.Services.AddScoped<IPushLane>(sp => sp.GetRequiredService<WorkspacePushService>());
-    builder.Services.AddScoped<WorkspacePushHandler>();
-    builder.Services.AddScoped<BasicGitPushStrategy>();
-    builder.Services.AddScoped<DotNetDependencyPushStrategy>();
-    builder.Services.AddScoped<WorkspacePushStrategySelector>();
-    builder.Services.AddScoped<WorkspaceUndoPushHandler>();
-    builder.Services.AddScoped<WorkspaceDependencyService>();
-    builder.Services.AddScoped<WorkspacePendingActionsService>();
-    builder.Services.AddScoped<AppActivityStateService>();
-    builder.Services.AddScoped<IWorkspaceBranchOperations, WorkspaceBranchOperations>();
-    builder.Services.AddScoped<IWorkspaceCatalogOperations, WorkspaceCatalogOperations>();
-    builder.Services.AddScoped<IWorkspacePushOperations, WorkspacePushOperations>();
-    builder.Services.AddScoped<IWorkspaceUpdateOperations, WorkspaceUpdateOperations>();
-    builder.Services.AddScoped<IWorkspaceUpdateAndPushOperations, WorkspaceUpdateAndPushOperations>();
-    builder.Services.AddScoped<IWorkspacePreparationOperations, WorkspacePreparationOperations>();
-    builder.Services.AddScoped<IWorkspaceSyncOperations, WorkspaceSyncOperations>();
-    builder.Services.AddScoped<IWorkspacePullRequestOperations, WorkspacePullRequestOperations>();
-    builder.Services.AddScoped<IWorkspaceFileOperations, WorkspaceFileOperations>();
-    builder.Services.AddScoped<IWorkspaceGitChangesOperations, WorkspaceGitChangesOperations>();
-    builder.Services.AddSingleton<HostInfoCache>();
-    builder.Services.AddSingleton<AiProviderAvailabilityCache>();
-    builder.Services.AddScoped<WorkspaceAiProviderPins>();
-    builder.Services.AddScoped<IWorkspaceAiGenerationOperations, WorkspaceAiGenerationOperations>();
-    builder.Services.AddSingleton<IWorkspaceManifestFile, WorkspaceManifestFile>();
-    builder.Services.AddScoped<GrayMoon.Application.WorkspaceManifest.IWorkspaceManifestService, GrayMoon.App.Services.WorkspaceManifest.WorkspaceManifestService>();
-    builder.Services.AddScoped<GrayMoon.App.Services.WorkspaceManifest.IRemoteWorkspaceManifestReader, GrayMoon.App.Services.WorkspaceManifest.GitHubRemoteWorkspaceManifestReader>();
-    builder.Services.AddScoped<IWorkspaceRepositoryOperations, GrayMoon.App.Services.Application.WorkspaceRepositoryOperations>();
-    builder.Services.AddScoped<WorkspaceBranchHandler>();
-    builder.Services.AddScoped<IPrepareWorkspacePhases, PrepareWorkspacePhases>();
-    builder.Services.AddScoped<PrepareWorkspaceOrchestrator>();
-    builder.Services.AddSingleton<IWorkspaceOperationRunner, WorkspaceOperationRunner>();
-    builder.Services.AddSingleton<IWorkspaceOperationLock>(sp => (IWorkspaceOperationLock)sp.GetRequiredService<IWorkspaceOperationRunner>());
-    builder.Services.AddScoped<IBackgroundJobService, BackgroundJobService>();
-    builder.Services.AddScoped<IWorkspacePageService, WorkspacePageService>();
-    builder.Services.AddScoped<IWorkspaceTopBarService, WorkspaceTopBarService>();
-    builder.Services.AddSingleton<DesktopWorkspaceContextTracker>();
-    builder.Services.AddSingleton<WorkspaceOperationOutcomeStore>();
-    builder.Services.AddSingleton<UpdateAndPushApprovalStore>();
-
-    builder.Services.AddScoped<IWorkspaceGitChangesReadService, WorkspaceGitChangesReadService>();
-    builder.Services.AddScoped<IGitChangesWorkerClient, GitChangesWorkerClient>();
-    builder.Services.AddSingleton<MarkdownProseDiffService>();
-    builder.Services.AddScoped<MarkdownImageEmbedder>();
-    builder.Services.AddHttpClient(nameof(MarkdownImageEmbedder))
-        .ConfigureHttpClient(client =>
-        {
-            client.Timeout = TimeSpan.FromSeconds(15);
-            client.DefaultRequestHeaders.UserAgent.ParseAdd("GrayMoon-MarkdownPreview/1.0");
-        });
-
-    builder.Services.AddScoped<GitChangesSnapshotPushHandler>();
-    builder.Services.AddSingleton<IWorkspaceGitChangesNotifier, WorkspaceGitChangesNotifier>();
-    builder.Services.AddScoped<WorkspaceGitChangesSelectionMemory>();
-    builder.Services.AddSingleton<IGitChangesFileOrdering, TreeGitChangesFileOrdering>();
-    builder.Services.AddSingleton<WorkspaceGitChangesCommitMessageMemory>();
-    builder.Services.AddSingleton<WorkspaceGitChangesPushAfterCommitMemory>();
-    builder.Services.AddSingleton<WorkspaceGitChangesGenerateMessageOnCommitMemory>();
-    builder.Services.AddSingleton<WorkspaceGitChangesCommitGeneration>();
-    builder.Services.AddSingleton<WorkspacePullRequestDraftMemory>();
-    builder.Services.AddSingleton<WorkspacePullRequestTextGeneration>();
-    builder.Services.AddSingleton<IWorkspaceGitChangesActivityTracker, WorkspaceGitChangesActivityTracker>();
-    builder.Services.AddSingleton<IWorkspaceGitChangesMonitoringPause, WorkspaceGitChangesMonitoringPause>();
-    builder.Services.AddSingleton<IGitChangesWorkspaceScanner, GitChangesWorkspaceScanner>();
-    builder.Services.AddSingleton<IGitChangesLineStatsRefresh, GitChangesLineStatsRefresh>();
-    builder.Services.AddScoped<IWorkspaceGitChangesActivation, WorkspaceGitChangesActivation>();
-    builder.Services.AddScoped<WorkspaceGitChangesRouteActivity>();
-
-    builder.Services.AddSingleton<ICommandLineService, CommandLineService>();
-    builder.Services.AddSingleton<IScopedServiceExecutor, ScopedServiceExecutor>();
-
-    // Token protection
-    builder.Services.AddSingleton<ITokenEncryptionKeyProvider, TokenEncryptionKeyProvider>();
-    builder.Services.AddSingleton<ITokenProtector, AesGcmTokenProtector>();
-
-    // Worker secret (F2) and one-time pairing codes
-    builder.Services.AddSingleton<IWorkerSecretSeenStore, DbWorkerSecretSeenStore>();
-    builder.Services.AddSingleton<WorkerSecretService>();
-    builder.Services.AddSingleton<WorkerPairingService>();
-
-    // Background services
-    builder.Services.AddSingleton<SyncBackgroundService>();
-    builder.Services.AddHostedService(sp => sp.GetRequiredService<SyncBackgroundService>());
-    builder.Services.AddSingleton<WorkerSyncNotificationQueue>();
-    builder.Services.AddHostedService(sp => sp.GetRequiredService<WorkerSyncNotificationQueue>());
-    builder.Services.AddSingleton<IWorkerSyncNotificationBarrier>(sp => sp.GetRequiredService<WorkerSyncNotificationQueue>());
-    builder.Services.AddHostedService<TokenHealthBackgroundService>();
-    builder.Services.AddSingleton<WorkspaceGitChangesWriteQueue>();
-    builder.Services.AddHostedService(sp => sp.GetRequiredService<WorkspaceGitChangesWriteQueue>());
-    builder.Services.AddSingleton(TimeProvider.System);
-    builder.Services.AddSingleton<IGitChangesContextEnsurer, GitChangesContextEnsurer>();
-    builder.Services.AddSingleton<GitChangesAuditScheduler>();
-    builder.Services.AddSingleton<IGitChangesAuditScheduler>(sp => sp.GetRequiredService<GitChangesAuditScheduler>());
-    builder.Services.AddHostedService(sp => sp.GetRequiredService<GitChangesAuditScheduler>());
-    builder.Services.AddHostedService<GitChangesWatcherKeeper>();
-
-    // Connector services
-    builder.Services.AddTransient<GitHubOverlayLoggingHandler>();
-    builder.Services.AddHttpClient<GitHubService>()
-        .AddHttpMessageHandler<GitHubOverlayLoggingHandler>();
-    builder.Services.AddHttpClient<NuGetService>();
-    builder.Services.AddScoped<ConnectorServiceFactory>();
-    builder.Services.AddScoped<IPullRequestService, PullRequestService>();
-
-    // Persist Data Protection keys to db volume so antiforgery and other protected data survive container restarts
-    var keyRingDir = Path.Combine(Path.GetDirectoryName(GetDatabasePath(connectionString) ?? "db") ?? "db", "DataProtection-Keys");
-    builder.Services.AddDataProtection()
-        .SetApplicationName("GrayMoon")
-        .PersistKeysToFileSystem(new DirectoryInfo(keyRingDir));
+    builder.Services.AddGrayMoonServices(builder.Configuration, connectionString);
 
     var app = builder.Build();
     WorkerResponseDelivery.SetCancelNotifier(app.Services.GetRequiredService<WorkerCommandCancelSender>().NotifyCancel);

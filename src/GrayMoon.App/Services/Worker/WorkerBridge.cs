@@ -103,7 +103,7 @@ public sealed class WorkerBridge(
 
         Action<WorkerCommandStreamLine> onLine = OnLine;
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
-        var task = WorkerResponseDelivery.WaitAsync(requestId, linkedCts.Token, onLine);
+        var task = WorkerResponseDelivery.WaitAsync(requestId, linkedCts.Token, onLine, connectionId);
         var sw = Stopwatch.StartNew();
 
         using var requestProp = LogContext.PushProperty(GrayMoonLogProperties.RequestId, requestId);

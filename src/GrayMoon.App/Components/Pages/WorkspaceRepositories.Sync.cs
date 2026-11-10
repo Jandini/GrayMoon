@@ -51,11 +51,12 @@ public sealed partial class WorkspaceRepositories
         var repoIds = repositoryIds.ToList();
         if (repoIds.Count == 0) return Task.CompletedTask;
         var label = $"Fetching {repoIds.Count} {(repoIds.Count == 1 ? "repository" : "repositories")}...";
+        var jobContextId = RequireSelectedContextId();
         StartPageJob(label, async (job, ct) =>
         {
             var result = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, OperationResult>(
                 svc => svc.QuickFetchAsync(
-                    WorkspaceId, RequireSelectedContextId(),
+                    WorkspaceId, jobContextId,
                     repoIds,
                     job.ToOperationProgress(),
                     ct),
@@ -171,12 +172,13 @@ public sealed partial class WorkspaceRepositories
                                 wr.IncomingCommits = info.IncomingCommits;
                             }
                         }),
-                        setRepoSyncStatus: (repoId, status) =>
+                        // Runs on the job thread: the dictionary is read by the markup, so write it on the dispatcher.
+                        setRepoSyncStatus: (repoId, status) => SafeInvoke(() =>
                         {
                             if (jobContextGeneration != _contextGeneration)
                                 return;
                             repoSyncStatus[repoId] = status;
-                        }));
+                        })));
 
                 await InvokeAsync(async () =>
                 {

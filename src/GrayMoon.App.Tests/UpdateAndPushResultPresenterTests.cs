@@ -14,6 +14,21 @@ public sealed class UpdateAndPushResultPresenterTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
+    public void Completed_with_a_failed_package_restore_is_a_warning_on_both_surfaces(bool onGrid)
+    {
+        var push = GrayMoon.App.Services.Orchestration.PushOperationResult.FromRepoErrors(
+            new Dictionary<int, string> { [4] = "Package restore failed for repo-4: error NU1101" });
+        var result = Result(UpdateAndPushStatus.Completed) with { Push = push };
+
+        var notice = UpdateAndPushResultPresenter.Present(result, onGrid);
+
+        Assert.Equal(UpdateAndPushNoticeKind.Warning, notice.Kind);
+        Assert.Equal("Push finished, but package restore failed in 1 repository.", notice.Message);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
     public void Completed_says_nothing(bool onGrid)
         => Assert.Equal(UpdateAndPushNoticeKind.None, UpdateAndPushResultPresenter.Present(Result(UpdateAndPushStatus.Completed), onGrid).Kind);
 

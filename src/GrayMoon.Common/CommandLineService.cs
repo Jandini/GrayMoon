@@ -91,8 +91,13 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
         {
             if (stdin != null)
             {
-                await process.StandardInput.WriteAsync(stdin.AsMemory(), runToken);
-                process.StandardInput.Close();
+                await WriteStdinAsync(
+                    fileName,
+                    async () =>
+                    {
+                        await process.StandardInput.WriteAsync(stdin.AsMemory(), runToken);
+                        process.StandardInput.Close();
+                    });
             }
 
             await process.WaitForExitAsync(runToken);
@@ -197,9 +202,14 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
             {
                 // Write raw bytes directly to the stream so the exact NUL-delimited UTF-8 payload is
                 // transmitted, bypassing any console-encoding assumptions StandardInput's StreamWriter would apply.
-                await process.StandardInput.BaseStream.WriteAsync(stdinBytes, runToken);
-                await process.StandardInput.BaseStream.FlushAsync(runToken);
-                process.StandardInput.Close();
+                await WriteStdinAsync(
+                    fileName,
+                    async () =>
+                    {
+                        await process.StandardInput.BaseStream.WriteAsync(stdinBytes, runToken);
+                        await process.StandardInput.BaseStream.FlushAsync(runToken);
+                        process.StandardInput.Close();
+                    });
             }
 
             await process.WaitForExitAsync(runToken);
@@ -224,6 +234,24 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
             MirrorCombinedOutputAsStderr(stdout, stderr);
 
         return new CommandLineResult(process.ExitCode, stdout, stderr);
+    }
+
+    /// <summary>
+    /// Writes the process's stdin. A process that exits (or closes its stdin) before it has read everything breaks
+    /// the pipe; that is not a failure of the run: the caller gets the process's own exit code and stderr, exactly
+    /// as when the write had succeeded (a Worker fallback keys on that exit code, for example for
+    /// <c>--pathspec-from-file=-</c>). Cancellation still propagates.
+    /// </summary>
+    private async Task WriteStdinAsync(string fileName, Func<Task> write)
+    {
+        try
+        {
+            await write();
+        }
+        catch (IOException ex)
+        {
+            logger.LogDebug(ex, "Command {Executable} closed stdin before all input was written", fileName);
+        }
     }
 
     /// <summary>

@@ -359,13 +359,15 @@ public sealed partial class WorkspaceGitChanges
 
                 var result = await ScopedExecutor.ExecuteAsync<IWorkspacePushOperations, OperationResult>(svc =>
                     svc.PushAsync(
-                        WorkspaceId, RequireSelectedContextId(),
+                        WorkspaceId, committedContextId,
                         pushRepoIds,
                         synchronizedPush: false,
                         requiredPackageIds: EmptyPushPackageIds,
                         job.ToOperationProgress(),
                         cancellationToken: ct));
-                result.ShowRepoErrors(msg => SafeInvoke(() => ToastService.ShowError(msg)));
+                result.ShowRepoErrors(
+                    msg => SafeInvoke(() => ToastService.ShowError(msg)),
+                    warning => SafeInvoke(() => ToastService.ShowWarning(warning)));
             }
         });
     }
@@ -399,10 +401,10 @@ public sealed partial class WorkspaceGitChanges
             ? $"Unstaging {targets.Count} repositories..."
             : $"Staging {targets.Count} repositories...";
 
+        var contextId = RequireSelectedContextId();
         StartPageJob(label, async (job, ct) =>
         {
             var outcomes = new RepositoryOutcomes(targets.Select(t => (t.WorkspaceRepositoryId, t.RepositoryName)));
-            var contextId = RequireSelectedContextId();
             var completed = 0;
             using var semaphore = new SemaphoreSlim(Math.Max(1, GitChangesOptions.Value.MaxParallelRepositoryOperations));
 

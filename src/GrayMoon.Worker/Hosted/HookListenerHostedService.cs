@@ -14,10 +14,15 @@ public sealed class HookListenerHostedService(
     IJobQueue jobQueue,
     IWorktreeCreateHookDeferral hookDeferral,
     IOptions<WorkerOptions> options,
-    ILogger<HookListenerHostedService> logger) : IHostedService, IAsyncDisposable
+    ILogger<HookListenerHostedService> logger,
+    HookRepositoryPathPolicy? pathPolicy = null) : IHostedService, IAsyncDisposable
 {
     private readonly WorkerOptions _options = options.Value;
+    private readonly HookRepositoryPathPolicy _pathPolicy = pathPolicy ?? new HookRepositoryPathPolicy(KnownWorkspaceRoots.Shared);
     private const int MaxConcurrentRequests = 64;
+
+    /// <summary>Largest hook body accepted. A real payload is two ids and a path, well under 1 KB.</summary>
+    internal const int MaxBodyBytes = 64 * 1024;
 
     private readonly SemaphoreSlim _inFlight = new(MaxConcurrentRequests, MaxConcurrentRequests);
     private HttpListener? _listener;
@@ -50,11 +55,12 @@ public sealed class HookListenerHostedService(
 
     private async Task ListenAsync(CancellationToken ct)
     {
-        while (!ct.IsCancellationRequested && _listener != null)
+        // Shutdown sets the field to null; the loop keeps its own reference so that cannot fault a pending accept.
+        while (!ct.IsCancellationRequested && _listener is { } listener)
         {
             try
             {
-                var context = await _listener.GetContextAsync().WaitAsync(ct);
+                var context = await listener.GetContextAsync().WaitAsync(ct);
                 if (!_inFlight.Wait(0, CancellationToken.None))
                 {
                     // Hooks are tiny local POSTs; this many in flight means something is flooding the port.
@@ -110,18 +116,51 @@ public sealed class HookListenerHostedService(
 
         try
         {
-            NotifyPayload? payload = null;
-            if (context.Request.HasEntityBody)
+            // A loopback caller is not trusted: any local process or a browser page can post here. A browser
+            // "simple" cross-site POST cannot carry application/json, so the content type check turns it away.
+            if (!IsJsonContentType(context.Request.ContentType))
             {
-                using var reader = new StreamReader(context.Request.InputStream, context.Request.ContentEncoding);
-                var body = await reader.ReadToEndAsync(ct);
-                payload = JsonSerializer.Deserialize<NotifyPayload>(body);
+                Reject(context, 400, path, "the content type is not application/json");
+                return;
+            }
+
+            if (context.Request.ContentLength64 > MaxBodyBytes)
+            {
+                Reject(context, 413, path, "the body is larger than the limit");
+                return;
+            }
+
+            var body = context.Request.HasEntityBody
+                ? await ReadBodyAsync(context.Request.InputStream, MaxBodyBytes, ct)
+                : [];
+            if (body == null)
+            {
+                Reject(context, 413, path, "the body is larger than the limit");
+                return;
+            }
+
+            NotifyPayload? payload = null;
+            try
+            {
+                if (body.Length > 0)
+                    payload = JsonSerializer.Deserialize<NotifyPayload>(body);
+            }
+            catch (JsonException)
+            {
+                Reject(context, 400, path, "the body is not valid JSON");
+                return;
             }
 
             if (payload == null || payload.RepositoryId == 0 || payload.WorkspaceId == 0 || string.IsNullOrWhiteSpace(payload.RepositoryPath))
             {
-                context.Response.StatusCode = 400;
-                context.Response.Close();
+                Reject(context, 400, path, "the payload is incomplete");
+                return;
+            }
+
+            // The path decides where git and GitVersion run, so it must be a working tree GrayMoon manages.
+            if (_pathPolicy.GetRejectionReason(payload.RepositoryPath, payload.WorkspaceId, payload.RepositoryId) is { } pathRejection)
+            {
+                Reject(context, 400, path, pathRejection);
                 return;
             }
 
@@ -154,18 +193,73 @@ public sealed class HookListenerHostedService(
         }
     }
 
+    private void Reject(HttpListenerContext context, int statusCode, string path, string reason)
+    {
+        logger.LogWarning("Rejected {Path} with {StatusCode}: {Reason}", path, statusCode, reason);
+        context.Response.StatusCode = statusCode;
+        context.Response.Close();
+    }
+
+    /// <summary>True for <c>application/json</c>, with or without parameters such as <c>; charset=utf-8</c>.</summary>
+    internal static bool IsJsonContentType(string? contentType)
+    {
+        if (string.IsNullOrWhiteSpace(contentType))
+            return false;
+        var separator = contentType.IndexOf(';');
+        var mediaType = (separator < 0 ? contentType : contentType[..separator]).Trim();
+        return string.Equals(mediaType, "application/json", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Reads the whole body, or returns null once it turns out to be longer than <paramref name="maxBytes"/>. Never
+    /// buffers more than one byte past the limit, whatever the declared length was (a chunked body declares none).
+    /// </summary>
+    internal static async Task<byte[]?> ReadBodyAsync(Stream input, int maxBytes, CancellationToken ct)
+    {
+        var buffer = new byte[maxBytes + 1];
+        var total = 0;
+        while (total < buffer.Length)
+        {
+            var read = await input.ReadAsync(buffer.AsMemory(total, buffer.Length - total), ct);
+            if (read == 0)
+                break;
+            total += read;
+        }
+
+        return total > maxBytes ? null : buffer[..total];
+    }
+
     public Task StopAsync(CancellationToken cancellationToken)
     {
         _cts?.Cancel();
-        _listener?.Stop();
-        _listener?.Close();
+        CloseListener();
         return _listenTask ?? Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Closes the listener once. Close already stops it; on Linux a Stop followed by Close (or a second Close)
+    /// makes the managed HttpListener look its endpoint up again and rebind the port, which throws "Address already
+    /// in use" when anything else took the port in between. A failure to close must never fail shutdown.
+    /// </summary>
+    private void CloseListener()
+    {
+        var listener = Interlocked.Exchange(ref _listener, null);
+        if (listener == null)
+            return;
+        try
+        {
+            listener.Close();
+        }
+        catch (Exception ex) when (ex is HttpListenerException or ObjectDisposedException)
+        {
+            logger.LogDebug(ex, "Hook listener reported an error while closing");
+        }
     }
 
     public async ValueTask DisposeAsync()
     {
         _cts?.Cancel();
-        _listener?.Close();
+        CloseListener();
         if (_listenTask != null)
         {
             try

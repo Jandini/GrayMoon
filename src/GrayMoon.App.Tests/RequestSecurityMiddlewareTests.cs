@@ -1,5 +1,7 @@
 using GrayMoon.App.Services.Security;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Tests;
@@ -7,8 +9,7 @@ namespace GrayMoon.App.Tests;
 /// <summary>F3: cross-site and rebinding protection for the REST API and the SignalR hubs.</summary>
 public class RequestSecurityMiddlewareTests
 {
-    private const string NoForwardedHost = "";
-    private static readonly string[] NoAllowedOrigins = [];
+    private static readonly string[] NoAllowedHosts = [];
 
     // --- Path classification -------------------------------------------------
 
@@ -53,6 +54,27 @@ public class RequestSecurityMiddlewareTests
         Assert.False(isWorkerHub);
     }
 
+    // --- Allowlist ---------------------------------------------------------------
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("*")]
+    [InlineData(" ; * ; ")]
+    public void AllowedHosts_wildcard_or_empty_setting_is_an_empty_allowlist(string? setting)
+        => Assert.Empty(RequestSecurityMiddleware.BuildAllowedHosts(setting, []));
+
+    [Fact]
+    public void AllowedHosts_merges_the_setting_and_the_security_origins()
+    {
+        var hosts = RequestSecurityMiddleware.BuildAllowedHosts("localhost; nas.local ;192.168.1.10", ["graymoon.example.com", "*"]);
+
+        Assert.Equal(4, hosts.Count);
+        Assert.Contains("nas.local", hosts);
+        Assert.Contains("192.168.1.10", hosts);
+        Assert.Contains("graymoon.example.com", hosts);
+    }
+
     // --- REST rule -------------------------------------------------------------
 
     [Fact]
@@ -61,76 +83,66 @@ public class RequestSecurityMiddlewareTests
         var allowed = RequestSecurityMiddleware.IsRestRequestAllowed(
             origin: "http://evil.example.com",
             requestHeaderValue: "1",
-            requestHost: "localhost",
-            forwardedHost: NoForwardedHost,
-            allowedOrigins: NoAllowedOrigins);
+            allowedHosts: NoAllowedHosts);
 
         Assert.False(allowed);
     }
 
     [Fact]
-    public void RestRequest_same_origin_with_header_is_allowed()
+    public void RestRequest_loopback_origin_with_header_is_allowed()
     {
         var allowed = RequestSecurityMiddleware.IsRestRequestAllowed(
             origin: "http://localhost:8384",
             requestHeaderValue: "1",
-            requestHost: "localhost",
-            forwardedHost: NoForwardedHost,
-            allowedOrigins: NoAllowedOrigins);
+            allowedHosts: NoAllowedHosts);
 
         Assert.True(allowed);
     }
 
     [Fact]
-    public void RestRequest_same_origin_without_header_is_blocked()
+    public void RestRequest_loopback_origin_without_header_is_blocked()
     {
         var allowed = RequestSecurityMiddleware.IsRestRequestAllowed(
             origin: "http://localhost:8384",
             requestHeaderValue: "",
-            requestHost: "localhost",
-            forwardedHost: NoForwardedHost,
-            allowedOrigins: NoAllowedOrigins);
+            allowedHosts: NoAllowedHosts);
 
         Assert.False(allowed);
     }
 
-    [Fact]
-    public void RestRequest_loopback_origin_against_loopback_host_is_allowed()
+    [Theory]
+    [InlineData("http://127.0.0.1:5000")]
+    [InlineData("http://[::1]:8384")]
+    [InlineData("http://LOCALHOST")]
+    public void RestRequest_any_loopback_origin_is_allowed_with_an_empty_allowlist(string origin)
     {
         var allowed = RequestSecurityMiddleware.IsRestRequestAllowed(
-            origin: "http://127.0.0.1:5000",
+            origin: origin,
             requestHeaderValue: "1",
-            requestHost: "localhost",
-            forwardedHost: NoForwardedHost,
-            allowedOrigins: NoAllowedOrigins);
+            allowedHosts: NoAllowedHosts);
 
         Assert.True(allowed);
     }
 
     [Fact]
-    public void RestRequest_forwarded_host_match_is_allowed()
+    public void RestRequest_listed_host_is_allowed()
     {
         var allowed = RequestSecurityMiddleware.IsRestRequestAllowed(
             origin: "http://graymoon.example.com",
             requestHeaderValue: "1",
-            requestHost: "127.0.0.1",
-            forwardedHost: "graymoon.example.com:443",
-            allowedOrigins: NoAllowedOrigins);
+            allowedHosts: ["graymoon.example.com"]);
 
         Assert.True(allowed);
     }
 
     [Fact]
-    public void RestRequest_configured_allowed_origin_is_allowed()
+    public void RestRequest_wildcard_subdomain_entry_matches_subdomains_only()
     {
-        var allowed = RequestSecurityMiddleware.IsRestRequestAllowed(
-            origin: "http://graymoon.example.com",
-            requestHeaderValue: "1",
-            requestHost: "127.0.0.1",
-            forwardedHost: NoForwardedHost,
-            allowedOrigins: ["graymoon.example.com"]);
+        string[] hosts = ["*.example.com"];
 
-        Assert.True(allowed);
+        Assert.True(RequestSecurityMiddleware.IsRestRequestAllowed("http://graymoon.example.com", "1", hosts));
+        Assert.False(RequestSecurityMiddleware.IsRestRequestAllowed("http://example.com", "1", hosts));
+        Assert.False(RequestSecurityMiddleware.IsRestRequestAllowed("http://evilexample.com", "1", hosts));
     }
 
     [Fact]
@@ -139,9 +151,7 @@ public class RequestSecurityMiddlewareTests
         var allowed = RequestSecurityMiddleware.IsRestRequestAllowed(
             origin: "not-a-uri",
             requestHeaderValue: "1",
-            requestHost: "localhost",
-            forwardedHost: NoForwardedHost,
-            allowedOrigins: NoAllowedOrigins);
+            allowedHosts: NoAllowedHosts);
 
         Assert.False(allowed);
     }
@@ -154,22 +164,18 @@ public class RequestSecurityMiddlewareTests
         var allowed = RequestSecurityMiddleware.IsHubOriginAllowed(
             origin: "http://localhost:8384",
             isWorkerHub: true,
-            requestHost: "localhost",
-            forwardedHost: NoForwardedHost,
-            allowedOrigins: NoAllowedOrigins);
+            allowedHosts: NoAllowedHosts);
 
         Assert.False(allowed);
     }
 
     [Fact]
-    public void HubOrigin_own_host_on_other_hub_is_allowed()
+    public void HubOrigin_loopback_on_other_hub_is_allowed()
     {
         var allowed = RequestSecurityMiddleware.IsHubOriginAllowed(
             origin: "http://localhost:8384",
             isWorkerHub: false,
-            requestHost: "localhost",
-            forwardedHost: NoForwardedHost,
-            allowedOrigins: NoAllowedOrigins);
+            allowedHosts: NoAllowedHosts);
 
         Assert.True(allowed);
     }
@@ -180,9 +186,7 @@ public class RequestSecurityMiddlewareTests
         var allowed = RequestSecurityMiddleware.IsHubOriginAllowed(
             origin: "http://evil.example.com",
             isWorkerHub: false,
-            requestHost: "localhost",
-            forwardedHost: NoForwardedHost,
-            allowedOrigins: NoAllowedOrigins);
+            allowedHosts: NoAllowedHosts);
 
         Assert.False(allowed);
     }
@@ -191,7 +195,26 @@ public class RequestSecurityMiddlewareTests
 
     private sealed class Flag { public bool Called; }
 
-    private static (RequestSecurityMiddleware Middleware, Flag Flag) CreateMiddlewareWithFlag(SecurityOptions? options = null)
+    private sealed class CountingLogger : ILogger<RequestSecurityMiddleware>
+    {
+        public List<string> Warnings { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == LogLevel.Warning)
+                Warnings.Add(formatter(state, exception));
+        }
+    }
+
+    /// <param name="allowedHosts">The <c>AllowedHosts</c> setting (what <c>GRAYMOON_AllowedHosts</c> sets);
+    /// null means not configured, which is the Docker default.</param>
+    private static (RequestSecurityMiddleware Middleware, Flag Flag, CountingLogger Logger) CreateMiddlewareWithFlag(
+        SecurityOptions? options = null,
+        string? allowedHosts = null)
     {
         var flag = new Flag();
         RequestDelegate next = _ =>
@@ -199,17 +222,218 @@ public class RequestSecurityMiddlewareTests
             flag.Called = true;
             return Task.CompletedTask;
         };
-        return (new RequestSecurityMiddleware(next, Options.Create(options ?? new SecurityOptions())), flag);
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["AllowedHosts"] = allowedHosts })
+            .Build();
+        var logger = new CountingLogger();
+        return (new RequestSecurityMiddleware(next, Options.Create(options ?? new SecurityOptions()), configuration, logger), flag, logger);
+    }
+
+    private static DefaultHttpContext CreateContext(string path, string method, string? host = null, string? origin = null, bool withRequestHeader = false)
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Path = path;
+        context.Request.Method = method;
+        if (host is not null)
+            context.Request.Host = new HostString(host);
+        if (origin is not null)
+            context.Request.Headers.Origin = origin;
+        if (withRequestHeader)
+            context.Request.Headers["X-GrayMoon-Request"] = "1";
+        return context;
+    }
+
+    // Review 2026-11-10 finding 7: under DNS rebinding the hostile page's name is both the Origin host and
+    // the Host header, and the page is same-origin so it can add any custom header. Equality with Host (or
+    // with X-Forwarded-Host, which the page can also set) must not let the request through.
+    [Theory]
+    [InlineData("/api/workspaces", "POST")]
+    [InlineData("/repos/1/branches", "POST")]
+    [InlineData("/_blazor/negotiate", "POST")]
+    [InlineData("/hubs/workspace-sync", "GET")]
+    [InlineData("/hubs/desktop", "GET")]
+    public async Task Middleware_rebinding_origin_equal_to_host_but_not_listed_is_403(string path, string method)
+    {
+        var (middleware, flag, _) = CreateMiddlewareWithFlag();
+        var context = CreateContext(path, method, host: "rebind.evil.example.com:8384", origin: "http://rebind.evil.example.com:8384", withRequestHeader: true);
+        context.Request.Headers["X-Forwarded-Host"] = "rebind.evil.example.com:8384";
+
+        await middleware.InvokeAsync(context);
+
+        Assert.False(flag.Called);
+        Assert.Equal(StatusCodes.Status403Forbidden, context.Response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Middleware_rebinding_origin_is_403_even_when_other_hosts_are_listed()
+    {
+        var (middleware, flag, _) = CreateMiddlewareWithFlag(allowedHosts: "localhost;nas.local");
+        var context = CreateContext("/api/workspaces", "POST", host: "rebind.evil.example.com", origin: "http://rebind.evil.example.com", withRequestHeader: true);
+
+        await middleware.InvokeAsync(context);
+
+        Assert.False(flag.Called);
+        Assert.Equal(StatusCodes.Status403Forbidden, context.Response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("/api/workspaces", "POST")]
+    [InlineData("/_blazor/negotiate", "POST")]
+    [InlineData("/hubs/workspace-sync", "GET")]
+    public async Task Middleware_host_listed_in_AllowedHosts_passes(string path, string method)
+    {
+        var (middleware, flag, _) = CreateMiddlewareWithFlag(allowedHosts: "localhost;nas.local;192.168.1.10");
+        var context = CreateContext(path, method, host: "nas.local:8384", origin: "http://nas.local:8384", withRequestHeader: true);
+
+        await middleware.InvokeAsync(context);
+
+        Assert.True(flag.Called);
+    }
+
+    [Fact]
+    public async Task Middleware_wildcard_AllowedHosts_is_treated_as_empty_and_lan_origin_is_403()
+    {
+        var (middleware, flag, _) = CreateMiddlewareWithFlag(allowedHosts: "*");
+        var context = CreateContext("/api/workspaces", "POST", host: "nas.local:8384", origin: "http://nas.local:8384", withRequestHeader: true);
+
+        await middleware.InvokeAsync(context);
+
+        Assert.False(flag.Called);
+        Assert.Equal(StatusCodes.Status403Forbidden, context.Response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("*")]
+    public void Empty_allowlist_logs_one_startup_warning_that_names_the_variable(string? allowedHosts)
+    {
+        var (_, _, logger) = CreateMiddlewareWithFlag(allowedHosts: allowedHosts);
+
+        var warning = Assert.Single(logger.Warnings);
+        Assert.Contains("GRAYMOON_AllowedHosts", warning);
+    }
+
+    [Fact]
+    public void Configured_allowlist_logs_no_warning()
+    {
+        var (_, _, hostsLogger) = CreateMiddlewareWithFlag(allowedHosts: "localhost;127.0.0.1;[::1]");
+        var (_, _, originsLogger) = CreateMiddlewareWithFlag(new SecurityOptions { AllowedOrigins = ["graymoon.example.com"] });
+
+        Assert.Empty(hostsLogger.Warnings);
+        Assert.Empty(originsLogger.Warnings);
+    }
+
+    // --- Host rule ---------------------------------------------------------------
+
+    // A page reached through a rebound name is same-origin with GrayMoon: its GETs carry no Origin, so only
+    // the Host header shows where the browser thinks it is.
+    [Theory]
+    [InlineData("/api/workspaces/1/git-changes")]
+    [InlineData("/api/workspaces/1/files")]
+    [InlineData("/repos")]
+    [InlineData("/api/about")]
+    [InlineData("/")]
+    [InlineData("/workspaces/1")]
+    public async Task Middleware_GET_for_a_rebound_host_without_origin_is_403(string path)
+    {
+        var (middleware, flag, logger) = CreateMiddlewareWithFlag();
+        var context = CreateContext(path, "GET", host: "rebind.evil.example.com:8384");
+        context.Response.Body = new MemoryStream();
+
+        await middleware.InvokeAsync(context);
+
+        Assert.False(flag.Called);
+        Assert.Equal(StatusCodes.Status403Forbidden, context.Response.StatusCode);
+        Assert.Contains(logger.Warnings, w => w.Contains("rebind.evil.example.com"));
+    }
+
+    [Fact]
+    public async Task Middleware_GET_for_an_unlisted_host_is_403_when_other_hosts_are_listed()
+    {
+        var (middleware, flag, _) = CreateMiddlewareWithFlag(allowedHosts: "localhost;nas.local");
+        var context = CreateContext("/api/workspaces", "GET", host: "rebind.evil.example.com");
+        context.Response.Body = new MemoryStream();
+
+        await middleware.InvokeAsync(context);
+
+        Assert.False(flag.Called);
+        Assert.Equal(StatusCodes.Status403Forbidden, context.Response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Rejected_host_response_names_the_variable_and_does_not_echo_the_host()
+    {
+        var (middleware, _, logger) = CreateMiddlewareWithFlag(allowedHosts: "localhost");
+        var body = new MemoryStream();
+        for (var i = 0; i < 3; i++)
+        {
+            var context = CreateContext("/", "GET", host: "rebind.evil.example.com");
+            context.Response.Body = body;
+            await middleware.InvokeAsync(context);
+        }
+
+        var text = System.Text.Encoding.UTF8.GetString(body.ToArray());
+        Assert.Contains("GRAYMOON_AllowedHosts", text);
+        Assert.DoesNotContain("evil", text);
+        // Logged once, not once per rejected asset request.
+        Assert.Single(logger.Warnings);
+    }
+
+    [Theory]
+    [InlineData("localhost:8384")]
+    [InlineData("LOCALHOST")]
+    [InlineData("127.0.0.1:8384")]
+    [InlineData("[::1]:8384")]
+    public async Task Middleware_GET_for_a_loopback_host_passes_with_an_empty_allowlist(string host)
+    {
+        var (middleware, flag, _) = CreateMiddlewareWithFlag();
+        var context = CreateContext("/api/workspaces", "GET", host: host);
+
+        await middleware.InvokeAsync(context);
+
+        Assert.True(flag.Called);
+    }
+
+    [Theory]
+    [InlineData("nas.local:8384", "localhost;nas.local")]
+    [InlineData("192.168.1.10", "192.168.1.10")]
+    [InlineData("graymoon.example.com", "*.example.com")]
+    public async Task Middleware_GET_for_a_listed_host_passes(string host, string allowedHosts)
+    {
+        var (middleware, flag, _) = CreateMiddlewareWithFlag(allowedHosts: allowedHosts);
+        var context = CreateContext("/workspaces/1", "GET", host: host);
+
+        await middleware.InvokeAsync(context);
+
+        Assert.True(flag.Called);
+    }
+
+    // A Worker on another machine and a container probe address the App by names nobody lists. The Worker
+    // paths are authenticated by the Worker secret (WorkerSecretMiddleware), so the Host rule leaves them alone.
+    [Theory]
+    [InlineData("/health", "GET")]
+    [InlineData("/hub/worker", "GET")]
+    [InlineData("/hub/worker/negotiate", "POST")]
+    [InlineData("/hub/agent", "GET")]
+    [InlineData("/repos/1/connector", "GET")]
+    [InlineData("/workspaces/1/capabilities", "GET")]
+    [InlineData("/api/worker/pair", "POST")]
+    public async Task Middleware_health_and_worker_paths_pass_for_an_unlisted_host(string path, string method)
+    {
+        var (middleware, flag, _) = CreateMiddlewareWithFlag();
+        var context = CreateContext(path, method, host: "192.168.1.10:8384");
+
+        await middleware.InvokeAsync(context);
+
+        Assert.True(flag.Called);
     }
 
     [Fact]
     public async Task Middleware_GET_on_api_path_is_unaffected_even_with_foreign_origin()
     {
-        var (middleware, flag) = CreateMiddlewareWithFlag();
-        var context = new DefaultHttpContext();
-        context.Request.Path = "/api/workspaces";
-        context.Request.Method = "GET";
-        context.Request.Headers.Origin = "http://evil.example.com";
+        var (middleware, flag, _) = CreateMiddlewareWithFlag();
+        var context = CreateContext("/api/workspaces", "GET", origin: "http://evil.example.com");
 
         await middleware.InvokeAsync(context);
 
@@ -220,10 +444,8 @@ public class RequestSecurityMiddlewareTests
     [Fact]
     public async Task Middleware_POST_on_api_path_with_no_origin_passes()
     {
-        var (middleware, flag) = CreateMiddlewareWithFlag();
-        var context = new DefaultHttpContext();
-        context.Request.Path = "/api/workspaces";
-        context.Request.Method = "POST";
+        var (middleware, flag, _) = CreateMiddlewareWithFlag();
+        var context = CreateContext("/api/workspaces", "POST");
 
         await middleware.InvokeAsync(context);
 
@@ -233,12 +455,8 @@ public class RequestSecurityMiddlewareTests
     [Fact]
     public async Task Middleware_POST_on_api_path_cross_site_origin_is_403()
     {
-        var (middleware, flag) = CreateMiddlewareWithFlag();
-        var context = new DefaultHttpContext();
-        context.Request.Path = "/api/workspaces";
-        context.Request.Method = "POST";
-        context.Request.Host = new HostString("localhost");
-        context.Request.Headers.Origin = "http://evil.example.com";
+        var (middleware, flag, _) = CreateMiddlewareWithFlag();
+        var context = CreateContext("/api/workspaces", "POST", host: "localhost", origin: "http://evil.example.com");
 
         await middleware.InvokeAsync(context);
 
@@ -247,15 +465,10 @@ public class RequestSecurityMiddlewareTests
     }
 
     [Fact]
-    public async Task Middleware_POST_on_api_path_same_origin_with_header_passes()
+    public async Task Middleware_POST_on_api_path_loopback_origin_with_header_passes()
     {
-        var (middleware, flag) = CreateMiddlewareWithFlag();
-        var context = new DefaultHttpContext();
-        context.Request.Path = "/api/workspaces";
-        context.Request.Method = "POST";
-        context.Request.Host = new HostString("localhost");
-        context.Request.Headers.Origin = "http://localhost";
-        context.Request.Headers["X-GrayMoon-Request"] = "1";
+        var (middleware, flag, _) = CreateMiddlewareWithFlag();
+        var context = CreateContext("/api/workspaces", "POST", host: "localhost", origin: "http://localhost", withRequestHeader: true);
 
         await middleware.InvokeAsync(context);
 
@@ -267,12 +480,8 @@ public class RequestSecurityMiddlewareTests
     [InlineData("/hub/agent")]   // legacy path kept for already-installed Workers
     public async Task Middleware_hub_worker_with_any_origin_is_403(string path)
     {
-        var (middleware, flag) = CreateMiddlewareWithFlag();
-        var context = new DefaultHttpContext();
-        context.Request.Path = path;
-        context.Request.Method = "GET";
-        context.Request.Host = new HostString("localhost");
-        context.Request.Headers.Origin = "http://localhost";
+        var (middleware, flag, _) = CreateMiddlewareWithFlag();
+        var context = CreateContext(path, "GET", host: "localhost", origin: "http://localhost");
 
         await middleware.InvokeAsync(context);
 
@@ -285,25 +494,22 @@ public class RequestSecurityMiddlewareTests
     [InlineData("/hub/agent")]   // legacy path kept for already-installed Workers
     public async Task Middleware_hub_worker_without_origin_connects(string path)
     {
-        var (middleware, flag) = CreateMiddlewareWithFlag();
-        var context = new DefaultHttpContext();
-        context.Request.Path = path;
-        context.Request.Method = "GET";
+        var (middleware, flag, _) = CreateMiddlewareWithFlag();
+        var context = CreateContext(path, "GET");
 
         await middleware.InvokeAsync(context);
 
         Assert.True(flag.Called);
     }
 
-    [Fact]
-    public async Task Middleware_hubs_workspace_sync_foreign_origin_is_403()
+    [Theory]
+    [InlineData("/hubs/workspace-sync")]
+    [InlineData("/hubs/desktop")]
+    [InlineData("/_blazor")]
+    public async Task Middleware_hub_foreign_origin_is_403(string path)
     {
-        var (middleware, flag) = CreateMiddlewareWithFlag();
-        var context = new DefaultHttpContext();
-        context.Request.Path = "/hubs/workspace-sync";
-        context.Request.Method = "GET";
-        context.Request.Host = new HostString("localhost");
-        context.Request.Headers.Origin = "http://evil.example.com";
+        var (middleware, flag, _) = CreateMiddlewareWithFlag();
+        var context = CreateContext(path, "GET", host: "localhost", origin: "http://evil.example.com");
 
         await middleware.InvokeAsync(context);
 
@@ -311,15 +517,14 @@ public class RequestSecurityMiddlewareTests
         Assert.Equal(StatusCodes.Status403Forbidden, context.Response.StatusCode);
     }
 
-    [Fact]
-    public async Task Middleware_hubs_workspace_sync_own_origin_connects()
+    [Theory]
+    [InlineData("/hubs/workspace-sync")]
+    [InlineData("/hubs/desktop")]
+    [InlineData("/_blazor")]
+    public async Task Middleware_hub_loopback_origin_connects(string path)
     {
-        var (middleware, flag) = CreateMiddlewareWithFlag();
-        var context = new DefaultHttpContext();
-        context.Request.Path = "/hubs/workspace-sync";
-        context.Request.Method = "GET";
-        context.Request.Host = new HostString("localhost");
-        context.Request.Headers.Origin = "http://localhost";
+        var (middleware, flag, _) = CreateMiddlewareWithFlag();
+        var context = CreateContext(path, "GET", host: "localhost", origin: "http://localhost");
 
         await middleware.InvokeAsync(context);
 
@@ -329,72 +534,8 @@ public class RequestSecurityMiddlewareTests
     [Fact]
     public async Task Middleware_blazor_hub_without_origin_connects()
     {
-        var (middleware, flag) = CreateMiddlewareWithFlag();
-        var context = new DefaultHttpContext();
-        context.Request.Path = "/_blazor";
-        context.Request.Method = "GET";
-
-        await middleware.InvokeAsync(context);
-
-        Assert.True(flag.Called);
-    }
-
-    [Fact]
-    public async Task Middleware_desktop_hub_foreign_origin_is_403()
-    {
-        var (middleware, flag) = CreateMiddlewareWithFlag();
-        var context = new DefaultHttpContext();
-        context.Request.Path = "/hubs/desktop";
-        context.Request.Method = "GET";
-        context.Request.Host = new HostString("localhost");
-        context.Request.Headers.Origin = "http://evil.example.com";
-
-        await middleware.InvokeAsync(context);
-
-        Assert.False(flag.Called);
-        Assert.Equal(StatusCodes.Status403Forbidden, context.Response.StatusCode);
-    }
-
-    [Fact]
-    public async Task Middleware_desktop_hub_own_origin_connects()
-    {
-        var (middleware, flag) = CreateMiddlewareWithFlag();
-        var context = new DefaultHttpContext();
-        context.Request.Path = "/hubs/desktop";
-        context.Request.Method = "GET";
-        context.Request.Host = new HostString("localhost");
-        context.Request.Headers.Origin = "http://localhost";
-
-        await middleware.InvokeAsync(context);
-
-        Assert.True(flag.Called);
-    }
-
-    [Fact]
-    public async Task Middleware_blazor_hub_foreign_origin_is_403()
-    {
-        var (middleware, flag) = CreateMiddlewareWithFlag();
-        var context = new DefaultHttpContext();
-        context.Request.Path = "/_blazor";
-        context.Request.Method = "GET";
-        context.Request.Host = new HostString("localhost");
-        context.Request.Headers.Origin = "http://evil.example.com";
-
-        await middleware.InvokeAsync(context);
-
-        Assert.False(flag.Called);
-        Assert.Equal(StatusCodes.Status403Forbidden, context.Response.StatusCode);
-    }
-
-    [Fact]
-    public async Task Middleware_blazor_hub_own_origin_connects()
-    {
-        var (middleware, flag) = CreateMiddlewareWithFlag();
-        var context = new DefaultHttpContext();
-        context.Request.Path = "/_blazor";
-        context.Request.Method = "GET";
-        context.Request.Host = new HostString("localhost");
-        context.Request.Headers.Origin = "http://localhost";
+        var (middleware, flag, _) = CreateMiddlewareWithFlag();
+        var context = CreateContext("/_blazor", "GET");
 
         await middleware.InvokeAsync(context);
 
@@ -405,13 +546,9 @@ public class RequestSecurityMiddlewareTests
     public async Task Middleware_hub_127_0_0_1_origin_against_localhost_host_connects()
     {
         // R-F3d: the Desktop WebView and a tab opened via 127.0.0.1 must both work regardless of
-        // which loopback name the App itself is bound to.
-        var (middleware, flag) = CreateMiddlewareWithFlag();
-        var context = new DefaultHttpContext();
-        context.Request.Path = "/hubs/workspace-sync";
-        context.Request.Method = "GET";
-        context.Request.Host = new HostString("localhost");
-        context.Request.Headers.Origin = "http://127.0.0.1:8384";
+        // which loopback name the App itself is bound to. Desktop starts the App with exactly this allowlist.
+        var (middleware, flag, _) = CreateMiddlewareWithFlag(allowedHosts: "localhost;127.0.0.1;[::1]");
+        var context = CreateContext("/hubs/workspace-sync", "GET", host: "localhost", origin: "http://127.0.0.1:8384");
 
         await middleware.InvokeAsync(context);
 
@@ -419,31 +556,26 @@ public class RequestSecurityMiddlewareTests
     }
 
     [Fact]
-    public async Task Middleware_hub_forwarded_host_match_connects()
+    public async Task Middleware_hub_forwarded_host_alone_is_not_proof()
     {
-        // Docker behind a reverse proxy: the Origin matches X-Forwarded-Host, not the raw Host header.
-        var (middleware, flag) = CreateMiddlewareWithFlag();
-        var context = new DefaultHttpContext();
-        context.Request.Path = "/hubs/workspace-sync";
-        context.Request.Method = "GET";
-        context.Request.Host = new HostString("127.0.0.1");
-        context.Request.Headers.Origin = "https://graymoon.example.com";
+        // Docker behind a reverse proxy: X-Forwarded-Host is a request header the page can influence, so the
+        // public host name has to be listed (GRAYMOON_AllowedHosts or Security:AllowedOrigins).
+        var (middleware, flag, _) = CreateMiddlewareWithFlag();
+        var context = CreateContext("/hubs/workspace-sync", "GET", host: "127.0.0.1", origin: "https://graymoon.example.com");
         context.Request.Headers["X-Forwarded-Host"] = "graymoon.example.com";
 
         await middleware.InvokeAsync(context);
 
-        Assert.True(flag.Called);
+        Assert.False(flag.Called);
+        Assert.Equal(StatusCodes.Status403Forbidden, context.Response.StatusCode);
     }
 
     [Fact]
     public async Task Middleware_hub_configured_allowed_origin_connects()
     {
-        var (middleware, flag) = CreateMiddlewareWithFlag(new SecurityOptions { AllowedOrigins = ["graymoon.example.com"] });
-        var context = new DefaultHttpContext();
-        context.Request.Path = "/hubs/workspace-sync";
-        context.Request.Method = "GET";
-        context.Request.Host = new HostString("127.0.0.1");
-        context.Request.Headers.Origin = "https://graymoon.example.com";
+        var (middleware, flag, _) = CreateMiddlewareWithFlag(new SecurityOptions { AllowedOrigins = ["graymoon.example.com"] });
+        var context = CreateContext("/hubs/workspace-sync", "GET", host: "127.0.0.1", origin: "https://graymoon.example.com");
+        context.Request.Headers["X-Forwarded-Host"] = "graymoon.example.com";
 
         await middleware.InvokeAsync(context);
 

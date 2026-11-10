@@ -820,23 +820,32 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     // inline indicator (_mutatingRepositoryIds) rather than the full LoadingOverlay. Whole-repository
     // scope stages/unstages every tracked and untracked file in one repository and can take a moment, so
     // it gets the same overlay+terminal treatment as commit and the section-wide bulk actions.
-    private Task StageAsync(int workspaceRepositoryId, GitChangeOperationScope scope, IReadOnlyList<string> paths, string rowKey) =>
-        scope == GitChangeOperationScope.Repository
-            ? RunRepositoryScopedMutationJobAsync(workspaceRepositoryId, isStage: true)
-            : RunMutationAsync(workspaceRepositoryId, rowKey, isDiscard: false, async (_, _, _, repositoryId, _) =>
-            {
-                var result = await GitChangesOperations.StageAsync(WorkspaceId, RequireSelectedContextId(), repositoryId, scope, paths, CancellationToken.None);
-                await PersistMutationResultAsync(workspaceRepositoryId, repositoryId, result.Success, result.Snapshot, result.ErrorMessage);
-            });
+    private Task StageAsync(int workspaceRepositoryId, GitChangeOperationScope scope, IReadOnlyList<string> paths, string rowKey)
+    {
+        if (scope == GitChangeOperationScope.Repository)
+            return RunRepositoryScopedMutationJobAsync(workspaceRepositoryId, isStage: true);
 
-    private Task UnstageAsync(int workspaceRepositoryId, GitChangeOperationScope scope, IReadOnlyList<string> paths, string rowKey) =>
-        scope == GitChangeOperationScope.Repository
-            ? RunRepositoryScopedMutationJobAsync(workspaceRepositoryId, isStage: false)
-            : RunMutationAsync(workspaceRepositoryId, rowKey, isDiscard: false, async (_, _, _, repositoryId, _) =>
-            {
-                var result = await GitChangesOperations.UnstageAsync(WorkspaceId, RequireSelectedContextId(), repositoryId, scope, paths, CancellationToken.None);
-                await PersistMutationResultAsync(workspaceRepositoryId, repositoryId, result.Success, result.Snapshot, result.ErrorMessage);
-            });
+        // Captured at the click, so a context switch while the mutation runs cannot retarget it.
+        var contextId = RequireSelectedContextId();
+        return RunMutationAsync(workspaceRepositoryId, rowKey, isDiscard: false, async (_, _, _, repositoryId, _) =>
+        {
+            var result = await GitChangesOperations.StageAsync(WorkspaceId, contextId, repositoryId, scope, paths, CancellationToken.None);
+            await PersistMutationResultAsync(workspaceRepositoryId, repositoryId, result.Success, result.Snapshot, result.ErrorMessage);
+        });
+    }
+
+    private Task UnstageAsync(int workspaceRepositoryId, GitChangeOperationScope scope, IReadOnlyList<string> paths, string rowKey)
+    {
+        if (scope == GitChangeOperationScope.Repository)
+            return RunRepositoryScopedMutationJobAsync(workspaceRepositoryId, isStage: false);
+
+        var contextId = RequireSelectedContextId();
+        return RunMutationAsync(workspaceRepositoryId, rowKey, isDiscard: false, async (_, _, _, repositoryId, _) =>
+        {
+            var result = await GitChangesOperations.UnstageAsync(WorkspaceId, contextId, repositoryId, scope, paths, CancellationToken.None);
+            await PersistMutationResultAsync(workspaceRepositoryId, repositoryId, result.Success, result.Snapshot, result.ErrorMessage);
+        });
+    }
 
     private Task RunRepositoryScopedMutationJobAsync(int workspaceRepositoryId, bool isStage)
     {
@@ -851,6 +860,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             return Task.CompletedTask;
         }
 
+        var jobContextId = RequireSelectedContextId();
         StartPageJob(
             isStage ? "Staging repository..." : "Unstaging repository...",
             async (job, ct) =>
@@ -863,8 +873,8 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
                 }
 
                 var result = isStage
-                    ? await GitChangesOperations.StageAsync(WorkspaceId, RequireSelectedContextId(), resolved.Value.RepositoryId, GitChangeOperationScope.Repository, [], ct)
-                    : await GitChangesOperations.UnstageAsync(WorkspaceId, RequireSelectedContextId(), resolved.Value.RepositoryId, GitChangeOperationScope.Repository, [], ct);
+                    ? await GitChangesOperations.StageAsync(WorkspaceId, jobContextId, resolved.Value.RepositoryId, GitChangeOperationScope.Repository, [], ct)
+                    : await GitChangesOperations.UnstageAsync(WorkspaceId, jobContextId, resolved.Value.RepositoryId, GitChangeOperationScope.Repository, [], ct);
 
                 // reload:false - StartPageJob's own ReloadOnSuccess (properly dispatcher-marshalled via
                 // InvokeAsync) does the final LoadAsync() once this job body returns; calling LoadAsync's

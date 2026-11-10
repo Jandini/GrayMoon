@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 using GrayMoon.Abstractions.Notifications;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
@@ -15,6 +16,7 @@ using GrayMoon.App.Services.Orchestration;
 using GrayMoon.App.Services.Worker;
 using GrayMoon.App.Services.Workspaces;
 using GrayMoon.Application;
+using GrayMoon.Application.Features;
 using GrayMoon.Application.Workspaces;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -470,6 +472,251 @@ public sealed class WorkspacePushStrategyTests
         Assert.DoesNotContain(ctx.WorkerBridge.Calls, c => c.Command is "SyncRepositoryDependencies" or "RefreshRepositoryProjects");
     }
 
+    [Fact]
+    public async Task Push_lane_keeps_waiting_when_one_registry_lookup_fails_in_transit()
+    {
+        // #10: a single failed probe says nothing about the package. The old code failed the level on it.
+        var nuget = new RecordingNuGetHandler { PublishedVersions = ["0.9.0"], FailingPackageLookups = 1 };
+        await using var ctx = await CreateContextAsync(nuget, FastPackageWait(timeoutMinutesPerDependency: 2));
+        await ctx.UseDotNetDependencyProfileAsync();
+        var graph = await SeedDependencyGraphAsync(ctx, matchConnector: true);
+        RespondPushCommands(ctx);
+        var channel = Channel.CreateUnbounded<DependencyLevelCompletion>();
+        channel.Writer.TryWrite(new DependencyLevelCompletion(1, Ids(graph.ProducerId), Ids(), Ids()));
+        channel.Writer.TryWrite(new DependencyLevelCompletion(2, Ids(graph.ConsumerId), Ids(graph.ConsumerId), Ids(graph.ConsumerId)));
+        channel.Writer.TryComplete();
+
+        var pushed = await RunPushLaneAsync(ctx, channel.Reader).WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.Empty(pushed.LevelErrors);
+        Assert.Equal(2, pushed.Count);
+        Assert.Equal(new[] { graph.ProducerId, graph.ConsumerId }, PushCalls(ctx).Select(c => c.GetProperty("repositoryId").GetInt32()).ToList());
+        Assert.True(nuget.PackageLookups >= 2, "The failed lookup must be asked again.");
+    }
+
+    [Fact]
+    public async Task Push_lane_timeout_names_the_last_registry_error_when_every_lookup_failed()
+    {
+        // #10: repeated transport failures end in the ordinary timeout, and its message says what the registry did.
+        var nuget = new RecordingNuGetHandler { PublishedVersions = ["0.9.0"], FailingPackageLookups = int.MaxValue };
+        await using var ctx = await CreateContextAsync(nuget, FastPackageWait(timeoutMinutesPerDependency: 0.005));
+        await ctx.UseDotNetDependencyProfileAsync();
+        var graph = await SeedDependencyGraphAsync(ctx, matchConnector: true);
+        RespondPushCommands(ctx);
+        var channel = Channel.CreateUnbounded<DependencyLevelCompletion>();
+        channel.Writer.TryWrite(new DependencyLevelCompletion(1, Ids(graph.ProducerId), Ids(), Ids()));
+        channel.Writer.TryWrite(new DependencyLevelCompletion(2, Ids(graph.ConsumerId), Ids(graph.ConsumerId), Ids(graph.ConsumerId)));
+        channel.Writer.TryComplete();
+
+        var pushed = await RunPushLaneAsync(ctx, channel.Reader).WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.Equal(1, pushed.Count);
+        var error = pushed.LevelErrors[2];
+        Assert.Contains("Timed out waiting for package dependencies", error, StringComparison.Ordinal);
+        Assert.Contains("Last registry error: nuget-test: " + RecordingNuGetHandler.TransportError, error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Push_lane_reports_a_failed_restore_as_a_warning_and_the_level_still_completes()
+    {
+        // #8: the Worker answered success=false. The old code discarded the answer and reported nothing.
+        await using var ctx = await CreateContextAsync(new RecordingNuGetHandler { PublishedVersions = ["0.9.0"] });
+        await ctx.UseDotNetDependencyProfileAsync();
+        var graph = await SeedDependencyGraphAsync(ctx, matchConnector: true);
+        RespondPushCommands(ctx);
+        ctx.WorkerBridge.Respond("DotnetRestore", new { success = false, errorMessage = "error NU1101: Unable to find package Acme.Api." });
+        var channel = Channel.CreateUnbounded<DependencyLevelCompletion>();
+        channel.Writer.TryWrite(new DependencyLevelCompletion(1, Ids(graph.ProducerId), Ids(), Ids()));
+        channel.Writer.TryWrite(new DependencyLevelCompletion(2, Ids(graph.ConsumerId), Ids(graph.ConsumerId), Ids(graph.ConsumerId)));
+        channel.Writer.TryComplete();
+
+        var pushed = await RunPushLaneAsync(ctx, channel.Reader).WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.Equal(2, pushed.Count);
+        Assert.Empty(pushed.LevelErrors);
+        Assert.Equal(
+            $"Package restore failed for {ConsumerName}: error NU1101: Unable to find package Acme.Api.",
+            pushed.RepoErrors[graph.ConsumerId]);
+        Assert.True(PackageRestoreOutcome.IsWarning(pushed.RepoErrors[graph.ConsumerId]));
+    }
+
+    [Fact]
+    public async Task DotNet_restore_returns_the_outcome_of_every_repository_and_reports_the_failed_ones()
+    {
+        // #8, Update path: the restore result used to be thrown away.
+        await using var ctx = await CreateContextAsync(new RecordingNuGetHandler());
+        await ctx.UseDotNetDependencyProfileAsync();
+        await SeedDependencyGraphAsync(ctx, matchConnector: true);
+        ctx.WorkerBridge.Respond("DotnetRestore", args =>
+            Args(args).GetProperty("repositoryName").GetString() == ConsumerName
+                ? new WorkerCommandResponse(true, new { success = false, errorMessage = "error NU1101: Unable to find package Acme.Api." }, null)
+                : new WorkerCommandResponse(true, new { success = true }, null));
+        var special = await ctx.GetSpecialContextIdAsync();
+        var progress = new ConcurrentQueue<string>();
+
+        await using var scope = ctx.CreateScope();
+        var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+        var outcomes = await git.RestoreDependenciesAsync(
+            ctx.WorkspaceId,
+            special,
+            [("graymoon-api", ["src/Api/Acme.Api.csproj"]), (ConsumerName, ["src/Web/Acme.Web.csproj"])],
+            CancellationToken.None);
+        await git.RestoreAllWorkspacePackagesAsync(ctx.WorkspaceId, special, progress.Enqueue, CancellationToken.None);
+
+        Assert.Equal(2, outcomes.Count);
+        Assert.True(outcomes.Single(o => o.RepositoryName == "graymoon-api").Success);
+        var failed = outcomes.Single(o => o.RepositoryName == ConsumerName);
+        Assert.False(failed.Success);
+        Assert.Equal("error NU1101: Unable to find package Acme.Api.", failed.Reason);
+        Assert.Contains(progress, message => message == $"Package restore failed for {ConsumerName}: error NU1101: Unable to find package Acme.Api.");
+    }
+
+    [Fact]
+    public async Task After_a_Feature_push_the_upstream_goes_on_the_Feature_state_and_the_shared_link_is_untouched()
+    {
+        // #2: the remote branch and the upstream flag used to be taken from, and written to, the shared link.
+        await using var ctx = await CreateContextAsync(new RecordingNuGetHandler());
+        await ctx.UseDotNetDependencyProfileAsync();
+        var graph = await SeedDependencyGraphAsync(ctx, matchConnector: true);
+        RespondPushCommands(ctx);
+        // The worker does not say whether the branch tracks a remote, so only the "it was just pushed" rule applies.
+        ctx.WorkerBridge.Respond("GetCommitCounts", new { outgoingCommits = 0, incomingCommits = 0 });
+        await ctx.MutateLinkAsync(link =>
+        {
+            link.BranchName = "main";
+            link.BranchHasUpstream = false;
+        });
+        var feature = await SeedFeatureAsync(ctx, branchName: "feature/y");
+
+        await using (var scope = ctx.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<WorkspacePushService>().UpdateCommitCountsAndUpstreamAfterPushAsync(
+                ctx.WorkspaceId, feature, [new PushRepoPayload(graph.ProducerId, "graymoon-api", 1, [])], CancellationToken.None);
+        }
+
+        var link = await ctx.ReadLinkAsync();
+        Assert.Equal("main", link.BranchName);
+        Assert.False(link.BranchHasUpstream);
+        Assert.Equal(3, link.OutgoingCommits);
+        var remotes = (await ctx.ReadBranchesAsync()).Where(b => b.IsRemote).Select(b => b.BranchName).ToList();
+        Assert.Contains("origin/feature/y", remotes);
+        Assert.DoesNotContain("origin/main", remotes);
+        var state = await ReadFeatureStateAsync(ctx, feature);
+        Assert.True(state.BranchHasUpstream);
+        Assert.Equal(0, state.OutgoingCommits);
+    }
+
+    [Fact]
+    public async Task After_a_Feature_push_a_tag_pinned_Workspace_checkout_does_not_skip_the_Feature_commit_counts()
+    {
+        // #2: the tag pin was read from the shared link, so a Feature on a branch lost its count refresh.
+        await using var ctx = await CreateContextAsync(new RecordingNuGetHandler());
+        await ctx.UseDotNetDependencyProfileAsync();
+        var graph = await SeedDependencyGraphAsync(ctx, matchConnector: true);
+        RespondPushCommands(ctx);
+        await PinRepositoryAsync(ctx, graph.ProducerId);
+        var feature = await SeedFeatureAsync(ctx, branchName: "feature/y");
+
+        await using (var scope = ctx.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<WorkspacePushService>().UpdateCommitCountsAndUpstreamAfterPushAsync(
+                ctx.WorkspaceId, feature, [new PushRepoPayload(graph.ProducerId, "graymoon-api", 1, [])], CancellationToken.None);
+        }
+
+        Assert.Single(ctx.WorkerBridge.Calls, c => c.Command == "GetCommitCounts");
+        var state = await ReadFeatureStateAsync(ctx, feature);
+        Assert.Equal(0, state.OutgoingCommits);
+        Assert.True(state.BranchHasUpstream);
+    }
+
+    [Fact]
+    public async Task After_a_Workspace_push_the_upstream_is_still_mirrored_onto_the_link()
+    {
+        await using var ctx = await CreateContextAsync(new RecordingNuGetHandler());
+        await ctx.UseDotNetDependencyProfileAsync();
+        var graph = await SeedDependencyGraphAsync(ctx, matchConnector: true);
+        RespondPushCommands(ctx);
+        ctx.WorkerBridge.Respond("GetCommitCounts", new { outgoingCommits = 0, incomingCommits = 0 });
+        await ctx.MutateLinkAsync(link => link.BranchHasUpstream = false);
+        var special = await ctx.GetSpecialContextIdAsync();
+
+        await using (var scope = ctx.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<WorkspacePushService>().UpdateCommitCountsAndUpstreamAfterPushAsync(
+                ctx.WorkspaceId, special, [new PushRepoPayload(graph.ProducerId, "graymoon-api", 1, [])], CancellationToken.None);
+        }
+
+        var link = await ctx.ReadLinkAsync();
+        Assert.True(link.BranchHasUpstream);
+        Assert.Equal(0, link.OutgoingCommits);
+        Assert.Contains(await ctx.ReadBranchesAsync(), b => b.IsRemote && b.BranchName == "origin/feature/x");
+    }
+
+    private static Action<WorkspaceOptions> FastPackageWait(double timeoutMinutesPerDependency)
+        => options =>
+        {
+            options.PushWaitDependencyTimeoutMinutesPerDependency = timeoutMinutesPerDependency;
+            options.PushWaitPollIntervalSeconds = 0.02;
+            options.PushWaitTickMilliseconds = 10;
+        };
+
+    /// <summary>A Feature context on <paramref name="branchName"/> for the seeded (producer) repository, with its own state row.</summary>
+    private static async Task<WorkspaceFeatureContextId> SeedFeatureAsync(SyncStateTestContext ctx, string branchName)
+    {
+        await using var db = await ctx.Resolve<IDbContextFactory<AppDbContext>>().CreateDbContextAsync();
+        var feature = new WorkspaceFeature
+        {
+            WorkspaceId = ctx.WorkspaceId,
+            Name = "feature-y",
+            LifecycleState = WorkspaceFeatureLifecycleState.Ready,
+            BaseKind = WorkspaceFeatureBaseKind.CurrentWorkspace,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        db.WorkspaceFeatures.Add(feature);
+        await db.SaveChangesAsync();
+
+        var context = new WorkspaceFeatureContext
+        {
+            WorkspaceId = ctx.WorkspaceId,
+            Kind = WorkspaceFeatureContextKind.Feature,
+            WorkspaceFeatureId = feature.WorkspaceFeatureId,
+            CreatedAt = DateTime.UtcNow,
+            IsInSync = true,
+        };
+        db.WorkspaceFeatureContexts.Add(context);
+        await db.SaveChangesAsync();
+
+        db.WorkspaceFeatureRepositories.Add(new WorkspaceFeatureRepository
+        {
+            WorkspaceFeatureContextId = context.WorkspaceFeatureContextId,
+            WorkspaceRepositoryId = ctx.WorkspaceRepositoryId,
+            WorktreePath = @"C:\Users\test\.graymoon\test-ws\features\feature-y\graymoon-api",
+            State = WorkspaceFeatureRepositoryState.Ready,
+            BaseCommitSha = "abc123",
+            ParentBranchName = "main",
+            CreatedAt = DateTime.UtcNow,
+        });
+        db.WorkspaceRepositoryContextStates.Add(new WorkspaceRepositoryContextState
+        {
+            WorkspaceFeatureContextId = context.WorkspaceFeatureContextId,
+            WorkspaceRepositoryId = ctx.WorkspaceRepositoryId,
+            BranchName = branchName,
+            OutgoingCommits = 3,
+            BranchHasUpstream = false,
+            SyncStatus = RepoSyncStatus.InSync,
+        });
+        await db.SaveChangesAsync();
+        return new WorkspaceFeatureContextId(context.WorkspaceFeatureContextId);
+    }
+
+    private static async Task<WorkspaceRepositoryContextState> ReadFeatureStateAsync(SyncStateTestContext ctx, WorkspaceFeatureContextId feature)
+    {
+        await using var db = await ctx.Resolve<IDbContextFactory<AppDbContext>>().CreateDbContextAsync();
+        return await db.WorkspaceRepositoryContextStates.AsNoTracking().SingleAsync(s =>
+            s.WorkspaceFeatureContextId == feature.Value && s.WorkspaceRepositoryId == ctx.WorkspaceRepositoryId);
+    }
+
     private sealed record LaneResult(int Count, IReadOnlyDictionary<int, string> RepoErrors, IReadOnlyDictionary<int, string> LevelErrors);
 
     private static HashSet<int> Ids(params int[] ids) => ids.ToHashSet();
@@ -752,6 +999,13 @@ public sealed class WorkspacePushStrategyTests
 
         public IReadOnlyList<string> Requests => _requests.ToList();
 
+        /// <summary>The first this many package-index requests fail in transit (no HTTP answer at all).</summary>
+        public int FailingPackageLookups { get; init; }
+
+        public const string TransportError = "Connection reset by peer.";
+
+        public int PackageLookups => Volatile.Read(ref _packageLookups);
+
         private int _packageLookups;
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -763,6 +1017,8 @@ public sealed class WorkspacePushStrategyTests
             if (url.StartsWith("https://nuget.test/flat/", StringComparison.OrdinalIgnoreCase))
             {
                 var lookup = Interlocked.Increment(ref _packageLookups);
+                if (lookup <= FailingPackageLookups)
+                    throw new HttpRequestException(TransportError);
                 if (lookup > UnavailablePackageLookups && PublishedVersions.Count > 0)
                     return Json(JsonSerializer.Serialize(new { versions = PublishedVersions }));
             }

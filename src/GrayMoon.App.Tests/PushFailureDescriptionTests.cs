@@ -30,6 +30,55 @@ public sealed class PushFailureDescriptionTests
     }
 
     [Fact]
+    public void A_push_whose_only_problem_is_a_failed_restore_is_done_with_a_warning()
+    {
+        var result = PushOperationResult.FromRepoErrors(new Dictionary<int, string>
+        {
+            [7] = "Package restore failed for repo-7: error NU1101",
+            [3] = "Package restore failed for repo-3: timed out",
+        });
+
+        Assert.True(result.Success);
+        Assert.Null(result.Error);
+        Assert.True(result.HasWarnings);
+        Assert.Equal(
+            ["Package restore failed for repo-3: timed out", "Package restore failed for repo-7: error NU1101"],
+            result.Warnings);
+        Assert.Equal("Push finished, but package restore failed in 2 repositories.", PushOperationResult.DescribeWarnings(result));
+        // The warning stays on its repository for the grid.
+        Assert.Equal("Package restore failed for repo-7: error NU1101", result.RepoErrors![7]);
+
+        // Reported once as a warning, never as an error and never dropped.
+        var errors = new List<string>();
+        var warnings = new List<string>();
+        result.ShowRepoErrors(errors.Add, warnings.Add);
+        Assert.Empty(errors);
+        Assert.Equal(["Push finished, but package restore failed in 2 repositories."], warnings);
+
+        var fallback = new List<string>();
+        result.ShowRepoErrors(fallback.Add);
+        Assert.Single(fallback);
+    }
+
+    [Fact]
+    public void A_restore_warning_next_to_a_real_failure_is_still_a_failed_push()
+    {
+        var mixed = PushOperationResult.FromRepoErrors(new Dictionary<int, string>
+        {
+            [7] = "Package restore failed for repo-7: error NU1101",
+            [8] = "rejected",
+        });
+        Assert.False(mixed.Success);
+        Assert.False(mixed.HasWarnings);
+
+        var levelFailed = PushOperationResult.FromErrors(
+            new Dictionary<int, string> { [7] = "Package restore failed for repo-7: error NU1101" },
+            new Dictionary<int, string> { [2] = "timed out" });
+        Assert.False(levelFailed.Success);
+        Assert.Null(PushOperationResult.DescribeWarnings(levelFailed));
+    }
+
+    [Fact]
     public void A_level_zero_failure_has_no_level_in_the_message()
     {
         var failed = OperationResult.Fail("x", null, new Dictionary<int, string> { [0] = "Worker not connected." });

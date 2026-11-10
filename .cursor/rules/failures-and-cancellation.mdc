@@ -1,0 +1,31 @@
+---
+description: Best-effort steps report their outcome; wait loops, cancellation registration and reader loops follow fixed rules
+alwaysApply: true
+---
+
+# Failures, cancellation and waiting
+
+Each rule is a confirmed defect from the 2026-11-10 code review. Details:
+`AGENTS.md`, "Failures, cancellation and waiting".
+
+1. **Best-effort is allowed, silent is not.** A Worker command returns
+   `Success=false` when its process exits non-zero; the App reads every Worker
+   response and surfaces at least a warning. No `catch (Exception) { }`
+   without a log and an outcome.
+2. **In a wait or poll loop a transient transport error means "not yet"**
+   (`HttpRequestException`, socket error, per-request timeout). Keep the loop
+   deadline and put the last error in the timeout message.
+3. **Parallel lanes see each other's failure promptly.** Cancel the other lane
+   at its next boundary and name where it stopped. Unknown outcome = failure.
+4. **Add the entry, then `cancellationToken.Register`**, and handle an already
+   cancelled token.
+5. **A reader loop rethrows `OperationCanceledException` only for its own
+   stopping token.** Any other OCE fails one item; the loop continues.
+   Reconnect and retry loops observe the stopping token.
+6. **Retry only what can succeed**, and bound the total wait.
+7. **Scope failure to what failed**: fail the requests of the connection that
+   dropped, not all of them; no `FirstOrDefault` to pick "the" connection.
+8. **Swap or dispose a shared `CancellationTokenSource` atomically.**
+9. **`First()` / `Single()` on user or configuration data gets a clear
+   error** instead of an unhandled exception.
+10. **Process stdin writes sit inside the `IOException` handling.**

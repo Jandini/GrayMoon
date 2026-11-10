@@ -92,7 +92,7 @@ public sealed class WorkspaceCommitSyncHandler(
                 var err = response.Error ?? "Commit sync failed.";
                 logger.LogWarning("CommitSync failed for repository {RepositoryId}: {Error}", repositoryId, err);
                 setRepositoryError(repositoryId, err);
-                await SetSyncStatusErrorAsync(dbContext, workspaceId, repositoryId, cancellationToken);
+                await SetSyncStatusErrorAsync(stateWriter, contextId, workspaceId, repositoryId, cancellationToken);
                 await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
                 return;
             }
@@ -201,7 +201,7 @@ public sealed class WorkspaceCommitSyncHandler(
                     var err = response.Error ?? "Commit sync failed.";
                     logger.LogError("CommitSync failed for repository {RepositoryId}: {Error}", repositoryId, err);
                     setRepositoryError(repositoryId, err);
-                    await SetSyncStatusErrorAsync(scopedDbContext, workspaceId, repositoryId, cancellationToken);
+                    await SetSyncStatusErrorAsync(scopedStateWriter, contextId, workspaceId, repositoryId, cancellationToken);
                     await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
                     return;
                 }
@@ -250,7 +250,7 @@ public sealed class WorkspaceCommitSyncHandler(
     {
         if (result == null)
         {
-            await SetSyncStatusErrorAsync(db, workspaceId, repositoryId, ct);
+            await SetSyncStatusErrorAsync(stateWriter, contextId, workspaceId, repositoryId, ct);
             return;
         }
 
@@ -289,14 +289,19 @@ public sealed class WorkspaceCommitSyncHandler(
         };
     }
 
-    private static async Task SetSyncStatusErrorAsync(AppDbContext db, int workspaceId, int repositoryId, CancellationToken ct)
-    {
-        var wr = await db.WorkspaceRepositories
-            .FirstOrDefaultAsync(w => w.WorkspaceId == workspaceId && w.RepositoryId == repositoryId, ct);
-        if (wr != null)
+    /// <summary>
+    /// Marks the repository as failed for the context the pull ran in. Goes through the state writer, so a Feature
+    /// writes only its own context state and the special Workspace also mirrors onto the shared link. The empty
+    /// snapshot probes nothing, so every other column stays as it is.
+    /// </summary>
+    private static Task SetSyncStatusErrorAsync(
+        WorkspaceRepositoryStateWriter stateWriter,
+        WorkspaceFeatureContextId contextId,
+        int workspaceId,
+        int repositoryId,
+        CancellationToken ct)
+        => stateWriter.ApplyAsync(contextId, workspaceId, repositoryId, new RepositoryStateSnapshot(), new RepositoryStateWriteOptions
         {
-            wr.SyncStatus = RepoSyncStatus.Error;
-            await db.SaveChangesAsync(ct);
-        }
-    }
+            SyncStatus = SyncStatusWrite.Error
+        }, ct);
 }

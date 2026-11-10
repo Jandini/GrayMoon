@@ -46,11 +46,21 @@ else
     private bool LogonPasswordRequired => WorkerConnectionTracker.LogonPasswordRequired;
     private bool InstallFailed => WorkerConnectionTracker.InstallFailed;
 
+    private bool _subscribed;
+
     protected override void OnInitialized()
     {
-        WorkerConnectionTracker.OnStateChanged(state => { _ = InvokeAsync(StateHasChanged); });
+        // The prerender pass has no circuit: nothing could be re-rendered, so it does not subscribe.
+        // The tracker and the queue state are singletons; every handler added here is removed in Dispose.
+        if (!RendererInfo.IsInteractive)
+            return;
+
+        _subscribed = true;
+        WorkerConnectionTracker.OnStateChanged(OnWorkerStateChanged);
         WorkerQueueStateService.OnQueueStateChanged(OnQueueStateChanged);
     }
+
+    private void OnWorkerStateChanged(WorkerConnectionState state) => _ = InvokeAsync(StateHasChanged);
 
     private void OnQueueStateChanged(object? sender, EventArgs e) => _ = InvokeAsync(StateHasChanged);
 
@@ -111,5 +121,13 @@ else
         WorkerSecret.UnsecuredWorkerConnected,
         InstallFailed);
 
-    public void Dispose() => WorkerQueueStateService.RemoveQueueStateChanged(OnQueueStateChanged);
+    public void Dispose()
+    {
+        if (!_subscribed)
+            return;
+
+        _subscribed = false;
+        WorkerConnectionTracker.RemoveStateChanged(OnWorkerStateChanged);
+        WorkerQueueStateService.RemoveQueueStateChanged(OnQueueStateChanged);
+    }
 }

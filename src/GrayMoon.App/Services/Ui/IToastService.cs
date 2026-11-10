@@ -9,6 +9,9 @@ public interface IToastService
     /// <summary>Show an error toast message with distinct error styling.</summary>
     void ShowError(string message);
 
+    /// <summary>Show a warning toast: the work finished, but something needs attention. Amber styling, shown as long as an error.</summary>
+    void ShowWarning(string message);
+
     /// <summary>Fired when a new toast should be shown so the UI can re-render.</summary>
     event Action? OnShow;
 
@@ -21,8 +24,11 @@ public interface IToastService
     /// <summary>Whether the current toast represents an error.</summary>
     bool IsError { get; }
 
+    /// <summary>Whether the current toast is a warning.</summary>
+    bool IsWarning { get; }
+
     /// <summary>
-    /// Id of the toast last passed to <see cref="Show"/> or <see cref="ShowError"/>.
+    /// Id of the toast last passed to <see cref="Show"/>, <see cref="ShowWarning"/> or <see cref="ShowError"/>.
     /// Each show gets a new id, including when the text is unchanged.
     /// <see cref="Hide"/> leaves the id in place. Zero before the first show.
     /// </summary>

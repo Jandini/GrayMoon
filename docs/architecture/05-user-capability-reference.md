@@ -588,7 +588,7 @@ Restore package state from the Workspace or dependency-level workflows (.NET Dep
 
 Uses discovered project paths and calls `dotnet restore` through the Worker.
 
-Restore also runs in `PushOrchestrator` after each level's push. `DependencyUpdateOrchestrator` never restores.
+Restore also runs in `PushOrchestrator` after each level's push. `DependencyUpdateOrchestrator` never restores. A restore that fails after a pushed level does not fail the push: when it is the only problem, the run ends as done with a warning (`OperationResult.Warnings`, "Push finished, but package restore failed in N repositories.", shown with `IToastService.ShowWarning`: amber, 6 seconds like an error), and the repository keeps its restore error in the grid. Next to a real push failure it stays part of the failed run.
 
 ---
 
@@ -909,6 +909,8 @@ unavailable/unsupported diff
 
 `.md`, `.markdown`, `.mdown`, `.mkdn`, `.mkd`, `.mdwn`, `.mkdown`, `.mdtxt`, `.mdtext`, `.markdn`, and `.mdc` (Cursor project rules) open on Preview, with Source still available as the Monaco diff. Other extensions stay on the Monaco diff only.
 
+Preview images are embedded by the App as data URIs (`MarkdownImageEmbedder`), because the page has no access to the repository files and no GitHub session. Repository-relative images are read through the Worker; remote `http(s)` images are downloaded by the App from any host. Arbitrary hosts are a deliberate choice (README badges and screenshots live on CDNs), bounded instead by size and count: at most 24 images per document, 2 MB per remote image, 256 KB per SVG, and an SVG with script or event handlers is not embedded. The `src` is read out of rendered HTML, so it is HTML-decoded for the request or the Worker path (`a.svg?x=1&amp;y=2` is requested as `?x=1&y=2`) and matched in its escaped form only when the output is rewritten. A remote image that could not be embedded becomes a small text chip with its `alt` text.
+
 ### Implementation
 
 ```text
@@ -1089,6 +1091,8 @@ incoming commits
 ```
 
 The service can identify the lowest dependency level that needs work.
+
+The popup lists at most 100 repositories, but its actions (Update, Push, Pull, Undo Push Commits) and the default-branch warning in front of Update and Push work on every repository of the selected context, read from that context's own branch, tag and counters. The context is fixed when the button is pressed. Pull with nothing left to pull reports "Nothing to pull."; an action whose repositories cannot be loaded reports "<action> could not be started." and starts nothing.
 
 ---
 
@@ -1304,10 +1308,10 @@ reading tokens or triggering actions through the browser GrayMoon's UI runs in.
 ```text
 a non-GET request with no Origin header passes unchanged (scripts, curl, the Worker)
 a non-GET request with an Origin header is rejected (403) unless:
-  the Origin's host is this app's own host, a loopback name, or a configured Security:AllowedOrigins entry
+  the Origin's host is a loopback name (localhost, 127.0.0.1, ::1, 0.0.0.0) or a listed host (below)
   and the request also carries X-GrayMoon-Request: 1
     (a cross-site page cannot add that header without a CORS preflight, which GrayMoon does not allow)
-GET requests are never affected
+GET requests are not affected by the Origin rule; the request host rule below covers them
 ```
 
 ### SignalR hubs
@@ -1315,14 +1319,50 @@ GET requests are never affected
 ```text
 /hub/worker (and the legacy /hub/agent alias): any request carrying an Origin header is rejected (403); the Worker's .NET client sends none
 /hubs/workspace-sync, /hubs/desktop, /_blazor: a request with no Origin header passes;
-  one with an Origin header passes only when its host is this app's own host, a loopback name,
-  or a configured Security:AllowedOrigins entry
+  one with an Origin header passes only when its host is a loopback name or a listed host
 ```
 
-"Own host" also accepts `X-Forwarded-Host` (reverse proxies) and any host listed in the optional
-`Security:AllowedOrigins` setting. Desktop sets `AllowedHosts` to loopback names only for the App process
-it launches; the shared `appsettings.json` keeps `AllowedHosts = "*"` for Docker and manual installs, which
-may be reached by host name or LAN IP.
+### Listed hosts (`GRAYMOON_AllowedHosts`)
+
+```text
+listed hosts = the AllowedHosts setting (';' separated; set with the GRAYMOON_AllowedHosts environment variable)
+               plus the optional Security:AllowedOrigins entries
+a bare * is not a host and is ignored; *.example.com matches any subdomain
+empty list   -> only loopback Origins and loopback request hosts are accepted, and the App logs one
+                warning at startup that names GRAYMOON_AllowedHosts
+```
+
+An Origin whose host equals the request's `Host` or `X-Forwarded-Host` header is **not** accepted on that
+ground: under DNS rebinding the hostile page's own name arrives in both. A reverse-proxy or LAN host name
+has to be listed.
+
+- **Desktop** starts the App with `GRAYMOON_AllowedHosts=localhost;127.0.0.1;[::1]`.
+- **Docker** ships no `AllowedHosts` value (`appsettings.json` has none), so a container works from a
+  browser on the same machine (`http://localhost:8384`) and rejects browser pages served under any other
+  name until that name is listed, for example `-e "GRAYMOON_AllowedHosts=localhost;nas.local;192.168.1.10"`.
+  The same setting drives ASP.NET Core host filtering, so once it is set every name used to reach the App
+  (including `localhost`, which a Worker on the Docker host uses) must be in the list.
+
+### Request host (every path, every method)
+
+```text
+a request whose Host header is a loopback name or a listed host passes
+a request with no Host header passes (no browser sends one)
+/health and the Worker paths (/hub/worker, /hub/agent, /repos/{id}/connector,
+  /workspaces/{id}/capabilities, /api/worker/pair) are not checked: a container probe and a Worker on
+  another machine use names nobody lists, and the Worker paths require the Worker secret (below)
+any other request is rejected (403) with a plain-text message that names GRAYMOON_AllowedHosts;
+  the first rejection is logged as a warning with the host, later ones are not logged
+```
+
+This is what stops a DNS-rebinding page from reading data. Such a page is same-origin with GrayMoon, so
+its GET requests carry no Origin header and the rules above never see them; the `Host` header still names
+the hostile host. The check runs with an empty list too (loopback only), so pages and `GET /api/...` data
+are not readable through a rebound name in any configuration.
+
+Behind a reverse proxy, list the name the proxy sends as `Host` as well as the public name: a proxy that
+replaces `Host` with its upstream name (the nginx default without `proxy_set_header Host $host`) is
+otherwise rejected.
 
 Git hooks post to the **Worker's** local listener (`127.0.0.1:<port>/hook/*`), not to the App, so they are
 outside this middleware.
@@ -1337,10 +1377,13 @@ secret: generated on first start, kept in graymoon-worker.secret next to the dat
   (plain text; file mode 600 on Linux; if the file is missing at startup a new secret is generated)
 header: X-GrayMoon-Worker-Secret, sent by the Worker on the hub connection and on these requests
 wrong secret                      -> 401, always (constant-time comparison)
-missing secret                    -> accepted with a warning, UNLESS
-                                     Security:RequireWorkerSecret is true, or
-                                     some Worker has already presented the correct secret
+missing secret                    -> 401 (Security:RequireWorkerSecret defaults to true), from the first start
+  explicit opt-out Security:RequireWorkerSecret=false:
+                                     /hub/worker and /workspaces/{id}/capabilities accept a missing secret
+                                     with a warning until some Worker has presented the correct secret
                                      (setting Security:WorkerSecretSeen), then 401
+  /repos/{id}/connector            -> always 401 without the valid secret, whatever the setting says;
+                                     the endpoint checks the secret itself as well as the middleware
 /repos/{id}/connector, /workspaces/{id}/capabilities and /api/worker/pair
   with any Origin header          -> 403 (the Worker and the install script never send one)
 ```
@@ -1357,9 +1400,12 @@ manual / Docker    GrayMoon > Worker shows a one-time pairing code (valid 10 min
 
 The Worker reads the secret from the `GRAYMOON_WORKER_SECRET` environment variable, then from
 `worker.secret` under its machine-wide GrayMoon data folder (`%ProgramData%\GrayMoon` on Windows). The file
-sits outside the install folder so a Worker update keeps it. A Worker installed before this feature keeps
-working without a secret (the App shows "Reinstall the Worker to finish securing GrayMoon") until a Worker
-has connected with the secret, or `Security:RequireWorkerSecret` is set (default false).
+sits outside the install folder so a Worker update keeps it. A Worker without a secret (installed before
+this feature, or installed by hand without a pairing code) is refused with 401 and shows as offline; the
+fix is to reinstall it from GrayMoon > Worker with a pairing code (Desktop: Install Worker). Setting
+`Security:RequireWorkerSecret=false` (`GRAYMOON_Security__RequireWorkerSecret=false`) lets such a Worker
+connect again with the "Reinstall the Worker to finish securing GrayMoon" notice, but it still cannot
+fetch connector tokens, so remote git operations fail until it is paired.
 
 ### Self-update and hook listener hardening
 
@@ -1368,6 +1414,8 @@ SelfUpdate rejects an installUrl that is not http(s) or contains ' " % ^ \ ` $ &
   it runs cmd.exe /c start "" /b powershell.exe ... irm '<url>' | iex (Windows only)
 the Worker hook listener allows at most 64 in-flight requests (503 above that); a port bind failure
   gives an actionable error and fails startup
+it answers 400 to a body that is not application/json or whose repositoryPath is not a managed
+  working tree, and 413 to a body over 64 KB; nothing is queued for a rejected request
 ```
 
 ### Implementation
@@ -1375,7 +1423,8 @@ the Worker hook listener allows at most 64 in-flight requests (503 above that); 
 ```text
 RequestSecurityMiddleware
 WorkerSecretMiddleware / WorkerSecretService / WorkerPairingService
-SecurityOptions (Security:AllowedOrigins, Security:RequireWorkerSecret)
+SecurityOptions (Security:AllowedOrigins, Security:RequireWorkerSecret); AllowedHosts (GRAYMOON_AllowedHosts)
+ConnectorEndpoints.IsPairedWorkerRequest
 Worker: WorkerSecretProvider, SignalRConnectionHostedService, WorkerTokenProvider, IWorkspaceCapabilityProvider,
         SelfUpdateCommand, HookListenerHostedService
 Desktop: WorkerInstaller (secret hand-off)
@@ -1444,7 +1493,9 @@ exit                 App validates the commit/PR shape, the text is kept and an 
 ### Flow
 
 ```text
-resolve provider and model, check availability (the startup GetHostInfo; menus do not probe)
+resolve provider and model, check availability (the startup GetHostInfo; menus do not probe); a provider
+                            the Worker's host check does not list (older Worker) is filled in by HostInfoCache
+                            as not installed, so it is shown as unavailable with a reason, never an exception
 Worker CollectGitEvidence   one request for all repositories, bounded fan-out, never mutates or fetches;
                             PR: also every commit's subject and shortstat, oldest first (git log --reverse
                             --shortstat, no bodies), up to 200 per repository (60 above 10 repositories);
@@ -1453,7 +1504,9 @@ CommitHistoryCondenser      PR: folds fixup!/squash!/amend! into their commit, d
                             subject committed in several repositories into one line, marks small low-signal
                             commits, redacts subjects, orders by committer time
 AiPromptBuilder             one prompt under a hard budget (commit 4,000 / PR 8,000 estimated tokens),
-                            secrets redacted, evidence wrapped as untrusted data; PR splits it into headers
+                            secrets redacted, evidence wrapped as untrusted data (every piece of repository
+                            text, including the commit prompt's recent subjects used as a style reference, is
+                            redacted and cannot close the evidence block); PR splits it into headers
                             and facts (45%), history (20%, low-signal then small middle commits dropped first,
                             the first and last 10 kept longest) and excerpts (the rest)
 Worker GenerateAiText       one CLI process in its own empty temp folder, no tools (Cursor: read-only ask mode),
@@ -1472,7 +1525,7 @@ All three Worker commands run on the main pool. The App never runs git or an AI 
 ```text
 Components/Ai: AiProviderControl, AiMenuCheckItem, AiSuggestionPanel; wwwroot/css/ai-generation.css (gm-ai-error / gm-ai-warning), js/gm-ai-menu.js
 WorkspaceGitChanges.Ai.cs / NewPullRequestModal.Ai.cs
-AiTextGenerationRuns<TText>          app-wide click-to-write runs, one per Workspace and Feature context, outside any page or circuit; Error, Warning and Offer are per context
+AiTextGenerationRuns<TText>          app-wide click-to-write runs, one per Workspace and Feature context, outside any page or circuit; Error, Warning and Offer are per context; Cancel and the end of a run share one locked handle, so a late Cancel is a no-op
 WorkspaceGitChangesCommitGeneration   the commit message runs (stores into WorkspaceGitChangesCommitMessageMemory)
 WorkspacePullRequestTextGeneration    the New PR title and description runs (stores into WorkspacePullRequestDraftMemory)
 WorkspacePullRequestDraftMemory       the New PR title and description, per Workspace and Feature context

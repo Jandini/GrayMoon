@@ -196,6 +196,7 @@ public static class WorkspaceOperationsEndpoints
             success = r.Success,
             status = r.Status.ToString(),
             message = r.Summary,
+            warning = PushOperationResult.DescribeWarnings(r.Push),
             pushed = r.PushedRepoCount > 0,
             pendingApprovalId = r.PendingApprovalId,
             push = r.Push,

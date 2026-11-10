@@ -56,13 +56,13 @@ public sealed partial class WorkspaceGitChanges
             ? $"Unstaging {fileCount} selected file{(fileCount == 1 ? "" : "s")}..."
             : $"Staging {fileCount} selected file{(fileCount == 1 ? "" : "s")}...";
 
+        var contextId = RequireSelectedContextId();
         StartPageJob(label, async (job, ct) =>
         {
             string NameOf(int id) =>
                 _view?.Repositories.FirstOrDefault(r => r.WorkspaceRepositoryId == id)?.RepositoryName ?? $"repository {id}";
 
             var outcomes = new RepositoryOutcomes(targets.Keys.Select(id => (id, NameOf(id))));
-            var contextId = RequireSelectedContextId();
             var completed = 0;
             using var semaphore = new SemaphoreSlim(Math.Max(1, GitChangesOptions.Value.MaxParallelRepositoryOperations));
 

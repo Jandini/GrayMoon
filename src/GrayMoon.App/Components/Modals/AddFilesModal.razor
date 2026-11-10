@@ -5,6 +5,7 @@
 @using GrayMoon.Application.Features
 @inject IWorkspaceFileSearchService FileSearchService
 @inject ILogger<AddFilesModal> Logger
+@implements IDisposable
 
 @if (IsVisible)
 {
@@ -164,6 +165,7 @@
     private bool isSearching;
     private HashSet<(string RepositoryName, string FilePath)> selectedKeys = new();
     private CancellationTokenSource? _debounceCts;
+    private readonly LoadGeneration _search = new();
     private bool _wasVisible;
     private bool showRepoMenu;
 
@@ -183,9 +185,12 @@
             _wasVisible = true;
             try { await searchInputRef.FocusAsync(); } catch { /* ignore */ }
         }
-        else if (!IsVisible)
+        else if (!IsVisible && _wasVisible)
         {
             _wasVisible = false;
+            // Closed: a search still running must not land in the next open.
+            _search.Invalidate();
+            isSearching = false;
         }
     }
 
@@ -219,6 +224,9 @@
                     searchError = null;
                     searchResults = null;
                 }
+                // The pattern is no longer searchable: a search still running for the previous text is dropped.
+                _search.Invalidate();
+                isSearching = false;
                 StateHasChanged();
                 return;
             }
@@ -252,16 +260,26 @@
 
     private async Task SearchAsync()
     {
-        if (!HasRepos || isSearching) return;
+        if (!HasRepos) return;
         var trimmed = searchPattern.Trim();
-        if (trimmed == "*" || string.IsNullOrEmpty(trimmed)) return;
+        if (trimmed == "*" || string.IsNullOrEmpty(trimmed))
+        {
+            // Nothing to search for: stop a search that is still running so its result cannot come back later.
+            _search.Invalidate();
+            isSearching = false;
+            return;
+        }
+
+        // A search that is still running is superseded, not kept: the newest pattern and repository win.
+        var (generation, ct) = _search.Begin();
         searchError = null;
         isSearching = true;
         StateHasChanged();
         try
         {
             var effectivePattern = EffectiveSearchPattern(trimmed);
-            var data = await FileSearchService.SearchAsync(WorkspaceId, ContextId, effectivePattern, selectedRepositoryName);
+            var data = await FileSearchService.SearchAsync(WorkspaceId, ContextId, effectivePattern, selectedRepositoryName, ct);
+            if (!_search.IsCurrent(generation)) return;
             if (data != null)
             {
                 searchResults = data;
@@ -273,17 +291,34 @@
                 searchResults = new WorkerSearchFilesResponse { Files = new List<WorkerSearchFileItemDto>() };
             }
         }
+        catch (OperationCanceledException) when (!_search.IsCurrent(generation))
+        {
+            // Superseded by a newer search, or the modal closed.
+        }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "File search failed");
-            searchError = ex.Message;
-            searchResults = new WorkerSearchFilesResponse { Files = new List<WorkerSearchFileItemDto>() };
+            if (_search.IsCurrent(generation))
+            {
+                Logger.LogError(ex, "File search failed");
+                searchError = ex.Message;
+                searchResults = new WorkerSearchFilesResponse { Files = new List<WorkerSearchFileItemDto>() };
+            }
         }
         finally
         {
-            isSearching = false;
-            await InvokeAsync(StateHasChanged);
+            // Only the newest search clears the "Searching..." row.
+            if (_search.IsCurrent(generation))
+            {
+                isSearching = false;
+                await InvokeAsync(StateHasChanged);
+            }
         }
+    }
+
+    public void Dispose()
+    {
+        _debounceCts?.Cancel();
+        _search.Dispose();
     }
 
     private async Task OnAddClick()

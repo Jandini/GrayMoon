@@ -27,8 +27,9 @@ public sealed partial class WorkspaceRepositories
             return;
         }
 
+        var jobContextId = RequireSelectedContextId();
         var (updatePlan, _) = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, (IReadOnlyList<SyncDependenciesRepoPayload> Payload, bool IsMultiLevel)>(
-            svc => svc.GetUpdatePlanAsync(WorkspaceId, RequireSelectedContextId()));
+            svc => svc.GetUpdatePlanAsync(WorkspaceId, jobContextId));
         var repoIdsWithUpdates = updatePlan.Select(p => p.RepoId).ToHashSet();
 
         var reposOnDefault = allLinks
@@ -94,11 +95,12 @@ public sealed partial class WorkspaceRepositories
         if (workspace == null || !HasRepositories || IsJobRunning)
             return Task.CompletedTask;
 
+        var jobContextId = RequireSelectedContextId();
         StartPageJob(UpdateJobTitle, async (job, ct) =>
         {
             var updateResult = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, DependencyUpdateRunResult>(svc =>
                 svc.UpdateAsync(
-                    WorkspaceId, RequireSelectedContextId(),
+                    WorkspaceId, jobContextId,
                     ct,
                     job.ToOperationProgress(),
                     (repoId, msg) => SafeInvoke(() => SetRepositoryError(repoId, msg)),
@@ -136,8 +138,9 @@ public sealed partial class WorkspaceRepositories
             return;
         }
 
+        var jobContextId = RequireSelectedContextId();
         var (updatePlan, _) = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, (IReadOnlyList<SyncDependenciesRepoPayload> Payload, bool IsMultiLevel)>(
-            svc => svc.GetUpdatePlanAsync(WorkspaceId, RequireSelectedContextId()));
+            svc => svc.GetUpdatePlanAsync(WorkspaceId, jobContextId));
         var repoIdsWithUpdates = updatePlan.Select(p => p.RepoId).ToHashSet();
 
         _reviewedDefaultBranchRepoIds = allLinks
@@ -211,8 +214,9 @@ public sealed partial class WorkspaceRepositories
             return;
         }
 
+        var jobContextId = RequireSelectedContextId();
         var (updatePlan, _) = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, (IReadOnlyList<SyncDependenciesRepoPayload> Payload, bool IsMultiLevel)>(
-            svc => svc.GetUpdatePlanAsync(WorkspaceId, RequireSelectedContextId()));
+            svc => svc.GetUpdatePlanAsync(WorkspaceId, jobContextId));
         var repoIdsWithUpdates = updatePlan.Select(p => p.RepoId).ToHashSet();
 
         _reviewedDefaultBranchRepoIds = allLinks
@@ -368,6 +372,9 @@ public sealed partial class WorkspaceRepositories
                 case UpdateAndPushNoticeKind.Info:
                     ToastService.Show(notice.Message);
                     break;
+                case UpdateAndPushNoticeKind.Warning:
+                    ToastService.ShowWarning(notice.Message);
+                    break;
                 case UpdateAndPushNoticeKind.Error:
                     ToastService.ShowError(notice.Message);
                     break;
@@ -390,7 +397,8 @@ public sealed partial class WorkspaceRepositories
         // The live callbacks reach the page only while it is alive and only as they happen; a push that waits
         // minutes for a package can fail long after the user looked away. The returned result is the complete
         // account, so apply it; the presenter's notice then says that the push stopped.
-        if (result.Push is { Success: false } pushFailure)
+        // A push that finished with restore warnings keeps them on its repositories too.
+        if (result.Push is { } pushFailure && (!pushFailure.Success || pushFailure.HasWarnings))
         {
             SafeInvoke(() =>
             {

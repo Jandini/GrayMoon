@@ -1,0 +1,25 @@
+---
+description: No per-circuit state in singletons; every event subscription is removed in Dispose
+alwaysApply: true
+---
+
+# Service lifetimes and event subscriptions
+
+From the 2026-11-10 code review: `WorkerConnectionTracker` handlers were added
+per circuit and never removed (a leak for the process lifetime), and the
+singleton `IToastService` showed one tab's toast in every tab.
+
+1. **A singleton never holds per-circuit or per-user state.** One browser tab
+   is one circuit. UI notification state (toasts, banners, selection) belongs
+   in a scoped service. `IToastService` is the known violation; do not add
+   another and do not inject it into a new singleton.
+2. **Every subscription to a longer-lived object is removed in `Dispose`.**
+   A component or scoped service that calls `OnStateChanged(...)` or `+=` on a
+   singleton calls the matching `RemoveStateChanged(...)` / `-=`, using the
+   same delegate instance kept in a field. Do not subscribe during prerender.
+3. **Do not inject a scoped service into a singleton.** Grep every consumer
+   before changing a lifetime.
+4. **Static or singleton collections need a removal path** (handler lists,
+   pending maps, caches). Delete dead caches.
+
+Details: `AGENTS.md`, "Service lifetimes and event subscriptions".

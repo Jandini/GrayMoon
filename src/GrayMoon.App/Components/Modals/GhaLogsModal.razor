@@ -4,6 +4,7 @@
 @inject ConnectorRepository ConnectorRepository
 @inject IJSRuntime JS
 @inject IOptions<WorkspaceOptions> WorkspaceOptions
+@implements IDisposable
 
 @if (IsVisible)
 {
@@ -174,6 +175,11 @@
     private ElementReference _modalElement;
     private bool _focusOnNextRender;
 
+    // One generation per open: a load started for an earlier open (or an earlier run) is cancelled and its
+    // results are dropped, so they cannot be appended to the list of the run that is open now.
+    private readonly LoadGeneration _load = new();
+    private long _loadedRunId;
+
     private JobLogEntry? SelectedJob => _jobs.FirstOrDefault(j => j.Meta.Id == _selectedJobId);
 
     private bool IsSelectedJobFailed => string.Equals(
@@ -201,9 +207,11 @@
 
     protected override void OnParametersSet()
     {
-        if (IsVisible && !_wasVisible)
+        if (IsVisible && (!_wasVisible || RunId != _loadedRunId))
         {
             _wasVisible = true;
+            _loadedRunId = RunId;
+            _load.Invalidate();
             _focusOnNextRender = true;
             _isLoading = true;
             _isLoadingMore = false;
@@ -213,12 +221,14 @@
             _autoSelectInitialized = false;
             _errorMessage = null;
             _selectedJobId = null;
-            _jobs.Clear();
+            // A new list, not Clear(): a load that is still running can at most write to its own list.
+            _jobs = [];
         }
-        else if (!IsVisible)
+        else if (!IsVisible && _wasVisible)
         {
             _wasVisible = false;
             _loadTriggered = false;
+            _load.Invalidate();
         }
     }
 
@@ -251,18 +261,22 @@
 
     private async Task LoadLogsAsync()
     {
+        var (generation, ct) = _load.Begin();
+        var loaded = _jobs;
+        var owner = Owner;
+        var repositoryName = RepositoryName;
         try
         {
             var connector = await ConnectorRepository.GetByNameAsync(ConnectorName);
+            if (!_load.IsCurrent(generation)) return;
             if (connector == null)
             {
                 _errorMessage = $"Connector \"{ConnectorName}\" not found.";
-                _isLoading = false;
-                await InvokeAsync(StateHasChanged);
                 return;
             }
 
-            var jobsResponse = await GitHubService.GetWorkflowRunJobsAsync(connector, Owner, RepositoryName, RunId);
+            var jobsResponse = await GitHubService.GetWorkflowRunJobsAsync(connector, owner, repositoryName, RunId, ct);
+            if (!_load.IsCurrent(generation)) return;
             var jobs = (jobsResponse?.Jobs ?? [])
                 .OrderBy(j => j.StartedAt ?? j.CreatedAt ?? DateTimeOffset.MaxValue)
                 .ThenBy(j => j.Id)
@@ -275,10 +289,10 @@
             var gate = new SemaphoreSlim(maxParallel, maxParallel);
             var logTasks = jobs.Select(async job =>
             {
-                await gate.WaitAsync();
+                await gate.WaitAsync(ct);
                 try
                 {
-                    var rawLog = await GitHubService.GetJobLogsAsync(connector, Owner, RepositoryName, job.Id);
+                    var rawLog = await GitHubService.GetJobLogsAsync(connector, owner, repositoryName, job.Id, ct);
                     List<GhaLogEntry> entries = rawLog != null
                         ? GhaLogParser.ParseJobLog(rawLog)
                         : [new GhaLogLineEntry(GhaLogLineKind.Normal, "Log not available.")];
@@ -294,7 +308,8 @@
             {
                 var job = jobs[jobIdx];
                 var (rawLog, entries) = await logTasks[jobIdx];
-                _jobs.Add(new JobLogEntry(job, entries, rawLog));
+                if (!_load.IsCurrent(generation)) return;
+                loaded.Add(new JobLogEntry(job, entries, rawLog));
                 AutoSelectJob();
 
                 if (jobIdx == 0)
@@ -305,17 +320,28 @@
                 await InvokeAsync(StateHasChanged);
             }
         }
+        catch (OperationCanceledException) when (!_load.IsCurrent(generation))
+        {
+            // Superseded by a newer open, or the modal closed.
+        }
         catch (Exception ex)
         {
-            _errorMessage = ex.Message;
+            if (_load.IsCurrent(generation))
+                _errorMessage = ex.Message;
         }
         finally
         {
-            _isLoading = false;
-            _isLoadingMore = false;
-            await InvokeAsync(StateHasChanged);
+            // Only the current load owns the loading flags; an older one must not clear a newer spinner.
+            if (_load.IsCurrent(generation))
+            {
+                _isLoading = false;
+                _isLoadingMore = false;
+                await InvokeAsync(StateHasChanged);
+            }
         }
     }
+
+    public void Dispose() => _load.Dispose();
 
     private void AutoSelectJob()
     {

@@ -39,7 +39,7 @@ public sealed class RepositoryBranchWriterRaceTests
         await using (var seed = ctx.CreateScope())
         {
             var writer = seed.ServiceProvider.GetRequiredService<RepositoryBranchWriter>();
-            await writer.PersistAsync(ctx.WorkspaceRepositoryId, ["main"], ["main"], "main", tags: null, currentTag: null);
+            await writer.PersistAsync(ctx.WorkspaceRepositoryId, ["main"], ["main"], "main", tags: null);
         }
 
         var stale = DateTime.UtcNow.AddDays(-2);
@@ -58,8 +58,7 @@ public sealed class RepositoryBranchWriterRaceTests
             ["main", BranchName],
             ["main"],
             "main",
-            tags: null,
-            currentTag: null);
+            tags: null);
 
         var rows = await ctx.ReadBranchesAsync();
         Assert.Equal(1, rows.Count(branch => branch.BranchName == BranchName && !branch.IsRemote && !branch.IsTag));

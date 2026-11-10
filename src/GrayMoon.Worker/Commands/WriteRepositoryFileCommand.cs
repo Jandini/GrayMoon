@@ -39,6 +39,12 @@ public sealed class WriteRepositoryFileCommand()
             return new WriteRepositoryFileResponse { ErrorMessage = "Writing under .git is not allowed." };
         }
 
+        // The validator compares text; a junction or symlink inside the repository could still carry the write out.
+        if (RepositoryPathContainment.GetEscapeReason(repoPath, validation.FullPath) is { } escape)
+        {
+            return new WriteRepositoryFileResponse { ErrorMessage = $"{escape} Skipped: {filePath}" };
+        }
+
         var target = validation.FullPath;
         var bytes = Encoding.UTF8.GetBytes(content);
 

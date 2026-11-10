@@ -15,7 +15,8 @@ public sealed partial class WorkspaceRepositories
         {
             try { await JSRuntime.InvokeVoidAsync("focusElement", "workspace-repos-search"); } catch { /* ignore */ }
         }
-        if (firstRender && workspace != null && _hubConnection == null)
+        // Not gated on firstRender: the first render can happen before the workspace is loaded.
+        if (PageRealtimeGate.ShouldAttachHub(_hubConnection != null, workspace != null, _disposed))
         {
             _hubConnection = WorkspaceSyncHubConnectionHelper.Create(NavigationManager);
             _hubConnection.On<int>("WorkspaceSynced", async (workspaceId) =>

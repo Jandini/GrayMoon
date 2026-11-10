@@ -164,10 +164,7 @@ public sealed partial class WorkspacePushService(
                 wr => wr.RepositoryId,
                 wr => ConnectorHelpers.UnprotectToken(wr.Repository!.Connector?.UserToken));
 
-        var tagPinnedRepoIdsPush = links
-            .Where(wr => !string.IsNullOrWhiteSpace(wr.CheckedOutTag))
-            .Select(wr => wr.RepositoryId)
-            .ToHashSet();
+        var tagPinnedRepoIdsPush = await LoadTagPinnedRepoIdsAsync(workspaceId, contextId, cancellationToken);
         if (tagPinnedRepoIdsPush.Count > 0)
             payload = payload.Where(p => !tagPinnedRepoIdsPush.Contains(p.RepoId)).ToList();
         if (payload.Count == 0)
@@ -379,6 +376,8 @@ public sealed partial class WorkspacePushService(
             for (var observationIndex = 0; observationIndex < totalDeps; observationIndex++)
                 observations[observationIndex] = new PackageWaitObservation();
             var foundLock = new object();
+            // Newest registry transport failure seen while polling, kept for the timeout message. A failed probe is "not yet".
+            string? lastRegistryError = null;
             var ciRunWatch = ciProvider.CreatePushRunWatch(_overlayCommandTerminalService);
             int getFoundCount()
             {
@@ -423,7 +422,13 @@ public sealed partial class WorkspacePushService(
                 if (stillUnmatched > 0)
                     onLevelError?.Invoke(level, NoRegistryMessage(stillUnmatched));
                 else
-                    PackageWaitTimeout.Report(level, onLevelError, found, totalDeps, waited, missing);
+                {
+                    var registryError = Volatile.Read(ref lastRegistryError);
+                    Action<int, string>? reportTimeout = registryError == null
+                        ? onLevelError
+                        : (failedLevel, message) => onLevelError?.Invoke(failedLevel, $"{message} Last registry error: {registryError}");
+                    PackageWaitTimeout.Report(level, reportTimeout, found, totalDeps, waited, missing);
+                }
                 run.Diagnostics.FailedLevel = level;
                 run.Diagnostics.FailureCategory = PackageWaitDiagnostics.FailurePackageWaitTimeout;
                 run.Diagnostics.BlockedRepositories.AddRange(reposAtLevel.Select(repo => repo.RepoName));
@@ -489,7 +494,17 @@ public sealed partial class WorkspacePushService(
                     if (toCheck.Length > 0)
                     {
                         if (requiredForLevel.Any(r => !r.MatchedConnectorId.HasValue))
-                            await MatchUnmatchedPackagesAsync(workspaceId, requiredForLevel, connectorByIdForLevel, linkedToken);
+                        {
+                            try
+                            {
+                                await MatchUnmatchedPackagesAsync(workspaceId, requiredForLevel, connectorByIdForLevel, linkedToken);
+                            }
+                            catch (Exception ex) when (IsTransientRegistryFailure(ex, linkedToken))
+                            {
+                                Volatile.Write(ref lastRegistryError, ex.Message);
+                                _logger.LogWarning(ex, "[PushOrchestrator {RunId}] Push wait: registry matching failed, retrying on the next poll. Level={Level}", runId, level);
+                            }
+                        }
                         var prevFound = getFoundCount();
                         foreach (var chunk in toCheck.Chunk(_maxConcurrent))
                         {
@@ -513,6 +528,23 @@ public sealed partial class WorkspacePushService(
                                 try
                                 {
                                     lookup = await _nuGetService!.LookupPackageVersionAsync(connector, req.PackageId, req.Version, linkedToken);
+                                }
+                                catch (Exception ex) when (IsTransientRegistryFailure(ex, linkedToken))
+                                {
+                                    // One failed probe (connection reset, 5xx surfaced as an exception, request timeout) says
+                                    // nothing about the package. Record it and ask again on the next poll; only the deadline
+                                    // fails the level, and its message carries the last error seen here.
+                                    var transientKind = ex is TimeoutException or OperationCanceledException
+                                        ? PackageVersionLookupKind.RequestTimeout
+                                        : PackageVersionLookupKind.RegistryFailure;
+                                    if (observations[i].Observe(transientKind, null, false, DateTime.UtcNow))
+                                    {
+                                        PackageWaitDiagnostics.LogLookupTransition(
+                                            _logger, runId, req.PackageId, req.Version, connector.ConnectorId, connector.ConnectorName, transientKind, null);
+                                    }
+                                    Volatile.Write(ref lastRegistryError, $"{connector.ConnectorName}: {ex.Message}");
+                                    _logger.LogWarning(ex, "[PushOrchestrator {RunId}] Push wait: lookup of {PackageId} {Version} failed, retrying on the next poll.", runId, req.PackageId, req.Version);
+                                    return;
                                 }
                                 catch (Exception ex) when (ex is not OperationCanceledException)
                                 {
@@ -828,10 +860,7 @@ public sealed partial class WorkspacePushService(
             .ToDictionary(
                 wr => wr.RepositoryId,
                 wr => ConnectorHelpers.UnprotectToken(wr.Repository!.Connector?.UserToken));
-        var tagPinnedRepoIds = links
-            .Where(wr => !string.IsNullOrWhiteSpace(wr.CheckedOutTag))
-            .Select(wr => wr.RepositoryId)
-            .ToHashSet();
+        var tagPinnedRepoIds = await LoadTagPinnedRepoIdsAsync(workspace.WorkspaceId, contextId, cancellationToken);
         var ciProvider = _ciProviderResolver == null
             ? NoCiProvider.Instance
             : await _ciProviderResolver.GetForWorkspaceAsync(workspaceId, cancellationToken);
@@ -974,7 +1003,10 @@ public sealed partial class WorkspacePushService(
         if (link?.Repository == null)
             return (false, "Repository not in workspace or not found.");
 
-        if (!string.IsNullOrWhiteSpace(link.CheckedOutTag))
+        // Tag pin and upstream are per-context: a Feature must not be blocked (or labelled) by the Workspace checkout.
+        var checkout = (await LoadContextCheckoutsAsync(workspaceId, contextId, [repositoryId], cancellationToken))
+            .GetValueOrDefault(repositoryId);
+        if (!string.IsNullOrWhiteSpace(checkout?.CheckedOutTag))
             return (false, "Repository is pinned to a tag. Checkout a branch before pushing.");
 
         var repo = link.Repository;
@@ -983,7 +1015,7 @@ public sealed partial class WorkspacePushService(
         var workspaceFolderName = workerArgs.WorkspaceFolderName;
         var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
 
-        onProgressMessage?.Invoke(link.BranchHasUpstream == true ? "Pushing..." : "Pushing upstream...");
+        onProgressMessage?.Invoke(checkout?.BranchHasUpstream == true ? "Pushing..." : "Pushing upstream...");
 
         if (_connectorHealthService != null)
             await _connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepositoryId, cancellationToken);
@@ -1055,10 +1087,7 @@ public sealed partial class WorkspacePushService(
                 wr => wr.RepositoryId,
                 wr => ConnectorHelpers.UnprotectToken(wr.Repository!.Connector?.UserToken));
 
-        var tagPinnedRepoIdsInLevelOrder = links
-            .Where(wr => !string.IsNullOrWhiteSpace(wr.CheckedOutTag))
-            .Select(wr => wr.RepositoryId)
-            .ToHashSet();
+        var tagPinnedRepoIdsInLevelOrder = await LoadTagPinnedRepoIdsAsync(workspaceId, contextId, cancellationToken);
         if (tagPinnedRepoIdsInLevelOrder.Count > 0)
             payload = payload.Where(p => !tagPinnedRepoIdsInLevelOrder.Contains(p.RepoId)).ToList();
         if (payload.Count == 0)
@@ -1161,10 +1190,7 @@ public sealed partial class WorkspacePushService(
                 wr => wr.RepositoryId,
                 wr => ConnectorHelpers.UnprotectToken(wr.Repository!.Connector?.UserToken));
 
-        var tagPinnedRepoIdsParallel = links
-            .Where(wr => !string.IsNullOrWhiteSpace(wr.CheckedOutTag))
-            .Select(wr => wr.RepositoryId)
-            .ToHashSet();
+        var tagPinnedRepoIdsParallel = await LoadTagPinnedRepoIdsAsync(workspaceId, contextId, cancellationToken);
         if (tagPinnedRepoIdsParallel.Count > 0)
             payload = payload.Where(p => !tagPinnedRepoIdsParallel.Contains(p.RepoId)).ToList();
         if (payload.Count == 0)
@@ -1216,10 +1242,11 @@ public sealed partial class WorkspacePushService(
             if (!repoNameById.TryGetValue(kvp.Key, out var repositoryName)) return;
             try
             {
-                await _workerBridge.SendCommandAsync(
+                var response = await _workerBridge.SendCommandAsync(
                     "DotnetRestore",
                     new { workspaceName, repositoryName, projectPaths = kvp.Value, workspaceRoot, workspaceRepositoryName },
                     cancellationToken);
+                ReportRestoreOutcome(kvp.Key, PackageRestoreOutcome.FromResponse(repositoryName, response), onRepoError);
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
@@ -1231,6 +1258,19 @@ public sealed partial class WorkspacePushService(
         });
         await Task.WhenAll(tasks);
         return failed[0] != 0;
+    }
+
+    /// <summary>
+    /// A restore that ran and reported failure is a warning, not a level failure: the push already landed and the next
+    /// level may still start. It is reported on the repository, in the job terminal and in the log, never dropped.
+    /// </summary>
+    private void ReportRestoreOutcome(int repositoryId, PackageRestoreOutcome outcome, Action<int, string>? onRepoError)
+    {
+        if (outcome.Success)
+            return;
+        _logger.LogWarning("{Warning} The level continues.", outcome.Warning);
+        outcome.WriteToJobTerminal();
+        onRepoError?.Invoke(repositoryId, outcome.Warning);
     }
 
     private async Task<bool> TryRestoreReposAtLevelAsync(
@@ -1283,10 +1323,11 @@ public sealed partial class WorkspacePushService(
             if (!repoNameById.TryGetValue(kvp.Key, out var repositoryName)) return;
             try
             {
-                await _workerBridge.SendCommandAsync(
+                var response = await _workerBridge.SendCommandAsync(
                     "DotnetRestore",
                     new { workspaceName, repositoryName, projectPaths = (IReadOnlyList<string>)kvp.Value, workspaceRoot, workspaceRepositoryName },
                     cancellationToken);
+                ReportRestoreOutcome(kvp.Key, PackageRestoreOutcome.FromResponse(repositoryName, response), onRepoError);
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
@@ -1475,23 +1516,26 @@ public sealed partial class WorkspacePushService(
         if (workspace == null) return;
 
         var repoIds = repos.Select(r => r.RepoId).ToHashSet();
-        var links = await _dbContext.WorkspaceRepositories
-            .Where(wr => wr.WorkspaceId == workspaceId && repoIds.Contains(wr.RepositoryId))
-            .ToListAsync(cancellationToken);
+
+        // The branch that was pushed is the pushed context's branch. A Feature's branch and tag live in its context
+        // state; reading them from the shared link would record the Workspace's branch as pushed and mark it tracked.
+        var checkouts = await LoadContextCheckoutsAsync(workspaceId, contextId, repoIds, cancellationToken);
 
         // Persist the remote branch for each pushed repo so it appears in Remotes without calling refresh branches.
         var now = DateTime.UtcNow;
-        var remoteCandidates = links
-            .Where(wr => string.IsNullOrWhiteSpace(wr.CheckedOutTag) && !string.IsNullOrWhiteSpace(wr.BranchName))
-            .Select(wr => (
-                Link: wr,
-                RemoteBranchName: wr.BranchName!.StartsWith("origin/", StringComparison.OrdinalIgnoreCase)
-                    ? wr.BranchName!
-                    : "origin/" + wr.BranchName))
+        var remoteCandidates = checkouts
+            .Where(c => string.IsNullOrWhiteSpace(c.Value.CheckedOutTag) && !string.IsNullOrWhiteSpace(c.Value.BranchName))
+            .Select(c => (
+                RepositoryId: c.Key,
+                c.Value.WorkspaceRepositoryId,
+                RemoteBranchName: c.Value.BranchName!.StartsWith("origin/", StringComparison.OrdinalIgnoreCase)
+                    ? c.Value.BranchName!
+                    : "origin/" + c.Value.BranchName))
             .ToList();
+        var pushedUpstreamRepoIds = remoteCandidates.Select(c => c.RepositoryId).ToHashSet();
         if (remoteCandidates.Count > 0)
         {
-            var wrlIds = remoteCandidates.Select(c => c.Link.WorkspaceRepositoryId).ToList();
+            var wrlIds = remoteCandidates.Select(c => c.WorkspaceRepositoryId).ToList();
             var existingRemotes = await _dbContext.RepositoryBranches
                 .Where(rb => wrlIds.Contains(rb.WorkspaceRepositoryId) && rb.IsRemote)
                 .Select(rb => new { rb.WorkspaceRepositoryId, rb.BranchName })
@@ -1500,21 +1544,19 @@ public sealed partial class WorkspacePushService(
                 .Select(rb => (rb.WorkspaceRepositoryId, rb.BranchName))
                 .ToHashSet();
             var toAdd = new List<RepositoryBranch>();
-            foreach (var (link, remoteBranchName) in remoteCandidates)
+            foreach (var (_, workspaceRepositoryId, remoteBranchName) in remoteCandidates)
             {
-                if (!existingRemoteSet.Contains((link.WorkspaceRepositoryId, remoteBranchName)))
+                if (!existingRemoteSet.Contains((workspaceRepositoryId, remoteBranchName)))
                 {
                     toAdd.Add(new RepositoryBranch
                     {
-                        WorkspaceRepositoryId = link.WorkspaceRepositoryId,
+                        WorkspaceRepositoryId = workspaceRepositoryId,
                         BranchName = remoteBranchName,
                         IsRemote = true,
                         LastSeenAt = now,
                         IsDefault = false
                     });
                 }
-
-                link.BranchHasUpstream = true;
             }
 
             if (toAdd.Count > 0)
@@ -1526,12 +1568,12 @@ public sealed partial class WorkspacePushService(
         var workspaceFolderName = workerArgs.WorkspaceFolderName;
         var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
 
-        var tagPinnedInLinks = links
-            .Where(l => !string.IsNullOrWhiteSpace(l.CheckedOutTag))
-            .Select(l => l.RepositoryId)
+        var tagPinnedInContext = checkouts
+            .Where(c => !string.IsNullOrWhiteSpace(c.Value.CheckedOutTag))
+            .Select(c => c.Key)
             .ToHashSet();
         var results = await Task.WhenAll(repos
-            .Where(r => !tagPinnedInLinks.Contains(r.RepoId))
+            .Where(r => !tagPinnedInContext.Contains(r.RepoId))
             .Select(async repo =>
         {
             try
@@ -1557,19 +1599,34 @@ public sealed partial class WorkspacePushService(
         // A failed or missing response leaves the persisted counts alone: nothing is marked probed, so the
         // writer has nothing to replace. Overwriting them with nulls would blank the badges after a
         // transient worker hiccup. Pending remote-branch rows flush with this one save.
-        var snapshots = results
-            .Where(r => r.Data != null)
-            .Select(r => (r.RepoId, new RepositoryStateSnapshot
+        //
+        // A pushed branch tracks its remote. That fact goes through the state writer with the counts, so a Feature
+        // records it on its own context state and only the special Workspace mirrors it onto the shared link. The
+        // worker's own answer wins when it gave one.
+        var countsByRepoId = results.Where(r => r.Data != null).ToDictionary(r => r.RepoId, r => r.Data!);
+        var snapshots = new List<(int RepositoryId, RepositoryStateSnapshot Snapshot)>();
+        foreach (var repoId in countsByRepoId.Keys.Union(pushedUpstreamRepoIds).OrderBy(id => id))
+        {
+            var pushedUpstream = pushedUpstreamRepoIds.Contains(repoId);
+            if (countsByRepoId.TryGetValue(repoId, out var data))
             {
-                OutgoingCommits = r.Data!.OutgoingCommits,
-                IncomingCommits = r.Data.IncomingCommits,
-                DefaultBranchBehind = r.Data.DefaultBranchBehind,
-                DefaultBranchAhead = r.Data.DefaultBranchAhead,
-                HasUpstream = r.Data.HasUpstream,
-                CommitCountsProbed = true,
-                UpstreamProbed = r.Data.HasUpstream.HasValue,
-            }))
-            .ToList();
+                snapshots.Add((repoId, new RepositoryStateSnapshot
+                {
+                    OutgoingCommits = data.OutgoingCommits,
+                    IncomingCommits = data.IncomingCommits,
+                    DefaultBranchBehind = data.DefaultBranchBehind,
+                    DefaultBranchAhead = data.DefaultBranchAhead,
+                    HasUpstream = data.HasUpstream ?? (pushedUpstream ? true : null),
+                    CommitCountsProbed = true,
+                    UpstreamProbed = data.HasUpstream.HasValue || pushedUpstream,
+                }));
+            }
+            else
+            {
+                snapshots.Add((repoId, new RepositoryStateSnapshot { HasUpstream = true, UpstreamProbed = true }));
+            }
+        }
+
         if (snapshots.Count > 0)
         {
             await _stateWriter.ApplyBatchAsync(contextId, workspaceId, snapshots, cancellationToken: cancellationToken);
@@ -1581,6 +1638,73 @@ public sealed partial class WorkspacePushService(
 
         await _recomputeScope.CompleteAsync(workspaceId, contextId, cancellationToken);
     }
+
+    /// <summary>What a context has checked out in one repository. All null when the context has no state row yet.</summary>
+    private sealed record ContextCheckout(int WorkspaceRepositoryId, string? BranchName, string? CheckedOutTag, bool? BranchHasUpstream);
+
+    /// <summary>
+    /// Branch, tag pin and upstream flag per repository id, for the context being pushed. The special Workspace reads
+    /// the shared link (its mirror). A Feature reads its own context state, and a repository with no state row yet is
+    /// unknown: it never borrows the Workspace's branch or tag.
+    /// </summary>
+    private async Task<Dictionary<int, ContextCheckout>> LoadContextCheckoutsAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        IReadOnlyCollection<int>? repositoryIds,
+        CancellationToken cancellationToken)
+    {
+        var linkQuery = _dbContext.WorkspaceRepositories.AsNoTracking().Where(wr => wr.WorkspaceId == workspaceId);
+        if (repositoryIds != null)
+            linkQuery = linkQuery.Where(wr => repositoryIds.Contains(wr.RepositoryId));
+        var links = await linkQuery
+            .Select(wr => new { wr.RepositoryId, wr.WorkspaceRepositoryId, wr.BranchName, wr.CheckedOutTag, wr.BranchHasUpstream })
+            .ToListAsync(cancellationToken);
+
+        var kind = await _dbContext.WorkspaceFeatureContexts
+            .AsNoTracking()
+            .Where(c => c.WorkspaceFeatureContextId == contextId.Value)
+            .Select(c => (WorkspaceFeatureContextKind?)c.Kind)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (kind == WorkspaceFeatureContextKind.Workspace)
+        {
+            return links.ToDictionary(
+                l => l.RepositoryId,
+                l => new ContextCheckout(l.WorkspaceRepositoryId, l.BranchName, l.CheckedOutTag, l.BranchHasUpstream));
+        }
+
+        var linkIds = links.Select(l => l.WorkspaceRepositoryId).ToList();
+        var states = await _dbContext.WorkspaceRepositoryContextStates
+            .AsNoTracking()
+            .Where(s => s.WorkspaceFeatureContextId == contextId.Value && linkIds.Contains(s.WorkspaceRepositoryId))
+            .Select(s => new { s.WorkspaceRepositoryId, s.BranchName, s.CheckedOutTag, s.BranchHasUpstream })
+            .ToDictionaryAsync(s => s.WorkspaceRepositoryId, cancellationToken);
+        return links.ToDictionary(
+            l => l.RepositoryId,
+            l => states.TryGetValue(l.WorkspaceRepositoryId, out var state)
+                ? new ContextCheckout(l.WorkspaceRepositoryId, state.BranchName, state.CheckedOutTag, state.BranchHasUpstream)
+                : new ContextCheckout(l.WorkspaceRepositoryId, null, null, null));
+    }
+
+    private async Task<HashSet<int>> LoadTagPinnedRepoIdsAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        CancellationToken cancellationToken)
+        => (await LoadContextCheckoutsAsync(workspaceId, contextId, null, cancellationToken))
+            .Where(c => !string.IsNullOrWhiteSpace(c.Value.CheckedOutTag))
+            .Select(c => c.Key)
+            .ToHashSet();
+
+    /// <summary>
+    /// True for a registry call that failed in transit and is worth asking again: network and socket errors, and a
+    /// request that timed out on its own (a cancellation while the wait's own token is still live).
+    /// </summary>
+    private static bool IsTransientRegistryFailure(Exception ex, CancellationToken waitToken)
+        => ex switch
+        {
+            OperationCanceledException => !waitToken.IsCancellationRequested,
+            HttpRequestException or TimeoutException or IOException or System.Net.Sockets.SocketException => true,
+            _ => false
+        };
 
     private Task<WorkerWorkspaceArgs> ResolveWorkerPathArgsAsync(
         int workspaceId,

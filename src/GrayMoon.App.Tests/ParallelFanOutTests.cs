@@ -189,7 +189,7 @@ public sealed class ParallelFanOutTests
             await db.SaveChangesAsync();
         }
 
-        var probe = new FanOutProbe();
+        var probe = new FanOutProbe { HoldUntilActive = Limit };
         ctx.WorkerBridge.RespondAsync(WorkerHubMethods.SweepPendingFeatureFolders, async (_, ct) =>
         {
             await probe.EnterAsync(ct);
@@ -419,6 +419,9 @@ public sealed class ParallelFanOutTests
         private int _activeWhenRootStarted;
         private int _sourcesFinishedWhenRootStarted;
 
+        /// <summary>When set, a call waits (up to 5 s) until this many calls have been active together.</summary>
+        public int HoldUntilActive { get; init; }
+
         public int MaxActive => Volatile.Read(ref _maxActive);
         public int ActiveWhenRootStarted => Volatile.Read(ref _activeWhenRootStarted);
         public int SourcesFinishedWhenRootStarted => Volatile.Read(ref _sourcesFinishedWhenRootStarted);
@@ -444,6 +447,10 @@ public sealed class ParallelFanOutTests
 
             try
             {
+                // Hold the call until the expected number run side by side (bounded), so a busy machine that starts
+                // the calls late still shows the real degree of parallelism instead of a lower one.
+                for (var waited = 0; HoldUntilActive > 0 && MaxActive < HoldUntilActive && waited < 5000; waited += 5)
+                    await Task.Delay(5, cancellationToken);
                 await Task.Delay(60, cancellationToken);
             }
             finally

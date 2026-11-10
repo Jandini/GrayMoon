@@ -71,7 +71,7 @@ git --no-optional-locks diff --numstat
 git --no-optional-locks diff --cached --numstat
 ```
 
-plus line counts for untracked text files under a soft 5 MiB per-file cap (`SoftSizeLimitBytes`). Watcher and audit scans leave `includeLineStats` false; the App's `GitChangesLineStatsRefresh` later requests a stats-bearing scan when counts are missing.
+plus line counts for untracked text files under a soft 5 MiB per-file cap (`SoftSizeLimitBytes`). Watcher and audit scans leave `includeLineStats` false; the App's `GitChangesLineStatsRefresh` later requests a stats-bearing scan when counts are missing. Requests for one repository and context are debounced into one scan; a new request replaces the pending one in a single atomic swap that cancels it, so concurrent snapshots never leave two scans running.
 
 `GitPorcelainV2Parser.Parse` turns the porcelain output into `IReadOnlyList<GitChangeEntry>`. There is **no path pagination** and **no path truncation** on the Worker; the only cap is `GitChangesOptions.MaxChangesPerSnapshot` (default 15,000), above which the scan fails with `TooManyChanges` instead of producing a snapshot. Nested ignored directories are not listed as individual files; an untracked nested git repository appears as one directory entry ending in `/` (`--untracked-files=all`).
 
@@ -112,7 +112,7 @@ In both cases the payload includes the **entire** `Changes` list for that reposi
 
 Per repository + context, the handler:
 
-1. Rejects `snapshot.Version <=` persisted `SnapshotVersion`.
+1. Rejects `snapshot.Version <=` persisted `SnapshotVersion` of the context row. With dual-write on, a legacy row whose version is already equal or higher skips only the legacy write for that snapshot; the context tables are still written and broadcast.
 2. Updates status counts (`StagedCount` / `ChangedCount` / `ConflictCount` derived from the entry list; line stats when present).
 3. `ExecuteDeleteAsync` all existing change entries for that context+repo.
 4. `AddRange` every entry from `snapshot.Changes`.

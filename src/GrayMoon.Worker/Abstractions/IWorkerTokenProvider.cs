@@ -6,7 +6,7 @@ public interface IWorkerTokenProvider
 {
     /// <summary>
     /// Returns a connector-scoped token suitable for remote git operations for the given repository,
-    /// or null when a token cannot be obtained. Implementations may cache tokens in-memory.
+    /// or null when a token cannot be obtained. The Worker's implementation asks the App every time and keeps no token.
     /// </summary>
     Task<string?> GetTokenForRepositoryAsync(int repositoryId, CancellationToken cancellationToken);
 

@@ -1,24 +1,29 @@
 using System.Collections.Concurrent;
 using System.Threading.Channels;
 using GrayMoon.App.Components.Features;
-using GrayMoon.App.Services.Ui;
+using GrayMoon.App.Data;
+using GrayMoon.App.Models;
 using GrayMoon.Application;
 using GrayMoon.Application.Features;
+using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Services.Features;
 
 /// <summary>
 /// Removes Features in the background once the user has confirmed the Remove Feature dialog. Up to
-/// <see cref="IFeatureRemovalQueue.MaxConcurrentRemovals"/> run at the same time; the rest wait in order. The user is
-/// told the outcome with a toast, whichever page is open.
+/// <see cref="IFeatureRemovalQueue.MaxConcurrentRemovals"/> run at the same time; the rest wait in order. The outcome
+/// is raised through <see cref="Completed"/>; each open tab shows it as a toast (<c>Toast.razor</c>), because this
+/// singleton cannot hold the per-circuit <c>IToastService</c>.
 /// </summary>
 public sealed class FeatureRemovalQueue(
     IServiceScopeFactory scopeFactory,
-    IToastService toastService,
     IFeatureFolderCleanupService folderCleanup,
-    ILogger<FeatureRemovalQueue> logger)
+    ILogger<FeatureRemovalQueue> logger,
+    TimeProvider? timeProvider = null)
     : BackgroundService, IFeatureRemovalQueue
 {
+    private static readonly TimeSpan ShutdownMarkTimeout = TimeSpan.FromSeconds(5);
+
     private readonly Channel<QueuedRemoval> _channel = Channel.CreateUnbounded<QueuedRemoval>();
     private readonly ConcurrentDictionary<int, byte> _pending = new();
 
@@ -56,11 +61,25 @@ public sealed class FeatureRemovalQueue(
         return true;
     }
 
-    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // The queue lives in memory, so nothing can be mid-removal when the App starts: a Feature still marked
+        // Removing was cut short by the previous shutdown or a crash. Release it now instead of waiting for the
+        // next Worker connect to run the reconciler.
+        await RecoverInterruptedRemovalsAsync(stoppingToken);
+
         var workers = Enumerable.Range(0, IFeatureRemovalQueue.MaxConcurrentRemovals)
             .Select(_ => Task.Run(() => RunWorkerAsync(stoppingToken), CancellationToken.None));
-        return Task.WhenAll(workers);
+        await Task.WhenAll(workers);
+
+        // Removals that were queued but never started changed nothing; they are dropped with the process.
+        while (_channel.Reader.TryRead(out var dropped))
+        {
+            _pending.TryRemove(dropped.FeatureContextId.Value, out _);
+            logger.LogWarning(
+                "Queued Feature removal dropped at shutdown; the Feature is unchanged. WorkspaceId={WorkspaceId} FeatureName={FeatureName}",
+                dropped.WorkspaceId, dropped.FeatureName);
+        }
     }
 
     private async Task RunWorkerAsync(CancellationToken stoppingToken)
@@ -72,8 +91,92 @@ public sealed class FeatureRemovalQueue(
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
-            // Shutting down; a removal cut short stays in the Removing state and can be continued later.
+            // Shutting down; RunAsync already moved a removal that was cut short out of the Removing state.
         }
+    }
+
+    /// <summary>
+    /// Marks every Feature still in <c>Removing</c> as <c>NeedsRepair</c> ("Interrupted while removing"), so Remove can
+    /// be run again. Called at startup, when no removal can be running. Returns the number of Features released.
+    /// Never throws except for cancellation: a database problem here must not stop the queue from starting.
+    /// </summary>
+    internal async Task<int> RecoverInterruptedRemovalsAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+            var removing = await db.WorkspaceFeatures
+                .Where(f => f.LifecycleState == WorkspaceFeatureLifecycleState.Removing)
+                .ToListAsync(cancellationToken);
+
+            var released = 0;
+            foreach (var feature in removing)
+            {
+                var contextIds = await db.WorkspaceFeatureContexts.AsNoTracking()
+                    .Where(c => c.WorkspaceFeatureId == feature.WorkspaceFeatureId)
+                    .Select(c => c.WorkspaceFeatureContextId)
+                    .ToListAsync(cancellationToken);
+                if (contextIds.Any(_pending.ContainsKey))
+                    continue;
+
+                MarkInterrupted(feature);
+                released++;
+                logger.LogWarning(
+                    "Feature removal was interrupted by a restart; marked NeedsRepair. WorkspaceId={WorkspaceId} FeatureName={FeatureName}",
+                    feature.WorkspaceId, feature.Name);
+            }
+
+            if (released > 0)
+                await db.SaveChangesAsync(cancellationToken);
+            return released;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Could not release Features left in the Removing state.");
+            return 0;
+        }
+    }
+
+    /// <summary>
+    /// Shutdown cut this removal short. Moves its Feature out of <c>Removing</c> right away, on a token of its own
+    /// (the stopping token is already cancelled). Best effort: the startup pass covers a failure here.
+    /// </summary>
+    private async Task MarkInterruptedAtShutdownAsync(QueuedRemoval removal)
+    {
+        try
+        {
+            using var timeout = new CancellationTokenSource(ShutdownMarkTimeout);
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync(timeout.Token);
+            var feature = await db.WorkspaceFeatureContexts
+                .Where(c => c.WorkspaceFeatureContextId == removal.FeatureContextId.Value)
+                .Select(c => c.WorkspaceFeature)
+                .FirstOrDefaultAsync(timeout.Token);
+            if (feature is not { LifecycleState: WorkspaceFeatureLifecycleState.Removing })
+                return;
+
+            MarkInterrupted(feature);
+            await db.SaveChangesAsync(timeout.Token);
+            logger.LogWarning(
+                "Feature removal interrupted by shutdown; marked NeedsRepair. WorkspaceId={WorkspaceId} FeatureName={FeatureName}",
+                removal.WorkspaceId, removal.FeatureName);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex, "Could not mark the interrupted Feature removal at shutdown. WorkspaceId={WorkspaceId} FeatureName={FeatureName}",
+                removal.WorkspaceId, removal.FeatureName);
+        }
+    }
+
+    private void MarkInterrupted(WorkspaceFeature feature)
+    {
+        feature.LifecycleState = WorkspaceFeatureLifecycleState.NeedsRepair;
+        feature.LastError = WorkspaceFeatureReconciler.InterruptedRemoving;
+        feature.UpdatedAt = (timeProvider ?? TimeProvider.System).GetUtcNow().UtcDateTime;
     }
 
     private async Task RunAsync(QueuedRemoval removal, CancellationToken stoppingToken)
@@ -88,6 +191,7 @@ public sealed class FeatureRemovalQueue(
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
+            await MarkInterruptedAtShutdownAsync(removal);
             _pending.TryRemove(removal.FeatureContextId.Value, out _);
             throw;
         }
@@ -109,28 +213,24 @@ public sealed class FeatureRemovalQueue(
 
     private void Announce(QueuedRemoval removal, OperationResult result)
     {
-        // Subscribers first (the feature list drops the finished Feature); the toast never delays them.
-        try
-        {
-            Completed?.Invoke(new FeatureRemovalCompleted(
-                removal.WorkspaceId, removal.FeatureContextId, removal.FeatureName, result));
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "A Feature removal subscriber failed.");
-        }
+        // Subscribers: the feature list drops the finished Feature, and every open tab shows the outcome toast.
+        // One failing subscriber must not keep the others from hearing about it.
+        var handlers = Completed;
+        if (handlers == null)
+            return;
 
-        try
+        var completed = new FeatureRemovalCompleted(
+            removal.WorkspaceId, removal.FeatureContextId, removal.FeatureName, result);
+        foreach (var handler in handlers.GetInvocationList().Cast<Action<FeatureRemovalCompleted>>())
         {
-            var message = BuildToast(removal.FeatureName, result, out var isError);
-            if (isError)
-                toastService.ShowError(message);
-            else
-                toastService.Show(message);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Could not show the Feature removal toast.");
+            try
+            {
+                handler(completed);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "A Feature removal subscriber failed.");
+            }
         }
     }
 

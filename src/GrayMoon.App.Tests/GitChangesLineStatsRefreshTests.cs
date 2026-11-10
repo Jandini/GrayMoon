@@ -96,6 +96,33 @@ public sealed class GitChangesLineStatsRefreshTests
     }
 
     [Fact]
+    public async Task Concurrent_requests_for_one_repository_still_run_one_scan()
+    {
+        // A long debounce keeps every request of a burst inside one window even on a slow machine.
+        var (refresh, scanner) = CreateRefresh(debounceMilliseconds: 1500);
+        using var lease = refresh.Subscribe(8);
+        const int repositories = 40;
+
+        for (var repositoryId = 1; repositoryId <= repositories; repositoryId++)
+        {
+            var id = repositoryId;
+            using var barrier = new Barrier(8);
+            var threads = Enumerable.Range(0, 8).Select(_ => new Thread(() =>
+            {
+                barrier.SignalAndWait();
+                refresh.RequestRepository(8, id);
+            })).ToList();
+            threads.ForEach(t => t.Start());
+            threads.ForEach(t => t.Join());
+        }
+
+        await WaitUntilAsync(() => scanner.Calls >= repositories);
+        await Task.Delay(300);
+        // A source that was overwritten without being cancelled runs its own numstat: more scans than repositories.
+        Assert.Equal(repositories, scanner.Calls);
+    }
+
+    [Fact]
     public async Task Dispose_unsubscribes_and_cancels_pending_repository_fill()
     {
         var (refresh, scanner) = CreateRefresh();
@@ -109,13 +136,14 @@ public sealed class GitChangesLineStatsRefreshTests
     }
 
     private static (GitChangesLineStatsRefresh Refresh, RecordingScanner Scanner) CreateRefresh(
-        Func<Task>? onScan = null)
+        Func<Task>? onScan = null,
+        int debounceMilliseconds = 10)
     {
         var scanner = new RecordingScanner(onScan);
         var refresh = new GitChangesLineStatsRefresh(
             scanner,
             new FakeFeatureContextScopeFactory(new WorkspaceFeatureContextId(1)),
-            Options.Create(new GitChangesOptions { WatcherDebounceMilliseconds = 10 }),
+            Options.Create(new GitChangesOptions { WatcherDebounceMilliseconds = debounceMilliseconds }),
             NullLogger<GitChangesLineStatsRefresh>.Instance);
         return (refresh, scanner);
     }

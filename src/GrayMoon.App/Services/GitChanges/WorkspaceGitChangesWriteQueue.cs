@@ -64,10 +64,22 @@ public class WorkspaceGitChangesWriteQueue(
                 await handler.HandleAsync(item.Notification, stoppingToken);
                 item.Completed?.TrySetResult(true);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
                 item.Completed?.TrySetCanceled(stoppingToken);
                 throw;
+            }
+            catch (OperationCanceledException ex)
+            {
+                // Not shutdown: a timeout or cancellation inside this one snapshot. Ending the single reader
+                // here would silently drop every later snapshot and hang its waiters, so only this item is
+                // cancelled and the reader goes on.
+                item.Completed?.TrySetCanceled(ex.CancellationToken);
+                logger.LogWarning(
+                    ex,
+                    "Git Changes snapshot processing was cancelled for workspace {WorkspaceId} repository {RepositoryId}; the queue continues",
+                    item.Notification.WorkspaceId,
+                    item.Notification.RepositoryId);
             }
             catch (Exception ex)
             {

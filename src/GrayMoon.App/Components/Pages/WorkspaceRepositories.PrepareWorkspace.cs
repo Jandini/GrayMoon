@@ -50,6 +50,7 @@ public sealed partial class WorkspaceRepositories
         // Branch creation (hooks suppressed, state persisted inline), then - only when every targeted repository is on
         // the new branch - the update, the push, or both as the shared combined Update and Push. A branch failure stops the
         // orchestrator before anything else runs and is reported through the error callbacks.
+        var jobContextId = RequireSelectedContextId();
         StartPageJob("Creating branches...", async (job, ct) =>
         {
             IReadOnlySet<int> syncedRepoIds = new HashSet<int>();
@@ -58,7 +59,7 @@ public sealed partial class WorkspaceRepositories
             {
                 var result = await ScopedExecutor.ExecuteAsync<IWorkspacePreparationOperations, PrepareWorkspaceResult>(
                     svc => svc.PrepareAsync(
-                        WorkspaceId, RequireSelectedContextId(),
+                        WorkspaceId, jobContextId,
                         request.NewBranchName,
                         request.BaseBranch,
                         tagFilteredRepoIds,
@@ -112,7 +113,7 @@ public sealed partial class WorkspaceRepositories
                     await RefreshAfterPipelinedRunAsync();
             }
 
-            await PreparePushOnlyAsync(job, ct, syncedRepoIds);
+            await PreparePushOnlyAsync(jobContextId, job, ct, syncedRepoIds);
         }, new PageJobOptions { RefreshOnSuccess = false });
     }
 
@@ -120,7 +121,7 @@ public sealed partial class WorkspaceRepositories
     /// Prepare Workspace with Push only: the standalone synchronized push after the branches exist. Update and Push never
     /// reaches here - it runs as the shared combined operation, including its approval for a normal push.
     /// </summary>
-    private async Task PreparePushOnlyAsync(BackgroundJobHandle job, CancellationToken ct, IReadOnlySet<int> syncedRepoIds)
+    private async Task PreparePushOnlyAsync(GrayMoon.Application.Features.WorkspaceFeatureContextId jobContextId, BackgroundJobHandle job, CancellationToken ct, IReadOnlySet<int> syncedRepoIds)
     {
         // Phase 3: determine push plan and execute push (per-level restore handled inside push service)
         job.ReportProgress("Preparing push...");
@@ -128,7 +129,7 @@ public sealed partial class WorkspaceRepositories
         IReadOnlySet<string> requiredPackageIds;
         try
         {
-            var plan = await BuildPushPlanAsync("No repositories to push.", ct);
+            var plan = await BuildPushPlanAsync(jobContextId, "No repositories to push.", ct);
             if (plan == null) return;
             (pushRepoIds, requiredPackageIds) = plan.Value;
         }
@@ -145,7 +146,7 @@ public sealed partial class WorkspaceRepositories
 
         try
         {
-            await ExecutePushCoreAsync(job, ct, pushRepoIds, synchronizedPush: true, requiredPackageIds, syncedRepoIds);
+            await ExecutePushCoreAsync(jobContextId, job, ct, pushRepoIds, synchronizedPush: true, requiredPackageIds, syncedRepoIds);
         }
         catch (SynchronizedPushNotPossibleException ex)
         {

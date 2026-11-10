@@ -21,6 +21,19 @@ public sealed record OperationResult(
     /// </summary>
     public string? RemoveFeaturePendingDeletionFolder { get; init; }
 
+    /// <summary>
+    /// What went wrong in a follow-up step of a run whose main work succeeded (a package restore that failed after
+    /// the push landed). <see cref="Success"/> stays true; the caller reports these as "done with a warning", never
+    /// as a failure and never silently. Null when there is nothing to warn about, and always null on a failure.
+    /// </summary>
+    public IReadOnlyList<string>? Warnings { get; init; }
+
+    /// <summary>One line that sums up <see cref="Warnings"/> for a toast or a response message. Null without warnings.</summary>
+    public string? WarningSummary { get; init; }
+
+    /// <summary>True for a successful run that has something to warn about.</summary>
+    public bool HasWarnings => Success && Warnings is { Count: > 0 };
+
     public static OperationResult Ok(
         IReadOnlyDictionary<int, string>? repoErrors = null,
         IReadOnlyDictionary<int, string>? levelErrors = null)
@@ -148,8 +161,19 @@ public static class OperationProgressExtensions
     public static IProgress<OperationProgress> ToOperationProgress(this Action<string> report)
         => new Progress<OperationProgress>(p => report(p.Message));
 
-    public static void ShowRepoErrors(this OperationResult result, Action<string> showError)
+    /// <summary>
+    /// Reports a result's errors. A successful result that carries warnings is not an error: its one-line summary
+    /// goes to <paramref name="showWarning"/> (to <paramref name="showError"/> when the caller has no warning
+    /// surface, so it is never dropped).
+    /// </summary>
+    public static void ShowRepoErrors(this OperationResult result, Action<string> showError, Action<string>? showWarning = null)
     {
+        if (result.HasWarnings)
+        {
+            (showWarning ?? showError)(result.WarningSummary ?? string.Join(Environment.NewLine, result.Warnings!));
+            return;
+        }
+
         if (result.RepoErrors is { Count: > 0 })
         {
             foreach (var (id, err) in result.RepoErrors)

@@ -273,8 +273,10 @@
         {
             await OnCancel.InvokeAsync();
         }
-        else if (ModalKeyboard.IsPlainEnter(e) && Mode == ConnectorModalMode.Delete)
+        else if (Mode == ConnectorModalMode.Delete
+            && ModalSubmitGuard.CanSubmit(ModalKeyboard.IsPlainEnter(e), e.Repeat, IsSubmitting))
         {
+            // Same guard as the Delete button (disabled while submitting): a held or repeated Enter deletes once.
             await OnDelete.InvokeAsync();
         }
     }

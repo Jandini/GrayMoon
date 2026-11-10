@@ -15,12 +15,11 @@ Design constraint that still applies: GrayMoon is not CI-aware. The package wait
 
 ## Still open
 
-1. **Notification panel start.** `WorkspaceActionNotificationPanel.razor` still awaits `StartAsync()` inside `OnAfterRenderAsync` (try/catch, not `TryStartAsync`). Move it onto the helper.
-2. **Hub start hardening.** `TryStartAsync` has no retry with back-off, no cancellation token tied to the page lifetime, and no debug log of circuit id, page, host, elapsed time and outcome (`started`, `cancelled by dispose`, `failed`). `WithAutomaticReconnect` does not cover a failed first start.
-3. **Tests.** No test references `WorkspaceSyncHubConnectionHelper`. Needed: one per outcome (started, cancelled, failed), and one showing that a cancelled start does not throw out of a render callback.
-4. **Continue waiting.** A "Continue waiting" action on the failed-level callout that resumes the same operation at that level without re-pushing.
-5. **Top bar writes from browser tabs.** `WorkspaceTopBarService.PushToDesktopAsync` still lets a browser tab on a workspace rewrite the Desktop window title and tray label. Use the same Desktop-client flag as Open in. `Worker.razor` also still uses a different probe name (`graymoonDesktopBridge.isAvailable`).
-6. **Toast.** The toast is still only a hint; keep the banner as the record (no change needed unless the banner is removed).
+1. **Hub start hardening.** `TryStartAsync` has no retry with back-off, no cancellation token tied to the page lifetime, and no debug log of circuit id, page, host, elapsed time and outcome (`started`, `cancelled by dispose`, `failed`). `WithAutomaticReconnect` does not cover a failed first start.
+2. **Tests.** No test references `WorkspaceSyncHubConnectionHelper`. Needed: one per outcome (started, cancelled, failed), and one showing that a cancelled start does not throw out of a render callback.
+3. **Continue waiting.** A "Continue waiting" action on the failed-level callout that resumes the same operation at that level without re-pushing.
+4. **Top bar writes from browser tabs.** `WorkspaceTopBarService.PushToDesktopAsync` still lets a browser tab on a workspace rewrite the Desktop window title and tray label. Use the same Desktop-client flag as Open in. `Worker.razor` also still uses a different probe name (`graymoonDesktopBridge.isAvailable`).
+5. **Toast.** The toast is still only a hint; keep the banner as the record (no change needed unless the banner is removed).
 
 ## Smaller risks seen in the original investigation
 

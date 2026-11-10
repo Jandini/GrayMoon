@@ -181,6 +181,129 @@ public sealed class PushUndoReturnCapabilitiesTests : IDisposable
         Assert.False(notification.State!.ProjectsProbed);
     }
 
+    /// <summary>
+    /// The scan after a push used to be started and left behind: the command returned, its pool slot was free and
+    /// its cancellation no longer reached the scan. It now runs before the command returns.
+    /// </summary>
+    [Fact]
+    public async Task Push_holds_its_job_until_the_post_push_sync_is_done()
+    {
+        await CloneOnFeatureBranchAsync();
+        var (projectScanner, versionProviders) = NewDoubles();
+        var sync = new HeldSync();
+        var command = new PushRepositoryCommand(
+            _git, _reader, projectScanner, versionProviders, new GitRemoteIntegrateService(_git, _reader),
+            new DisconnectedHubProvider(), NullLogger<PushRepositoryCommand>.Instance)
+        {
+            SendSyncOverride = sync.SendAsync,
+        };
+
+        var run = command.ExecuteAsync(PushRequest());
+        await sync.Started.WaitAsync(TimeSpan.FromSeconds(60));
+        await Task.WhenAny(run, Task.Delay(500));
+        Assert.False(run.IsCompleted, "the push returned while its scan was still running");
+
+        sync.Release();
+        var response = await run.WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.True(response.Success, response.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task Cancelling_the_push_job_ends_its_post_push_sync_and_keeps_the_push_result()
+    {
+        await CloneOnFeatureBranchAsync();
+        var (projectScanner, versionProviders) = NewDoubles();
+        var sync = new HeldSync();
+        using var job = new CancellationTokenSource();
+        var command = new PushRepositoryCommand(
+            _git, _reader, projectScanner, versionProviders, new GitRemoteIntegrateService(_git, _reader),
+            new DisconnectedHubProvider(), NullLogger<PushRepositoryCommand>.Instance)
+        {
+            SendSyncOverride = sync.SendAsync,
+        };
+
+        var run = command.ExecuteAsync(PushRequest(), job.Token);
+        await sync.Started.WaitAsync(TimeSpan.FromSeconds(60));
+        await job.CancelAsync();
+        var response = await run.WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.True(sync.Cancelled, "the job's cancellation did not reach the scan");
+        Assert.True(response.Success, response.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task Undo_push_holds_its_job_until_the_post_reset_sync_is_done()
+    {
+        await CloneOnFeatureBranchAsync();
+        var (projectScanner, versionProviders) = NewDoubles();
+        var pushed = await NewPushCommand(projectScanner, versionProviders).ExecuteAsync(PushRequest());
+        Assert.True(pushed.Success, pushed.ErrorMessage);
+        var sync = new HeldSync();
+        var command = new UndoPushCommand(_git, _reader, versionProviders, new DisconnectedHubProvider(), NullLogger<UndoPushCommand>.Instance)
+        {
+            SendSyncOverride = sync.SendAsync,
+        };
+
+        var run = command.ExecuteAsync(new UndoPushRequest
+        {
+            WorkspaceRoot = _root,
+            WorkspaceName = "ws",
+            RepositoryName = "repo",
+            WorkspaceId = 1,
+            RepositoryId = 2,
+            BranchName = "feature/x",
+            KeepChanges = true,
+            Capabilities = BasicWithoutVersioning,
+        });
+        await sync.Started.WaitAsync(TimeSpan.FromSeconds(60));
+        await Task.WhenAny(run, Task.Delay(500));
+        Assert.False(run.IsCompleted, "the undo returned while its scan was still running");
+
+        sync.Release();
+        var response = await run.WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.True(response.Success, response.ErrorMessage);
+    }
+
+    private PushRepositoryRequest PushRequest() => new()
+    {
+        WorkspaceRoot = _root,
+        WorkspaceName = "ws",
+        RepositoryName = "repo",
+        WorkspaceId = 1,
+        RepositoryId = 2,
+        BranchName = "feature/x",
+        Capabilities = BasicWithoutVersioning,
+    };
+
+    /// <summary>Stands in for the hub send: reports that the sync was reached, then waits to be released or cancelled.</summary>
+    private sealed class HeldSync
+    {
+        private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Started => _started.Task;
+
+        public bool Cancelled { get; private set; }
+
+        public void Release() => _release.TrySetResult();
+
+        public async Task SendAsync(GrayMoon.Abstractions.Notifications.RepositorySyncNotification notification, CancellationToken cancellationToken)
+        {
+            _started.TrySetResult();
+            try
+            {
+                await _release.Task.WaitAsync(cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                Cancelled = true;
+                throw;
+            }
+        }
+    }
+
     private (CountingCsProjFileService ProjectScanner, CountingVersionProviderFactory VersionProviders) NewDoubles()
         => (new CountingCsProjFileService(), CapabilityTestDoubles.RealFactory(_git));
 

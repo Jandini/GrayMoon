@@ -1,0 +1,44 @@
+---
+description: Blazor page jobs - page state only on the dispatcher, context captured at queue time, restartable loads guarded
+globs: "**/Components/**/*.cs,**/Components/**/*.razor"
+alwaysApply: false
+---
+
+# Blazor page jobs and component state
+
+A job body (`StartJob`, `StartPageJob`, `StartWorkspaceJob`, `Task.Run`) runs on
+the thread pool while the dispatcher may be rendering. Each rule is a confirmed
+defect from the 2026-11-10 code review. Full text: `AGENTS.md`, "Blazor page
+jobs: page state only on the dispatcher".
+
+1. **Never assign or mutate page fields the markup reads from a job body**
+   (`_slots`, `_linkByRepoId`, `prByRepositoryId`, `repoSyncStatus`, any status
+   dictionary). Load into locals or a snapshot, then apply inside `InvokeAsync`
+   / `SafeInvoke` after checking `_disposed` and the context generation.
+2. **A reload helper awaited by a job is a load step plus a dispatcher apply
+   step.** Catching `InvalidOperationException` around a thread-pool swap is
+   not a fix.
+3. **Capture the context before queuing the job:**
+   `var contextId = RequireSelectedContextId();` before `StartJob`. Never call
+   `RequireSelectedContextId()` inside a job lambda or a
+   `ScopedExecutor.ExecuteAsync(svc => ...)` lambda that runs in a job.
+4. **Do not gate setup that needs loaded data on `firstRender`.** The first
+   render happens before `OnInitializedAsync` finishes. Start hubs and
+   background refresh at the end of the load, through
+   `WorkspaceSyncHubConnectionHelper`.
+5. **Check that a job actually started.** `StartJob` can return another
+   operation's handle or refuse; do not report work that was dropped.
+6. **A restartable load (modal reopen, parameter change, search) has a
+   generation counter and its own `CancellationTokenSource`.** Late results are
+   ignored; a newer request is never dropped silently. Reference:
+   `FilterSearchInput`, `DebouncedQueryLoader`.
+7. **Component background loops catch every exception and log it**;
+   `DisposeAsync` never rethrows a loop fault.
+8. **JS interop handles `JSDisconnectedException` and
+   `InvalidOperationException`** and is not called on every render when nothing
+   changed. Focus once, not every render.
+9. **Every submit path of a modal shares one guard** (Enter, button, each
+   mode), and a check that exists on one tab exists on every tab doing the
+   same action.
+10. **Remove every subscription to a singleton in `Dispose`**
+    (`RemoveStateChanged`, `-=`), and do not subscribe during prerender.

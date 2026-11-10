@@ -243,6 +243,7 @@ public sealed partial class WorkspaceRepositories
         var draftContextId = (_selectedContextId ?? default).Value;
         _newPrModal = _newPrModal with { IsVisible = false };
 
+        var jobContextId = RequireSelectedContextId();
         JobService.StartJob(PageJobKey, total == 1 ? "Creating 1 pull request..." : $"Creating {total} pull requests...", async (job, ct) =>
         {
             // Push and create run inside the same job so the loading overlay stays up continuously
@@ -253,7 +254,7 @@ public sealed partial class WorkspaceRepositories
 
                 var pushResult = await ScopedExecutor.ExecuteAsync<IWorkspacePushOperations, OperationResult>(svc =>
                     svc.PushAsync(
-                        WorkspaceId, RequireSelectedContextId(),
+                        WorkspaceId, jobContextId,
                         repoIdsToPush,
                         synchronizedPush: false,
                         requiredPackageIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase),

@@ -50,16 +50,21 @@ public sealed partial class WorkspaceGitService
         var remoteBranches = refreshResponse.RemoteBranches.Where(b => !string.IsNullOrWhiteSpace(b)).ToList();
         var tags = refreshResponse.Tags.Where(t => !string.IsNullOrWhiteSpace(t)).ToList();
 
-        await PersistBranchesAsync(wr.WorkspaceRepositoryId, localBranches, remoteBranches, refreshResponse.DefaultBranch, tags, refreshResponse.CurrentTag, cancellationToken);
+        await PersistBranchesAsync(contextId, wr.WorkspaceRepositoryId, localBranches, remoteBranches, refreshResponse.DefaultBranch, tags, refreshResponse.CurrentTag, cancellationToken);
 
         // BranchHasUpstream is only written from the worker's own git-config probe. Deriving it here by
         // matching the branch name against the remote list said "has upstream" for any branch that merely
         // shares a name with a remote ref, which is how a freshly checked-out default branch could end up
         // with the upstream badge instead of its commit counts.
+        // It is the upstream of the checkout the refresh ran in, so it goes to that context's state; the writer
+        // mirrors it onto the shared link only for the special Workspace.
         if (refreshResponse.UpstreamProbed && string.IsNullOrWhiteSpace(refreshResponse.CurrentTag))
         {
-            wr.BranchHasUpstream = refreshResponse.HasUpstream;
-            await _dbContext.SaveChangesAsync(cancellationToken);
+            await _stateWriter.ApplyAsync(contextId, workspaceId, repositoryId, new RepositoryStateSnapshot
+            {
+                UpstreamProbed = true,
+                HasUpstream = refreshResponse.HasUpstream,
+            }, cancellationToken: cancellationToken);
         }
 
         return true;
@@ -79,10 +84,14 @@ public sealed partial class WorkspaceGitService
         IReadOnlyList<string>? remoteBranches,
         string? defaultBranchName = null,
         CancellationToken cancellationToken = default)
-        => PersistBranchesAsync(workspaceRepositoryId, localBranches, remoteBranches, defaultBranchName, tags: null, currentTag: null, cancellationToken);
+        => _branchWriter.PersistAsync(workspaceRepositoryId, localBranches, remoteBranches, defaultBranchName, tags: null, cancellationToken);
 
-    /// <summary>Persists branches and tags for a workspace repository. Removes branches/tags not in the fetched list, adds new ones, updates LastSeenAt for existing ones. Optionally marks the default branch (e.g. main or master) and the currently checked-out tag.</summary>
-    public Task PersistBranchesAsync(
+    /// <summary>
+    /// Persists branches and tags for a workspace repository. Removes branches/tags not in the fetched list, adds new ones, updates LastSeenAt for existing ones. Optionally marks the default branch (e.g. main or master).
+    /// The branch and tag rows are shared by every context; the checked-out tag is recorded on <paramref name="contextId"/> (the context the refresh ran in).
+    /// </summary>
+    public async Task PersistBranchesAsync(
+        WorkspaceFeatureContextId contextId,
         int workspaceRepositoryId,
         IReadOnlyList<string>? localBranches,
         IReadOnlyList<string>? remoteBranches,
@@ -90,7 +99,10 @@ public sealed partial class WorkspaceGitService
         IReadOnlyList<string>? tags,
         string? currentTag,
         CancellationToken cancellationToken = default)
-        => _branchWriter.PersistAsync(workspaceRepositoryId, localBranches, remoteBranches, defaultBranchName, tags, currentTag, cancellationToken);
+    {
+        await _branchWriter.PersistAsync(workspaceRepositoryId, localBranches, remoteBranches, defaultBranchName, tags, cancellationToken);
+        await _stateWriter.ApplyTagRefreshAsync(contextId, workspaceRepositoryId, tags, currentTag, cancellationToken);
+    }
 
     /// <summary>Creates a new branch in all workspace repos (in parallel), then checks it out. baseBranch is "__default__" to use each repo's default, or a branch name. When <paramref name="repositoryIds"/> is set, only those repos are included. When <paramref name="syncState"/> is true, hooks are suppressed and the worker returns full state inline so the app can persist it without waiting for async hook syncs.</summary>
     public async Task<IReadOnlyDictionary<int, string>> CreateBranchesAsync(
@@ -285,25 +297,11 @@ public sealed partial class WorkspaceGitService
         CancellationToken cancellationToken = default)
         => _branchWriter.AddLocalBranchesAsync(branches, cancellationToken);
 
-    /// <summary>Ensures a remote branch row (<c>origin/&lt;name&gt;</c>) exists for the workspace repository. Unlike <see cref="EnsureRemoteBranchPersistedAsync"/> it leaves BranchHasUpstream alone, for branches that are not necessarily the checked-out one.</summary>
+    /// <summary>Ensures a remote branch row (<c>origin/&lt;name&gt;</c>) exists for the workspace repository. It leaves BranchHasUpstream alone: the branch is not necessarily the checked-out one, and upstream state belongs to a context.</summary>
     public Task EnsureRemoteBranchRowPersistedAsync(int workspaceRepositoryId, string branchName, CancellationToken cancellationToken = default)
         => _branchWriter.AddRemoteBranchAsync(workspaceRepositoryId, branchName, cancellationToken);
 
     /// <summary>Removes a branch that git no longer has from RepositoryBranches. A remote branch may be passed with or without the <c>origin/</c> prefix. Does not touch the checked-out branch or upstream state of the workspace repository.</summary>
     public Task RemoveBranchPersistedAsync(int workspaceRepositoryId, string branchName, bool isRemote, CancellationToken cancellationToken = default)
         => _branchWriter.RemoveBranchAsync(workspaceRepositoryId, branchName, isRemote, cancellationToken);
-
-    /// <summary>Adds the given branch as a remote branch to persistence and sets BranchHasUpstream on the workspace repository link. Used after a successful push so the branch appears in Remotes without calling refresh branches.</summary>
-    public async Task EnsureRemoteBranchPersistedAsync(int workspaceId, int repositoryId, string branchName, CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(branchName))
-            return;
-        var wr = await _dbContext.WorkspaceRepositories
-            .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId, cancellationToken);
-        if (wr == null)
-            return;
-        await _branchWriter.AddRemoteBranchAsync(wr.WorkspaceRepositoryId, branchName, cancellationToken);
-        wr.BranchHasUpstream = true;
-        await _dbContext.SaveChangesAsync(cancellationToken);
-    }
 }

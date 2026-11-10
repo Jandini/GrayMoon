@@ -269,6 +269,7 @@ public sealed class WorkspaceBranchOperations(
                 var remoteBranches = refreshResponse.RemoteBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? [];
                 var tags = refreshResponse.Tags?.Where(t => !string.IsNullOrWhiteSpace(t)).ToList() ?? [];
                 await workspaceGitService.PersistBranchesAsync(
+                    contextId,
                     wr.WorkspaceRepositoryId,
                     localBranches,
                     remoteBranches,
@@ -279,10 +280,15 @@ public sealed class WorkspaceBranchOperations(
                 // Only the worker's git-config probe may set this. Matching the branch name against the
                 // remote list marked any same-named branch as having an upstream, which showed the upstream
                 // badge on branches that had never been pushed.
+                // It goes to the state of the context the refresh ran in; the writer mirrors it onto the shared
+                // link only for the special Workspace.
                 if (refreshResponse.UpstreamProbed && string.IsNullOrWhiteSpace(refreshResponse.CurrentTag))
                 {
-                    wr.BranchHasUpstream = refreshResponse.HasUpstream;
-                    await dbContext.SaveChangesAsync(cancellationToken);
+                    await stateWriter.ApplyAsync(contextId, workspaceId, repositoryId, new RepositoryStateSnapshot
+                    {
+                        UpstreamProbed = true,
+                        HasUpstream = refreshResponse.HasUpstream,
+                    }, cancellationToken: cancellationToken);
                 }
                 await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
             }
@@ -819,8 +825,12 @@ public sealed class WorkspaceBranchOperations(
 
             if (isRemote && string.Equals(await GetCurrentBranchAsync(workspaceId, contextId, wr.WorkspaceRepositoryId, cancellationToken), branchName, StringComparison.OrdinalIgnoreCase))
             {
-                wr.BranchHasUpstream = false;
-                await dbContext.SaveChangesAsync(cancellationToken);
+                // The deleted remote branch was this context's upstream; the shared link changes only for the special Workspace.
+                await stateWriter.ApplyAsync(contextId, workspaceId, repositoryId, new RepositoryStateSnapshot
+                {
+                    UpstreamProbed = true,
+                    HasUpstream = false,
+                }, cancellationToken: cancellationToken);
             }
 
             await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);

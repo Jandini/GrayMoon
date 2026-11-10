@@ -1,3 +1,4 @@
+using GrayMoon.Common.Git;
 using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Jobs.Requests;
 using GrayMoon.Worker.Jobs.Response;
@@ -30,9 +31,16 @@ public sealed class StageAndCommitCommand(IGitService git, IGitRepositoryReader 
         var stagePaths = pathsToStage.ToList();
         foreach (var path in pathsToStage.ToList())
         {
-            if (string.IsNullOrWhiteSpace(path) || !path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+            if (string.IsNullOrWhiteSpace(path))
                 continue;
-            var props = CentralPackageVersions.FindPropsFile(Path.Combine(repoPath, path), repoPath);
+            // Validated before the path is combined with the repository; a rooted or ".." path refuses the commit
+            // here instead of first being used to look for a props file.
+            var validation = GitRepositoryPathValidator.Validate(repoPath, path);
+            if (!validation.IsValid || validation.FullPath is null)
+                return new StageAndCommitResponse { Success = false, ErrorMessage = validation.ErrorMessage ?? $"Invalid path: {path}" };
+            if (!path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+                continue;
+            var props = CentralPackageVersions.FindPropsFile(validation.FullPath, repoPath);
             if (props == null)
                 continue;
             var relative = Path.GetRelativePath(repoPath, props).Replace('\\', '/');

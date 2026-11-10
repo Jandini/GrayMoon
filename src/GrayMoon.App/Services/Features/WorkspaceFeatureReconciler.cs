@@ -18,7 +18,8 @@ public sealed class WorkspaceFeatureReconciler(
     IServiceScopeFactory scopeFactory,
     WorkerConnectionTracker connectionTracker,
     IWorkspaceOperationLock operationLock,
-    ILogger<WorkspaceFeatureReconciler> logger) : IWorkspaceFeatureReconciler, IHostedService
+    ILogger<WorkspaceFeatureReconciler> logger,
+    IFeatureRemovalQueue? removalQueue = null) : IWorkspaceFeatureReconciler, IHostedService
 {
     internal const string InterruptedCreating = "Interrupted while creating";
     internal const string InterruptedRemoving = "Interrupted while removing";
@@ -141,10 +142,27 @@ public sealed class WorkspaceFeatureReconciler(
                 || f.LifecycleState == WorkspaceFeatureLifecycleState.Removing)
             .ToListAsync(cancellationToken);
 
+        // A queued Remove takes no Workspace lock, so "not structurally busy" does not mean nobody owns this
+        // Feature. One that is queued or being removed right now is not interrupted (review 2026-11-10).
+        var stuckIds = stuck.Select(f => f.WorkspaceFeatureId).ToList();
+        var contextIdByFeatureId = new Dictionary<int, int>();
+        if (removalQueue is not null && stuckIds.Count > 0)
+        {
+            var contexts = await db.WorkspaceFeatureContexts.AsNoTracking()
+                .Where(c => c.WorkspaceFeatureId != null && stuckIds.Contains(c.WorkspaceFeatureId.Value))
+                .Select(c => new { FeatureId = c.WorkspaceFeatureId!.Value, c.WorkspaceFeatureContextId })
+                .ToListAsync(cancellationToken);
+            foreach (var context in contexts)
+                contextIdByFeatureId[context.FeatureId] = context.WorkspaceFeatureContextId;
+        }
+
         var interrupted = 0;
         foreach (var feature in stuck)
         {
             if (operationLock.IsWorkspaceStructurallyBusy(feature.WorkspaceId))
+                continue;
+            if (contextIdByFeatureId.TryGetValue(feature.WorkspaceFeatureId, out var contextId)
+                && IsRemovalPending(contextId))
                 continue;
 
             var message = feature.LifecycleState == WorkspaceFeatureLifecycleState.Creating
@@ -301,6 +319,9 @@ public sealed class WorkspaceFeatureReconciler(
                     continue;
                 if (!featuresById.TryGetValue(featureId, out var feature))
                     continue;
+                // Its worktrees are disappearing on purpose; a missing one is not a repair case.
+                if (IsRemovalPending(featureContext.WorkspaceFeatureContextId))
+                    continue;
 
                 foreach (var row in featureContext.FeatureRepositories)
                 {
@@ -429,6 +450,9 @@ public sealed class WorkspaceFeatureReconciler(
         if (dirty)
             await db.SaveChangesAsync(cancellationToken);
     }
+
+    private bool IsRemovalPending(int featureContextId) =>
+        removalQueue?.IsPending(new WorkspaceFeatureContextId(featureContextId)) == true;
 
     private static async Task<string?> SafeMainPathAsync(
         IWorkspaceContextPathResolver pathResolver,

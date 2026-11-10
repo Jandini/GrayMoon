@@ -1,0 +1,32 @@
+---
+description: Worker - validate every external path, ArgumentList only, .git may be a file, bounded listener and queues
+globs: "**/GrayMoon.Worker/**/*.cs,**/GrayMoon.Common/**/*.cs"
+alwaysApply: false
+---
+
+# Worker: input, processes and git
+
+Each rule is a confirmed defect from the 2026-11-10 code review. Details:
+`AGENTS.md`, "Worker: input, processes and git".
+
+1. **Validate every path from outside the Worker** - request DTO `*Path` /
+   `*Paths` with `GitRepositoryPathValidator` (rooted and `.`/`..` rejected),
+   hook payload paths against a known workspace root. The App is not a trusted
+   source of paths.
+2. **Never interpolate a command line.** `ArgumentList`, `--` before refs and
+   paths, `:(literal)` pathspecs.
+3. **Launch processes only through `ICommandLineService` /
+   `IBoundedProcessRunner`**; take an `IRepositoryAccess` lease for LibGit2Sharp
+   handles and file walks.
+4. **Never assume `.git` is a directory** (it is a file in a Feature
+   worktree). Use `git rev-parse --git-path <name>`, not
+   `Path.Combine(repo, ".git", ...)`. Test with a `GitScenarios` worktree.
+5. **A non-zero exit is `Success=false`** with the stderr tail; a timeout is
+   reported as a timeout.
+6. **Local HTTP listeners cap the body (64 KB), require
+   `application/json`, and stay on loopback.** Loopback is not trust.
+7. **A SignalR handler never blocks on a bounded queue** (`TryWrite` and
+   answer "queue full"), so `CancelCommand` is never stuck.
+8. **No fire-and-forget work outside the pools.**
+9. **A deleting sweep takes the same lock as the code that adds.**
+10. Request and response DTOs stay `sealed class` with `[JsonPropertyName]`.

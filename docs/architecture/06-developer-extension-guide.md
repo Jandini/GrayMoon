@@ -135,7 +135,7 @@ A start of Update and Push from a page, popup, Prepare Workspace, REST or a futu
 - Show the result with `UpdateAndPushResultPresenter`. On `ApprovalRequired`, ask the user and only then send `ApproveNormalPushContinuation`; never approve on the user's behalf.
 - Run the call inside the surface's job or lock (`BackgroundJobService` or `RunExclusiveAsync`); the job body only calls `ExecuteAsync`.
 
-Changing the engine: `UpdateAndPushOrchestrator` talks to `IDependencyUpdateLane` and `IPushLane`, so test ordering and failure handling with fake lanes (`UpdateAndPushOrchestratorPipelineTests`). A `Pipelined = false` result must stay free of side effects, because the coordinator then falls back to the sequential path. Policy (update failure gate, approval, default-branch refusal) belongs in the coordinator, not in the engine or the callers. See `02-system-architecture.md` section 8A.
+Changing the engine: `UpdateAndPushOrchestrator` talks to `IDependencyUpdateLane` and `IPushLane`, so test ordering and failure handling with fake lanes (`UpdateAndPushOrchestratorPipelineTests`). A push lane that stops must end its task (return or throw) after reporting the level error: the engine reads that as the signal to stop the update at its next level boundary (`04-runtime-communication-and-concurrency.md` section 6). A warning that must not stop the run, such as a failed restore, is reported on the repository; when warnings are all a push reported, the result is `OperationResult` with `Success` true, `Warnings` and `WarningSummary` (`PushOperationResult.TryDoneWithRestoreWarnings`), and callers show the summary (`ShowRepoErrors` warning callback, `UpdateAndPushNoticeKind.Warning`) instead of a failure. A `Pipelined = false` result must stay free of side effects, because the coordinator then falls back to the sequential path. Policy (update failure gate, approval, default-branch refusal) belongs in the coordinator, not in the engine or the callers. See `02-system-architecture.md` section 8A.
 
 ## 5. Use query services for large pages
 
@@ -307,7 +307,7 @@ Keep synthetic detached-HEAD descriptions out of persisted real branches.
 
 Rules:
 
-- Branch row changes go through `RepositoryBranchWriter` (`PersistAsync` for a full refresh; `AddLocalBranchesAsync`, `AddRemoteBranchAsync`, `RemoveBranchAsync`, `PruneRemoteBranchesAsync` for single changes). Remote rows are `origin/<name>`, normalized only there (`ToRemoteBranchName`). These methods never touch tags. Remove a row only after git confirmed the delete. Test: `FeatureBranchPersistenceTests`.
+- Branch row changes go through `RepositoryBranchWriter` (`PersistAsync` for a full refresh; `AddLocalBranchesAsync`, `AddRemoteBranchAsync`, `RemoveBranchAsync`, `PruneRemoteBranchesAsync` for single changes). Remote rows are `origin/<name>`, normalized only there (`ToRemoteBranchName`). These methods never touch tags. Remove a row only after git confirmed the delete. Test: `FeatureBranchPersistenceTests`. The writer never sets a checkout's tag, branch or upstream flag: pass the context to `WorkspaceGitService.PersistBranchesAsync(contextId, ...)` or call `WorkspaceRepositoryStateWriter.ApplyTagRefreshAsync` / `ApplyAsync`. Test: `FeatureContextBranchRefreshScopingTests`.
 - Any new branch or tag mutation that can run in a Feature context must call `IFeatureBranchGuard.CheckAsync` (rules and messages in `FeatureBranchPolicy`). A Feature keeps every repository on its Feature branch (or detached at its pinned tag); the guard is enforced service-side for dialog, REST and bulk paths, so a new entry point is not protected by the dialog alone.
 - **Tag-pinned / tag-checked-out repositories are never part of mutating operations.** Filter them out of candidate id sets (`!wr.IsOnTag` / empty `CheckedOutTag`) before branch create/checkout, Push, Sync Commits, Update Dependencies, Return to Default, Prepare Workspace, and bulk follow-ups such as Merge PRs... → Return to default → All repositories. Service paths must leave them untouched (skip, do not fail or mutate) when an id slips through - Return to Default classifies `IsOnTag` as excluded, not blocking (`ClassifyRepository`, `ReturnToDefaultUnattendedBatchAsync`, `ExecuteReturnToDefaultAsync`). Switching onto a tag (which records the pin) and leaving a tag through GrayMoon are the intentional exceptions.
 - Never drop, cap or delay tags to speed up a sync.
@@ -397,6 +397,13 @@ Lock scopes (`IWorkspaceOperationLock`, implemented by `WorkspaceOperationRunner
 - Remove Feature takes no lock: it runs in `FeatureRemovalQueue` (at most `IFeatureRemovalQueue.MaxConcurrentRemovals` = 4 at once) so Sync and every other operation keep working. Code that must not run during a removal cannot rely on `IsWorkspaceStructurallyBusy`.
 
 Do not depend on page-owned scoped services after the component is gone unless the work creates its own scope. A job body that calls back into the page after its Worker work must guard on `_disposed` (see `GrayMoon/CLAUDE.md` "Background job system").
+
+Service lifetime rules:
+
+- No singleton or hosted service holds per-circuit state. UI notification state lives in scoped services: `IToastService` is scoped (one per browser tab), so a toast shows only in the tab that raised it. A singleton that has something to tell the user raises an event, and a per-circuit component shows it (`FeatureRemovalQueue.Completed` to `Toast.razor`).
+- Do not inject a scoped service into a singleton. In Development the container is built with `ValidateScopes` and `ValidateOnBuild` (`Program.cs`), so that mistake stops startup, and `ServiceContainerConventionTests` builds the same container (`GrayMoonServiceRegistration.cs`) with both flags in every test run; `ToastServiceLifetimeTests` checks the toast consumers.
+- A component or scoped service that subscribes to a singleton (`WorkerConnectionTracker.OnStateChanged`, `WorkerQueueStateService`, `IFeatureRemovalQueue.Completed`) keeps the delegate in a field and removes it in `Dispose`. Do not subscribe during prerender (`RendererInfo.IsInteractive`) or from the statically rendered `MainLayout`.
+- `BackgroundJobService.StartJob` may refuse a start; it then shows the tab a warning toast itself. Check `BackgroundJobHandle.WasStarted` (or `IsRunning` beforehand) before reporting your own work as running or completed, and do not add a second "already running" message.
 
 ---
 
@@ -587,6 +594,8 @@ A Workspace repository can be checked out in several contexts at once (the speci
 
 When adding a context-aware overload, update every call site that already has a context in scope.
 
+**One writer.** `WorkspaceRepositoryStateWriter` is the only code that writes per-context checkout state (branch, tag, counts, upstream, sync status), and the only code that mirrors it onto the shared link. Operation code never assigns those columns on a `WorkspaceRepositoryLink` itself, not even "just the error flag": build a `RepositoryStateSnapshot` with the probed group set (an empty snapshot plus `SyncStatusWrite.Error` marks a failure) and call `ApplyAsync` / `ApplyBatchAsync` with the context id. Reading follows the same split: `WorkspacePushService.LoadContextCheckoutsAsync` is the push-side example (link for the special Workspace, context state for a Feature, unknown when the Feature has no row). Reference tests: `WorkspacePushStrategyTests.After_a_Feature_push_the_upstream_goes_on_the_Feature_state_and_the_shared_link_is_untouched`, `CommitSyncPullStateTests.Pull_failure_in_a_Feature_marks_the_Feature_state_and_leaves_the_shared_link_alone`.
+
 Reference test: `WorkspaceRepositoryLinkListQueryServiceTests.Feature_context_sort_keyset_and_level_grouping_use_context_state_not_shared_link`.
 
 ---
@@ -675,6 +684,24 @@ process-count tests (GitServiceFewerProcessesTests)
 architecture tests (FeaturesDiskAccessArchitectureTests, WorkerSendSiteGuardTests)
 ```
 
+### Convention tests (how the rules are enforced)
+
+The defect-prevention rules in `AGENTS.md` are checked by tests in `GrayMoon.App.Tests/Conventions/` and `GrayMoon.Worker.Tests/Conventions/`. Each test scans the source text or the compiled assembly, and each has a second test that feeds the scan a synthetic violation, so a scan that stops matching fails too.
+
+| Rule | Test | What it checks |
+|---|---|---|
+| Remove every event subscription | `EventSubscriptionConventionTests` | Every `X.Event += Handler` and `.OnStateChanged(h)` in `Components/**` (a component is its `.razor` file plus its partial `.cs` files) has a matching `-=` / `.RemoveStateChanged(h)`. A lambda subscription always fails. |
+| Capture the context before the job is queued | `JobLambdaConventionTests` | No lambda passed to `StartJob`, `StartWorkspaceJob`, `StartPushJob` or `ExecuteAsync` in `Components/**` calls `RequireSelectedContextId()`. |
+| Change page state on the dispatcher | `JobLambdaConventionTests` | The same lambdas write `_slots`, `_linkByRepoId`, `prByRepositoryId` and `repoSyncStatus` only inside `InvokeAsync` / `SafeInvoke`. |
+| No scoped service in a singleton | `ServiceContainerConventionTests` | Builds the real container (`GrayMoonServiceRegistration.AddGrayMoonServices`) with `ValidateScopes` and `ValidateOnBuild`. |
+| Per-context state goes through the state writer | `SharedLinkWriteConventionTests` | Reads the IL of `GrayMoon.App` and lists every type that calls the `BranchName`, `CheckedOutTag` or `BranchHasUpstream` setter of `WorkspaceRepositoryLink`; each type and property must be in the allowed list. |
+| Validate every path from the App | `RequestPathValidationConventionTests` (Worker) | Every string path property of a request DTO (found by reflection) is read by a command that calls `GitRepositoryPathValidator`. Repository names need no test of their own: every command resolves the name through `WorkerRepositoryPaths.Resolve`, which throws `ArgumentException` for anything that is not one folder name. |
+| A best-effort step always reports | `BestEffortCatchConventionTests` | Every `catch` / `catch (Exception)` in `Services/Workspaces` and `Services/Git` logs, rethrows, or uses the exception. |
+
+Each test has an exception list with a reason per entry. An entry that starts with `OPEN` is a known violation (section 24); the test fails when an entry no longer applies, so remove the entry in the change that fixes the code. Do not add an entry to make a new violation pass. The narrower scans from the same review stay: `WorkspacePageJobDisciplineTests`, `ServiceLifetimeAndConnectionPlumbingTests`, `ModalAndSharedUiGuardTests`.
+
+The scans read text, so they have limits: a job helper with a new name is not seen until it is added to `JobLambdaScanner`, and the path scan accepts a command that calls the validator for one path and not for another.
+
 Before changing shared Workspace code, add a characterization test that pins the special Workspace behavior first. Old-Worker compatibility tests are not needed (version lock).
 
 After broad Workspace changes, run all three test projects. Manual smoke list for wide changes: App starts and the Worker connects within 30 s; Sync all; a terminal commit updates the grid (hooks); switch all to a new branch and Return to Default; Git Changes stage and commit; Update Dependencies + Push with levels; create and close a PR; Dependencies page and Restore list each project once; Create and Remove a Feature; Open in VS Code / Terminal; one REST script.
@@ -717,9 +744,9 @@ Verified against the code; each item is still true. Fix the code and remove the 
 Security (open review findings):
 
 - **Self-update URL trust.** The App builds `installUrl` from `NavigationManager.BaseUri` (`Worker.razor`) and from the request scheme and Host (`DesktopNotificationHub.UpgradeWorker`). The Worker's `SelfUpdateCommand` rejects non-http(s) URLs and shell-special characters, but checks neither host nor path before running `irm '<url>' | iex`.
-- **Origin check.** `RequestSecurityMiddleware` accepts an Origin whose host equals the request Host (passes under DNS rebinding), accepts any loopback host on any port (and `0.0.0.0`), compares hosts only, and trusts `X-Forwarded-Host` without a proxy allowlist.
-- **Hook listener.** `127.0.0.1:9191/hook/*` has no secret, no Origin rejection, no Content-Type check and no body cap (`ReadToEndAsync`); only an in-flight cap of 64 exists.
-- **Worker secret.** `Security:RequireWorkerSecret` defaults to false; a missing secret is accepted (with a warning) until some Worker has presented one.
+- **Origin check.** `RequestSecurityMiddleware` accepts any loopback host on any port (and `0.0.0.0`) and compares hosts only (no scheme or port). GET requests carry no Origin on a same-origin page, so the same middleware also checks the request's `Host` on every path and method (loopback or listed; `/health` and the Worker paths exempt); see 05 section 33. A new endpoint that a non-browser client on another machine must reach by an unlisted name needs its own authentication before it is added to that exemption.
+- **Hook listener.** `127.0.0.1:9191/hook/*` has no secret. It requires `application/json`, caps the body at 64 KB and accepts only a `repositoryPath` GrayMoon manages (02 section 11), so a web page or a stray local POST cannot start a scan; a local process that can write a hook file into a repository can still trigger a scan of that repository.
+- **Links inside a repository.** The Worker's own file writes (`WriteRepositoryFileCommand`, `UpdateFileVersionsCommand`, `SyncRepositoryDependenciesCommand`) refuse a path that leaves the repository through a junction or symlink (`RepositoryPathContainment`). Reads (`GetFileContentsCommand`, `CheckFileVersionsCommand`, `ResolveGeneratedPackageReferencesCommand`, `DotnetRestoreCommand`) and everything git does itself are not checked, so a link committed to a repository can still make the Worker read a file outside it.
 - **Data layer.** `Cache=Shared` is forced on the connection string; schema uses `EnsureCreated()` (synchronous call) plus hand-written migrations, not EF Core migrations.
 
 Behavior:
@@ -728,9 +755,7 @@ Behavior:
 - **REST and Features.** REST acts only on the special Workspace; there are no Feature endpoints and no endpoint uses `IWorkspaceFeatureOperations`.
 - **Hooks are never removed** when a repository leaves a Workspace or the Workspace is deleted; renamed foreign hooks (`<hook>.replaced-by-graymoon`) stop running.
 - **Large tag lists.** The branch inventory's unique index `(WorkspaceRepositoryId, BranchName, IsRemote)` has no `IsTag`, so a tag and a local branch with the same name collide; `SwitchBranchModal` renders every tag without virtualization.
-- **`dotnet restore` failures are reported as success.** `DotnetRestoreCommand` logs a non-zero exit as a warning and returns `Success = true`.
 - **DependencyStats Feature fallback.** `RecomputeAndPersistRepositoryDependencyStatsAsync` falls back to the shared link `GitVersion` for a Feature repository with no context-state row (`GetValueOrDefault(..., x.GitVersion)`), contrary to rule 20A.2.
-- **Reconciler vs background removal.** `WorkspaceFeatureReconciler` marks `Removing` Features `NeedsRepair` ("Interrupted while removing") unless the Workspace is structurally busy, but queued removals take no structural lock, so a Worker reconnect during a removal can flag it (seen in code, not reproduced).
 - **Bulk branch dialog.** `BranchModal` shows no branch occupancy; `WorkspaceBranchHandler.CheckoutBranchForWorkspaceAsync` skips held repositories but fails open (`OccupancyCheckDegraded`) when occupancy cannot be read.
 - **Git lock scope.** `GitProcessRunner` serializes git per working-tree path, so a Workspace checkout and its Feature worktrees do not share a lock; ref updates in the shared common git dir rely on git's own `*.lock` files.
 - **Copy absolute path** in Git Changes (`WorkspaceGitChanges.CopyPath.cs`) always joins with `\`, wrong for a Linux Worker.

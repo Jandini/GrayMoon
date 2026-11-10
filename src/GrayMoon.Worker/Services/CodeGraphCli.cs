@@ -133,6 +133,7 @@ public sealed class CodeGraphCli(
         }
 
         _finishedInits.TryRemove(key, out _);
+        PruneFinishedInits();
 
         // Not part of the command that started it: the build must not stream into that command's (finished) output.
         using var noFlow = ExecutionContext.SuppressFlow();
@@ -178,11 +179,29 @@ public sealed class CodeGraphCli(
                 output.Complete(outcome);
                 _inits.TryRemove(key, out _);
                 cancel.Dispose();
+                PruneFinishedInits();
                 completion.TrySetResult();
             }
         });
 
         return true;
+    }
+
+    /// <summary>Finished builds whose output is still kept for a late watch.</summary>
+    internal int FinishedInitCount => _finishedInits.Count;
+
+    /// <summary>
+    /// Forgets the kept output of builds whose folder is gone (a removed Feature or repository): nothing can watch
+    /// them any more, and without this every folder ever indexed would stay in memory for the life of the Worker.
+    /// Runs whenever a build starts or ends, so what is kept is bounded by the folders that still exist.
+    /// </summary>
+    internal void PruneFinishedInits()
+    {
+        foreach (var key in _finishedInits.Keys)
+        {
+            if (!Directory.Exists(key))
+                _finishedInits.TryRemove(key, out _);
+        }
     }
 
     /// <summary>

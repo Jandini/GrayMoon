@@ -27,14 +27,15 @@ public sealed class RepositoryBranchWriter(AppDbContext dbContext, ILogger<Repos
     /// <summary>
     /// Persists branches and tags for a workspace repository. Remote branches are stored as <c>origin/&lt;name&gt;</c> whether the
     /// caller holds the bare name (the Worker lists them bare) or the prefixed ref, so every writer agrees on one row per branch.
-    /// Removes branches/tags not in the fetched list, adds new ones, updates LastSeenAt for existing ones. Optionally marks the default branch (e.g. main or master) and the currently checked-out tag.</summary>
+    /// Removes branches/tags not in the fetched list, adds new ones, updates LastSeenAt for existing ones. Optionally marks the default branch (e.g. main or master).
+    /// The branch and tag lists belong to the repository and are shared by every context. Which tag a context has checked out is
+    /// per-context state and is written by <see cref="WorkspaceRepositoryStateWriter.ApplyTagRefreshAsync"/>, never here.</summary>
     public async Task PersistAsync(
         int workspaceRepositoryId,
         IReadOnlyList<string>? localBranches,
         IReadOnlyList<string>? remoteBranches,
         string? defaultBranchName,
         IReadOnlyList<string>? tags,
-        string? currentTag,
         CancellationToken cancellationToken = default,
         bool save = true)
     {
@@ -118,40 +119,6 @@ public sealed class RepositoryBranchWriter(AppDbContext dbContext, ILogger<Repos
         if (toRemove.Count > 0)
         {
             dbContext.RepositoryBranches.RemoveRange(toRemove);
-        }
-
-        // Update WorkspaceRepositoryLink.CheckedOutTag from the worker-reported value when tags were refreshed.
-        if (tags != null)
-        {
-            var link = await dbContext.WorkspaceRepositories
-                .FirstOrDefaultAsync(wr => wr.WorkspaceRepositoryId == workspaceRepositoryId, cancellationToken);
-            if (link != null)
-            {
-                if (!string.IsNullOrWhiteSpace(currentTag))
-                {
-                    link.CheckedOutTag = currentTag;
-                    link.BranchName = null;
-                    link.BranchHasUpstream = null;
-                    link.OutgoingCommits = null;
-                    link.IncomingCommits = null;
-                    link.DefaultBranchBehindCommits = null;
-                    link.DefaultBranchAheadCommits = null;
-                    // Determine if a newer tag exists: SortIndex 0 = newest. If currentTag is not at index 0, there is a newer tag.
-                    var tagIdx = -1;
-                    for (var i = 0; i < tags.Count; i++)
-                    {
-                        if (string.Equals(tags[i], currentTag, StringComparison.OrdinalIgnoreCase))
-                        { tagIdx = i; break; }
-                    }
-                    link.HasNewerTag = tagIdx > 0;
-                }
-                else if (!string.IsNullOrWhiteSpace(link.CheckedOutTag))
-                {
-                    // Tag list refreshed but we are no longer on a tag; clear the pinned state.
-                    link.CheckedOutTag = null;
-                    link.HasNewerTag = null;
-                }
-            }
         }
 
         if (save)

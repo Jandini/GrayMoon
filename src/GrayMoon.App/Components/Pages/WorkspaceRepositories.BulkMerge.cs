@@ -408,6 +408,7 @@ public sealed partial class WorkspaceRepositories
             ? (mergeTotal == 1 ? "Merging 1 pull request..." : $"Merging {mergeTotal} pull requests...")
             : (rowsToReturnOnly.Count == 1 ? "Returning 1 repository to default..." : $"Returning {rowsToReturnOnly.Count} repositories to default...");
 
+        var jobContextId = RequireSelectedContextId();
         StartPageJob(label, async (job, ct) =>
         {
             try
@@ -506,7 +507,7 @@ public sealed partial class WorkspaceRepositories
                     }
 
                     if (returnRows.Count > 0)
-                        await RunBulkReturnToDefaultAsync(returnRows, job, ct);
+                        await RunBulkReturnToDefaultAsync(jobContextId, returnRows, job, ct);
                 }
 
                 await InvokeAsync(async () =>
@@ -574,7 +575,7 @@ public sealed partial class WorkspaceRepositories
     /// Returns every distinct repository in one batch. Each repository keeps its own success or failure.
     /// Workspace recompute runs once after the batch, not once per repository.
     /// </summary>
-    private async Task RunBulkReturnToDefaultAsync(IReadOnlyList<BulkMergePrRow> succeededRows, BackgroundJobHandle job, CancellationToken ct)
+    private async Task RunBulkReturnToDefaultAsync(GrayMoon.Application.Features.WorkspaceFeatureContextId jobContextId, IReadOnlyList<BulkMergePrRow> succeededRows, BackgroundJobHandle job, CancellationToken ct)
     {
         await InvokeAsync(() =>
         {
@@ -591,7 +592,7 @@ public sealed partial class WorkspaceRepositories
             batch = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, UnattendedReturnToDefaultBatchResult>(
                 svc => svc.ReturnToDefaultBatchAsync(
                     WorkspaceId,
-                    RequireSelectedContextId(),
+                    jobContextId,
                     succeededRows.Select(row => row.RepositoryId).ToList(),
                     job.ToOperationProgress(),
                     ct));

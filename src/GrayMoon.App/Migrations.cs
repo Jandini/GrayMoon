@@ -50,9 +50,10 @@ public static partial class Migrations
         (16, "Repair special Workspace context backfill", dbContext => MigrateSpecialWorkspaceContextBackfillRepairAsync(dbContext)),
     };
 
-    public static async Task RunAllAsync(AppDbContext dbContext, ILogger? logger = null)
+    public static async Task RunAllAsync(AppDbContext dbContext, ILogger? logger = null, TimeProvider? timeProvider = null)
     {
         logger ??= NullLogger.Instance;
+        timeProvider ??= TimeProvider.System;
 
         var conn = dbContext.Database.GetDbConnection();
         if (conn.State != ConnectionState.Open)
@@ -64,7 +65,7 @@ public static partial class Migrations
 
         string? backupPath = null;
         if (legacyPending || strictPending.Count > 0)
-            backupPath = await BackupDatabaseAsync(conn, logger);
+            backupPath = await BackupDatabaseAsync(conn, logger, timeProvider);
 
         if (legacyPending)
         {
@@ -85,11 +86,30 @@ public static partial class Migrations
         await MigrateWorkspacesExcludeAiWorkflowsAsync(dbContext, logger);
         await MigrateWorkspaceGitRepositoryStatusLineStatsAsync(dbContext, logger);
         // Role must exist before any legacy step loads WorkspaceRepositoryLink through EF (strict step 5 repeats it idempotently).
-        await MigrateWorkspaceRepositoryRoleAsync(dbContext, logger);
-        await MigrateForkSupportAsync(dbContext, logger);
+        // These two are also strict steps (5 and 15), so they have no catch of their own; the baseline is tolerant,
+        // so here they get the same catch shape as every other baseline patch.
+        await RunTolerantLegacyStepAsync(dbContext, nameof(MigrateWorkspaceRepositoryRoleAsync), () => MigrateWorkspaceRepositoryRoleAsync(dbContext, logger), logger);
+        await RunTolerantLegacyStepAsync(dbContext, nameof(MigrateForkSupportAsync), () => MigrateForkSupportAsync(dbContext, logger), logger);
         await MigrateWorkspaceFeatureContextSchemaAsync(dbContext, logger);
         // The Feature context tables exist now; add their fork columns before anything reads them through EF.
-        await MigrateForkSupportAsync(dbContext, logger);
+        await RunTolerantLegacyStepAsync(dbContext, nameof(MigrateForkSupportAsync), () => MigrateForkSupportAsync(dbContext, logger), logger);
+    }
+
+    /// <summary>
+    /// Runs one legacy-baseline patch in tolerant mode: a failure is logged and startup continues. The change
+    /// tracker is cleared so entities a failed patch left Added are not flushed by a later step's SaveChanges.
+    /// </summary>
+    internal static async Task RunTolerantLegacyStepAsync(AppDbContext dbContext, string name, Func<Task> action, ILogger logger)
+    {
+        try
+        {
+            await action();
+        }
+        catch (Exception ex)
+        {
+            dbContext.ChangeTracker.Clear();
+            logger.LogError(ex, "Legacy migration step {StepName} failed; continuing startup.", name);
+        }
     }
 
     /// <summary>
@@ -147,10 +167,13 @@ public static partial class Migrations
 
     /// <summary>
     /// Backs up the database file with <c>VACUUM INTO</c> (a plain file copy of an open WAL database can be
-    /// corrupt) before a pending migration step runs. Skipped for non-file-backed databases (in-memory tests).
-    /// Keeps the 3 newest backups next to the database file and deletes older ones.
+    /// corrupt) before a pending migration step runs. Skipped for non-file-backed databases (in-memory tests)
+    /// and for a database with nothing to lose (missing or empty file, or no row in any table - a brand-new
+    /// install). Keeps the 3 newest backups next to the database file and deletes older ones.
+    /// A backup that cannot be written, or that fails its integrity check, stops the migration with a
+    /// <see cref="DatabaseMigrationException"/> naming the path and the cause: no step runs without a way back.
     /// </summary>
-    private static async Task<string?> BackupDatabaseAsync(DbConnection conn, ILogger logger)
+    private static async Task<string?> BackupDatabaseAsync(DbConnection conn, ILogger logger, TimeProvider timeProvider)
     {
         var dataSource = conn.DataSource;
         if (string.IsNullOrWhiteSpace(dataSource) || dataSource.Equals(":memory:", StringComparison.OrdinalIgnoreCase))
@@ -159,17 +182,24 @@ public static partial class Migrations
             return null;
         }
 
+        if (!await HasAnyDataAsync(conn))
+        {
+            logger.LogDebug("Skipping pre-migration database backup: the database is new and holds no data.");
+            return null;
+        }
+
         var directory = Path.GetDirectoryName(dataSource);
         if (string.IsNullOrEmpty(directory))
             directory = Directory.GetCurrentDirectory();
-        Directory.CreateDirectory(directory);
 
         var fileName = Path.GetFileName(dataSource);
-        var backupFileName = $"{fileName}.bak-{DateTime.UtcNow:yyyyMMdd-HHmmss}";
+        var backupFileName = $"{fileName}.bak-{timeProvider.GetUtcNow().UtcDateTime:yyyyMMdd-HHmmss}";
         var backupPath = Path.Combine(directory, backupFileName);
 
-        await using (var cmd = conn.CreateCommand())
+        try
         {
+            Directory.CreateDirectory(directory);
+            await using var cmd = conn.CreateCommand();
             cmd.CommandText = "VACUUM INTO $backupPath;";
             var parameter = cmd.CreateParameter();
             parameter.ParameterName = "$backupPath";
@@ -177,15 +207,68 @@ public static partial class Migrations
             cmd.Parameters.Add(parameter);
             await cmd.ExecuteNonQueryAsync();
         }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Pre-migration database backup to {BackupPath} failed; no migration step was run.", backupPath);
+            throw new DatabaseMigrationException(
+                $"The pre-migration database backup could not be written to '{backupPath}': {ex.Message} " +
+                "No migration step was run and the database is unchanged. Free disk space or fix the folder permissions, then start GrayMoon again.",
+                backupPath,
+                ex);
+        }
 
-        if (await IsBackupIntegrityOkAsync(backupPath))
-            logger.LogInformation("Created pre-migration database backup at {BackupPath}.", backupPath);
-        else
-            logger.LogError("Pre-migration database backup at {BackupPath} failed integrity check.", backupPath);
+        if (!await IsBackupIntegrityOkAsync(backupPath))
+        {
+            logger.LogError("Pre-migration database backup at {BackupPath} failed its integrity check; no migration step was run.", backupPath);
+            throw new DatabaseMigrationException(
+                $"The pre-migration database backup at '{backupPath}' failed its integrity check. " +
+                "No migration step was run and the database is unchanged. The database may be damaged: check it before starting GrayMoon again.",
+                backupPath,
+                innerException: null);
+        }
+
+        logger.LogInformation("Created pre-migration database backup at {BackupPath}.", backupPath);
 
         PruneOldBackups(directory, fileName, logger);
 
         return backupPath;
+    }
+
+    /// <summary>
+    /// False when a backup would hold nothing: the database file is missing or empty, or no table has a row
+    /// (a database EnsureCreated just built). A probe that fails counts as "has data", so the backup still runs.
+    /// </summary>
+    private static async Task<bool> HasAnyDataAsync(DbConnection conn)
+    {
+        try
+        {
+            var tables = new List<string>();
+            await using (var listCmd = conn.CreateCommand())
+            {
+                listCmd.CommandText = "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%';";
+                await using var reader = await listCmd.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                    tables.Add(reader.GetString(0));
+            }
+
+            if (tables.Count == 0)
+                return false;
+
+            foreach (var table in tables)
+            {
+                await using var existsCmd = conn.CreateCommand();
+                // Table names come from sqlite_master, not from user input; quote them for safety anyway.
+                existsCmd.CommandText = $"SELECT EXISTS(SELECT 1 FROM \"{table.Replace("\"", "\"\"")}\");";
+                if (Convert.ToInt32(await existsCmd.ExecuteScalarAsync()) != 0)
+                    return true;
+            }
+
+            return false;
+        }
+        catch
+        {
+            return true;
+        }
     }
 
     private static async Task<bool> IsBackupIntegrityOkAsync(string backupPath)

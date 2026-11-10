@@ -27,6 +27,8 @@ sequenceDiagram
 
 A unique request ID correlates response and caller.
 
+`WorkerResponseDelivery.WaitAsync` adds the pending entry before it registers the cancellation callback, so a token that is already cancelled removes the entry at once and the wait ends cancelled; nothing stays pending. Each entry records the Worker connection the command was sent to. When a Worker connection drops, `WorkerHub.OnDisconnectedAsync` fails only that connection's pending requests (`FailForConnection`); everything is failed (`FailAll`) only when no connection is left (section 18).
+
 Command terminal output is streamed separately so long-running operations can show live progress.
 
 `WorkerBridge.SendCommandAsync` refuses commands while the Worker runs a different product version (section 18).
@@ -108,6 +110,15 @@ MaxConcurrentAiCommands     AI pool     default 4
 ```
 
 The main pool also carries Sync, push, restore, worktree create/remove (`CreateGitWorktree`, `RemoveGitWorktree`), Feature folder cleanup, the CodeGraph commands and every hook notify job.
+
+Intake and cancellation (`CommandRequestIntake`, in `SignalRConnectionHostedService.cs`):
+
+- The .NET SignalR client runs one handler at a time, so the `RequestCommand` handler never waits. It registers the request in `CommandJobCancellationRegistry`, starts the queue write and returns. When the pool's queue is full the write waits for room in the background, in arrival order; nothing is rejected.
+- `CancelCommand` is therefore delivered at once whatever the queues hold. It ends a wait for room (the caller gets `Command cancelled.`), makes a queued job skip, and cancels a running job through its linked token. Stopping the Worker ends every wait for room the same way.
+- A `CancelCommand` for a request that is not registered (it finished already, or its `RequestCommand` has not arrived yet) is remembered so a late `RequestCommand` is answered `Command cancelled.` without running. At most `MaxPendingCancellations` = 256 are remembered; the oldest is dropped first.
+- Push and undo-push send their follow-up `SyncCommand` (commit counts, version, projects) before the command returns, with the job's cancellation token. The scan holds the job's pool slot and counts as pending work; cancelling the job ends the scan and the push or reset keeps its own result.
+- A closed connection starts the reconnect loop only while the Worker is running; the loop observes the shutdown token that `StopAsync` cancels.
+- `StartAsync` builds the connection and returns; the first connect loop (retry every 5 seconds) runs in the background and ends on the same shutdown token. The host starts hosted services one after another, so the hook listener and the job pools start whether or not the App is reachable.
 
 This isolation matters.
 
@@ -193,14 +204,14 @@ This protects multi-step orchestration from overlapping writes and Git operation
 
 These run without any Workspace or context lock, so Sync and every other operation keep working:
 
-- **Remove Feature.** Confirming the dialog enqueues into `FeatureRemovalQueue` (hosted `BackgroundService`, unbounded channel, `IFeatureRemovalQueue.MaxConcurrentRemovals` = 4 concurrent removals, the rest FIFO, one pending entry per context). `RemoveFeatureAsync` takes no Workspace lock and does not refresh the Workspace; the departing page starts `IWorkspaceCheckoutRefresh` itself and does not wait. The outcome is a toast on whatever page is open.
+- **Remove Feature.** Confirming the dialog enqueues into `FeatureRemovalQueue` (hosted `BackgroundService`, unbounded channel, `IFeatureRemovalQueue.MaxConcurrentRemovals` = 4 concurrent removals, the rest FIFO, one pending entry per context). `RemoveFeatureAsync` takes no Workspace lock and does not refresh the Workspace; the departing page starts `IWorkspaceCheckoutRefresh` itself and does not wait. The outcome is raised through `IFeatureRemovalQueue.Completed`; `Toast.razor` in every open tab turns it into a toast (the queue is a singleton and cannot hold the per-circuit `IToastService`).
 - **Feature reconciliation** (`WorkspaceFeatureReconciler`, section 5E). Skips every Workspace that `IsWorkspaceStructurallyBusy`.
 - **Pending-delete sweep** (`FeatureFolderCleanupService`, section 5D). Skips while `IsWorkspaceStructurallyBusy`; a background removal does not stop it, because the sweep excludes Features that still exist.
 
 ### 3B. Update and Push: locks, approvals and outcomes
 
 - **Lock key per surface.** The notification popup starts its job under the whole-Workspace key `/workspaces/{id}` (structural lock); the Repositories page of a Feature uses the context key. The runner refuses each while the other is held. A REST call runs inside `WorkspaceCommandHttp.RunExclusiveAsync` on the special Workspace context and returns 409 "A workspace operation is already running." when the lock is busy.
-- **`StartJob` can start nothing.** When the lock is already held, `BackgroundJobService.StartJob` returns the other job's handle and does not run the new body. The "Continue with normal push?" callbacks therefore wait in memory, up to 10 seconds, for no job to be running before they start the continuation.
+- **`StartJob` can start nothing.** When the lock is already held, `BackgroundJobService.StartJob` does not run the new body and returns a handle for the other job with `WasStarted == false` (section 4). The "Continue with normal push?" callbacks therefore wait in memory, up to 10 seconds, for no job to be running before they start the continuation.
 - **Pending approvals** (`UpdateAndPushApprovalStore`) live in memory in a singleton: single use, 30 minutes, bound to the Workspace and context, never persisted. The continuation re-plans and pushes only repositories that are still pending and were approved.
 - **One outcome per run.** The combined run gets one `RunId`; `WorkspaceOperationOutcomeStore.Begin(workspace, context, operation, runId)` joins the existing entry when the RunId matches, so the nested update and push facades do not replace it. An update failure therefore stays visible after the push phase.
 - **Cost of the default-branch re-check.** One read of the stored repository snapshots when the run starts; no Worker call and nothing per level.
@@ -217,6 +228,14 @@ Therefore:
 - cancellation must flow through application/Worker boundaries;
 - the operation result is persisted independently from the initiating page;
 - a later page can re-read the resulting persisted state.
+
+`BackgroundJobService.StartJob` can refuse to start: a job for the key is already running, or the Workspace or context lock is held by another operation. The new work is then dropped, the refusal is logged, the tab that asked gets a warning toast ("Another operation is still running, so this one was not started. Try again when it finishes."), and the returned `BackgroundJobHandle` has `WasStarted == false`: it only shows the job that is running (state, message, terminal, Abort) and ignores `ReportProgress` from the refused caller. A caller that reports an outcome for its own work checks `IsRunning` first or `WasStarted` afterwards.
+
+A job body runs on the thread pool while the dispatcher may be rendering the page, so the Repositories, Actions and Git Changes pages follow three rules:
+
+- **Load off-thread, apply on the dispatcher.** The Repositories grid reload (`RefreshFromSync`, also reached through `ReloadWorkspaceDataFromFreshScopeAsync`) is a load step (`LoadWorkspaceReloadSnapshotAsync`: header, index and header state into a `WorkspaceReloadSnapshot`, no page field assigned) followed by an apply step (`ApplyWorkspaceReloadSnapshotAsync`) that always runs inside `InvokeAsync`. The apply step first asks `PageStateApplyGuard.ShouldApply` and drops the snapshot when the page is disposed or the Feature context changed since the load started. Per-repository callbacks from a running job (sync status, repository errors) go through `SafeInvoke` for the same reason. The reload can be awaited from any thread.
+- **A job uses the context it was queued with.** Each action reads `RequireSelectedContextId()` once into a local before `StartJob` / `StartPageJob` and passes that value into the job, including the helper methods the job calls (push, restore, Return to Default). Changing `?context=` while a job runs does not retarget it; the commit-then-push job on Git Changes pushes in the context it committed in. The same holds for an event handler that awaits without a job: the custom-dependency save, the push badge's dependency lookup and the dependency tooltip load read the context before their first `await`, and the tooltip load drops its result when the context changed while it ran.
+- **The sync hub attaches after the load, not on the first render.** The first render can happen while the page is still loading, so the Repositories and Actions pages check `PageRealtimeGate.ShouldAttachHub` on every render until the connection exists. The Actions on-open background refresh starts the same way, once, when the rows are loaded.
 
 ---
 
@@ -329,17 +348,21 @@ CodeGraph         when Create asked for an index: InitializeCodeGraphAsync (the 
 - Worktree paths are built from the persisted `ManagedFeatureStorageRoot` with `WorkerPath.Combine`. Do not call the path resolver inside the intent transaction: it opens a second `AppDbContext` and deadlocks SQLite against this write and against `WorkspaceGitChangesWriteQueue`.
 - Any failure after the intent commit lands in `NeedsRepair`; the failure write uses `CancellationToken.None`, so Abort still persists it.
 - `GetHeadCommits` (Worker) runs with an internal `SemaphoreSlim` of `DefaultMaxConcurrent` = 8 (a constant, not `MaxParallelOperations`).
-- Per worktree (`GitWorktreeService.CreateWorktreeAsync`): `git worktree list --porcelain` pre-check; idempotent success if the path already hosts the expected branch (or is detached at the base SHA); else `WorktreePathConflict` / `BranchOccupied` / `PathExists` (an existing empty folder is allowed); `EnsureWindowsLongPaths`; `git worktree add -b <name> <path> <sha>` or `--detach <path> <sha>`, never `--force`; verify list, `VerifyFailed` if not listed.
+- Per worktree (`GitWorktreeService.CreateWorktreeAsync`): `git worktree list --porcelain` pre-check; idempotent success if the path already hosts the expected branch (or is detached at the base SHA); else `WorktreePathConflict` / `BranchOccupied` / `PathExists` (an existing empty folder is allowed); `EnsureWindowsLongPaths`; `git worktree add -b <name> <path> <sha>` or `--detach <path> <sha>`, never `--force`; verify list, `VerifyFailed` if not listed. From the on-disk checks until git returns it holds a Mutating lease on the worktree path: while a removal or a leftover-folder sweep (`FeatureFolderCleaner`) claims that folder or the Feature root above it the create fails with `PathUnderRemoval`, and a claim that starts during the add waits for it, so the sweep's re-check sees the new worktree and refuses to delete.
 - `CreateGitWorktreeCommand` first rewrites the main checkout's hooks (so the new worktree's `post-checkout` is attributed by path), then wraps `git worktree add` in `IWorktreeCreateHookDeferral.BeginCreate(worktreePath)` and `BeginExternalRepositoryMutation(mainPath)`.
 - Hook deferral (`WorktreeCreateHookDeferral`): a `Checkout` notify job for a worktree being created is held (one per path, re-created with `FreshWorktree = true`) and re-enqueued once no create has been active for `QuietPeriod` = 500 ms, so held syncs do not occupy main-pool slots the remaining creates need. A fresh-worktree `CheckoutHookSyncCommand` skips the token lookup and network fetch, projects, commit counts and remote branches, but still runs GitVersion; `SyncCommandHandler` skips PR reconciliation for it.
 - Finalization barrier (`FeatureFinalizationCoordinator`, App singleton): `Arm(contextId)` before the first worktree of Create or Repair, disposed in a `finally` after the seed and lifecycle change. `SyncCommandHandler` waits on `WaitForFinalizationAsync` for a finalizing Feature context (bounded by `MaxBarrierWait` = 15 min, then applies anyway), so the deferred GitVersion lands after the seed and is never overwritten by it. In memory only: a restart drops it and Repair's idempotent seed reconciles. `AcquireProjectionAsync(contextId)` serializes every writer of a context's `WorkspaceProjects` / `ProjectDependencies` (the seed and the project merges), so the unique (context, repository, name) index is never raced.
 - Telemetry (Information): App `Feature Create timing` per stage, `Feature Create repository timing` (`GateWaitMs`, `PathMs`, `WorkerRoundTripMs`, `DbMs`, `TotalMs`); Worker `GetHeadCommits timing`, `CreateGitWorktree timing`, `Git worktree created ... PreListMs LongPathsMs AddMs VerifyListMs`, `NotifySync completed ... hook=...`. See section 19 for `FeatureOperationLog`.
 
-Repair (`repair-feature`) re-runs worktree create only for `Pending` / `NeedsRepair` rows, keeps `Ready` rows and re-seeds idempotently. Rollback (`rollback-feature`) refuses dirty repositories, removes Sources first and the root last, non-force.
+Repair (`repair-feature`) re-runs worktree create only for `Pending` / `NeedsRepair` rows, keeps `Ready` rows and re-seeds idempotently. Rollback (`rollback-feature`) refuses dirty repositories, removes Sources first and the root last, non-force. After the rows are deleted it sends `CleanupFeatureFolder` (`onlyIfMarked: false`) for the Feature root, so a folder that still holds non-worktree files (`codegraph.json`, `.codegraph`) is deleted or marked pending deletion and a later Create with the same name is not refused with "folder exists". A cleanup that cannot run does not fail the rollback.
 
 ### 5D. Feature removal internals and pending-delete cleanup
 
 App side (`RemoveFeatureAsync`, from `FeatureRemovalQueue`, no lock): pauses the context's Git Changes renewal and audits (section 9A), marks the Feature and live rows `Removing` and saves, then runs `UninitCodeGraph`, removes Source worktrees concurrently (bounded by `MaxParallelOperations`), then the root worktree alone and only when every Source succeeded (D10). Each repository row becomes `Removed` in its own short-lived context right after its worktree is unregistered, so a crash can resume. Local branches are deleted afterwards (`-D` only when authorized) and, when requested, remote branches with a lease (`expectedSha`).
+
+Re-check when the queued removal runs: "discard uncommitted" applies only to a repository the analyzed plan showed with uncommitted, staged or conflicted work (`RemovePlanShowedUncommittedWork`). Every other repository is re-probed with `InspectWorktree` and removed without `--force`. One that became dirty since the analysis is skipped with "changed since the check, run Remove again."; its row stays `Removing` with that error, the other repositories proceed, the root worktree is kept and the Feature becomes `NeedsRepair`. When the probe cannot answer, the non-force `git worktree remove` is still sent and git refuses a dirty worktree.
+
+Shutdown and restart: the queue is in memory. A removal cut short by shutdown marks its Feature `NeedsRepair` ("Interrupted while removing") before the worker exits (own 5 s token), and removals still waiting are dropped with a Warning (their Features are unchanged). At startup, before the workers run, `RecoverInterruptedRemovalsAsync` marks every Feature still in `Removing` the same way, so recovery does not wait for a Worker connect. Repository rows keep their state, so Remove can be run again and continues.
 
 Worker side (`RemoveGitWorktree` -> `GitWorktreeService.RemoveWorktreeAsync`):
 
@@ -370,7 +393,7 @@ Retry timer: there is no always-on timer. `ArmRetry(workspaceId)` starts a per-W
 
 ### 5E. Feature reconciliation
 
-`WorkspaceFeatureReconciler` (hosted) runs on every Worker `Online` transition, at most once per 60 s, single-flight, with at most 4 concurrent Worker calls. It never deletes worktrees and takes no lock; Workspaces that are structurally busy are skipped.
+`WorkspaceFeatureReconciler` (hosted) runs on every Worker `Online` transition, at most once per 60 s, single-flight, with at most 4 concurrent Worker calls. It never deletes worktrees and takes no lock; Workspaces that are structurally busy are skipped. A Feature whose removal is still held by `FeatureRemovalQueue` (`IFeatureRemovalQueue.IsPending`) is skipped too, both for the stuck-state check and for row reconciliation, because a queued removal takes no structural lock.
 
 ```text
 Feature stuck Creating / Removing                          -> NeedsRepair ("Interrupted while creating" / "Interrupted while removing")
@@ -411,6 +434,12 @@ flowchart TB
 ```
 
 Dependency ordering is a business rule, not a performance detail.
+
+**Two-lane Update and Push: when the push lane stops.** `UpdateAndPushOrchestrator` runs the update lane on the caller's scope and the push lane on a task of its own, joined by a channel of finished levels. The push lane stops on a failed repository push, a level error (package-wait timeout, no registry, restore exception) or an exception. The update lane checks this at every level hand-off: once the lane task has ended or a level error was reported, the level just committed is not handed over and the update stops there, at a level boundary, instead of committing the remaining levels. Nothing is rolled back. The push result (`BuildPushResult`) then carries one message on the failed level: the reason, the levels that are committed locally but not pushed, and the level the update stopped after. A push-lane exception becomes that failed result (level = the last level the lane took) and is no longer rethrown after the update; cancellation still propagates. The update result of a deliberately stopped run is successful with no synced repositories, so the closing message is the push failure.
+
+**Package wait: a failed probe is "not yet".** In `WorkspacePushService.PushLevelAsync` a registry lookup (or registry matching) that fails in transit - `HttpRequestException`, `IOException`, `SocketException`, `TimeoutException`, or a request cancelled while the wait's own token is still live - is recorded as an observation and asked again on the next poll. It does not fail the level. Only the deadline does, and then the timeout message ends with "Last registry error: <connector>: <message>". Cancellation by the user and non-transport exceptions behave as before.
+
+**Restore after a pushed level reports its outcome.** The App reads the `DotnetRestore` response (`PackageRestoreOutcome`). `success: false`, or a command that failed in transit, is a warning "Package restore failed for <repo>: <reason>": it is logged, written to the job terminal and reported on the repository, and the level still completes so the next level starts. An exception thrown by the restore call still fails the level. `WorkspaceGitService.RestoreDependenciesAsync` (Update path and the manual restore actions) returns the outcome per repository and shows failures as progress text. `OperationResult` has no warning channel, so a run whose only problem is a failed restore ends as "Push finished, but package restore failed in N repositories." rather than as a clean success.
 
 ---
 
@@ -490,6 +519,8 @@ Different hooks may gather different state.
 For example, pre-push is intentionally not a general-purpose fetch operation.
 
 `reference-transaction` reports a branch made or deleted outside GrayMoon: `RefsHookSyncCommand` debounces per repository (`RepositoryPassCoalescer`, 250 ms) and sends a branch-lists-only snapshot (`RepositoryStateSnapshot.IsBranchRefsOnly`). `SyncCommandHandler` applies it without deriving sync status, reconciling pull requests or recomputing dependencies, and without touching tags or the checked-out state.
+
+The listener queues a job only for a request that passes its checks (JSON content type, 64 KB body cap, a `repositoryPath` GrayMoon manages; 02 section 11). A rejected request gets 400 or 413 and no job; the hook scripts ignore the status, so the Git command is never affected.
 
 Notify jobs (`NotifySyncJob`) run on the Worker main pool. `Checkout` jobs for worktrees being created are deferred (section 5C).
 
@@ -574,6 +605,8 @@ The Worker can push a fresh snapshot without waiting for an explicit page reques
 
 The App validates version ordering and persists through the single write queue.
 
+The queue's reader (`WorkspaceGitChangesWriteQueue.ExecuteAsync`) ends only when the host stopping token is cancelled. An `OperationCanceledException` from anything else while one snapshot is handled (a timeout inside the handler, for example) cancels that snapshot's `EnqueueAndWaitAsync` caller, is logged as a warning, and the reader goes on with the next snapshot.
+
 After a snapshot commits, `GitChangesSnapshotPushHandler` publishes to `IWorkspaceGitChangesNotifier`, the in-process singleton fan-out for persisted snapshot changes, next to the `ContextGitChangesUpdated` SignalR broadcast. Unlinking repositories from a Workspace publishes too, with the all-contexts sentinel. Circuit-side consumers such as the Changes nav dot subscribe to it instead of opening their own hub connection.
 
 ### 9A. Refresh suppression and monitoring pause
@@ -654,6 +687,8 @@ Any new Git Changes path must preserve the monotonic/latest-wins semantics.
 ## 14. Browser activity and polling
 
 Some pages adapt polling to browser activity.
+
+`AppActivityTracker` (wires `idleActivity.js` to the per-circuit `AppActivityStateService`) is mounted in `MainLayout` with an interactive render mode. The layout itself is rendered statically, so a tracker without that render mode would never run its JS interop and the state would stay Active.
 
 Actions, for example, uses faster polling when actively viewed and slower polling when idle/hidden.
 
@@ -788,6 +823,10 @@ The App tracks Worker connectivity in `WorkerConnectionTracker`: `Connecting`, `
 Operations that require local filesystem/Git access must fail clearly when no Worker is connected.
 
 Read-only persisted UI may remain available even when the Worker is offline.
+
+The tracker is a singleton. A component that calls `OnStateChanged` keeps the delegate in a field, subscribes only when it is interactive (not during prerender) and calls `RemoveStateChanged` in `Dispose`; the statically rendered `MainLayout` does not subscribe at all.
+
+Commands go to the connection that connected last (`GetWorkerConnectionId`). When a restarted Worker connects before its old connection has closed, new commands therefore reach the new Worker, and the old connection's disconnect fails only the requests that were sent to it.
 
 App and Worker are version-locked:
 

@@ -124,6 +124,16 @@ public sealed class WorkerConnectionTracker
             _onStateChanged -= handler;
     }
 
+    /// <summary>Number of registered state handlers. A component that subscribes must remove its handler in Dispose.</summary>
+    internal int StateChangedHandlerCount
+    {
+        get
+        {
+            lock (_lock)
+                return _onStateChanged?.GetInvocationList().Length ?? 0;
+        }
+    }
+
     public void BeginSelfUpdate()
     {
         RaiseIfChanged(() =>
@@ -245,11 +255,25 @@ public sealed class WorkerConnectionTracker
         });
     }
 
-    /// <summary>Returns the first worker connection ID for sending commands. Null if no worker connected.</summary>
+    /// <summary>
+    /// Returns the active worker connection ID for sending commands: the connection that connected last.
+    /// When a restarted Worker connects before its old connection has closed, new commands go to the new
+    /// connection, not to the one about to disappear. Null if no worker connected.
+    /// </summary>
     public string? GetWorkerConnectionId()
     {
         lock (_lock)
-            return _connectionIds.FirstOrDefault();
+            return _connectionIds.LastOrDefault();
+    }
+
+    /// <summary>True while any worker connection is open.</summary>
+    public bool HasWorkerConnection
+    {
+        get
+        {
+            lock (_lock)
+                return _connectionIds.Count > 0;
+        }
     }
 
     /// <summary>Must run while holding the instance lock. Returns true if listeners should be notified.</summary>

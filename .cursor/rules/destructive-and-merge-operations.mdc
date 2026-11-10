@@ -1,0 +1,28 @@
+---
+description: Deletes follow only successful fetches, cleanup covers every dependent table, queued destructive actions re-check
+alwaysApply: true
+---
+
+# Destructive and merge operations
+
+From the 2026-11-10 code review: a connector refresh deleted every repository
+of a connector whose fetch had failed.
+
+1. **"Not in the fetched set" deletes only when the fetch succeeded.** Limit
+   deletions to the sources that answered successfully; a failed source (401,
+   rate limit, timeout) contributes no deletions and is named in the result.
+2. **Deleting or unlinking removes every dependent table's rows**, in every
+   context. A new table that references a repository, link or context is
+   added to the matching cleanup (`WorkspaceRepositoryLinkCleanup`) and its
+   test in the same change.
+3. **Re-check the precondition when a queued destructive action runs.** Never
+   carry `force` / "discard" forward to a repository that changed after the
+   analysis the user approved; skip it with a message.
+4. **Rollback and cleanup do not depend on an empty folder.** Mark leftovers
+   with `PendingDeleteMarker`.
+5. **A failed backup or integrity check stops the operation** with a message
+   naming the path and cause. Never log and continue.
+6. **Failure-path tests seed data the failure could destroy** (not
+   `repoCount: 0`) and assert it survives.
+
+Details: `AGENTS.md`, "Destructive and merge operations".

@@ -115,6 +115,17 @@ public sealed class GitWorktreeService(
                 $"Branch '{branchName}' is already checked out at '{branchOccupied.WorktreePath}'.");
         }
 
+        // Held from the checks below until git has created the worktree. A removal or a leftover-folder sweep claims
+        // the folder (or the Feature root above it) exclusively, so it either finishes before this starts - the lease
+        // is then refused - or waits for this add and sees the new worktree in its re-check, instead of deleting a
+        // worktree that appeared between its check and its delete.
+        using var addLease = access.TryAcquireShared(canonicalWorktreePath, RepositoryAccessKind.Mutating);
+        if (addLease == null)
+        {
+            return (false, null, false, "PathUnderRemoval",
+                $"Worktree path is being removed: {canonicalWorktreePath}. Try again when the removal has finished.");
+        }
+
         if (File.Exists(canonicalWorktreePath))
         {
             return (false, null, false, "PathExists",
@@ -146,12 +157,14 @@ public sealed class GitWorktreeService(
             ? ["worktree", "add", "--detach", canonicalWorktreePath, baseCommitSha]
             : ["worktree", "add", "-b", branchName!, canonicalWorktreePath, baseCommitSha];
         var addStartedAt = Stopwatch.GetTimestamp();
+        // A removal that outwaits its grace period cancels the lease; the add then stops instead of racing the delete.
+        using var addCancellation = CancellationTokenSource.CreateLinkedTokenSource(ct, addLease.Yield);
         var (exitCode, stdout, stderr) = await runner.RunAsync(
             "git",
             addArgs,
             mainRepositoryPath,
             null,
-            ct);
+            addCancellation.Token);
         var addMs = (long)Stopwatch.GetElapsedTime(addStartedAt).TotalMilliseconds;
 
         if (exitCode != 0)
@@ -736,9 +749,11 @@ public sealed class GitWorktreeService(
 
         var (exitCode, stdout, stderr) = await runner.RunAsync(
             "git",
-            $"rev-list --count {defaultRef}..{compareRef}",
+            ["rev-list", "--count", "--end-of-options", $"{defaultRef}..{compareRef}"],
             repoPath,
+            null,
             ct,
+            GitLockIntent.Read,
             streamStderrAsStdout: true,
             mirrorFailureOutputAsStderr: false);
         if (exitCode != 0)
@@ -763,9 +778,11 @@ public sealed class GitWorktreeService(
 
         var (exitCode, stdout, stderr) = await runner.RunAsync(
             "git",
-            $"rev-list --left-right --count {upstreamRef}...refs/heads/{branchName}",
+            ["rev-list", "--left-right", "--count", "--end-of-options", $"{upstreamRef}...refs/heads/{branchName}"],
             repoPath,
+            null,
             ct,
+            GitLockIntent.Read,
             streamStderrAsStdout: true,
             mirrorFailureOutputAsStderr: false);
         if (exitCode != 0)
@@ -787,9 +804,11 @@ public sealed class GitWorktreeService(
     {
         var (exitCode, stdout, _) = await runner.RunAsync(
             "git",
-            $"rev-parse --verify --quiet {revision}",
+            ["rev-parse", "--verify", "--quiet", "--end-of-options", revision],
             repoPath,
+            null,
             ct,
+            GitLockIntent.Read,
             streamStderrAsStdout: true,
             mirrorFailureOutputAsStderr: false);
         if (exitCode != 0)
@@ -860,9 +879,11 @@ public sealed class GitWorktreeService(
 
         var (exitCode, stdout, stderr) = await runner.RunAsync(
             "git",
-            $"rev-list --left-right --count {upstreamRef}...HEAD",
+            ["rev-list", "--left-right", "--count", "--end-of-options", $"{upstreamRef}...HEAD"],
             repoPath,
+            null,
             ct,
+            GitLockIntent.Read,
             streamStderrAsStdout: true,
             mirrorFailureOutputAsStderr: false);
         if (exitCode != 0)
@@ -884,9 +905,11 @@ public sealed class GitWorktreeService(
 
         var (exitCode, stdout, stderr) = await runner.RunAsync(
             "git",
-            $"rev-list --count {defaultRef}..HEAD",
+            ["rev-list", "--count", "--end-of-options", $"{defaultRef}..HEAD"],
             repoPath,
+            null,
             ct,
+            GitLockIntent.Read,
             streamStderrAsStdout: true,
             mirrorFailureOutputAsStderr: false);
         if (exitCode != 0)

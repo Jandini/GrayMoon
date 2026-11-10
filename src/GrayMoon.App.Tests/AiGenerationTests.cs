@@ -90,6 +90,9 @@ public sealed class AiGenerationTests
         public object Generation { get; set; } = new { success = true, json = """{"subject":"Add the feature","body":"Details."}""", errorKind = "None" };
         public bool ClaudeInstalled { get; set; } = true;
 
+        /// <summary>Which providers the Worker's host check lists. An older Worker does not know every id.</summary>
+        public Func<string, bool> ProviderReported { get; set; } = _ => true;
+
         public IEnumerable<(string Command, JsonElement Args)> Sent =>
             Fixture.Bridge.Sent.Select(s => (s.Command, ManifestTestFixture.ToJson(s.Args)));
 
@@ -132,7 +135,7 @@ public sealed class AiGenerationTests
                 gitVersionToolVersion = "5.12.0",
                 claudeVersion = harness.ClaudeInstalled ? "1.0" : null,
                 cursorAgentVersion = (string?)null,
-                aiProviders = AiProviderIds.All.Select(id => new
+                aiProviders = AiProviderIds.All.Where(harness.ProviderReported).Select(id => new
                 {
                     providerId = id,
                     isInstalled = id == AiProviderIds.Claude && harness.ClaudeInstalled,
@@ -187,6 +190,36 @@ public sealed class AiGenerationTests
         Assert.Contains("## repository Api", prompt);
         Assert.Contains("## repository Web", prompt);
         Assert.Contains("branch: feature/x", prompt);
+    }
+
+    [Fact]
+    public async Task A_provider_the_worker_did_not_report_is_unavailable_with_a_reason_instead_of_an_exception()
+    {
+        await using var h = await CreateHarnessAsync();
+        h.Evidence = request => EvidenceFor(request);
+        h.ProviderReported = id => id == AiProviderIds.Claude;
+        var missing = AiProviderIds.All.First(id => id != AiProviderIds.Claude);
+
+        var menu = await h.Operations.GetProvidersAsync(h.Workspace.WorkspaceId, CancellationToken.None);
+
+        Assert.True(menu.Options.Single(o => o.Id == AiProviderIds.Claude).IsAvailable);
+        var option = menu.Options.Single(o => o.Id == missing);
+        Assert.False(option.IsAvailable);
+        Assert.False(string.IsNullOrWhiteSpace(option.Problem));
+
+        var scope = new AiCommitScope(h.Workspace.WorkspaceId, Context, GitCommitEvidenceMode.All, [new(h.RepositoryIds["Api"], "main")]);
+        var result = await h.Operations.GenerateCommitMessageAsync(scope, missing, progress: null, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(AiGenerationErrorKind.NotInstalled, result.Failure!.Kind);
+
+        // An id no host check lists must fail with a message, never with "Sequence contains no matching element".
+        var unknown = await h.Operations.GenerateCommitMessageAsync(scope, "not-a-provider", progress: null, CancellationToken.None);
+
+        Assert.False(unknown.Success);
+        Assert.False(string.IsNullOrWhiteSpace(unknown.Failure!.Message));
+        Assert.DoesNotContain("Sequence contains", unknown.Failure.Message);
+        Assert.DoesNotContain(h.Sent, s => s.Command == WorkerHubMethods.GenerateAiText);
     }
 
     [Fact]
