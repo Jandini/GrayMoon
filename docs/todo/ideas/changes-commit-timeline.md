@@ -1,6 +1,32 @@
 # Changes page: commit timeline ("time machine") for reviewing a feature commit by commit
 
-Status: **idea, design only.** Nothing is built. First written 2026-11-11, revised the same day after review (scale, persistence, scope). Written against `07-git-changes-projection-and-tree.md` and the current Changes page (`WorkspaceGitChanges*.razor/.cs`, `GitChangesTree.razor`, `GitChangesHeader`).
+Status: **idea, design only.** Nothing is built. First written 2026-11-11, revised the same day after review (scale, persistence, scope), then reviewed again with laptop measurements (see "Review findings"). **Waiting for the enterprise VDI measurement** before the design text is revised. Written against `07-git-changes-projection-and-tree.md` and the current Changes page (`WorkspaceGitChanges*.razor/.cs`, `GitChangesTree.razor`, `GitChangesHeader`).
+
+## Review findings (2026-11-11, second review, with measurements)
+
+The git commands this design depends on were measured on a developer laptop (numbers in "Performance reality and why we persist"). **Where a finding below conflicts with the older text further down, the finding wins.** The rest of the note is revised once the enterprise VDI numbers are in (see "VDI measurement"), because those may change the targets again.
+
+Decided:
+
+- **The three SQLite tables stay in v1.** An in-memory cache was considered and rejected: persistence keeps the "Changes page reads SQLite only" rule, and on a machine where every git process is slow, a refill after each App restart is exactly the cost to avoid.
+
+Findings that change the design:
+
+| # | Finding | Evidence | Change |
+|---|---|---|---|
+| 1 | Process start dominates everything except line counts | `git --version` takes 76 ms; a metadata `log` of 181 commits takes 78 ms | Count **processes**, not commits. Every design choice below minimizes the number of git processes per repository |
+| 2 | Changed-file lists for every commit are nearly free inside the list call | `log --name-status` for 181 commits is 90 ms, 12 ms more than metadata only. A separate `diff-tree` per clicked commit is 76 ms plus the hub round trip | `ListBranchCommits` returns the file lists (`--name-status`, with `-M`) and the hydrator fills `WorkspaceGitContextCommitFiles` for single commits **eagerly**. A dot click is then a pure SQLite read. `GetCommitChanges` is needed only for ranges and the combined view. Hover prefetch of file lists is no longer needed |
+| 3 | Incremental mode costs more than a full list | `merge-base --is-ancestor` (74 ms) plus `log known..tip` (76 ms) is two processes, 150 ms; the full list is one process, 78-90 ms | **Drop incremental mode.** Always list the full range and reuse rows by sha in the App. Removes `KnownTipSha`, the `Mode` field and the incremental-versus-full tests. The "under 100 ms incremental" target is replaced by "one process per HEAD change" |
+| 4 | Parallelism buys little | 48 list calls: 4.2 s at 1 process, 4.0 s at 4, 2.5 s at 8, 1.8 s at 16. Process creation looks close to serialized (antivirus) | A cold backfill of 100 repositories is about 5-8 s here, not "a few seconds". Still fine in the background. Do not expect a higher parallelism cap to rescue a slow machine |
+| 5 | Line counts are the only expensive part | `--numstat` for 181 commits: 351 ms in the list call, 373 ms as one `diff-tree --stdin` process | Unchanged: tier 2 stays a separate low-priority pass |
+| 6 | Each side of a commit diff is its own process | `git show <sha>:<path>` is 73 ms, so a diff is about 150 ms | Read both sides with one `git cat-file --batch` process |
+| 7 | **The ahead badge does not measure what this note assumes** | `GitCliRepositoryReader.GetCommitCountsVsDefaultAsync` counts `<default ref>...HEAD`: the tip is `HEAD` and the base is the default ref. This note uses the Feature branch as tip and `ParentBranchName` as base, and calls "count equals badge" an integrity check | The check would fail for a stacked feature and for a worktree flipped to another branch. Choose the timeline's own range and **drop the badge equality check** (and `ExpectedCount`), or change the badge first. Still to confirm: which default ref the App passes for a Feature repository |
+| 8 | Merge commits would show no files | `git diff-tree <merge>` and `git log --name-status` print nothing for a merge by default | Diff a merge explicitly against its first parent (`<sha>^1 <sha>`, or `--first-parent -m` in the list call), with a test |
+| 9 | Purge rules contradict each other | "Key and lifetime" purges rows when the checked-out branch changes; the state table says rows are retained so flipping back does not recompute | Pick one (open question 1c). Suggested: retain until the branch is deleted or the Feature is removed |
+| 10 | The merged cross-repository order is fragile | A rebase gives every commit of that repository nearly the same committer date, so they clump, and a date-ordered walk swaps the tree between repositories on every step | Suggested default: group by repository (open question 0a) |
+| 11 | The walk changes today's Working tree behaviour | Stepping past the last working change would wrap into commit 1 | Suggested: the Working tree keeps wrapping inside itself and is left only by dot, `[` / `]` or `Shift` (open question 0) |
+
+Suggested, not decided - a smaller first version: a single-repository strip (the scope picker chooses the repository), the commit list, one-commit selection, the per-repository combined view and the two-button walk. The merged all-repositories timeline, bubbles, lanes, zoom, the file-progress arc, the crossing pulse and dot sizing would wait until someone asks for them.
 
 ## Problem
 
@@ -118,24 +144,111 @@ A failed or slow history load never disables the working tree, commit box, Sync 
 
 ## Performance reality and why we persist
 
-I have **not measured** any of this; the numbers below are expectations to confirm in Phase 0, not facts.
+### Measured on a developer laptop (2026-11-11)
 
-- `git log <base>..HEAD --format=...` (no stats) walks only the commits in the range. For 181 commits that should take tens of milliseconds of git time. On Windows, process start (about 20-60 ms) is a large share of it.
-- `--shortstat` / `--numstat` makes git **diff every commit**, which is what gets slow (hundreds of ms to seconds for 181 commits in a big repository). **Dots do not need stats**, so the list never asks for them.
-- Across repositories nothing batches: one process per repository. For 100 ahead repositories at a bounded parallelism of about 4-8, an optimistic total is a few seconds, a pessimistic one is tens of seconds. That is acceptable **in the background** and not acceptable while the user waits.
-- Repeating that on every page open or every Refresh is wasteful, because commit data is **immutable per SHA**. Only the *membership* of the range changes (new commit, amend, rebase, parent moved).
+Script: `changes-commit-timeline-measure.ps1` (next to this note). One synthetic repository: 400 files on `main`, then 181 commits on `feature` (5 files each, 60 files in every tenth commit, 300 lines per file). Each command is started the way the Worker starts it (a .NET process, no shell), once cold and then 9 times; the table shows milliseconds including process start. Machine: i7-8665U (8 logical processors), Windows 11, git 2.56.0.windows.4, standard Defender, local SSD.
 
-So: persist per Feature branch, update incrementally in the background, and make the page open a pure SQLite read. Targets for Phase 0 (acceptance, tune after measuring):
+| Command | First run | Min | Median | Max |
+|---|---|---|---|---|
+| Process start floor (`git --version`) | 81 | 69 | 76 | 85 |
+| `rev-list --count` (the ahead badge) | 79 | 75 | 80 | 103 |
+| `log` 181 commits, metadata only | 88 | 74 | 78 | 84 |
+| `log` 181 commits with `--name-status` | 92 | 86 | 90 | 106 |
+| `log` 181 commits with `--numstat` | 368 | 347 | 351 | 367 |
+| `log` one new commit (incremental) | 75 | 73 | 76 | 82 |
+| `merge-base --is-ancestor` | 78 | 70 | 74 | 80 |
+| `diff-tree` one commit, 5 files | 78 | 75 | 76 | 81 |
+| `diff-tree` one commit, 60 files | 86 | 81 | 83 | 84 |
+| `diff -M --numstat main...feature` (all commits combined) | 129 | 126 | 130 | 135 |
+| `diff-tree --stdin --numstat`, 181 commits, one process | 366 | 368 | 373 | 376 |
+| `show <sha>:<path>` (one side of a diff) | 79 | 71 | 73 | 80 |
 
-| Measurement | Target |
+Parallel sweep, 48 metadata `log` calls (stands in for a backfill of 48 repositories):
+
+| Parallel processes | 48 calls total ms | ms per call |
+|---|---|---|
+| 1 | 4,244 | 88 |
+| 2 | 3,881 | 81 |
+| 4 | 3,971 | 83 |
+| 8 | 2,504 | 52 |
+| 16 | 1,827 | 38 |
+
+What this says:
+
+- Walking 181 commits costs git about 2-15 ms. The other 75 ms is starting the process. A fixture of 100 repositories would only repeat that floor 100 times, so it was not built.
+- `--numstat` makes git diff every commit and is the only thing that scales with content (about 350 ms here). Dots do not need it.
+- Parallelism does not scale: process creation is the bottleneck, not CPU or disk.
+- Commit data is **immutable per SHA**; only the membership of the range changes (new commit, amend, rebase, parent moved). Paying 80 ms or more per repository on every page open would be waste.
+
+Not covered by the synthetic fixture: a large real repository (a big tree makes each diff heavier), a cold disk, and security software that inspects every process start. The last one is why the same script is run on the enterprise VDI.
+
+So: persist per Feature branch, update in the background with one process per repository per HEAD change, and make the page open a pure SQLite read. Targets, restated against the laptop numbers (to be restated again after the VDI run):
+
+| Measurement | Target | Laptop |
+|---|---|---|
+| `ListBranchCommits` for 181 commits with file lists, no line counts | under 150 ms including process start | 90 ms |
+| Update after one new commit | one git process | 90 ms |
+| Cold backfill of 100 repositories that are ahead, background | under 10 s total, no visible UI impact | about 5-8 s (extrapolated from the sweep) |
+| Page open, 100 repositories x 181 commits (18,100 rows), windowed read | under 100 ms | not measured (SQLite only, measured in Phase 2) |
+| Click a commit | SQLite read, no git process | n/a |
+| Combined view of one repository | under 250 ms | 130 ms |
+
+### VDI measurement (to do)
+
+The enterprise VDI runs security software that slows every process start, so the laptop numbers are a lower bound. Give the prompt below to the AI agent on the VDI. It needs this note and `changes-commit-timeline-measure.ps1` from the same folder; nothing else from the repository, no build, no network.
+
+```text
+You are measuring git performance on this machine for a design note. Do not change any product code.
+
+1. Read docs/todo/ideas/changes-commit-timeline.md in the GrayMoon repository, sections "Review findings" and
+   "Performance reality and why we persist", so you know what the numbers are for.
+
+2. Run the script next to it with Windows PowerShell, from any folder:
+     powershell.exe -NoProfile -ExecutionPolicy Bypass -File <path>\changes-commit-timeline-measure.ps1
+   It creates one synthetic git repository in a new folder under the temp directory, times a fixed list of
+   read-only git commands, and prints two Markdown tables. It takes one to ten minutes. It writes nothing
+   outside that temp folder. If execution policy or security software blocks it, report the exact message
+   and stop; do not work around a security control.
+
+3. Run it a second time and keep both outputs. If a number differs by more than 30% between the runs, run it
+   a third time and say which run looks like the outlier.
+
+4. If a real repository with a feature branch that is many commits ahead exists on this machine, run the
+   script once more against it (read-only):
+     ... -File <path>\changes-commit-timeline-measure.ps1 -RealRepositoryPath <repo> -RealBaseRef origin/main
+   Use that repository's own default branch for -RealBaseRef. Skip this step if there is no such repository.
+
+5. Delete the temp fixture folder the script printed.
+
+6. Write the results into the note, in the section "VDI measurement", under a new heading
+   "### Measured on the enterprise VDI (<date>)":
+   - git version, PowerShell version, logical processors, and in general words what security software is
+     active (for example "endpoint protection with process inspection"). No host names, user names, paths,
+     repository names or product licence details.
+   - both tables from the most representative run, plus the real-repository rows if you have them.
+   - a comparison with the laptop table: for each row, VDI median divided by laptop median.
+   - answers to these questions, each in one or two sentences:
+     a. What is the process start floor, and how far is the first run from the median?
+     b. Does the parallel sweep get faster with more processes, stay flat, or get slower?
+     c. Extrapolated from the sweep, how long does a cold backfill of 100 repositories take at 4 and at 8
+        parallel processes?
+     d. Is "log with --name-status" still close to "log metadata only"?
+     e. Which of the targets in the note's target table are missed, and by how much?
+   Do not redesign the feature. Only if a result contradicts a finding in "Review findings", add one line
+   under your results that says which finding and why.
+
+7. Follow the repository's writing rules: ASCII hyphen only (no em dash or en dash), Windows line endings.
+   Do not commit or push.
+```
+
+How the VDI numbers will be read:
+
+| VDI result | Consequence |
 |---|---|
-| `ListBranchCommits` for 181 commits, no stats, warm | under 150 ms including process start |
-| Incremental update after one new commit | under 100 ms Worker time |
-| Cold backfill of 100 repositories that are ahead, background | under 10 s total, no visible UI impact |
-| Page open, 100 repositories x 181 commits (18,100 rows), windowed read | under 100 ms |
-| `GetCommitChanges` for one commit | under 100 ms |
-
-Phase 0 builds a fixture script (100 repositories, 181 commits each, a mix of small and large commits) and records the real numbers in this note, as was done for the large-changeset note.
+| Process floor under about 200 ms | Design stands as revised in "Review findings" |
+| Process floor 200-500 ms | Same design. The backfill of 100 repositories takes a minute or more, so the "History: 14 / 30 repositories" chip and the selected-repository-first order become essential, and hydration must never run for a repository that is not ahead |
+| Process floor above 500 ms, or the sweep gets slower with more processes | Lower the hydration parallelism cap to 1-2, move tier 2 line counts out of v1, and consider reading history in-process with LibGit2Sharp (already used by the Worker for config reads) instead of one git process per repository |
+| First run far above the median | Cold cost matters more than warm cost: hydrate right after Sync and after Feature create, so the user never pays it on a click |
 
 ## Persistence design
 
@@ -419,7 +532,7 @@ Strip is `role="listbox"` horizontal, dots are `role="option"` with `aria-select
 
 ## Phases
 
-0. **Measure.** Fixture script (100 repositories, 181 commits each), time `git log` with and without stats, process-start overhead on Windows, parallelism sweep, SQLite insert and windowed read of 18,100 rows. Record numbers here, set final targets.
+0. **Measure.** Laptop done (2026-11-11, `changes-commit-timeline-measure.ps1`). Remaining: the enterprise VDI run ("VDI measurement"), then revise this note from "Review findings" and set final targets. The SQLite insert and windowed read of 18,100 rows is measured in Phase 2 with the real tables.
 1. **Worker and Common.** `ListBranchCommits` (incremental and full), `GetCommitChanges`, `GetGitFileDiff` revisions, SHA validation, pool routing. Tests with `TempGitRepositoryFixture`: count equals `DefaultBranchAhead` for Feature branches created from the default branch (fixtures with default `main`, `master` and `develop` in the same Feature, remote default differing from the local name, default ref present only as `origin/<name>`), parent that is not the default, unresolvable parent (fork-point fallback), detached at a pinned tag with and without commits, branch not checked out, merge, root, rename, binary, incremental versus full agreement, rewritten history, upstream boundary, rebase in progress.
 2. **Persistence and hydrator.** Migration, tables, hydrator with coalescing, version gate, integrity check against the badge, purge on Feature and repository removal. Tests: failed Worker answer never deletes, purge cleans every table, stale answer discarded, rewrite reuses rows.
 3. **Read service and page state.** SQL summaries, rail buckets, keyset window, selection, URL query, rewritten-history fallback.
