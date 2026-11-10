@@ -284,4 +284,83 @@ public sealed class FeatureContextBranchRefreshScopingTests
             Assert.Empty(await git.GetTagPinnedRepositoryIdsAsync(ctx.WorkspaceId, specialId, CancellationToken.None));
         }
     }
+
+    [Fact]
+    public async Task Restore_Packages_sends_the_Worker_only_the_repositories_the_selected_context_has_on_a_branch()
+    {
+        // Through the public restore methods, so the wiring is covered: Restore must ask for the pins of the context
+        // it was called with, not of the Workspace.
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await ctx.UseDotNetDependencyProfileAsync();
+        var featureId = await SeedFeatureAsync(ctx);
+        var specialId = await ctx.GetSpecialContextIdAsync();
+        ctx.WorkerBridge.Respond("DotnetRestore", new { success = true });
+
+        await using (var scope = ctx.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            foreach (var contextId in new[] { specialId.Value, featureId.Value })
+            {
+                db.WorkspaceProjects.Add(new WorkspaceProject
+                {
+                    WorkspaceId = ctx.WorkspaceId,
+                    WorkspaceFeatureContextId = contextId,
+                    RepositoryId = ctx.RepositoryId,
+                    ProjectName = "Acme.Api",
+                    ProjectType = ProjectType.Library,
+                    ProjectFilePath = "src/Api/Acme.Api.csproj",
+                    TargetFramework = "net10.0",
+                });
+            }
+
+            await db.SaveChangesAsync();
+        }
+
+        var synced = new HashSet<int> { ctx.RepositoryId };
+        int RestoreCalls() => ctx.WorkerBridge.Calls.Count(c => c.Command == "DotnetRestore");
+
+        // The Workspace is on a tag, the Feature on its branch: only the Feature restores.
+        await ctx.MutateLinkAsync(l =>
+        {
+            l.CheckedOutTag = "v1.0.0";
+            l.BranchName = null;
+        });
+        await using (var scope = ctx.CreateScope())
+        {
+            var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+            Assert.Equal(1, await git.RestoreAllWorkspacePackagesAsync(ctx.WorkspaceId, featureId, _ => { }, CancellationToken.None));
+            Assert.Equal(1, await git.RestoreSyncedWorkspacePackagesAsync(ctx.WorkspaceId, featureId, synced, _ => { }, CancellationToken.None));
+            Assert.Equal(2, RestoreCalls());
+            Assert.Equal(0, await git.RestoreAllWorkspacePackagesAsync(ctx.WorkspaceId, specialId, _ => { }, CancellationToken.None));
+            Assert.Equal(0, await git.RestoreSyncedWorkspacePackagesAsync(ctx.WorkspaceId, specialId, synced, _ => { }, CancellationToken.None));
+            Assert.Equal(2, RestoreCalls());
+        }
+
+        // The other way round: the Feature is on a tag, the Workspace on a branch: only the Workspace restores.
+        await ctx.MutateLinkAsync(l =>
+        {
+            l.CheckedOutTag = null;
+            l.BranchName = "feature/x";
+        });
+        await using (var scope = ctx.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var state = await db.WorkspaceRepositoryContextStates.SingleAsync(s =>
+                s.WorkspaceFeatureContextId == featureId.Value && s.WorkspaceRepositoryId == ctx.WorkspaceRepositoryId);
+            state.CheckedOutTag = "v2.0.0";
+            state.BranchName = null;
+            await db.SaveChangesAsync();
+        }
+
+        await using (var scope = ctx.CreateScope())
+        {
+            var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+            Assert.Equal(0, await git.RestoreAllWorkspacePackagesAsync(ctx.WorkspaceId, featureId, _ => { }, CancellationToken.None));
+            Assert.Equal(0, await git.RestoreSyncedWorkspacePackagesAsync(ctx.WorkspaceId, featureId, synced, _ => { }, CancellationToken.None));
+            Assert.Equal(2, RestoreCalls());
+            Assert.Equal(1, await git.RestoreAllWorkspacePackagesAsync(ctx.WorkspaceId, specialId, _ => { }, CancellationToken.None));
+            Assert.Equal(1, await git.RestoreSyncedWorkspacePackagesAsync(ctx.WorkspaceId, specialId, synced, _ => { }, CancellationToken.None));
+            Assert.Equal(4, RestoreCalls());
+        }
+    }
 }
