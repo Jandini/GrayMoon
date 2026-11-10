@@ -58,7 +58,7 @@ public sealed class WorkspaceRepositoryStateWriterTests
         await using (var scope = ctx.CreateScope())
         {
             var branchWriter = scope.ServiceProvider.GetRequiredService<RepositoryBranchWriter>();
-            await branchWriter.PersistAsync(ctx.WorkspaceRepositoryId, ["feature/x", "main"], ["origin/main"], "main", ["v1.0.0"], null);
+            await branchWriter.PersistAsync(ctx.WorkspaceRepositoryId, ["feature/x", "main"], ["origin/main"], "main", ["v1.0.0"]);
         }
 
         await ApplyAsync(ctx, new RepositoryStateSnapshot());

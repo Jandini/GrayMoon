@@ -1157,9 +1157,12 @@ public sealed class WorkspaceFeatureOperations(
 
         // Every worktree is unregistered now. Anything still on disk (a file or folder some program has open) is deleted
         // here if it has let go, or marked pending deletion for the background cleanup; Remove itself never waits on it.
-        var pendingDeletionFolder = rootRow != null || reportByWrId.Values.Any(r => r.ResidueRemaining)
-            ? await CleanupFeatureFolderForNameAsync(info.WorkspaceId, info.FeatureName, onlyIfMarked: false, cancellationToken)
-            : null;
+        // Always asked, also without a Workspace repository row and without reported leftovers: the Worker deletes the
+        // Feature root only when it is empty, so a file outside every worktree (codegraph.json, .codegraph) would leave
+        // the folder behind and block the next Create of the same name with FeatureFolderExists. The Worker's cleaner
+        // re-checks the folder and refuses anything that is not this Feature's folder under the managed root.
+        var pendingDeletionFolder = await CleanupFeatureFolderForNameAsync(
+            info.WorkspaceId, info.FeatureName, onlyIfMarked: false, cancellationToken);
 
         var report = rows
             .Select(r => reportByWrId.TryGetValue(r.WorkspaceRepositoryId, out var entry) ? entry : null)

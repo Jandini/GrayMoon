@@ -337,7 +337,12 @@ runs on the thread pool while the dispatcher may be rendering the page.
    use** - Worker request DTO properties (`*Path`, `*Paths`) with
    `GitRepositoryPathValidator` (rejects rooted paths and `.`/`..`), and hook
    payloads against a workspace root the Worker already knows. The App is not
-   a trusted source of paths. [21, 22]
+   a trusted source of paths. [21, 22] A repository name is resolved only
+   through `WorkerRepositoryPaths.Resolve`, which throws for a name that is
+   not one folder name (separator, `..`, rooted, wildcard, trailing dot).
+   Before writing a file at a validated path, also call
+   `RepositoryPathContainment.GetEscapeReason`: the validator compares text
+   and does not see a junction or symlink that leads out of the repository.
 2. **Never build a command line by string interpolation.** Use
    `ArgumentList`; put `--` before refs and paths so a name starting with `-`
    is not an option; use `:(literal)` pathspecs. [21, GitCliRepositoryReader]

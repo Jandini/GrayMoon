@@ -736,6 +736,7 @@
         switch (notice.Kind)
         {
             case UpdateAndPushNoticeKind.Info:
+            case UpdateAndPushNoticeKind.Warning:
                 ToastService.Show(notice.Message);
                 break;
             case UpdateAndPushNoticeKind.Error:
@@ -913,7 +914,9 @@
             requiredPackageIds,
             job.ToOperationProgress(),
             cancellationToken: ct);
-        pushResult.ShowRepoErrors(msg => { if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError(msg)); });
+        pushResult.ShowRepoErrors(
+            msg => { if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError(msg)); },
+            warning => { if (!_disposed) _ = InvokeAsync(() => ToastService.Show(warning)); });
     }
 
     private Task OnPullBadgeClickAsync(WorkspaceNotification n, NotificationRepo repo)
@@ -1041,7 +1044,9 @@
                     requiredPackageIds,
                     job.ToOperationProgress(),
                     cancellationToken: ct);
-                result.ShowRepoErrors(msg => { if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError(msg)); });
+                result.ShowRepoErrors(
+                    msg => { if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError(msg)); },
+                    warning => { if (!_disposed) _ = InvokeAsync(() => ToastService.Show(warning)); });
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)

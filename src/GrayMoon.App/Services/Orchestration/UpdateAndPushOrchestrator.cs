@@ -55,6 +55,7 @@ public sealed class UpdateAndPushOrchestrator(
         var laneReader = new TrackingLevelReader(channel.Reader);
         var handedLevels = new List<int>();
         int? updateStoppedAfterLevel = null;
+        var laneEnded = false;
 
         // The lane has its own scope (its own DbContext): it runs concurrently with the update, which owns the caller's.
         // RunPushLaneAsync also gives every level a scope of its own, since the update rewrites rows between levels.
@@ -85,6 +86,9 @@ public sealed class UpdateAndPushOrchestrator(
             }
             finally
             {
+                // Set before anything else: the task itself only completes after the scope is disposed, and a level
+                // that finishes in that gap must already see the lane as stopped.
+                Volatile.Write(ref laneEnded, true);
                 progress.EndPush();
             }
         }, CancellationToken.None);
@@ -110,7 +114,7 @@ public sealed class UpdateAndPushOrchestrator(
                     // The lane only ends before the channel is completed when it stopped: a level failed (reported
                     // through the level error first) or it threw. Committing further levels would leave commits
                     // nothing pushes, so the update stops here, at the boundary it has just reached.
-                    if (lane.IsCompleted || !pushLevelErrors.IsEmpty)
+                    if (Volatile.Read(ref laneEnded) || lane.IsCompleted || !pushLevelErrors.IsEmpty)
                     {
                         updateStoppedAfterLevel = completion.Level;
                         throw new PushLaneStoppedException();
@@ -182,12 +186,9 @@ public sealed class UpdateAndPushOrchestrator(
 
         // Restore warnings arrive as repository errors but do not stop the lane: every level was still pushed.
         var laneFinished = laneFault == null && levelErrors.Count == 0 && updateStoppedAfterLevel == null && takenCount == handedLevels.Count;
-        if (laneFinished && repoErrors.Count > 0 && repoErrors.Values.All(PackageRestoreOutcome.IsWarning))
-        {
-            return OperationResult.Fail(
-                $"Push finished, but package restore failed in {repoErrors.Count} {(repoErrors.Count == 1 ? "repository" : "repositories")}.",
-                new Dictionary<int, string>(repoErrors));
-        }
+        // That is a finished push with warnings, not a failed run.
+        if (laneFinished && PushOperationResult.TryDoneWithRestoreWarnings(repoErrors) is { } warned)
+            return warned;
 
         var failedLevel = levelErrors.Count > 0 ? levelErrors.Keys.Min() : lastTakenLevel ?? 0;
         var notPushed = handedLevels.Where(level => level > failedLevel).ToList();

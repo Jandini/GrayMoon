@@ -370,6 +370,7 @@ public sealed partial class WorkspaceRepositories
             switch (notice.Kind)
             {
                 case UpdateAndPushNoticeKind.Info:
+                case UpdateAndPushNoticeKind.Warning:
                     ToastService.Show(notice.Message);
                     break;
                 case UpdateAndPushNoticeKind.Error:
@@ -394,7 +395,8 @@ public sealed partial class WorkspaceRepositories
         // The live callbacks reach the page only while it is alive and only as they happen; a push that waits
         // minutes for a package can fail long after the user looked away. The returned result is the complete
         // account, so apply it; the presenter's notice then says that the push stopped.
-        if (result.Push is { Success: false } pushFailure)
+        // A push that finished with restore warnings keeps them on its repositories too.
+        if (result.Push is { } pushFailure && (!pushFailure.Success || pushFailure.HasWarnings))
         {
             SafeInvoke(() =>
             {

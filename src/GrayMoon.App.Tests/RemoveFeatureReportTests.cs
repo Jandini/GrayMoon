@@ -459,8 +459,11 @@ public sealed class RemoveFeatureReportTests
     }
 
     [Fact]
-    public async Task Clean_remove_of_source_worktrees_does_not_ask_for_folder_cleanup()
+    public async Task Clean_remove_without_a_workspace_repository_row_still_asks_for_folder_cleanup()
     {
+        // No Workspace repository row and no leftovers reported by any worktree: the Feature folder can still hold
+        // files outside every worktree (codegraph.json, .codegraph). Without the cleanup the folder stayed and the
+        // next Create of the same name failed with FeatureFolderExists.
         await using var ctx = await SyncStateTestContext.CreateAsync();
         var featureContextId = await SeedRemovableFeatureAsync(ctx);
         await SetManagedStorageRootAsync(ctx);
@@ -468,6 +471,7 @@ public sealed class RemoveFeatureReportTests
         ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree());
         ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new { success = true });
         ctx.WorkerBridge.Respond("DeleteBranch", new { success = true });
+        ctx.WorkerBridge.Respond(WorkerHubMethods.CleanupFeatureFolder, new { outcome = "Removed" });
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -477,7 +481,15 @@ public sealed class RemoveFeatureReportTests
 
         Assert.True(result.Success, result.Error);
         Assert.Null(result.RemoveFeaturePendingDeletionFolder);
-        Assert.DoesNotContain(ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.CleanupFeatureFolder);
+
+        var call = Assert.Single(ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.CleanupFeatureFolder);
+        Assert.Equal(ManagedStorageRoot, GetArg(call.Args, "featureStorageRoot"));
+        Assert.Equal($@"{ManagedStorageRoot}\feat-refresh", GetArg(call.Args, "featureRootPath"));
+        Assert.Equal(false, GetArg(call.Args, "onlyIfMarked"));
+
+        // The cleanup runs only after every worktree is unregistered.
+        var commands = ctx.WorkerBridge.Calls.Select(c => c.Command).ToList();
+        Assert.True(commands.LastIndexOf(WorkerHubMethods.RemoveGitWorktree) < commands.IndexOf(WorkerHubMethods.CleanupFeatureFolder));
     }
 
     [Fact]

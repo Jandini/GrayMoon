@@ -287,6 +287,11 @@ public sealed partial class WorkspaceRepositories
                 ClearRepositoryErrorsFor(failedRepoIds is null ? repoIds : repoIds.Where(id => !failedRepoIds.Contains(id)));
             }
 
+            // Done with a warning: the push landed, a package restore after it failed. The repository rows above
+            // carry the reason; the toast says the push itself finished.
+            if (result.HasWarnings)
+                ToastService.Show(result.WarningSummary ?? "Push finished with warnings.");
+
             if (result.RepoErrors is { Count: > 0 } || result.LevelErrors is { Count: > 0 })
                 return;
             if (!result.Success && !string.IsNullOrWhiteSpace(result.Error))

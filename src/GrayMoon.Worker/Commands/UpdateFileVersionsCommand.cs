@@ -23,6 +23,9 @@ public sealed class UpdateFileVersionsCommand() : ICommandHandler<UpdateFileVers
         if (!validation.IsValid || validation.FullPath is null)
             return new UpdateFileVersionsResponse { UpdatedCount = 0, ErrorMessage = $"{validation.ErrorMessage ?? "Invalid path."} Skipped: {filePath}" };
         var fullFilePath = validation.FullPath;
+        // The validator compares text; a junction or symlink inside the repository could still carry the write out.
+        if (RepositoryPathContainment.GetEscapeReason(repoPath, fullFilePath) is { } escape)
+            return new UpdateFileVersionsResponse { UpdatedCount = 0, ErrorMessage = $"{escape} Skipped: {filePath}" };
         if (!File.Exists(fullFilePath))
             return new UpdateFileVersionsResponse { UpdatedCount = 0, ErrorMessage = $"File not found: {filePath}" };
         var patternEntries = FileVersionTokenParser.ParsePatternLines(versionPattern);

@@ -365,7 +365,9 @@ public sealed partial class WorkspaceGitChanges
                         requiredPackageIds: EmptyPushPackageIds,
                         job.ToOperationProgress(),
                         cancellationToken: ct));
-                result.ShowRepoErrors(msg => SafeInvoke(() => ToastService.ShowError(msg)));
+                result.ShowRepoErrors(
+                    msg => SafeInvoke(() => ToastService.ShowError(msg)),
+                    warning => SafeInvoke(() => ToastService.Show(warning)));
             }
         });
     }

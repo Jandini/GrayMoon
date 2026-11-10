@@ -588,7 +588,7 @@ Restore package state from the Workspace or dependency-level workflows (.NET Dep
 
 Uses discovered project paths and calls `dotnet restore` through the Worker.
 
-Restore also runs in `PushOrchestrator` after each level's push. `DependencyUpdateOrchestrator` never restores.
+Restore also runs in `PushOrchestrator` after each level's push. `DependencyUpdateOrchestrator` never restores. A restore that fails after a pushed level does not fail the push: when it is the only problem, the run ends as done with a warning (`OperationResult.Warnings`, "Push finished, but package restore failed in N repositories."), and the repository keeps its restore error in the grid. Next to a real push failure it stays part of the failed run.
 
 ---
 

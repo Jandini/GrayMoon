@@ -2,11 +2,45 @@ namespace GrayMoon.Worker.Services;
 
 public static class WorkerRepositoryPaths
 {
-    /// <summary>Absolute working-tree path of <paramref name="repositoryName"/> inside <paramref name="workspacePath"/>.</summary>
+    /// <summary>
+    /// Absolute working-tree path of <paramref name="repositoryName"/> inside <paramref name="workspacePath"/>.
+    /// Every command resolves its repository here, so this is where the name is checked: the App is not a trusted
+    /// source of names, and a rooted or ".." name would resolve outside the workspace folder.
+    /// </summary>
+    /// <exception cref="ArgumentException">The name is not a single folder name.</exception>
     public static string Resolve(string workspacePath, string repositoryName, string? workspaceRepositoryName)
-        => IsWorkspaceRepository(repositoryName, workspaceRepositoryName)
+    {
+        if (GetRepositoryNameRejection(repositoryName) is { } rejection)
+            throw new ArgumentException(rejection, nameof(repositoryName));
+        return IsWorkspaceRepository(repositoryName, workspaceRepositoryName)
             ? workspacePath
             : Path.Combine(workspacePath, repositoryName);
+    }
+
+    // The Windows set on every OS, so a name is judged the same wherever the Worker runs.
+    private static readonly char[] InvalidRepositoryNameChars = ['/', '\\', ':', '*', '?', '"', '<', '>', '|'];
+
+    /// <summary>
+    /// Null when <paramref name="repositoryName"/> is one safe folder name; otherwise why it is refused. Refused:
+    /// empty, "." and "..", a separator or drive colon, a rooted path, control and wildcard characters, and a
+    /// trailing dot or space (Windows drops those, so the folder used would not be the one named).
+    /// </summary>
+    public static string? GetRepositoryNameRejection(string? repositoryName)
+    {
+        if (string.IsNullOrWhiteSpace(repositoryName))
+            return "Repository name is empty.";
+        if (repositoryName is "." or ".."
+            || repositoryName.IndexOfAny(InvalidRepositoryNameChars) >= 0
+            || repositoryName.Any(char.IsControl)
+            || Path.IsPathRooted(repositoryName)
+            || repositoryName[0] == ' '
+            || repositoryName[^1] is '.' or ' ')
+        {
+            return "Repository name is not a valid folder name.";
+        }
+
+        return null;
+    }
 
     public static bool IsWorkspaceRepository(string repositoryName, string? workspaceRepositoryName)
         => !string.IsNullOrWhiteSpace(workspaceRepositoryName)

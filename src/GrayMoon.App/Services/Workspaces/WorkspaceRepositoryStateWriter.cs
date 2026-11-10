@@ -129,6 +129,8 @@ public sealed class WorkspaceRepositoryStateWriter(
 
         var previousBranch = StageTracked(context, wr, state, snapshot, options);
         var isSpecialWorkspace = context.Kind == WorkspaceFeatureContextKind.Workspace;
+        if (snapshot.BranchesProbed)
+            StageTagRefresh(wr, state, isSpecialWorkspace, snapshot.Tags, snapshot.CheckedOutTag);
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -140,7 +142,6 @@ public sealed class WorkspaceRepositoryStateWriter(
                 snapshot.RemoteBranches,
                 snapshot.DefaultBranchName ?? wr.DefaultBranchName,
                 snapshot.Tags,
-                snapshot.CheckedOutTag,
                 cancellationToken);
         }
 
@@ -154,6 +155,119 @@ public sealed class WorkspaceRepositoryStateWriter(
             await ReconcilePullRequestsAsync(contextId, workspaceId, [(wr, state, previousBranch)], isSpecialWorkspace, cancellationToken);
 
         return true;
+    }
+
+    /// <summary>
+    /// Records which tag the context has checked out, from a refresh that listed the repository's tags
+    /// (<paramref name="tags"/> newest first), and whether a newer tag exists. Nothing is written when
+    /// <paramref name="tags"/> is null: the refresh did not look at tags. A Feature context writes its own context
+    /// state only; the special Workspace also mirrors onto the link. Returns false when the context or the link is
+    /// missing or they belong to different workspaces.
+    /// </summary>
+    public async Task<bool> ApplyTagRefreshAsync(
+        WorkspaceFeatureContextId contextId,
+        int workspaceRepositoryId,
+        IReadOnlyList<string>? tags,
+        string? currentTag,
+        CancellationToken cancellationToken = default)
+    {
+        if (tags == null)
+            return true;
+
+        var context = await dbContext.WorkspaceFeatureContexts
+            .FirstOrDefaultAsync(c => c.WorkspaceFeatureContextId == contextId.Value, cancellationToken);
+        var wr = await dbContext.WorkspaceRepositories
+            .FirstOrDefaultAsync(x => x.WorkspaceRepositoryId == workspaceRepositoryId, cancellationToken);
+        if (context is null || wr is null || context.WorkspaceId != wr.WorkspaceId)
+        {
+            logger.LogWarning(
+                "Tag refresh write skipped: context {ContextId} or workspace repository {WorkspaceRepositoryId} missing, or not in the same workspace",
+                contextId.Value, workspaceRepositoryId);
+            return false;
+        }
+
+        var state = await dbContext.WorkspaceRepositoryContextStates
+            .FirstOrDefaultAsync(
+                s => s.WorkspaceFeatureContextId == contextId.Value && s.WorkspaceRepositoryId == workspaceRepositoryId,
+                cancellationToken);
+        if (state is null)
+        {
+            // Nothing to clear on a context that has no state yet, and no row is created just to say "not on a tag".
+            if (Blank(currentTag) && context.Kind != WorkspaceFeatureContextKind.Workspace)
+                return true;
+            state = new WorkspaceRepositoryContextState
+            {
+                WorkspaceFeatureContextId = contextId.Value,
+                WorkspaceRepositoryId = workspaceRepositoryId,
+                SyncStatus = context.Kind == WorkspaceFeatureContextKind.Workspace ? wr.SyncStatus : RepoSyncStatus.NeedsSync,
+                CheckedOutTag = context.Kind == WorkspaceFeatureContextKind.Workspace ? wr.CheckedOutTag : null,
+            };
+            dbContext.WorkspaceRepositoryContextStates.Add(state);
+        }
+
+        StageTagRefresh(wr, state, context.Kind == WorkspaceFeatureContextKind.Workspace, tags, currentTag);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    /// <summary>Mutates the tracked context state and, for the special Workspace, the link. Does not save.</summary>
+    private static void StageTagRefresh(
+        WorkspaceRepositoryLink wr,
+        WorkspaceRepositoryContextState state,
+        bool isSpecialWorkspace,
+        IReadOnlyList<string>? tags,
+        string? currentTag)
+    {
+        if (tags == null)
+            return;
+
+        if (!Blank(currentTag))
+        {
+            state.CheckedOutTag = currentTag;
+            state.BranchName = null;
+            state.BranchHasUpstream = null;
+            state.OutgoingCommits = null;
+            state.IncomingCommits = null;
+            state.DefaultBranchBehindCommits = null;
+            state.DefaultBranchAheadCommits = null;
+            // The list is newest first: any position after the first means a newer tag exists.
+            var tagIndex = -1;
+            for (var i = 0; i < tags.Count; i++)
+            {
+                if (string.Equals(tags[i], currentTag, StringComparison.OrdinalIgnoreCase))
+                {
+                    tagIndex = i;
+                    break;
+                }
+            }
+
+            state.HasNewerTag = tagIndex > 0;
+        }
+        else if (!Blank(state.CheckedOutTag) || (isSpecialWorkspace && !Blank(wr.CheckedOutTag)))
+        {
+            // Tags were refreshed and the checkout is no longer on one: clear the pinned state.
+            state.CheckedOutTag = null;
+            state.HasNewerTag = null;
+        }
+        else
+        {
+            return;
+        }
+
+        if (!isSpecialWorkspace)
+            return;
+
+        wr.CheckedOutTag = state.CheckedOutTag;
+        wr.HasNewerTag = state.HasNewerTag;
+        if (!Blank(state.CheckedOutTag))
+        {
+            wr.BranchName = null;
+            wr.BranchHasUpstream = null;
+            wr.OutgoingCommits = null;
+            wr.IncomingCommits = null;
+            wr.DefaultBranchBehindCommits = null;
+            wr.DefaultBranchAheadCommits = null;
+        }
     }
 
     private static void ApplyIdentity(WorkspaceRepositoryContextState state, RepositoryStateSnapshot snapshot)
@@ -427,13 +541,13 @@ public sealed class WorkspaceRepositoryStateWriter(
 
             if (snapshot.BranchesProbed)
             {
+                StageTagRefresh(wr, state, isSpecialWorkspace, snapshot.Tags, snapshot.CheckedOutTag);
                 await branchWriter.PersistAsync(
                     wr.WorkspaceRepositoryId,
                     snapshot.LocalBranches,
                     snapshot.RemoteBranches,
                     snapshot.DefaultBranchName ?? wr.DefaultBranchName,
                     snapshot.Tags,
-                    snapshot.CheckedOutTag,
                     cancellationToken,
                     save: false);
             }

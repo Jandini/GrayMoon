@@ -99,8 +99,9 @@ public sealed class SyncCommandHandler(
                 remoteBranches: null,
                 defaultBranchName: null,
                 tags: n.RemoteTags,
-                currentTag: n.Tag,
                 cancellationToken: default);
+            // The tag pin belongs to the context the hook reported for, not to the shared link.
+            await stateWriter.ApplyTagRefreshAsync(contextId.Value, wr.WorkspaceRepositoryId, n.RemoteTags, n.Tag);
         }
 
         // Prune remote branches from DB that no longer exist in git (fetch --prune ran on the worker side).

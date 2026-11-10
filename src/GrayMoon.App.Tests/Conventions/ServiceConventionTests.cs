@@ -86,8 +86,8 @@ public sealed class SharedLinkWriteConventionTests
     ];
 
     /// <summary>
-    /// Types that set the guarded columns: the properties each may set and the reason. An entry marked OPEN is
-    /// a known violation recorded so it cannot spread; remove the entry when the code is fixed.
+    /// Types that set the guarded columns: the properties each may set and the reason. A known violation is
+    /// recorded as an entry marked OPEN so it cannot spread; remove the entry when the code is fixed.
     /// </summary>
     private static readonly Dictionary<string, (string[] Properties, string Reason)> AllowedWriters = new(StringComparer.Ordinal)
     {
@@ -101,12 +101,6 @@ public sealed class SharedLinkWriteConventionTests
             "Updates the detached grid row of the selected context during a sync; nothing is saved."),
         ["GrayMoon.App.Services.Application.WorkspaceSyncOperations"] = ([nameof(WorkspaceRepositoryLink.BranchName), nameof(WorkspaceRepositoryLink.CheckedOutTag)],
             "Overlays the Feature context's state on links loaded AsNoTracking before a handler filters them; nothing is saved."),
-        ["GrayMoon.App.Services.Workspaces.RepositoryBranchWriter"] = (GuardedProperties,
-            "OPEN: PersistAsync sets tag, branch and upstream on the link from a branch refresh without knowing the context."),
-        ["GrayMoon.App.Services.Application.WorkspaceBranchOperations"] = ([nameof(WorkspaceRepositoryLink.BranchHasUpstream)],
-            "OPEN: RefreshBranchesAsync and DeleteBranchAsync save BranchHasUpstream on the link for any context."),
-        ["GrayMoon.App.Services.Git.WorkspaceGitService"] = ([nameof(WorkspaceRepositoryLink.BranchHasUpstream)],
-            "OPEN: RefreshBranchesAsync and EnsureRemoteBranchPersistedAsync save BranchHasUpstream on the link for any context."),
     };
 
     [Fact]

@@ -2,6 +2,7 @@ using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Jobs.Requests;
 using GrayMoon.Worker.Jobs.Response;
 using GrayMoon.Common.FileVersions;
+using GrayMoon.Common.Git;
 using GrayMoon.Worker.Services;
 namespace GrayMoon.Worker.Commands;
 /// <summary>
@@ -30,13 +31,16 @@ public sealed class ResolveGeneratedPackageReferencesCommand(ICsProjFileParser c
             if (string.IsNullOrWhiteSpace(repositoryName) || string.IsNullOrWhiteSpace(filePath) || string.IsNullOrWhiteSpace(pattern))
                 continue;
             var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
-            var fullFilePath = Path.Combine(repoPath, filePath.Replace('/', Path.DirectorySeparatorChar));
             var fileResult = new ResolveGeneratedPackageReferencesFileResult
             {
                 RepositoryName = repositoryName,
                 FilePath = filePath
             };
-            if (!File.Exists(fullFilePath))
+            // The App is not a trusted source of paths: a rooted or ".." path is answered like a missing file
+            // (no packages) and never opened.
+            var validation = GitRepositoryPathValidator.Validate(repoPath, filePath);
+            var fullFilePath = validation.FullPath;
+            if (!validation.IsValid || fullFilePath is null || !File.Exists(fullFilePath))
             {
                 results.Add(fileResult);
                 continue;

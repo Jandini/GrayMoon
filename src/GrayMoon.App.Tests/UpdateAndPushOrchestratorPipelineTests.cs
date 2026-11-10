@@ -25,8 +25,9 @@ public sealed class UpdateAndPushOrchestratorPipelineTests
         return new UpdateAndPushOrchestrator(update, push, services.GetRequiredService<IServiceScopeFactory>(), NullLogger<UpdateAndPushOrchestrator>.Instance);
     }
 
-    private static Task<UpdateAndPushResult> Run(UpdateAndPushOrchestrator orchestrator, Action<int, string>? levelError = null)
-        => orchestrator.RunAsync(WorkspaceId, Context, CancellationToken.None, _ => { }, (_, _) => { }, levelError ?? ((_, _) => { }));
+    private static Task<UpdateAndPushResult> Run(
+        UpdateAndPushOrchestrator orchestrator, Action<int, string>? levelError = null, Action<string>? overlay = null)
+        => orchestrator.RunAsync(WorkspaceId, Context, CancellationToken.None, overlay ?? (_ => { }), (_, _) => { }, levelError ?? ((_, _) => { }));
 
     [Fact]
     public async Task Three_levels_are_pushed_in_order_and_level_one_goes_out_while_level_three_is_still_updating()
@@ -136,7 +137,12 @@ public sealed class UpdateAndPushOrchestratorPipelineTests
         Assert.Equal([1, 2, 3], update.CompletedLevels);
         Assert.Equal([1, 2, 3], push.ReceivedLevels);
         Assert.Equal(3, result.PushedRepoCount);
-        Assert.Equal("Push finished, but package restore failed in 1 repository.", result.Push!.Error);
+        // Done with a warning, not a failed run: the push landed on every level.
+        Assert.True(result.Push!.Success);
+        Assert.Null(result.Push.Error);
+        Assert.True(result.Push.HasWarnings);
+        Assert.Equal(["Package restore failed for repo-1: error NU1101"], result.Push.Warnings);
+        Assert.Equal("Push finished, but package restore failed in 1 repository.", result.Push.WarningSummary);
         Assert.Null(result.Push.LevelErrors);
         Assert.Equal("Package restore failed for repo-1: error NU1101", result.Push.RepoErrors![1]);
     }
@@ -159,14 +165,23 @@ public sealed class UpdateAndPushOrchestratorPipelineTests
     {
         // #11: the exception used to surface only after levels 3 and 4 were committed, with no level in the message.
         var push = new FakePushLane { ThrowAtLevel = 2, ThrowOnRun = new InvalidOperationException("worker not connected") };
+        // Level 3 waits until the orchestrator has seen the lane end. The fake's own task ending is too early: the
+        // orchestrator notices a moment later, and level 4 could be committed in between. The overlay is reported once
+        // for the update's first message and once more when the orchestrator drops the ended push lane.
+        var overlayReports = 0;
+        var laneSeenEnded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var update = new FakeUpdateLane
         {
             Levels = [1, 2, 3, 4],
-            BeforeLevel = async level => { if (level == 3) await push.Ended.WaitAsync(Timeout); },
+            ReportAtStart = "Updating",
+            BeforeLevel = async level => { if (level == 3) await laneSeenEnded.Task.WaitAsync(Timeout); },
         };
         var reported = new List<(int Level, string Message)>();
 
-        var result = await Run(Create(update, push), (level, message) => { lock (reported) reported.Add((level, message)); }).WaitAsync(Timeout);
+        var result = await Run(
+            Create(update, push),
+            (level, message) => { lock (reported) reported.Add((level, message)); },
+            _ => { if (Interlocked.Increment(ref overlayReports) == 2) laneSeenEnded.TrySetResult(); }).WaitAsync(Timeout);
 
         Assert.Equal([1, 2, 3], update.CompletedLevels);
         Assert.True(result.Update.Success);
@@ -203,6 +218,9 @@ public sealed class UpdateAndPushOrchestratorPipelineTests
     {
         public int[] Levels { get; init; } = [];
         public Func<int, Task>? BeforeLevel { get; init; }
+
+        /// <summary>Reported once before the first level, so the overlay has an update message to show.</summary>
+        public string? ReportAtStart { get; init; }
         public bool FailAfterLevels { get; init; }
         public Exception? ThrowAfterLevels { get; init; }
         public Action? AfterLevels { get; init; }
@@ -216,6 +234,8 @@ public sealed class UpdateAndPushOrchestratorPipelineTests
             int? maxLevel = null, string? runId = null, Func<DependencyLevelCompletion, Task>? onLevelCompleted = null)
         {
             RunCount++;
+            if (ReportAtStart != null)
+                progress?.Report(new OperationProgress(ReportAtStart));
             foreach (var level in Levels)
             {
                 if (BeforeLevel != null)
@@ -271,13 +291,23 @@ public sealed class UpdateAndPushOrchestratorPipelineTests
         public Task<bool> CanRunPushLaneAsync(int workspaceId, WorkspaceFeatureContextId contextId, int? maxLevel, CancellationToken cancellationToken)
             => Task.FromResult(CanRun);
 
-        public async Task<int> RunPushLaneAsync(
+        public Task<int> RunPushLaneAsync(
             int workspaceId, WorkspaceFeatureContextId contextId, ChannelReader<DependencyLevelCompletion> completedLevels,
             Action<string>? onProgressMessage = null, Action<int, string>? onRepoError = null, Action<int, string>? onLevelError = null,
             bool restorePackages = true, string? runId = null, CancellationToken cancellationToken = default)
         {
+            // Ended is signalled only once the returned task is complete. Signalling it from inside the method let a
+            // waiter run while the task still looked unfinished to the orchestrator, and one more level was committed.
+            var run = RunCoreAsync(completedLevels, onRepoError, onLevelError, cancellationToken);
+            run.ContinueWith(_ => _ended.TrySetResult(), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            return run;
+        }
+
+        private async Task<int> RunCoreAsync(
+            ChannelReader<DependencyLevelCompletion> completedLevels, Action<int, string>? onRepoError, Action<int, string>? onLevelError,
+            CancellationToken cancellationToken)
+        {
             RunCount++;
-            try
             {
                 var pushed = 0;
                 await foreach (var completion in completedLevels.ReadAllAsync(cancellationToken))
@@ -310,10 +340,6 @@ public sealed class UpdateAndPushOrchestratorPipelineTests
                 if (ThrowOnRun != null && ThrowAtLevel == null)
                     throw ThrowOnRun;
                 return pushed;
-            }
-            finally
-            {
-                _ended.TrySetResult();
             }
         }
     }

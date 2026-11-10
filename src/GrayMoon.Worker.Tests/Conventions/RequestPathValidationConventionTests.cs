@@ -23,7 +23,6 @@ public sealed class RequestPathValidationConventionTests
         ["StageGitChangesRequest.Paths"] = "Validated in GitCliRepositoryGitChangesService before any git call.",
         ["UnstageGitChangesRequest.Paths"] = "Validated in GitCliRepositoryGitChangesService before any git call.",
         ["GetGitFileDiffRequest.Path"] = "Validated in GitCliRepositoryGitChangesService before any git or file call.",
-        ["StageAndCommitRequest.PathsToStage"] = "Validated in GitService.StageAndCommitAsync before staging; the command only looks for a props file above each project.",
 
         // Absolute machine paths, not paths inside a repository, so the repository validator does not apply.
         ["CreateGitWorktreeRequest.MainRepositoryPath"] = "Absolute path of the main clone; GitWorktreeService checks it.",
@@ -36,10 +35,6 @@ public sealed class RequestPathValidationConventionTests
         ["RemoveGitWorktreeRequest.FeatureRootPath"] = "Absolute Feature root; GitWorktreeService checks the residue path before deleting.",
         ["CleanupFeatureFolderRequest.FeatureRootPath"] = "Absolute Feature root; FeatureFolderCleaner has its own containment checks.",
         ["ValidatePathRequest.Path"] = "The command exists to test an arbitrary absolute path the user typed.",
-
-        // Known open violations, recorded so they cannot spread. Remove the entry with the fix.
-        ["ResolveGeneratedPackageReferencesItem.FilePath"] = "OPEN: ResolveGeneratedPackageReferencesCommand combines it with the repository path unvalidated (read only).",
-        ["SyncRepositoryDependenciesProjectUpdate.ProjectPath"] = "OPEN: reaches CsProjFileService.UpdatePackageVersionsAsync unvalidated, and that method writes the file.",
     };
 
     [Fact]

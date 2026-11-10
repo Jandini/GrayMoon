@@ -15,11 +15,37 @@ internal static class PushOperationResult
         if (repoErrors.Count == 0 && levelErrors.Count == 0)
             return OperationResult.Ok();
 
+        if (levelErrors.Count == 0 && TryDoneWithRestoreWarnings(repoErrors) is { } warned)
+            return warned;
+
         return OperationResult.Fail(
             StoppedAfterFailures,
             repoErrors.Count > 0 ? new Dictionary<int, string>(repoErrors) : null,
             levelErrors.Count > 0 ? new Dictionary<int, string>(levelErrors) : null);
     }
+
+    /// <summary>
+    /// A push whose only reported problems are failed package restores is done, with warnings: every level was pushed.
+    /// The warnings stay on their repositories (<see cref="OperationResult.RepoErrors"/>) and are listed in
+    /// <see cref="OperationResult.Warnings"/>. Null when anything else was reported.
+    /// </summary>
+    public static OperationResult? TryDoneWithRestoreWarnings(IReadOnlyDictionary<int, string> repoErrors)
+    {
+        if (repoErrors.Count == 0 || !repoErrors.Values.All(PackageRestoreOutcome.IsWarning))
+            return null;
+
+        return OperationResult.Ok(new Dictionary<int, string>(repoErrors)) with
+        {
+            Warnings = repoErrors.OrderBy(kv => kv.Key).Select(kv => kv.Value).ToList(),
+            WarningSummary = $"Push finished, but package restore failed in {repoErrors.Count} {(repoErrors.Count == 1 ? "repository" : "repositories")}.",
+        };
+    }
+
+    /// <summary>One line for a push that finished with restore warnings; null when there are none.</summary>
+    public static string? DescribeWarnings(OperationResult? result)
+        => result is { HasWarnings: true }
+            ? result.WarningSummary ?? string.Join(Environment.NewLine, result.Warnings!)
+            : null;
 
     /// <summary>
     /// One-line account of why a failed push stopped, for the message a user sees when the run ends: the lowest
