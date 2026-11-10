@@ -21,7 +21,6 @@ Design constraint that still applies: GrayMoon is not CI-aware. The package wait
 4. **Continue waiting.** A "Continue waiting" action on the failed-level callout that resumes the same operation at that level without re-pushing.
 5. **Top bar writes from browser tabs.** `WorkspaceTopBarService.PushToDesktopAsync` still lets a browser tab on a workspace rewrite the Desktop window title and tray label. Use the same Desktop-client flag as Open in. `Worker.razor` also still uses a different probe name (`graymoonDesktopBridge.isAvailable`).
 6. **Toast.** The toast is still only a hint; keep the banner as the record (no change needed unless the banner is removed).
-7. **Wiki.** The wiki still says 3 minutes per package and talks about CI (`Workspace-Repositories.md`, `Workspace-Prepare-Workspace.md`). The code default is 5.0 minutes. Tracked in `docs/documentation-update/wiki-0.2.0.md`; remove this item when the wiki matches.
 
 ## Smaller risks seen in the original investigation
 

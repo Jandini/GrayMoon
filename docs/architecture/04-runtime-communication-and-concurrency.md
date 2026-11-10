@@ -339,7 +339,7 @@ Repair (`repair-feature`) re-runs worktree create only for `Pending` / `NeedsRep
 
 ### 5D. Feature removal internals and pending-delete cleanup
 
-App side (`RemoveFeatureAsync`, from `FeatureRemovalQueue`, no lock): pauses the context's Git Changes renewal and audits (section 9A), runs `UninitCodeGraph` first, marks the Feature and live rows `Removing`, removes Source worktrees concurrently (bounded by `MaxParallelOperations`), then the root worktree alone and only when every Source succeeded (D10). Each repository row becomes `Removed` in its own short-lived context right after its worktree is unregistered, so a crash can resume. Local branches are deleted afterwards (`-D` only when authorized) and, when requested, remote branches with a lease (`expectedSha`).
+App side (`RemoveFeatureAsync`, from `FeatureRemovalQueue`, no lock): pauses the context's Git Changes renewal and audits (section 9A), marks the Feature and live rows `Removing` and saves, then runs `UninitCodeGraph`, removes Source worktrees concurrently (bounded by `MaxParallelOperations`), then the root worktree alone and only when every Source succeeded (D10). Each repository row becomes `Removed` in its own short-lived context right after its worktree is unregistered, so a crash can resume. Local branches are deleted afterwards (`-D` only when authorized) and, when requested, remote branches with a lease (`expectedSha`).
 
 Worker side (`RemoveGitWorktree` -> `GitWorktreeService.RemoveWorktreeAsync`):
 
@@ -616,7 +616,7 @@ flowchart LR
   D --> E["page re-reads"]
 ```
 
-`GitChangesSnapshotPushHandler` resolves the context from the reported repository path, writes the context tables, and broadcasts `ContextGitChangesUpdated(workspaceId, contextId, repositoryId)`. When `GitChangesOptions.WriteLegacyGitChangesTables` is enabled (default off; the Merge dialog does not depend on it), the handler also writes the legacy tables and broadcasts `GitChangesUpdated(workspaceId, repositoryId)` for the special Workspace.
+`GitChangesSnapshotPushHandler` resolves the context from the reported repository path, writes the context tables, and broadcasts `ContextGitChangesUpdated(workspaceId, contextId, repositoryId, contentDigest)`. When `GitChangesOptions.WriteLegacyGitChangesTables` is enabled (default off; the Merge dialog does not depend on it), the handler also writes the legacy tables and broadcasts `GitChangesUpdated(workspaceId, repositoryId)` for the special Workspace.
 
 Each snapshot carries the **full** `GitChangeEntry` list for that repository over Worker↔App SignalR (`GitChangesSnapshotNotification`). The App's hub `MaximumReceiveMessageSize` is 10 MiB. The Changes page then re-reads the **entire** context projection into the circuit (`LoadAsync`), not only the updated repository's rows.
 
@@ -770,7 +770,7 @@ Current `WorkspaceSyncHub` events:
 ```text
 ContextRepositorySynced(workspaceId, contextId, repositoryId)
 ContextSynced(workspaceId, contextId)
-ContextGitChangesUpdated(workspaceId, contextId, repositoryId)
+ContextGitChangesUpdated(workspaceId, contextId, repositoryId, contentDigest)
 RepositorySynced(workspaceId, repositoryId)       legacy
 WorkspaceSynced(workspaceId)                      legacy
 GitChangesUpdated(workspaceId, repositoryId)      legacy, special Workspace only

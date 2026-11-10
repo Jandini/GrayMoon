@@ -80,7 +80,7 @@ dbContext.Database.EnsureCreated()                        creates the file from 
 Migrations.RunAllAsync(dbContext, logger)                 versioned patches (below)
 TokenReencryptionService.ReencryptLegacyTokensAsync(...)  section 18; never throws
 WorkerSecretService.InitializeAsync()                     graymoon-worker.secret next to the database
-PRAGMA journal_mode=WAL / busy_timeout=5000 / synchronous=NORMAL
+PRAGMA journal_mode=WAL / busy_timeout=5000 / synchronous=NORMAL (startup only; the per-connection interceptor re-applies busy_timeout and foreign_keys, not synchronous)
 ```
 
 A `DatabaseMigrationException` is caught at the top of `Program.cs`, logged as fatal, and the App exits with code 1. Every other startup exception is logged the same way.

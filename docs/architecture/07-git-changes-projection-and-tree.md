@@ -73,7 +73,7 @@ git --no-optional-locks diff --cached --numstat
 
 plus line counts for untracked text files under a soft 5 MiB per-file cap (`SoftSizeLimitBytes`). Watcher and audit scans leave `includeLineStats` false; the App's `GitChangesLineStatsRefresh` later requests a stats-bearing scan when counts are missing.
 
-`GitPorcelainV2Parser.Parse` turns the porcelain output into `IReadOnlyList<GitChangeEntry>`. There is **no change-count cap**, **no path pagination**, and **no path truncation** on the Worker today. Nested ignored directories are not listed as individual files; an untracked nested git repository appears as one directory entry ending in `/` (`--untracked-files=all`).
+`GitPorcelainV2Parser.Parse` turns the porcelain output into `IReadOnlyList<GitChangeEntry>`. There is **no path pagination** and **no path truncation** on the Worker; the only cap is `GitChangesOptions.MaxChangesPerSnapshot` (default 15,000), above which the scan fails with `TooManyChanges` instead of producing a snapshot. Nested ignored directories are not listed as individual files; an untracked nested git repository appears as one directory entry ending in `/` (`--untracked-files=all`).
 
 ### Snapshot model (`GrayMoon.Common.Git`)
 
@@ -181,7 +181,7 @@ Worker→App snapshots and SQLite replace are still O(paths) per repository (not
 
 | Concern | Today |
 |---|---|
-| Change-count limit | None (inventory uncapped; `FullHydrationMaxEntries` is an internal hydration switch only) |
+| Change-count limit | `GitChangesOptions.MaxChangesPerSnapshot` (default 15,000); a scan above it fails with `TooManyChanges`. `FullHydrationMaxEntries` is an internal hydration switch only |
 | Path pagination / lazy folder children | `GetEntryPageAsync` + expand in Summary mode |
 | Tree virtualization | `Virtualize` with fixed 28px rows |
 | Client inventory | Full context on Full-mode open; Summary mode holds summaries + expanded prefix pages |
