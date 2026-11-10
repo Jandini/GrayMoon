@@ -188,9 +188,9 @@ Return to Default).
 
 ## Rules from the 2026-11-10 code review
 
-Every rule below comes from a confirmed defect in
-`docs/code-review/2026-11-10-code-review.md` (workspace root; fix plan next to
-it). The finding number is in brackets. Follow them in new code and when
+Every rule below comes from a confirmed defect of that review. The finding
+number is in brackets; `docs/code-review/2026-11-10-fix-summary.md` (workspace
+root) lists each fix by that number. Follow them in new code and when
 editing nearby code; do not copy an existing violation because "the file
 already does it".
 
@@ -425,8 +425,8 @@ In addition to "Database schema changes":
 When a document describes behavior the code does not have (single-instance
 activation, idle polling tier), fix the code or the document in the same
 change and say which. Do not describe intended behavior as current in
-`docs/architecture/` or in `CLAUDE.md`. When a review finding is fixed, update
-its row in the review document to `Fixed (<branch>)`.
+`docs/architecture/` or in `CLAUDE.md`. When an open item in
+`docs/todo/defects/` is fixed, delete its note and update the index there.
 
 ## Buttons and short action labels never word-wrap
 

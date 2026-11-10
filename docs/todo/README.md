@@ -17,6 +17,8 @@ Last checked against the code: 2026-11-11 (branch `code-review-fixes`, on top of
 | [worker-response-dropped-while-reconnecting](defects/worker-response-dropped-while-reconnecting.md) | A command result produced during a reconnect is dropped and the App waits out the timeout. | Not built, to confirm first |
 | [silent-catch-blocks](defects/silent-catch-blocks.md) | Five catch blocks on state-changing or status paths swallow the failure without a log line. | Not built |
 | [convention-test-coverage](defects/convention-test-coverage.md) | The convention tests check fewer fields, columns, folders and pages than the rules name. | Not built |
+| [release-signing-secrets-and-workflow-run](defects/release-signing-secrets-and-workflow-run.md) | Desktop: move the signing secrets to the `production` environment and run the release workflow from a branch and a stable tag. | Owner action |
+| [review-fix-test-gaps](defects/review-fix-test-gaps.md) | Five fixes lack the regression test that proves them (failed integrity check, serial cancel dispatch, context flip, tests against old code, hub attach). | Not built |
 
 ## `ideas/` - proposals and design notes, nothing is committed to
 
