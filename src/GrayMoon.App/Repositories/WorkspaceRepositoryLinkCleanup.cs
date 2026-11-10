@@ -45,6 +45,8 @@ internal static class WorkspaceRepositoryLinkCleanup
                 projectsQuery = projectsQuery.Where(p => p.WorkspaceId == workspaceFilter);
 
             await projectsQuery.ExecuteDeleteAsync(cancellationToken);
+
+            await DeleteFileRowsAsync(db, repositoryIds, workspaceId, cancellationToken);
         }
 
         if (workspaceRepositoryIds.Count == 0)
@@ -74,5 +76,42 @@ internal static class WorkspaceRepositoryLinkCleanup
         await db.WorkspaceRepositoryActions
             .Where(a => workspaceRepositoryIds.Contains(a.WorkspaceRepositoryId))
             .ExecuteDeleteAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Deletes the Files page rows of the unlinked repositories, in every context of the workspace: the pinned
+    /// files, their version configurations and per-context states, and the out-of-date line statuses. The rows
+    /// are keyed by (WorkspaceId, RepositoryId), not by the link, so no cascade from the link reaches them.
+    /// Children go first and explicitly, so the result does not depend on SQLite foreign-key enforcement.
+    /// </summary>
+    private static async Task DeleteFileRowsAsync(
+        AppDbContext db,
+        IReadOnlyCollection<int> repositoryIds,
+        int? workspaceId,
+        CancellationToken cancellationToken)
+    {
+        var filesQuery = db.WorkspaceFiles.Where(f => repositoryIds.Contains(f.RepositoryId));
+        var lineStatusesQuery = db.WorkspaceFileLineStatuses.Where(s => repositoryIds.Contains(s.RepositoryId));
+        if (workspaceId is int wsId)
+        {
+            filesQuery = filesQuery.Where(f => f.WorkspaceId == wsId);
+            lineStatusesQuery = lineStatusesQuery.Where(s => s.WorkspaceId == wsId);
+        }
+
+        var fileIds = await filesQuery.Select(f => f.FileId).ToListAsync(cancellationToken);
+        if (fileIds.Count > 0)
+        {
+            await db.WorkspaceFileVersionConfigs
+                .Where(c => fileIds.Contains(c.FileId))
+                .ExecuteDeleteAsync(cancellationToken);
+
+            await db.WorkspaceFileContextStates
+                .Where(s => fileIds.Contains(s.FileId))
+                .ExecuteDeleteAsync(cancellationToken);
+
+            await filesQuery.ExecuteDeleteAsync(cancellationToken);
+        }
+
+        await lineStatusesQuery.ExecuteDeleteAsync(cancellationToken);
     }
 }

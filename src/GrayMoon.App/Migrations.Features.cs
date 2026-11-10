@@ -34,6 +34,8 @@ public static partial class Migrations
         catch (Exception ex)
         {
             // Fresh DB: EnsureCreated already created the Feature tables from the model.
+            // The backfill adds entities before it saves; drop them so a later step's SaveChanges does not flush them.
+            dbContext.ChangeTracker.Clear();
             logger.LogError(ex, "Legacy migration step MigrateWorkspaceFeatureContextSchemaAsync failed; continuing startup.");
         }
     }

@@ -121,17 +121,17 @@ public sealed partial class WorkspaceGitChanges
     /// Survives page navigation (circuit-scoped BackgroundJobService); the empty-state UI
     /// and the header's scan indicator both bind to IsScanRunning / ScanStatus when the page is
     /// mounted, so the panel is never fully hidden behind a rescan.
-    /// Context id is captured when the job body starts so a later Feature switch cannot retarget
+    /// Context id is captured when the job is queued so a later Feature switch cannot retarget
     /// an in-flight scan (the switch aborts the scan separately).
     /// </summary>
     private void StartScanJob(string label)
     {
+        // Captured when the scan is queued - do not re-read _selectedContextId inside the job.
+        var contextId = RequireSelectedContextId();
         JobService.StartJob(ScanJobKey, label, async (job, ct) =>
         {
             try
             {
-                // Capture once - do not re-read _selectedContextId mid-scan.
-                var contextId = RequireSelectedContextId();
                 await Scanner.ScanWorkspaceAsync(WorkspaceId, contextId, ct, progress =>
                     job.ReportProgress($"Refreshing {progress.Completed} of {progress.Total} repositories..."), includeLineStats: true);
 

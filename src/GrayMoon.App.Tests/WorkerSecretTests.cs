@@ -207,12 +207,71 @@ public class WorkerSecretTests
         Assert.Equal(StatusCodes.Status401Unauthorized, context.Response.StatusCode);
     }
 
+    // Review 2026-11-10, P3 "Worker secret optional until first pairing": with nothing configured and no
+    // Worker ever paired, a request without the secret is rejected, not accepted.
     [Theory]
     [InlineData("/repos/7/connector")]
     [InlineData("/workspaces/7/capabilities")]
     [InlineData("/hub/worker")]
+    [InlineData("/hub/worker/negotiate")]
     [InlineData("/hub/agent")]   // legacy path kept for already-installed Workers
-    public async Task Missing_secret_is_accepted_while_not_required_and_never_seen(string path)
+    public async Task Missing_secret_is_401_by_default_before_any_worker_has_paired(string path)
+    {
+        using var folder = new TempSecretFolder();
+        var service = CreateService(folder);
+        var pipeline = new Pipeline(service, new SecurityOptions());
+
+        var context = await pipeline.SendAsync(path);
+
+        Assert.False(pipeline.NextCalled);
+        Assert.Equal(StatusCodes.Status401Unauthorized, context.Response.StatusCode);
+        Assert.False(service.UnsecuredWorkerConnected);
+    }
+
+    [Fact]
+    public void Worker_secret_is_required_by_default()
+        => Assert.True(new SecurityOptions().RequireWorkerSecret);
+
+    // Finding 7: the endpoint that returns the PAT needs the secret even under the explicit opt-out.
+    [Fact]
+    public async Task Connector_request_without_secret_is_401_even_when_the_secret_is_not_required()
+    {
+        using var folder = new TempSecretFolder();
+        var pipeline = new Pipeline(CreateService(folder), new SecurityOptions { RequireWorkerSecret = false });
+
+        var context = await pipeline.SendAsync("/repos/7/connector");
+
+        Assert.False(pipeline.NextCalled);
+        Assert.Equal(StatusCodes.Status401Unauthorized, context.Response.StatusCode);
+    }
+
+    [Fact]
+    public void Connector_endpoint_itself_accepts_only_the_valid_secret_without_an_origin()
+    {
+        using var folder = new TempSecretFolder();
+        var service = CreateService(folder);
+
+        static HttpRequest Request(string? secret, string? origin = null)
+        {
+            var context = new DefaultHttpContext();
+            if (secret is not null)
+                context.Request.Headers[WorkerSecretHeader.Name] = secret;
+            if (origin is not null)
+                context.Request.Headers.Origin = origin;
+            return context.Request;
+        }
+
+        Assert.True(ConnectorEndpoints.IsPairedWorkerRequest(Request(service.Secret), service));
+        Assert.False(ConnectorEndpoints.IsPairedWorkerRequest(Request(null), service));
+        Assert.False(ConnectorEndpoints.IsPairedWorkerRequest(Request("wrong-secret"), service));
+        Assert.False(ConnectorEndpoints.IsPairedWorkerRequest(Request(service.Secret, origin: "http://localhost:8384"), service));
+    }
+
+    [Theory]
+    [InlineData("/workspaces/7/capabilities")]
+    [InlineData("/hub/worker")]
+    [InlineData("/hub/agent")]   // legacy path kept for already-installed Workers
+    public async Task Missing_secret_is_accepted_only_under_the_explicit_opt_out_and_never_seen(string path)
     {
         using var folder = new TempSecretFolder();
         var pipeline = new Pipeline(CreateService(folder), new SecurityOptions { RequireWorkerSecret = false });
@@ -264,7 +323,7 @@ public class WorkerSecretTests
     {
         using var folder = new TempSecretFolder();
         var service = CreateService(folder);
-        var pipeline = new Pipeline(service, new SecurityOptions());
+        var pipeline = new Pipeline(service, new SecurityOptions { RequireWorkerSecret = false });
 
         await pipeline.SendAsync(hubPath + "/negotiate", method: "POST");
         Assert.True(service.UnsecuredWorkerConnected);

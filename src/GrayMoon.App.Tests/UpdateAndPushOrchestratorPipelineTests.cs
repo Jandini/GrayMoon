@@ -77,19 +77,68 @@ public sealed class UpdateAndPushOrchestratorPipelineTests
     }
 
     [Fact]
-    public async Task A_push_failure_is_reported_while_the_update_still_walks_every_level()
+    public async Task A_push_failure_stops_the_update_at_its_next_level_boundary_and_names_what_was_not_pushed()
     {
+        // #11: the update used to commit levels 3 and 4 although nothing would push them.
         var push = new FakePushLane { FailLevel = 2 };
-        var update = new FakeUpdateLane { Levels = [1, 2, 3] };
+        var update = new FakeUpdateLane
+        {
+            Levels = [1, 2, 3, 4],
+            // Level 3 is being updated while level 2 fails to push; the stop lands on the level 3 boundary.
+            BeforeLevel = async level => { if (level == 3) await push.Ended.WaitAsync(Timeout); },
+        };
         var reported = new List<(int Level, string Message)>();
 
-        var result = await Run(Create(update, push), (level, message) => reported.Add((level, message))).WaitAsync(Timeout);
+        var result = await Run(Create(update, push), (level, message) => { lock (reported) reported.Add((level, message)); }).WaitAsync(Timeout);
 
-        Assert.True(result.Update.Success);
         Assert.Equal([1, 2, 3], update.CompletedLevels);
+        Assert.Equal([1, 2], push.ReceivedLevels);
+        Assert.True(result.Update.Success);
         Assert.NotNull(result.Push);
         Assert.False(result.Push!.Success);
-        Assert.Contains(reported, e => e.Level == 2);
+        Assert.False(result.Success);
+        const string expected = "Level 2 failed to push. Level 3 is committed locally but not pushed. The update stopped after level 3.";
+        Assert.Equal("Push stopped at level 2: " + expected, result.Push.Error);
+        Assert.Equal(expected, result.Push.LevelErrors![2]);
+        Assert.Equal("Push stopped at level 2: " + expected, PushOperationResult.Describe(result.Push));
+        Assert.Equal((2, expected), reported[^1]);
+    }
+
+    [Fact]
+    public async Task A_push_failure_after_the_update_finished_names_the_levels_left_unpushed()
+    {
+        // The lane fails level 1 only after every level was handed over: nothing is left to stop, but 2 and 3 stay local.
+        var handedOver = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var push = new FakePushLane { FailLevel = 1, BeforeLevel = _ => handedOver.Task };
+        var update = new FakeUpdateLane { Levels = [1, 2, 3], AfterLevels = handedOver.SetResult };
+
+        var result = await Run(Create(update, push)).WaitAsync(Timeout);
+
+        Assert.Equal([1, 2, 3], update.CompletedLevels);
+        Assert.False(result.Push!.Success);
+        Assert.Equal(
+            "Push stopped at level 1: Level 1 failed to push. Levels 2, 3 are committed locally but not pushed.",
+            result.Push.Error);
+    }
+
+    [Fact]
+    public async Task Restore_warnings_do_not_stop_the_update_and_are_not_reported_as_a_stopped_push()
+    {
+        var push = new FakePushLane { RestoreWarningLevel = 1 };
+        var update = new FakeUpdateLane
+        {
+            Levels = [1, 2, 3],
+            BeforeLevel = async level => { if (level == 2) await push.Received(1).WaitAsync(Timeout); },
+        };
+
+        var result = await Run(Create(update, push)).WaitAsync(Timeout);
+
+        Assert.Equal([1, 2, 3], update.CompletedLevels);
+        Assert.Equal([1, 2, 3], push.ReceivedLevels);
+        Assert.Equal(3, result.PushedRepoCount);
+        Assert.Equal("Push finished, but package restore failed in 1 repository.", result.Push!.Error);
+        Assert.Null(result.Push.LevelErrors);
+        Assert.Equal("Package restore failed for repo-1: error NU1101", result.Push.RepoErrors![1]);
     }
 
     [Fact]
@@ -106,15 +155,48 @@ public sealed class UpdateAndPushOrchestratorPipelineTests
     }
 
     [Fact]
-    public async Task A_push_lane_exception_surfaces_after_the_update_finished()
+    public async Task A_push_lane_exception_stops_the_update_and_becomes_a_failed_push_naming_the_level()
+    {
+        // #11: the exception used to surface only after levels 3 and 4 were committed, with no level in the message.
+        var push = new FakePushLane { ThrowAtLevel = 2, ThrowOnRun = new InvalidOperationException("worker not connected") };
+        var update = new FakeUpdateLane
+        {
+            Levels = [1, 2, 3, 4],
+            BeforeLevel = async level => { if (level == 3) await push.Ended.WaitAsync(Timeout); },
+        };
+        var reported = new List<(int Level, string Message)>();
+
+        var result = await Run(Create(update, push), (level, message) => { lock (reported) reported.Add((level, message)); }).WaitAsync(Timeout);
+
+        Assert.Equal([1, 2, 3], update.CompletedLevels);
+        Assert.True(result.Update.Success);
+        Assert.False(result.Push!.Success);
+        const string expected = "worker not connected Level 3 is committed locally but not pushed. The update stopped after level 3.";
+        Assert.Equal("Push stopped at level 2: " + expected, result.Push.Error);
+        Assert.Equal("Push stopped at level 2: " + expected, PushOperationResult.Describe(result.Push));
+        Assert.Equal((2, expected), Assert.Single(reported));
+    }
+
+    [Fact]
+    public async Task A_push_lane_exception_after_the_update_finished_is_a_failed_push_not_an_exception()
     {
         var push = new FakePushLane { ThrowOnRun = new InvalidOperationException("worker not connected") };
         var update = new FakeUpdateLane { Levels = [1, 2] };
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => Run(Create(update, push)).WaitAsync(Timeout));
+        var result = await Run(Create(update, push)).WaitAsync(Timeout);
 
-        Assert.Equal("worker not connected", ex.Message);
         Assert.Equal([1, 2], update.CompletedLevels);
+        Assert.False(result.Push!.Success);
+        Assert.Equal("Push stopped at level 2: worker not connected", result.Push.Error);
+    }
+
+    [Fact]
+    public async Task A_cancelled_push_lane_still_surfaces_as_cancellation()
+    {
+        var push = new FakePushLane { ThrowOnRun = new OperationCanceledException() };
+        var update = new FakeUpdateLane { Levels = [1] };
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Run(Create(update, push)).WaitAsync(Timeout));
     }
 
     private sealed class FakeUpdateLane : IDependencyUpdateLane
@@ -123,6 +205,7 @@ public sealed class UpdateAndPushOrchestratorPipelineTests
         public Func<int, Task>? BeforeLevel { get; init; }
         public bool FailAfterLevels { get; init; }
         public Exception? ThrowAfterLevels { get; init; }
+        public Action? AfterLevels { get; init; }
         public int RunCount { get; private set; }
         public List<int> CompletedLevels { get; } = [];
 
@@ -142,6 +225,7 @@ public sealed class UpdateAndPushOrchestratorPipelineTests
                     await onLevelCompleted(Level(level));
             }
 
+            AfterLevels?.Invoke();
             if (ThrowAfterLevels != null)
                 throw ThrowAfterLevels;
 
@@ -157,9 +241,22 @@ public sealed class UpdateAndPushOrchestratorPipelineTests
         public bool CanRun { get; init; } = true;
         public int? FailLevel { get; init; }
         public Exception? ThrowOnRun { get; init; }
+
+        /// <summary>Throws <see cref="ThrowOnRun"/> while handling this level; when null it is thrown after the last level.</summary>
+        public int? ThrowAtLevel { get; init; }
+
+        /// <summary>Reports a package restore warning for this level and carries on, like the real lane.</summary>
+        public int? RestoreWarningLevel { get; init; }
+
+        public Func<int, Task>? BeforeLevel { get; init; }
         public int RunCount { get; private set; }
         public bool Finished { get; private set; }
         public List<int> ReceivedLevels { get; } = [];
+
+        private readonly TaskCompletionSource _ended = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>Completes when the lane has returned or thrown.</summary>
+        public Task Ended => _ended.Task;
 
         public Task Received(int level)
         {
@@ -180,32 +277,44 @@ public sealed class UpdateAndPushOrchestratorPipelineTests
             bool restorePackages = true, string? runId = null, CancellationToken cancellationToken = default)
         {
             RunCount++;
-            var pushed = 0;
-            var failed = false;
-            await foreach (var completion in completedLevels.ReadAllAsync(cancellationToken))
+            try
             {
-                ReceivedLevels.Add(completion.Level);
-                _ = Received(completion.Level);
-                lock (_gate)
-                    _received[completion.Level].TrySetResult();
-
-                if (failed)
-                    continue;
-
-                if (FailLevel == completion.Level)
+                var pushed = 0;
+                await foreach (var completion in completedLevels.ReadAllAsync(cancellationToken))
                 {
-                    failed = true;
-                    onLevelError?.Invoke(completion.Level, $"Level {completion.Level} failed to push.");
-                    continue;
+                    ReceivedLevels.Add(completion.Level);
+                    _ = Received(completion.Level);
+                    lock (_gate)
+                        _received[completion.Level].TrySetResult();
+                    if (BeforeLevel != null)
+                        await BeforeLevel(completion.Level);
+
+                    if (ThrowAtLevel == completion.Level)
+                        throw ThrowOnRun!;
+
+                    // Like the real lane: a failed level is reported, then the lane returns without reading further.
+                    if (FailLevel == completion.Level)
+                    {
+                        onLevelError?.Invoke(completion.Level, $"Level {completion.Level} failed to push.");
+                        Finished = true;
+                        return pushed;
+                    }
+
+                    if (RestoreWarningLevel == completion.Level)
+                        onRepoError?.Invoke(completion.Level, $"Package restore failed for repo-{completion.Level}: error NU1101");
+
+                    pushed += completion.RepoIds.Count;
                 }
 
-                pushed += completion.RepoIds.Count;
+                Finished = true;
+                if (ThrowOnRun != null && ThrowAtLevel == null)
+                    throw ThrowOnRun;
+                return pushed;
             }
-
-            Finished = true;
-            if (ThrowOnRun != null)
-                throw ThrowOnRun;
-            return pushed;
+            finally
+            {
+                _ended.TrySetResult();
+            }
         }
     }
 }

@@ -55,7 +55,15 @@ Desktop and Docker never share one App.
 docker run -d --restart unless-stopped --name graymoon -p 8384:8384 -v graymoon:/app/db jandini/graymoon:latest
 ```
 
-Open `http://localhost:8384` and install the Worker from the Worker page. The walkthrough is [Getting Started](https://github.com/Jandini/GrayMoon/wiki/Getting-Started).
+Open `http://localhost:8384` and install the Worker from the Worker page. The install script asks for the one-time pairing code shown there; a Worker that is not paired with this GrayMoon is refused. The walkthrough is [Getting Started](https://github.com/Jandini/GrayMoon/wiki/Getting-Started).
+
+Out of the box the container accepts browser pages only from the machine it runs on (`localhost`). To open GrayMoon from another machine, list every host name or address people type in the browser in `GRAYMOON_AllowedHosts`, separated by `;`, and keep `localhost` in the list:
+
+```bash
+docker run -d --restart unless-stopped --name graymoon -p 8384:8384 -v graymoon:/app/db -e "GRAYMOON_AllowedHosts=localhost;nas.local;192.168.1.10" jandini/graymoon:latest
+```
+
+Without it a page opened under another name loads but cannot connect (the log has one warning that names the variable). A host that is not in the list is answered with 400 once the variable is set.
 
 ## Documentation
 

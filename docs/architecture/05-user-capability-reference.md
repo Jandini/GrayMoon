@@ -1304,7 +1304,7 @@ reading tokens or triggering actions through the browser GrayMoon's UI runs in.
 ```text
 a non-GET request with no Origin header passes unchanged (scripts, curl, the Worker)
 a non-GET request with an Origin header is rejected (403) unless:
-  the Origin's host is this app's own host, a loopback name, or a configured Security:AllowedOrigins entry
+  the Origin's host is a loopback name (localhost, 127.0.0.1, ::1, 0.0.0.0) or a listed host (below)
   and the request also carries X-GrayMoon-Request: 1
     (a cross-site page cannot add that header without a CORS preflight, which GrayMoon does not allow)
 GET requests are never affected
@@ -1315,14 +1315,34 @@ GET requests are never affected
 ```text
 /hub/worker (and the legacy /hub/agent alias): any request carrying an Origin header is rejected (403); the Worker's .NET client sends none
 /hubs/workspace-sync, /hubs/desktop, /_blazor: a request with no Origin header passes;
-  one with an Origin header passes only when its host is this app's own host, a loopback name,
-  or a configured Security:AllowedOrigins entry
+  one with an Origin header passes only when its host is a loopback name or a listed host
 ```
 
-"Own host" also accepts `X-Forwarded-Host` (reverse proxies) and any host listed in the optional
-`Security:AllowedOrigins` setting. Desktop sets `AllowedHosts` to loopback names only for the App process
-it launches; the shared `appsettings.json` keeps `AllowedHosts = "*"` for Docker and manual installs, which
-may be reached by host name or LAN IP.
+### Listed hosts (`GRAYMOON_AllowedHosts`)
+
+```text
+listed hosts = the AllowedHosts setting (';' separated; set with the GRAYMOON_AllowedHosts environment variable)
+               plus the optional Security:AllowedOrigins entries
+a bare * is not a host and is ignored; *.example.com matches any subdomain
+empty list   -> only loopback Origins are accepted, and the App logs one warning at startup that names
+                GRAYMOON_AllowedHosts
+```
+
+An Origin whose host equals the request's `Host` or `X-Forwarded-Host` header is **not** accepted on that
+ground: under DNS rebinding the hostile page's own name arrives in both. A reverse-proxy or LAN host name
+has to be listed.
+
+- **Desktop** starts the App with `GRAYMOON_AllowedHosts=localhost;127.0.0.1;[::1]`.
+- **Docker** ships no `AllowedHosts` value (`appsettings.json` has none), so a container works from a
+  browser on the same machine (`http://localhost:8384`) and rejects browser pages served under any other
+  name until that name is listed, for example `-e "GRAYMOON_AllowedHosts=localhost;nas.local;192.168.1.10"`.
+  The same setting drives ASP.NET Core host filtering, so once it is set every name used to reach the App
+  (including `localhost`, which a Worker on the Docker host uses) must be in the list.
+
+Known limit: GET requests carry no Origin header on a same-origin page, so with no listed hosts a
+rebinding page can still read `GET /api/...` data. Setting `GRAYMOON_AllowedHosts` closes that too (host
+filtering then rejects the foreign `Host`). Credentials are never exposed this way: the connector token
+endpoint requires the Worker secret (below).
 
 Git hooks post to the **Worker's** local listener (`127.0.0.1:<port>/hook/*`), not to the App, so they are
 outside this middleware.
@@ -1337,10 +1357,13 @@ secret: generated on first start, kept in graymoon-worker.secret next to the dat
   (plain text; file mode 600 on Linux; if the file is missing at startup a new secret is generated)
 header: X-GrayMoon-Worker-Secret, sent by the Worker on the hub connection and on these requests
 wrong secret                      -> 401, always (constant-time comparison)
-missing secret                    -> accepted with a warning, UNLESS
-                                     Security:RequireWorkerSecret is true, or
-                                     some Worker has already presented the correct secret
+missing secret                    -> 401 (Security:RequireWorkerSecret defaults to true), from the first start
+  explicit opt-out Security:RequireWorkerSecret=false:
+                                     /hub/worker and /workspaces/{id}/capabilities accept a missing secret
+                                     with a warning until some Worker has presented the correct secret
                                      (setting Security:WorkerSecretSeen), then 401
+  /repos/{id}/connector            -> always 401 without the valid secret, whatever the setting says;
+                                     the endpoint checks the secret itself as well as the middleware
 /repos/{id}/connector, /workspaces/{id}/capabilities and /api/worker/pair
   with any Origin header          -> 403 (the Worker and the install script never send one)
 ```
@@ -1357,9 +1380,12 @@ manual / Docker    GrayMoon > Worker shows a one-time pairing code (valid 10 min
 
 The Worker reads the secret from the `GRAYMOON_WORKER_SECRET` environment variable, then from
 `worker.secret` under its machine-wide GrayMoon data folder (`%ProgramData%\GrayMoon` on Windows). The file
-sits outside the install folder so a Worker update keeps it. A Worker installed before this feature keeps
-working without a secret (the App shows "Reinstall the Worker to finish securing GrayMoon") until a Worker
-has connected with the secret, or `Security:RequireWorkerSecret` is set (default false).
+sits outside the install folder so a Worker update keeps it. A Worker without a secret (installed before
+this feature, or installed by hand without a pairing code) is refused with 401 and shows as offline; the
+fix is to reinstall it from GrayMoon > Worker with a pairing code (Desktop: Install Worker). Setting
+`Security:RequireWorkerSecret=false` (`GRAYMOON_Security__RequireWorkerSecret=false`) lets such a Worker
+connect again with the "Reinstall the Worker to finish securing GrayMoon" notice, but it still cannot
+fetch connector tokens, so remote git operations fail until it is paired.
 
 ### Self-update and hook listener hardening
 
@@ -1375,7 +1401,8 @@ the Worker hook listener allows at most 64 in-flight requests (503 above that); 
 ```text
 RequestSecurityMiddleware
 WorkerSecretMiddleware / WorkerSecretService / WorkerPairingService
-SecurityOptions (Security:AllowedOrigins, Security:RequireWorkerSecret)
+SecurityOptions (Security:AllowedOrigins, Security:RequireWorkerSecret); AllowedHosts (GRAYMOON_AllowedHosts)
+ConnectorEndpoints.IsPairedWorkerRequest
 Worker: WorkerSecretProvider, SignalRConnectionHostedService, WorkerTokenProvider, IWorkspaceCapabilityProvider,
         SelfUpdateCommand, HookListenerHostedService
 Desktop: WorkerInstaller (secret hand-off)

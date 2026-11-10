@@ -91,7 +91,7 @@ A `DatabaseMigrationException` is caught at the top of `Program.cs`, logged as f
 
 | Version | What runs | Failure handling |
 |---|---|---|
-| 1 (`LegacyBaselineVersion`) | `RunLegacyBaselineAsync`: every patch written before versioning existed (`SeedDefaultWorkspaceRootPathAsync`, `HasSelfFileVersionToken`, `IsGenerated`, drop `GitHubApiUsageHourly`, `ExcludeAiWorkflows`, Git status line stats, repository `Role`, `MigrateWorkspaceFeatureContextSchemaAsync` incl. the one-time special Workspace context backfill) | Tolerant: each patch logs its own error and startup continues. `user_version` is then set to 1. |
+| 1 (`LegacyBaselineVersion`) | `RunLegacyBaselineAsync`: every patch written before versioning existed (`SeedDefaultWorkspaceRootPathAsync`, `HasSelfFileVersionToken`, `IsGenerated`, drop `GitHubApiUsageHourly`, `ExcludeAiWorkflows`, Git status line stats, repository `Role`, `MigrateWorkspaceFeatureContextSchemaAsync` incl. the one-time special Workspace context backfill) | Tolerant: each patch logs its own error and startup continues. A failed patch also clears the EF change tracker, so entities it left Added are not flushed by a later step. `Role` and fork support, which are strict steps too and have no catch of their own, run through `RunTolerantLegacyStepAsync` here. `user_version` is then set to 1. |
 | 2 and later (`Migrations.StrictSteps`) | One entry per schema change, run in version order | Strict: each step runs in its own transaction, together with `PRAGMA user_version = N`. Any exception rolls the step back and throws `DatabaseMigrationException(version, name, backupPath, inner)`, which stops startup. |
 
 Current strict steps:
@@ -125,7 +125,7 @@ A brand-new database also starts at `user_version` 0, so it runs the baseline an
 
 ### Pre-migration backup
 
-Before any pending step (baseline or strict), `BackupDatabaseAsync` writes `VACUUM INTO '<db>.bak-yyyyMMdd-HHmmss'` (UTC) next to the database file (a plain copy of an open WAL database can be corrupt), runs `PRAGMA integrity_check` on the copy (a failed check is logged as an error, not fatal), and keeps the 3 newest `<db>.bak-*` files. The backup is skipped for non-file databases (`:memory:` tests). Its path travels in `DatabaseMigrationException` so the fatal log names the way back.
+Before any pending step (baseline or strict), `BackupDatabaseAsync` writes `VACUUM INTO '<db>.bak-yyyyMMdd-HHmmss'` (UTC) next to the database file (a plain copy of an open WAL database can be corrupt), runs `PRAGMA integrity_check` on the copy, and keeps the 3 newest `<db>.bak-*` files. A backup that cannot be written (disk full, permissions) or that fails the integrity check stops startup with a `DatabaseMigrationException` naming the backup path and the cause; no step runs and the database is unchanged. The backup is skipped for non-file databases (`:memory:` tests) and for a database with no row in any table (a brand-new install, which has nothing to lose). Its path travels in `DatabaseMigrationException` so the fatal log names the way back.
 
 ### Adding a schema change
 
@@ -949,6 +949,8 @@ generated WorkspaceProjects
 ```
 
 Membership changes (adding Sources, changing membership in the Repositories modal, enabling or disabling the Workspace repository) and Workspace rename or root change are refused while a Workspace has Features (`WorkspaceRepository`, `WorkspaceRepositoryOperations`, `WorkspaceProfileTransition`).
+
+Unlinking or deleting a repository goes through `WorkspaceRepositoryLinkCleanup.DeleteDependentsAsync`, which deletes every dependent row explicitly (no reliance on cascades): projects and their dependency edges, custom dependency edges, legacy Git Changes rows, branches, PR and Actions rows, and the Files page rows of that repository in every context of the Workspace (`WorkspaceFiles`, `WorkspaceFileVersionConfigs`, `WorkspaceFileContextStates`, `WorkspaceFileLineStatuses`). A new table that references a repository or link is added there and to `WorkspaceRepositoryLinkCleanupTests` in the same change.
 
 ### Known gaps
 

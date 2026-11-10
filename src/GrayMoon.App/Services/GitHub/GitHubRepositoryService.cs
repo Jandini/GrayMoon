@@ -33,6 +33,7 @@ public sealed class GitHubRepositoryService(
         logger.LogInformation("User triggered fetch repositories from GitHub");
         var allFetched = new List<Repository>();
         var connectorErrors = new List<ConnectorFetchError>();
+        var failedConnectorIds = new HashSet<int>();
         var uniqueCloneUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var connectors = await connectorRepository.GetAllAsync();
         var activeConnectors = connectors.Where(connector => connector.IsActive && connector.ConnectorType == ConnectorType.GitHub).ToList();
@@ -74,7 +75,17 @@ public sealed class GitHubRepositoryService(
                 continue;
             }
 
-            connectorErrors.Add(new ConnectorFetchError { ConnectorName = connector.ConnectorName, Message = fetch.ErrorMessage });
+            // A connector that did not answer is skipped: it contributes no repositories and, through
+            // failedConnectorIds, no deletions either. Its stored repositories, links and rows stay as they are.
+            failedConnectorIds.Add(connector.ConnectorId);
+            logger.LogWarning(
+                "Connector {ConnectorName} skipped in the repository refresh: {Reason}. Its stored repositories were left unchanged.",
+                connector.ConnectorName, fetch.ErrorMessage);
+            connectorErrors.Add(new ConnectorFetchError
+            {
+                ConnectorName = connector.ConnectorName,
+                Message = $"Skipped: {fetch.ErrorMessage} Its repositories were left unchanged."
+            });
             await connectorRepository.UpdateStatusAsync(connector.ConnectorId, "Error", fetch.ErrorMessage);
         }
 
@@ -83,7 +94,7 @@ public sealed class GitHubRepositoryService(
         IReadOnlyList<KeptRepositoryForFeaturesInfo> keptForFeatures = [];
         if (allFetched.Count > 0)
         {
-            var mergeResult = await repositoryRepository.MergeRepositoriesAsync(allFetched);
+            var mergeResult = await repositoryRepository.MergeRepositoriesAsync(allFetched, failedConnectorIds);
             renamedRepositories = mergeResult.Renames;
             mergedIdMap = mergeResult.MergedRepositoryIdMap;
             keptForFeatures = mergeResult.KeptForFeatures;

@@ -20,6 +20,18 @@ public sealed class DatabaseMigrationException : Exception
         BackupPath = backupPath;
     }
 
+    /// <summary>
+    /// A failure before any step ran (the pre-migration backup could not be written or verified). The message
+    /// names the path and the cause; <see cref="Version"/> is 0 and the database is unchanged.
+    /// </summary>
+    public DatabaseMigrationException(string message, string? backupPath, Exception? innerException)
+        : base(message, innerException)
+    {
+        Version = 0;
+        StepName = "pre-migration backup";
+        BackupPath = backupPath;
+    }
+
     private static string BuildMessage(int version, string stepName, string? backupPath)
     {
         var backupNote = string.IsNullOrEmpty(backupPath)

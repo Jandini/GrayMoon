@@ -47,6 +47,8 @@ public class MigrationsRunnerTests
             await using (var db = new AppDbContext(options))
             {
                 await db.Database.CreateSchemaAsync();
+                // A database with no rows is not backed up, so give this one something to lose.
+                await db.Database.ExecuteSqlRawAsync("INSERT INTO Settings (Key, Value) VALUES ('seed', 'value');");
                 await Migrations.RunAllAsync(db, NullLogger.Instance);
             }
 
@@ -74,6 +76,121 @@ public class MigrationsRunnerTests
         {
             try { Directory.Delete(dir, recursive: true); } catch { /* best effort cleanup */ }
         }
+    }
+
+    [Fact]
+    public async Task RunAllAsync_does_not_back_up_a_brand_new_database_with_no_rows()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "gm-migrations-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var dbPath = Path.Combine(dir, "test.db");
+        try
+        {
+            var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite($"Data Source={dbPath};Pooling=False").Options;
+            await using (var db = new AppDbContext(options))
+            {
+                await db.Database.CreateSchemaAsync();
+                await Migrations.RunAllAsync(db, NullLogger.Instance);
+            }
+
+            Assert.Empty(Directory.GetFiles(dir, "test.db.bak-*"));
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch { /* best effort cleanup */ }
+        }
+    }
+
+    [Fact]
+    public async Task RunAllAsync_stops_before_any_step_when_the_backup_cannot_be_written_and_names_the_path()
+    {
+        // Review 2026-11-10 finding 17: a failed VACUUM INTO (disk full, permissions) must stop the migration
+        // with a message naming the path, not surface a raw SqliteException or run steps without a backup.
+        var dir = Path.Combine(Path.GetTempPath(), "gm-migrations-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var dbPath = Path.Combine(dir, "test.db");
+        var clock = new ManualClock(new DateTimeOffset(2026, 11, 10, 8, 30, 15, TimeSpan.Zero));
+        // The backup target is occupied by a folder, so SQLite cannot write the file there.
+        var backupPath = Path.Combine(dir, "test.db.bak-20261110-083015");
+        Directory.CreateDirectory(backupPath);
+        try
+        {
+            var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite($"Data Source={dbPath};Pooling=False").Options;
+            await using var db = new AppDbContext(options);
+            await db.Database.CreateSchemaAsync();
+            await db.Database.ExecuteSqlRawAsync("INSERT INTO Settings (Key, Value) VALUES ('seed', 'value');");
+
+            var ex = await Assert.ThrowsAsync<DatabaseMigrationException>(() => Migrations.RunAllAsync(db, NullLogger.Instance, clock));
+
+            Assert.Contains(backupPath, ex.Message, StringComparison.Ordinal);
+            Assert.Equal(backupPath, ex.BackupPath);
+            Assert.NotNull(ex.InnerException);
+
+            // No step ran: the version is still 0 and the seeded row is intact.
+            var connection = (SqliteConnection)db.Database.GetDbConnection();
+            Assert.Equal(0, await GetUserVersionAsync(connection));
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = "SELECT Value FROM Settings WHERE Key = 'seed'";
+            Assert.Equal("value", await cmd.ExecuteScalarAsync() as string);
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch { /* best effort cleanup */ }
+        }
+    }
+
+    [Fact]
+    public async Task RunTolerantLegacyStepAsync_swallows_the_failure_and_drops_entities_the_step_left_added()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
+        await using var db = new AppDbContext(options);
+        await db.Database.CreateSchemaAsync();
+
+        await Migrations.RunTolerantLegacyStepAsync(
+            db,
+            "test-step",
+            () =>
+            {
+                db.Workspaces.Add(new GrayMoon.App.Models.Workspace { Name = "half-added" });
+                throw new InvalidOperationException("boom");
+            },
+            NullLogger.Instance);
+
+        Assert.Empty(db.ChangeTracker.Entries());
+        await db.SaveChangesAsync();
+        Assert.False(await db.Workspaces.AnyAsync());
+    }
+
+    [Fact]
+    public async Task Feature_context_schema_step_failure_leaves_no_added_entities_for_a_later_step_to_flush()
+    {
+        // The backfill adds context states and then saves. Without the GitVersionPending column that save
+        // fails; the tolerant catch must clear the tracker or a later step's SaveChanges retries the insert.
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
+        await using var db = new AppDbContext(options);
+        await db.Database.CreateSchemaAsync();
+        await db.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = OFF;");
+
+        var connector = new GrayMoon.App.Models.Connector { ConnectorName = "c", ConnectorType = GrayMoon.App.Models.ConnectorType.GitHub, ApiBaseUrl = "https://api.github.com", IsActive = true };
+        db.Connectors.Add(connector);
+        await db.SaveChangesAsync();
+        var workspace = new GrayMoon.App.Models.Workspace { Name = "ws" };
+        db.Workspaces.Add(workspace);
+        var repository = new GrayMoon.App.Models.Repository { ConnectorId = connector.ConnectorId, RepositoryName = "r", OrgName = "acme", CloneUrl = "https://example/r.git" };
+        db.Repositories.Add(repository);
+        await db.SaveChangesAsync();
+        db.WorkspaceRepositories.Add(new GrayMoon.App.Models.WorkspaceRepositoryLink { WorkspaceId = workspace.WorkspaceId, RepositoryId = repository.RepositoryId });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        await db.Database.ExecuteSqlRawAsync("ALTER TABLE WorkspaceRepositoryContextStates DROP COLUMN GitVersionPending;");
+
+        await Migrations.MigrateWorkspaceFeatureContextSchemaAsync(db, NullLogger.Instance);
+
+        Assert.Empty(db.ChangeTracker.Entries());
     }
 
     [Fact]

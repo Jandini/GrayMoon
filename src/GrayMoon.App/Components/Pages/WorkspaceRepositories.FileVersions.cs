@@ -14,11 +14,12 @@ public sealed partial class WorkspaceRepositories
         var allLinks = await GetAllLinksForOperationAsync();
         var repoIds = allLinks.Select(wr => wr.RepositoryId).ToHashSet();
 
+        var jobContextId = RequireSelectedContextId();
         StartPageJob("Updating file versions...", async (job, ct) =>
         {
             var result = await ScopedExecutor.ExecuteAsync<IWorkspaceFileOperations, WorkspaceFileVersionUpdateResult>(
                 svc => svc.UpdateVersionsAsync(
-                WorkspaceId, RequireSelectedContextId(),
+                WorkspaceId, jobContextId,
                     ct,
                     checkAfter: true,
                     progress: job.ToOperationProgress()));
@@ -64,12 +65,13 @@ public sealed partial class WorkspaceRepositories
             return Task.CompletedTask;
         }
 
+        var jobContextId = RequireSelectedContextId();
         StartPageJob("Updating file versions...", async (job, ct) =>
         {
             var repoIds = new HashSet<int> { repositoryId };
             var result = await ScopedExecutor.ExecuteAsync<IWorkspaceFileOperations, WorkspaceFileVersionUpdateResult>(
                 svc => svc.UpdateVersionsAsync(
-                WorkspaceId, RequireSelectedContextId(),
+                WorkspaceId, jobContextId,
                     ct,
                     selectedRepositoryIds: repoIds,
                     filterPatternTokensToSelectedRepositories: false,
@@ -196,12 +198,13 @@ public sealed partial class WorkspaceRepositories
         CloseVersionFilesCommitModal();
 
         var jobLabel = shouldCommit ? "Updating and committing file versions..." : "Updating file versions...";
+        var jobContextId = RequireSelectedContextId();
         StartPageJob(jobLabel, async (job, ct) =>
         {
             var repoIds = new HashSet<int> { repositoryId };
             var result = await ScopedExecutor.ExecuteAsync<IWorkspaceFileOperations, WorkspaceFileVersionUpdateResult>(
                 svc => svc.UpdateVersionsAsync(
-                WorkspaceId, RequireSelectedContextId(),
+                WorkspaceId, jobContextId,
                     ct,
                     selectedRepositoryIds: repoIds,
                     filterPatternTokensToSelectedRepositories: false,

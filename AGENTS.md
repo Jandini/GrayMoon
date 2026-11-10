@@ -253,8 +253,9 @@ runs on the thread pool while the dispatcher may be rendering the page.
 1. **A singleton never holds per-circuit or per-user state.** One browser tab
    is one circuit; state in a singleton is shared by every tab. UI
    notification state (toasts, banners, selection) belongs in a scoped
-   service. `IToastService` is the known violation; do not add another, and do
-   not rely on a toast reaching only the current tab until it is scoped. [15]
+   service. `IToastService` is scoped (one per tab); a singleton that has
+   something to tell the user raises an event and a per-circuit component
+   shows it (`FeatureRemovalQueue.Completed` to `Toast.razor`). [15]
 2. **Every subscription to a longer-lived object is removed in `Dispose`.**
    A component or scoped service that calls `OnStateChanged(...)` or `+=` on a
    singleton (`WorkerConnectionTracker`, queue state, hub helpers) must call

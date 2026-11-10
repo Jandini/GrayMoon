@@ -171,6 +171,81 @@ public sealed partial class GitHubFanOutTests
         Assert.NotEqual("Error", statuses["c1"]);
     }
 
+    [Fact]
+    public async Task Refresh_failure_for_one_connector_keeps_that_connectors_repositories_and_their_rows()
+    {
+        // Review 2026-11-10 finding 1: the failing connector has rows the merge could destroy. They must survive,
+        // while a connector that answered still loses the repository it no longer returns.
+        var handler = new FanOutProbeHandler(FanOutProbeHandler.IsUserReposRequest, gateTarget: 0) { FailConnectorIndex = 0 };
+        await using var rig = await FanOutRig.CreateAsync(handler, 3, repoCount: 0, connectorCount: 2);
+
+        int failedRepositoryId, failedLinkId, staleRepositoryId;
+        await using (var seedScope = rig.Provider.CreateAsyncScope())
+        {
+            var db = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var connectors = await db.Connectors.AsNoTracking().ToDictionaryAsync(c => c.ConnectorName, c => c.ConnectorId);
+
+            var workspace = new Workspace { Name = "workspace" };
+            db.Workspaces.Add(workspace);
+            var failedRepository = new Repository
+            {
+                ConnectorId = connectors["c0"],
+                RepositoryName = "kept-by-failed-connector",
+                OrgName = "org",
+                CloneUrl = "https://c0.example/org/kept-by-failed-connector.git",
+                GitHubRepositoryId = 5000
+            };
+            var staleRepository = new Repository
+            {
+                ConnectorId = connectors["c1"],
+                RepositoryName = "no-longer-returned",
+                OrgName = "other",
+                CloneUrl = "https://c1.example/other/no-longer-returned.git",
+                GitHubRepositoryId = 5001
+            };
+            db.Repositories.AddRange(failedRepository, staleRepository);
+            await db.SaveChangesAsync();
+
+            var failedLink = new WorkspaceRepositoryLink { WorkspaceId = workspace.WorkspaceId, RepositoryId = failedRepository.RepositoryId, BranchName = "main" };
+            var staleLink = new WorkspaceRepositoryLink { WorkspaceId = workspace.WorkspaceId, RepositoryId = staleRepository.RepositoryId, BranchName = "main" };
+            db.WorkspaceRepositories.AddRange(failedLink, staleLink);
+            await db.SaveChangesAsync();
+
+            db.RepositoryBranches.Add(new RepositoryBranch { WorkspaceRepositoryId = failedLink.WorkspaceRepositoryId, BranchName = "main" });
+            db.WorkspaceRepositoryPullRequests.Add(new WorkspaceRepositoryPullRequest
+            {
+                WorkspaceRepositoryId = failedLink.WorkspaceRepositoryId,
+                PullRequestNumber = 7,
+                State = "open",
+                LastCheckedAt = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+
+            failedRepositoryId = failedRepository.RepositoryId;
+            failedLinkId = failedLink.WorkspaceRepositoryId;
+            staleRepositoryId = staleRepository.RepositoryId;
+        }
+
+        RefreshRepositoriesResult result;
+        await using (var scope = rig.Provider.CreateAsyncScope())
+            result = await scope.ServiceProvider.GetRequiredService<GitHubRepositoryService>().RefreshRepositoriesAsync();
+
+        var error = Assert.Single(result.ConnectorErrors);
+        Assert.Equal("c0", error.ConnectorName);
+        Assert.StartsWith("Skipped:", error.Message, StringComparison.Ordinal);
+
+        await using var verifyScope = rig.Provider.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.True(await verifyDb.Repositories.AnyAsync(r => r.RepositoryId == failedRepositoryId));
+        Assert.True(await verifyDb.WorkspaceRepositories.AnyAsync(l => l.WorkspaceRepositoryId == failedLinkId));
+        Assert.True(await verifyDb.RepositoryBranches.AnyAsync(b => b.WorkspaceRepositoryId == failedLinkId));
+        Assert.True(await verifyDb.WorkspaceRepositoryPullRequests.AnyAsync(p => p.WorkspaceRepositoryId == failedLinkId));
+
+        // The connector that answered is still cleaned up, and its fetched repository is merged.
+        Assert.False(await verifyDb.Repositories.AnyAsync(r => r.RepositoryId == staleRepositoryId));
+        Assert.True(await verifyDb.Repositories.AnyAsync(r => r.RepositoryName == "repo1"));
+    }
+
     private sealed class RecordingProgress : IProgress<int>
     {
         private readonly object _lock = new();

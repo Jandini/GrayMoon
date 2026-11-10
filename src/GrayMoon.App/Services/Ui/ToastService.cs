@@ -1,8 +1,14 @@
 namespace GrayMoon.App.Services.Ui;
 
-/// <summary>Singleton service for showing toast notifications.</summary>
+/// <summary>
+/// Scoped service for showing toast notifications: one instance per Blazor circuit (browser tab), so a toast
+/// shows only in the tab that raised it. Never inject it into a singleton or hosted service; process-wide
+/// work raises an event that a per-circuit component turns into a toast (see <c>Toast.razor</c>).
+/// Show and Hide may be called from any thread (job bodies, timers).
+/// </summary>
 public sealed class ToastService : IToastService
 {
+    private readonly object _gate = new();
     private string? _message;
     private bool _isVisible;
     private bool _isError;
@@ -10,34 +16,68 @@ public sealed class ToastService : IToastService
 
     public event Action? OnShow;
 
-    public string? Message => _message;
-    public bool IsVisible => _isVisible;
-    public bool IsError => _isError;
-    public long ShownId => _shownId;
-
-    public void Show(string message)
+    public string? Message
     {
-        _message = message;
-        _isVisible = true;
-        _isError = false;
-        _shownId++;
-        OnShow?.Invoke();
+        get
+        {
+            lock (_gate)
+                return _message;
+        }
     }
 
-    public void ShowError(string message)
+    public bool IsVisible
     {
-        _message = message;
-        _isVisible = true;
-        _isError = true;
-        _shownId++;
+        get
+        {
+            lock (_gate)
+                return _isVisible;
+        }
+    }
+
+    public bool IsError
+    {
+        get
+        {
+            lock (_gate)
+                return _isError;
+        }
+    }
+
+    public long ShownId
+    {
+        get
+        {
+            lock (_gate)
+                return _shownId;
+        }
+    }
+
+    public void Show(string message) => Set(message, isError: false);
+
+    public void ShowError(string message) => Set(message, isError: true);
+
+    private void Set(string message, bool isError)
+    {
+        lock (_gate)
+        {
+            _message = message;
+            _isVisible = true;
+            _isError = isError;
+            _shownId++;
+        }
+
         OnShow?.Invoke();
     }
 
     public void Hide()
     {
-        _isVisible = false;
-        _message = null;
-        _isError = false;
+        lock (_gate)
+        {
+            _isVisible = false;
+            _message = null;
+            _isError = false;
+        }
+
         OnShow?.Invoke();
     }
 }

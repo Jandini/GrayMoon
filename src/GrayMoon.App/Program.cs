@@ -41,6 +41,16 @@ try
 {
     var builder = WebApplication.CreateBuilder(args);
 
+    // In Development the container is checked when it is built: a scoped service injected into a singleton
+    // (for example the per-circuit IToastService into a hosted service) stops startup instead of sharing
+    // one instance between every browser tab.
+    builder.Host.UseDefaultServiceProvider((context, options) =>
+    {
+        var isDevelopment = context.HostingEnvironment.IsDevelopment();
+        options.ValidateScopes = isDevelopment;
+        options.ValidateOnBuild = isDevelopment;
+    });
+
     // Desktop mode: launched with --desktop <pipe-name> by GrayMoon.Desktop.exe
     var desktopPipeIndex = Array.IndexOf(args, "--desktop");
     var isDesktopMode = desktopPipeIndex >= 0 && desktopPipeIndex + 1 < args.Length;
@@ -129,7 +139,7 @@ try
     builder.Services.AddSingleton<WorkerQueueStateService>();
     builder.Services.AddSingleton<WorkerCommandCancelSender>();
     builder.Services.AddSingleton<OverlayCommandTerminalService>();
-    builder.Services.AddSingleton<IToastService, ToastService>();
+    builder.Services.AddScoped<IToastService, ToastService>();
     builder.Services.AddSingleton<MatrixOverlayPreferenceService>();
     builder.Services.AddSingleton<CommandTerminalOverlayPreferenceService>();
     builder.Services.AddSingleton<MergePullRequestReturnToDefaultPreferenceService>();

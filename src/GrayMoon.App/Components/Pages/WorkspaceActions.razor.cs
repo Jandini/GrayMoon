@@ -42,6 +42,8 @@ public sealed partial class WorkspaceActions : IDisposable
     [Inject] private IWorkspaceFeatureContextResolver FeatureContextResolver { get; set; } = null!;
     [Inject] private GrayMoon.App.Services.Queries.IWorkspaceRepositoryLinkListQueryService LinkListQueryService { get; set; } = null!;
 
+    private bool _backgroundRefreshStarted;
+
     private int MaxConcurrency => Math.Max(1, WorkspaceOptions.Value.MaxParallelOperations);
 
     protected override async Task OnInitializedAsync()
@@ -59,14 +61,17 @@ public sealed partial class WorkspaceActions : IDisposable
 
     protected override void OnParametersSet() => ApplyIncomingSearchQuery();
 
-    protected override async Task OnAfterRenderAsync(bool firstRender)
+    protected override void OnAfterRender(bool firstRender)
     {
-        if (!firstRender) return;
-
-        if (!isLoading && rows.Count > 0)
+        // Not gated on firstRender: the first render can happen while OnInitializedAsync is still loading,
+        // so both steps are retried on every render until they have run once.
+        if (PageRealtimeGate.ShouldStartOnce(_backgroundRefreshStarted, isLoading, rows.Count > 0, _disposed))
+        {
+            _backgroundRefreshStarted = true;
             StartBackgroundRefresh();
+        }
 
-        if (workspace != null && errorMessage == null)
+        if (PageRealtimeGate.ShouldAttachHub(_hubConnection != null, workspace != null && errorMessage == null, _disposed))
         {
             _hubConnection = WorkspaceSyncHubConnectionHelper.Create(NavigationManager);
 

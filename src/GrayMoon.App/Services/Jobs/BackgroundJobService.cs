@@ -13,7 +13,9 @@ public interface IBackgroundJobService
 
     /// <summary>
     /// Starts a new background job for jobKey. If a Running job already exists for the key,
-    /// returns it unchanged. Otherwise creates a new handle, stores it, and launches the work.
+    /// or the Workspace or context lock is held by another operation, the work is dropped and the returned handle
+    /// shows the running job with <see cref="BackgroundJobHandle.WasStarted"/> false. Otherwise creates a new
+    /// handle, stores it, and launches the work.
     /// Workspace mutation keys share one process-wide run per workspace.
     /// </summary>
     BackgroundJobHandle StartJob(string jobKey, string displayMessage,
@@ -68,7 +70,12 @@ public sealed class BackgroundJobService : IBackgroundJobService, IDisposable
         Func<BackgroundJobHandle, CancellationToken, Task> work)
     {
         if (_jobs.TryGetValue(jobKey, out var existing) && existing.State == BackgroundJobState.Running)
-            return existing;
+        {
+            _logger.LogInformation(
+                "Background job {JobKey} was not started: '{Running}' is already running for this key.",
+                jobKey, existing.DisplayMessage);
+            return existing.AsNotStarted();
+        }
 
         if (WorkspaceJobKeys.IsMutationKey(jobKey, out var workspaceId))
             return StartWorkspaceJob(workspaceId, jobKey, displayMessage, work);
@@ -116,7 +123,7 @@ public sealed class BackgroundJobService : IBackgroundJobService, IDisposable
             && WorkspaceJobKeys.TryGetContextId(jobKey, out _, out var contextIdValue))
         {
             var contextId = new WorkspaceFeatureContextId(contextIdValue);
-            hierarchical.TryStartContext(
+            var contextStarted = hierarchical.TryStartContext(
                 contextId,
                 workspaceId,
                 operationKind: jobKey,
@@ -130,13 +137,10 @@ public sealed class BackgroundJobService : IBackgroundJobService, IDisposable
                 out var locked);
 
             var concrete = (WorkspaceOperation)locked;
-            if (WorkspaceJobKeys.OverlayMatches(jobKey, concrete))
-                return Attach(jobKey, concrete);
-
-            return Attach(concrete.OverlayKey, concrete);
+            return AttachStartResult(jobKey, concrete, contextStarted);
         }
 
-        _runner.TryStart(
+        var started = _runner.TryStart(
             workspaceId,
             operationKind: jobKey,
             overlayKey: jobKey,
@@ -148,10 +152,26 @@ public sealed class BackgroundJobService : IBackgroundJobService, IDisposable
             },
             out var operation);
 
-        if (WorkspaceJobKeys.OverlayMatches(jobKey, operation))
-            return Attach(jobKey, operation);
+        return AttachStartResult(jobKey, operation, started);
+    }
 
-        return Attach(operation.OverlayKey, operation);
+    /// <summary>
+    /// Attaches the overlay handle for <paramref name="operation"/>. When the lock was refused, the operation is the
+    /// one already holding it and the caller's work was dropped: the returned handle shows that operation with
+    /// <see cref="BackgroundJobHandle.WasStarted"/> false, so the caller cannot mistake it for its own run.
+    /// </summary>
+    private BackgroundJobHandle AttachStartResult(string jobKey, WorkspaceOperation operation, bool started)
+    {
+        var handle = WorkspaceJobKeys.OverlayMatches(jobKey, operation)
+            ? Attach(jobKey, operation)
+            : Attach(operation.OverlayKey, operation);
+        if (started)
+            return handle;
+
+        _logger.LogInformation(
+            "Background job {JobKey} was not started: '{Running}' ({RunningKey}) holds the lock.",
+            jobKey, operation.DisplayMessage, operation.OverlayKey);
+        return handle.AsNotStarted();
     }
 
     private bool TryGetMatchingOperation(string jobKey, out WorkspaceOperation? operation)

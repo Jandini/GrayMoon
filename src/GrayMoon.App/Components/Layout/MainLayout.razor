@@ -4,7 +4,6 @@
 @using GrayMoon.App.Components.Shared
 @using GrayMoon.App.Repositories
 @using GrayMoon.App.Services
-@inject WorkerConnectionTracker WorkerConnectionTracker
 @inject AppSettingRepository AppSettingRepository
 @inject CommandTerminalOverlayPreferenceService CommandTerminalOverlayPreference
 @inject LoadingOverlayUiSettingsService LoadingOverlayUiSettings
@@ -16,7 +15,10 @@
 <Toast />
 <WorkspaceActionNotificationPanel />
 <DesktopTopBarSync />
-<AppActivityTracker />
+@* Interactive on purpose: the tracker wires idleActivity.js in OnAfterRenderAsync, which never runs for a
+   statically rendered component. Without the render mode AppActivityStateService stays Active forever and the
+   idle and hidden polling tiers (Actions, pull request refresh) never apply. *@
+<AppActivityTracker @rendermode="ActivityTrackerRenderMode" />
 <WorkspaceGitChangesActivityBinder />
 
 <div class="page @(NavbarCollapse.IsCollapsed ? "page--navbar-collapsed" : "") @(!DesktopTopBar.IsVisible ? "page--topbar-hidden" : "")">
@@ -70,6 +72,8 @@
 </div>
 
 @code {
+    private static readonly IComponentRenderMode ActivityTrackerRenderMode = new InteractiveServerRenderMode(prerender: false);
+
     private string? version;
 
     protected override async Task OnInitializedAsync()
@@ -84,7 +88,10 @@
             ? typeof(Program).Assembly.GetName().Version?.ToString()
             : informationalVersion;
 
-        WorkerConnectionTracker.OnStateChanged((sync) => { _ = InvokeAsync(StateHasChanged); });
+        // The layout is rendered statically (a layout cannot declare a render mode), so it never re-renders
+        // after the response. It must not subscribe to a singleton such as WorkerConnectionTracker: the handler
+        // would be added on every request and could never update anything. Live parts are the interactive
+        // components mounted below (WorkerStatusBadge, Toast, AppActivityTracker, ...).
 
         var showTerminal = await AppSettingRepository.GetBoolAsync(AppSettingRepository.TerminalShowByDefaultKey, defaultValue: true);
         CommandTerminalOverlayPreference.IsVisible = showTerminal;

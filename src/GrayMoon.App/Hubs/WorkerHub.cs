@@ -44,10 +44,15 @@ public sealed class WorkerHub(
         connectionTracker.OnWorkerDisconnected(Context.ConnectionId);
         workerSecret.NoteWorkerDisconnected();
         workerQueueStateService.Clear();
-        // Fail any request still in flight immediately rather than letting it wait out its full
-        // WorkerBridge command timeout - there is only ever one worker connection, so no per-connection
-        // filtering is needed here.
-        WorkerResponseDelivery.FailAll("Worker disconnected before responding.");
+        // Fail the requests still in flight on this connection immediately rather than letting them wait
+        // out their full WorkerBridge command timeout. A restarted Worker can connect before its old
+        // connection closes; requests already sent to the new connection must keep waiting. Only when no
+        // connection is left is everything failed.
+        const string disconnectedReason = "Worker disconnected before responding.";
+        if (connectionTracker.HasWorkerConnection)
+            WorkerResponseDelivery.FailForConnection(Context.ConnectionId, disconnectedReason);
+        else
+            WorkerResponseDelivery.FailAll(disconnectedReason);
         // Clear cached workspace root when worker disconnects.
         // WorkspaceService is scoped, so resolve it from a fresh scope.
         await using var scope = scopeFactory.CreateAsyncScope();

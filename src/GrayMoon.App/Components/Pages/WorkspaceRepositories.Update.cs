@@ -27,8 +27,9 @@ public sealed partial class WorkspaceRepositories
             return;
         }
 
+        var jobContextId = RequireSelectedContextId();
         var (updatePlan, _) = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, (IReadOnlyList<SyncDependenciesRepoPayload> Payload, bool IsMultiLevel)>(
-            svc => svc.GetUpdatePlanAsync(WorkspaceId, RequireSelectedContextId()));
+            svc => svc.GetUpdatePlanAsync(WorkspaceId, jobContextId));
         var repoIdsWithUpdates = updatePlan.Select(p => p.RepoId).ToHashSet();
 
         var reposOnDefault = allLinks
@@ -94,11 +95,12 @@ public sealed partial class WorkspaceRepositories
         if (workspace == null || !HasRepositories || IsJobRunning)
             return Task.CompletedTask;
 
+        var jobContextId = RequireSelectedContextId();
         StartPageJob(UpdateJobTitle, async (job, ct) =>
         {
             var updateResult = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, DependencyUpdateRunResult>(svc =>
                 svc.UpdateAsync(
-                    WorkspaceId, RequireSelectedContextId(),
+                    WorkspaceId, jobContextId,
                     ct,
                     job.ToOperationProgress(),
                     (repoId, msg) => SafeInvoke(() => SetRepositoryError(repoId, msg)),
@@ -136,8 +138,9 @@ public sealed partial class WorkspaceRepositories
             return;
         }
 
+        var jobContextId = RequireSelectedContextId();
         var (updatePlan, _) = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, (IReadOnlyList<SyncDependenciesRepoPayload> Payload, bool IsMultiLevel)>(
-            svc => svc.GetUpdatePlanAsync(WorkspaceId, RequireSelectedContextId()));
+            svc => svc.GetUpdatePlanAsync(WorkspaceId, jobContextId));
         var repoIdsWithUpdates = updatePlan.Select(p => p.RepoId).ToHashSet();
 
         _reviewedDefaultBranchRepoIds = allLinks
@@ -211,8 +214,9 @@ public sealed partial class WorkspaceRepositories
             return;
         }
 
+        var jobContextId = RequireSelectedContextId();
         var (updatePlan, _) = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, (IReadOnlyList<SyncDependenciesRepoPayload> Payload, bool IsMultiLevel)>(
-            svc => svc.GetUpdatePlanAsync(WorkspaceId, RequireSelectedContextId()));
+            svc => svc.GetUpdatePlanAsync(WorkspaceId, jobContextId));
         var repoIdsWithUpdates = updatePlan.Select(p => p.RepoId).ToHashSet();
 
         _reviewedDefaultBranchRepoIds = allLinks

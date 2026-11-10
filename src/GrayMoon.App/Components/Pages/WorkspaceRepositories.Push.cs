@@ -182,11 +182,12 @@ public sealed partial class WorkspaceRepositories
     /// <summary>Starts the page push job. Shared by the dependency modal flow and the Basic (non-dependency-aware) Push click, which has no modal state.</summary>
     private void StartPushJob(IReadOnlySet<int> repoIds, bool synchronizedPush, IReadOnlySet<string> requiredPackageIds)
     {
+        var jobContextId = RequireSelectedContextId();
         JobService.StartJob(PageJobKey, "Preparing push...", async (job, ct) =>
         {
             try
             {
-                await ExecutePushCoreAsync(job, ct, repoIds, synchronizedPush, requiredPackageIds);
+                await ExecutePushCoreAsync(jobContextId, job, ct, repoIds, synchronizedPush, requiredPackageIds);
             }
             catch (SynchronizedPushNotPossibleException ex)
             {
@@ -196,7 +197,7 @@ public sealed partial class WorkspaceRepositories
                     () =>
                     {
                         JobService.StartJob(PageJobKey, "Preparing push...", (j, c) =>
-                            ExecutePushCoreAsync(j, c, repoIds, synchronizedPush: false, requiredPackageIds));
+                            ExecutePushCoreAsync(jobContextId, j, c, repoIds, synchronizedPush: false, requiredPackageIds));
                         return Task.CompletedTask;
                     },
                     confirmButtonText: "Continue"));
@@ -205,11 +206,11 @@ public sealed partial class WorkspaceRepositories
     }
 
     private async Task<(IReadOnlySet<int> PushRepoIds, IReadOnlySet<string> RequiredPackageIds)?> BuildPushPlanAsync(
-        string emptyMessage, CancellationToken ct, int? maxLevel = null)
+        GrayMoon.Application.Features.WorkspaceFeatureContextId jobContextId, string emptyMessage, CancellationToken ct, int? maxLevel = null)
     {
         await using var planScope = ServiceScopeFactory.CreateAsyncScope();
         var planOps = planScope.ServiceProvider.GetRequiredService<IWorkspacePushOperations>();
-        var plan = await planOps.GetPlanAsync(WorkspaceId, RequireSelectedContextId(), maxLevel, ct);
+        var plan = await planOps.GetPlanAsync(WorkspaceId, jobContextId, maxLevel, ct);
         if (!plan.HasUnpushed || plan.RepositoryIds.Count == 0)
         {
             SafeInvoke(() => ToastService.Show(emptyMessage));
@@ -219,6 +220,7 @@ public sealed partial class WorkspaceRepositories
     }
 
     private async Task ExecutePushCoreAsync(
+        GrayMoon.Application.Features.WorkspaceFeatureContextId jobContextId,
         BackgroundJobHandle job,
         CancellationToken ct,
         IReadOnlySet<int> repoIds,
@@ -232,7 +234,7 @@ public sealed partial class WorkspaceRepositories
         {
             var result = await ScopedExecutor.ExecuteAsync<IWorkspacePushOperations, OperationResult>(svc =>
                 svc.PushAsync(
-                    WorkspaceId, RequireSelectedContextId(),
+                    WorkspaceId, jobContextId,
                     repoIds,
                     synchronizedPush,
                     requiredPackageIds,
@@ -298,10 +300,11 @@ public sealed partial class WorkspaceRepositories
         if (workspace == null || IsJobRunning)
             return Task.CompletedTask;
 
+        var jobContextId = RequireSelectedContextId();
         StartPageJob("Setting upstream...", async (job, ct) =>
         {
             var result = await ScopedExecutor.ExecuteAsync<IWorkspacePushOperations, OperationResult>(
-                svc => svc.PushSingleAsync(WorkspaceId, RequireSelectedContextId(), repositoryId, branchName, job.ToOperationProgress(), ct));
+                svc => svc.PushSingleAsync(WorkspaceId, jobContextId, repositoryId, branchName, job.ToOperationProgress(), ct));
 
             if (result.Success)
             {
@@ -332,16 +335,17 @@ public sealed partial class WorkspaceRepositories
         var allLinks = await GetAllLinksForOperationAsync();
         var repoIds = allLinks.Select(wr => wr.RepositoryId).ToHashSet();
 
-        StartPageJob("Restoring packages...", (job, ct) => RestorePackagesCoreAsync(repoIds, job, ct), new PageJobOptions { RefreshOnSuccess = false });
+        var jobContextId = RequireSelectedContextId();
+        StartPageJob("Restoring packages...", (job, ct) => RestorePackagesCoreAsync(jobContextId, repoIds, job, ct), new PageJobOptions { RefreshOnSuccess = false });
     }
 
-    private async Task RestorePackagesCoreAsync(IReadOnlySet<int> repoIds, BackgroundJobHandle job, CancellationToken ct)
+    private async Task RestorePackagesCoreAsync(GrayMoon.Application.Features.WorkspaceFeatureContextId jobContextId, IReadOnlySet<int> repoIds, BackgroundJobHandle job, CancellationToken ct)
     {
         job.ReportProgress("Restoring packages...");
         try
         {
             var count = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, int>(
-                svc => svc.RestorePackagesAsync(WorkspaceId, RequireSelectedContextId(), job.ToOperationProgress(), ct));
+                svc => svc.RestorePackagesAsync(WorkspaceId, jobContextId, job.ToOperationProgress(), ct));
 
             SafeInvoke(() =>
             {
@@ -380,11 +384,12 @@ public sealed partial class WorkspaceRepositories
         if (repoIds.Count == 0) return Task.CompletedTask;
 
         var label = $"Restoring packages in {repoIds.Count} {(repoIds.Count == 1 ? "repository" : "repositories")}...";
+        var jobContextId = RequireSelectedContextId();
         StartPageJob(label, async (job, ct) =>
         {
             job.ReportProgress("Restoring packages...");
             var count = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, int>(
-                svc => svc.RestoreSyncedPackagesAsync(WorkspaceId, RequireSelectedContextId(), repoIds, job.ToOperationProgress(), ct));
+                svc => svc.RestoreSyncedPackagesAsync(WorkspaceId, jobContextId, repoIds, job.ToOperationProgress(), ct));
 
             SafeInvoke(() =>
             {

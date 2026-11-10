@@ -319,6 +319,12 @@ package registry access
 health checking
 ```
 
+### Repository refresh
+
+`GitHubRepositoryService.RefreshRepositoriesAsync` fetches every active GitHub connector in parallel (bounded by `MaxParallelOperations`) and merges the result with `GitHubRepositoryRepository.MergeRepositoriesAsync`. A repository that a connector no longer returns is deleted with its links and dependent rows, unless a Feature still uses it. A connector whose fetch failed (401, rate limit, timeout) is skipped: its id is passed to the merge as `failedConnectorIds`, none of its stored repositories is deleted, its status becomes `Error`, and the result lists it in `ConnectorErrors` with a "Skipped: ..." message. Test anchor: `GitHubFanOutTests`.
+
+Read-only GitHub calls retry 502/503 and `HttpRequestException` with backoff (3 attempts, 2 for live-feed polls). A per-request timeout is retried once, without backoff, and never when the caller cancelled (`GitHubService.Http.cs`, `ShouldRetryGet`), so a hung endpoint costs one extra attempt. 429 is not retried; the rate-limit tracker owns that pause.
+
 ### Token protection at rest
 
 Connector tokens are encrypted with AES-256-GCM (`Services/Security/AesGcmTokenProtector`, format `v2:KEYID:BASE64(IV||CIPHERTEXT||TAG)`). `TokenEncryptionKeyProvider` picks the current key:
@@ -811,7 +817,7 @@ update file versions
 
 Every `WorkspaceOperationsEndpoints` handler resolves and acts on the special Workspace context (`GetOrCreateSpecialWorkspaceContextIdAsync`). No endpoint maps `IWorkspaceFeatureOperations`: Features cannot be created, listed, repaired or removed through REST.
 
-Request security (Origin/host checks in `RequestSecurityMiddleware`, Worker secret on Worker-only endpoints) is described in 05 section 33.
+Request security is described in 05 section 33. In short: `RequestSecurityMiddleware` accepts a browser Origin only when its host is loopback or listed in `GRAYMOON_AllowedHosts` (an empty list means loopback only, with a startup warning; equality with the request Host is not accepted), and the Worker-only endpoints require the Worker secret from the first start (`Security:RequireWorkerSecret` defaults to true; `GET /repos/{id}/connector` requires it unconditionally).
 
 `POST /update-and-push` returns 200 for Completed and NothingToPush, 409 for ApprovalRequired (with `pendingApprovalId`) and Rejected, and 400 for UpdateFailed and PushFailed; `/update-and-push/approve` takes that `pendingApprovalId`. A client must ask its human before approving a normal push. Omitting `reviewedDefaultBranchRepoIds` skips the default-branch re-check, and no endpoint returns the default-branch review yet. `/prepare-workspace` reports its combined step the same way. There is no MCP server yet; when one is built it should call these operations or endpoints, never orchestrators or the Worker.
 

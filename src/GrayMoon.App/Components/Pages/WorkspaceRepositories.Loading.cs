@@ -350,8 +350,9 @@ public sealed partial class WorkspaceRepositories
     {
         try
         {
+            var contextId = RequireSelectedContextId();
             await ScopedExecutor.ExecuteAsync<IWorkspaceBranchOperations>(
-                svc => svc.RefreshBranchesAsync(WorkspaceId, RequireSelectedContextId(), repositoryId, CancellationToken.None));
+                svc => svc.RefreshBranchesAsync(WorkspaceId, contextId, repositoryId, CancellationToken.None));
         }
         catch (Exception ex)
         {
@@ -381,37 +382,95 @@ public sealed partial class WorkspaceRepositories
             Logger.LogDebug(ex, "Reload after cancel skipped (invalid operation, e.g. circuit disposed) for workspace {WorkspaceId}", WorkspaceId);
         }
     }
-    /// <summary>Loads workspace using a new scope (fresh DbContext) so we get current DB values and avoid EF cache. Used by RefreshFromSync so the grid shows updated UnmatchedDeps after notify or Update.
-    /// Called directly from background job bodies (which survive page navigation), so a disposed page (e.g. user navigated away) must not fault the job - swallow disposal exceptions instead.</summary>
-    private async Task ReloadWorkspaceDataFromFreshScopeAsync()
+    /// <summary>Reloads the grid from a fresh scope (fresh DbContext) so it shows current DB values.
+    /// Safe to await from a background job body: the data is loaded on the calling thread into a
+    /// <see cref="WorkspaceReloadSnapshot"/> and the page fields are assigned only on the dispatcher
+    /// (see <see cref="RefreshFromSync"/>). A disposed page (user navigated away) must not fault the job.</summary>
+    private Task ReloadWorkspaceDataFromFreshScopeAsync() => RefreshFromSync();
+
+    /// <summary>What a reload read, plus the context it was read for. Built off the dispatcher; holds no page state.</summary>
+    private sealed record WorkspaceReloadSnapshot(
+        Workspace? Workspace,
+        IReadOnlyList<WorkspaceRepositoryLinkIndexEntry> Index,
+        WorkspaceRepositoryHeaderStateDto? HeaderState,
+        int ContextGeneration,
+        CancellationToken QueryToken);
+
+    /// <summary>Load step: reads the header, index and header state. Assigns no page field, so it may run on a job thread.</summary>
+    private async Task<WorkspaceReloadSnapshot> LoadWorkspaceReloadSnapshotAsync()
     {
-        if (_disposed) return;
-        try
+        var contextGeneration = _contextGeneration;
+        var contextId = _selectedContextId;
+        var isWorkspaceContext = !_isFeatureContext;
+        var capabilities = _capabilities;
+        var search = _effectiveSearch;
+        var token = _queryLoader.GetQueryToken();
+        var w = await ScopedExecutor.ExecuteAsync<WorkspaceRepository, Workspace?>(
+            repo => repo.GetHeaderAsync(WorkspaceId));
+        if (w == null)
         {
-            var w = await ScopedExecutor.ExecuteAsync<WorkspaceRepository, Workspace?>(
-                repo => repo.GetHeaderAsync(WorkspaceId));
-            if (_disposed) return;
-            if (w == null)
-            {
-                SetPageError("Workspace not found.");
-                ClearGridState();
-                return;
-            }
-            workspace = w;
-            // Keep scroll position: rebuild the index/visible range in place instead of resetting to the top
-            // (RefreshFromSync recomputes the visible range from the live scroll pixel position and leaves virtual scroll attached).
-            await RefreshFromSync();
+            return new WorkspaceReloadSnapshot(null, [], null, contextGeneration, token);
         }
-        catch (ObjectDisposedException ex)
-        {
-            Logger.LogDebug(ex, "Reload skipped (context disposed) for workspace {WorkspaceId}", WorkspaceId);
-        }
-        catch (InvalidOperationException ex)
-        {
-            Logger.LogDebug(ex, "Reload skipped (invalid operation, e.g. circuit disposed) for workspace {WorkspaceId}", WorkspaceId);
-        }
+        // Rebuild index when levels/order may have changed.
+        var filter = new WorkspaceRepositoryLinkListFilter(WorkspaceId, search);
+        var index = await LinkListQueryService.GetIndexAsync(filter, contextId, isWorkspaceContext, token);
+        var headerState = await LinkListQueryService.GetHeaderStateAsync(
+            WorkspaceId, contextId, isWorkspaceContext, capabilities, token);
+        return new WorkspaceReloadSnapshot(w, index, headerState, contextGeneration, token);
     }
-    /// <summary>Called when WorkspaceSynced is received (or after an operation): refresh header + visible rows only.</summary>
+
+    /// <summary>Apply step: swaps the page collections. Must run on the dispatcher (the markup reads these fields).
+    /// Drops the snapshot when the page is gone or the user switched context since it was loaded.</summary>
+    private async Task ApplyWorkspaceReloadSnapshotAsync(WorkspaceReloadSnapshot snapshot)
+    {
+        if (!PageStateApplyGuard.ShouldApply(_disposed, snapshot.ContextGeneration, _contextGeneration))
+        {
+            return;
+        }
+        if (snapshot.Workspace == null)
+        {
+            SetPageError("Workspace not found.");
+            ClearGridState();
+            StateHasChanged();
+            return;
+        }
+        workspace = snapshot.Workspace;
+        // The visible slot range is recomputed below from the live scroll pixel position rather than reusing
+        // old slot indices, since a level split/merge shifts slot positions in the rebuilt list.
+        BuildSlots(snapshot.Index);
+        totalCount = snapshot.Index.Count;
+        _headerState = snapshot.HeaderState;
+        _linkByRepoId.Clear();
+        _linkByWrlId.Clear();
+        prByRepositoryId = new Dictionary<int, PullRequestInfo?>();
+        repoSyncStatus = new();
+        _tooltipLoadedRepoIds.Clear();
+        _tooltipLoadInFlight.Clear();
+        var rangeStart = _lastKnownScrollTopPx - (VirtualOverscanSlots * VirtualRowHeightPx);
+        var rangeEnd = _lastKnownScrollTopPx + _lastKnownClientHeightPx + (VirtualOverscanSlots * VirtualRowHeightPx);
+        var (rebuiltStart, rebuiltEnd) = ComputeRangeForPixelWindow(rangeStart, rangeEnd);
+        UpdateVisibleRange(rebuiltStart, Math.Max(-1, rebuiltEnd));
+        // Awaited on the dispatcher: the continuation (and the row hydration it applies) stays there.
+        await EnsureSlotsHydratedAsync(_visibleStart, _visibleEnd, snapshot.QueryToken);
+        if (!PageStateApplyGuard.ShouldApply(_disposed, snapshot.ContextGeneration, _contextGeneration))
+        {
+            return;
+        }
+        if (_virtualScrollAttached)
+        {
+            try
+            {
+                await JSRuntime.InvokeVoidAsync("grayMoonVirtualScroll.setTotalHeight", _tbodyRef, TotalScrollHeightPx());
+            }
+            catch (JSDisconnectedException) { }
+            catch (InvalidOperationException) { }
+        }
+        ApplySyncStateFromLoadedItems();
+        StateHasChanged();
+    }
+
+    /// <summary>Called when WorkspaceSynced is received (or after an operation): refresh header + visible rows only.
+    /// Callable from any thread: the load step runs where it is called, the apply step always on the dispatcher.</summary>
     private async Task RefreshFromSync()
     {
         if (_disposed) return;
@@ -421,53 +480,20 @@ public sealed partial class WorkspaceRepositories
             if (_disposed) return;
             try
             {
-                var token = _queryLoader.GetQueryToken();
-                var w = await ScopedExecutor.ExecuteAsync<WorkspaceRepository, Workspace?>(
-                    repo => repo.GetHeaderAsync(WorkspaceId));
-                if (w == null)
-                {
-                    SetPageError("Workspace not found.");
-                    ClearGridState();
-                    await InvokeAsync(StateHasChanged);
-                    return;
-                }
-                workspace = w;
-                // Rebuild index when levels/order may have changed. The visible slot range is recomputed below
-                // from the live scroll pixel position rather than reusing old slot indices, since a level
-                // split/merge shifts slot positions in the rebuilt list.
-                var filter = new WorkspaceRepositoryLinkListFilter(WorkspaceId, _effectiveSearch);
-                var index = await LinkListQueryService.GetIndexAsync(
-                    filter, _selectedContextId, !_isFeatureContext, token);
+                var snapshot = await LoadWorkspaceReloadSnapshotAsync();
                 if (_disposed) return;
-                BuildSlots(index);
-                totalCount = index.Count;
-                await LoadHeaderStateAsync(token);
-                _linkByRepoId.Clear();
-                _linkByWrlId.Clear();
-                prByRepositoryId = new Dictionary<int, PullRequestInfo?>();
-                repoSyncStatus = new();
-                _tooltipLoadedRepoIds.Clear();
-                _tooltipLoadInFlight.Clear();
-                var rangeStart = _lastKnownScrollTopPx - (VirtualOverscanSlots * VirtualRowHeightPx);
-                var rangeEnd = _lastKnownScrollTopPx + _lastKnownClientHeightPx + (VirtualOverscanSlots * VirtualRowHeightPx);
-                var (rebuiltStart, rebuiltEnd) = ComputeRangeForPixelWindow(rangeStart, rangeEnd);
-                UpdateVisibleRange(rebuiltStart, Math.Max(-1, rebuiltEnd));
-                await EnsureSlotsHydratedAsync(_visibleStart, _visibleEnd, token);
-                if (_virtualScrollAttached)
-                {
-                    try
-                    {
-                        await JSRuntime.InvokeVoidAsync("grayMoonVirtualScroll.setTotalHeight", _tbodyRef, TotalScrollHeightPx());
-                    }
-                    catch (JSDisconnectedException) { }
-                    catch (InvalidOperationException) { }
-                }
-                ApplySyncStateFromLoadedItems();
-                await InvokeAsync(StateHasChanged);
+                await InvokeAsync(() => ApplyWorkspaceReloadSnapshotAsync(snapshot));
             }
             catch (OperationCanceledException) { }
-            catch (ObjectDisposedException) { }
-            catch (InvalidOperationException) { }
+            catch (ObjectDisposedException ex)
+            {
+                Logger.LogDebug(ex, "Reload skipped (page or context disposed) for workspace {WorkspaceId}", WorkspaceId);
+            }
+            catch (InvalidOperationException ex)
+            {
+                // Only the dispatcher hand-off of a torn-down circuit lands here now; the swap itself runs on the dispatcher.
+                Logger.LogDebug(ex, "Reload skipped (circuit gone) for workspace {WorkspaceId}", WorkspaceId);
+            }
             catch (Exception ex)
             {
                 Logger.LogDebug(ex, "RefreshFromSync failed for workspace {WorkspaceId}", WorkspaceId);

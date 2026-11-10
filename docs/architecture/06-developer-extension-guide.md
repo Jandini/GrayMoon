@@ -135,7 +135,7 @@ A start of Update and Push from a page, popup, Prepare Workspace, REST or a futu
 - Show the result with `UpdateAndPushResultPresenter`. On `ApprovalRequired`, ask the user and only then send `ApproveNormalPushContinuation`; never approve on the user's behalf.
 - Run the call inside the surface's job or lock (`BackgroundJobService` or `RunExclusiveAsync`); the job body only calls `ExecuteAsync`.
 
-Changing the engine: `UpdateAndPushOrchestrator` talks to `IDependencyUpdateLane` and `IPushLane`, so test ordering and failure handling with fake lanes (`UpdateAndPushOrchestratorPipelineTests`). A `Pipelined = false` result must stay free of side effects, because the coordinator then falls back to the sequential path. Policy (update failure gate, approval, default-branch refusal) belongs in the coordinator, not in the engine or the callers. See `02-system-architecture.md` section 8A.
+Changing the engine: `UpdateAndPushOrchestrator` talks to `IDependencyUpdateLane` and `IPushLane`, so test ordering and failure handling with fake lanes (`UpdateAndPushOrchestratorPipelineTests`). A push lane that stops must end its task (return or throw) after reporting the level error: the engine reads that as the signal to stop the update at its next level boundary (`04-runtime-communication-and-concurrency.md` section 6). A warning that must not stop the run, such as a failed restore, is reported on the repository only. A `Pipelined = false` result must stay free of side effects, because the coordinator then falls back to the sequential path. Policy (update failure gate, approval, default-branch refusal) belongs in the coordinator, not in the engine or the callers. See `02-system-architecture.md` section 8A.
 
 ## 5. Use query services for large pages
 
@@ -398,6 +398,13 @@ Lock scopes (`IWorkspaceOperationLock`, implemented by `WorkspaceOperationRunner
 
 Do not depend on page-owned scoped services after the component is gone unless the work creates its own scope. A job body that calls back into the page after its Worker work must guard on `_disposed` (see `GrayMoon/CLAUDE.md` "Background job system").
 
+Service lifetime rules:
+
+- No singleton or hosted service holds per-circuit state. UI notification state lives in scoped services: `IToastService` is scoped (one per browser tab), so a toast shows only in the tab that raised it. A singleton that has something to tell the user raises an event, and a per-circuit component shows it (`FeatureRemovalQueue.Completed` to `Toast.razor`).
+- Do not inject a scoped service into a singleton. In Development the container is built with `ValidateScopes` and `ValidateOnBuild` (`Program.cs`), so that mistake stops startup; `ToastServiceLifetimeTests` checks the toast consumers.
+- A component or scoped service that subscribes to a singleton (`WorkerConnectionTracker.OnStateChanged`, `WorkerQueueStateService`, `IFeatureRemovalQueue.Completed`) keeps the delegate in a field and removes it in `Dispose`. Do not subscribe during prerender (`RendererInfo.IsInteractive`) or from the statically rendered `MainLayout`.
+- `BackgroundJobService.StartJob` may refuse a start; check `BackgroundJobHandle.WasStarted` (or `IsRunning` beforehand) before reporting your own work as running or completed.
+
 ---
 
 ## 15. Worker command changes
@@ -587,6 +594,8 @@ A Workspace repository can be checked out in several contexts at once (the speci
 
 When adding a context-aware overload, update every call site that already has a context in scope.
 
+**One writer.** `WorkspaceRepositoryStateWriter` is the only code that writes per-context checkout state (branch, tag, counts, upstream, sync status), and the only code that mirrors it onto the shared link. Operation code never assigns those columns on a `WorkspaceRepositoryLink` itself, not even "just the error flag": build a `RepositoryStateSnapshot` with the probed group set (an empty snapshot plus `SyncStatusWrite.Error` marks a failure) and call `ApplyAsync` / `ApplyBatchAsync` with the context id. Reading follows the same split: `WorkspacePushService.LoadContextCheckoutsAsync` is the push-side example (link for the special Workspace, context state for a Feature, unknown when the Feature has no row). Reference tests: `WorkspacePushStrategyTests.After_a_Feature_push_the_upstream_goes_on_the_Feature_state_and_the_shared_link_is_untouched`, `CommitSyncPullStateTests.Pull_failure_in_a_Feature_marks_the_Feature_state_and_leaves_the_shared_link_alone`.
+
 Reference test: `WorkspaceRepositoryLinkListQueryServiceTests.Feature_context_sort_keyset_and_level_grouping_use_context_state_not_shared_link`.
 
 ---
@@ -717,9 +726,8 @@ Verified against the code; each item is still true. Fix the code and remove the 
 Security (open review findings):
 
 - **Self-update URL trust.** The App builds `installUrl` from `NavigationManager.BaseUri` (`Worker.razor`) and from the request scheme and Host (`DesktopNotificationHub.UpgradeWorker`). The Worker's `SelfUpdateCommand` rejects non-http(s) URLs and shell-special characters, but checks neither host nor path before running `irm '<url>' | iex`.
-- **Origin check.** `RequestSecurityMiddleware` accepts an Origin whose host equals the request Host (passes under DNS rebinding), accepts any loopback host on any port (and `0.0.0.0`), compares hosts only, and trusts `X-Forwarded-Host` without a proxy allowlist.
+- **Origin check.** `RequestSecurityMiddleware` accepts any loopback host on any port (and `0.0.0.0`) and compares hosts only (no scheme or port). GET requests are not checked, so with no `GRAYMOON_AllowedHosts` value a DNS-rebinding page can still read `GET /api/...` data (not credentials); see 05 section 33.
 - **Hook listener.** `127.0.0.1:9191/hook/*` has no secret, no Origin rejection, no Content-Type check and no body cap (`ReadToEndAsync`); only an in-flight cap of 64 exists.
-- **Worker secret.** `Security:RequireWorkerSecret` defaults to false; a missing secret is accepted (with a warning) until some Worker has presented one.
 - **Data layer.** `Cache=Shared` is forced on the connection string; schema uses `EnsureCreated()` (synchronous call) plus hand-written migrations, not EF Core migrations.
 
 Behavior:

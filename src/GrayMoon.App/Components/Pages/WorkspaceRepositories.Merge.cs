@@ -467,6 +467,7 @@ public sealed partial class WorkspaceRepositories
         _mergePrModal = _mergePrModal with { IsMerging = true, ErrorMessage = null };
         StateHasChanged();
 
+        var jobContextId = RequireSelectedContextId();
         StartPageJob("Merging pull requests…", async (job, ct) =>
         {
             try
@@ -520,7 +521,7 @@ public sealed partial class WorkspaceRepositories
                     });
 
                     var syncResult = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, UnattendedReturnToDefaultResult>(
-                        svc => svc.ReturnToDefaultAsync(WorkspaceId, RequireSelectedContextId(), [repositoryId], job.ToOperationProgress(), ct));
+                        svc => svc.ReturnToDefaultAsync(WorkspaceId, jobContextId, [repositoryId], job.ToOperationProgress(), ct));
 
                     SafeInvoke(() =>
                     {

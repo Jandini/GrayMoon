@@ -18,15 +18,13 @@ public sealed partial class GitHubService
         new ResiliencePipelineBuilder<HttpResponseMessage>()
             .AddRetry(new RetryStrategyOptions<HttpResponseMessage>
             {
-                ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
-                    .HandleResult(r => r.StatusCode is HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable)
-                    .Handle<HttpRequestException>()
-                    .Handle<TaskCanceledException>(),
-                // 3 quick retries with short backoff, then fail
+                ShouldHandle = ShouldRetryGet,
+                // 3 quick retries with short backoff, then fail (a per-request timeout gets one, see ShouldRetryGet)
                 MaxRetryAttempts = 3,
                 Delay = TimeSpan.FromSeconds(1),
                 BackoffType = DelayBackoffType.Exponential,
                 UseJitter = true,
+                DelayGenerator = GetRetryDelay,
                 OnRetry = static args =>
                 {
                     if (args.Outcome.Result is HttpResponseMessage prev)
@@ -69,14 +67,12 @@ public sealed partial class GitHubService
         new ResiliencePipelineBuilder<HttpResponseMessage>()
             .AddRetry(new RetryStrategyOptions<HttpResponseMessage>
             {
-                ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
-                    .HandleResult(r => r.StatusCode is HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable)
-                    .Handle<HttpRequestException>()
-                    .Handle<TaskCanceledException>(),
+                ShouldHandle = ShouldRetryGet,
                 MaxRetryAttempts = 2,
                 Delay = TimeSpan.FromSeconds(1),
                 BackoffType = DelayBackoffType.Exponential,
                 UseJitter = true,
+                DelayGenerator = GetRetryDelay,
                 OnRetry = static args =>
                 {
                     if (args.Outcome.Result is HttpResponseMessage prev)
@@ -85,6 +81,26 @@ public sealed partial class GitHubService
                 }
             })
             .Build();
+
+    /// <summary>
+    /// Retry rule shared by the read-only pipelines. 502/503 and <see cref="HttpRequestException"/> use the pipeline's
+    /// full attempt count. A <see cref="TaskCanceledException"/> is retried only when the caller's token is not
+    /// cancelled (so it is the per-request timeout, not a cancel) and only on the first attempt: a hung endpoint
+    /// already cost one full timeout, and repeating that three more times stretches a refresh by minutes.
+    /// </summary>
+    private static ValueTask<bool> ShouldRetryGet(RetryPredicateArguments<HttpResponseMessage> args)
+    {
+        var outcome = args.Outcome;
+        if (outcome.Exception is TaskCanceledException)
+            return ValueTask.FromResult(args.AttemptNumber == 0 && !args.Context.CancellationToken.IsCancellationRequested);
+        if (outcome.Exception is HttpRequestException)
+            return ValueTask.FromResult(true);
+        return ValueTask.FromResult(outcome.Result is { StatusCode: HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable });
+    }
+
+    /// <summary>No backoff after a per-request timeout (the wait already happened); null keeps the pipeline's own backoff.</summary>
+    private static ValueTask<TimeSpan?> GetRetryDelay(RetryDelayGeneratorArguments<HttpResponseMessage> args) =>
+        ValueTask.FromResult<TimeSpan?>(args.Outcome.Exception is TaskCanceledException ? TimeSpan.Zero : null);
 
     private async Task<T?> PostAsync<T>(Connector connector, string requestUri, string? payload, CancellationToken cancellationToken = default)
     {

@@ -1,5 +1,8 @@
+using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services;
+using GrayMoon.Application.Features;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace GrayMoon.App.Tests;
@@ -129,5 +132,101 @@ public sealed class CommitSyncPullStateTests
 
         Assert.Equal(gitError, repoError);
         Assert.Null(pageError);
+    }
+
+    [Fact]
+    public async Task Pull_failure_in_the_Workspace_marks_the_link_and_its_context_state_as_failed()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        ctx.WorkerBridge.Respond("CommitSyncRepository", data: null, success: false, error: "pull failed");
+
+        await RunPullAsync(ctx);
+
+        Assert.Equal(RepoSyncStatus.Error, (await ctx.ReadLinkAsync()).SyncStatus);
+        var special = await ctx.GetSpecialContextIdAsync();
+        Assert.Equal(RepoSyncStatus.Error, (await ReadStateAsync(ctx, special)).SyncStatus);
+    }
+
+    [Fact]
+    public async Task Pull_failure_in_a_Feature_marks_the_Feature_state_and_leaves_the_shared_link_alone()
+    {
+        // The failure used to be written to the shared link: the Workspace row turned red for a Feature's failed pull,
+        // and the Feature's own row stayed in sync.
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var feature = await SeedFeatureAsync(ctx);
+        var linkStatusBefore = (await ctx.ReadLinkAsync()).SyncStatus;
+        Assert.NotEqual(RepoSyncStatus.Error, linkStatusBefore);
+        ctx.WorkerBridge.Respond("CommitSyncRepository", data: null, success: false, error: "pull failed");
+
+        string? repoError = null;
+        await using (var scope = ctx.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<WorkspaceCommitSyncHandler>().CommitSyncAsync(
+                ctx.WorkspaceId,
+                feature,
+                ctx.RepositoryId,
+                CancellationToken.None,
+                new Progress<OperationProgress>(_ => { }),
+                (_, message) => repoError = message,
+                _ => { });
+        }
+
+        Assert.Equal("pull failed", repoError);
+        Assert.Equal(linkStatusBefore, (await ctx.ReadLinkAsync()).SyncStatus);
+        Assert.Equal(RepoSyncStatus.Error, (await ReadStateAsync(ctx, feature)).SyncStatus);
+    }
+
+    private static async Task<WorkspaceRepositoryContextState> ReadStateAsync(SyncStateTestContext ctx, WorkspaceFeatureContextId contextId)
+    {
+        await using var db = await ctx.Resolve<IDbContextFactory<AppDbContext>>().CreateDbContextAsync();
+        return await db.WorkspaceRepositoryContextStates.AsNoTracking().SingleAsync(s =>
+            s.WorkspaceFeatureContextId == contextId.Value && s.WorkspaceRepositoryId == ctx.WorkspaceRepositoryId);
+    }
+
+    private static async Task<WorkspaceFeatureContextId> SeedFeatureAsync(SyncStateTestContext ctx)
+    {
+        await using var db = await ctx.Resolve<IDbContextFactory<AppDbContext>>().CreateDbContextAsync();
+        var feature = new WorkspaceFeature
+        {
+            WorkspaceId = ctx.WorkspaceId,
+            Name = "feature-y",
+            LifecycleState = WorkspaceFeatureLifecycleState.Ready,
+            BaseKind = WorkspaceFeatureBaseKind.CurrentWorkspace,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        db.WorkspaceFeatures.Add(feature);
+        await db.SaveChangesAsync();
+
+        var context = new WorkspaceFeatureContext
+        {
+            WorkspaceId = ctx.WorkspaceId,
+            Kind = WorkspaceFeatureContextKind.Feature,
+            WorkspaceFeatureId = feature.WorkspaceFeatureId,
+            CreatedAt = DateTime.UtcNow,
+            IsInSync = true,
+        };
+        db.WorkspaceFeatureContexts.Add(context);
+        await db.SaveChangesAsync();
+
+        db.WorkspaceFeatureRepositories.Add(new WorkspaceFeatureRepository
+        {
+            WorkspaceFeatureContextId = context.WorkspaceFeatureContextId,
+            WorkspaceRepositoryId = ctx.WorkspaceRepositoryId,
+            WorktreePath = @"C:\Users\test\.graymoon\test-ws\features\feature-y\graymoon-api",
+            State = WorkspaceFeatureRepositoryState.Ready,
+            BaseCommitSha = "abc123",
+            ParentBranchName = "main",
+            CreatedAt = DateTime.UtcNow,
+        });
+        db.WorkspaceRepositoryContextStates.Add(new WorkspaceRepositoryContextState
+        {
+            WorkspaceFeatureContextId = context.WorkspaceFeatureContextId,
+            WorkspaceRepositoryId = ctx.WorkspaceRepositoryId,
+            BranchName = "feature/y",
+            SyncStatus = RepoSyncStatus.InSync,
+        });
+        await db.SaveChangesAsync();
+        return new WorkspaceFeatureContextId(context.WorkspaceFeatureContextId);
     }
 }

@@ -74,8 +74,9 @@ public sealed partial class WorkspaceRepositories
         }
         try
         {
+            var jobContextId = RequireSelectedContextId();
             var (payload, _) = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, (IReadOnlyList<SyncDependenciesRepoPayload> Payload, bool IsMultiLevel)>(
-                svc => svc.GetUpdatePlanAsync(WorkspaceId, RequireSelectedContextId(), new HashSet<int> { repositoryId }));
+                svc => svc.GetUpdatePlanAsync(WorkspaceId, jobContextId, new HashSet<int> { repositoryId }));
             if (payload == null || payload.Count == 0)
             {
                 if (HasOutOfDateFiles(repositoryId))
@@ -140,11 +141,12 @@ public sealed partial class WorkspaceRepositories
 
         repositoryErrors.Remove(repositoryId);
 
+        var jobContextId = RequireSelectedContextId();
         StartPageJob("Updating repository...", async (job, ct) =>
         {
             await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations>(svc =>
                 svc.UpdateAsync(
-                    WorkspaceId, RequireSelectedContextId(),
+                    WorkspaceId, jobContextId,
                     ct,
                     job.ToOperationProgress(),
                     (repoId, msg) => SafeInvoke(() => SetRepositoryError(repoId, msg)),
@@ -176,11 +178,12 @@ public sealed partial class WorkspaceRepositories
 
         repositoryErrors.Remove(repositoryId);
 
+        var jobContextId = RequireSelectedContextId();
         StartPageJob("Updating repository...", async (job, ct) =>
         {
             await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations>(svc =>
                 svc.UpdateSingleRepositoryAsync(
-                    WorkspaceId, RequireSelectedContextId(),
+                    WorkspaceId, jobContextId,
                     repositoryId,
                     onProgressMessage: job.ReportProgress,
                     onRepoError: (repoId, msg) => SafeInvoke(() => SetRepositoryError(repoId, msg)),

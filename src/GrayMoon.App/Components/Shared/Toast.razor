@@ -1,6 +1,9 @@
 @implements IDisposable
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using GrayMoon.App.Services.Features
+@using GrayMoon.Application.Features
 @inject IToastService ToastService
+@inject IFeatureRemovalQueue RemovalQueue
 
 @{
     var message = ToastService.Message;
@@ -16,47 +19,88 @@
 }
 
 @code {
+    // IToastService is scoped: one instance per circuit (browser tab), so a toast raised by this tab's pages
+    // and services shows in this tab only. This component is the single subscriber in the circuit.
+    private readonly object _timerGate = new();
     private Timer? _hideTimer;
-    private string? _lastMessage;
+    private long _timerShownId;
+    private bool _disposed;
 
     protected override void OnInitialized()
     {
         ToastService.OnShow += NotifyStateChanged;
+
+        // The removal queue is a process-wide singleton and cannot hold the per-circuit toast service.
+        // Each open tab shows the outcome of a finished Feature removal through its own toast.
+        RemovalQueue.Completed += OnFeatureRemovalCompleted;
     }
 
     protected override void OnAfterRender(bool firstRender)
     {
-        // Start timer only when toast becomes visible with a new message
-        if (ToastService.IsVisible && 
-            !string.IsNullOrEmpty(ToastService.Message) && 
-            ToastService.Message != _lastMessage)
+        if (!ToastService.IsVisible || string.IsNullOrEmpty(ToastService.Message))
+            return;
+
+        // One timer per shown toast. The id changes on every Show, also when the text is the same.
+        var shownId = ToastService.ShownId;
+        var delay = ToastService.IsError ? 6_000 : 2_500;
+        lock (_timerGate)
         {
-            _lastMessage = ToastService.Message;
+            if (_disposed || shownId == _timerShownId)
+                return;
+
+            _timerShownId = shownId;
             _hideTimer?.Dispose();
-            var delay = ToastService.IsError ? 6_000 : 2_500;
-            _hideTimer = new Timer(_ =>
-            {
-                _hideTimer?.Dispose();
-                _hideTimer = null;
-                ToastService.Hide();
-                _lastMessage = null;
-                InvokeAsync(StateHasChanged);
-            }, null, delay, Timeout.Infinite);
+            _hideTimer = new Timer(_ => HideIfStillShown(shownId), null, delay, Timeout.Infinite);
         }
-        else if (!ToastService.IsVisible)
+    }
+
+    private void HideIfStillShown(long shownId)
+    {
+        lock (_timerGate)
         {
-            _lastMessage = null;
+            if (_disposed || shownId != _timerShownId)
+                return;
+
+            _hideTimer?.Dispose();
+            _hideTimer = null;
         }
+
+        // A newer toast keeps its own timer; Hide raises OnShow, which re-renders on the dispatcher.
+        if (ToastService.ShownId == shownId)
+            ToastService.Hide();
+    }
+
+    private void OnFeatureRemovalCompleted(FeatureRemovalCompleted completed)
+    {
+        var message = FeatureRemovalQueue.BuildToast(completed.FeatureName, completed.Result, out var isError);
+        if (isError)
+            ToastService.ShowError(message);
+        else
+            ToastService.Show(message);
     }
 
     private void NotifyStateChanged()
     {
-        _ = InvokeAsync(StateHasChanged);
+        if (_disposed)
+            return;
+
+        _ = InvokeAsync(() =>
+        {
+            if (!_disposed)
+                StateHasChanged();
+        });
     }
 
     public void Dispose()
     {
+        lock (_timerGate)
+        {
+            _disposed = true;
+            _hideTimer?.Dispose();
+            _hideTimer = null;
+        }
+
         ToastService.OnShow -= NotifyStateChanged;
-        _hideTimer?.Dispose();
+        RemovalQueue.Completed -= OnFeatureRemovalCompleted;
     }
 }

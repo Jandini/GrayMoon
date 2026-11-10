@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Threading.Channels;
 using GrayMoon.App.Components.Features;
-using GrayMoon.App.Services.Ui;
 using GrayMoon.Application;
 using GrayMoon.Application.Features;
 
@@ -9,12 +8,12 @@ namespace GrayMoon.App.Services.Features;
 
 /// <summary>
 /// Removes Features in the background once the user has confirmed the Remove Feature dialog. Up to
-/// <see cref="IFeatureRemovalQueue.MaxConcurrentRemovals"/> run at the same time; the rest wait in order. The user is
-/// told the outcome with a toast, whichever page is open.
+/// <see cref="IFeatureRemovalQueue.MaxConcurrentRemovals"/> run at the same time; the rest wait in order. The outcome
+/// is raised through <see cref="Completed"/>; each open tab shows it as a toast (<c>Toast.razor</c>), because this
+/// singleton cannot hold the per-circuit <c>IToastService</c>.
 /// </summary>
 public sealed class FeatureRemovalQueue(
     IServiceScopeFactory scopeFactory,
-    IToastService toastService,
     IFeatureFolderCleanupService folderCleanup,
     ILogger<FeatureRemovalQueue> logger)
     : BackgroundService, IFeatureRemovalQueue
@@ -109,28 +108,24 @@ public sealed class FeatureRemovalQueue(
 
     private void Announce(QueuedRemoval removal, OperationResult result)
     {
-        // Subscribers first (the feature list drops the finished Feature); the toast never delays them.
-        try
-        {
-            Completed?.Invoke(new FeatureRemovalCompleted(
-                removal.WorkspaceId, removal.FeatureContextId, removal.FeatureName, result));
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "A Feature removal subscriber failed.");
-        }
+        // Subscribers: the feature list drops the finished Feature, and every open tab shows the outcome toast.
+        // One failing subscriber must not keep the others from hearing about it.
+        var handlers = Completed;
+        if (handlers == null)
+            return;
 
-        try
+        var completed = new FeatureRemovalCompleted(
+            removal.WorkspaceId, removal.FeatureContextId, removal.FeatureName, result);
+        foreach (var handler in handlers.GetInvocationList().Cast<Action<FeatureRemovalCompleted>>())
         {
-            var message = BuildToast(removal.FeatureName, result, out var isError);
-            if (isError)
-                toastService.ShowError(message);
-            else
-                toastService.Show(message);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Could not show the Feature removal toast.");
+            try
+            {
+                handler(completed);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "A Feature removal subscriber failed.");
+            }
         }
     }
 
