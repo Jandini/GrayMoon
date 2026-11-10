@@ -1,10 +1,10 @@
 # Changes page: commit timeline ("time machine") for reviewing a feature commit by commit
 
-Status: **idea, design only.** Nothing is built. First written 2026-11-11, revised the same day after review (scale, persistence, scope), then reviewed again with laptop measurements (see "Review findings"). **Waiting for the enterprise VDI measurement** before the design text is revised. Written against `07-git-changes-projection-and-tree.md` and the current Changes page (`WorkspaceGitChanges*.razor/.cs`, `GitChangesTree.razor`, `GitChangesHeader`).
+Status: **idea, design only.** Nothing is built. First written 2026-11-11, revised the same day after review (scale, persistence, scope), then reviewed again with laptop measurements (see "Review findings"). The enterprise VDI measurement is in (see "Measured on the enterprise VDI"); the design text below is not yet revised from it. Written against `07-git-changes-projection-and-tree.md` and the current Changes page (`WorkspaceGitChanges*.razor/.cs`, `GitChangesTree.razor`, `GitChangesHeader`).
 
 ## Review findings (2026-11-11, second review, with measurements)
 
-The git commands this design depends on were measured on a developer laptop (numbers in "Performance reality and why we persist"). **Where a finding below conflicts with the older text further down, the finding wins.** The rest of the note is revised once the enterprise VDI numbers are in (see "VDI measurement"), because those may change the targets again.
+The git commands this design depends on were measured on a developer laptop and on the enterprise VDI (numbers in "Performance reality and why we persist"). **Where a finding below conflicts with the older text further down, the finding wins.** The VDI numbers are recorded and the rest of the note is not yet revised from them, because those numbers may still change the targets.
 
 Decided:
 
@@ -182,7 +182,7 @@ What this says:
 
 Not covered by the synthetic fixture: a large real repository (a big tree makes each diff heavier), a cold disk, and security software that inspects every process start. The last one is why the same script is run on the enterprise VDI.
 
-So: persist per Feature branch, update in the background with one process per repository per HEAD change, and make the page open a pure SQLite read. Targets, restated against the laptop numbers (to be restated again after the VDI run):
+So: persist per Feature branch, update in the background with one process per repository per HEAD change, and make the page open a pure SQLite read. Targets, restated against the laptop numbers (the VDI run is recorded under "Measured on the enterprise VDI"; these targets are not restated yet):
 
 | Measurement | Target | Laptop |
 |---|---|---|
@@ -193,9 +193,85 @@ So: persist per Feature branch, update in the background with one process per re
 | Click a commit | SQLite read, no git process | n/a |
 | Combined view of one repository | under 250 ms | 130 ms |
 
-### VDI measurement (to do)
+### VDI measurement
 
-The enterprise VDI runs security software that slows every process start, so the laptop numbers are a lower bound. Give the prompt below to the AI agent on the VDI. It needs this note and `changes-commit-timeline-measure.ps1` from the same folder; nothing else from the repository, no build, no network.
+Measured on 2026-11-11 with `changes-commit-timeline-measure.ps1`. The results are below. The procedure prompt is kept as the record of what was run. The design text is not revised from these numbers.
+
+### Measured on the enterprise VDI (2026-11-11)
+
+Same script and synthetic fixture as the laptop section: one repository, 400 files on the default branch, then 181 commits ahead. Each command is a .NET process start, once cold and then 9 times; the table is milliseconds including process start. The run shown is the second. Every median, first sample, min, max and parallel total from the first run stayed within 30% of this run (closest: the first `--name-status` sample, 123 ms versus 157 ms; largest median gap: `log` with `--numstat`, 430 ms versus 481 ms). There was no third run. Fixture build was 5 s on both runs. No local feature branch was many commits ahead of its default branch (the largest lead found was 2 commits), so the real-repository rows were not run.
+
+Environment: git 2.51.2.windows.1, Windows PowerShell 5.1.26100.9711, 12 logical processors. Windows Defender and a separate endpoint antimalware product are both active, including process inspection.
+
+| Command | First run ms | Min ms | Median ms | Max ms |
+|---|---|---|---|---|
+| Process start floor (`git --version`) | 113 | 104 | 106 | 115 |
+| `rev-list --count` (the ahead badge) | 114 | 114 | 121 | 137 |
+| `log` 181 commits, metadata only | 135 | 123 | 125 | 132 |
+| `log` 181 commits with `--name-status` | 157 | 127 | 136 | 152 |
+| `log` 181 commits with `--numstat` | 483 | 455 | 481 | 492 |
+| `log` one new commit (incremental) | 117 | 113 | 119 | 129 |
+| `merge-base --is-ancestor` | 124 | 107 | 119 | 129 |
+| `diff-tree` one commit, 5 files | 113 | 109 | 116 | 138 |
+| `diff-tree` one commit, 60 files | 124 | 123 | 128 | 133 |
+| `diff -M --numstat main...feature` (all commits combined) | 176 | 172 | 176 | 186 |
+| `diff-tree --stdin --numstat`, 181 commits, one process | 520 | 489 | 510 | 525 |
+| `show <sha>:<path>` (one side of a diff) | 118 | 108 | 115 | 125 |
+
+Parallel sweep, 48 metadata `log` calls (stands in for a backfill of 48 repositories):
+
+| Parallel processes | 48 calls total ms | ms per call |
+|---|---|---|
+| 1 | 6,058 | 126 |
+| 2 | 3,327 | 69 |
+| 4 | 2,107 | 44 |
+| 8 | 1,390 | 29 |
+| 16 | 1,156 | 24 |
+
+Comparison with the laptop table. Command rows are VDI median divided by laptop median. Sweep rows are one sample each, so that ratio is the VDI total divided by the laptop total (the per-call ratio is the same).
+
+| Command | Laptop median ms | VDI median ms | VDI / laptop |
+|---|---|---|---|
+| Process start floor (`git --version`) | 76 | 106 | 1.39 |
+| `rev-list --count` (the ahead badge) | 80 | 121 | 1.51 |
+| `log` 181 commits, metadata only | 78 | 125 | 1.60 |
+| `log` 181 commits with `--name-status` | 90 | 136 | 1.51 |
+| `log` 181 commits with `--numstat` | 351 | 481 | 1.37 |
+| `log` one new commit (incremental) | 76 | 119 | 1.57 |
+| `merge-base --is-ancestor` | 74 | 119 | 1.61 |
+| `diff-tree` one commit, 5 files | 76 | 116 | 1.53 |
+| `diff-tree` one commit, 60 files | 83 | 128 | 1.54 |
+| `diff -M --numstat main...feature` (all commits combined) | 130 | 176 | 1.35 |
+| `diff-tree --stdin --numstat`, 181 commits, one process | 373 | 510 | 1.37 |
+| `show <sha>:<path>` (one side of a diff) | 73 | 115 | 1.58 |
+
+| Parallel processes | Laptop total ms | VDI total ms | VDI / laptop |
+|---|---|---|---|
+| 1 | 4,244 | 6,058 | 1.43 |
+| 2 | 3,881 | 3,327 | 0.86 |
+| 4 | 3,971 | 2,107 | 0.53 |
+| 8 | 2,504 | 1,390 | 0.56 |
+| 16 | 1,827 | 1,156 | 0.63 |
+
+Single-process commands cost about 1.4x to 1.6x the laptop. From 2 processes upward the sweep is faster here than on the laptop (12 logical processors on this machine, 8 on the laptop).
+
+Answers:
+
+a. The process start floor is 106 ms median. The first sample is 113 ms, 7 ms (about 7%) above that median. On the other run the first sample was 109 ms against a 113 ms median.
+
+b. The parallel sweep gets faster as the process count rises: 6.1 s at 1 process, 3.3 s at 2, 2.1 s at 4, 1.4 s at 8 and 1.2 s at 16. The gain from 8 to 16 is small.
+
+c. Scaling the 48-call sweep by 100/48, a cold backfill of 100 repositories is about 4.4 s at 4 parallel processes (2,107 ms x 100/48) and about 2.9 s at 8 (1,390 ms x 100/48).
+
+d. `log` with `--name-status` stays close to metadata only: 136 ms versus 125 ms, 11 ms more (about 9%). The other run's gap was 7 ms (125 versus 118).
+
+e. No timed target is missed. `ListBranchCommits` for 181 commits with file lists is 136 ms, 14 ms inside the 150 ms cap. The update after one new commit stays one git process (full metadata list 125 ms, with file lists 136 ms). The 100-repository backfill is about 4.4 s at 4 processes and about 2.9 s at 8, inside the 10 s cap. The combined view is 176 ms, 74 ms inside the 250 ms cap. Page open and click-a-commit are SQLite reads and were not part of this run.
+
+The floor is under the 200 ms row in "How the VDI numbers will be read", so that row leaves the revised design in place. The first sample stays close to the median, so the cold-start row stays unused.
+
+Finding 4 (parallelism buys little because process creation is serialized) is contradicted: the sweep gets faster through 16 processes, from 6.1 s at 1 process to 1.2 s at 16.
+
+The procedure that produced these numbers:
 
 ```text
 You are measuring git performance on this machine for a design note. Do not change any product code.
@@ -532,7 +608,7 @@ Strip is `role="listbox"` horizontal, dots are `role="option"` with `aria-select
 
 ## Phases
 
-0. **Measure.** Laptop done (2026-11-11, `changes-commit-timeline-measure.ps1`). Remaining: the enterprise VDI run ("VDI measurement"), then revise this note from "Review findings" and set final targets. The SQLite insert and windowed read of 18,100 rows is measured in Phase 2 with the real tables.
+0. **Measure.** Laptop and enterprise VDI done (2026-11-11, `changes-commit-timeline-measure.ps1`; see "Measured on a developer laptop" and "Measured on the enterprise VDI"). Remaining: revise this note from "Review findings" and set final targets. The SQLite insert and windowed read of 18,100 rows is measured in Phase 2 with the real tables.
 1. **Worker and Common.** `ListBranchCommits` (incremental and full), `GetCommitChanges`, `GetGitFileDiff` revisions, SHA validation, pool routing. Tests with `TempGitRepositoryFixture`: count equals `DefaultBranchAhead` for Feature branches created from the default branch (fixtures with default `main`, `master` and `develop` in the same Feature, remote default differing from the local name, default ref present only as `origin/<name>`), parent that is not the default, unresolvable parent (fork-point fallback), detached at a pinned tag with and without commits, branch not checked out, merge, root, rename, binary, incremental versus full agreement, rewritten history, upstream boundary, rebase in progress.
 2. **Persistence and hydrator.** Migration, tables, hydrator with coalescing, version gate, integrity check against the badge, purge on Feature and repository removal. Tests: failed Worker answer never deletes, purge cleans every table, stale answer discarded, rewrite reuses rows.
 3. **Read service and page state.** SQL summaries, rail buckets, keyset window, selection, URL query, rewritten-history fallback.
