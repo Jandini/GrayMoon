@@ -12,6 +12,7 @@ public sealed class ToastService : IToastService
     private string? _message;
     private bool _isVisible;
     private bool _isError;
+    private bool _isWarning;
     private long _shownId;
 
     public event Action? OnShow;
@@ -43,6 +44,15 @@ public sealed class ToastService : IToastService
         }
     }
 
+    public bool IsWarning
+    {
+        get
+        {
+            lock (_gate)
+                return _isWarning;
+        }
+    }
+
     public long ShownId
     {
         get
@@ -52,17 +62,20 @@ public sealed class ToastService : IToastService
         }
     }
 
-    public void Show(string message) => Set(message, isError: false);
+    public void Show(string message) => Set(message, isError: false, isWarning: false);
 
-    public void ShowError(string message) => Set(message, isError: true);
+    public void ShowError(string message) => Set(message, isError: true, isWarning: false);
 
-    private void Set(string message, bool isError)
+    public void ShowWarning(string message) => Set(message, isError: false, isWarning: true);
+
+    private void Set(string message, bool isError, bool isWarning)
     {
         lock (_gate)
         {
             _message = message;
             _isVisible = true;
             _isError = isError;
+            _isWarning = isWarning;
             _shownId++;
         }
 
@@ -76,6 +89,7 @@ public sealed class ToastService : IToastService
             _isVisible = false;
             _message = null;
             _isError = false;
+            _isWarning = false;
         }
 
         OnShow?.Invoke();

@@ -9,11 +9,12 @@
     var message = ToastService.Message;
     var isVisible = ToastService.IsVisible;
     var isError = ToastService.IsError;
+    var isWarning = ToastService.IsWarning;
 }
 
 @if (isVisible && !string.IsNullOrEmpty(message))
 {
-    <div class="toast-bubble @(isError ? "toast-bubble--error" : "")" role="alert" aria-live="assertive">
+    <div class="toast-bubble @(isError ? "toast-bubble--error" : isWarning ? "toast-bubble--warning" : "")" role="alert" aria-live="assertive">
         <span class="toast-bubble-text">@message</span>
     </div>
 }
@@ -42,7 +43,7 @@
 
         // One timer per shown toast. The id changes on every Show, also when the text is the same.
         var shownId = ToastService.ShownId;
-        var delay = ToastService.IsError ? 6_000 : 2_500;
+        var delay = ToastService.IsError || ToastService.IsWarning ? 6_000 : 2_500;
         lock (_timerGate)
         {
             if (_disposed || shownId == _timerShownId)

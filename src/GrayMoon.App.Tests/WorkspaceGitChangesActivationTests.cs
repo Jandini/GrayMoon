@@ -202,9 +202,11 @@ public sealed class WorkspaceGitChangesActivationTests
         public string? Message => null;
         public bool IsVisible => false;
         public bool IsError => false;
+        public bool IsWarning => false;
         public long ShownId => 0;
         public void Show(string message) { }
         public void ShowError(string message) { }
+        public void ShowWarning(string message) { }
         public void Hide() { }
     }
 }

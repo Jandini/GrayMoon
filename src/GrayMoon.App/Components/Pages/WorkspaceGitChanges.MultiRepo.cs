@@ -367,7 +367,7 @@ public sealed partial class WorkspaceGitChanges
                         cancellationToken: ct));
                 result.ShowRepoErrors(
                     msg => SafeInvoke(() => ToastService.ShowError(msg)),
-                    warning => SafeInvoke(() => ToastService.Show(warning)));
+                    warning => SafeInvoke(() => ToastService.ShowWarning(warning)));
             }
         });
     }

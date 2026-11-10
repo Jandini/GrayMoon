@@ -25,6 +25,12 @@
     border-color: #7f1d1d;
 }
 
+.toast-bubble--warning {
+    background-color: #3a2e12;
+    color: #fbbf24;
+    border-color: #92400e;
+}
+
 .toast-bubble-text {
     display: block;
     text-align: left;

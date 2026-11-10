@@ -370,8 +370,10 @@ public sealed partial class WorkspaceRepositories
             switch (notice.Kind)
             {
                 case UpdateAndPushNoticeKind.Info:
-                case UpdateAndPushNoticeKind.Warning:
                     ToastService.Show(notice.Message);
+                    break;
+                case UpdateAndPushNoticeKind.Warning:
+                    ToastService.ShowWarning(notice.Message);
                     break;
                 case UpdateAndPushNoticeKind.Error:
                     ToastService.ShowError(notice.Message);

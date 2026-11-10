@@ -290,7 +290,7 @@ public sealed partial class WorkspaceRepositories
             // Done with a warning: the push landed, a package restore after it failed. The repository rows above
             // carry the reason; the toast says the push itself finished.
             if (result.HasWarnings)
-                ToastService.Show(result.WarningSummary ?? "Push finished with warnings.");
+                ToastService.ShowWarning(result.WarningSummary ?? "Push finished with warnings.");
 
             if (result.RepoErrors is { Count: > 0 } || result.LevelErrors is { Count: > 0 })
                 return;
