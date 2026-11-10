@@ -48,6 +48,7 @@ public static partial class Migrations
         (14, "Git Changes content digest", dbContext => MigrateGitChangesContentDigestAsync(dbContext)),
         (15, "Fork support columns", dbContext => MigrateForkSupportAsync(dbContext)),
         (16, "Repair special Workspace context backfill", dbContext => MigrateSpecialWorkspaceContextBackfillRepairAsync(dbContext)),
+        (17, "Repository missing-from-provider column", dbContext => MigrateRepositoryMissingFromProviderColumnAsync(dbContext)),
     };
 
     public static async Task RunAllAsync(AppDbContext dbContext, ILogger? logger = null, TimeProvider? timeProvider = null)

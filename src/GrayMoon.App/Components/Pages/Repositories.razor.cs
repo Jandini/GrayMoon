@@ -19,7 +19,7 @@ public sealed partial class Repositories : IAsyncDisposable, IDisposable
 
     private IReadOnlyList<ConnectorFetchError>? connectorErrors;
     private IReadOnlyList<RenamedRepositoryInfo>? renamedRepositories;
-    private IReadOnlyList<KeptRepositoryForFeaturesInfo>? keptForFeatures;
+    private IReadOnlyList<KeptRepositoryInfo>? keptMissingFromProvider;
     private string? errorMessage;
     private string searchTerm = string.Empty;
     private string _effectiveSearch = string.Empty;
@@ -243,7 +243,7 @@ public sealed partial class Repositories : IAsyncDisposable, IDisposable
             var result = await RepositoryService.RefreshRepositoriesAsync(progress, _fetchRepositoriesCts.Token);
             connectorErrors = result.ConnectorErrors.Count > 0 ? result.ConnectorErrors : null;
             renamedRepositories = result.RenamedRepositories.Count > 0 ? result.RenamedRepositories : null;
-            keptForFeatures = result.KeptForFeatures.Count > 0 ? result.KeptForFeatures : null;
+            keptMissingFromProvider = result.KeptMissingFromProvider.Count > 0 ? result.KeptMissingFromProvider : null;
             catalogHasAny = await RepositoryListQueryService.AnyAsync();
             await ResetAndLoadFromTopAsync();
         }

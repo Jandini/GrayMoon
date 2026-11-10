@@ -1,17 +1,14 @@
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
-using GrayMoon.App.Services.GitChanges;
 using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Repositories;
 
 public sealed class GitHubRepositoryRepository(
     AppDbContext dbContext,
-    IWorkspaceGitChangesNotifier gitChangesNotifier,
     ILogger<GitHubRepositoryRepository> logger)
 {
     private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
-    private readonly IWorkspaceGitChangesNotifier _gitChangesNotifier = gitChangesNotifier ?? throw new ArgumentNullException(nameof(gitChangesNotifier));
     private readonly ILogger<GitHubRepositoryRepository> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     public async Task<List<GitHubRepositoryEntry>> GetAllEntriesAsync()
@@ -32,6 +29,13 @@ public sealed class GitHubRepositoryRepository(
                 Topics = repository.Topics
             })
             .ToListAsync();
+    }
+
+    /// <summary>Connectors that have at least one stored repository.</summary>
+    public async Task<HashSet<int>> GetConnectorIdsWithRepositoriesAsync(CancellationToken cancellationToken = default)
+    {
+        var ids = await _dbContext.Repositories.AsNoTracking().Select(r => r.ConnectorId).Distinct().ToListAsync(cancellationToken);
+        return ids.ToHashSet();
     }
 
     /// <summary>Stored fork parent clone URLs keyed by (connector, provider repository id), so a fetch only asks the provider about forks whose parent is not known yet.</summary>
@@ -91,27 +95,24 @@ public sealed class GitHubRepositoryRepository(
         public IReadOnlyList<RenamedRepositoryInfo> Renames { get; init; } = [];
         /// <summary>Maps a deleted duplicate RepositoryId to the surviving canonical RepositoryId. Empty when no merges were needed.</summary>
         public IReadOnlyDictionary<int, int> MergedRepositoryIdMap { get; init; } = new Dictionary<int, int>();
-        /// <summary>Repositories no longer returned by the provider but kept because a Feature still uses them. Empty when nothing was kept.</summary>
-        public IReadOnlyList<KeptRepositoryForFeaturesInfo> KeptForFeatures { get; init; } = [];
+        /// <summary>Repositories no longer returned by the provider but kept because a Workspace links them. Empty when nothing was kept.</summary>
+        public IReadOnlyList<KeptRepositoryInfo> KeptMissingFromProvider { get; init; } = [];
     }
 
     /// <summary>
     /// Merges fetched repositories with existing ones.
     /// Matching priority: (1) stable provider ID (ConnectorId + GitHubRepositoryId), (2) CloneUrl, (3) URL-prefix rename heuristic.
     /// Updates existing rows in-place - preserving RepositoryId and all workspace links.
-    /// Adds new rows for genuinely new repositories, removes rows no longer returned by GitHub.
-    /// Handles multiple simultaneous renames in a single pass.
+    /// Adds new rows for genuinely new repositories. Handles multiple simultaneous renames in a single pass.
     /// <para>
-    /// <paramref name="failedConnectorIds"/> lists the connectors whose fetch failed (401, rate limit, timeout).
-    /// Being absent from <paramref name="repositories"/> says nothing about their repositories, so none of them
-    /// is deleted. <c>null</c> or empty means every asked connector answered.
+    /// A row no longer returned is deleted only when its connector returned at least one repository in
+    /// <paramref name="repositories"/> and no Workspace links it. A connector with nothing in the set (failed,
+    /// inactive, or an empty answer) keeps every stored row, and a Workspace-linked repository is kept, marked
+    /// with <see cref="Repository.MissingFromProviderSinceUtc"/> and reported in the result.
     /// </para>
     /// </summary>
-    public async Task<MergeRepositoriesResult> MergeRepositoriesAsync(
-        IReadOnlyCollection<Repository> repositories,
-        IReadOnlyCollection<int>? failedConnectorIds = null)
+    public async Task<MergeRepositoriesResult> MergeRepositoriesAsync(IReadOnlyCollection<Repository> repositories)
     {
-        var failed = failedConnectorIds?.ToHashSet() ?? [];
         // Clear any stale Repository tracker state from previous operations in this circuit-scope DbContext.
         foreach (var entry in _dbContext.ChangeTracker.Entries<Repository>().ToList())
             entry.State = Microsoft.EntityFrameworkCore.EntityState.Detached;
@@ -312,94 +313,101 @@ public sealed class GitHubRepositoryRepository(
         if (insertCount > 0)
             await _dbContext.SaveChangesAsync();
 
+        // A repository the provider returned again is no longer missing.
+        if (matchedExistingIds.Count > 0)
+        {
+            var returnedAgainIds = existing
+                .Where(r => r.MissingFromProviderSinceUtc != null && matchedExistingIds.Contains(r.RepositoryId))
+                .Select(r => r.RepositoryId)
+                .ToList();
+            if (returnedAgainIds.Count > 0)
+            {
+                await _dbContext.Repositories
+                    .Where(r => returnedAgainIds.Contains(r.RepositoryId))
+                    .ExecuteUpdateAsync(s => s.SetProperty(r => r.MissingFromProviderSinceUtc, (DateTime?)null));
+            }
+        }
+
         // ---------------------------------------------------------------------------
-        // PHASE E - Delete unmatched existing rows (no longer returned by the provider)
-        //           Delete WorkspaceRepositoryLink rows first (ExecuteDeleteAsync respects no tracker).
-        //           A candidate still used by a Feature (WorkspaceFeatureRepositories cascades from the
-        //           WorkspaceRepositoryLink row - see FK_WorkspaceFeatureRepositories_Links) is kept
-        //           instead of deleted, so a connector refresh can never silently drop a Feature's
-        //           repository and leave its worktree without a database row.
+        // PHASE E - Existing rows no longer returned by the provider.
+        //           Only a connector that returned at least one repository in this merge has said anything
+        //           about its repositories. A connector with nothing in the fetched set (failed, inactive,
+        //           removed, or an empty answer) keeps every stored row.
+        //           A repository linked to a Workspace is never deleted here: connector state must not remove
+        //           a Workspace's repository (and with it the Feature rows that cascade from the link). It is
+        //           kept, marked with MissingFromProviderSinceUtc and reported.
+        //           Only catalog rows no Workspace links are deleted.
         // ---------------------------------------------------------------------------
-        //           "Not in the fetched set" is no reason to delete for a connector whose fetch failed.
-        var candidateDeleteIds = existing
+        var answeredConnectorIds = normalized.Select(r => r.ConnectorId).ToHashSet();
+        var candidates = existing
             .Where(r => !matchedExistingIds.Contains(r.RepositoryId))
-            .Where(r => !failed.Contains(r.ConnectorId))
-            .Select(r => r.RepositoryId)
+            .Where(r => answeredConnectorIds.Contains(r.ConnectorId))
             .ToList();
+        var candidateIds = candidates.Select(r => r.RepositoryId).ToList();
 
-        List<int> affectedWorkspaceIds = [];
-        var keptForFeatures = new List<KeptRepositoryForFeaturesInfo>();
-        var toDeleteIds = candidateDeleteIds;
+        var keptMissing = new List<KeptRepositoryInfo>();
+        var toDeleteIds = candidateIds;
 
-        if (candidateDeleteIds.Count > 0)
+        if (candidateIds.Count > 0)
         {
             var candidateLinks = await _dbContext.WorkspaceRepositories
-                .Where(wr => candidateDeleteIds.Contains(wr.RepositoryId))
-                .Select(wr => new { wr.WorkspaceRepositoryId, wr.WorkspaceId, wr.RepositoryId })
+                .Where(wr => candidateIds.Contains(wr.RepositoryId))
+                .Select(wr => new { wr.WorkspaceRepositoryId, wr.RepositoryId, WorkspaceName = wr.Workspace!.Name })
                 .ToListAsync();
             var candidateLinkIds = candidateLinks.Select(l => l.WorkspaceRepositoryId).ToList();
 
-            var featureUsage = new List<(int WorkspaceRepositoryId, string FeatureName)>();
-            if (candidateLinkIds.Count > 0)
-            {
-                var featureUsageRows = await _dbContext.WorkspaceFeatureRepositories
+            var featureNamesByLinkId = (await _dbContext.WorkspaceFeatureRepositories
                     .Where(wfr => candidateLinkIds.Contains(wfr.WorkspaceRepositoryId))
                     .Select(wfr => new { wfr.WorkspaceRepositoryId, FeatureName = wfr.WorkspaceFeatureContext!.WorkspaceFeature!.Name })
-                    .ToListAsync();
-                foreach (var row in featureUsageRows)
-                    featureUsage.Add((row.WorkspaceRepositoryId, row.FeatureName));
-            }
+                    .ToListAsync())
+                .ToLookup(row => row.WorkspaceRepositoryId, row => row.FeatureName);
 
-            var linkIdToRepositoryId = candidateLinks.ToDictionary(l => l.WorkspaceRepositoryId, l => l.RepositoryId);
-            var repositoryIdToFeatureNames = new Dictionary<int, List<string>>();
-            foreach (var (workspaceRepositoryId, featureName) in featureUsage)
+            var linksByRepositoryId = candidateLinks.ToLookup(l => l.RepositoryId);
+            var linkedRepositoryIds = candidateLinks.Select(l => l.RepositoryId).ToHashSet();
+            toDeleteIds = candidateIds.Where(id => !linkedRepositoryIds.Contains(id)).ToList();
+
+            var newlyMissingIds = new List<int>();
+            foreach (var kept in candidates.Where(r => linkedRepositoryIds.Contains(r.RepositoryId)))
             {
-                if (!linkIdToRepositoryId.TryGetValue(workspaceRepositoryId, out var repositoryId)) continue;
-                if (!repositoryIdToFeatureNames.TryGetValue(repositoryId, out var names))
+                var links = linksByRepositoryId[kept.RepositoryId].ToList();
+                var workspaceNames = links.Select(l => l.WorkspaceName).Distinct(StringComparer.Ordinal).OrderBy(n => n, StringComparer.Ordinal).ToList();
+                var featureNames = links.SelectMany(l => featureNamesByLinkId[l.WorkspaceRepositoryId]).Distinct(StringComparer.Ordinal).OrderBy(n => n, StringComparer.Ordinal).ToList();
+                if (kept.MissingFromProviderSinceUtc == null)
                 {
-                    names = [];
-                    repositoryIdToFeatureNames[repositoryId] = names;
+                    newlyMissingIds.Add(kept.RepositoryId);
+                    _logger.LogWarning(
+                        "MergeRepositories: Repository {RepositoryId} ({RepositoryName}) is no longer returned by the provider but is linked to Workspace(s) {WorkspaceNames}; kept.",
+                        kept.RepositoryId, kept.RepositoryName, string.Join(", ", workspaceNames));
                 }
-                names.Add(featureName);
+
+                keptMissing.Add(new KeptRepositoryInfo
+                {
+                    RepositoryId = kept.RepositoryId,
+                    RepositoryName = kept.RepositoryName,
+                    OrgName = kept.OrgName,
+                    WorkspaceNames = workspaceNames,
+                    FeatureNames = featureNames
+                });
             }
 
-            var keptRepositoryIds = repositoryIdToFeatureNames.Keys.ToHashSet();
-            toDeleteIds = candidateDeleteIds.Where(id => !keptRepositoryIds.Contains(id)).ToList();
-
-            foreach (var (repositoryId, featureNames) in repositoryIdToFeatureNames)
+            if (newlyMissingIds.Count > 0)
             {
-                var keptRepository = existing.First(r => r.RepositoryId == repositoryId);
-                var distinctFeatureNames = featureNames.Distinct(StringComparer.Ordinal).OrderBy(n => n, StringComparer.Ordinal).ToList();
-                _logger.LogWarning(
-                    "MergeRepositories: Repository {RepositoryId} is no longer returned by the provider but is used by Feature(s) {FeatureNames}; kept until those Features are removed.",
-                    repositoryId, string.Join(", ", distinctFeatureNames));
-                keptForFeatures.Add(new KeptRepositoryForFeaturesInfo
-                {
-                    RepositoryId = repositoryId,
-                    RepositoryName = keptRepository.RepositoryName,
-                    OrgName = keptRepository.OrgName,
-                    FeatureNames = distinctFeatureNames
-                });
+                var missingSince = DateTime.UtcNow;
+                await _dbContext.Repositories
+                    .Where(r => newlyMissingIds.Contains(r.RepositoryId))
+                    .ExecuteUpdateAsync(s => s.SetProperty(r => r.MissingFromProviderSinceUtc, (DateTime?)missingSince));
             }
 
             if (toDeleteIds.Count > 0)
             {
                 foreach (var rid in toDeleteIds)
                     _logger.LogWarning(
-                        "MergeRepositories: Repository no longer returned by provider, will delete. RepositoryId={RepositoryId}, RepositoryName={RepositoryName}",
+                        "MergeRepositories: Repository no longer returned by provider and not linked to any Workspace, will delete. RepositoryId={RepositoryId}, RepositoryName={RepositoryName}",
                         rid,
                         existing.First(r => r.RepositoryId == rid).RepositoryName);
 
-                // Delete dependent rows first so FK constraint is not violated.
-                var linksToRemove = candidateLinks.Where(l => toDeleteIds.Contains(l.RepositoryId)).ToList();
-                var wrlIdsToRemove = linksToRemove.Select(l => l.WorkspaceRepositoryId).ToList();
-                affectedWorkspaceIds = linksToRemove.Select(l => l.WorkspaceId).Distinct().ToList();
-
-                await WorkspaceRepositoryLinkCleanup.DeleteDependentsAsync(_dbContext, wrlIdsToRemove, toDeleteIds);
-
-                await _dbContext.WorkspaceRepositories
-                    .Where(wr => toDeleteIds.Contains(wr.RepositoryId))
-                    .ExecuteDeleteAsync();
+                // No Workspace links these rows, so there are no link dependents; repository-level dependents go first.
+                await WorkspaceRepositoryLinkCleanup.DeleteDependentsAsync(_dbContext, [], toDeleteIds);
 
                 await _dbContext.Repositories
                     .Where(r => toDeleteIds.Contains(r.RepositoryId))
@@ -409,18 +417,15 @@ public sealed class GitHubRepositoryRepository(
 
         await transaction.CommitAsync();
 
-        foreach (var workspaceId in affectedWorkspaceIds)
-            _gitChangesNotifier.Publish(workspaceId, IWorkspaceGitChangesNotifier.AllContexts);
-
         _logger.LogInformation(
-            "MergeRepositories: Complete. Updated={Updated}, Inserted={Inserted}, Deleted={Deleted}, Renames={Renames}, KeptForFeatures={KeptForFeatures}",
-            updateCount, insertCount, toDeleteIds.Count, renames.Count, keptForFeatures.Count);
+            "MergeRepositories: Complete. Updated={Updated}, Inserted={Inserted}, Deleted={Deleted}, Renames={Renames}, KeptMissingFromProvider={KeptMissingFromProvider}",
+            updateCount, insertCount, toDeleteIds.Count, renames.Count, keptMissing.Count);
 
         return new MergeRepositoriesResult
         {
             Renames = renames,
             MergedRepositoryIdMap = new Dictionary<int, int>(),
-            KeptForFeatures = keptForFeatures
+            KeptMissingFromProvider = keptMissing
         };
     }
 
@@ -460,25 +465,5 @@ public sealed class GitHubRepositoryRepository(
         // Same owner/org path prefix, only the trailing repo-name segment differs
         return string.Equals(oldPath[..oldSlash], newPath[..newSlash], StringComparison.OrdinalIgnoreCase)
                && !string.Equals(oldPath, newPath, StringComparison.OrdinalIgnoreCase);
-    }
-
-    public async Task DeleteOrphanedAsync(IReadOnlyCollection<int> connectorIds)
-    {
-        if (connectorIds.Count == 0)
-        {
-            var allCount = await _dbContext.Repositories.CountAsync();
-            _dbContext.Repositories.RemoveRange(_dbContext.Repositories);
-            await _dbContext.SaveChangesAsync();
-            _logger.LogInformation("Persistence: saved Repository. Action=DeleteOrphaned, RemovedCount={RemovedCount} (all; no connectors)", allCount);
-            return;
-        }
-
-        var orphans = await _dbContext.Repositories
-            .Where(repository => !connectorIds.Contains(repository.ConnectorId))
-            .ToListAsync();
-        var removedCount = orphans.Count;
-        _dbContext.Repositories.RemoveRange(orphans);
-        await _dbContext.SaveChangesAsync();
-        _logger.LogInformation("Persistence: saved Repository. Action=DeleteOrphaned, RemovedCount={RemovedCount}", removedCount);
     }
 }

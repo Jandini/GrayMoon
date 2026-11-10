@@ -19,11 +19,10 @@ namespace GrayMoon.App.Tests;
 public sealed class ConnectorRepositoryFeatureProtectionTests
 {
     [Fact]
-    public async Task MergeRepositoriesAsync_no_features_deletes_unreturned_repository_as_today()
+    public async Task MergeRepositoriesAsync_keeps_and_marks_a_workspace_linked_repository_the_provider_no_longer_returns()
     {
-        // Regression guard R-B5 (A4 step 0): characterization of today's behaviour on a database with no
-        // Features at all. A repository no longer returned by the provider is deleted exactly as before,
-        // and the new KeptForFeatures check changes nothing in this case.
+        // Connector state never removes a Workspace's repository. With no Feature at all, the linked repository
+        // that is no longer returned used to be deleted with its link; it is kept, marked and reported.
         await using var ctx = await MergeTestContext.CreateAsync();
         await using var scope = ctx.CreateScope();
         var repo = ctx.MergeRepo(scope);
@@ -33,18 +32,76 @@ public sealed class ConnectorRepositoryFeatureProtectionTests
 
         var result = await repo.MergeRepositoriesAsync(fetched);
 
-        Assert.Empty(result.KeptForFeatures);
-        Assert.False(await db.Repositories.AnyAsync(r => r.RepositoryId == ctx.DroppedRepositoryId));
-        Assert.False(await db.WorkspaceRepositories.AnyAsync(l => l.RepositoryId == ctx.DroppedRepositoryId));
-        Assert.True(await db.Repositories.AnyAsync(r => r.RepositoryId == ctx.KeptRepositoryId));
+        var kept = Assert.Single(result.KeptMissingFromProvider);
+        Assert.Equal(ctx.DroppedRepositoryId, kept.RepositoryId);
+        Assert.Equal(new[] { "merge-test-ws" }, kept.WorkspaceNames);
+        Assert.Empty(kept.FeatureNames);
+        Assert.True(await db.WorkspaceRepositories.AnyAsync(l => l.RepositoryId == ctx.DroppedRepositoryId));
+        Assert.NotNull((await db.Repositories.AsNoTracking().SingleAsync(r => r.RepositoryId == ctx.DroppedRepositoryId)).MissingFromProviderSinceUtc);
+        Assert.Null((await db.Repositories.AsNoTracking().SingleAsync(r => r.RepositoryId == ctx.KeptRepositoryId)).MissingFromProviderSinceUtc);
+    }
+
+    [Fact]
+    public async Task MergeRepositoriesAsync_clears_the_mark_when_the_provider_returns_the_repository_again()
+    {
+        await using var ctx = await MergeTestContext.CreateAsync();
+        await using (var scope = ctx.CreateScope())
+            await ctx.MergeRepo(scope).MergeRepositoriesAsync([ctx.FetchedKeptRepository()]);
+
+        await using var secondScope = ctx.CreateScope();
+        var db = ctx.Db(secondScope);
+        var dropped = await db.Repositories.AsNoTracking().SingleAsync(r => r.RepositoryId == ctx.DroppedRepositoryId);
+        Assert.NotNull(dropped.MissingFromProviderSinceUtc);
+
+        var result = await ctx.MergeRepo(secondScope).MergeRepositoriesAsync(
+        [
+            ctx.FetchedKeptRepository(),
+            new Repository { ConnectorId = ctx.ConnectorId, RepositoryName = dropped.RepositoryName, OrgName = dropped.OrgName, Visibility = "Public", CloneUrl = dropped.CloneUrl }
+        ]);
+
+        Assert.Empty(result.KeptMissingFromProvider);
+        Assert.Null((await db.Repositories.AsNoTracking().SingleAsync(r => r.RepositoryId == ctx.DroppedRepositoryId)).MissingFromProviderSinceUtc);
+    }
+
+    [Fact]
+    public async Task MergeRepositoriesAsync_deletes_an_unlinked_repository_the_provider_no_longer_returns()
+    {
+        // The catalog (repositories no Workspace links) still follows the provider.
+        await using var ctx = await MergeTestContext.CreateAsync();
+        var unlinkedId = await ctx.AddRepositoryAsync(ctx.ConnectorId, "repo-unlinked", linked: false);
+        await using var scope = ctx.CreateScope();
+        var db = ctx.Db(scope);
+
+        await ctx.MergeRepo(scope).MergeRepositoriesAsync([ctx.FetchedKeptRepository()]);
+
+        Assert.False(await db.Repositories.AnyAsync(r => r.RepositoryId == unlinkedId));
+    }
+
+    [Fact]
+    public async Task MergeRepositoriesAsync_touches_nothing_of_a_connector_that_returned_no_repository()
+    {
+        // A connector with nothing in the fetched set (failed, inactive, or an empty answer) did not say its
+        // repositories are gone. Before the fix both of these rows were deleted.
+        await using var ctx = await MergeTestContext.CreateAsync();
+        var otherConnectorId = await ctx.AddConnectorAsync("github-other");
+        var linkedId = await ctx.AddRepositoryAsync(otherConnectorId, "other-linked", linked: true);
+        var unlinkedId = await ctx.AddRepositoryAsync(otherConnectorId, "other-unlinked", linked: false);
+        await using var scope = ctx.CreateScope();
+        var db = ctx.Db(scope);
+
+        var result = await ctx.MergeRepo(scope).MergeRepositoriesAsync([ctx.FetchedKeptRepository()]);
+
+        Assert.DoesNotContain(result.KeptMissingFromProvider, k => k.RepositoryId == linkedId);
+        Assert.True(await db.WorkspaceRepositories.AnyAsync(l => l.RepositoryId == linkedId));
+        Assert.Null((await db.Repositories.AsNoTracking().SingleAsync(r => r.RepositoryId == linkedId)).MissingFromProviderSinceUtc);
+        Assert.True(await db.Repositories.AnyAsync(r => r.RepositoryId == unlinkedId));
     }
 
     [Fact]
     public async Task MergeRepositoriesAsync_keeps_repository_still_used_by_a_feature()
     {
         // Step 1: the connector no longer returns the dropped repository, but a Feature still uses it.
-        // The unused repository is deleted as today; the used repository, its link, and its Feature row
-        // all survive, and KeptForFeatures reports it.
+        // The repository, its link, and its Feature row all survive, and the result names the Feature.
         await using var ctx = await MergeTestContext.CreateAsync();
         await ctx.AddFeatureUsingDroppedRepositoryAsync("feat-keep-repo");
 
@@ -56,7 +113,7 @@ public sealed class ConnectorRepositoryFeatureProtectionTests
 
         var result = await repo.MergeRepositoriesAsync(fetched);
 
-        var kept = Assert.Single(result.KeptForFeatures);
+        var kept = Assert.Single(result.KeptMissingFromProvider);
         Assert.Equal(ctx.DroppedRepositoryId, kept.RepositoryId);
         Assert.Equal(new[] { "feat-keep-repo" }, kept.FeatureNames);
 
@@ -253,6 +310,47 @@ internal sealed class MergeTestContext : IAsyncDisposable
 
         FeatureId = feature.WorkspaceFeatureId;
         FeatureContextId = featureContext.WorkspaceFeatureContextId;
+    }
+
+    public async Task<int> AddConnectorAsync(string name)
+    {
+        await using var scope = _provider.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var connector = new Connector
+        {
+            ConnectorName = name,
+            ConnectorType = ConnectorType.GitHub,
+            ApiBaseUrl = "https://api.github.com",
+            IsActive = true,
+            IsHealthy = true,
+        };
+        db.Connectors.Add(connector);
+        await db.SaveChangesAsync();
+        return connector.ConnectorId;
+    }
+
+    /// <summary>Adds a repository the next refresh does not return; <paramref name="linked"/> links it into the seeded Workspace.</summary>
+    public async Task<int> AddRepositoryAsync(int connectorId, string name, bool linked)
+    {
+        await using var scope = _provider.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var repository = new Repository
+        {
+            ConnectorId = connectorId,
+            RepositoryName = name,
+            OrgName = "other-org",
+            Visibility = "Public",
+            CloneUrl = $"https://other.example/{name}.git",
+        };
+        db.Repositories.Add(repository);
+        await db.SaveChangesAsync();
+        if (linked)
+        {
+            db.WorkspaceRepositories.Add(new WorkspaceRepositoryLink { WorkspaceId = WorkspaceId, RepositoryId = repository.RepositoryId, GitVersion = "1.0.0" });
+            await db.SaveChangesAsync();
+        }
+
+        return repository.RepositoryId;
     }
 
     /// <summary>An unattached Repository matching the kept repository's CloneUrl, as a connector refresh would fetch it again.</summary>

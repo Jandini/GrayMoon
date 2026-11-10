@@ -48,4 +48,11 @@ public class Repository
     /// <summary>Clone URL of the repository this one was forked from (the immediate parent). Null when not a fork or when the parent could not be resolved yet.</summary>
     [MaxLength(500)]
     public string? ParentCloneUrl { get; set; }
+
+    /// <summary>
+    /// When a refresh first found that the connector no longer returns this repository while a Workspace still
+    /// links it. Such a repository is kept, never deleted; null when the provider returns it (cleared by the next
+    /// fetch that does).
+    /// </summary>
+    public DateTime? MissingFromProviderSinceUtc { get; set; }
 }

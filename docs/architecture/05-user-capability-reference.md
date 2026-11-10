@@ -190,7 +190,9 @@ store credentials securely
 use connector for repository/GitHub/package operations
 ```
 
-A connector cannot be deleted while a Feature uses its repositories ("Remove the Features that use this connector's repositories first."), and a connector refresh keeps repositories that Features use.
+A connector cannot be deleted while a Feature uses its repositories ("Remove the Features that use this connector's repositories first.").
+
+A repository refresh never removes a repository that a Workspace uses: when the connector no longer returns it, it stays in the Workspace and the Repositories page lists it under "Not found on the provider" with the Workspaces that use it. Only repositories no Workspace uses leave the list, and only for a connector that returned at least one repository. A connector that answers with no repositories at all changes nothing and is named in the connector error list.
 
 ### Implementation areas
 

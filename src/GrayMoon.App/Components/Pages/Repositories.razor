@@ -95,11 +95,20 @@
                         <button type="button" class="btn-close" aria-label="Close" @onclick="() => renamedRepositories = null"></button>
                     </div>
                 }
-                @if (keptForFeatures?.Count > 0)
+                @if (keptMissingFromProvider?.Count > 0)
                 {
                     <div class="alert alert-warning alert-dismissible fade show rounded-0 mb-0 border-0 border-bottom" role="alert">
-                        @($"{keptForFeatures.Count} repositories are no longer returned by the provider but are kept because Features use them. Remove those Features to finish.")
-                        <button type="button" class="btn-close" aria-label="Close" @onclick="() => keptForFeatures = null"></button>
+                        <strong><i class="bi bi-exclamation-triangle me-1"></i>Not found on the provider.</strong> These repositories are no longer returned by their connector. They are kept because Workspaces use them:
+                        <ul class="mb-0 mt-1 ps-3">
+                            @foreach (var kept in keptMissingFromProvider)
+                            {
+                                <li>
+                                    @if (!string.IsNullOrWhiteSpace(kept.OrgName)) { <span>@kept.OrgName / </span> }
+                                    <strong>@kept.RepositoryName</strong> <span>(@string.Join(", ", kept.WorkspaceNames))</span>
+                                </li>
+                            }
+                        </ul>
+                        <button type="button" class="btn-close" aria-label="Close" @onclick="() => keptMissingFromProvider = null"></button>
                     </div>
                 }
                 <div class="card-body p-0">

@@ -119,6 +119,7 @@ Current strict steps:
 16  Repair special Workspace context backfill              (re-runs the baseline's special Workspace context backfill once every column exists; the
                                                            baseline copy throws part-way on a 0.1.0 database because step 14 adds ContentDigest later,
                                                            which left later Workspaces uncopied. Idempotent: it skips anything already copied)
+17  Repository missing-from-provider column                (Repositories.MissingFromProviderSinceUtc)
 ```
 
 A brand-new database also starts at `user_version` 0, so it runs the baseline and every strict step right after `EnsureCreated()`. Every step must therefore be a no-op against the current model's shape (guard with `pragma_table_info(...)`, `sqlite_master`, `CREATE ... IF NOT EXISTS`), and a backfill must run only on the branch that actually created the column (see `AddWorkspaceProfileColumnIfMissingAsync`).
@@ -186,6 +187,8 @@ CloneUrl
 GitHubRepositoryId / provider identity
 visibility/archive metadata
 ```
+
+`MissingFromProviderSinceUtc` (nullable) is set when a repository refresh finds that the connector no longer returns a repository a Workspace links. The repository is kept, never deleted; the next fetch that returns it clears the value. Only repositories no Workspace links are deleted by a refresh (`GitHubRepositoryRepository.MergeRepositoriesAsync`).
 
 Fork fields: `IsFork` and `ParentCloneUrl` (the immediate parent's clone URL, provider-neutral, null when not a fork). Both are set by repository sync (`GitHubRepositoryService`; the parent comes from `GET repos/{owner}/{repo}` because the list endpoint only returns the `fork` flag, and is looked up once per fork then reused from the stored value). Both pull request tables (`WorkspaceRepositoryPullRequests` and `WorkspaceRepositoryContextPullRequests`) carry nullable `Parent*` columns (`ParentPullRequestNumber`, `ParentState`, `ParentMergeable`, `ParentMergeableState`, `ParentHtmlUrl`, `ParentMergedAt`, `ParentChangedFiles`) describing the pull request for the same head branch in the upstream repository. They are real columns so SQL header counts can see upstream PRs. `PullRequestInfo.Compose(own, parent)` builds the model: only own PR, only upstream PR (flagged `IsInParentRepository`, link-only), both (own is primary, upstream in `ParentPullRequest`), or none. Added by strict step 15 and, idempotently, in the legacy baseline so EF reads during baseline do not fail.
 The database uses provider identity where available and does not rely solely on repository name.
