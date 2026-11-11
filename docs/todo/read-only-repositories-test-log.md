@@ -64,3 +64,29 @@ Results: 79 passed; 8 passed.
 
 - The manual smoke list (owner, at the gates).
 - No test was run on a second machine or operating system.
+
+## F22 fix - 2026-11-12
+
+Base: commit `ece83ab7` (0A committed by the owner). Production files changed: `WorkspaceBranchOperations.cs`, `WorkspaceGitService.Branches.cs`, `WorkspaceManifestService.cs`.
+
+| Step | Result | Change |
+|---|---|---|
+| Build | succeeded, 0 warnings, 0 errors | - |
+| App tests | 2145 passed, 0 failed, 0 skipped (42 s) | +11: 8 in `TagPinCharacterizationTests`, 3 in `WorkspaceManifestTagPinConcurrencyTests` |
+
+Three tests named `..._does_not_clear_the_pin_today` were rewritten to assert that the pin is cleared; that is the intended behavior change. No other existing test changed.
+
+Check that the new tests detect the defects:
+
+- The three rewritten tests asserted the opposite (no pin change) against the unfixed code in 0A and passed there.
+- With the gate in `SetRepositoryTagPinsAsync` removed, `Two_pin_changes_for_one_Workspace_do_not_overwrite_each_other` fails (expected 1 read, actual 2). The gate was restored.
+
+Focused run:
+
+```
+dotnet test src/GrayMoon.App.Tests/GrayMoon.App.Tests.csproj --filter "FullyQualifiedName~TagPin"
+```
+
+Result: 16 passed.
+
+Not run for this fix: Worker and Common tests (no file of theirs changed; they run again at the end of 0B), and a manual check against a real Workspace repository.

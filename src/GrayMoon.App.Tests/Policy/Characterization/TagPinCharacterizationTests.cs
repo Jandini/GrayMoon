@@ -11,7 +11,7 @@ using static GrayMoon.App.Tests.Policy.Characterization.PolicyHarness;
 namespace GrayMoon.App.Tests.Policy.Characterization;
 
 /// <summary>
-/// Phase 0A, finding F22: what happens to the tag pin recorded in the Workspace definition when a Source repository
+/// What happens to the tag pin recorded in the Workspace definition when a Source repository
 /// enters or leaves a tag through the app. The Workspace has a Workspace repository (the consumer of the seeded
 /// graph is given that role), which is the condition for recording pins at all.
 /// </summary>
@@ -34,7 +34,7 @@ public sealed class TagPinCharacterizationTests
     }
 
     [Fact]
-    public async Task Branch_checkout_from_a_tag_in_the_special_Workspace_does_not_clear_the_pin_today()
+    public async Task Branch_checkout_from_a_tag_in_the_special_Workspace_clears_the_pin()
     {
         var pins = new PinRecorder();
         await using var ctx = await CreateWithWorkspaceRepositoryAsync(pins);
@@ -43,8 +43,62 @@ public sealed class TagPinCharacterizationTests
 
         await CheckoutAsync(ctx, "main", isTag: false);
 
-        // F22: the database leaves the tag, the Workspace definition keeps the pin.
         Assert.Null((await ctx.ReadLinkAsync()).CheckedOutTag);
+        AssertPinCleared(pins);
+    }
+
+    [Fact]
+    public async Task Branch_checkout_from_a_branch_does_not_touch_the_Workspace_definition()
+    {
+        var pins = new PinRecorder();
+        await using var ctx = await CreateWithWorkspaceRepositoryAsync(pins);
+        ctx.WorkerBridge.Respond("CheckoutBranch", new CheckoutBranchResponse { Success = true, CurrentBranch = "main" });
+
+        await CheckoutAsync(ctx, "main", isTag: false);
+
+        Assert.Empty(pins.Changes);
+    }
+
+    [Fact]
+    public async Task Branch_checkout_that_the_Worker_refuses_keeps_the_pin()
+    {
+        var pins = new PinRecorder();
+        await using var ctx = await CreateWithWorkspaceRepositoryAsync(pins);
+        await PinWorkspaceAsync(ctx, ctx.RepositoryId);
+        ctx.WorkerBridge.Respond("CheckoutBranch", new CheckoutBranchResponse { Success = false, ErrorMessage = "local changes" });
+
+        var body = await CheckoutBodyAsync(ctx, "main", isTag: false);
+
+        Assert.False(body.Success);
+        Assert.Equal(Tag, (await ctx.ReadLinkAsync()).CheckedOutTag);
+        Assert.Empty(pins.Changes);
+    }
+
+    [Fact]
+    public async Task Branch_checkout_from_a_tag_reports_a_pin_that_could_not_be_cleared()
+    {
+        var pins = new PinRecorder { Failure = "The Workspace definition was not found." };
+        await using var ctx = await CreateWithWorkspaceRepositoryAsync(pins);
+        await PinWorkspaceAsync(ctx, ctx.RepositoryId);
+        ctx.WorkerBridge.Respond("CheckoutBranch", new CheckoutBranchResponse { Success = true, CurrentBranch = "main" });
+
+        var body = await CheckoutBodyAsync(ctx, "main", isTag: false);
+
+        Assert.False(body.Success);
+        Assert.Equal("The Workspace definition was not found.", body.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task Branch_checkout_from_a_tag_without_a_Workspace_repository_records_nothing()
+    {
+        var pins = new PinRecorder();
+        await using var ctx = await CreateAsync(services => services.AddScoped<IWorkspaceManifestService>(_ => pins));
+        await SeedGraphAsync(ctx);
+        await PinWorkspaceAsync(ctx, ctx.RepositoryId);
+        ctx.WorkerBridge.Respond("CheckoutBranch", new CheckoutBranchResponse { Success = true, CurrentBranch = "main" });
+
+        await CheckoutAsync(ctx, "main", isTag: false);
+
         Assert.Empty(pins.Changes);
     }
 
@@ -63,33 +117,86 @@ public sealed class TagPinCharacterizationTests
                 .CreateBranchAsync(ctx.WorkspaceId, special, ctx.RepositoryId, "topic", "main");
         }
 
-        // The one path that clears the pin. It writes no repository state itself, so the database still shows the tag.
-        var change = Assert.Single(pins.Changes);
-        Assert.Null(change.Tag);
+        // This path writes no repository state itself (the hook does), so the database still shows the tag.
+        AssertPinCleared(pins);
         Assert.Equal(Tag, (await ctx.ReadLinkAsync()).CheckedOutTag);
     }
 
     [Fact]
-    public async Task Bulk_create_branch_from_a_tag_in_the_special_Workspace_does_not_clear_the_pin_today()
+    public async Task Bulk_create_branch_from_a_tag_in_the_special_Workspace_clears_the_pin()
     {
         var pins = new PinRecorder();
         await using var ctx = await CreateWithWorkspaceRepositoryAsync(pins);
         await PinWorkspaceAsync(ctx, ctx.RepositoryId);
         ctx.WorkerBridge.Respond("CreateBranch", new CreateBranchResponse { Success = true, CurrentBranch = "topic", Branch = "topic" });
-        var special = await ctx.GetSpecialContextIdAsync();
 
-        await using (var scope = ctx.CreateScope())
-        {
-            await scope.ServiceProvider.GetRequiredService<WorkspaceBranchHandler>()
-                .CreateBranchesAsync(ctx.WorkspaceId, special, "topic", "__default__", repositoryIds: new HashSet<int> { ctx.RepositoryId });
-        }
+        var outcome = await BulkCreateAsync(ctx, await ctx.GetSpecialContextIdAsync(), new HashSet<int> { ctx.RepositoryId });
 
+        Assert.Empty(outcome.ErrorsByRepositoryId);
         Assert.Null((await ctx.ReadLinkAsync()).CheckedOutTag);
+        AssertPinCleared(pins);
+    }
+
+    [Fact]
+    public async Task Bulk_create_branch_for_the_whole_Workspace_clears_only_the_Source_that_left_a_tag()
+    {
+        var pins = new PinRecorder();
+        await using var ctx = await CreateWithWorkspaceRepositoryAsync(pins);
+        await PinWorkspaceAsync(ctx, ctx.RepositoryId);
+        ctx.WorkerBridge.Respond("CreateBranch", new CreateBranchResponse { Success = true, CurrentBranch = "topic", Branch = "topic" });
+
+        await BulkCreateAsync(ctx, await ctx.GetSpecialContextIdAsync(), repositoryIds: null);
+
+        // The other repository is the Workspace repository and was on a branch: one change, for the Source.
+        AssertPinCleared(pins);
+    }
+
+    [Fact]
+    public async Task Bulk_create_branch_that_the_Worker_refuses_keeps_the_pin()
+    {
+        var pins = new PinRecorder();
+        await using var ctx = await CreateWithWorkspaceRepositoryAsync(pins);
+        await PinWorkspaceAsync(ctx, ctx.RepositoryId);
+        ctx.WorkerBridge.Respond("CreateBranch", new CreateBranchResponse { Success = false, ErrorMessage = "exists" });
+
+        var outcome = await BulkCreateAsync(ctx, await ctx.GetSpecialContextIdAsync(), new HashSet<int> { ctx.RepositoryId });
+
+        Assert.Equal("exists", outcome.ErrorsByRepositoryId[ctx.RepositoryId]);
+        Assert.Equal(Tag, (await ctx.ReadLinkAsync()).CheckedOutTag);
         Assert.Empty(pins.Changes);
     }
 
     [Fact]
-    public async Task Workspace_wide_checkout_from_a_tag_in_the_special_Workspace_does_not_clear_the_pin_today()
+    public async Task Bulk_create_branch_from_a_tag_reports_a_pin_that_could_not_be_cleared()
+    {
+        var pins = new PinRecorder { Failure = "The Workspace definition was not found." };
+        await using var ctx = await CreateWithWorkspaceRepositoryAsync(pins);
+        await PinWorkspaceAsync(ctx, ctx.RepositoryId);
+        ctx.WorkerBridge.Respond("CreateBranch", new CreateBranchResponse { Success = true, CurrentBranch = "topic", Branch = "topic" });
+
+        var outcome = await BulkCreateAsync(ctx, await ctx.GetSpecialContextIdAsync(), new HashSet<int> { ctx.RepositoryId });
+
+        Assert.Equal("The Workspace definition was not found.", outcome.ErrorsByRepositoryId[ctx.RepositoryId]);
+    }
+
+    [Fact]
+    public async Task Bulk_create_branch_in_a_Feature_leaves_the_Workspace_definition_alone()
+    {
+        var pins = new PinRecorder();
+        await using var ctx = await CreateWithWorkspaceRepositoryAsync(pins);
+        await PinWorkspaceAsync(ctx, ctx.RepositoryId);
+        var feature = await SeedFeatureAsync(ctx, [new FeatureRepo(ctx.RepositoryId)]);
+        ctx.WorkerBridge.Respond("CreateBranch", new CreateBranchResponse { Success = true, CurrentBranch = "topic", Branch = "topic" });
+
+        await BulkCreateAsync(ctx, feature, new HashSet<int> { ctx.RepositoryId });
+
+        // The pin describes the Workspace checkout, which a Feature does not move.
+        Assert.Equal(Tag, (await ctx.ReadLinkAsync()).CheckedOutTag);
+        Assert.Empty(pins.Changes);
+    }
+
+    [Fact]
+    public async Task Workspace_wide_checkout_from_a_tag_in_the_special_Workspace_clears_the_pin()
     {
         var pins = new PinRecorder();
         await using var ctx = await CreateWithWorkspaceRepositoryAsync(pins);
@@ -109,18 +216,39 @@ public sealed class TagPinCharacterizationTests
         }
 
         Assert.Null((await ctx.ReadLinkAsync()).CheckedOutTag);
-        Assert.Empty(pins.Changes);
+        AssertPinCleared(pins);
+    }
+
+    private static void AssertPinCleared(PinRecorder pins)
+    {
+        var change = Assert.Single(pins.Changes);
+        Assert.Contains(ProducerName, change.RepositoryUrl);
+        Assert.Null(change.Tag);
+        Assert.Null(change.Commit);
+    }
+
+    private static async Task<BranchCreationOutcome> BulkCreateAsync(
+        SyncStateTestContext ctx, WorkspaceFeatureContextId contextId, IReadOnlySet<int>? repositoryIds)
+    {
+        await using var scope = ctx.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<WorkspaceGitService>()
+            .CreateBranchesWithOutcomeAsync(ctx.WorkspaceId, contextId, "topic", "__default__", repositoryIds: repositoryIds);
     }
 
     private static async Task CheckoutAsync(SyncStateTestContext ctx, string name, bool isTag)
+    {
+        var body = await CheckoutBodyAsync(ctx, name, isTag);
+        Assert.True(body.Success, body.ErrorMessage);
+    }
+
+    private static async Task<CheckoutBranchApiResult> CheckoutBodyAsync(SyncStateTestContext ctx, string name, bool isTag)
     {
         var special = await ctx.GetSpecialContextIdAsync();
         await using var scope = ctx.CreateScope();
         var outcome = await scope.ServiceProvider.GetRequiredService<IWorkspaceBranchOperations>()
             .CheckoutAsync(ctx.WorkspaceId, special, ctx.RepositoryId, name, isTag);
         Assert.True(outcome.IsSuccessStatus);
-        var body = Assert.IsType<CheckoutBranchApiResult>(outcome.Body);
-        Assert.True(body.Success, body.ErrorMessage);
+        return Assert.IsType<CheckoutBranchApiResult>(outcome.Body);
     }
 
     private static async Task<SyncStateTestContext> CreateWithWorkspaceRepositoryAsync(PinRecorder pins)
@@ -136,6 +264,9 @@ public sealed class TagPinCharacterizationTests
     {
         private readonly List<WorkspaceRepositoryTagPinChange> _changes = [];
 
+        /// <summary>When set, every pin change fails with this message.</summary>
+        public string? Failure { get; init; }
+
         public IReadOnlyList<WorkspaceRepositoryTagPinChange> Changes
         {
             get
@@ -149,7 +280,7 @@ public sealed class TagPinCharacterizationTests
         {
             lock (_changes)
                 _changes.AddRange(changes);
-            return Task.FromResult(OperationResult.Ok());
+            return Task.FromResult(Failure is null ? OperationResult.Ok() : OperationResult.Fail(Failure));
         }
 
         public Task<WorkspaceManifestDrift> DetectDriftAsync(int workspaceId, CancellationToken cancellationToken = default) =>

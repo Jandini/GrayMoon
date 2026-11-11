@@ -328,6 +328,8 @@ public sealed class WorkspaceBranchOperations(
         var workspace = resolved.Workspace!;
         var repo = resolved.Repo!;
         var wr = resolved.Link!;
+        // Read before any state write: the state writer clears the tag on this same tracked link.
+        var leavingTag = !string.IsNullOrWhiteSpace(wr.CheckedOutTag);
 
         try
         {
@@ -409,7 +411,7 @@ public sealed class WorkspaceBranchOperations(
                 }, new RepositoryStateWriteOptions { ReconcilePullRequest = true });
             }
 
-            if (!string.IsNullOrWhiteSpace(wr.CheckedOutTag))
+            if (leavingTag)
             {
                 var pinError = await ClearRepositoryTagPinAsync(
                     workspaceId, contextId, wr, repo, workspaceRepositoryName, cancellationToken);

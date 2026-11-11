@@ -209,7 +209,7 @@ Columns: **Subject** is the row the tag is read from (the shared link, the per-c
 | `src/GrayMoon.App/Services/Application/WorkspaceBranchOperations.cs:361` | CheckoutAsync | state-write | link + context state | - | - |
 | `src/GrayMoon.App/Services/Application/WorkspaceBranchOperations.cs:365` | CheckoutAsync | pin-bookkeeping | Feature row | - | - |
 | `src/GrayMoon.App/Services/Application/WorkspaceBranchOperations.cs:368` | CheckoutAsync | presentation | branch snapshot | - | - |
-| `src/GrayMoon.App/Services/Application/WorkspaceBranchOperations.cs:412` | CheckoutAsync | pin-bookkeeping | link instance the state writer has already cleared: never true (F22) | tag pin clear | - |
+| `src/GrayMoon.App/Services/Application/WorkspaceBranchOperations.cs:412` | CheckoutAsync | pin-bookkeeping | at `1515d32b`: link instance the state writer had already cleared, never true (F22, fixed since) | tag pin clear | - |
 | `src/GrayMoon.App/Services/Application/WorkspaceBranchOperations.cs:524` | GetCommonBranchesAsync | eligibility-filter | link | common-branch intersection | - |
 | `src/GrayMoon.App/Services/Application/WorkspaceBranchOperations.cs:691` | CreateBranchAsync | pin-bookkeeping | link, read before any state write: clears the pin | tag pin clear | - |
 | `src/GrayMoon.App/Services/Application/WorkspaceBranchOperations.cs:877` | UpdateFeaturePinnedTagAsync | pin-bookkeeping | Feature row | - | - |
@@ -872,7 +872,7 @@ if an old row already holds one, in which case three paths copy it verbatim. Pin
 ### F22: tag pin after checkout
 
 Conclusion: F22 is a real bug by code reading. After a tag -> branch checkout in the special Workspace, the pin in
-graymoon.json is NOT cleared. Confirmed by test in 0A (see "F22 confirmed by test" below).
+graymoon.json is NOT cleared. Confirmed by test in 0A and fixed since (see "F22 confirmed by test, then fixed" below; line numbers here are those of `1515d32b`).
 
 - AppDbContext is one instance per DI scope (Reg:68-70). BrOps (Reg:176) and the state writer (Reg:146) are scoped,
   so they share it.
@@ -1041,19 +1041,23 @@ Inferred (not run end to end):
   has committed the file; GrayMoon does not commit it anywhere.
 
 
-### F22 confirmed by test
+### F22 confirmed by test, then fixed
 
-`TagPinCharacterizationTests` runs the four paths against a Workspace that has a Workspace repository (the condition for recording pins) with a recording `IWorkspaceManifestService`:
+`TagPinCharacterizationTests` runs the paths against a Workspace that has a Workspace repository (the condition for recording pins) with a recording `IWorkspaceManifestService`. The "0A" column is what the tests pinned at `1515d32b`; the last column is the behavior after the fix of 2026-11-12, which the same tests now assert.
 
-| Path | Database tag afterwards | Pin change sent to the Workspace definition |
-|---|---|---|
-| Tag checkout (`CheckoutAsync`, `isTag: true`) | set | one change, tag and commit |
-| Branch checkout from a tag (`CheckoutAsync`) | cleared | **none - the pin stays** |
-| Workspace-wide checkout from a tag | cleared | **none - the pin stays** |
-| Bulk Create Branch from a tag | cleared | **none - the pin stays** |
-| Single Create Branch from a tag | still set (this path writes no state; the hook does) | one change, tag null |
+| Path | Database tag afterwards | Pin change in 0A | Pin change after the fix |
+|---|---|---|---|
+| Tag checkout (`CheckoutAsync`, `isTag: true`) | set | one change, tag and commit | unchanged |
+| Branch checkout from a tag (`CheckoutAsync`) | cleared | none - the pin stayed | one change, tag null |
+| Workspace-wide checkout from a tag | cleared | none - the pin stayed | one change, tag null |
+| Bulk Create Branch from a tag | cleared | none - the pin stayed | one change, tag null |
+| Single Create Branch from a tag | still set (this path writes no state; the hook does) | one change, tag null | unchanged |
 
-So after leaving a tag by three of the four paths, `graymoon.json` still pins the repository to the tag. Whether the next Sync removes the stale pin was not verified. This is an existing defect, not part of the reference work; the plan (section 2, F22) decides where it is fixed.
+Before the fix, leaving a tag by three of the four paths left `graymoon.json` pinning the repository to the tag. A Sync does not remove a pin (`RecordCheckedOutTagPinsAsync` only records repositories that are on a tag) and a pin is applied when a repository is cloned (`SyncRepositoryCommand.cs:178`), so a fresh clone of the Workspace returned to the tag.
+
+The fix reads the tag before the state write in `CheckoutAsync` and in `CreateBranchesWithOutcomeAsync`, and serializes pin changes per Workspace in `WorkspaceManifestService.SetRepositoryTagPinsAsync` (the Workspace-wide checkout runs repositories in parallel, each in its own scope). Also tested: a checkout from a branch sends no change; a refused checkout or branch creation keeps the pin; a pin that cannot be cleared is reported as the error of that repository; a Feature and a Workspace without a Workspace repository send nothing. `WorkspaceManifestTagPinConcurrencyTests` holds the first change inside its file read and proves the second waits; it fails when the gate is removed.
+
+Not changed: a pin left behind by the old defect is not repaired, and leaving a tag outside the app does not clear the pin.
 
 ### Not mapped yet
 
@@ -1070,7 +1074,7 @@ All in `src/GrayMoon.App.Tests/Policy/Characterization/` (79 tests) plus `src/Gr
 | `UpdateCharacterizationTests` | Update plan, sync dependencies, single update (silent no-op), commit helpers and restore leave a tag-pinned repository out; **F6**: in a Feature, update and commit read the Workspace link while restore reads the Feature state; default-branch review ignores a tag-pinned repository. |
 | `SyncCharacterizationTests` | Undo push skips a tag-pinned repository and reads the tag per context; F7 for undo push; return to default (analysis, execution, unattended, batch) reports a tag-pinned repository as not blocking and sends no `ReturnToDefaultBranch`. |
 | `ServiceGapCharacterizationTests` | **F5 gaps**, each reaching the Worker for a tag-pinned repository: pull (single and level), bulk Create Branch, Prepare Workspace with no ids, Workspace-wide checkout, Git Changes commit, stage and unstage, Update Branch from Default; the six write actions of `IWorkspaceBranchOperations` (checkout, create, set upstream, delete local, delete remote, return to default); common branches is the one branch read that filters. |
-| `TagPinCharacterizationTests` | F22, table above. |
+| `TagPinCharacterizationTests` | F22, table above. After the fix it asserts the corrected behavior (13 tests). |
 | `CounterCharacterizationTests` | The four header projections (special Workspace or Feature, with or without the dependency graph) for a branch, a tag, a never-pushed branch and a Workspace-role repository; F7 for the header; out-of-sync is not tag-filtered; notification and notification panel sets; the three known differences below. |
 | `OperationLockCharacterizationTests` | A REST write is refused with 409 while a structural or a context operation runs in the same Workspace, and never reaches its operation. |
 | `InspectWorktreeMainCheckoutTests` (Worker) | F13: `InspectWorktree` on a main checkout for clean, dirty, unpushed, never-pushed, detached and tag checkouts. |
@@ -1091,5 +1095,4 @@ All in `src/GrayMoon.App.Tests/Policy/Characterization/` (79 tests) plus `src/Gr
 
 - Notification panel job bodies and the Files, Dependencies, Projects and Packages pages (lock audit, "not verified" in Part B).
 - Page filters as such (see Part A, "Page filters").
-- Whether a Sync removes a stale Workspace definition pin (F22).
 - The manual smoke list (owner, at the gates).

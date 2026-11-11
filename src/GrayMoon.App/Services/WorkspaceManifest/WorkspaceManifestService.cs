@@ -32,6 +32,13 @@ public sealed class WorkspaceManifestService(
 {
     internal const string NoWorkspaceRepositoryMessage = "No Workspace repository";
 
+    /// <summary>
+    /// One gate per Workspace for the read-change-write of tag pins. Repositories of one Workspace are checked out
+    /// in parallel, each in its own scope, so without it two pin changes read the same file and the later write
+    /// drops the earlier one.
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, SemaphoreSlim> TagPinGates = new();
+
     public async Task<WorkspaceManifest> BuildFromDatabaseAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -343,6 +350,8 @@ public sealed class WorkspaceManifestService(
         if (changes.Count == 0)
             return OperationResult.Ok();
 
+        var gate = TagPinGates.GetOrAdd(workspaceId, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken);
         try
         {
             var (_, args) = await GetSpecialContextArgsAsync(workspaceId, cancellationToken);
@@ -372,6 +381,10 @@ public sealed class WorkspaceManifestService(
         {
             logger.LogWarning(ex, "Recording repository tag pins failed. WorkspaceId={WorkspaceId}", workspaceId);
             return OperationResult.Fail(ex.Message);
+        }
+        finally
+        {
+            gate.Release();
         }
     }
 

@@ -10,6 +10,7 @@ using GrayMoon.App.Repositories;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using GrayMoon.Application.Features;
+using GrayMoon.Application.WorkspaceManifest;
 
 namespace GrayMoon.App.Services.Git;
 
@@ -146,6 +147,12 @@ public sealed partial class WorkspaceGitService
         if (links.Count == 0)
             return BranchCreationOutcome.Empty;
 
+        // Read before the state writes below clear the tag on these tracked links.
+        var leavingTagRepositoryIds = links
+            .Where(wr => !string.IsNullOrWhiteSpace(wr.CheckedOutTag))
+            .Select(wr => wr.RepositoryId)
+            .ToHashSet();
+
         var errors = new ConcurrentDictionary<int, string>();
         var branchNameByRepoId = new ConcurrentDictionary<int, string>();
         var checkedOutBranchByRepoId = new ConcurrentDictionary<int, string?>();
@@ -273,6 +280,18 @@ public sealed partial class WorkspaceGitService
             }, cancellationToken);
         }
 
+        var pinError = await ClearTagPinsAfterBranchCreationAsync(
+            workspaceId,
+            contextId,
+            workspaceRepositoryName,
+            links.Where(wr => leavingTagRepositoryIds.Contains(wr.RepositoryId) && branchNameByRepoId.ContainsKey(wr.RepositoryId)).ToList(),
+            cancellationToken);
+        if (pinError is not null)
+        {
+            foreach (var repositoryId in leavingTagRepositoryIds.Where(branchNameByRepoId.ContainsKey))
+                errors.TryAdd(repositoryId, pinError);
+        }
+
         // Persist the new branch for each repo where creation succeeded (so it appears in branch lists without a manual refresh)
         var createdBranches = branchNameByRepoId
             .Where(pair => pair.Value == newBranchName)
@@ -285,6 +304,31 @@ public sealed partial class WorkspaceGitService
             links.Select(l => l.RepositoryId).ToHashSet(),
             new Dictionary<int, string?>(checkedOutBranchByRepoId),
             new Dictionary<int, string>(errors));
+    }
+
+    /// <summary>
+    /// Clears the tag pin of every Source repository that left a tag by getting a new branch. Only the special
+    /// Workspace with a Workspace repository records pins, so every other context is left alone. Returns the
+    /// error to report, or null.
+    /// </summary>
+    private async Task<string?> ClearTagPinsAfterBranchCreationAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        string? workspaceRepositoryName,
+        IReadOnlyList<WorkspaceRepositoryLink> leftTag,
+        CancellationToken cancellationToken)
+    {
+        var changes = leftTag
+            .Where(wr => wr.Role == WorkspaceRepositoryRole.Source && wr.Repository is not null)
+            .Select(wr => new WorkspaceRepositoryTagPinChange(wr.Repository!.CloneUrl, null, null))
+            .ToList();
+        if (changes.Count == 0 || string.IsNullOrWhiteSpace(workspaceRepositoryName))
+            return null;
+        if (!(await _contextResolver.GetRequiredAsync(contextId, workspaceId, cancellationToken)).IsSpecialWorkspace)
+            return null;
+
+        var recorded = await _manifestService.SetRepositoryTagPinsAsync(workspaceId, changes, cancellationToken);
+        return recorded.Success ? null : recorded.Error ?? "Could not clear the tag in the Workspace definition.";
     }
 
     /// <summary>Ensures a local branch is present in RepositoryBranches for the given workspace repository. Adds it if missing; does not remove other branches.</summary>
