@@ -283,9 +283,54 @@ public static class GitHubApiErrorHelper
                    + "Push your local commits first, then create the pull request.";
         }
 
+        var errorMessages = GetValidationErrorMessages(rawErrorContent);
+
+        if (errorMessages.Any(m => m.Contains("already exists", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "GitHub rejected the pull request (422): " + string.Join(" ", errorMessages)
+                   + " Refresh the workspace to pick up the existing pull request.";
+        }
+
+        if (errorMessages.Count > 0)
+        {
+            var prefix = string.IsNullOrWhiteSpace(detail) ? "GitHub rejected the request (422)" : detail.TrimEnd('.', ' ');
+            return $"{prefix}: {string.Join(" ", errorMessages)}";
+        }
+
         return string.IsNullOrWhiteSpace(detail)
             ? "GitHub rejected the workflow request (422). It may not support manual runs on this branch, or required workflow inputs are missing."
             : detail;
+    }
+
+    /// <summary>Collects the <c>errors[].message</c> texts GitHub attaches to a "Validation Failed" response.</summary>
+    internal static IReadOnlyList<string> GetValidationErrorMessages(string? jsonBody)
+    {
+        var result = new List<string>();
+        if (string.IsNullOrWhiteSpace(jsonBody))
+            return result;
+        try
+        {
+            using var doc = JsonDocument.Parse(jsonBody);
+            if (!doc.RootElement.TryGetProperty("errors", out var errors) || errors.ValueKind != JsonValueKind.Array)
+                return result;
+
+            foreach (var error in errors.EnumerateArray())
+            {
+                if (error.ValueKind == JsonValueKind.Object
+                    && error.TryGetProperty("message", out var m)
+                    && m.ValueKind == JsonValueKind.String
+                    && !string.IsNullOrWhiteSpace(m.GetString()))
+                {
+                    result.Add(m.GetString()!.Trim());
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            /* not JSON */
+        }
+
+        return result;
     }
 
     private static string BuildForbiddenUserMessage(string? githubDetail)
