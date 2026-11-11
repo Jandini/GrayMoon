@@ -1,14 +1,21 @@
 # Changes page: commit timeline ("time machine") for reviewing a feature commit by commit
 
-Status: **idea, design only.** Nothing is built. First written 2026-11-11, revised the same day after review (scale, persistence, scope), then reviewed again with laptop measurements (see "Review findings"). The enterprise VDI measurement is in (see "Measured on the enterprise VDI"); the design text below is not yet revised from it. Written against `07-git-changes-projection-and-tree.md` and the current Changes page (`WorkspaceGitChanges*.razor/.cs`, `GitChangesTree.razor`, `GitChangesHeader`).
+Status: **idea, design only.** Nothing is built. First written 2026-11-11, revised the same day after review (scale, persistence, scope), then reviewed again with laptop measurements (see "Review findings"). The enterprise VDI measurement is in (see "Measured on the enterprise VDI") and no target is missed. The design text below is revised from both measurements and from the review decisions; what is still open is listed at the end of "Review findings". Written against `07-git-changes-projection-and-tree.md` and the current Changes page (`WorkspaceGitChanges*.razor/.cs`, `GitChangesTree.razor`, `GitChangesHeader`).
 
 ## Review findings (2026-11-11, second review, with measurements)
 
-The git commands this design depends on were measured on a developer laptop and on the enterprise VDI (numbers in "Performance reality and why we persist"). **Where a finding below conflicts with the older text further down, the finding wins.** The VDI numbers are recorded and the rest of the note is not yet revised from them, because those numbers may still change the targets.
+The git commands this design depends on were measured on a developer laptop and on the enterprise VDI (numbers in "Performance reality and why we persist"). Findings 2, 3, 4, 6, 8 and 10 are applied to the design text below. Findings 7, 9 and 11 wait for a decision; until then the older text stands there and **the finding wins where they conflict**.
 
 Decided:
 
 - **The three SQLite tables stay in v1.** An in-memory cache was considered and rejected: persistence keeps the "Changes page reads SQLite only" rule, and on a machine where every git process is slow, a refill after each App restart is exactly the cost to avoid.
+- **Performance is not a blocker.** On the enterprise VDI (two security products inspecting every process start) a git process costs 106 ms against 76 ms on the laptop, every command is 1.4x to 1.6x slower, and no target is missed. Not measured anywhere: a large real repository that is many commits ahead (the VDI had none more than 2 ahead). The timing logs in "Responsiveness contract" will show that case in first use; it does not block the build.
+- **There is no walk across repositories and no merged timeline.** The Changes page always shows every repository that has changes in one tree, and history follows the same model with three views:
+  1. **Working tree** - unchanged, every repository, as today.
+  2. **All commits** (the default history view) - one tree of every repository that has commits to review, each showing its combined change against its own base. Same tree shape as the Working tree view, and the existing next / previous walk already moves through it across repositories.
+  3. **Commit by commit** - a drill-down inside **one** repository. The dots are that repository's commits (the repository of the selected file, or the one picked in the repository picker), and stepping stays in that repository.
+- **Out of v1 as a consequence:** the merged date-ordered timeline across repositories, the bubbles level and its breadcrumb, lane view, and the per-repository colour underline on dots.
+- **Hydration parallelism stays 4 and becomes a setting**, because the two machines disagree on how much parallelism helps (finding 4).
 
 Findings that change the design:
 
@@ -17,16 +24,26 @@ Findings that change the design:
 | 1 | Process start dominates everything except line counts | `git --version` takes 76 ms; a metadata `log` of 181 commits takes 78 ms | Count **processes**, not commits. Every design choice below minimizes the number of git processes per repository |
 | 2 | Changed-file lists for every commit are nearly free inside the list call | `log --name-status` for 181 commits is 90 ms, 12 ms more than metadata only. A separate `diff-tree` per clicked commit is 76 ms plus the hub round trip | `ListBranchCommits` returns the file lists (`--name-status`, with `-M`) and the hydrator fills `WorkspaceGitContextCommitFiles` for single commits **eagerly**. A dot click is then a pure SQLite read. `GetCommitChanges` is needed only for ranges and the combined view. Hover prefetch of file lists is no longer needed |
 | 3 | Incremental mode costs more than a full list | `merge-base --is-ancestor` (74 ms) plus `log known..tip` (76 ms) is two processes, 150 ms; the full list is one process, 78-90 ms | **Drop incremental mode.** Always list the full range and reuse rows by sha in the App. Removes `KnownTipSha`, the `Mode` field and the incremental-versus-full tests. The "under 100 ms incremental" target is replaced by "one process per HEAD change" |
-| 4 | Parallelism buys little | 48 list calls: 4.2 s at 1 process, 4.0 s at 4, 2.5 s at 8, 1.8 s at 16. Process creation looks close to serialized (antivirus) | A cold backfill of 100 repositories is about 5-8 s here, not "a few seconds". Still fine in the background. Do not expect a higher parallelism cap to rescue a slow machine |
+| 4 | Parallelism buys little on the laptop and helps on the VDI | 48 list calls: 4.2 s at 1 process, 4.0 s at 4, 2.5 s at 8, 1.8 s at 16. Process creation looks close to serialized (antivirus) | That was the laptop (8 logical processors). **The VDI contradicts it** (12 logical processors): 6.1 s at 1 process, 2.1 s at 4, 1.4 s at 8, 1.2 s at 16. A cold backfill of 100 repositories is about 5-8 s on the laptop and about 4.4 s at 4 processes on the VDI, both inside the 10 s target and both in the background. The cap stays 4 and becomes a setting, because the best value differs per machine |
 | 5 | Line counts are the only expensive part | `--numstat` for 181 commits: 351 ms in the list call, 373 ms as one `diff-tree --stdin` process | Unchanged: tier 2 stays a separate low-priority pass |
 | 6 | Each side of a commit diff is its own process | `git show <sha>:<path>` is 73 ms, so a diff is about 150 ms | Read both sides with one `git cat-file --batch` process |
 | 7 | **The ahead badge does not measure what this note assumes** | `GitCliRepositoryReader.GetCommitCountsVsDefaultAsync` counts `<default ref>...HEAD`: the tip is `HEAD` and the base is the default ref. This note uses the Feature branch as tip and `ParentBranchName` as base, and calls "count equals badge" an integrity check | The check would fail for a stacked feature and for a worktree flipped to another branch. Choose the timeline's own range and **drop the badge equality check** (and `ExpectedCount`), or change the badge first. Still to confirm: which default ref the App passes for a Feature repository |
 | 8 | Merge commits would show no files | `git diff-tree <merge>` and `git log --name-status` print nothing for a merge by default | Diff a merge explicitly against its first parent (`<sha>^1 <sha>`, or `--first-parent -m` in the list call), with a test |
 | 9 | Purge rules contradict each other | "Key and lifetime" purges rows when the checked-out branch changes; the state table says rows are retained so flipping back does not recompute | Pick one (open question 1c). Suggested: retain until the branch is deleted or the Feature is removed |
-| 10 | The merged cross-repository order is fragile | A rebase gives every commit of that repository nearly the same committer date, so they clump, and a date-ordered walk swaps the tree between repositories on every step | Suggested default: group by repository (open question 0a) |
+| 10 | The merged cross-repository order is fragile | A rebase gives every commit of that repository nearly the same committer date, so they clump, and a date-ordered walk swaps the tree between repositories on every step | **Decided: no merged order and no walk across repositories** (see "Decided" above). Commits of different repositories are never interleaved |
 | 11 | The walk changes today's Working tree behaviour | Stepping past the last working change would wrap into commit 1 | Suggested: the Working tree keeps wrapping inside itself and is left only by dot, `[` / `]` or `Shift` (open question 0) |
 
-Suggested, not decided - a smaller first version: a single-repository strip (the scope picker chooses the repository), the commit list, one-commit selection, the per-repository combined view and the two-button walk. The merged all-repositories timeline, bubbles, lanes, zoom, the file-progress arc, the crossing pulse and dot sizing would wait until someone asks for them.
+Still open, each with a recommendation (the product owner decides; numbers refer to "Open questions"):
+
+| Open question | Recommendation |
+|---|---|
+| **Which commits the timeline shows** (finding 7, question 1). The badge counts default ref to `HEAD`; this note uses `ParentBranchName` to the Feature branch tip | Keep this note's range and drop the "count equals badge" check and `ExpectedCount`. When the two counts differ, the tooltip names the base used |
+| **Working tree wrap** (finding 11, question 0) | The Working tree keeps wrapping inside itself, as today. It is left by dot, `[` / `]` or `Shift` |
+| **History of a branch that is no longer checked out** (finding 9, question 1c) | Keep until the branch is deleted or the Feature is removed |
+| **Merge commits** (question 4) | Show all of them, each diffed against its first parent (finding 8) |
+| **Smaller polish set for v1** | Defer zoom, the file-progress arc, the crossing pulse and dot sizing until someone asks for them |
+
+One code fact still to confirm, as the first step of the Worker phase: which default ref the App passes to `GetCommitCountsVsDefaultAsync` for a Feature repository. With the first recommendation above it only affects the tooltip text, not correctness.
 
 ## Problem
 
@@ -36,7 +53,7 @@ In GrayMoon "the commits of a Feature" always means **commits across many reposi
 
 Goals:
 
-1. A compact **timeline of dots** plus a node for the **current changes** (working tree), matching the GM dark theme, that stays usable at 181 commits in one repository and thousands across repositories.
+1. A compact **timeline of dots** plus a node for the **current changes** (working tree), matching the GM dark theme, that stays usable at 181 commits in one repository. Across repositories the page shows one combined tree (`All commits`), never one merged timeline.
 2. Selecting a commit shows its files in the existing tree and its diff in the existing diff pane. No commit box, no Stage / Undo / Discard in that mode, so the tree takes the whole left column.
 3. Costs as little screen height as possible.
 4. **Opens instantly.** The page never runs `git log` while the user waits; history is persisted per Feature branch and kept current in the background.
@@ -116,16 +133,16 @@ This feature is only worth shipping if nothing existing gets slower and everythi
 - Dedicated parallelism cap (a fraction of `MaxParallelRepositoryOperations`), read pool only, never the diff pool the user is waiting on.
 - It **yields** to user work: paused while a Commit, Push, Sync, Undo, branch update or rebase is running for that repository or while the user is actively scrubbing, then resumes. A user click on a repository whose history is still loading **jumps that repository to the front of the queue**.
 - Order: selected repository, visible repositories, then the rest by commits ahead.
-- One bounded process per repository per HEAD change; incremental mode makes the common case one tiny `git log`.
+- One bounded git process per repository per HEAD change: the full list with file lists (90 ms on the laptop, 136 ms on the VDI for 181 commits). There is no incremental mode.
 - Startup backfill of existing Features happens once, in the background, so a "cold" open is rare. If a user does beat it, they see ready repositories instantly and the rest filling in, never a blocking spinner.
 
 **3. Interactions answer within a frame or two**
 
 | Interaction | Budget and technique |
 |---|---|
-| Click a dot, or press `[` / `]` | **Selection paints immediately** (optimistic highlight, before any data). Tree rows come from SQLite in under 100 ms when the file list is persisted; otherwise from one on-demand Worker call (target under 150 ms) with skeleton rows, never a blocking overlay |
+| Click a dot, or press `[` / `]` | **Selection paints immediately** (optimistic highlight, before any data). Tree rows come from SQLite in under 100 ms with no git process, because file lists are stored at hydration. Skeleton rows appear only for a repository that is still hydrating, never a blocking overlay |
 | Hold `]` to scrub quickly | Only the latest selection fetches; older in-flight loads are discarded by a version counter. No queue of stale work |
-| Hover a dot | After about 120 ms of intent, **prefetch** that commit's file list and the neighbours' (previous and next); after selection, prefetch the next file's diff the same way the page already treats the selected file |
+| Hover a dot | Tooltip only. File lists need no prefetch (they are already in SQLite). After selection, prefetch the next file's diff the same way the page already treats the selected file |
 | Scroll or drag the rail | Windowed SQL keyset read, constant size; strip stays 60 fps with virtualized dots |
 | Switch scope or repository | Pure SQLite summaries, under 50 ms |
 | Return to Working tree | Instant; its state was never discarded |
@@ -182,20 +199,20 @@ What this says:
 
 Not covered by the synthetic fixture: a large real repository (a big tree makes each diff heavier), a cold disk, and security software that inspects every process start. The last one is why the same script is run on the enterprise VDI.
 
-So: persist per Feature branch, update in the background with one process per repository per HEAD change, and make the page open a pure SQLite read. Targets, restated against the laptop numbers (the VDI run is recorded under "Measured on the enterprise VDI"; these targets are not restated yet):
+So: persist per Feature branch, update in the background with one process per repository per HEAD change, and make the page open a pure SQLite read. Targets, with the measured value on both machines (none is missed):
 
-| Measurement | Target | Laptop |
+| Measurement | Target | Laptop / VDI |
 |---|---|---|
-| `ListBranchCommits` for 181 commits with file lists, no line counts | under 150 ms including process start | 90 ms |
-| Update after one new commit | one git process | 90 ms |
-| Cold backfill of 100 repositories that are ahead, background | under 10 s total, no visible UI impact | about 5-8 s (extrapolated from the sweep) |
+| `ListBranchCommits` for 181 commits with file lists, no line counts | under 150 ms including process start | 90 ms / 136 ms |
+| Update after one new commit | one git process | 90 ms / 136 ms |
+| Cold backfill of 100 repositories that are ahead, background | under 10 s total, no visible UI impact | about 5-8 s / about 4.4 s at 4 processes (extrapolated from the sweeps) |
 | Page open, 100 repositories x 181 commits (18,100 rows), windowed read | under 100 ms | not measured (SQLite only, measured in Phase 2) |
 | Click a commit | SQLite read, no git process | n/a |
-| Combined view of one repository | under 250 ms | 130 ms |
+| Combined view of one repository | under 250 ms | 130 ms / 176 ms |
 
 ### VDI measurement
 
-Measured on 2026-11-11 with `changes-commit-timeline-measure.ps1`. The results are below. The procedure prompt is kept as the record of what was run. The design text is not revised from these numbers.
+Measured on 2026-11-11 with `changes-commit-timeline-measure.ps1`. The results are below. The procedure prompt is kept as the record of what was run. The design text is revised from these numbers (see "Review findings").
 
 ### Measured on the enterprise VDI (2026-11-11)
 
@@ -347,25 +364,27 @@ Commit rows are **per (context, repository, sha)**, not shared globally. That du
 |---|---|---|
 | `WorkspaceGitContextBranchHistories` | Id, ContextId, RepositoryId, BranchName (**nullable**, null when detached), BaseKind (`ParentRef`, `ForkPoint`, `PinnedTag`), TipKind (`Branch`, `DetachedHead`), BaseRef, BaseSha, MergeBaseSha, TipSha, UpstreamSha (nullable), ExpectedCount (from the ahead badge, nullable when the base is a fork-point fallback), CommitCount, State (`Ready`, `Loading`, `Stale`, `Failed`), Version (monotonic, latest wins), LoadedAtUtc | One row per repository history; the integrity and freshness record. Unique on (ContextId, RepositoryId, BranchName-or-`@detached`) |
 | `WorkspaceGitContextBranchCommits` | HistoryId, Sha, Ordinal (1 = oldest, topological), ParentShas, AuthorName, AuthorDateUtc, CommitDateUtc, Subject (up to 1000), IsMerge, FilesChanged, Insertions, Deletions (last three nullable, tier 2) | Immutable commit metadata plus membership and order. **No message body, no author email** (privacy and size) |
-| `WorkspaceGitContextCommitFiles` | HistoryId, RangeKey (`sha` for one commit, `from..to` for a range or the Σ view), Path, OriginalPath, Status, Insertions, Deletions, IsBinary, IsSubmodule | **Lazily filled** changed-file lists, on first click. Dropped for a range key when HEAD moves; per-commit keys stay valid forever |
+| `WorkspaceGitContextCommitFiles` | HistoryId, RangeKey (`sha` for one commit, `from..to` for a range or the Σ view), Path, OriginalPath, Status, Insertions, Deletions, IsBinary, IsSubmodule | Changed-file lists. Single-commit keys are filled **at hydration** from the list call (path, original path, status; line counts stay null until tier 2). Range and combined keys are filled on first use and dropped when that repository's HEAD or base moves; per-commit keys stay valid forever |
 
-Indexes: `(HistoryId, Ordinal)`, `(HistoryId, Sha)` unique, `(ContextId-via-history, CommitDateUtc, RepositoryId, Ordinal)` for the merged cross-repository order, and `(HistoryId, RangeKey, Path)`.
+Indexes: `(HistoryId, Ordinal)`, `(HistoryId, Sha)` unique, and `(HistoryId, RangeKey, Path)`.
 
 "Pushed" is **not stored per commit**. The history stores `UpstreamSha`; a commit is pushed when its ordinal is at or below the ordinal of `UpstreamSha`. A push only updates `UpstreamSha`, no `git log`.
 
 Paths and file names are never logged; messages are not persisted beyond the subject.
 
-### Hydration pipeline (background, incremental)
+### Hydration pipeline (background, one git process per repository)
 
 ```text
 Trigger: status row HeadCommit or ahead count changed (snapshot push, Sync, Commit, Push, Undo push,
          Update from default, Feature create)  -> CommitHistoryHydrator queue (per history, coalesced)
 
-Worker ListBranchCommits(repoPath, baseRef, knownHeadSha?)
-   knownHeadSha is ancestor of HEAD   -> Incremental: only knownHeadSha..HEAD  (the common case, one new commit)
-   otherwise (rebase, amend, reset)    -> Full: baseRef..HEAD, rows reused by sha so tier 2 data survives
-App (write queue, version gate)       -> apply in one transaction, verify CommitCount == ExpectedCount
-   mismatch                            -> State=Stale, one full retry, then Failed with a log line (no paths)
+Worker ListBranchCommits(repoPath, base, tip) -> one git process: the full range, each commit with its file list
+   (no incremental mode: its two processes cost more than one full list, see "Review findings" 3)
+App matches rows by sha               -> unchanged commits keep their rows, file lists and tier 2 data;
+                                         commits no longer in the range are removed
+App (write queue, version gate)       -> apply in one transaction
+   Worker outcome is not Ok            -> stored rows are kept, State=Failed, log line (no paths)
+   count differs from the ahead badge  -> not an error by itself (open question 1)
 App                                   -> publish a ContextCommitHistoryUpdated event (digest, like Git changes)
 ```
 
@@ -381,9 +400,9 @@ App                                   -> publish a ContextCommitHistoryUpdated e
 The strip and tree read through an `IWorkspaceCommitHistoryReadService`, using the same discipline as `WorkspaceGitChangesReadService`:
 
 - **Summaries** (per repository: count, first and last date, hydrated state) for the repository picker and the Σ chip.
-- **Rail buckets**: `GROUP BY` time slice (and repository count) in SQL, constant size regardless of commit count.
-- **Window**: keyset page over the merged order `(CommitDateUtc, RepositoryId, Ordinal)` for the dots that are currently visible, never "first N and stop".
-- **Commit files**: `WorkspaceGitContextCommitFiles` for the key, or one on-demand Worker call that fills the table, then read.
+- **Rail buckets** (one repository): `GROUP BY` ordinal slice in SQL, constant size regardless of commit count.
+- **Window**: keyset page over `(HistoryId, Ordinal)` for the dots of the selected repository that are currently visible, never "first N and stop".
+- **Commit files**: `WorkspaceGitContextCommitFiles` for the key. A single commit is always there after hydration; a range or combined key is filled by one Worker call on first use, then read.
 - The worst case, 100 repositories x 181 commits = 18,100 rows, is about 3 MB in SQLite and is never materialized in the circuit.
 
 ## UX design
@@ -434,12 +453,14 @@ The overview rail is drawn as a 3-4px density line along the bottom edge of the 
 
 ### Scaling the strip: 1 to thousands of commits
 
+In v1 the dots are always one repository's commits, so the first two levels below are enough; **the Bubbles level and its breadcrumb are out of v1** and stay here as a later option.
+
 One dot per commit works up to a few dozen. The strip has **three levels** and picks automatically, never hiding a commit:
 
 | Level | When | What the user sees |
 |---|---|---|
 | **Dots** | The visible window holds up to about 60 commits at a 12-16px pitch | Individual dots, tooltips, selection |
-| **Windowed dots + rail** | More than fits (181 in one repository, or the merged order of many repositories) | A **window of dots** that scrolls horizontally plus a thin **overview rail** (3-4px, along the bottom edge of the strip so the header does not grow, taller only in the wrapped full-width form). The rail is a density histogram of the entire range with date ticks and a draggable window handle; click or drag it to move |
+| **Windowed dots + rail** | More than fits (181 in one repository) | A **window of dots** that scrolls horizontally plus a thin **overview rail** (3-4px, along the bottom edge of the strip so the header does not grow, taller only in the wrapped full-width form). The rail is a density histogram of the entire range with date ticks and a draggable window handle; click or drag it to move |
 | **Bubbles** | Zoomed out to the whole range at 1,000+ commits | Time buckets as bubbles: `Nov 3 - 214 commits - 17 repos`. Click a bubble to zoom the window onto it. A breadcrumb shows `All 2,340  >  Nov 3 (214)  >  repo` with click-to-zoom-out |
 
 Dots are virtualized (only the window is in the DOM), reading from the SQL window query. Wheel over the strip scrolls it horizontally. A zoom control (`+` / `-`, or `Ctrl`+wheel) changes the pitch within the dot levels.
@@ -452,7 +473,7 @@ Also, for a review this long, commit-by-commit is not the only path: the Σ view
 
 ```text
 +----------------------------------------------------------------------------------------------+
-| [Σ 2,340] [All repos ▾] [≡]  main ○─●─●─●─●─●─●─●─●─●─●─●─●─●─●─●─●─●  ─ ─ ◌ Working tree +12 ~3  [⌃] |
+| [Σ 2,340] [repo-name ▾] [≡]  main ○─●─●─●─●─●─●─●─●─●─●─●─●─●─●─●─●─●  ─ ─ ◌ Working tree +12 ~3  [⌃] |
 |   ░░▓▓▓░░░░▒▒▓▓▓▓▓░░▒▒░░░░░▓▓▓▓▓▓▓▓▓░░  <- overview rail (density, date ticks, window handle)      |
 +----------------------------------------------------------------------------------------------+
 ```
@@ -460,7 +481,7 @@ Also, for a review this long, commit-by-commit is not the only path: the Σ view
 Left to right:
 
 1. **`Σ` chip**: "All commits" for the scope, the cumulative `mergeBase..HEAD` diff of each repository in scope (what a PR would contain, committed part only). The number is the sum of the ahead badges.
-2. **Scope picker**: `All repos` (default) or one repository (lists only repositories that are ahead, with counts, sorted by count, with search; repository filter as chips for multi-select). Picking a repository gives a single-repository strip, including the 181-commit case.
+2. **Repository picker**: chooses whose commits the dots show (lists only repositories that are ahead, with counts, sorted by count, with search). It follows the repository of the selected file, so selecting a file in the `All commits` tree and then a dot stays in that repository. The dots are always one repository's commits; there is no merged timeline. Where the text below says "scope", read "the picked repository".
 3. **`≡` commit list**.
 4. **Base marker** with the parent branch name (`main`, or `main +1` when repositories differ, tooltip lists them).
 5. **Dots / bubbles** per the table above, oldest to newest, equal spacing within the window (not time proportional).
@@ -477,7 +498,7 @@ Dot states (existing tokens from `app.css`):
 | Selected ("you are here") | 2px ring `--accent-blue-hover`, fill `--accent-blue-light`, plus the position cues in "Navigation" below (sliding ring, file-progress arc, position label); a selected range shows a soft underline across its dots |
 | Merge commit | Diamond |
 | Working tree | Dashed ring `--text-secondary`; `--warning` when conflicts exist |
-| Repository (merged order) | Small colored underline per repository (repository badge color if one exists, else a hashed muted palette); with many repositories this is only a hint, the picker and list are the real filters |
+| Repository | Not marked on dots: the dots are one repository's commits, named in the picker |
 | Dot size (Phase 5) | 8-12px by lines changed, once tier 2 data exists |
 | Hydrating repository | Faint placeholder segment on the rail, no dots yet |
 
@@ -506,7 +527,7 @@ Today the header's next / previous change buttons (`v` / `^`) step through the h
 
 - **Unit of the walk:** hunk, then file, then commit. The ring is `Commit 1 ... Commit N, Working tree`, oldest to newest. "Next" at the last hunk of the last file of a ring element goes to the first hunk of the first file of the next element; "Previous" at the first goes to the last hunk of the last file of the previous element. This is the existing walk with the edge extended.
 - **Only single-element views cross.** Working tree and a single commit are ring elements. **Σ and a selected range are combined views, so the walk stays inside them and wraps inside them** exactly as today; leaving them is a dot click. Likewise, if a text filter is active it still applies, and the walk never crosses into a commit that has no matching file.
-- **Order across repositories:** in the `All repos` scope the ring follows the merged commit order, so one step can change repository (the tree swaps to that repository's files, header and dot follow). In a single-repository scope the ring is that repository's commits. Whether the walk should instead group by repository is an open question.
+- **No walk across repositories.** The ring is one repository's commits (the repository the dots show). `All commits` is one combined tree of every repository, like the Working tree view; the existing walk already moves through it across repositories and never steps from it into single commits.
 - **Empty elements are skipped.** A commit with no files (empty merge, submodule-only) and a clean Working tree are not stops; they stay reachable by dot and list. A repository still hydrating or failed has no stops until it is ready.
 - **Ends of the ring wrap.** Forward from the last element returns to the first, with the same single wrap the current buttons have, announced in the strip's position label ("Back at commit 1 of 181") instead of a toast.
 - **Working tree workflow is preserved for features without history.** When the Feature has no commits to review there is no ring and the walk is exactly today's. With history, the Working tree is the last element of the ring: stepping forward past its last change wraps to commit 1, and stepping back from its first change goes to the newest commit. Because that changes today's edge behaviour for pre-commit review, it is called out in the open questions and the wrap is always announced.
@@ -521,7 +542,7 @@ The selected dot is the single, always-visible "you are here" marker, and it mov
 
 1. **Sliding ring.** The selection ring animates to the new dot (about 120 ms, none under reduced motion), so a step across a commit boundary is visible as movement and the eye follows it. The strip scrolls the dot into view and the rail's window handle follows.
 2. **File-progress arc.** The ring around the selected dot fills clockwise by position in the commit, `3 of 7` files being about 43% filled. It shows how far through this commit you are, and the next step into the following dot starts a fresh arc. In the Working tree node the same arc shows progress through the working changes.
-3. **Position label** (wide tiers only; in narrower tiers it is the dot's tooltip and its `aria-label`): `Commit 137 of 181 - file 3 of 7`, in the repository's name when the scope is `All repos`. Ends read "Back at commit 1 of 181" for a moment after a wrap.
+3. **Position label** (wide tiers only; in narrower tiers it is the dot's tooltip and its `aria-label`): `Commit 137 of 181 - file 3 of 7`, with the repository's name. Ends read "Back at commit 1 of 181" for a moment after a wrap.
 4. **Header summary** already follows the selection (sha, files, M / A / D, lines), which confirms the commit after each step.
 5. **Crossing pulse.** When a step lands in a new commit, that dot gets a brief 300 ms halo, which is the cue that the commit changed even if the eye was on the diff.
 6. **Range and Σ.** A range lights all of its dots with the underline, Σ lights the whole row and the `Σ` chip; neither shows a single pointer, and the label says `Range 12-15 - file 4 of 28` or `All 181 commits - file 12 of 340`.
@@ -539,13 +560,15 @@ Screen readers get `aria-current="step"` on the selected dot and a polite live-r
 | Range | Shift-click, rail drag, or list multi-select; **one repository** | Combined files from the parent of the first to the last | Parent-of-first vs last |
 | All (Σ) | Σ chip | Every repository in scope, each its own `mergeBase..HEAD`, as Repository > folders > files (the existing tree shape) | Merge-base vs HEAD per file |
 
+These modes are the three views decided in "Review findings": Working tree and `All commits` (Σ) span every repository in one tree, exactly as the Changes page does today; one commit and a range are a drill-down inside one repository. Opening history lands on `All commits`.
+
 Σ across repositories needs one changed-file list per repository (`RangeKey = mergeBase..head`), filled lazily and cached in `WorkspaceGitContextCommitFiles`, invalidated when that repository's HEAD or merge base moves.
 
 ### Multi-repository behavior
 
 - The unit of selection is **(repository, commit)**; the tree is scoped to that commit's repository: section `Commit abc1234` > repository > folders > files.
-- All repositories' commits order by `CommitDateUtc` with a stable tiebreak (repository name, then ordinal), which tells the story of the Feature across repositories.
-- Lane view (toggle, off by default, max 4 visible lanes then scroll) for people who want per-repository rows; it costs height only on request.
+- Commits of different repositories are never interleaved. Across repositories the page shows the combined `All commits` tree; commit by commit is always inside one repository, in that repository's own order (`Ordinal`).
+- Lane view (per-repository rows of dots) is out of v1.
 - A per-repository commit **cannot be split across repositories** in a range in v1 (a range stays inside one repository).
 - Repositories still hydrating, failed, or not ahead are shown in the scope picker with their state (`loading`, `history unavailable`) and never block others.
 
@@ -563,14 +586,14 @@ All in the **read pool** (`ReadOnlyCommands`), using `GitRepositoryPathValidator
 
 | Command | Request | Git | Response |
 |---|---|---|---|
-| `ListBranchCommits` | repository path, **tip** (Feature branch name, or detached `HEAD`), parent ref name and `BaseCommitSha` from the App (resolution **by the same code as the ahead badge**, then fork-point fallback), optional `KnownTipSha` | `git merge-base --is-ancestor <known> <tip>`, then `git log --reverse --no-color --format=<sha, parents, author name, author date, committer date, subject> --end-of-options <base>..<tip>` (or `<known>..<tip>`). `git rev-list <upstream>..<tip>` gives `UpstreamSha` (none for a detached tip). **No stats** | `Outcome` (`Ok`, `ParentUnresolved`, `TipMissing`, `Unborn`), `BaseKind`, `Mode` (`Incremental` or `Full`), `BaseSha`, `MergeBaseSha`, `TipSha`, `UpstreamSha`, `Commits[]`. No count cap. An unresolved parent is an **outcome**, not an exception, so the App can fall back or show a state chip |
-| `GetCommitChanges` | repository path, `FromSha` or empty tree, `ToSha` | `git diff-tree -r -M --name-status -z --numstat` (one commit) or `git diff -M ...` (range, Σ) | changed-file entries (status A/M/D/R/C/T, path, original path, insertions, deletions, binary, submodule). Never truncated; chunk instead of cutting if near the 10 MiB hub receive cap |
+| `ListBranchCommits` | repository path, **tip** (Feature branch name, or detached `HEAD`), parent ref name and `BaseCommitSha` from the App (resolution **by the same code as the ahead badge**, then fork-point fallback) | One process for commits and their file lists: `git log --reverse --no-color --format=<sha, parents, author name, author date, committer date, subject> --name-status -M -z --diff-merges=first-parent --end-of-options <base>..<tip>`. Always the full range (no incremental mode). `git rev-list <upstream>..<tip>` gives `UpstreamSha` (none for a detached tip). **No line counts** | `Outcome` (`Ok`, `ParentUnresolved`, `TipMissing`, `Unborn`), `BaseKind`, `BaseSha`, `MergeBaseSha`, `TipSha`, `UpstreamSha`, `Commits[]` (each with its changed files: status, path, original path). No count cap. An unresolved parent is an **outcome**, not an exception, so the App can fall back or show a state chip |
+| `GetCommitChanges` | repository path, `FromSha` or empty tree, `ToSha` | `git diff -M --name-status -z --numstat <from> <to>` for a range or the combined view (176 ms on the VDI). Single commits do not use this command; their file lists come from `ListBranchCommits` | changed-file entries (status A/M/D/R/C/T, path, original path, insertions, deletions, binary, submodule). Never truncated; chunk instead of cutting if near the 10 MiB hub receive cap |
 | `GetCommitStats` (tier 2, optional) | repository path, list of SHAs | one `git diff-tree --stdin --numstat --shortstat` process | per-SHA files / insertions / deletions |
-| `GetGitFileDiff` (extended) | `GitDiffRequest.Revisions { FromSha, ToSha }` | `git show <sha>:<path>` for both sides, same soft size / binary / encoding classification | same `GitDiffDocument`; new `Revision` comparison value |
+| `GetGitFileDiff` (extended) | `GitDiffRequest.Revisions { FromSha, ToSha }` | one `git cat-file --batch` process for both sides (two `git show <sha>:<path>` processes would cost about 230 ms on the VDI), same soft size / binary / encoding classification | same `GitDiffDocument`; new `Revision` comparison value |
 
 The commit body for the popover is a separate `GetCommitDetail`; this is also the natural reader for the `pr-description-commit-history` idea.
 
-Merge commits are diffed against the first parent and shown as diamonds; the list is the full `base..HEAD` set including merges so counts equal the badge. Whether to offer a `--first-parent` view is an open question.
+Merge commits are diffed against the first parent and shown as diamonds. Git prints no files for a merge by default, so the list call asks for it (`--diff-merges=first-parent`, git 2.31 or later; on an older git the merge's files come from one `git diff-tree -r -M <sha>^1 <sha>` call), and a Worker test covers a merge's file list; the list is the full `base..HEAD` set including merges so counts equal the badge. Whether to offer a `--first-parent` view is an open question.
 
 ## App design
 
@@ -595,10 +618,10 @@ Merge commits are diffed against the first parent and shown as diamonds; the lis
 
 | Event | Behavior |
 |---|---|
-| New commit | Incremental hydration appends; the dot animates in; selection unchanged; Working tree stays selected if it was |
+| New commit | Hydration lists the range again (one process) and adds the new row; the dot animates in; selection unchanged; Working tree stays selected if it was |
 | Working tree changes while viewing a commit | Tree and diff stay put; the Working tree node counts update |
-| HEAD rewritten (amend, rebase, reset, force-push, undo push) | `Full` hydration reuses rows by sha; if the selected sha is gone, fall back to Working tree with a toast "Commit abc1234 is no longer on this branch (history was rewritten)" |
-| Parent branch moved (Update from default, base advanced) | `Full` hydration; membership shrinks as commits land in the parent |
+| HEAD rewritten (amend, rebase, reset, force-push, undo push) | Hydration reuses rows by sha; if the selected sha is gone, fall back to Working tree with a toast "Commit abc1234 is no longer on this branch (history was rewritten)" |
+| Parent branch moved (Update from default, base advanced) | Hydration lists the range again; membership shrinks as commits land in the parent |
 | Push | `UpstreamSha` updates, dots turn to pushed style, no `git log` |
 | Branch deleted or Feature removed | Purge per the lifetime rules |
 
@@ -609,12 +632,12 @@ Strip is `role="listbox"` horizontal, dots are `role="option"` with `aria-select
 ## Phases
 
 0. **Measure.** Laptop and enterprise VDI done (2026-11-11, `changes-commit-timeline-measure.ps1`; see "Measured on a developer laptop" and "Measured on the enterprise VDI"). Remaining: revise this note from "Review findings" and set final targets. The SQLite insert and windowed read of 18,100 rows is measured in Phase 2 with the real tables.
-1. **Worker and Common.** `ListBranchCommits` (incremental and full), `GetCommitChanges`, `GetGitFileDiff` revisions, SHA validation, pool routing. Tests with `TempGitRepositoryFixture`: count equals `DefaultBranchAhead` for Feature branches created from the default branch (fixtures with default `main`, `master` and `develop` in the same Feature, remote default differing from the local name, default ref present only as `origin/<name>`), parent that is not the default, unresolvable parent (fork-point fallback), detached at a pinned tag with and without commits, branch not checked out, merge, root, rename, binary, incremental versus full agreement, rewritten history, upstream boundary, rebase in progress.
+1. **Worker and Common.** `ListBranchCommits` (one process, with file lists), `GetCommitChanges` (ranges and the combined view), `GetGitFileDiff` revisions, SHA validation, pool routing. Tests with `TempGitRepositoryFixture`: count equals `DefaultBranchAhead` for Feature branches created from the default branch (fixtures with default `main`, `master` and `develop` in the same Feature, remote default differing from the local name, default ref present only as `origin/<name>`), parent that is not the default, unresolvable parent (fork-point fallback), detached at a pinned tag with and without commits, branch not checked out, merge, root, rename, binary, a merge's file list against its first parent, rewritten history, upstream boundary, rebase in progress.
 2. **Persistence and hydrator.** Migration, tables, hydrator with coalescing, version gate, integrity check against the badge, purge on Feature and repository removal. Tests: failed Worker answer never deletes, purge cleans every table, stale answer discarded, rewrite reuses rows.
 3. **Read service and page state.** SQL summaries, rail buckets, keyset window, selection, URL query, rewritten-history fallback.
    Also the **state derivation** (pure function from status and Feature repository rows to the state table, unit-tested for every row, no git) and the responsiveness guards from the contract.
-4. **Strip and commit mode (single commit and Working tree).** Dots, rail, scope picker, commit list, composer removal, read-only border, diff header, read-only guard test. Header integration: strip in the title-row slot with wrap and container-query tiers, header summary following the selection, strip and scan indicator swapping on `IsScanRunning` with no state loss, Refresh revalidating history. Measure the leftover title-row width at common window sizes (1366, 1600, 1920) and set the tier breakpoints from that. Navigation: extend `NavigateChangeAsync` / `WalkToAdjacentFileAsync` so the walk continues across ring elements, with `Shift` and `[` `]` commit skips, commit-boundary prefetch, the sliding ring, file-progress arc and position label. Tests: the ring order, empty-element skipping, wrap at both ends, Σ and range staying inside their view, the unchanged walk when the Feature has no history, stale-load discard while holding the key.
-5. **Range, Σ, unpushed styling, keyboard, repository filter, bubbles level, hide toggle for the wrapped line.**
+4. **Strip and commit mode (Working tree, All commits across repositories, single commit in one repository).** Dots, rail, scope picker, commit list, composer removal, read-only border, diff header, read-only guard test. Header integration: strip in the title-row slot with wrap and container-query tiers, header summary following the selection, strip and scan indicator swapping on `IsScanRunning` with no state loss, Refresh revalidating history. Measure the leftover title-row width at common window sizes (1366, 1600, 1920) and set the tier breakpoints from that. Navigation: extend `NavigateChangeAsync` / `WalkToAdjacentFileAsync` so the walk continues across ring elements, with `Shift` and `[` `]` commit skips, commit-boundary prefetch, the sliding ring, file-progress arc and position label. Tests: the ring order, empty-element skipping, wrap at both ends, Σ and range staying inside their view, the unchanged walk when the Feature has no history, stale-load discard while holding the key.
+5. **Range, unpushed styling, keyboard, hide toggle for the wrapped line.** (The combined `All commits` view moved to phase 4; the bubbles level is out of v1.)
 6. **Polish and widening.** Tier 2 stats and dot size, lane view, commit message popover, "viewed" markers and "since my last review" (as GitHub and Reviewable do), AI summary of a range, then the Workspace-context and bounded default-branch stages from "Scope".
 
 ## Docs and release steps when built
@@ -628,16 +651,16 @@ A dedicated Blazor component is the right call: vis-timeline is time-proportiona
 ## Open questions
 
 0. **Navigation**: ship Option 1 (same two buttons continue across commits, `Shift` or `[` `]` skips a commit) as recommended, or Option 2 (extra `[<]` `[>]`, as header buttons or strip end caps)? And is it acceptable that with history present, stepping forward past the last Working tree change wraps to commit 1 instead of the first Working tree change, or should the Working tree always wrap inside itself and be left only by dot, `[` or `Shift`?
-0a. **Cross-repository walk order**: merged commit-date order (default here) or grouped by repository (finish repository A's commits, then B's)?
+0a. Closed: there is no walk across repositories and no merged order (see "Review findings", "Decided").
 
 1. **Base ref for Feature contexts**: confirm whether the badge uses `ParentBranchName` or the default ref and follow it exactly; if they differ, fix that first. Also confirm how a Feature repository's branch name is obtained (status row `BranchName` versus a stored Feature branch field) and what the badge does for `PinnedTag` repositories.
 1a. **Pinned-tag repositories**: is `BaseCommitSha..HEAD` the right range for commits made on a detached HEAD, and should the "can be lost on checkout" chip also offer a one-click "create a branch here" action (a mutating action, so separate from this read-only feature)?
 1b. **Fork-point fallback**: acceptable to show a count that differs from the badge, with an explanatory tooltip, or should the badge also switch to the fork-point basis in that case?
 1c. **Retained history for a branch no longer checked out**: keep until the branch is deleted (this note) or until the Feature is removed?
-2. **Measured numbers** from Phase 0 may change the targets, the parallelism limit, or whether Sync should trigger hydration eagerly.
+2. Closed: measured on the laptop and on the enterprise VDI. No target is missed, the hydration parallelism cap stays 4 and becomes a setting, and hydration is triggered after Sync as designed.
 3. **Should Σ optionally include the working tree** (PR preview of committed plus uncommitted work)?
 4. **Merge commits**: all of `base..HEAD` (default here, matches the badge) or a `--first-parent` view?
-5. **Default scope with many repositories**: `All repos` merged (this note) or last-selected repository?
+5. Closed: history opens on `All commits` (every repository, combined); the dots show the repository of the selected file.
 6. **Cross-repository ranges** are not in v1; is a time-based "feature range" worth it later?
 7. **Repository colors**: does a stable repository color already exist to reuse?
 8. **Retention when a Feature branch is merged but kept**: purge at merge, or keep read-only history until the Feature is removed?
