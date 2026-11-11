@@ -593,6 +593,80 @@ public sealed class GitCliRepositoryGitChangesServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Commit_all_with_dirty_submodule_content_fails_at_once_naming_the_submodule()
+    {
+        using var inner = new TempGitRepositoryFixture();
+        inner.CommitInitial("inner.txt", "inner\n");
+
+        _repo.CommitInitial("tracked.txt", "original\n");
+        var add = _repo.RunGit("-c", "protocol.file.allow=always", "submodule", "add", inner.RepositoryPath, "sub");
+        Assert.Equal(0, add.ExitCode);
+        _repo.RunGit("commit", "-m", "Add submodule");
+
+        // Content inside the submodule: the parent cannot stage it, so it never settles.
+        _repo.WriteFile("sub/untracked-inside.txt", "dirty\n");
+        _repo.WriteFile("tracked.txt", "changed\n");
+
+        var result = await _service.CommitAsync(
+            _repo.RepositoryPath,
+            new GitCommitOperationRequest("Commit all", StageAllFirst: true),
+            2,
+            CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal("StageFailed", result.ErrorCode);
+        Assert.Contains("Submodule sub", result.ErrorMessage);
+        Assert.DoesNotContain("still had unstaged", result.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task Commit_all_stages_a_submodule_that_only_has_a_new_commit()
+    {
+        using var inner = new TempGitRepositoryFixture();
+        inner.CommitInitial("inner.txt", "inner\n");
+
+        _repo.CommitInitial("tracked.txt", "original\n");
+        _repo.RunGit("-c", "protocol.file.allow=always", "submodule", "add", inner.RepositoryPath, "sub");
+        _repo.RunGit("commit", "-m", "Add submodule");
+
+        // Advance the submodule's own HEAD (a new commit, nothing left dirty inside it).
+        var subPath = Path.Combine(_repo.RepositoryPath, "sub");
+        File.WriteAllText(Path.Combine(subPath, "inner.txt"), "moved on\n");
+        RunGitIn(subPath, "add", "--all");
+        RunGitIn(subPath, "-c", "user.name=T", "-c", "user.email=t@example.com", "commit", "-m", "Advance");
+
+        var result = await _service.CommitAsync(
+            _repo.RepositoryPath,
+            new GitCommitOperationRequest("Bump submodule", StageAllFirst: true),
+            2,
+            CancellationToken.None);
+
+        Assert.True(result.Success, result.ErrorMessage);
+    }
+
+    private static void RunGitIn(string workingDirectory, params string[] args)
+    {
+        var startInfo = new System.Diagnostics.ProcessStartInfo("git")
+        {
+            WorkingDirectory = workingDirectory,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        foreach (var arg in args)
+        {
+            startInfo.ArgumentList.Add(arg);
+        }
+
+        using var process = System.Diagnostics.Process.Start(startInfo)!;
+        process.StandardOutput.ReadToEnd();
+        process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        Assert.Equal(0, process.ExitCode);
+    }
+
+    [Fact]
     public async Task Commit_all_stages_everything_then_commits()
     {
         _repo.CommitInitial("tracked.txt", "original\n");

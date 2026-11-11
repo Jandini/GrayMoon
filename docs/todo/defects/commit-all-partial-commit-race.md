@@ -1,6 +1,6 @@
 # Commit All / Commit Staged: hardening that is not built
 
-Status: the data-loss bug is fixed. Phases 0, 1 and 2 and the one-line run summary from Phase 4 are built (shared scoped `DbContext` no longer used by parallel commits; one result per repository; commit message kept when a repository fails; end-of-run summary; targets decided when the commit starts, see `WorkspaceCommitTargetPlanner`). Phase 3 is not built. Automatic retries are deliberately left out so they cannot hide a problem. Written 2026-11-08.
+Status: the data-loss bug is fixed. Phases 0, 1 and 2 and the one-line run summary from Phase 4 are built (shared scoped `DbContext` no longer used by parallel commits; one result per repository; commit message kept when a repository fails; end-of-run summary; targets decided when the commit starts, see `WorkspaceCommitTargetPlanner`). Phase 3 is partly built (item D is done, see below). Automatic retries are deliberately left out so they cannot hide a problem. Written 2026-11-08.
 
 ## Background (kept for context)
 
@@ -13,11 +13,12 @@ Status: the data-loss bug is fixed. Phases 0, 1 and 2 and the one-line run summa
 | # | Finding | Effect |
 |---|---|---|
 | C | `git add --all` and `git commit` have no retry. Only remote operations use `GitRetryClassifier`. The in-process lock does not stop an IDE or git extension holding `index.lock`. | Whole repository fails with `StageFailed`. |
-| D | `StageAllForCommitAsync` retries 3 times with no delay, and any porcelain worktree entry counts as unsettled (possibly a dirty submodule). | Churning files or a dirty submodule gives `StageFailed`. |
 | E | Git subprocess default timeout is 60 s; the App's 240 s command timeout includes queueing behind the repository lock. | Slow hooks or a large `git add` fail. |
 | F | `post-commit` hook runs `curl --max-time 2` to the Worker while `git commit` still holds the repository lock. | Possible 2 s stall per commit (unverified). |
 
-Fix sketch: retry `git add` / `git commit` on `index.lock` contention with bounded backoff (`GitRetryClassifier`) inside the existing write lock; delay between `git add --all` verify retries and report dirty submodules as a specific error; a separate timeout tier for `add` / `commit`, starting the App's 240 s clock when the Worker starts executing; check the `post-commit` hook endpoint under the lock.
+Done (item D, 2026-11-11): `StageAllForCommitAsync` pauses 250 ms and then 750 ms before its 2nd and 3rd attempt, and a submodule with modified or untracked content inside it (which `git add --all` in the parent cannot stage) fails at once with a message naming the submodule, instead of three identical retries and the generic "still had unstaged" text. A submodule that only has a new commit is staged normally. Tests: `Commit_all_with_dirty_submodule_content_fails_at_once_naming_the_submodule` (fails on the old code) and `Commit_all_stages_a_submodule_that_only_has_a_new_commit`. The pause is not covered by a test, because no repository state stays dirty after `git add --all` and then settles.
+
+Fix sketch for the rest: retry `git add` / `git commit` on `index.lock` contention with bounded backoff (`GitRetryClassifier`) inside the existing write lock; a separate timeout tier for `add` / `commit`, starting the App's 240 s clock when the Worker starts executing; check the `post-commit` hook endpoint under the lock.
 
 ### Other
 
@@ -27,4 +28,4 @@ Fix sketch: retry `git add` / `git commit` on `index.lock` contention with bound
 
 ## Order
 
-Phase 3 only after a repro of D and E.
+Phase 3 (C, E, F) only after a repro of E.
