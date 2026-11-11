@@ -1,3 +1,5 @@
+using GrayMoon.App.Services.Policy;
+using GrayMoon.Application.Repositories.Policy;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using Microsoft.Extensions.Options;
@@ -24,7 +26,7 @@ public sealed class WorkspaceUndoPushHandler(
         CancellationToken ct)
     {
         var targets = repos
-            .Where(wr => !wr.IsOnTag && (wr.OutgoingCommits ?? 0) > 0 && !string.IsNullOrWhiteSpace(wr.BranchName))
+            .Where(wr => wr.Allows(RepositoryOperation.UndoPush) && (wr.OutgoingCommits ?? 0) > 0 && !string.IsNullOrWhiteSpace(wr.BranchName))
             .ToList();
 
         if (targets.Count == 0)

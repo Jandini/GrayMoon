@@ -257,8 +257,8 @@ public sealed class FeatureContextBranchRefreshScopingTests
         await using (var scope = ctx.CreateScope())
         {
             var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-            Assert.Empty(await git.GetTagPinnedRepositoryIdsAsync(ctx.WorkspaceId, featureId, CancellationToken.None));
-            Assert.Equal([ctx.RepositoryId], await git.GetTagPinnedRepositoryIdsAsync(ctx.WorkspaceId, specialId, CancellationToken.None));
+            Assert.Empty(await git.GetSkippedRepositoryIdsAsync(ctx.WorkspaceId, featureId, GrayMoon.Application.Repositories.Policy.RepositoryOperation.RestorePackages, GrayMoon.Application.Repositories.Policy.RepositorySubjectSource.Context, CancellationToken.None));
+            Assert.Equal([ctx.RepositoryId], await git.GetSkippedRepositoryIdsAsync(ctx.WorkspaceId, specialId, GrayMoon.Application.Repositories.Policy.RepositoryOperation.RestorePackages, GrayMoon.Application.Repositories.Policy.RepositorySubjectSource.Context, CancellationToken.None));
         }
 
         // The other way round: the Feature is pinned, the Workspace is on a branch.
@@ -280,8 +280,8 @@ public sealed class FeatureContextBranchRefreshScopingTests
         await using (var scope = ctx.CreateScope())
         {
             var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-            Assert.Equal([ctx.RepositoryId], await git.GetTagPinnedRepositoryIdsAsync(ctx.WorkspaceId, featureId, CancellationToken.None));
-            Assert.Empty(await git.GetTagPinnedRepositoryIdsAsync(ctx.WorkspaceId, specialId, CancellationToken.None));
+            Assert.Equal([ctx.RepositoryId], await git.GetSkippedRepositoryIdsAsync(ctx.WorkspaceId, featureId, GrayMoon.Application.Repositories.Policy.RepositoryOperation.RestorePackages, GrayMoon.Application.Repositories.Policy.RepositorySubjectSource.Context, CancellationToken.None));
+            Assert.Empty(await git.GetSkippedRepositoryIdsAsync(ctx.WorkspaceId, specialId, GrayMoon.Application.Repositories.Policy.RepositoryOperation.RestorePackages, GrayMoon.Application.Repositories.Policy.RepositorySubjectSource.Context, CancellationToken.None));
         }
     }
 

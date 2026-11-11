@@ -1,3 +1,5 @@
+using GrayMoon.App.Services.Policy;
+using GrayMoon.Application.Repositories.Policy;
 using GrayMoon.App.Components.Shared;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services;
@@ -115,7 +117,7 @@ public sealed partial class WorkspaceRepositories
     private CancellationTokenSource? _refreshDebounceCts;
     private readonly object _refreshDebounceLock = new();
     private CancellationTokenSource? _backgroundWorkCts;
-    private const string TagBlockedActionMessage = "Repository is on a tag; checkout a branch first.";
+    private const string TagBlockedActionMessage = RepositoryOperationPolicy.OnTagMessage;
     private int TableColSpan => _presentation.ColumnCount;
     internal enum VirtualSlotKind
     {
@@ -132,6 +134,15 @@ public sealed partial class WorkspaceRepositories
         int RepositoryId,
         int LevelRepoCount,
         int StripeIndex);
+    /// <summary>Asks the policy about a row of the selected context.</summary>
+    private bool Allows(WorkspaceRepositoryLink link, RepositoryOperation operation) =>
+        link.Allows(operation, _isFeatureContext);
+
+    /// <summary>A repository whose row is not loaded is not held back here; the service decides when the operation runs.</summary>
+    private bool IsRepoAllowed(int repositoryId, RepositoryOperation operation) =>
+        TryGetLink(repositoryId) is not { } link || Allows(link, operation);
+
+    /// <summary>For the row and level Sync buttons, which leave a tag checkout alone although Workspace Sync includes it.</summary>
     private bool IsRepoOnTag(int repositoryId) =>
         TryGetLink(repositoryId)?.IsOnTag == true;
     private WorkspaceRepositoryLink? TryGetLink(int repositoryId) =>
@@ -189,7 +200,7 @@ public sealed partial class WorkspaceRepositories
 
         /// <summary>True when the repository is on a branch other than its default and so has somewhere to sync to.</summary>
         public bool NeedsReturnToDefault =>
-            !Link.IsOnTag
+            Link.Allows(RepositoryOperation.ReturnToDefault)
             && !string.IsNullOrWhiteSpace(Link.BranchName)
             && !string.Equals(Link.BranchName, Link.DefaultBranchName, StringComparison.Ordinal);
     }

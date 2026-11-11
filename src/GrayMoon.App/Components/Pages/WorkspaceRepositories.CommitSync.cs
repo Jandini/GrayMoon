@@ -1,3 +1,4 @@
+using GrayMoon.Application.Repositories.Policy;
 using GrayMoon.App.Components.Shared;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services;
@@ -15,7 +16,7 @@ public sealed partial class WorkspaceRepositories
         var allLinks = await GetAllLinksForOperationAsync();
         var repoIdsWithIncoming = allLinks
             .Where(wr =>
-                !wr.IsOnTag
+                Allows(wr, RepositoryOperation.Pull)
                 && (wr.IncomingCommits ?? 0) > 0)
             .Select(wr => wr.RepositoryId)
             .ToList();
@@ -35,7 +36,7 @@ public sealed partial class WorkspaceRepositories
     {
         if (workspace == null || IsJobRunning)
             return;
-        if (IsRepoOnTag(repositoryId))
+        if (!IsRepoAllowed(repositoryId, RepositoryOperation.Pull))
         {
             ToastService.Show(TagBlockedActionMessage);
             return;
@@ -79,7 +80,7 @@ public sealed partial class WorkspaceRepositories
 
     private void ShowConfirmSyncCommitsLevel(List<int> repositoryIds)
     {
-        var filtered = repositoryIds.Where(id => !IsRepoOnTag(id)).ToList();
+        var filtered = repositoryIds.Where(id => IsRepoAllowed(id, RepositoryOperation.Pull)).ToList();
         if (filtered.Count == 0)
         {
             ToastService.Show("All repositories in this level are on tags; checkout a branch first.");
@@ -95,7 +96,7 @@ public sealed partial class WorkspaceRepositories
     {
         if (workspace == null || IsJobRunning)
             return Task.CompletedTask;
-        if (IsRepoOnTag(repositoryId))
+        if (!IsRepoAllowed(repositoryId, RepositoryOperation.Pull))
         {
             ToastService.Show(TagBlockedActionMessage);
             return Task.CompletedTask;
@@ -119,7 +120,7 @@ public sealed partial class WorkspaceRepositories
         if (workspace == null || IsJobRunning || repositoryIds == null || repositoryIds.Count == 0)
             return Task.CompletedTask;
 
-        repositoryIds = repositoryIds.Where(id => !IsRepoOnTag(id)).ToList();
+        repositoryIds = repositoryIds.Where(id => IsRepoAllowed(id, RepositoryOperation.Pull)).ToList();
         if (repositoryIds.Count == 0)
         {
             ToastService.Show("All repositories are on tags; checkout a branch first.");

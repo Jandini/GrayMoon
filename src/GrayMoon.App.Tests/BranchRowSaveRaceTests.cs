@@ -212,6 +212,7 @@ public sealed class BranchRowSaveRaceTests
         sp.GetRequiredService<IWorkspaceCapabilitiesResolver>(),
         sp.GetRequiredService<IServiceScopeFactory>(),
         sp.GetRequiredService<ILogger<WorkspacePushService>>(),
+        sp.GetRequiredService<GrayMoon.Application.Repositories.Policy.IWorkspaceRepositoryOperationPolicy>(),
         ctx.HubContext);
 
     private static RepositoryBranch NewRemote(int workspaceRepositoryId, string name) => new()

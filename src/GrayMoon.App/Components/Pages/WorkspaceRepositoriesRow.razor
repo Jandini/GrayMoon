@@ -1,3 +1,5 @@
+@using GrayMoon.App.Services.Policy
+@using GrayMoon.Application.Repositories.Policy
 @using GrayMoon.App.Models
 @using GrayMoon.App.Services
 @using GrayMoon.App.Services.Features
@@ -29,7 +31,7 @@
         || AllFileVersionLines.Count > 0
         || MismatchedFileVersionLines.Count > 0
         || CustomDependencyLines.Count > 0;
-    var depOkBadgeInactive = ActionsDisabled || Link.IsOnTag;
+    var depOkBadgeInactive = ActionsDisabled || !Link.Allows(RepositoryOperation.UpdateDependencies);
     var versionCell = DetermineVersionCell(Link.GitVersion, Link.IsVersionUnresolved, WorkspaceUsesRepositoryVersioning);
     var singleRepoPrPullMap = (!string.IsNullOrEmpty(repoUrl) && PrInfo != null
         && string.Equals(PrInfo.State, "open", StringComparison.OrdinalIgnoreCase)
@@ -191,7 +193,7 @@
                                       role="button"
                                       tabindex="@(depOkBadgeInactive ? -1 : 0)"
                                       style="cursor: @(depOkBadgeInactive ? "default" : "pointer");"
-                                      title="@(depOkBadgeInactive ? "Repository is on a tag; checkout a branch first." : "Manage custom dependencies")"
+                                      title="@(depOkBadgeInactive ? RepositoryOperationPolicy.OnTagMessage : "Manage custom dependencies")"
                                       @onclick="HandleCustomDependenciesClick"
                                       @onclick:preventDefault
                                       @onkeydown="HandleCustomDependenciesKeydown">0</span>
@@ -213,7 +215,7 @@
                                       role="button"
                                       tabindex="@(depOkBadgeInactive ? -1 : 0)"
                                       style="cursor: @(depOkBadgeInactive ? "default" : "pointer");"
-                                      title="@(depOkBadgeInactive ? "Repository is on a tag; checkout a branch first." : "Manage dependencies")"
+                                      title="@(depOkBadgeInactive ? RepositoryOperationPolicy.OnTagMessage : "Manage dependencies")"
                                       @onclick="HandleCustomDependenciesClick"
                                       @onclick:preventDefault
                                       @onkeydown="HandleCustomDependenciesKeydown">@totalWithFiles</span>
@@ -424,7 +426,7 @@
                                         <div class="dependency-badge-tooltip-footer dependency-badge-tooltip-footer--split">
                                             @if (depBadgeOnTag)
                                             {
-                                                <span class="dependency-badge-tooltip-footer-hint">Repository is on a tag; checkout a branch first.</span>
+                                                <span class="dependency-badge-tooltip-footer-hint">@RepositoryOperationPolicy.OnTagMessage</span>
                                             }
                                             else if (unmatchedDeps > 0 && hasOutOfDateFiles)
                                             {
@@ -655,7 +657,7 @@
 
     private async Task HandleDependencyBadgeClick()
     {
-        if (ActionsDisabled || Link?.IsOnTag == true)
+        if (ActionsDisabled || Link?.Allows(RepositoryOperation.UpdateDependencies) == false)
             return;
         if ((Link?.UnmatchedDeps ?? 0) > 0)
             await OnDependencyBadgeClick.InvokeAsync();
@@ -665,14 +667,14 @@
 
     private async Task HandleCustomDependenciesClick()
     {
-        if (ActionsDisabled || Link?.IsOnTag == true)
+        if (ActionsDisabled || Link?.Allows(RepositoryOperation.UpdateDependencies) == false)
             return;
         await OnCustomDependenciesClick.InvokeAsync();
     }
 
     private async Task HandleShowDependenciesClick()
     {
-        if (ActionsDisabled || Link?.IsOnTag == true)
+        if (ActionsDisabled || Link?.Allows(RepositoryOperation.UpdateDependencies) == false)
             return;
         await OnCustomDependenciesClick.InvokeAsync();
     }

@@ -291,6 +291,7 @@ public class SqlitePerformanceTests
                 sp.GetRequiredService<IWorkspaceCapabilitiesResolver>(),
                 sp.GetRequiredService<IServiceScopeFactory>(),
                 sp.GetRequiredService<ILogger<WorkspacePushService>>(),
+                sp.GetRequiredService<GrayMoon.Application.Repositories.Policy.IWorkspaceRepositoryOperationPolicy>(),
                 ctx.HubContext);
             await push.UpdateCommitCountsAndUpstreamAfterPushAsync(
                 ctx.WorkspaceId,

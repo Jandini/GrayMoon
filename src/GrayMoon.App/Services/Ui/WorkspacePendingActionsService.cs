@@ -1,3 +1,5 @@
+using GrayMoon.App.Services.Policy;
+using GrayMoon.Application.Repositories.Policy;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services.Queries;
 using GrayMoon.Application.Features;
@@ -86,19 +88,13 @@ public sealed class WorkspacePendingActionsService(
         IReadOnlyList<WorkspaceRepositoryLinkListItemDto> links,
         IReadOnlyDictionary<int, IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)>>? mismatchedDeps = null)
     {
-        bool hasUnmatched = links.Any(wr => !IsOnTag(wr) && ((wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0));
-        bool isPushRecommended = links.Any(wr => !IsOnTag(wr) && (wr.OutgoingCommits ?? 0) > 0);
-        bool hasIncoming = links.Any(wr =>
-            !IsOnTag(wr)
-            && (wr.IncomingCommits ?? 0) > 0);
+        bool hasUnmatched = links.Any(NeedsUpdate);
+        bool isPushRecommended = links.Any(NeedsPush);
+        bool hasIncoming = links.Any(NeedsPull);
         if (!hasUnmatched && !isPushRecommended && !hasIncoming)
             return null;
         var actionLinks = links
-            .Where(wr => !IsOnTag(wr) && (
-                (wr.UnmatchedDeps ?? 0) > 0 ||
-                (wr.OutOfDateFileRepos ?? 0) > 0 ||
-                (wr.OutgoingCommits ?? 0) > 0 ||
-                (wr.IncomingCommits ?? 0) > 0))
+            .Where(wr => NeedsUpdate(wr) || NeedsPush(wr) || NeedsPull(wr))
             .OrderBy(wr => wr.DependencyLevel ?? 0)
             .ThenBy(wr => wr.RepositoryName)
             .ToList();
@@ -123,7 +119,7 @@ public sealed class WorkspacePendingActionsService(
             })
             .ToList();
         var lowestLevel = links
-            .Where(wr => !IsOnTag(wr) && ((wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0))
+            .Where(NeedsUpdate)
             .Min(wr => wr.DependencyLevel);
         return new WorkspaceNotification(
             workspaceId,
@@ -135,5 +131,12 @@ public sealed class WorkspacePendingActionsService(
             lowestLevel,
             totalActionRepoCount);
     }
-    private static bool IsOnTag(WorkspaceRepositoryLinkListItemDto link) => !string.IsNullOrWhiteSpace(link.CheckedOutTag);
+    private static bool NeedsUpdate(WorkspaceRepositoryLinkListItemDto link) =>
+        link.Allows(RepositoryOperation.UpdateDependencies) && ((link.UnmatchedDeps ?? 0) > 0 || (link.OutOfDateFileRepos ?? 0) > 0);
+
+    private static bool NeedsPush(WorkspaceRepositoryLinkListItemDto link) =>
+        link.Allows(RepositoryOperation.Push) && (link.OutgoingCommits ?? 0) > 0;
+
+    private static bool NeedsPull(WorkspaceRepositoryLinkListItemDto link) =>
+        link.Allows(RepositoryOperation.Pull) && (link.IncomingCommits ?? 0) > 0;
 }

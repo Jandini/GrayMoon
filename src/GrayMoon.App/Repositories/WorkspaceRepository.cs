@@ -1,3 +1,4 @@
+using GrayMoon.Application.Repositories.Policy;
 using GrayMoon.Abstractions.Workspaces;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
@@ -344,7 +345,7 @@ public sealed class WorkspaceRepository(
                 continue;
             }
 
-            if (!string.IsNullOrWhiteSpace(checkedOutTag))
+            if (!RepositoryOperationPolicy.IsAllowed(RepositoryOperation.Push, RepositoryPolicySubject.ForCheckout(null, checkedOutTag)))
                 continue;
             if ((outgoingCommits ?? 0) > 0 || branchHasUpstream == false)
                 result.Add(link.RepositoryId);
@@ -478,7 +479,7 @@ public sealed class WorkspaceRepository(
                 continue;
             }
 
-            if (!string.IsNullOrWhiteSpace(checkedOutTag))
+            if (!RepositoryOperationPolicy.IsAllowed(RepositoryOperation.Push, RepositoryPolicySubject.ForCheckout(null, checkedOutTag)))
                 continue;
             if (maxLevel.HasValue && (dependencyLevel ?? 0) > maxLevel.Value)
                 continue;

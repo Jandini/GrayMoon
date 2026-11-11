@@ -9,6 +9,7 @@ using GrayMoon.App.Services.Ci;
 using GrayMoon.App.Services.Orchestration;
 using GrayMoon.Abstractions.Workspaces;
 using GrayMoon.Application.Features;
+using GrayMoon.Application.Repositories.Policy;
 using GrayMoon.Application.Workspaces;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -37,6 +38,7 @@ public sealed partial class WorkspacePushService(
     IWorkspaceCapabilitiesResolver capabilitiesResolver,
     IServiceScopeFactory scopeFactory,
     ILogger<WorkspacePushService> logger,
+    IWorkspaceRepositoryOperationPolicy operationPolicy,
     IHubContext<WorkspaceSyncHub>? hubContext = null,
     PackageRegistrySyncService? packageRegistrySyncService = null,
     NuGetService? nuGetService = null,
@@ -61,6 +63,7 @@ public sealed partial class WorkspacePushService(
     private readonly IWorkspaceCapabilitiesResolver _capabilitiesResolver = capabilitiesResolver ?? throw new ArgumentNullException(nameof(capabilitiesResolver));
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
     private readonly ILogger<WorkspacePushService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly IWorkspaceRepositoryOperationPolicy _operationPolicy = operationPolicy ?? throw new ArgumentNullException(nameof(operationPolicy));
     private readonly int _maxConcurrent = Math.Max(1, workspaceOptions?.Value?.MaxParallelOperations ?? 16);
     private readonly IHubContext<WorkspaceSyncHub>? _hubContext = hubContext;
     private readonly PackageRegistrySyncService? _packageRegistrySyncService = packageRegistrySyncService;
@@ -164,9 +167,9 @@ public sealed partial class WorkspacePushService(
                 wr => wr.RepositoryId,
                 wr => ConnectorHelpers.UnprotectToken(wr.Repository!.Connector?.UserToken));
 
-        var tagPinnedRepoIdsPush = await LoadTagPinnedRepoIdsAsync(workspaceId, contextId, cancellationToken);
-        if (tagPinnedRepoIdsPush.Count > 0)
-            payload = payload.Where(p => !tagPinnedRepoIdsPush.Contains(p.RepoId)).ToList();
+        var pushSkippedRepoIds = await LoadPushSkippedRepoIdsAsync(workspaceId, contextId, cancellationToken);
+        if (pushSkippedRepoIds.Count > 0)
+            payload = payload.Where(p => !pushSkippedRepoIds.Contains(p.RepoId)).ToList();
         if (payload.Count == 0)
         {
             onProgressMessage?.Invoke("No repositories to push.");
@@ -860,7 +863,7 @@ public sealed partial class WorkspacePushService(
             .ToDictionary(
                 wr => wr.RepositoryId,
                 wr => ConnectorHelpers.UnprotectToken(wr.Repository!.Connector?.UserToken));
-        var tagPinnedRepoIds = await LoadTagPinnedRepoIdsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var pushSkippedRepoIds = await LoadPushSkippedRepoIdsAsync(workspace.WorkspaceId, contextId, cancellationToken);
         var ciProvider = _ciProviderResolver == null
             ? NoCiProvider.Instance
             : await _ciProviderResolver.GetForWorkspaceAsync(workspaceId, cancellationToken);
@@ -898,7 +901,7 @@ public sealed partial class WorkspacePushService(
             // stale value already equals the new one.
             await using var levelScope = _scopeFactory.CreateAsyncScope();
             var levelPushService = levelScope.ServiceProvider.GetRequiredService<WorkspacePushService>();
-            if (!await levelPushService.PushLaneLevelAsync(run, done, tagPinnedRepoIds, cancellationToken))
+            if (!await levelPushService.PushLaneLevelAsync(run, done, pushSkippedRepoIds, cancellationToken))
             {
                 LogOperationSummary(run, pushSucceeded: false);
                 return run.PushedRepos.Count;
@@ -927,7 +930,7 @@ public sealed partial class WorkspacePushService(
     private async Task<bool> PushLaneLevelAsync(
         SynchronizedPushRun run,
         DependencyLevelCompletion done,
-        IReadOnlySet<int> tagPinnedRepoIds,
+        IReadOnlySet<int> pushSkippedRepoIds,
         CancellationToken cancellationToken)
     {
         var workspaceId = run.Workspace.WorkspaceId;
@@ -939,7 +942,7 @@ public sealed partial class WorkspacePushService(
         var needingPush = await _workspaceRepository.GetRepositoryIdsNeedingPushAsync(workspaceId, contextId.Value, done.RepoIds, cancellationToken);
         var reposAtLevel = payload
             .Where(p => done.RepoIds.Contains(p.RepoId)
-                && !tagPinnedRepoIds.Contains(p.RepoId)
+                && !pushSkippedRepoIds.Contains(p.RepoId)
                 && (needingPush.Contains(p.RepoId) || done.CommittedRepoIds.Contains(p.RepoId)))
             .ToList();
         var notSelected = done.RepoIds.Where(id => reposAtLevel.All(repo => repo.RepoId != id)).OrderBy(id => id).ToList();
@@ -1006,8 +1009,11 @@ public sealed partial class WorkspacePushService(
         // Tag pin and upstream are per-context: a Feature must not be blocked (or labelled) by the Workspace checkout.
         var checkout = (await LoadContextCheckoutsAsync(workspaceId, contextId, [repositoryId], cancellationToken))
             .GetValueOrDefault(repositoryId);
-        if (!string.IsNullOrWhiteSpace(checkout?.CheckedOutTag))
-            return (false, "Repository is pinned to a tag. Checkout a branch before pushing.");
+        var pushDecision = checkout is null
+            ? RepositoryOperationDecision.Allowed
+            : RepositoryOperationPolicy.Evaluate(RepositoryOperation.Push, RepositoryOperationScope.Individual, checkout.ToPolicySubject());
+        if (!pushDecision.IsAllowed)
+            return (false, pushDecision.Message);
 
         var repo = link.Repository;
         var workerArgs = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
@@ -1087,9 +1093,9 @@ public sealed partial class WorkspacePushService(
                 wr => wr.RepositoryId,
                 wr => ConnectorHelpers.UnprotectToken(wr.Repository!.Connector?.UserToken));
 
-        var tagPinnedRepoIdsInLevelOrder = await LoadTagPinnedRepoIdsAsync(workspaceId, contextId, cancellationToken);
-        if (tagPinnedRepoIdsInLevelOrder.Count > 0)
-            payload = payload.Where(p => !tagPinnedRepoIdsInLevelOrder.Contains(p.RepoId)).ToList();
+        var pushSkippedRepoIdsInLevelOrder = await LoadPushSkippedRepoIdsAsync(workspaceId, contextId, cancellationToken);
+        if (pushSkippedRepoIdsInLevelOrder.Count > 0)
+            payload = payload.Where(p => !pushSkippedRepoIdsInLevelOrder.Contains(p.RepoId)).ToList();
         if (payload.Count == 0)
         {
             onProgressMessage?.Invoke("No repositories to push.");
@@ -1190,9 +1196,9 @@ public sealed partial class WorkspacePushService(
                 wr => wr.RepositoryId,
                 wr => ConnectorHelpers.UnprotectToken(wr.Repository!.Connector?.UserToken));
 
-        var tagPinnedRepoIdsParallel = await LoadTagPinnedRepoIdsAsync(workspaceId, contextId, cancellationToken);
-        if (tagPinnedRepoIdsParallel.Count > 0)
-            payload = payload.Where(p => !tagPinnedRepoIdsParallel.Contains(p.RepoId)).ToList();
+        var pushSkippedRepoIdsParallel = await LoadPushSkippedRepoIdsAsync(workspaceId, contextId, cancellationToken);
+        if (pushSkippedRepoIdsParallel.Count > 0)
+            payload = payload.Where(p => !pushSkippedRepoIdsParallel.Contains(p.RepoId)).ToList();
         if (payload.Count == 0)
         {
             onProgressMessage?.Invoke("No repositories to push.");
@@ -1524,7 +1530,7 @@ public sealed partial class WorkspacePushService(
         // Persist the remote branch for each pushed repo so it appears in Remotes without calling refresh branches.
         var now = DateTime.UtcNow;
         var remoteCandidates = checkouts
-            .Where(c => string.IsNullOrWhiteSpace(c.Value.CheckedOutTag) && !string.IsNullOrWhiteSpace(c.Value.BranchName))
+            .Where(c => c.Value.AllowsPush && !string.IsNullOrWhiteSpace(c.Value.BranchName))
             .Select(c => (
                 RepositoryId: c.Key,
                 c.Value.WorkspaceRepositoryId,
@@ -1568,12 +1574,12 @@ public sealed partial class WorkspacePushService(
         var workspaceFolderName = workerArgs.WorkspaceFolderName;
         var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
 
-        var tagPinnedInContext = checkouts
-            .Where(c => !string.IsNullOrWhiteSpace(c.Value.CheckedOutTag))
+        var notPushableInContext = checkouts
+            .Where(c => !c.Value.AllowsPush)
             .Select(c => c.Key)
             .ToHashSet();
         var results = await Task.WhenAll(repos
-            .Where(r => !tagPinnedInContext.Contains(r.RepoId))
+            .Where(r => !notPushableInContext.Contains(r.RepoId))
             .Select(async repo =>
         {
             try
@@ -1640,7 +1646,13 @@ public sealed partial class WorkspacePushService(
     }
 
     /// <summary>What a context has checked out in one repository. All null when the context has no state row yet.</summary>
-    private sealed record ContextCheckout(int WorkspaceRepositoryId, string? BranchName, string? CheckedOutTag, bool? BranchHasUpstream);
+    private sealed record ContextCheckout(int WorkspaceRepositoryId, string? BranchName, string? CheckedOutTag, bool? BranchHasUpstream)
+    {
+        /// <summary>The role and the context kind are not loaded here; no push rule reads them.</summary>
+        public RepositoryPolicySubject ToPolicySubject() => RepositoryPolicySubject.ForCheckout(BranchName, CheckedOutTag);
+
+        public bool AllowsPush => RepositoryOperationPolicy.IsAllowed(RepositoryOperation.Push, ToPolicySubject());
+    }
 
     /// <summary>
     /// Branch, tag pin and upstream flag per repository id, for the context being pushed. The special Workspace reads
@@ -1685,13 +1697,14 @@ public sealed partial class WorkspacePushService(
                 : new ContextCheckout(l.WorkspaceRepositoryId, null, null, null));
     }
 
-    private async Task<HashSet<int>> LoadTagPinnedRepoIdsAsync(
+    private async Task<HashSet<int>> LoadPushSkippedRepoIdsAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken)
-        => (await LoadContextCheckoutsAsync(workspaceId, contextId, null, cancellationToken))
-            .Where(c => !string.IsNullOrWhiteSpace(c.Value.CheckedOutTag))
-            .Select(c => c.Key)
+        => (await _operationPolicy.PartitionAsync(
+                workspaceId, contextId, RepositoryOperation.Push, repositoryIds: null, RepositorySubjectSource.Context, cancellationToken))
+            .Skipped
+            .Select(skip => skip.RepositoryId)
             .ToHashSet();
 
     /// <summary>

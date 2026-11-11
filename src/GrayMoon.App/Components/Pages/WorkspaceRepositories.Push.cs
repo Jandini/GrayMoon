@@ -1,3 +1,4 @@
+using GrayMoon.Application.Repositories.Policy;
 using GrayMoon.Abstractions.Exceptions;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services;
@@ -30,7 +31,7 @@ public sealed partial class WorkspaceRepositories
 
             var repoIdsWithUnpushed = plan.RepositoryIds;
             var repoIdsThatNeedPush = allLinks
-                .Where(wr => !wr.IsOnTag && (wr.OutgoingCommits ?? 0) > 0)
+                .Where(wr => Allows(wr, RepositoryOperation.Push) && (wr.OutgoingCommits ?? 0) > 0)
                 .Select(wr => wr.RepositoryId)
                 .ToHashSet();
             if (PushClickRouter.ForCapabilities(_capabilities) == PushClickRoute.StartDirect)
@@ -86,7 +87,7 @@ public sealed partial class WorkspaceRepositories
     {
         if (workspace == null || IsJobRunning)
             return;
-        if (IsRepoOnTag(repositoryId))
+        if (!IsRepoAllowed(repositoryId, RepositoryOperation.Push))
         {
             ToastService.Show(TagBlockedActionMessage);
             return;
@@ -116,7 +117,7 @@ public sealed partial class WorkspaceRepositories
             var contextId = RequireSelectedContextId();
             var allLinks = await GetAllLinksForOperationAsync();
             var repoIdsThatNeedPush = allLinks
-                .Where(wr => !wr.IsOnTag && (wr.OutgoingCommits ?? 0) > 0)
+                .Where(wr => Allows(wr, RepositoryOperation.Push) && (wr.OutgoingCommits ?? 0) > 0)
                 .Select(wr => wr.RepositoryId)
                 .ToHashSet();
             if (_capabilities is null || !_capabilities.UsesDependencyAwarePush)

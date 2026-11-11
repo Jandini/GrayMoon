@@ -90,3 +90,56 @@ dotnet test src/GrayMoon.App.Tests/GrayMoon.App.Tests.csproj --filter "FullyQual
 Result: 16 passed.
 
 Not run for this fix: Worker and Common tests (no file of theirs changed; they run again at the end of 0B), and a manual check against a real Workspace repository.
+
+## Phase 0B - 2026-11-12
+
+Base: commit `92363c3c` (F22 fix committed by the owner). Not committed.
+
+| Step | Result | Change from the F22 run |
+|---|---|---|
+| Build (`dotnet build GrayMoon.slnx`) | succeeded, 0 warnings, 0 errors | - |
+| Common tests | 393 passed, 0 failed, 0 skipped (13 s) | - |
+| Worker tests | 1015 passed, 0 failed, 1 skipped (4 m 3 s) | same skipped test as the baseline |
+| App tests | 2748 passed, 0 failed, 0 skipped (32 s) | +603, all new policy tests (most are theory cases) |
+| Worker `Category=Long` | 2 passed, 0 failed (25 s) | - |
+| App `Category=Long` | 2 passed, 0 failed (10 s) | - |
+
+New test files: `Policy/RepositoryOperationPolicyMatrixTests.cs`, `Policy/WorkspaceRepositoryOperationPolicyServiceTests.cs`, `Policy/RepositoryOperationPolicyExpressionsTests.cs`, `Policy/RepositorySkipReportingTests.cs`, `Conventions/RepositoryPolicyConventionTests.cs`.
+
+The 0A characterization tests (`Policy/Characterization`, 87 tests) are unchanged and pass.
+
+Existing tests changed, none in what they assert:
+
+- `FeatureContextBranchRefreshScopingTests.cs`: four calls to the removed `GetTagPinnedRepositoryIdsAsync` now call `GetSkippedRepositoryIdsAsync` for Restore Packages; the expected values are the same.
+- `BranchRowSaveRaceTests.cs`, `SqlitePerformanceTests.cs`: one more constructor argument (the policy) where `WorkspacePushService` is built by hand.
+- `SyncStateTestContext.cs`, `WorkspaceB4ContextLeakTests.cs`, `WorkspaceProjectRepositoryContextScopingTests.cs`, `WorkspaceProjectRepositoryGeneratedPackageTests.cs`: the policy service is registered; `WorkspaceProjectRepositoryContextScopingTests.cs` also registers a context factory for it.
+
+Focused runs:
+
+```
+dotnet test src/GrayMoon.App.Tests/GrayMoon.App.Tests.csproj --filter "FullyQualifiedName~GrayMoon.App.Tests.Policy|FullyQualifiedName~RepositoryPolicyConventionTests"
+dotnet test src/GrayMoon.App.Tests/GrayMoon.App.Tests.csproj --filter "FullyQualifiedName~Policy.Characterization"
+```
+
+Results: 690 passed; 87 passed.
+
+### Two existing tests that fail together
+
+During 0B the full App run failed twice with one test each, and passed on the next run:
+
+- `AiAndGitChangesSweepTests.Cancel_racing_the_end_of_a_run_never_throws`
+- `BackgroundJobRefusedStartTests.Workspace_job_refused_by_the_lock_reports_not_started`
+
+Each passes alone. Run together with a filter they fail in most runs:
+
+```
+dotnet test src/GrayMoon.App.Tests/GrayMoon.App.Tests.csproj --filter "FullyQualifiedName~AiAndGitChangesSweepTests|FullyQualifiedName~BackgroundJobRefusedStartTests"
+```
+
+The same command fails in the same way on an export of commit `ece83ab7` (built with `-p:DisableGitVersionTask=true`, 3 of 3 runs), so the cause is older than 0B and is not in a file 0B changed. The cause was not investigated.
+
+### Not run
+
+- No check that each new test detects a defect by breaking the code on purpose, except what the tests show by themselves: the convention test failed with the full list of readers before the allow-list was filled in, and the service tests failed where a test host had no policy registered.
+- The manual smoke list (owner, at the gates).
+- No test was run on a second machine or operating system.

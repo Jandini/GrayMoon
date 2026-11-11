@@ -339,8 +339,8 @@ public sealed class WorkspaceFeatureOperations(
                         {
                             mainRepositoryPath = mainPath,
                             worktreePath = row.WorktreePath,
-                            branchName = row.PinnedTag == null ? name : null,
-                            detach = row.PinnedTag != null,
+                            branchName = FeatureBranchPolicy.ExpectedBranch(name, row.PinnedTag),
+                            detach = row.IsDetached,
                             baseCommitSha = row.BaseCommitSha,
                             divergenceBaseBranch = row.ParentBranchName,
                             workspaceId,
@@ -383,7 +383,7 @@ public sealed class WorkspaceFeatureOperations(
                     }
 
                     await writeDb.SaveChangesAsync(cancellationToken);
-                    if (tracked.State == WorkspaceFeatureRepositoryState.Ready && row.PinnedTag == null)
+                    if (tracked.State == WorkspaceFeatureRepositoryState.Ready && !row.IsDetached)
                         await PersistLocalBranchAsync(row.WorkspaceRepositoryId, name, cancellationToken);
                     logger.FeatureRepositoryTiming(
                         "Create", workspaceId, name, link.Repository?.RepositoryName,
@@ -513,7 +513,7 @@ public sealed class WorkspaceFeatureOperations(
             .ToDictionary(
                 r => r.WorkspaceRepository!.RepositoryId,
                 r => states.FirstOrDefault(s => s.WorkspaceRepositoryId == r.WorkspaceRepositoryId)?.BranchName
-                    ?? (r.PinnedTag == null ? info.FeatureName : null));
+                    ?? (r.IsDetached ? null : info.FeatureName));
 
         // PR refresh (GitHub) and Feature workspace path resolution are independent; run together
         // so the Checking overlay does not wait for them sequentially.
@@ -548,7 +548,7 @@ public sealed class WorkspaceFeatureOperations(
                     // The Feature branch itself, not whatever happens to be checked out right now
                     // (09 SB-2): Remove always deletes this name, so the analysis must judge it, even
                     // when the worktree has drifted to another branch or a detached commit.
-                    var featureBranchName = row.PinnedTag == null ? info.FeatureName : null;
+                    var featureBranchName = row.IsDetached ? null : info.FeatureName;
                     var disk = await InspectWorktreeDiskStatusAsync(
                         mainPath, row.WorktreePath, row.WorkspaceRepository?.DefaultBranchName, featureBranchName, cancellationToken);
                     var live = await ProbeFeatureWorktreeLiveStatusAsync(
@@ -581,7 +581,7 @@ public sealed class WorkspaceFeatureOperations(
                         WorktreePath = row.WorktreePath,
                         WorktreeExists = disk.Exists,
                         WorktreeStatusUnknown = disk.StatusUnknown,
-                        BranchName = state?.BranchName ?? (row.PinnedTag == null ? info.FeatureName : null),
+                        BranchName = state?.BranchName ?? (row.IsDetached ? null : info.FeatureName),
                         HeadCommit = live.HeadCommit ?? state?.HeadCommit,
                         HasUncommittedChanges = live.HasUncommittedChanges,
                         HasStagedChanges = live.HasStagedChanges,
@@ -931,7 +931,7 @@ public sealed class WorkspaceFeatureOperations(
                     // §27.8 / D4: after worktree remove, optionally delete the Feature branch locally
                     // and/or remotely from the main repository. Tag-pinned repositories never got a
                     // Feature branch; a same-named branch there is not ours.
-                    var branchName = row.PinnedTag == null ? info.FeatureName : null;
+                    var branchName = row.IsDetached ? null : info.FeatureName;
                     var planRow = driftByWrId.GetValueOrDefault(row.WorkspaceRepositoryId);
                     var hasRemoteUpstream = planRow?.FeatureBranchHasUpstream == true;
                     RemoveFeatureBranchOutcome branchOutcome;
@@ -1974,8 +1974,8 @@ public sealed class WorkspaceFeatureOperations(
                         {
                             mainRepositoryPath = mainPath,
                             worktreePath = row.WorktreePath,
-                            branchName = row.PinnedTag == null ? featureName : null,
-                            detach = row.PinnedTag != null,
+                            branchName = FeatureBranchPolicy.ExpectedBranch(featureName, row.PinnedTag),
+                            detach = row.IsDetached,
                             baseCommitSha = row.BaseCommitSha,
                             divergenceBaseBranch = row.ParentBranchName,
                             workspaceId = info.WorkspaceId,
@@ -2016,7 +2016,7 @@ public sealed class WorkspaceFeatureOperations(
                     tracked.State = WorkspaceFeatureRepositoryState.Ready;
                     tracked.LastError = null;
                     await writeDb.SaveChangesAsync(cancellationToken);
-                    if (row.PinnedTag == null)
+                    if (!row.IsDetached)
                         await PersistLocalBranchAsync(row.WorkspaceRepositoryId, featureName, cancellationToken);
                     results.Add((row.WorkspaceRepositoryId, new FeatureRepairRepositoryResult(
                         repoName, FeatureRepositoryOperationOutcome.Succeeded, null)));
@@ -2249,7 +2249,7 @@ public sealed class WorkspaceFeatureOperations(
                         repoName, FeatureRepositoryOperationOutcome.Failed, removeResp.Error ?? "RemoveGitWorktree failed."));
                 }
 
-                var branchName = row.PinnedTag == null ? featureName : null;
+                var branchName = FeatureBranchPolicy.ExpectedBranch(featureName, row.PinnedTag);
                 var defaultBranch = linkByWrId.TryGetValue(row.WorkspaceRepositoryId, out var branchLink)
                     ? branchLink.DefaultBranchName
                     : null;

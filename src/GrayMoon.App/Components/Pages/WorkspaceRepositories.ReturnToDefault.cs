@@ -1,3 +1,4 @@
+using GrayMoon.Application.Repositories.Policy;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services;
 
@@ -124,7 +125,7 @@ public sealed partial class WorkspaceRepositories
         }
         if (string.IsNullOrWhiteSpace(repositoryName))
             return Task.CompletedTask;
-        if (IsRepoOnTag(repositoryId))
+        if (!IsRepoAllowed(repositoryId, RepositoryOperation.ReturnToDefault))
         {
             ToastService.Show(TagBlockedActionMessage);
             CloseSwitchBranchModal();
@@ -292,7 +293,7 @@ public sealed partial class WorkspaceRepositories
         if (workspace == null || repositoryIds == null || repositoryIds.Count == 0 || IsJobRunning)
             return Task.CompletedTask;
 
-        repositoryIds = repositoryIds.Where(id => !IsRepoOnTag(id)).ToList();
+        repositoryIds = repositoryIds.Where(id => IsRepoAllowed(id, RepositoryOperation.ReturnToDefault)).ToList();
         if (repositoryIds.Count == 0)
         {
             ToastService.Show("All repositories are on tags; checkout a branch first.");
@@ -351,7 +352,7 @@ public sealed partial class WorkspaceRepositories
         var allLinks = await GetAllLinksForOperationAsync();
         var eligibleRepos = allLinks
             .Where(wr =>
-                !wr.IsOnTag &&
+                Allows(wr, RepositoryOperation.ReturnToDefault) &&
                 !string.IsNullOrWhiteSpace(wr.BranchName) &&
                 !string.IsNullOrWhiteSpace(wr.DefaultBranchName) &&
                 !string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal))

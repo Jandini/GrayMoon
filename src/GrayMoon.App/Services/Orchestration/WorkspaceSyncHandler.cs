@@ -1,3 +1,5 @@
+using GrayMoon.App.Services.Policy;
+using GrayMoon.Application.Repositories.Policy;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using GrayMoon.App.Models;
@@ -271,7 +273,7 @@ public sealed partial class WorkspaceSyncHandler(
             }
 
             // Tag-pinned / tag-checked-out repositories are never part of Return to Default - leave them untouched.
-            if (!string.IsNullOrWhiteSpace(dto.CheckedOutTag))
+            if (!dto.Allows(RepositoryOperation.ReturnToDefault))
                 continue;
 
             var needsSync = !string.IsNullOrWhiteSpace(dto.BranchName)
@@ -457,7 +459,8 @@ public sealed partial class WorkspaceSyncHandler(
 
     internal static ReturnToDefaultRepositoryPlan ClassifyRepository(WorkspaceRepositoryLinkListItemDto dto)
     {
-        var isOnTag = !string.IsNullOrWhiteSpace(dto.CheckedOutTag);
+        // The plan's IsOnTag is the policy's answer: the repository is left out of Return to Default.
+        var isOnTag = !dto.Allows(RepositoryOperation.ReturnToDefault);
         var isAlreadyOnDefault = !isOnTag
             && (string.IsNullOrWhiteSpace(dto.BranchName)
                 || string.Equals(dto.BranchName, dto.DefaultBranchName, StringComparison.Ordinal));

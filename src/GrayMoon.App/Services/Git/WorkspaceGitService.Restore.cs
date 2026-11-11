@@ -1,3 +1,4 @@
+using GrayMoon.Application.Repositories.Policy;
 using System.Collections.Concurrent;
 using GrayMoon.Abstractions.Worker;
 using GrayMoon.Abstractions.Exceptions;
@@ -81,14 +82,14 @@ public sealed partial class WorkspaceGitService
 
         setProgress("Restoring packages...");
 
-        var tagPinnedIds = await GetTagPinnedRepositoryIdsAsync(workspaceId, contextId, cancellationToken);
+        var skippedIds = await GetSkippedRepositoryIdsAsync(workspaceId, contextId, RepositoryOperation.RestorePackages, RepositorySubjectSource.Context, cancellationToken);
 
 
         var projects = await _workspaceProjectRepository.GetByWorkspaceIdAsync(workspaceId, (WorkspaceFeatureContextId?)contextId);
         var repoGroups = projects
             .Where(p => p.Repository != null
                         && !string.IsNullOrWhiteSpace(p.ProjectFilePath)
-                        && !tagPinnedIds.Contains(p.RepositoryId))
+                        && !skippedIds.Contains(p.RepositoryId))
             .GroupBy(p => (p.RepositoryId, RepoName: p.Repository!.RepositoryName))
             .Select(g => (g.Key.RepoName, ProjectPaths: (IReadOnlyList<string>)g.Select(p => p.ProjectFilePath!).ToList()))
             .ToList();
@@ -120,7 +121,7 @@ public sealed partial class WorkspaceGitService
 
         setProgress("Restoring packages...");
 
-        var tagPinnedIds = await GetTagPinnedRepositoryIdsAsync(workspaceId, contextId, cancellationToken);
+        var skippedIds = await GetSkippedRepositoryIdsAsync(workspaceId, contextId, RepositoryOperation.RestorePackages, RepositorySubjectSource.Context, cancellationToken);
 
 
         var projects = await _workspaceProjectRepository.GetByWorkspaceIdAsync(workspaceId, (WorkspaceFeatureContextId?)contextId);
@@ -128,7 +129,7 @@ public sealed partial class WorkspaceGitService
             .Where(p => p.Repository != null
                         && !string.IsNullOrWhiteSpace(p.ProjectFilePath)
                         && syncedRepoIds.Contains(p.RepositoryId)
-                        && !tagPinnedIds.Contains(p.RepositoryId))
+                        && !skippedIds.Contains(p.RepositoryId))
             .GroupBy(p => (p.RepositoryId, RepoName: p.Repository!.RepositoryName))
             .Select(g => (g.Key.RepoName, ProjectPaths: (IReadOnlyList<string>)g.Select(p => p.ProjectFilePath!).ToList()))
             .ToList();
@@ -142,29 +143,28 @@ public sealed partial class WorkspaceGitService
     }
 
     /// <summary>
-    /// Repositories the given context has checked out on a tag. The special Workspace reads the shared link; a Feature
-    /// reads its own context state, and a repository it has no state for is not pinned (never borrowed from the Workspace).
+    /// Repositories the policy leaves out of a Workspace-wide <paramref name="operation"/> in the given context.
+    /// <paramref name="source"/> says which row the context's branch and tag are read from.
     /// </summary>
-    internal async Task<HashSet<int>> GetTagPinnedRepositoryIdsAsync(int workspaceId, WorkspaceFeatureContextId contextId, CancellationToken cancellationToken)
-    {
-        var context = await _contextResolver.GetRequiredAsync(contextId, workspaceId, cancellationToken);
-        var pinned = context.IsSpecialWorkspace
-            ? await _dbContext.WorkspaceRepositories
-                .AsNoTracking()
-                .Where(l => l.WorkspaceId == workspaceId && l.CheckedOutTag != null && l.CheckedOutTag != "")
-                .Select(l => l.RepositoryId)
-                .ToListAsync(cancellationToken)
-            : await _dbContext.WorkspaceRepositoryContextStates
-                .AsNoTracking()
-                .Where(s => s.WorkspaceFeatureContextId == contextId.Value && s.CheckedOutTag != null && s.CheckedOutTag != "")
-                .Join(
-                    _dbContext.WorkspaceRepositories.AsNoTracking().Where(l => l.WorkspaceId == workspaceId),
-                    s => s.WorkspaceRepositoryId,
-                    l => l.WorkspaceRepositoryId,
-                    (s, l) => l.RepositoryId)
-                .ToListAsync(cancellationToken);
-        return pinned.ToHashSet();
-    }
+    internal async Task<HashSet<int>> GetSkippedRepositoryIdsAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        RepositoryOperation operation,
+        RepositorySubjectSource source,
+        CancellationToken cancellationToken) =>
+        (await GetSkippedRepositoriesAsync(workspaceId, contextId, operation, source, cancellationToken))
+            .Select(skip => skip.RepositoryId)
+            .ToHashSet();
+
+    /// <summary>The same repositories with the reason each one was left out, for the result of the run.</summary>
+    internal async Task<IReadOnlyList<RepositorySkip>> GetSkippedRepositoriesAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        RepositoryOperation operation,
+        RepositorySubjectSource source,
+        CancellationToken cancellationToken) =>
+        (await _operationPolicy.PartitionAsync(workspaceId, contextId, operation, repositoryIds: null, source, cancellationToken))
+            .Skipped;
 
     /// <summary>Shows the failed restores as the operation's progress text; the job terminal and the log already have them.</summary>
     private static void ReportRestoreFailures(IReadOnlyList<PackageRestoreOutcome> outcomes, Action<string> setProgress)

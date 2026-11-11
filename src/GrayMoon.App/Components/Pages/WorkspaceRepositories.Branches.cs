@@ -1,3 +1,4 @@
+using GrayMoon.Application.Repositories.Policy;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services;
 
@@ -443,7 +444,7 @@ public sealed partial class WorkspaceRepositories
     {
         var wr = TryGetLink(repositoryId);
         var repo = wr?.Repository;
-        if (wr == null || repo == null || string.IsNullOrWhiteSpace(wr.BranchName) || wr.IsOnTag)
+        if (wr == null || repo == null || string.IsNullOrWhiteSpace(wr.BranchName) || !Allows(wr, RepositoryOperation.UpdateBranchFromDefault))
             return;
         if (!string.IsNullOrWhiteSpace(wr.DefaultBranchName)
             && string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.OrdinalIgnoreCase))

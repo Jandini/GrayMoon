@@ -358,6 +358,7 @@ public sealed class B4ContextLeakTestContext : IAsyncDisposable
         services.AddScoped<WorkspaceFileVersionConfigRepository>();
         services.AddScoped<WorkspaceRepositoryCustomDependencyRepository>();
         services.AddScoped<WorkspaceProjectRepository>();
+        services.AddSingleton<GrayMoon.Application.Repositories.Policy.IWorkspaceRepositoryOperationPolicy, GrayMoon.App.Services.Policy.WorkspaceRepositoryOperationPolicyService>();
         services.AddScoped<WorkspaceFileRepository>();
 
         var provider = services.BuildServiceProvider();

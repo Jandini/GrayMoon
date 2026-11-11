@@ -320,9 +320,11 @@ public sealed class ContextScopingTestContext : IAsyncDisposable
         var services = new ServiceCollection();
         services.AddLogging(b => b.SetMinimumLevel(LogLevel.Warning));
         services.AddDbContext<AppDbContext>(o => o.UseSqlite(connection), ServiceLifetime.Scoped);
+        services.AddDbContextFactory<AppDbContext>(o => o.UseSqlite(connection), ServiceLifetime.Singleton);
         services.AddScoped<WorkspaceFileVersionConfigRepository>();
         services.AddScoped<WorkspaceRepositoryCustomDependencyRepository>();
         services.AddScoped<WorkspaceProjectRepository>();
+        services.AddSingleton<GrayMoon.Application.Repositories.Policy.IWorkspaceRepositoryOperationPolicy, GrayMoon.App.Services.Policy.WorkspaceRepositoryOperationPolicyService>();
 
         var provider = services.BuildServiceProvider();
         var ctx = new ContextScopingTestContext(connection, provider);
@@ -500,9 +502,11 @@ public sealed class WorkspaceOnlyTestContext : IAsyncDisposable
         var services = new ServiceCollection();
         services.AddLogging(b => b.SetMinimumLevel(LogLevel.Warning));
         services.AddDbContext<AppDbContext>(o => o.UseSqlite(connection), ServiceLifetime.Scoped);
+        services.AddDbContextFactory<AppDbContext>(o => o.UseSqlite(connection), ServiceLifetime.Singleton);
         services.AddScoped<WorkspaceFileVersionConfigRepository>();
         services.AddScoped<WorkspaceRepositoryCustomDependencyRepository>();
         services.AddScoped<WorkspaceProjectRepository>();
+        services.AddSingleton<GrayMoon.Application.Repositories.Policy.IWorkspaceRepositoryOperationPolicy, GrayMoon.App.Services.Policy.WorkspaceRepositoryOperationPolicyService>();
 
         var provider = services.BuildServiceProvider();
         var ctx = new WorkspaceOnlyTestContext(connection, provider);

@@ -403,6 +403,7 @@ public sealed class GeneratedPackageTestContext : IAsyncDisposable
         services.AddScoped<WorkspaceFileVersionConfigRepository>();
         services.AddScoped<WorkspaceRepositoryCustomDependencyRepository>();
         services.AddScoped<WorkspaceProjectRepository>();
+        services.AddSingleton<GrayMoon.Application.Repositories.Policy.IWorkspaceRepositoryOperationPolicy, GrayMoon.App.Services.Policy.WorkspaceRepositoryOperationPolicyService>();
 
         var provider = services.BuildServiceProvider();
         var ctx = new GeneratedPackageTestContext(connection, provider);

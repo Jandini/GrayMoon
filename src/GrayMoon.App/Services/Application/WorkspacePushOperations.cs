@@ -1,3 +1,4 @@
+using GrayMoon.Application.Repositories.Policy;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services.Orchestration;
@@ -15,7 +16,9 @@ public sealed class WorkspacePushOperations(
     WorkspaceRepository workspaceRepository,
     IWorkspaceCapabilitiesResolver capabilitiesResolver,
     WorkspacePushStrategySelector strategySelector,
-    WorkspaceOperationOutcomeStore outcomes) : IWorkspacePushOperations
+    WorkspaceOperationOutcomeStore outcomes,
+    IWorkspaceRepositoryOperationPolicy operationPolicy,
+    ILogger<WorkspacePushOperations> logger) : IWorkspacePushOperations
 {
     public async Task<WorkspacePushPlan> GetPlanAsync(
         int workspaceId,
@@ -85,7 +88,16 @@ public sealed class WorkspacePushOperations(
         var result = await pushHandler.RunPushWithDependenciesAsync(strategy, run, progress, cancellationToken: cancellationToken);
         if (!result.Success)
             recorder.Result(result);
-        return result;
+
+        var skipped = (await operationPolicy.PartitionAsync(
+            workspaceId, contextId, RepositoryOperation.Push, repositoryIds.ToList(), RepositorySubjectSource.Context, cancellationToken)).Skipped;
+        if (skipped.Count == 0)
+            return result;
+
+        logger.LogInformation(
+            "Push {RunId}: workspace {WorkspaceId}: {Count} repositories left out of the push: {Repositories}",
+            runId, workspaceId, skipped.Count, string.Join(", ", skipped.Select(skip => $"{skip.RepositoryName} ({skip.Reason})")));
+        return result with { Skipped = skipped };
     }
 
     public async Task<OperationResult> PushPendingAsync(

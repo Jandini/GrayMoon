@@ -1,3 +1,6 @@
+using System.Text.Json.Serialization;
+using GrayMoon.Application.Repositories.Policy;
+
 namespace GrayMoon.Application;
 
 public sealed record OperationProgress(string Message, int? Completed = null, int? Total = null);
@@ -8,6 +11,13 @@ public sealed record OperationResult(
     IReadOnlyDictionary<int, string>? RepoErrors = null,
     IReadOnlyDictionary<int, string>? LevelErrors = null)
 {
+    /// <summary>
+    /// Repositories the policy left out of the run, with the reason. Recorded and logged only: not shown to the user
+    /// and not part of the REST response.
+    /// </summary>
+    [JsonIgnore]
+    public IReadOnlyList<RepositorySkip> Skipped { get; init; } = [];
+
     /// <summary>
     /// Per-repository outcome of a successful Remove Feature (D2): worktree removed, local branch
     /// outcome and leftover-files report. Null for every other operation that returns this type, and
@@ -101,6 +111,13 @@ public sealed record RemoveFeatureRepositoryReport(
 /// </summary>
 public sealed record DependencyUpdateRunResult(bool Success, IReadOnlySet<int> SyncedRepoIds)
 {
+    /// <summary>
+    /// Repositories the policy left out of the run, with the reason. Recorded and logged only: not shown to the user
+    /// and not part of the REST response.
+    /// </summary>
+    [JsonIgnore]
+    public IReadOnlyList<RepositorySkip> Skipped { get; init; } = [];
+
     public static DependencyUpdateRunResult Ok(IReadOnlySet<int>? syncedRepoIds = null)
         => new(true, syncedRepoIds ?? new HashSet<int>());
 
@@ -120,6 +137,10 @@ public sealed record UpdateAndPushResult(bool Pipelined, DependencyUpdateRunResu
     public static UpdateAndPushResult NotPipelined { get; } = new(false, DependencyUpdateRunResult.Ok(), null);
 
     public bool Success => Update.Success && (Push?.Success ?? true);
+
+    /// <summary>Repositories the policy left out of either lane. Recorded and logged only.</summary>
+    [JsonIgnore]
+    public IReadOnlyList<RepositorySkip> Skipped => [.. Update.Skipped, .. Push?.Skipped ?? []];
 }
 
 /// <summary>
@@ -136,6 +157,10 @@ public sealed record PrepareWorkspaceResult(
     UpdateAndPushExecutionResult? Combined = null,
     bool PushPending = false)
 {
+    /// <summary>Repositories the policy left out of the dependency update. Recorded and logged only.</summary>
+    [JsonIgnore]
+    public IReadOnlyList<RepositorySkip> Skipped => Update?.Skipped ?? [];
+
     public const string BranchesStoppedMessage =
         "Prepare Workspace stopped: branches could not be created in all selected repositories. No dependency updates or pushes were started.";
 

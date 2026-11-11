@@ -259,6 +259,26 @@ Not in 0B: closing F5 gaps, fixing F6/F22, unifying counter definitions, showing
 
 Exit: 0A tests unchanged and green, new policy tests green. **Stop for review, then 0C.**
 
+### 0B as built (2026-11-12)
+
+Done, not committed, waiting for review. Where the result differs from the steps above:
+
+- **Subject carries a bool, not the role enum.** `RepositoryPolicySubject.IsWorkspaceRepository` replaces `WorkspaceRepositoryRole Role` (the enum is not visible to `GrayMoon.Application`). The enum did not move.
+- **Subject source has three values:** `Context`, `ContextStateFirst` (the push plan: a state row wins in the Workspace too) and `LegacySharedLink` (the update path, F6). The "missing Feature state row" case needs no value of its own: a Feature repository without a state row is on no branch and no tag under `Context` and `ContextStateFirst`, as before.
+- **Allowed on a tag, as today:** Sync, Fetch, manual and Workspace checkout, Create Branch, both branch deletions, Set Upstream, Run Workflow, Stage, Unstage, Discard. "Skip repos on tags" in the Workspace-wide dialogs stays a user option and reads `IsOnTag`; it is not a rule.
+- **Where the policy is asked:** services that load their own rows use `IWorkspaceRepositoryOperationPolicy` (`WorkspaceRepositoryOperationPolicyService`); code that already holds rows uses the `Allows` extensions; the four header projections use `RepositoryOperationPolicyExpressions`, expanded into column comparisons before the query runs.
+- **Messages:** the two existing texts are constants on `RepositoryOperationPolicy`. A page still shows the general text for every operation, push included, as before.
+- **Skips (4.4):** `Skipped` is on `OperationResult` and `DependencyUpdateRunResult`, and computed on `UpdateAndPushResult` and `PrepareWorkspaceResult`. It is filled by a Workspace push (`WorkspacePushOperations.PushAsync`) and by a dependency update run, written to the log, and marked `[JsonIgnore]`. The pipelined push lane and Return to Default do not fill it yet.
+- **Entry points outside the Workspace lock** were not touched in 0B; they have no tag rule to move. The decision "check the policy at dispatch" applies from Phase 1.
+
+Left for 0C or later, found while moving the checks:
+
+- **Sync from a row or a level leaves a tag checkout alone; Workspace Sync includes it.** One `Sync` operation cannot express both, so the row badge, the level Sync filter and the level action buttons still read the tag. They are marked OPEN in `RepositoryPolicyConventionTests`.
+- **The commits badge of a row** is disabled by the tag itself, because it stands for pull and push together.
+- **The header counters compare the column with null and the empty string; the policy also treats blank text as no tag.** Nothing stores blank text (F8). `Blank_text_is_a_tag_to_the_query_form_only` records the difference.
+- **The convention test scans compiled calls.** A tag read written inside a database query expression is not seen by it.
+- **Two existing tests fail when run together and alone they pass** (`AiAndGitChangesSweepTests.Cancel_racing_the_end_of_a_run_never_throws`, `BackgroundJobRefusedStartTests.Workspace_job_refused_by_the_lock_reports_not_started`). The same happens on commit `ece83ab7`; it is not caused by 0B. See the test log.
+
 ## 7. Phase 0C - gate, then 0D
 
 **0C.** Run the full command list of 0A step 5 again, including both explicit `Long` runs. Compare totals and names with the baseline; every difference is explained in the log. Then the manual smoke list M1-M8 in section 9 against a running App and Worker with one tag-pinned repository. Result in the log: passed / not passed, with what could not run. **Stop. Phase 1 starts only on the owner's written go-ahead.**

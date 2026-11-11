@@ -1,3 +1,4 @@
+using GrayMoon.Application.Repositories.Policy;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.Application.Features;
@@ -101,7 +102,9 @@ public sealed class DependencyUpdateOrchestrator(
         {
             var versionFilesOk = await RunVersionFileUpdateAsync(
                 workspaceId, contextId, cancellationToken, setProgress, onAppSideComplete, OnRepoError, OnLevelError, commitMessage, runId);
-            return versionFilesOk && !hadError ? DependencyUpdateRunResult.Ok() : DependencyUpdateRunResult.Failed();
+            return await WithSkippedAsync(
+                versionFilesOk && !hadError ? DependencyUpdateRunResult.Ok() : DependencyUpdateRunResult.Failed(),
+                RepositoryOperation.UpdateVersionFiles, workspaceId, contextId, runId, cancellationToken);
         }
 
         // Step 1: Refresh project data from .csproj files on disk.
@@ -340,7 +343,30 @@ public sealed class DependencyUpdateOrchestrator(
             "[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: run finished. HadError={HadError}, TotalSyncedRepos={SyncedCount}",
             runId, workspaceId, hadError, hadError ? 0 : allSyncedRepoIds.Count);
 
-        return hadError ? DependencyUpdateRunResult.Failed() : DependencyUpdateRunResult.Ok(allSyncedRepoIds);
+        return await WithSkippedAsync(
+            hadError ? DependencyUpdateRunResult.Failed() : DependencyUpdateRunResult.Ok(allSyncedRepoIds),
+            RepositoryOperation.UpdateDependencies, workspaceId, contextId, runId, cancellationToken);
+    }
+
+    /// <summary>Adds the repositories the policy left out of the run to its result and logs them.</summary>
+    private async Task<DependencyUpdateRunResult> WithSkippedAsync(
+        DependencyUpdateRunResult result,
+        RepositoryOperation operation,
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        string? runId,
+        CancellationToken cancellationToken)
+    {
+        // The update path has always judged a Feature by the Workspace checkout (shared link); kept as it is.
+        var skipped = await workspaceGitService.GetSkippedRepositoriesAsync(
+            workspaceId, contextId, operation, RepositorySubjectSource.LegacySharedLink, cancellationToken);
+        if (skipped.Count == 0)
+            return result;
+
+        logger.LogInformation(
+            "[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: {Count} repositories left out of the update: {Repositories}",
+            runId, workspaceId, skipped.Count, string.Join(", ", skipped.Select(skip => $"{skip.RepositoryName} ({skip.Reason})")));
+        return result with { Skipped = skipped };
     }
 
     /// <summary>
@@ -366,8 +392,11 @@ public sealed class DependencyUpdateOrchestrator(
             return false;
         }
 
+        // The update path has always judged a Feature by the Workspace checkout (shared link); kept as it is.
+        var skippedIds = await workspaceGitService.GetSkippedRepositoryIdsAsync(
+            workspaceId, contextId, RepositoryOperation.UpdateVersionFiles, RepositorySubjectSource.LegacySharedLink, cancellationToken);
         var repoIds = workspace.Repositories
-            .Where(link => link.Repository != null && string.IsNullOrWhiteSpace(link.CheckedOutTag))
+            .Where(link => link.Repository != null && !skippedIds.Contains(link.RepositoryId))
             .Select(link => link.RepositoryId)
             .ToHashSet();
         var outOfDateFileRepoIds = await workspaceRepository.GetRepositoryIdsWithOutOfDateFilesAsync(workspaceId, contextId.Value, cancellationToken);
@@ -417,8 +446,10 @@ public sealed class DependencyUpdateOrchestrator(
         }
 
         // Repositories pinned to a tag (detached HEAD) must never participate in update: sync/commit/version refresh corrupts persisted branch/tag state and can yield "(no branch)".
-        bool IsPinnedToTag(WorkspaceRepositoryLink link) =>
-            !string.IsNullOrWhiteSpace(link.CheckedOutTag);
+        // The update path has always judged a Feature by the Workspace checkout (shared link); kept as it is.
+        var skippedIds = await workspaceGitService.GetSkippedRepositoryIdsAsync(
+            workspaceId, contextId, RepositoryOperation.UpdateDependencies, RepositorySubjectSource.LegacySharedLink, cancellationToken);
+        bool IsLeftOut(WorkspaceRepositoryLink link) => skippedIds.Contains(link.RepositoryId);
 
         // Dependency level is per-context (a Feature's own graph can differ from the Workspace's), so read
         // it via WorkspaceRepositoryContextState when a row exists for that context, falling back to the
@@ -428,7 +459,7 @@ public sealed class DependencyUpdateOrchestrator(
 
         var levelRepoIds = workspace.Repositories
             .Where(link => link.Repository != null)
-            .Where(link => !IsPinnedToTag(link))
+            .Where(link => !IsLeftOut(link))
             .Where(link => selectedRepositoryIds == null || selectedRepositoryIds.Contains(link.RepositoryId))
             .GroupBy(link => levelByRepo.TryGetValue(link.RepositoryId, out var level) ? level ?? 0 : 0)
             .OrderBy(g => g.Key)
@@ -443,7 +474,7 @@ public sealed class DependencyUpdateOrchestrator(
         {
             var nonTaggedFromSelection = workspace.Repositories
                 .Where(link => link.Repository != null && selectedRepositoryIds.Contains(link.RepositoryId))
-                .Where(link => !IsPinnedToTag(link))
+                .Where(link => !IsLeftOut(link))
                 .Select(link => link.RepositoryId)
                 .ToHashSet();
             if (nonTaggedFromSelection.Count > 0)
@@ -554,13 +585,11 @@ public sealed class DependencyUpdateOrchestrator(
             .ToList();
 
         // Never commit version-file changes for repos pinned to a tag.
-        var workspacePins = await workspaceRepository.GetByIdAsync(workspaceId);
-        var tagPinnedIds = workspacePins?.Repositories?
-            .Where(l => !string.IsNullOrWhiteSpace(l.CheckedOutTag))
-            .Select(l => l.RepositoryId)
-            .ToHashSet() ?? new HashSet<int>();
-        if (tagPinnedIds.Count > 0)
-            byRepo = byRepo.Where(r => !tagPinnedIds.Contains(r.RepositoryId)).ToList();
+        // The update path has always judged a Feature by the Workspace checkout (shared link); kept as it is.
+        var skippedIds = await workspaceGitService.GetSkippedRepositoryIdsAsync(
+            workspaceId, contextId, RepositoryOperation.Commit, RepositorySubjectSource.LegacySharedLink, cancellationToken);
+        if (skippedIds.Count > 0)
+            byRepo = byRepo.Where(r => !skippedIds.Contains(r.RepositoryId)).ToList();
         if (byRepo.Count == 0)
             return (true, []);
 

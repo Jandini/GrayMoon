@@ -42,6 +42,9 @@ public sealed class WorkspaceFeatureRepository
     [MaxLength(200)]
     public string? PinnedTag { get; set; }
 
+    /// <summary>True when the Feature pins this repository to a tag: its worktree is detached and it has no Feature branch.</summary>
+    public bool IsDetached => PinnedTag != null;
+
     public DateTime CreatedAt { get; set; }
 
     public WorkspaceFeatureRepositoryState State { get; set; } = WorkspaceFeatureRepositoryState.Pending;

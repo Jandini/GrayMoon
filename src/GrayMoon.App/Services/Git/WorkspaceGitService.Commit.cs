@@ -1,3 +1,4 @@
+using GrayMoon.Application.Repositories.Policy;
 using System.Collections.Concurrent;
 using GrayMoon.Abstractions.Worker;
 using GrayMoon.Abstractions.Exceptions;
@@ -29,12 +30,10 @@ public sealed partial class WorkspaceGitService
         if (!_workerBridge.IsWorkerConnected || reposToCommit.Count == 0)
             return Array.Empty<(int, bool, string?)>();
 
-        var tagPinnedIds = (await _dbContext.WorkspaceRepositories
-            .AsNoTracking()
-            .Where(wr => wr.WorkspaceId == workspaceId && !string.IsNullOrWhiteSpace(wr.CheckedOutTag))
-            .Select(wr => wr.RepositoryId)
-            .ToListAsync(cancellationToken)).ToHashSet();
-        reposToCommit = reposToCommit.Where(r => !tagPinnedIds.Contains(r.RepoId)).ToList();
+        // The update path has always judged a Feature by the Workspace checkout (shared link); kept as it is.
+        var skippedIds = await GetSkippedRepositoryIdsAsync(
+            workspaceId, contextId, RepositoryOperation.Commit, RepositorySubjectSource.LegacySharedLink, cancellationToken);
+        reposToCommit = reposToCommit.Where(r => !skippedIds.Contains(r.RepoId)).ToList();
         if (reposToCommit.Count == 0)
             return Array.Empty<(int, bool, string?)>();
 
@@ -129,12 +128,10 @@ public sealed partial class WorkspaceGitService
         if (!_workerBridge.IsWorkerConnected || reposAndPaths.Count == 0)
             return Array.Empty<(int, bool, string?)>();
 
-        var tagPinnedIdsFp = (await _dbContext.WorkspaceRepositories
-            .AsNoTracking()
-            .Where(wr => wr.WorkspaceId == workspaceId && !string.IsNullOrWhiteSpace(wr.CheckedOutTag))
-            .Select(wr => wr.RepositoryId)
-            .ToListAsync(cancellationToken)).ToHashSet();
-        reposAndPaths = reposAndPaths.Where(r => !tagPinnedIdsFp.Contains(r.RepoId)).ToList();
+        // The update path has always judged a Feature by the Workspace checkout (shared link); kept as it is.
+        var skippedIds = await GetSkippedRepositoryIdsAsync(
+            workspaceId, contextId, RepositoryOperation.Commit, RepositorySubjectSource.LegacySharedLink, cancellationToken);
+        reposAndPaths = reposAndPaths.Where(r => !skippedIds.Contains(r.RepoId)).ToList();
         if (reposAndPaths.Count == 0)
             return Array.Empty<(int, bool, string?)>();
 
