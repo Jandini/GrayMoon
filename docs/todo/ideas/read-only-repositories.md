@@ -1,6 +1,6 @@
 # Read-only (reference) repositories
 
-Status: draft, design only. Written 2026-11-11 on branch `readonly-repos`. Nothing is built.
+Status: draft, design only. Written 2026-11-11 on branch `readonly-repos`. Nothing is built. Order of work and the code findings: [read-only-repositories-implementation-plan](../read-only-repositories-implementation-plan.md).
 
 Naming: the UI says "read-only" and shows an `ro` badge. The file, the database and the code say `reference`.
 
@@ -98,7 +98,7 @@ Staged or unstaged file changes must not strand the user: they can still inspect
 
 - The Worker checks **live** Git state at confirmation, not cached counters, across the Workspace checkout and every existing Feature worktree for the Source repository.
 - Uncommitted file modifications (staged or unstaged) produce a warning and **do not block** activation. Never automatically discard, stash, reset or push them.
-- Unpushed commits on a branch (ahead of its configured upstream) block activation. A local branch with no configured upstream also blocks, since GrayMoon cannot establish that its work was published. Detect outgoing commits in any existing Feature context too.
+- Unpushed commits on a branch (ahead of its configured upstream) block activation. A local branch with no configured upstream also blocks, since GrayMoon cannot establish that its work was published. Exception (decided 2026-11-12): it passes when its HEAD is contained in a remote branch, which is the case for a new Feature branch with no commits; otherwise one untouched Feature would block the whole Workspace. Detect outgoing commits in any existing Feature context too.
 - **Definitive rule:** do **not** use ahead-of-default, ahead-of-parent, or unmerged PR status as a reference-activation restriction. Published Feature, release and QA branches are eligible. Check only unpublished commits relative to each branch's **own configured upstream** (and other existing safety conditions), across Workspace and existing Feature worktrees. Unknown required upstream or unreadable Git state blocks safely; never automatically push, merge, reset, stash or switch branches to qualify.
 - A repository whose live Git state or upstream comparison cannot be determined safely blocks activation with an actionable reason. An open PR, fully pushed but unmerged branch, or commits ahead of the default branch do not block by themselves; no extra warning about published branch history is needed.
 - For the Workspace flag, validate every Source repository and make the switch atomic: any blocking repository refuses the **entire** switch, with an aggregated list of reasons and warnings. The Workspace repository is excluded from this check.
@@ -130,7 +130,7 @@ In a read-only Workspace, the Workspace repository remains the only repository G
 A reference repository is **part of a Feature for source context**, even though it does not get a Feature branch. The Feature folder includes its source alongside normal writable worktrees, for AI tools, CodeGraph, investigation and comparison.
 
 - Create a **detached worktree at the exact Workspace checkout commit captured during Feature creation** (`BaseCommitSha` from the same `GetHeadCommits` snapshot). No Feature branch, PR, parent branch or branch deletion is created for the reference Source repository.
-- Keep that reference worktree **fixed for the life of the Feature**. Pulling or switching the repository in the main Workspace must not move an existing Feature's reference checkout. No automatic update, no "Merge Recent Commits" for reference worktrees and **no new Refresh reference action** in this design.
+- Keep that reference worktree **fixed for the life of the Feature**. Pulling or switching the repository in the main Workspace must not move an existing Feature's reference checkout. No automatic update, no Update Branch from Default for reference worktrees and **no new Refresh reference action** in this design.
 - Preserve the **originating branch or tag identity and the captured commit** as Feature-context metadata. In the Feature UI show, for example, `Authentication · main (source) · ro · abc123`. The branch is provenance, not the checked-out Git branch; Git remains detached. Do not overwrite the Workspace definition's selected commit with Feature state.
 - An existing writable Feature branch when a repository is *later* marked reference is not retroactively rewritten to detached; GrayMoon stops writing/pushing it. Future Features created while reference use detached snapshots.
 - If all Source repositories are reference, the **Workspace repository alone** still gets a normal writable Feature branch. Its definition and user-owned work may be committed and pushed as normal.
@@ -190,8 +190,7 @@ The Workspace repository is never read-only. GrayMoon writes `graymoon.json` (me
       "name": "Platform",
       "repositoryUrl": "https://github.com/acme/Platform.git",
       "connectorUrl": "https://github.com",
-      "reference": false,
-      "branch": "develop"
+      "reference": false
     }
   ]
 }
@@ -202,7 +201,7 @@ The saved Workspace is **mixed**: `Billing` is reference at a recorded commit, `
 ### The flag
 
 - `workspace.reference` is the future **Source repository default** (missing defaults to `false` for legacy definitions). Its database field should convey this meaning, e.g. `Workspaces.ReferenceDefault`.
-- `repositories[].reference` is the **current individual Source state**. Starting in **Phase 1**, write both `true` and `false` explicitly for every Source in version-2 definitions. `false` must remain a valid override when the Workspace future default is `true`.
+- `repositories[].reference` is the **current individual Source state**. Starting in **Phase 1**, write both `true` and `false` explicitly for every Source in version-2 definitions. `false` must remain a valid override when the Workspace future default is `true`. When the default is `false` and no Source is reference, no `reference` field is written and the file stays at version 1 (decided 2026-11-12); absent and all-false mean the same.
 - Phase 1 already persists per-Source state. Older manifests without per-Source values import each Source using the saved Workspace default when present, otherwise writable. Once imported, Source states are independent of subsequent future-default changes. No second persistence phase or migration is necessary.
 - Database: Workspace default and per-link `WorkspaceRepositories.IsReference` (booleans NOT NULL DEFAULT 0) with strict, phase-appropriate migrations. The Workspace-role link never becomes reference.
 - `BuildFromDatabaseAsync` writes the Workspace default and individual Source values, Restore imports them **before the first Sync**, and drift detection compares both kinds of state. Rewrites, merges, membership replacement and Feature operations must preserve their distinction; `WithBranchOverride` must carry per-link state.
@@ -224,9 +223,9 @@ When it is written:
 
 - when read-only is turned on (the clean check has just read HEAD),
 - after a pull, a manual branch switch or tag checkout through GrayMoon,
-- when a Sync or a hook finds the repository on another commit (pulled or switched with git outside GrayMoon).
+- not on a Sync and not from a hook (decided 2026-11-12). The recorded commit is applied only to a fresh clone, and on a branch every user is on a different commit, so recording on Sync would change `graymoon.json` for every teammate. A commit reached with git outside GrayMoon is recorded by the next GrayMoon pull or switch of that repository.
 
-These are the places that record tag pins today (`WorkspaceBranchOperations.SetRepositoryTagPinAsync`, `WorkspaceGitService.RecordCheckedOutTagPinsAsync`), plus the pull and the hook sync.
+Tag pins keep their own recording points (`WorkspaceBranchOperations.SetRepositoryTagPinAsync`, `WorkspaceGitService.RecordCheckedOutTagPinsAsync`); the branch form is recorded by the mode change, the pull and the manual switch.
 
 Ownership: file-owned, like tag pins. There is no database copy, rewrites keep it (`WorkspaceRepositoryTagPins.CopyOnto` is extended), drift ignores it. It is recorded from the special Workspace context only, never from a Feature.
 
@@ -302,7 +301,7 @@ Found by following the tag checks. Each is a place where a read-only repository 
 
 - Repositories grid: a small `ro` badge next to the branch name or tag, with the tooltip "Read-only repository". Write badges (push, update, PR) render as inactive, like on a tag.
 - **Edit Workspace:** tri-state none/mixed/all visual based on existing Source flags (no count), explicit batch actions, and the saved default for future Source additions. Changing the default only is distinguishable from updating existing Sources.
-- **Branch dialog (`BranchModal`):** the footer Read-only checkbox changes **only the selected Source repository**. It is never forced on or disabled merely because the Workspace default is read-only; no Workspace-wide toggle is here.
+- **Per-repository branch dialog (`SwitchBranchModal`; `BranchModal` is the Workspace-wide dialog):** the footer Read-only checkbox changes **only the selected Source repository**. It is never forced on or disabled merely because the Workspace default is read-only; no Workspace-wide toggle is here.
 - Turning the switch on checks live outgoing commits against the branch's **own upstream**, not against default. Staged/unstaged edits warn but do not block; unpublished commits, absent upstream for a branch, or unreadable Git state block. Fully pushed but unmerged branches ahead of default are allowed without extra warning. Show the repository/context for any refusal. An already-reference repository may switch to any existing branch/tag while staying reference, without repeating activation checks.
 - Disable the Read-only switch while any relevant orchestration is queued or running for that Workspace; enforce the same lock in the service/API path, not only in Razor. Other Workspaces remain independent.
 - Workspaces page: may show the derived none/mixed/all read-only summary; do not imply that a mixed Workspace is wholly read-only.
@@ -327,6 +326,22 @@ The following genuinely remain to be decided; the Feature snapshot, local stagin
 - **Running orchestrators:** lock the mode switch Workspace-wide during relevant queued/running work; release after the run fully finishes or stops. Serialize launch/toggle to prevent races.
 - **Workspace settings and manifest Restore:** derived none/mixed/all Workspace status; individual Branch-dialog toggle; independent default for new Sources; version-2 manifest persists both true and false per-Source flags, and Restore imports them before Sync.
 
+### Resolved in the 2026-11-12 plan review
+
+Decided by the owner after the code review; details and code references are in the implementation plan.
+
+- **Service-side tag gaps:** operations that check a tag only in the page (pull, bulk Create Branch, Prepare Workspace through REST, and others) get a service-side check in a separate step after the policy-only gate, before reference mode. The same step makes Update read the tag of the context it runs in.
+- **End-to-end:** no App-plus-Worker test harness is added. The gates run the automated suites and a manual smoke list run by the owner.
+- **Undo:** file, folder and repository-row Undo are allowed on a reference repository. "Undo all changes" over several repositories skips reference repositories and says how many.
+- **Adding an existing folder as a Source while the default is read-only:** the activation check runs; a blocked repository is added writable with a warning.
+- **A Feature branch that existed before the Source became reference:** left as a branch; fetch and fast-forward pull allowed, no writes.
+- **Recording the commit:** on the mode change and after a GrayMoon pull or switch only, not on Sync or from hooks.
+- **`branch` in the file:** only together with `commit` on a reference entry; never on a writable Source.
+- **No upstream at activation:** passes when HEAD is contained in a remote branch.
+- **Feature worktree missing or needing repair at activation:** a warning; a folder that exists but cannot be read blocks.
+- **Delete Branch on a reference repository:** a local delete that git accepts without force is allowed; a remote delete and a forced delete are refused.
+- **Pull:** today's pull is a plain merge pull and the same Worker command also pushes. Reference mode needs a pull-only, fast-forward-only path.
+
 ## Smaller points
 
 - **GrayMoon's own files in a repository.** Git hooks (`.git/hooks`, not tracked) stay installed; the state updates depend on them. Version-file and `.csproj` updates write tracked files: skipped. Package restore writes only ignored files: allowed.
@@ -335,7 +350,7 @@ The following genuinely remain to be decided; the Feature snapshot, local stagin
 - **Existing Features when the flag is turned on.** A pushed Feature branch stays as it is; nothing pushes it again. Repair Feature does not convert it to a detached worktree.
 - **CI, PR and Actions pages.** They skip read-only repositories, which also saves GitHub API calls on every refresh.
 - **REST and automation.** `WorkspaceOperationsEndpoints` returns the skipped repositories with a reason.
-- **Workspace merge and membership replace.** `ReplaceRepositoriesCoreAsync` and `MergeRepositoriesAsync` recreate link rows; the flag must survive both.
+- **Membership replace.** `ReplaceRepositoriesCoreAsync` leaves existing link rows untouched and creates rows only for new Sources; those take the Workspace default. There is no Workspace merge (`MergeRepositoriesAsync` merges the connector catalog).
 - **Clone depth.** Read-only repositories are candidates for a shallow or blobless clone later. Out of scope.
 
 ## Implementation verification gate
@@ -353,5 +368,5 @@ The following genuinely remain to be decided; the Feature snapshot, local stagin
 - A skipped repository is reported as skipped, with the reason. It is never a failure and never silent.
 - Treat orchestration launch and mode changes as mutually exclusive **per Workspace**, with a shared service-level guard. While relevant orchestration is queued/running, refuse mode changes to the Workspace or any of its Source repositories (even through REST/automation). The switch unlocks after the run fully finishes, fails, or is cancelled and stopped. The run uses its originally captured eligibility and is not retargeted mid-flight. Independent Workspaces are unaffected.
 - New database columns have a default; the migration is a new strict step.
-- Recording a commit never fails the pull, switch or sync that caused it; a failed write is reported and the next Sync records it.
+- Recording a commit never fails the pull, switch or sync that caused it; a failed write is reported and the next pull or switch records it.
 - When built: update `docs/architecture/01`, `03`, `05`, `06` and tag-pinned guidance in `AGENTS.md` and `CLAUDE.md`. Tests must cover: local edits (warning plus manual stage/unstage/Undo); unpushed commits or absent upstream (activation refused); fully pushed yet unmerged branch **ahead of default** (activation allowed without extra warning); reference-mode switch to another existing ahead-of-default branch (allowed, remains reference, no GrayMoon commit/push); existing Feature worktree with unpublished commits (activation refused); fixed Feature snapshots and provenance metadata; safe checkout conflicts; service-side write rejection; complete graph including reference producers and missing registry packages; and mode-toggle/orchestrator concurrency. Also test: a Workspace future default `true` with one per-Source `false` survives **Phase 1** serialization/Restore; changing only the default never alters existing Source flags; toggling one Source does not alter siblings. GrayMoon never commits or pushes a reference Source.
