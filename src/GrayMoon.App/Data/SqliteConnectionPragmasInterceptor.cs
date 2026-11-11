@@ -4,9 +4,10 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 namespace GrayMoon.App.Data;
 
 /// <summary>
-/// Applies SQLite pragmas that are not stored in the database file. <c>journal_mode</c> and
-/// <c>synchronous</c> persist; <c>busy_timeout</c> and <c>foreign_keys</c> are per connection, so a
-/// startup PRAGMA on one connection does not cover later pooled or factory connections.
+/// Applies SQLite pragmas that are not stored in the database file. Only <c>journal_mode</c> persists;
+/// <c>busy_timeout</c>, <c>foreign_keys</c> and <c>synchronous</c> are per connection (a new connection
+/// starts at <c>synchronous=FULL</c>), so a startup PRAGMA on one connection does not cover later pooled or
+/// factory connections. <c>NORMAL</c> is safe with WAL: a power loss can lose the last commits, never corrupt.
 /// </summary>
 public sealed class SqliteConnectionPragmasInterceptor : DbConnectionInterceptor
 {
@@ -34,6 +35,8 @@ public sealed class SqliteConnectionPragmasInterceptor : DbConnectionInterceptor
         command.ExecuteNonQuery();
         command.CommandText = "PRAGMA foreign_keys=ON;";
         command.ExecuteNonQuery();
+        command.CommandText = "PRAGMA synchronous=NORMAL;";
+        command.ExecuteNonQuery();
     }
 
     private static async Task ApplyAsync(DbConnection connection, CancellationToken cancellationToken)
@@ -42,6 +45,8 @@ public sealed class SqliteConnectionPragmasInterceptor : DbConnectionInterceptor
         command.CommandText = "PRAGMA busy_timeout=" + BusyTimeoutMilliseconds + ";";
         await command.ExecuteNonQueryAsync(cancellationToken);
         command.CommandText = "PRAGMA foreign_keys=ON;";
+        await command.ExecuteNonQueryAsync(cancellationToken);
+        command.CommandText = "PRAGMA synchronous=NORMAL;";
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 }

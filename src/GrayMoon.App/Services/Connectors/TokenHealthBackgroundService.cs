@@ -30,6 +30,7 @@ public sealed class TokenHealthBackgroundService(
                 var dbContext = listScope.ServiceProvider.GetRequiredService<AppDbContext>();
                 connectorIds = await dbContext.Connectors
                     .AsNoTracking()
+                    .Where(c => c.RemovedAtUtc == null)
                     .Select(c => c.ConnectorId)
                     .ToListAsync(stoppingToken);
             }
@@ -47,7 +48,7 @@ public sealed class TokenHealthBackgroundService(
             await using var persistScope = scopeFactory.CreateAsyncScope();
             var persistDb = persistScope.ServiceProvider.GetRequiredService<AppDbContext>();
             var connectors = await persistDb.Connectors
-                .Where(c => connectorIds.Contains(c.ConnectorId))
+                .Where(c => connectorIds.Contains(c.ConnectorId) && c.RemovedAtUtc == null)
                 .ToListAsync(stoppingToken);
             var byId = connectors.ToDictionary(c => c.ConnectorId);
             foreach (var result in results)

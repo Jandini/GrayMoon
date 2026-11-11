@@ -10,17 +10,11 @@ Classification (must / should / optional) and the order of work for all of these
 
 | Note | Open work | Status |
 |---|---|---|
-| [commit-all-partial-commit-race](defects/commit-all-partial-commit-race.md) | Stale targets (Phase 2); Worker `index.lock` retry and timeout tiers (Phase 3); run correlation id. | Data-loss bug fixed; hardening open |
-| [push-package-wait-and-circuit-crash](defects/push-package-wait-and-circuit-crash.md) | Hub start retry and logging, tests, top bar writes from browser tabs, wiki wording. | Mostly shipped |
-| [generated-package-context-write](defects/generated-package-context-write.md) | A Feature that cannot see a version file can delete workspace-global generated package rows. | Not built |
-| [sqlite-synchronous-per-connection](defects/sqlite-synchronous-per-connection.md) | `PRAGMA synchronous=NORMAL` only runs on the startup connection. | Not built |
+| [commit-all-partial-commit-race](defects/commit-all-partial-commit-race.md) | Worker `index.lock` retry and timeout tiers (Phase 3, needs a repro first); run correlation id. | Data-loss bug fixed; hardening open |
 | [worker-damaged-install-probe](defects/worker-damaged-install-probe.md) | No startup probe reports a damaged Worker install once. | Not built |
-| [connector-refresh-empty-answer](defects/connector-refresh-empty-answer.md) | Removing a connector deletes its repositories with their Workspace links; it becomes a soft delete. | Refresh part shipped; removal open |
-| [worker-response-dropped-while-reconnecting](defects/worker-response-dropped-while-reconnecting.md) | A command result produced during a reconnect is dropped and the App waits out the timeout. | Not built, to confirm first |
-| [silent-catch-blocks](defects/silent-catch-blocks.md) | Five catch blocks on state-changing or status paths swallow the failure without a log line. | Not built |
 | [convention-test-coverage](defects/convention-test-coverage.md) | The convention tests check fewer fields, columns, folders and pages than the rules name. | Not built |
 | [release-signing-secrets-and-workflow-run](defects/release-signing-secrets-and-workflow-run.md) | Desktop: move the signing secrets to the `production` environment and run the release workflow from a branch and a stable tag. | Owner action |
-| [review-fix-test-gaps](defects/review-fix-test-gaps.md) | Five fixes lack the regression test that proves them (failed integrity check, serial cancel dispatch, context flip, tests against old code, hub attach). | Not built |
+| [review-fix-test-gaps](defects/review-fix-test-gaps.md) | Three fixes lack the regression test that proves them (serial cancel dispatch, context flip in the tooltip load, hub attach after load). | Partly built |
 
 ## `ideas/` - proposals and design notes, nothing is committed to
 

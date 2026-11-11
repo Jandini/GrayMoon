@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using GrayMoon.Common.Git;
 using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Jobs.Requests;
@@ -7,7 +8,7 @@ using GrayMoon.Worker.Services.GitChanges;
 
 namespace GrayMoon.Worker.Commands;
 
-public sealed class StageAndCommitCommand(IGitService git, IGitRepositoryReader reader, GitStatusRefreshCoordinator refreshCoordinator) : ICommandHandler<StageAndCommitRequest, StageAndCommitResponse>
+public sealed class StageAndCommitCommand(IGitService git, IGitRepositoryReader reader, GitStatusRefreshCoordinator refreshCoordinator, ILogger<StageAndCommitCommand> logger) : ICommandHandler<StageAndCommitRequest, StageAndCommitResponse>
 {
     public async Task<StageAndCommitResponse> ExecuteAsync(StageAndCommitRequest request, CancellationToken cancellationToken = default)
     {
@@ -58,6 +59,7 @@ public sealed class StageAndCommitCommand(IGitService git, IGitRepositoryReader 
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // Best effort: the watcher still refreshes this repository.
+            logger.LogWarning(ex, "Could not refresh the Changes status of {RepositoryPath} after the commit; the watcher refreshes it.", repoPath);
         }
 
         return new StageAndCommitResponse { Success = success, Committed = committed, ErrorMessage = errorMessage };

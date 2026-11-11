@@ -40,19 +40,69 @@ public static class WorkspaceSyncHubConnectionHelper
     /// Starts <paramref name="hubConnection"/> and never throws: a failed first start (circuit closing, App busy) must not
     /// end the Blazor circuit, and live updates are an enhancement the page can do without. Returns whether it connected.
     /// </summary>
-    public static async Task<bool> TryStartAsync(HubConnection hubConnection, ILogger logger)
+    /// <remarks>
+    /// <c>WithAutomaticReconnect</c> only covers a connection that was up once, so a failed first start is retried
+    /// here after each of <see cref="StartRetryDelays"/>. The retries end when the page disposed the connection or
+    /// cancelled <paramref name="cancellationToken"/>. One debug line records the outcome.
+    /// </remarks>
+    public static Task<bool> TryStartAsync(HubConnection hubConnection, ILogger logger, CancellationToken cancellationToken = default) =>
+        TryStartAsync(hubConnection.StartAsync, logger, TimeProvider.System, cancellationToken);
+
+    /// <summary>Waits before the second, third and fourth start attempt. After the last one the page stays without live updates until it is reloaded.</summary>
+    internal static readonly TimeSpan[] StartRetryDelays = [TimeSpan.FromMilliseconds(500), TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5)];
+
+    internal static async Task<bool> TryStartAsync(
+        Func<CancellationToken, Task> start,
+        ILogger logger,
+        TimeProvider timeProvider,
+        CancellationToken cancellationToken)
     {
-        try
+        var started = timeProvider.GetTimestamp();
+        for (var attempt = 1; ; attempt++)
         {
-            await hubConnection.StartAsync();
-            return true;
-        }
-        catch (Exception ex)
-        {
-            logger.LogDebug(ex, "Workspace-sync hub connection did not start");
-            return false;
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await start(cancellationToken);
+                LogOutcome(logger, "started", attempt, timeProvider.GetElapsedTime(started), null);
+                return true;
+            }
+            catch (Exception ex) when (ex is ObjectDisposedException || cancellationToken.IsCancellationRequested)
+            {
+                // The page went away: its Dispose disposed the connection or cancelled the token. Not a failure.
+                LogOutcome(logger, "cancelled by dispose", attempt, timeProvider.GetElapsedTime(started), null);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                if (attempt > StartRetryDelays.Length)
+                {
+                    LogOutcome(logger, "failed", attempt, timeProvider.GetElapsedTime(started), ex);
+                    return false;
+                }
+
+                logger.LogDebug(ex, "Workspace-sync hub start attempt {Attempt} failed; retrying in {Delay}", attempt, StartRetryDelays[attempt - 1]);
+            }
+
+            try
+            {
+                await Task.Delay(StartRetryDelays[attempt - 1], timeProvider, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                LogOutcome(logger, "cancelled by dispose", attempt, timeProvider.GetElapsedTime(started), null);
+                return false;
+            }
         }
     }
+
+    private static void LogOutcome(ILogger logger, string outcome, int attempts, TimeSpan elapsed, Exception? exception) =>
+        logger.LogDebug(
+            exception,
+            "Workspace-sync hub start for {Page}: {Outcome} after {Attempts} attempt(s) in {ElapsedMs} ms",
+            logger.GetType().IsGenericType ? logger.GetType().GetGenericArguments()[0].Name : "page",
+            outcome, attempts, (long)elapsed.TotalMilliseconds);
+
 
     /// <summary>
     /// Stops and disposes <paramref name="hubConnection"/> without awaiting completion - the fire-and-forget

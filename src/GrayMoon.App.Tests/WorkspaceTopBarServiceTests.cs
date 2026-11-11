@@ -69,6 +69,60 @@ public sealed class WorkspaceTopBarServiceTests
             NullLogger<WorkspaceRepository>.Instance);
     }
 
+    private static Microsoft.AspNetCore.Http.HttpContextAccessor RequestWithUserAgent(string userAgent)
+    {
+        var httpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        httpContext.Request.Headers.UserAgent = userAgent;
+        return new Microsoft.AspNetCore.Http.HttpContextAccessor { HttpContext = httpContext };
+    }
+
+    [Fact]
+    public async Task A_browser_tab_never_sets_the_Desktop_title_or_the_tracker()
+    {
+        // Desktop and a browser tab can use the same App. The tab used to rewrite the Desktop window title and
+        // tray label with every navigation, in and out of a Workspace.
+        var (connection, dbContext, workspaceId) = await CreateSeededDbAsync();
+        await using var _ = connection;
+        await using var __ = dbContext;
+
+        var desktopContext = new WorkspaceContext(42, "Open in Desktop");
+        var navigationManager = new TestNavigationManager($"http://localhost/workspaces/{workspaceId}/repositories");
+        var hubContext = new FakeHubContext<DesktopNotificationHub>();
+        var tracker = new DesktopWorkspaceContextTracker { Current = desktopContext };
+        var service = new WorkspaceTopBarService(
+            navigationManager, CreateWorkspaceRepository(dbContext), hubContext, tracker,
+            RequestWithUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/142.0.0.0 Safari/537.36"));
+
+        await service.EnsureSynchronizedAsync();
+        navigationManager.SetUri("http://localhost/dashboard");
+        await service.EnsureSynchronizedAsync();
+
+        // The tab's own top bar still follows its route.
+        Assert.Null(service.WorkspaceDisplayName);
+        Assert.Empty(hubContext.ClientsImpl.AllProxy.Sent);
+        Assert.Same(desktopContext, tracker.Current);
+    }
+
+    [Fact]
+    public async Task The_Desktop_WebView_sets_the_Desktop_title()
+    {
+        var (connection, dbContext, workspaceId) = await CreateSeededDbAsync();
+        await using var _ = connection;
+        await using var __ = dbContext;
+
+        var navigationManager = new TestNavigationManager($"http://localhost/workspaces/{workspaceId}/repositories");
+        var hubContext = new FakeHubContext<DesktopNotificationHub>();
+        var tracker = new DesktopWorkspaceContextTracker();
+        var service = new WorkspaceTopBarService(
+            navigationManager, CreateWorkspaceRepository(dbContext), hubContext, tracker,
+            RequestWithUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0 GrayMoonDesktop/1.2.3"));
+
+        await service.EnsureSynchronizedAsync();
+
+        Assert.Single(hubContext.ClientsImpl.AllProxy.Sent, s => s.Method == "WorkspaceChanged");
+        Assert.Equal("Acme Workspace", tracker.Current?.WorkspaceName);
+    }
+
     [Fact]
     public async Task Navigating_into_a_workspace_pushes_WorkspaceChanged_with_its_name()
     {

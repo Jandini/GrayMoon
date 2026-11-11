@@ -55,6 +55,20 @@ public static partial class Migrations
         await AddNullableTextColumnIfMissingAsync(conn, "Repositories", "MissingFromProviderSinceUtc");
     }
 
+    /// <summary>
+    /// Adds Connectors.RemovedAtUtc (nullable TEXT): set when a connector is removed while a Workspace still uses
+    /// one of its repositories. Strict step 18: no try/catch, a failure propagates to
+    /// <see cref="RunStrictStepAsync"/>. Idempotent.
+    /// </summary>
+    public static async Task MigrateConnectorRemovedAtColumnAsync(AppDbContext dbContext, ILogger? logger = null)
+    {
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != ConnectionState.Open)
+            await conn.OpenAsync();
+
+        await AddNullableTextColumnIfMissingAsync(conn, "Connectors", "RemovedAtUtc");
+    }
+
     private static async Task<bool> TableExistsAsync(System.Data.Common.DbConnection conn, string tableName)
     {
         await using var cmd = conn.CreateCommand();

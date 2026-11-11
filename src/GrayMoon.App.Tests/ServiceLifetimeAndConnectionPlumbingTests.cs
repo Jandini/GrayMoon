@@ -205,11 +205,11 @@ public sealed class WorkerResponseDeliveryPendingTests
         var oldTask = WorkerResponseDelivery.WaitAsync(onOld, CancellationToken.None, connectionId: oldConnection);
         var newTask = WorkerResponseDelivery.WaitAsync(onNew, CancellationToken.None, connectionId: newConnection);
 
-        WorkerResponseDelivery.FailForConnection(oldConnection, "Worker disconnected before responding.");
+        WorkerResponseDelivery.FailForConnection(oldConnection, GrayMoon.App.Hubs.WorkerHub.DisconnectedReason);
 
         var failed = await oldTask;
         Assert.False(failed.Success);
-        Assert.Equal("Worker disconnected before responding.", failed.Error);
+        Assert.Equal("Worker disconnected before responding; the command may have completed.", failed.Error);
         Assert.False(newTask.IsCompleted);
         Assert.True(WorkerResponseDelivery.IsPending(onNew));
 

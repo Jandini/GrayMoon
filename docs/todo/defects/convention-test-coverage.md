@@ -8,7 +8,7 @@ Status: not built. The rules in `AGENTS.md` read as applying everywhere; the tes
 |---|---|---|
 | Page state only on the dispatcher | Four fields of the Repositories page (`_slots`, `_linkByRepoId`, `prByRepositoryId`, `repoSyncStatus`). | Other page fields the markup reads; the Actions and Git Changes pages. |
 | Feature contexts do not write the shared link | The `BranchHasUpstream`, `BranchName` and `CheckedOutTag` setters. | `SyncStatus`, `OutgoingCommits`, `IncomingCommits` and `GitVersion` on `WorkspaceRepositoryLink`. |
-| Best-effort steps report | `catch` blocks in `Services/Workspaces` and `Services/Git`. | Every other folder in the App, and the Worker (see [silent-catch-blocks](silent-catch-blocks.md)). |
+| Best-effort steps report | `catch` blocks in `Services/Workspaces` and `Services/Git`. | Every other folder in the App, and the Worker (the five catches the review named are fixed; about 20 more bare catches outside those two folders, most of them parse fallbacks, are to be listed and decided when this scan is widened). |
 | Context captured before the work starts | Every `RequireSelectedContextId()` that is not a capture into a local must be on an explicit list of reads made before the first `await`. | Direct reads of `_selectedContextId` and `_isFeatureContext` after an `await` in an event handler. The list is kept by hand; nothing proves a listed read is before the first `await`. |
 
 ## Fix plan

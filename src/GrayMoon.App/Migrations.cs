@@ -49,9 +49,14 @@ public static partial class Migrations
         (15, "Fork support columns", dbContext => MigrateForkSupportAsync(dbContext)),
         (16, "Repair special Workspace context backfill", dbContext => MigrateSpecialWorkspaceContextBackfillRepairAsync(dbContext)),
         (17, "Repository missing-from-provider column", dbContext => MigrateRepositoryMissingFromProviderColumnAsync(dbContext)),
+        (18, "Connector removed-at column", dbContext => MigrateConnectorRemovedAtColumnAsync(dbContext)),
     };
 
-    public static async Task RunAllAsync(AppDbContext dbContext, ILogger? logger = null, TimeProvider? timeProvider = null)
+    public static Task RunAllAsync(AppDbContext dbContext, ILogger? logger = null, TimeProvider? timeProvider = null) =>
+        RunAllAsync(dbContext, logger, timeProvider, IsBackupIntegrityOkAsync);
+
+    /// <summary>Test seam: <paramref name="isBackupIntegrityOk"/> stands in for the integrity check of the written backup.</summary>
+    internal static async Task RunAllAsync(AppDbContext dbContext, ILogger? logger, TimeProvider? timeProvider, Func<string, Task<bool>> isBackupIntegrityOk)
     {
         logger ??= NullLogger.Instance;
         timeProvider ??= TimeProvider.System;
@@ -66,7 +71,7 @@ public static partial class Migrations
 
         string? backupPath = null;
         if (legacyPending || strictPending.Count > 0)
-            backupPath = await BackupDatabaseAsync(conn, logger, timeProvider);
+            backupPath = await BackupDatabaseAsync(conn, logger, timeProvider, isBackupIntegrityOk);
 
         if (legacyPending)
         {
@@ -174,7 +179,7 @@ public static partial class Migrations
     /// A backup that cannot be written, or that fails its integrity check, stops the migration with a
     /// <see cref="DatabaseMigrationException"/> naming the path and the cause: no step runs without a way back.
     /// </summary>
-    private static async Task<string?> BackupDatabaseAsync(DbConnection conn, ILogger logger, TimeProvider timeProvider)
+    private static async Task<string?> BackupDatabaseAsync(DbConnection conn, ILogger logger, TimeProvider timeProvider, Func<string, Task<bool>> isBackupIntegrityOk)
     {
         var dataSource = conn.DataSource;
         if (string.IsNullOrWhiteSpace(dataSource) || dataSource.Equals(":memory:", StringComparison.OrdinalIgnoreCase))
@@ -218,7 +223,7 @@ public static partial class Migrations
                 ex);
         }
 
-        if (!await IsBackupIntegrityOkAsync(backupPath))
+        if (!await isBackupIntegrityOk(backupPath))
         {
             logger.LogError("Pre-migration database backup at {BackupPath} failed its integrity check; no migration step was run.", backupPath);
             throw new DatabaseMigrationException(

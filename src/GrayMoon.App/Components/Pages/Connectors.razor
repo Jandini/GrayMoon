@@ -180,6 +180,7 @@
              ConnectorName="@(selectedConnector?.ConnectorName ?? string.Empty)"
              IsSubmitting="@isDeleting"
              ErrorMessage="@deleteErrorMessage"
+             DeleteNote="@deleteNote"
              OnDelete="HandleDeleteConnector"
              OnCancel="CloseDeleteModal" />
 
@@ -246,6 +247,7 @@
     private string? createErrorMessage;
     private string? editErrorMessage;
     private string? deleteErrorMessage;
+    private string? deleteNote;
     private string defaultUserToken = string.Empty;
     private IReadOnlyList<string> apiBaseUrlHints = Array.Empty<string>();
 
@@ -477,10 +479,24 @@
         }
     }
 
-    private void ShowDeleteModal(Connector connector)
+    private async Task ShowDeleteModal(Connector connector)
     {
         selectedConnector = connector;
         deleteErrorMessage = null;
+        deleteNote = null;
+        try
+        {
+            var used = await ConnectorRepository.CountWorkspaceRepositoriesAsync(connector.ConnectorId);
+            if (used > 0)
+            {
+                deleteNote = $"{used} of its repositories {(used == 1 ? "is" : "are")} used by Workspaces. {(used == 1 ? "It stays" : "They stay")} in {(used == 1 ? "its Workspace" : "their Workspaces")} without a connector until another connector that can access {(used == 1 ? "it" : "them")} fetches repositories.";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Could not count the Workspace repositories of connector {ConnectorId}.", connector.ConnectorId);
+        }
+
         showDeleteModal = true;
     }
 

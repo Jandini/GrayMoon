@@ -20,6 +20,7 @@
 @inject WorkerSecretService WorkerSecret
 @inject WorkerPairingService WorkerPairing
 @inject AppSettingRepository AppSettings
+@inject GrayMoon.App.Services.Ui.WorkspaceOpenInRecentTools DesktopClient
 
 <PageTitle>Worker - GrayMoon</PageTitle>
 
@@ -280,7 +281,9 @@
 
             try
             {
-                _isDesktopHost = await JSRuntime.InvokeAsync<bool>("graymoonDesktopBridge.isAvailable");
+                // Same answer as the rest of the App: the user agent token Desktop adds, when the request showed it.
+                _isDesktopHost = DesktopClient.InDesktopWebView
+                    ?? await JSRuntime.InvokeAsync<bool>("graymoonDesktopBridge.isAvailable");
             }
             catch (JSException)
             {

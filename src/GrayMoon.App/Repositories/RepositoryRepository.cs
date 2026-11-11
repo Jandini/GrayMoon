@@ -20,7 +20,7 @@ public sealed class GitHubRepositoryRepository(
             .Select(repository => new GitHubRepositoryEntry
             {
                 RepositoryId = repository.RepositoryId,
-                ConnectorName = repository.Connector != null ? repository.Connector.ConnectorName : "Unknown",
+                ConnectorName = repository.Connector == null ? "Unknown" : repository.Connector.RemovedAtUtc != null ? "No connector" : repository.Connector.ConnectorName,
                 OrgName = repository.OrgName,
                 RepositoryName = repository.RepositoryName,
                 Visibility = repository.Visibility,
@@ -78,7 +78,7 @@ public sealed class GitHubRepositoryRepository(
             .Select(repository => new GitHubRepositoryEntry
             {
                 RepositoryId = repository.RepositoryId,
-                ConnectorName = repository.Connector != null ? repository.Connector.ConnectorName : "Unknown",
+                ConnectorName = repository.Connector == null ? "Unknown" : repository.Connector.RemovedAtUtc != null ? "No connector" : repository.Connector.ConnectorName,
                 OrgName = repository.OrgName,
                 RepositoryName = repository.RepositoryName,
                 Visibility = repository.Visibility,
@@ -414,6 +414,9 @@ public sealed class GitHubRepositoryRepository(
                     .ExecuteDeleteAsync();
             }
         }
+
+        // A removed connector whose last repository just moved to another connector (Phase B) is purged here.
+        await RemovedConnectorCleanup.PurgeUnusedAsync(_dbContext);
 
         await transaction.CommitAsync();
 

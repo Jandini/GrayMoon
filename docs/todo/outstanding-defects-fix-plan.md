@@ -14,33 +14,33 @@ Written 2026-11-11 on branch `outstanding-bugs`. Covers every note in `docs/todo
 | # | Item | Note | Class | Size |
 |---|---|---|---|---|
 | 1a | Repository refresh deletes Workspace-linked repositories (empty answer, inactive connector, no longer returned) | connector-refresh-empty-answer | Done 2026-11-11 | S-M |
-| 1b | Removing a connector cascades to its repositories and Workspace links | connector-refresh-empty-answer (widened by owner decision) | Must | M-L |
-| 2 | Feature sync deletes workspace-global generated package rows | generated-package-context-write | Must | M |
-| 3 | Version from one context written onto every consumer edge | generated-package-context-write | Must | M |
+| 1b | Removing a connector cascades to its repositories and Workspace links | connector-refresh-empty-answer (widened by owner decision) | Done 2026-11-11 | M-L |
+| 2 | Feature sync deletes workspace-global generated package rows | generated-package-context-write | Done 2026-11-11 | M |
+| 3 | Version from one context written onto every consumer edge | generated-package-context-write | Done 2026-11-11 | M |
 | 4 | Signing secrets still at repository level | release-signing-secrets-and-workflow-run | Must (owner action) | S |
 | 5 | All-empty refresh never purges deleted repositories | connector-refresh-empty-answer | Closed with 1a (an all-empty answer now changes nothing and is reported) | XS |
-| 6 | Worker drops a command result while not connected, with no log | worker-response-dropped-while-reconnecting | Should | S |
-| 7 | Registry lookup error read as "package does not exist" | silent-catch-blocks | Should | S |
-| 8 | Failed main-path lookup becomes `null` in the Feature reconciler | silent-catch-blocks | Should | S |
-| 9 | Root-path refresh on Worker connect fails silently | silent-catch-blocks | Should | XS |
-| 10 | `synchronous=NORMAL` only on the startup connection | sqlite-synchronous-per-connection | Should | XS |
-| 11 | Commit targets frozen before the AI step and the default-branch dialog | commit-all-partial-commit-race (Phase 2) | Should | M |
-| 12 | Browser tab rewrites the Desktop window title and tray label | push-package-wait-and-circuit-crash (3) | Should | S |
-| 13 | Hub first start has no retry; no tests for the helper | push-package-wait-and-circuit-crash (1, 2) | Should | M |
-| 14 | Four review fixes never proven against the old code | review-fix-test-gaps (row 4) | Should | S |
-| 15 | Missing test: backup written but fails the integrity check | review-fix-test-gaps (row 1) | Should | S |
+| 6 | Worker drops a command result while not connected, with no log | worker-response-dropped-while-reconnecting | Done 2026-11-11 | S |
+| 7 | Registry lookup error read as "package does not exist" | silent-catch-blocks | Done 2026-11-11 | S |
+| 8 | Failed main-path lookup becomes `null` in the Feature reconciler | silent-catch-blocks | Done 2026-11-11 | S |
+| 9 | Root-path refresh on Worker connect fails silently | silent-catch-blocks | Done 2026-11-11 | XS |
+| 10 | `synchronous=NORMAL` only on the startup connection | sqlite-synchronous-per-connection | Done 2026-11-11 | XS |
+| 11 | Commit targets frozen before the AI step and the default-branch dialog | commit-all-partial-commit-race (Phase 2) | Done 2026-11-11 | M |
+| 12 | Browser tab rewrites the Desktop window title and tray label | push-package-wait-and-circuit-crash (3) | Done 2026-11-11 | S |
+| 13 | Hub first start has no retry; no tests for the helper | push-package-wait-and-circuit-crash (1, 2) | Done 2026-11-11 | M |
+| 14 | Four review fixes never proven against the old code | review-fix-test-gaps (row 4) | Done 2026-11-11 (all three fail on the old code) | S |
+| 15 | Missing test: backup written but fails the integrity check | review-fix-test-gaps (row 1) | Done 2026-11-11 | S |
 | 16 | No startup probe for a damaged Worker install | worker-damaged-install-probe | Optional (cause already fixed) | M |
-| 17 | Post-commit status refresh failure not logged | silent-catch-blocks | Optional | XS |
+| 17 | Post-commit status refresh failure not logged | silent-catch-blocks | Done 2026-11-11 | XS |
 | 18 | Missing tests: serial cancel dispatch, context flip, hub attach | review-fix-test-gaps (rows 2, 3, 5) | Optional | M-L |
 | 19 | Convention scans narrower than the rules | convention-test-coverage | Optional (do with 7-9) | M |
 | 20 | Worker commit hardening C, D, E, F | commit-all-partial-commit-race (Phase 3) | Optional (needs repro) | L |
 | 21 | Correlation id per commit run; fan-out audit; 240 s status scan timeout | commit-all-partial-commit-race (Other) | Optional | S-M |
 | 22 | "Continue waiting" on a failed push level | moved to `ideas/push-continue-waiting.md` | Not a defect | - |
-| 23 | Warn when commit targets differ from what the AI described | commit-all-partial-commit-race (Phase 2.2) | Optional (falls out of 11) | S |
-| 24 | Push step re-reads the context (finding G) | commit-all-partial-commit-race | Close | - |
-| 25 | "Nothing to commit" treated as a failure | commit-all-partial-commit-race (Phase 2.1, second half) | Close | - |
-| 26 | Toast is only a hint | push-package-wait-and-circuit-crash (4) | Close | - |
-| 27 | "Clear read-only" catch before folder delete | silent-catch-blocks | Close (leave as is) | - |
+| 23 | Warn when commit targets differ from what the AI described | commit-all-partial-commit-race (Phase 2.2) | Done 2026-11-11 | S |
+| 24 | Push step re-reads the context (finding G) | commit-all-partial-commit-race | Closed 2026-11-11 | - |
+| 25 | "Nothing to commit" treated as a failure | commit-all-partial-commit-race (Phase 2.1, second half) | Closed 2026-11-11 | - |
+| 26 | Toast is only a hint | push-package-wait-and-circuit-crash (4) | Closed 2026-11-11 (note deleted) | - |
+| 27 | "Clear read-only" catch before folder delete | silent-catch-blocks | Closed 2026-11-11 (left as is) | - |
 
 ## Must fix
 
@@ -66,7 +66,7 @@ Change 1a - the refresh stops deleting linked repositories (done 2026-11-11; the
 3. Change the merge to a positive list: pass the connector ids that answered with at least one repository and delete unlinked rows only for those. A zero answer for a connector with stored rows is reported as "Connector X returned no repositories; its repositories were left unchanged". This matches the rule "delete only for sources that answered".
 4. Mark a kept repository so the UI can say why: new nullable column `Repositories.MissingFromProviderSinceUtc` (set when kept, cleared when a later fetch returns the repository). Needs the entity change, an idempotent `Migrate*Async` and a new `StrictSteps` entry.
 
-Change 1b - removing a connector is a soft delete, never a cascade (medium, one added column):
+Change 1b - removing a connector is a soft delete, never a cascade (done 2026-11-11; the note is deleted. Differences from the steps below: the removed row is renamed because the name column is unique, removed connectors are filtered in `ConnectorRepository` and the few direct readers instead of an `IncludeRemoved` read, and step 7, the per-repository state for an unhealthy connector, is left to `ideas/connector-token-failure-handling.md`):
 1. Failing test: delete a connector whose repositories are linked to a Workspace and used by a Feature; assert the links, context rows and Feature rows survive and the delete succeeds.
 2. Soft delete (owner decision 2026-11-11): the connector row stays as a tombstone. New nullable column `Connectors.RemovedAtUtc` (an added nullable column, so no table rebuild and no foreign key change). `DeleteAsync` then: deletes the connector's unlinked repositories; if no linked repository is left, deletes the connector row as today; otherwise sets `RemovedAtUtc`, clears `UserToken`, sets `IsActive = false` and keeps the row. It loses its "remove the Features first" refusal. The stored token is always cleared, so a removed connector can never authenticate anything.
 3. A removed connector is invisible everywhere a connector can be chosen or used: `ConnectorRepository.GetAllAsync` and the other list reads filter it out (one place, with an explicit `IncludeRemoved` read for the few callers that need it), the Connectors page does not list it, the refresh never fetches it, the name-uniqueness check ignores it so the same name can be added again, and health checks skip it.

@@ -166,7 +166,7 @@ public sealed partial class GitHubService
         request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
         var token = ConnectorHelpers.UnprotectToken(connector.UserToken);
         if (string.IsNullOrWhiteSpace(token))
-            throw new InvalidOperationException("Connector token is not configured.");
+            throw new InvalidOperationException(MissingTokenMessage(connector));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         return request;
     }
@@ -182,7 +182,7 @@ public sealed partial class GitHubService
         request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
         var token = ConnectorHelpers.UnprotectToken(connector.UserToken);
         if (string.IsNullOrWhiteSpace(token))
-            throw new InvalidOperationException("Connector token is not configured.");
+            throw new InvalidOperationException(MissingTokenMessage(connector));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         return request;
     }
@@ -310,7 +310,7 @@ public sealed partial class GitHubService
         request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
         var token = ConnectorHelpers.UnprotectToken(connector.UserToken);
         if (string.IsNullOrWhiteSpace(token))
-            throw new InvalidOperationException("Connector token is not configured.");
+            throw new InvalidOperationException(MissingTokenMessage(connector));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         return request;
     }
@@ -333,7 +333,7 @@ public sealed partial class GitHubService
             request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
             var token = ConnectorHelpers.UnprotectToken(connector.UserToken);
             if (string.IsNullOrWhiteSpace(token))
-                throw new InvalidOperationException("Connector token is not configured.");
+                throw new InvalidOperationException(MissingTokenMessage(connector));
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             return await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
         }, cancellationToken);

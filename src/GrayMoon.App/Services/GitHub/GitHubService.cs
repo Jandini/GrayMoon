@@ -101,6 +101,12 @@ public sealed partial class GitHubService : IConnectorService
         }
     }
 
+    /// <summary>Why a request cannot be made without a token: the connector was removed, or it has none configured.</summary>
+    private static string MissingTokenMessage(Connector connector) =>
+        connector.IsRemoved
+            ? "This repository has no valid connector: its connector was removed. Add or repair a connector that can access it, then fetch repositories."
+            : "Connector token is not configured.";
+
     private static void EnsureConnectorConfigured(Connector connector)
     {
         if (connector.ConnectorType != ConnectorType.GitHub)
@@ -111,7 +117,7 @@ public sealed partial class GitHubService : IConnectorService
         var token = ConnectorHelpers.UnprotectToken(connector.UserToken);
         if (string.IsNullOrWhiteSpace(token))
         {
-            throw new InvalidOperationException("Connector token is not configured.");
+            throw new InvalidOperationException(MissingTokenMessage(connector));
         }
     }
 }

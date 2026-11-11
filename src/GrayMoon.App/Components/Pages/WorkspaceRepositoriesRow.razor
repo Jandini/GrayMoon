@@ -53,8 +53,15 @@
                     {
                         <span class="badge repo-archived-badge">archived</span>
                     }
-                    @if (repo.IsFork)
+                    @if (repo.Connector?.IsRemoved == true)
                     {
+                        <span class="badge repo-archived-badge text-nowrap" title="The connector of this repository was removed. Local work still works; fetch, pull, push and pull requests need a connector. Add or repair a connector that can access the repository, then fetch repositories.">no connector</span>
+                    }
+                    else if (repo.MissingFromProviderSinceUtc is { } missingSince)
+                    {
+                        <span class="badge repo-archived-badge text-nowrap" title="@($"The connector no longer returns this repository (since {missingSince.ToLocalTime():yyyy-MM-dd}). It was deleted or moved on the provider, or the token lost access to it. It stays in this Workspace until you remove it.")">not found on provider</span>
+                    }
+                    @if (repo.IsFork)                    {
                         <ForkBadge ParentCloneUrl="@repo.ParentCloneUrl" Clickable="true" />
                     }
                     <div class="gm-menu-panel">
@@ -77,8 +84,15 @@
                     {
                         <span class="badge repo-archived-badge">archived</span>
                     }
-                    @if (repo.IsFork)
+                    @if (repo.Connector?.IsRemoved == true)
                     {
+                        <span class="badge repo-archived-badge text-nowrap" title="The connector of this repository was removed. Local work still works; fetch, pull, push and pull requests need a connector. Add or repair a connector that can access the repository, then fetch repositories.">no connector</span>
+                    }
+                    else if (repo.MissingFromProviderSinceUtc is { } missingSince)
+                    {
+                        <span class="badge repo-archived-badge text-nowrap" title="@($"The connector no longer returns this repository (since {missingSince.ToLocalTime():yyyy-MM-dd}). It was deleted or moved on the provider, or the token lost access to it. It stays in this Workspace until you remove it.")">not found on provider</span>
+                    }
+                    @if (repo.IsFork)                    {
                         <ForkBadge ParentCloneUrl="@repo.ParentCloneUrl" Clickable="true" />
                     }
                 </span>

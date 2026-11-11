@@ -2,6 +2,7 @@ using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services;
 using GrayMoon.App.Services.GitChanges;
+using GrayMoon.Application.Features;
 using GrayMoon.Common.Git;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.Options;
@@ -145,10 +146,7 @@ public sealed partial class WorkspaceGitChanges
             return;
         }
 
-        var reposOnDefaultBranch = targets
-            .Where(r => !string.IsNullOrWhiteSpace(r.DefaultBranchName)
-                && string.Equals(r.BranchName, r.DefaultBranchName, StringComparison.Ordinal))
-            .ToList();
+        var reposOnDefaultBranch = targets.Where(WorkspaceCommitTargetPlanner.IsOnDefaultBranch).ToList();
 
         if (reposOnDefaultBranch.Count > 0)
         {
@@ -169,7 +167,11 @@ public sealed partial class WorkspaceGitChanges
         CommitWorkspaceCoreAsync(mode, pushAfterCommit, targets);
     }
 
-    private void CommitWorkspaceCoreAsync(WorkspaceCommitMode mode, bool pushAfterCommit, List<WorkspaceGitChangesRepositoryView> targets)
+    /// <param name="clickedTargets">
+    /// The targets of the click: what the AI describes and what the user confirmed in the default-branch dialog. The
+    /// job reads the repositories again right before it commits (<see cref="WorkspaceCommitTargetPlanner"/>).
+    /// </param>
+    private void CommitWorkspaceCoreAsync(WorkspaceCommitMode mode, bool pushAfterCommit, List<WorkspaceGitChangesRepositoryView> clickedTargets)
     {
         if (IsJobRunning)
         {
@@ -189,11 +191,11 @@ public sealed partial class WorkspaceGitChanges
                 return;
             }
 
-            generation = new CommitMessageGeneration(writer, BuildAiCommitScope(mode, targets));
+            generation = new CommitMessageGeneration(writer, BuildAiCommitScope(mode, clickedTargets));
         }
 
         var stageAllFirst = WorkspaceCommitModeHelper.StageAllFirst(mode);
-        var committingLabel = $"Committing in {targets.Count} repositor{(targets.Count == 1 ? "y" : "ies")}...";
+        var committingLabel = $"Committing in {clickedTargets.Count} repositor{(clickedTargets.Count == 1 ? "y" : "ies")}...";
         var label = generation is null ? committingLabel : $"Writing the commit message with {generation.Provider.Label}...";
 
         StartPageJob(label, async (job, ct) =>
@@ -206,14 +208,30 @@ public sealed partial class WorkspaceGitChanges
                 return;
             }
 
-            if (generation is not null)
+            // The click is minutes old when the AI wrote the message, and older still after the default-branch
+            // dialog: decide the targets now, from the persisted state of the context the job was queued with.
+            var plan = await PlanCommitTargetsAsync(job, mode, clickedTargets, committedContextId, ct);
+            var targets = plan.Targets;
+            if (plan.AddedSinceClick.Count > 0)
             {
-                job.ReportProgress(committingLabel);
+                job.Terminal.Append(
+                    "commit",
+                    WorkerCommandStreamKind.Stdout,
+                    $"Also committing {string.Join(", ", plan.AddedSinceClick)}: changed after the commit was started."
+                    + (generation is null ? "" : " The commit message was written before that and does not describe these changes."));
             }
+
+            job.ReportProgress($"Committing in {targets.Count} repositor{(targets.Count == 1 ? "y" : "ies")}...");
 
             // One outcome per target repository. A repository that ends without one is reported as failed (see
             // RepositoryOutcomes.Complete), so a repository can never vanish from the result.
-            var outcomes = new RepositoryOutcomes(targets.Select(t => (t.WorkspaceRepositoryId, t.RepositoryName)));
+            var outcomes = new RepositoryOutcomes(
+                targets.Select(t => (t.WorkspaceRepositoryId, t.RepositoryName))
+                    .Concat(plan.LeftOut.Select(l => (l.Repository.WorkspaceRepositoryId, l.Repository.RepositoryName))));
+            foreach (var (repository, reason) in plan.LeftOut)
+            {
+                outcomes.Skipped(repository.WorkspaceRepositoryId, repository.RepositoryName, reason);
+            }
             var repositoryIds = new System.Collections.Concurrent.ConcurrentDictionary<int, int>();
             var completed = 0;
 
@@ -370,6 +388,30 @@ public sealed partial class WorkspaceGitChanges
                     warning => SafeInvoke(() => ToastService.ShowWarning(warning)));
             }
         });
+    }
+
+    /// <summary>
+    /// Reads the context's repositories again (off the dispatcher, into a local; never from <c>_view</c>) and plans the
+    /// run. When the read fails the click's targets are used and the terminal says so.
+    /// </summary>
+    private async Task<WorkspaceCommitTargetPlan> PlanCommitTargetsAsync(
+        BackgroundJobHandle job,
+        WorkspaceCommitMode mode,
+        List<WorkspaceGitChangesRepositoryView> clickedTargets,
+        WorkspaceFeatureContextId contextId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var summaries = await ReadService.GetContextSummariesAsync(WorkspaceId, contextId, cancellationToken);
+            return WorkspaceCommitTargetPlanner.Plan(mode, clickedTargets, GitChangesTreeBuilder.ViewFromSummaries(summaries).Repositories);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Could not re-read the Changes state before a workspace commit; committing the repositories of the click.");
+            job.Terminal.Append("commit", WorkerCommandStreamKind.Stderr, "Could not re-read the repositories before committing; committing the ones selected when the commit was started.");
+            return new WorkspaceCommitTargetPlan(clickedTargets, [], []);
+        }
     }
 
     private void StageAllChangedAsync() => BulkSectionActionAsync(unstageStagedSection: false);

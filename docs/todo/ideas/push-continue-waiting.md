@@ -1,6 +1,6 @@
 # Push: "Continue waiting" on a failed level
 
-Status: not started. Moved here on 2026-11-11 from `defects/push-package-wait-and-circuit-crash.md` (it is a missing feature, not a defect).
+Status: not started. Moved here on 2026-11-11 from the push wait defect note, which is closed (it is a missing feature, not a defect).
 
 ## Problem
 
