@@ -140,6 +140,10 @@
                     else if (Mode == ConnectorModalMode.Delete)
                     {
                         <p>Are you sure you want to delete <strong>@ConnectorName</strong>?</p>
+                        @if (!string.IsNullOrWhiteSpace(DeleteNote))
+                        {
+                            <p class="text-muted">@DeleteNote</p>
+                        }
                         @if (ErrorMessage != null)
                         {
                             <div class="gm-callout gm-callout--error" role="alert">@ErrorMessage</div>
@@ -175,6 +179,8 @@
     [Parameter] public string? ErrorMessage { get; set; }
     [Parameter] public EventCallback OnSubmit { get; set; }
     [Parameter] public EventCallback OnDelete { get; set; }
+    /// <summary>Delete mode: what stays behind when the connector goes. Null for none.</summary>
+    [Parameter] public string? DeleteNote { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
 
     private string SubmitButtonText => Mode == ConnectorModalMode.Edit ? "Update" : "Add";

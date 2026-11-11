@@ -522,7 +522,7 @@ public sealed class WorkspaceRepositoryOperations(
 
         var connectors = await db.Connectors
             .AsNoTracking()
-            .Where(c => c.ConnectorType == ConnectorType.GitHub)
+            .Where(c => c.ConnectorType == ConnectorType.GitHub && c.RemovedAtUtc == null)
             .ToListAsync(cancellationToken);
         var catalog = await db.Repositories
             .AsNoTracking()

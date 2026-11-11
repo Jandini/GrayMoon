@@ -454,7 +454,11 @@ public sealed class WorkspaceFeatureReconciler(
     private bool IsRemovalPending(int featureContextId) =>
         removalQueue?.IsPending(new WorkspaceFeatureContextId(featureContextId)) == true;
 
-    private static async Task<string?> SafeMainPathAsync(
+    /// <summary>
+    /// The main checkout path, or null when the lookup failed. Null means "unknown": the worktree probe then
+    /// answers <see cref="WorktreeProbe.Unknown"/> and the row is left as it is for this pass, never marked missing.
+    /// </summary>
+    private async Task<string?> SafeMainPathAsync(
         IWorkspaceContextPathResolver pathResolver,
         WorkspaceFeatureContextId special,
         int workspaceRepositoryId,
@@ -464,8 +468,9 @@ public sealed class WorkspaceFeatureReconciler(
         {
             return await pathResolver.GetRepositoryPathAsync(special, workspaceRepositoryId, cancellationToken);
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
+            logger.LogWarning(ex, "Could not resolve the main checkout path of workspace repository {WorkspaceRepositoryId}; its Feature worktree is not checked in this pass.", workspaceRepositoryId);
             return null;
         }
     }

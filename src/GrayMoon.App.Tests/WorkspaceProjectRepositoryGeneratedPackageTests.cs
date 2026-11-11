@@ -281,6 +281,93 @@ public sealed class WorkspaceProjectRepositoryGeneratedPackageTests
         Assert.Contains(edges, e => e.DependentProjectId == ctx.ConsumerProjectId);
         Assert.Contains(edges, e => e.DependentProjectId == featureConsumer.ProjectId);
     }
+
+    private static async Task<(WorkspaceFeatureContext Context, WorkspaceProject Consumer)> AddFeatureConsumerAsync(GeneratedPackageTestContext ctx, AppDbContext db)
+    {
+        var featureContext = new WorkspaceFeatureContext
+        {
+            WorkspaceId = ctx.WorkspaceId,
+            Kind = WorkspaceFeatureContextKind.Feature,
+            CreatedAt = DateTime.UtcNow,
+            IsInSync = true
+        };
+        db.WorkspaceFeatureContexts.Add(featureContext);
+        await db.SaveChangesAsync();
+
+        var featureConsumer = new WorkspaceProject
+        {
+            WorkspaceId = ctx.WorkspaceId,
+            WorkspaceFeatureContextId = featureContext.WorkspaceFeatureContextId,
+            RepositoryId = ctx.ConsumerRepositoryId,
+            ProjectName = "Consumer",
+            ProjectType = ProjectType.Library,
+            ProjectFilePath = GeneratedPackageTestContext.ConsumerProjectFilePath,
+            TargetFramework = "net10.0"
+        };
+        db.WorkspaceProjects.Add(featureConsumer);
+        await db.SaveChangesAsync();
+        return (featureContext, featureConsumer);
+    }
+
+    [Fact]
+    public async Task A_Feature_that_resolves_no_generated_package_keeps_the_Workspace_rows_and_drops_only_its_own_edge()
+    {
+        // A Feature whose version file is missing syncs an empty set. That used to delete the generated row for
+        // the whole Workspace, with the special Workspace's edge.
+        await using var ctx = await GeneratedPackageTestContext.CreateAsync();
+        await using var scope = ctx.CreateScope();
+        var db = ctx.Db(scope);
+        var repo = ctx.Repo(scope);
+        var (featureContext, featureConsumer) = await AddFeatureConsumerAsync(ctx, db);
+        await repo.SyncGeneratedPackageDependenciesAsync(ctx.WorkspaceId, [ctx.MakeInfo(version: "1.0.0")]);
+
+        await repo.SyncGeneratedPackageDependenciesAsync(ctx.WorkspaceId, featureContext.WorkspaceFeatureContextId, []);
+
+        var generated = await db.WorkspaceProjects.SingleAsync(p => p.IsGenerated);
+        var edge = Assert.Single(await db.ProjectDependencies.AsNoTracking().Where(d => d.ReferencedProjectId == generated.ProjectId).ToListAsync());
+        Assert.Equal(ctx.ConsumerProjectId, edge.DependentProjectId);
+        Assert.Equal("1.0.0", edge.Version);
+        Assert.NotEqual(featureConsumer.ProjectId, edge.DependentProjectId);
+    }
+
+    [Fact]
+    public async Task A_Feature_never_creates_a_generated_row_the_Workspace_does_not_have()
+    {
+        await using var ctx = await GeneratedPackageTestContext.CreateAsync();
+        await using var scope = ctx.CreateScope();
+        var db = ctx.Db(scope);
+        var (featureContext, _) = await AddFeatureConsumerAsync(ctx, db);
+
+        await ctx.Repo(scope).SyncGeneratedPackageDependenciesAsync(ctx.WorkspaceId, featureContext.WorkspaceFeatureContextId, [ctx.MakeInfo()]);
+
+        Assert.False(await db.WorkspaceProjects.AnyAsync(p => p.IsGenerated));
+        Assert.False(await db.ProjectDependencies.AnyAsync());
+    }
+
+    [Fact]
+    public async Task Each_context_keeps_the_generated_package_version_it_resolved()
+    {
+        // The version one context resolved used to be written to every context's consumer edge.
+        await using var ctx = await GeneratedPackageTestContext.CreateAsync();
+        await using var scope = ctx.CreateScope();
+        var db = ctx.Db(scope);
+        var repo = ctx.Repo(scope);
+        var (featureContext, featureConsumer) = await AddFeatureConsumerAsync(ctx, db);
+        await repo.SyncGeneratedPackageDependenciesAsync(ctx.WorkspaceId, [ctx.MakeInfo(version: "1.0.0")]);
+
+        await repo.SyncGeneratedPackageDependenciesAsync(ctx.WorkspaceId, featureContext.WorkspaceFeatureContextId, [ctx.MakeInfo(version: "2.0.0")]);
+
+        async Task<string?> VersionOfAsync(int projectId) =>
+            (await db.ProjectDependencies.AsNoTracking().SingleAsync(d => d.DependentProjectId == projectId)).Version;
+        Assert.Equal("1.0.0", await VersionOfAsync(ctx.ConsumerProjectId));
+        Assert.Equal("2.0.0", await VersionOfAsync(featureConsumer.ProjectId));
+
+        // And the special Workspace's next check does not write its version over the Feature's.
+        await repo.SyncGeneratedPackageDependenciesAsync(ctx.WorkspaceId, [ctx.MakeInfo(version: "1.1.0")]);
+
+        Assert.Equal("1.1.0", await VersionOfAsync(ctx.ConsumerProjectId));
+        Assert.Equal("2.0.0", await VersionOfAsync(featureConsumer.ProjectId));
+    }
 }
 
 /// <summary>In-memory SQLite DI context seeded with a producer repo (no physical project) and a consumer repo with one real .csproj-backed project, for generated-package tests.</summary>

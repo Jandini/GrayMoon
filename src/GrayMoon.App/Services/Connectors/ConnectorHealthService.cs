@@ -20,7 +20,7 @@ public sealed class ConnectorHealthService(AppDbContext dbContext, ILogger<Conne
             from wr in dbContext.WorkspaceRepositories
             join repo in dbContext.Repositories on wr.RepositoryId equals repo.RepositoryId
             join connector in dbContext.Connectors on repo.ConnectorId equals connector.ConnectorId
-            where connector.IsActive && !connector.IsHealthy
+            where connector.IsActive && !connector.IsHealthy && connector.RemovedAtUtc == null
             select connector.ConnectorId;
 
         var any = await query.Distinct().AnyAsync(cancellationToken);
@@ -52,7 +52,7 @@ public sealed class ConnectorHealthService(AppDbContext dbContext, ILogger<Conne
             return;
         }
 
-        EnsureHealthy(repo.Connector);
+        EnsureHealthy(repo.Connector, repo.RepositoryName);
     }
 
     /// <summary>
@@ -80,13 +80,17 @@ public sealed class ConnectorHealthService(AppDbContext dbContext, ILogger<Conne
             if (!reposById.TryGetValue(repositoryId, out var repo) || repo.Connector == null)
                 continue;
 
-            EnsureHealthy(repo.Connector);
+            EnsureHealthy(repo.Connector, repo.RepositoryName);
         }
     }
 
     /// <summary>Shared health check applied to a single connector; throws ConnectorHealthException when unhealthy.</summary>
-    private static void EnsureHealthy(Connector connector)
+    private static void EnsureHealthy(Connector connector, string repositoryName)
     {
+        // A removed connector has no token left, whatever its type would need.
+        if (connector.IsRemoved)
+            throw new ConnectorHealthException(Connector.NoValidConnectorMessage(repositoryName));
+
         var requiresToken = ConnectorHelpers.RequiresToken(connector.ConnectorType, connector.ApiBaseUrl);
 
         if (!requiresToken)

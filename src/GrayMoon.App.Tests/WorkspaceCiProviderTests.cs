@@ -269,7 +269,7 @@ public sealed class WorkspaceCiProviderTests
                 connectorRepository,
                 new GitHubRepositoryService(
                     connectorRepository,
-                    new GitHubRepositoryRepository(dbContext, new RecordingGitChangesNotifier(), NullLogger<GitHubRepositoryRepository>.Instance),
+                    new GitHubRepositoryRepository(dbContext, NullLogger<GitHubRepositoryRepository>.Instance),
                     GitHub,
                     Options.Create(new WorkspaceOptions()),
                     NullLogger<GitHubRepositoryService>.Instance),

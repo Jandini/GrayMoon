@@ -180,7 +180,7 @@ public sealed class WorkerRepositoryNameAndLinkValidationTests : IDisposable
             new FakeRepositoryGitChangesService { Delay = TimeSpan.Zero }, new GitChangesSnapshotCache(),
             Options.Create(new GitChangesOptions()), NullLogger<GitStatusRefreshCoordinator>.Instance);
 
-        var response = await new StageAndCommitCommand(git, reader, coordinator).ExecuteAsync(new StageAndCommitRequest
+        var response = await new StageAndCommitCommand(git, reader, coordinator, NullLogger<StageAndCommitCommand>.Instance).ExecuteAsync(new StageAndCommitRequest
         {
             WorkspaceRoot = _root,
             WorkspaceName = "ws",

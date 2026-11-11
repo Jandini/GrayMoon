@@ -276,7 +276,9 @@ runs on the thread pool while the dispatcher may be rendering the page.
    succeeded.** A sync or merge that removes rows missing from fresh data must
    limit deletions to the sources that answered successfully. A connector that
    failed (401, rate limit, timeout) contributes no deletions, and the result
-   names what was skipped. [1]
+   names what was skipped. [1] Connector state (removed, inactive, failed, an
+   empty answer, a repository no longer returned) never deletes a repository
+   that a Workspace links; only removing it from the Workspace does.
 2. **Deleting or unlinking an entity removes every dependent table's rows**,
    in every context. When you add a table that references a repository, link
    or context, add it to the matching cleanup

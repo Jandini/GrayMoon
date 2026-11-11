@@ -23,6 +23,6 @@ internal static class RepositorySearchExpressions
         return r => r.RepositoryName.ToLower().Contains(termValue)
                     || (r.OrgName ?? string.Empty).ToLower().Contains(termValue)
                     || (r.Topics ?? string.Empty).ToLower().Contains(termValue)
-                    || (r.Connector != null ? r.Connector.ConnectorName : "Unknown").ToLower().Contains(termValue);
+                    || (r.Connector == null ? "Unknown" : r.Connector.RemovedAtUtc != null ? "No connector" : r.Connector.ConnectorName).ToLower().Contains(termValue);
     }
 }
