@@ -171,9 +171,43 @@ public sealed class SignalRConnectionHostedService(
     }
 
     private Task SendCommandResponseAsync(string requestId, WorkerCommandResponse response)
-        => _connection?.State == HubConnectionState.Connected
-            ? _connection.InvokeAsync(WorkerHubMethods.ResponseCommand, requestId, response, CancellationToken.None)
-            : Task.CompletedTask;
+        => SendIntakeResponseAsync(
+            _connection?.State,
+            () => _connection!.InvokeAsync(WorkerHubMethods.ResponseCommand, requestId, response, CancellationToken.None),
+            requestId,
+            response,
+            logger);
+
+    /// <summary>
+    /// Sends a response the intake produced itself (a refused or cancelled request). While the hub is not connected
+    /// the response cannot be delivered, and it is not kept for later: a reconnect gets a new connection id and the
+    /// App has already failed the requests of the old one. The drop is logged so it can be traced.
+    /// </summary>
+    internal static async Task SendIntakeResponseAsync(
+        HubConnectionState? state,
+        Func<Task> send,
+        string requestId,
+        WorkerCommandResponse response,
+        ILogger logger)
+    {
+        if (state != HubConnectionState.Connected)
+        {
+            logger.LogWarning(
+                "Dropped the response for request {RequestId}: the hub connection is {State}. Success={Success}, Error={Error}. The App fails the request when it sees the disconnect.",
+                requestId, state?.ToString() ?? "not created", response.Success, response.Error);
+            return;
+        }
+
+        try
+        {
+            await send();
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not send the response for request {RequestId}. Success={Success}, Error={Error}.", requestId, response.Success, response.Error);
+            throw;
+        }
+    }
 
     private async Task ConnectWithRetryAsync(CancellationToken cancellationToken)
     {

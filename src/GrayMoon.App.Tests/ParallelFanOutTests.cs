@@ -37,7 +37,7 @@ public sealed class ParallelFanOutTests
             rows.Add((sourceIds[i], FeatureRoot + @"\" + names[i]));
         var featureContextId = await SeedFeatureAsync(ctx, rows);
 
-        var probe = new FanOutProbe();
+        var probe = new FanOutProbe { HoldUntilActive = Limit };
         RespondToRollback(ctx, names, probe, failingPath: null);
 
         await using var scope = ctx.CreateScope();
@@ -63,7 +63,7 @@ public sealed class ParallelFanOutTests
             rows.Add((sourceIds[i], FeatureRoot + @"\" + names[i]));
         var featureContextId = await SeedFeatureAsync(ctx, rows);
 
-        var probe = new FanOutProbe();
+        var probe = new FanOutProbe { HoldUntilActive = Limit };
         ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new { success = true });
         ctx.WorkerBridge.RespondAsync("DeleteBranch", async (args, ct) =>
         {
@@ -115,7 +115,7 @@ public sealed class ParallelFanOutTests
             rows.Add((sourceIds[i], FeatureRoot + @"\" + names[i]));
         var featureContextId = await SeedFeatureAsync(ctx, rows);
 
-        var probe = new FanOutProbe();
+        var probe = new FanOutProbe { HoldUntilActive = Limit };
         RespondToRollback(ctx, names, probe, failingPath: FeatureRoot + @"\src-b");
 
         await using var scope = ctx.CreateScope();
@@ -142,7 +142,7 @@ public sealed class ParallelFanOutTests
         var repoIds = await ReadRepositoryIdsAsync(ctx);
         Assert.Equal(3, repoIds.Count);
 
-        var probe = new FanOutProbe();
+        var probe = new FanOutProbe { HoldUntilActive = Limit };
         ctx.WorkerBridge.RespondAsync("RefreshBranches", async (_, ct) =>
         {
             await probe.EnterAsync(ct);

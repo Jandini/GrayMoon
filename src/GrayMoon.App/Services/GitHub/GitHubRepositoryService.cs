@@ -33,7 +33,6 @@ public sealed class GitHubRepositoryService(
         logger.LogInformation("User triggered fetch repositories from GitHub");
         var allFetched = new List<Repository>();
         var connectorErrors = new List<ConnectorFetchError>();
-        var failedConnectorIds = new HashSet<int>();
         var uniqueCloneUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var connectors = await connectorRepository.GetAllAsync();
         var activeConnectors = connectors.Where(connector => connector.IsActive && connector.ConnectorType == ConnectorType.GitHub).ToList();
@@ -65,6 +64,7 @@ public sealed class GitHubRepositoryService(
             FetchConnectorAsync(connector, gate, batchProgress, sharedStateLock, uniqueCloneUrls, progress, knownForkParents, cancellationToken)));
 
         // Apply the results in connector order. The status writes share this service's scoped DbContext, so they stay sequential.
+        HashSet<int>? connectorIdsWithStoredRepositories = null;
         for (var i = 0; i < activeConnectors.Count; i++)
         {
             var connector = activeConnectors[i];
@@ -72,12 +72,30 @@ public sealed class GitHubRepositoryService(
             if (fetch.ErrorMessage == null)
             {
                 allFetched.AddRange(fetch.Repositories);
+                if (fetch.Repositories.Count > 0)
+                    continue;
+
+                // A 200 with an empty list is what a token that lost its organization grant returns. It is no
+                // evidence that the stored repositories are gone, so the merge leaves them alone (it only cleans
+                // up for a connector that returned at least one repository) and the user is told.
+                connectorIdsWithStoredRepositories ??= await repositoryRepository.GetConnectorIdsWithRepositoriesAsync(cancellationToken);
+                if (connectorIdsWithStoredRepositories.Contains(connector.ConnectorId))
+                {
+                    logger.LogWarning(
+                        "Connector {ConnectorName} returned no repositories in the repository refresh. Its stored repositories were left unchanged.",
+                        connector.ConnectorName);
+                    connectorErrors.Add(new ConnectorFetchError
+                    {
+                        ConnectorName = connector.ConnectorName,
+                        Message = "The connector returned no repositories. Its stored repositories were left unchanged. Check what the token can access."
+                    });
+                }
+
                 continue;
             }
 
-            // A connector that did not answer is skipped: it contributes no repositories and, through
-            // failedConnectorIds, no deletions either. Its stored repositories, links and rows stay as they are.
-            failedConnectorIds.Add(connector.ConnectorId);
+            // A connector that did not answer is skipped: it contributes no repositories and so, in the merge,
+            // no deletions either. Its stored repositories, links and rows stay as they are.
             logger.LogWarning(
                 "Connector {ConnectorName} skipped in the repository refresh: {Reason}. Its stored repositories were left unchanged.",
                 connector.ConnectorName, fetch.ErrorMessage);
@@ -91,13 +109,13 @@ public sealed class GitHubRepositoryService(
 
         IReadOnlyList<RenamedRepositoryInfo> renamedRepositories = [];
         IReadOnlyDictionary<int, int> mergedIdMap = new Dictionary<int, int>();
-        IReadOnlyList<KeptRepositoryForFeaturesInfo> keptForFeatures = [];
+        IReadOnlyList<KeptRepositoryInfo> keptMissingFromProvider = [];
         if (allFetched.Count > 0)
         {
-            var mergeResult = await repositoryRepository.MergeRepositoriesAsync(allFetched, failedConnectorIds);
+            var mergeResult = await repositoryRepository.MergeRepositoriesAsync(allFetched);
             renamedRepositories = mergeResult.Renames;
             mergedIdMap = mergeResult.MergedRepositoryIdMap;
-            keptForFeatures = mergeResult.KeptForFeatures;
+            keptMissingFromProvider = mergeResult.KeptMissingFromProvider;
         }
 
         return new RefreshRepositoriesResult
@@ -105,7 +123,7 @@ public sealed class GitHubRepositoryService(
             ConnectorErrors = connectorErrors,
             RenamedRepositories = renamedRepositories,
             MergedRepositoryIdMap = mergedIdMap,
-            KeptForFeatures = keptForFeatures
+            KeptMissingFromProvider = keptMissingFromProvider
         };
     }
 

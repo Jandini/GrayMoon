@@ -80,7 +80,7 @@ dbContext.Database.EnsureCreated()                        creates the file from 
 Migrations.RunAllAsync(dbContext, logger)                 versioned patches (below)
 TokenReencryptionService.ReencryptLegacyTokensAsync(...)  section 18; never throws
 WorkerSecretService.InitializeAsync()                     graymoon-worker.secret next to the database
-PRAGMA journal_mode=WAL / busy_timeout=5000 / synchronous=NORMAL (startup only; the per-connection interceptor re-applies busy_timeout and foreign_keys, not synchronous)
+PRAGMA journal_mode=WAL / busy_timeout=5000 / synchronous=NORMAL (journal_mode is stored in the file; busy_timeout, foreign_keys and synchronous are per connection and are applied to every connection by SqliteConnectionPragmasInterceptor)
 ```
 
 A `DatabaseMigrationException` is caught at the top of `Program.cs`, logged as fatal, and the App exits with code 1. Every other startup exception is logged the same way.
@@ -119,6 +119,8 @@ Current strict steps:
 16  Repair special Workspace context backfill              (re-runs the baseline's special Workspace context backfill once every column exists; the
                                                            baseline copy throws part-way on a 0.1.0 database because step 14 adds ContentDigest later,
                                                            which left later Workspaces uncopied. Idempotent: it skips anything already copied)
+17  Repository missing-from-provider column                (Repositories.MissingFromProviderSinceUtc)
+18  Connector removed-at column                            (Connectors.RemovedAtUtc)
 ```
 
 A brand-new database also starts at `user_version` 0, so it runs the baseline and every strict step right after `EnsureCreated()`. Every step must therefore be a no-op against the current model's shape (guard with `pragma_table_info(...)`, `sqlite_master`, `CREATE ... IF NOT EXISTS`), and a backfill must run only on the branch that actually created the column (see `AddWorkspaceProfileColumnIfMissingAsync`).
@@ -186,6 +188,10 @@ CloneUrl
 GitHubRepositoryId / provider identity
 visibility/archive metadata
 ```
+
+`MissingFromProviderSinceUtc` (nullable) is set when a repository refresh finds that the connector no longer returns a repository a Workspace links. The repository is kept, never deleted; the next fetch that returns it clears the value. Only repositories no Workspace links are deleted by a refresh (`GitHubRepositoryRepository.MergeRepositoriesAsync`).
+
+`Connectors.RemovedAtUtc` (nullable) marks a removed connector. `ConnectorRepository.DeleteAsync` deletes the connector's repositories that no Workspace links; when none is left it deletes the connector row, otherwise the row stays as a soft delete: `RemovedAtUtc` set, token cleared, inactive, `Status` `Removed`, and the name changed to `<name> (removed <id>)` because `ConnectorName` is unique and the old name must be free again. The `Repositories.ConnectorId` foreign key still cascades, so the connector row is deleted only when it has no repository. `ConnectorRepository` reads, the token health check and the restore context skip removed connectors; `Connector.IsRemoved` is the check for code that holds a connector from `Repository.Connector`. `RemovedConnectorCleanup.PurgeUnusedAsync` (run at the end of every repository merge) deletes a removed connector's repositories that no Workspace links any more and then the connector row once it has no repository, which is what happens after the merge's clone URL match moved its repositories to another connector.
 
 Fork fields: `IsFork` and `ParentCloneUrl` (the immediate parent's clone URL, provider-neutral, null when not a fork). Both are set by repository sync (`GitHubRepositoryService`; the parent comes from `GET repos/{owner}/{repo}` because the list endpoint only returns the `fork` flag, and is looked up once per fork then reused from the stored value). Both pull request tables (`WorkspaceRepositoryPullRequests` and `WorkspaceRepositoryContextPullRequests`) carry nullable `Parent*` columns (`ParentPullRequestNumber`, `ParentState`, `ParentMergeable`, `ParentMergeableState`, `ParentHtmlUrl`, `ParentMergedAt`, `ParentChangedFiles`) describing the pull request for the same head branch in the upstream repository. They are real columns so SQL header counts can see upstream PRs. `PullRequestInfo.Compose(own, parent)` builds the model: only own PR, only upstream PR (flagged `IsInParentRepository`, link-only), both (own is primary, upstream in `ParentPullRequest`), or none. Added by strict step 15 and, idempotently, in the legacy baseline so EF reads during baseline do not fail.
 The database uses provider identity where available and does not rely solely on repository name.
@@ -411,6 +417,8 @@ IsGenerated
 MatchedConnectorId
 ```
 
+`MatchedConnectorId` is written by `PackageRegistrySyncService`. A registry lookup that throws is logged at warning and is not a miss: when no registry has the package and at least one lookup failed, the stored value is left unchanged so the next sync retries (test: `PackageRegistrySyncLookupFailureTests`).
+
 ### Project classification and packaging
 
 The Worker classifies each `.csproj` (`CsProjFileParser`), in this order:
@@ -442,6 +450,8 @@ Effective `IsPackable` / `PackageId` come from `ProjectPackagingResolver` (Worke
 Generated projects represent virtual/package-producing entities inferred from GrayMoon configuration or CI behavior.
 
 They are intentionally protected from deletion by normal physical project reconciliation.
+
+Generated rows are workspace-global and belong to the special Workspace context. `WorkspaceProjectRepository.SyncGeneratedPackageDependenciesAsync` takes the context whose file check resolved the packages: only the special Workspace context creates and removes generated rows, so a Feature whose version file is missing or different never drops a package for the whole Workspace. Each context updates and removes only the edges of its own consumer projects, so each context's edge carries the version that context resolved. The special Workspace context also adds a missing edge for another context's consumer (a new Feature has the edge before its own first check) and never changes it afterwards. Test anchor: `WorkspaceProjectRepositoryGeneratedPackageTests`.
 
 ---
 

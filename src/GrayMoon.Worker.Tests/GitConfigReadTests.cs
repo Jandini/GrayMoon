@@ -185,15 +185,12 @@ public sealed class GitConfigReadTests : IDisposable
     public void Hooks_path_is_handed_to_native_when_the_environment_redirects_config()
     {
         var repo = CreateRepo(_root, "hooks-env");
-        var previous = Environment.GetEnvironmentVariable("GIT_CONFIG_COUNT");
-        try
-        {
-            Environment.SetEnvironmentVariable("GIT_CONFIG_COUNT", "1");
-            Assert.False(LibGit2SharpConfigReader.TryGetString(repo, "core.hooksPath", null, CancellationToken.None).Handled);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("GIT_CONFIG_COUNT", previous);
-        }
+
+        // The variable is handed to the reader, never set on the test process: every git process a parallel test
+        // starts would inherit it and exit 128 ("missing config key GIT_CONFIG_KEY_0").
+        string? Redirected(string name) => name == "GIT_CONFIG_COUNT" ? "1" : null;
+
+        Assert.False(LibGit2SharpConfigReader.TryGetString(repo, "core.hooksPath", null, Redirected, CancellationToken.None).Handled);
+        Assert.True(LibGit2SharpConfigReader.TryGetString(repo, "core.hooksPath", null, _ => null, CancellationToken.None).Handled);
     }
 }

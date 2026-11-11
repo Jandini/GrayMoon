@@ -102,6 +102,48 @@ public class MigrationsRunnerTests
     }
 
     [Fact]
+    public async Task RunAllAsync_stops_before_any_step_when_the_written_backup_fails_its_integrity_check()
+    {
+        // Review 2026-11-10 finding 17: a backup that was written but is not a sound database is no way back,
+        // so no step may run. The old code logged the failed check and migrated anyway.
+        var dir = Path.Combine(Path.GetTempPath(), "gm-migrations-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var dbPath = Path.Combine(dir, "test.db");
+        var clock = new ManualClock(new DateTimeOffset(2026, 11, 10, 8, 30, 15, TimeSpan.Zero));
+        var backupPath = Path.Combine(dir, "test.db.bak-20261110-083015");
+        try
+        {
+            var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite($"Data Source={dbPath};Pooling=False").Options;
+            await using var db = new AppDbContext(options);
+            await db.Database.CreateSchemaAsync();
+            await db.Database.ExecuteSqlRawAsync("INSERT INTO Settings (Key, Value) VALUES ('seed', 'value');");
+
+            string? checkedPath = null;
+            var ex = await Assert.ThrowsAsync<DatabaseMigrationException>(() => Migrations.RunAllAsync(
+                db, NullLogger.Instance, clock,
+                path => { checkedPath = path; return Task.FromResult(false); }));
+
+            // The backup was written and it is the file that was checked.
+            Assert.Equal(backupPath, checkedPath);
+            Assert.True(File.Exists(backupPath));
+            Assert.Contains(backupPath, ex.Message, StringComparison.Ordinal);
+            Assert.Contains("integrity check", ex.Message, StringComparison.Ordinal);
+            Assert.Equal(backupPath, ex.BackupPath);
+
+            // No step ran: the version is still 0 and the seeded row is intact.
+            var connection = (SqliteConnection)db.Database.GetDbConnection();
+            Assert.Equal(0, await GetUserVersionAsync(connection));
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = "SELECT Value FROM Settings WHERE Key = 'seed'";
+            Assert.Equal("value", await cmd.ExecuteScalarAsync() as string);
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch { /* best effort cleanup */ }
+        }
+    }
+
+    [Fact]
     public async Task RunAllAsync_stops_before_any_step_when_the_backup_cannot_be_written_and_names_the_path()
     {
         // Review 2026-11-10 finding 17: a failed VACUUM INTO (disk full, permissions) must stop the migration

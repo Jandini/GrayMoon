@@ -809,7 +809,9 @@ public sealed class WorkspaceFileVersionService(
 
         if (csprojConfigs.Count == 0)
         {
-            await workspaceProjectRepository.SyncGeneratedPackageDependenciesAsync(workspaceId, [], cancellationToken);
+            // The repository scopes this to the calling context: a Feature that does not have the version file
+            // only drops its own edges, never the Workspace's generated packages.
+            await workspaceProjectRepository.SyncGeneratedPackageDependenciesAsync(workspaceId, contextId.Value, [], cancellationToken);
             return true;
         }
 
@@ -883,7 +885,7 @@ public sealed class WorkspaceFileVersionService(
                 }
             }
 
-            await workspaceProjectRepository.SyncGeneratedPackageDependenciesAsync(workspaceId, resolved, cancellationToken);
+            await workspaceProjectRepository.SyncGeneratedPackageDependenciesAsync(workspaceId, contextId.Value, resolved, cancellationToken);
             return true;
         }
         catch (OperationCanceledException) { throw; }

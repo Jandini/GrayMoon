@@ -63,32 +63,11 @@ public sealed class PackageRegistrySyncService(
             }
 
             // Try all NuGet connectors in parallel; match by package ID only (no particular version required).
-            int? matchedConnectorId = null;
-            var lookupTasks = connectors.Select(async connector =>
-            {
-                try
-                {
-                    logger.LogTrace("Registry lookup: PackageId={PackageId}, trying connector {ConnectorName} (Id={ConnectorId}).", packageId, connector.ConnectorName, connector.ConnectorId);
-                    var exists = await nuGetService.PackageExistsAsync(connector, packageId, ct);
-                    if (exists)
-                        logger.LogTrace("Registry match: PackageId={PackageId} found in connector {ConnectorName} (Id={ConnectorId}).", packageId, connector.ConnectorName, connector.ConnectorId);
-                    else
-                        logger.LogTrace("Registry lookup: PackageId={PackageId} not in connector {ConnectorName}.", packageId, connector.ConnectorName);
-                    return (connector, exists);
-                }
-                catch (Exception ex)
-                {
-                    logger.LogTrace(ex, "Registry lookup: PackageId={PackageId} error for connector {ConnectorName}: {Message}.", packageId, connector.ConnectorName, ex.Message);
-                    return (connector, false);
-                }
-            });
-            var results = await Task.WhenAll(lookupTasks);
-            var firstMatch = results.FirstOrDefault(r => r.Item2);
-            if (firstMatch.Item1 != null)
-                matchedConnectorId = firstMatch.Item1.ConnectorId;
-            if (matchedConnectorId == null)
-                logger.LogTrace("Registry lookup: PackageId={PackageId} matched no connector.", packageId);
-            projectIdToConnectorId[p.ProjectId] = matchedConnectorId;
+            var (matchedConnectorId, lookupFailed) = await FindRegistryAsync(connectors, packageId, ct);
+            // A failed lookup is not "no registry has this package": the stored match is left as it is, so a
+            // network error never clears a known mapping and the next sync retries.
+            if (matchedConnectorId != null || !lookupFailed)
+                projectIdToConnectorId[p.ProjectId] = matchedConnectorId;
             var done = Interlocked.Increment(ref completed);
             progress?.Report((done, total));
         });
@@ -141,24 +120,40 @@ public sealed class PackageRegistrySyncService(
                 Interlocked.Increment(ref completed);
                 return;
             }
-            int? matchedConnectorId = null;
-            var lookupTasks = connectors.Select(async connector =>
-            {
-                try
-                {
-                    var exists = await nuGetService.PackageExistsAsync(connector, packageId, ct);
-                    return (connector, exists);
-                }
-                catch { return (connector, false); }
-            });
-            var results = await Task.WhenAll(lookupTasks);
-            var firstMatch = results.FirstOrDefault(r => r.Item2);
-            if (firstMatch.Item1 != null)
-                matchedConnectorId = firstMatch.Item1.ConnectorId;
-            projectIdToConnectorId[p.ProjectId] = matchedConnectorId;
+            var (matchedConnectorId, lookupFailed) = await FindRegistryAsync(connectors, packageId, ct);
+            // A failed lookup is not "no registry has this package": the stored match is left as it is, so a
+            // network error never clears a known mapping and the next sync retries.
+            if (matchedConnectorId != null || !lookupFailed)
+                projectIdToConnectorId[p.ProjectId] = matchedConnectorId;
             Interlocked.Increment(ref completed);
         });
 
         await workspaceProjectRepository.SetPackagesMatchedConnectorsAsync(workspaceId, new Dictionary<int, int?>(projectIdToConnectorId), cancellationToken);
+    }
+
+    /// <summary>
+    /// Asks every NuGet connector whether it has the package (by id, any version). A lookup that throws is logged
+    /// and reported as failed, never as "does not exist".
+    /// </summary>
+    private async Task<(int? MatchedConnectorId, bool LookupFailed)> FindRegistryAsync(
+        IReadOnlyList<Connector> connectors, string packageId, CancellationToken cancellationToken)
+    {
+        var results = await Task.WhenAll(connectors.Select(async connector =>
+        {
+            try
+            {
+                var exists = await nuGetService.PackageExistsAsync(connector, packageId, cancellationToken);
+                logger.LogTrace("Registry lookup: PackageId={PackageId}, connector {ConnectorName}: {Result}.", packageId, connector.ConnectorName, exists ? "found" : "not found");
+                return (Connector: connector, Exists: exists, Failed: false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                logger.LogWarning(ex, "Registry lookup failed for package {PackageId} on connector {ConnectorName}. The package's registry match is left unchanged.", packageId, connector.ConnectorName);
+                return (Connector: connector, Exists: false, Failed: true);
+            }
+        }));
+
+        var match = results.FirstOrDefault(r => r.Exists);
+        return (match.Connector?.ConnectorId, results.Any(r => r.Failed));
     }
 }

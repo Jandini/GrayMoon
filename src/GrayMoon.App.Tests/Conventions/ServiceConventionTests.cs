@@ -72,8 +72,8 @@ public sealed class ServiceContainerConventionTests
 }
 
 /// <summary>
-/// Guardrail 5 (review 2026-11-10, finding 2): the branch, tag and upstream columns of the shared
-/// <see cref="WorkspaceRepositoryLink"/> are written only by the code that owns per-context state. The scan
+/// Guardrail 5 (review 2026-11-10, finding 2): the branch, tag, upstream, sync status, commit count and version
+/// columns of the shared <see cref="WorkspaceRepositoryLink"/> are written only by the code that owns per-context state. The scan
 /// reads the compiled IL, so it sees the real property setter and not a same-named property of another type.
 /// </summary>
 public sealed class SharedLinkWriteConventionTests
@@ -83,6 +83,10 @@ public sealed class SharedLinkWriteConventionTests
         nameof(WorkspaceRepositoryLink.BranchName),
         nameof(WorkspaceRepositoryLink.CheckedOutTag),
         nameof(WorkspaceRepositoryLink.BranchHasUpstream),
+        nameof(WorkspaceRepositoryLink.SyncStatus),
+        nameof(WorkspaceRepositoryLink.OutgoingCommits),
+        nameof(WorkspaceRepositoryLink.IncomingCommits),
+        nameof(WorkspaceRepositoryLink.GitVersion),
     ];
 
     /// <summary>
@@ -97,10 +101,22 @@ public sealed class SharedLinkWriteConventionTests
             "The model's own copy method builds a detached link."),
         ["GrayMoon.App.Services.Queries.WorkspaceRepositoryLinkListMapper"] = (GuardedProperties,
             "Maps a context-scoped list row to a detached link for the grid; nothing is saved."),
-        ["GrayMoon.App.Components.Pages.WorkspaceRepositories"] = ([nameof(WorkspaceRepositoryLink.BranchName)],
+        ["GrayMoon.App.Components.Pages.WorkspaceRepositories"] = (
+            [
+                nameof(WorkspaceRepositoryLink.BranchName), nameof(WorkspaceRepositoryLink.GitVersion),
+                nameof(WorkspaceRepositoryLink.OutgoingCommits), nameof(WorkspaceRepositoryLink.IncomingCommits),
+            ],
             "Updates the detached grid row of the selected context during a sync; nothing is saved."),
-        ["GrayMoon.App.Services.Application.WorkspaceSyncOperations"] = ([nameof(WorkspaceRepositoryLink.BranchName), nameof(WorkspaceRepositoryLink.CheckedOutTag)],
+        ["GrayMoon.App.Services.Application.WorkspaceSyncOperations"] = (
+            [
+                nameof(WorkspaceRepositoryLink.BranchName), nameof(WorkspaceRepositoryLink.CheckedOutTag),
+                nameof(WorkspaceRepositoryLink.OutgoingCommits),
+            ],
             "Overlays the Feature context's state on links loaded AsNoTracking before a handler filters them; nothing is saved."),
+        ["GrayMoon.App.Repositories.WorkspaceRepository"] = ([nameof(WorkspaceRepositoryLink.SyncStatus)],
+            "Creates a new link row in its initial NeedsSync state; no context has state for it yet."),
+        ["GrayMoon.App.Services.Application.WorkspaceRepositoryOperations"] = ([nameof(WorkspaceRepositoryLink.SyncStatus)],
+            "Creates a new link row in its initial NeedsSync state; no context has state for it yet."),
     };
 
     [Fact]
@@ -116,7 +132,7 @@ public sealed class SharedLinkWriteConventionTests
             .Order(StringComparer.Ordinal)
             .ToList();
         Assert.True(violations.Count == 0,
-            "WorkspaceRepositoryLink.BranchName / CheckedOutTag / BranchHasUpstream belong to the special Workspace context. "
+            "WorkspaceRepositoryLink.BranchName / CheckedOutTag / BranchHasUpstream / SyncStatus / OutgoingCommits / IncomingCommits / GitVersion belong to the special Workspace context. "
             + "Write per-context state through WorkspaceRepositoryStateWriter (GrayMoon/AGENTS.md, Feature-context scoping):"
             + Environment.NewLine + string.Join(Environment.NewLine, violations));
 
@@ -172,11 +188,20 @@ internal static class SampleLinkWriter
     }
 
     public static Action<WorkspaceRepositoryLink> InLambda() => link => link.BranchHasUpstream = true;
+
+    public static void Counts(WorkspaceRepositoryLink link)
+    {
+        link.SyncStatus = RepoSyncStatus.InSync;
+        link.OutgoingCommits = 1;
+        link.IncomingCommits = 2;
+        link.GitVersion = "1.0.0";
+    }
 }
 
 internal static class SampleLinkReader
 {
-    public static string? Read(WorkspaceRepositoryLink link) => link.BranchName + link.CheckedOutTag + link.BranchHasUpstream;
+    public static string? Read(WorkspaceRepositoryLink link) =>
+        link.BranchName + link.CheckedOutTag + link.BranchHasUpstream + link.SyncStatus + link.OutgoingCommits + link.IncomingCommits + link.GitVersion;
 }
 
 /// <summary>Walks the IL of every method in an assembly and yields the methods it calls.</summary>
@@ -263,32 +288,87 @@ internal static class IlCallScanner
 }
 
 /// <summary>
-/// Guardrail 7 (review 2026-11-10, findings 8, 10 and 11): a "best effort" catch in the workspace and git
-/// services always reports. It logs, rethrows, or carries the exception into the outcome it returns.
+/// Guardrail 7 (review 2026-11-10, findings 8, 10 and 11): a "best effort" catch always reports. It logs,
+/// rethrows, or carries the exception into the outcome it returns. Scanned: the App's workspace, git, connector
+/// and Feature services and its hubs, and the whole Worker. The rest of the App is not scanned yet.
 /// </summary>
 public sealed class BestEffortCatchConventionTests
 {
-    private static readonly string[] ScannedFolders = ["Services/Workspaces", "Services/Git"];
+    private static readonly string[] ScannedFolders =
+    [
+        "Services/Workspaces", "Services/Git", "Services/Connectors", "Services/Features", "Hubs",
+        "../GrayMoon.Worker",
+    ];
 
-    /// <summary>"File: first line of the catch" for a catch that may stay silent, with the reason.</summary>
+    /// <summary>
+    /// "File: first line of the catch" for a catch that may stay silent, with the reason. A reason that starts
+    /// with OPEN is a known gap, listed so it cannot spread; remove the entry when the code reports.
+    /// </summary>
     private static readonly Dictionary<string, string> Exceptions = new(StringComparer.Ordinal)
     {
         ["Services/Workspaces/PackageWaitDiagnostics.cs: catch (Exception) { return Correlate(commitSha, commitShaSource, null, lookupAttempted: true, lookupFailed: true); }"] =
             "The outcome it returns records the failure (lookupFailed: true), which the caller shows.",
         ["Services/Workspaces/SyncRecomputeCoalescer.cs: catch { /* the previous run's failure belongs to its own callers */ }"] =
             "Only waits for the previous run to finish; that run's failure was already thrown to its own callers.",
+        ["Services/Connectors/TokenHealthBackgroundService.cs: catch (Exception) { return new ConnectorHealthResult(connectorId, false, \"Token needs to be re-entered.\"); }"] =
+            "The outcome it returns is the report: the connector is shown unhealthy with this message.",
+
+        // The Worker, as found when the scan was widened to it. One key covers every catch in the file with the same text.
+        ["GrayMoon.Worker/Cli/Handlers/InstallCommandHandler.cs: catch (Exception ex) when (ServiceLogonFailure.IsMatch(ex)) { logonFailure = true; return false; }"] =
+            "Sets logonFailure, which the caller turns into the message the user sees.",
+        ["GrayMoon.Worker/Cli/Handlers/RunCommandHandler.cs: catch { }"] =
+            "A hub URL that does not parse leaves the App API base URL unset; the token provider logs that when it is needed.",
+        ["GrayMoon.Worker/Commands/GetHostInfoCommand.cs: catch { return null; }"] =
+            "Probes a tool's version; null is shown as \"not installed\" on the Worker page.",
+        ["GrayMoon.Worker/Commands/WriteRepositoryFileCommand.cs: catch { /* best-effort */ }"] =
+            "Deletes the temp file while the write's own exception is rethrown by the enclosing catch.",
+        ["GrayMoon.Worker/Logging/OverlayStreamSerilogSink.cs: catch { }"] =
+            "Runs inside a log sink; logging from it would recurse.",
+        ["GrayMoon.Worker/Services/Ai/AiCliDiagnostics.cs: catch { return (category, \"unavailable\"); }"] =
+            "Diagnostics only; \"unavailable\" is the value written to the diagnostic log.",
+        ["GrayMoon.Worker/Services/Ai/AiCliDiagnostics.cs: catch { versionsCount = -1; }"] =
+            "Diagnostics only; -1 is the value written to the diagnostic log.",
+        ["GrayMoon.Worker/Services/Ai/AiCliDiagnostics.cs: catch { return null; }"] =
+            "Diagnostics only (two places); null is the value written to the diagnostic log.",
+        ["GrayMoon.Worker/Services/CsProjFileParser.cs: catch { return Task.FromResult<CsProjFileInfo?>(null); }"] =
+            "OPEN: a project file that cannot be read or parsed is dropped from the scan with no log line; the class has no logger.",
+        ["GrayMoon.Worker/Services/CsProjFileParser.cs: catch { return false; }"] =
+            "OPEN: a project file that cannot be read is reported as \"not updated\" with no reason; the class has no logger.",
+        ["GrayMoon.Worker/Services/CsProjFileParser.cs: catch { return null; }"] =
+            "OPEN: a project file that cannot be read is reported as \"nothing to update\" with no reason; the class has no logger.",
+        ["GrayMoon.Worker/Services/FeatureFolderCleaner.cs: catch (Exception) { return false; }"] =
+            "A marker whose folder is not a valid path does not name this folder, so the folder is left alone.",
+        ["GrayMoon.Worker/Services/FeatureFolderCleaner.cs: catch (Exception) { return true; }"] =
+            "An unreadable .git file counts as a registered worktree, so the folder is not deleted.",
+        ["GrayMoon.Worker/Services/GitService.cs: catch { /* best-effort */ }"] =
+            "Clears a read-only flag before a delete; the delete that follows reports its own failure.",
+        ["GrayMoon.Worker/Services/GitWorktreeService.cs: catch { }"] =
+            "Deletes an empty worktree folder; the residue scan that follows reports what is left.",
+        ["GrayMoon.Worker/Services/GitWorktreeService.cs: catch { return; }"] =
+            "Three places. Two are in the residue delete, whose caller scans for residue afterwards. "
+            + "OPEN: the third is in that residue scan (VisitResidueEntries), where a folder that cannot be listed is counted as empty.",
+        ["GrayMoon.Worker/Services/WorkspaceFileSearchService.cs: catch { return Task.FromResult<IReadOnlyList<WorkspaceFileSearchResult>>([]); }"] =
+            "OPEN: a workspace folder that cannot be listed gives an empty search result with no reason.",
+        ["GrayMoon.Worker/Services/WorktreeCreateHookDeferral.cs: catch (Exception) { return path.Trim(); }"] =
+            "Normalizes a path for a comparison; a path that is not valid is compared as written.",
     };
 
     private static readonly Regex CatchAll = new(
-        @"\bcatch\s*(?:\(\s*(?:System\.)?Exception(?:\s+(?<variable>\w+))?\s*\))?\s*(?:when\s*\([^{]*\))?\s*\{",
+        @"\bcatch\s*(?:\(\s*(?:System\.)?Exception(?:\s+(?<variable>\w+))?\s*\))?\s*(?<filter>when\s*\([^{]*\))?\s*\{",
         RegexOptions.Compiled);
+
+    /// <summary>
+    /// The filter text after the variable name when it only names exception types (<c>ex is A or B</c>). Such a
+    /// catch is a typed catch written with a filter, the same as <c>catch (IOException)</c>, and not a catch-all.
+    /// </summary>
+    private const string TypeListFilter = @"\s+is\s+[\w.]+(?:\s+or\s+[\w.]+)+\s*\)\s*$|\s+is\s+(?!not\b)[\w.]+\s*\)\s*$";
 
     private static readonly Regex Reports = new(
         @"\bthrow\b|\b_?[lL]og(?:ger)?\s*\??\s*\.\s*\w+\s*\(|\bLog(?:Trace|Debug|Information|Warning|Error|Critical)\s*\(",
         RegexOptions.Compiled);
 
     [Fact]
-    public void Catch_all_blocks_in_workspace_and_git_services_always_report()
+    public void Catch_all_blocks_in_the_scanned_folders_always_report()
     {
         var catches = 0;
         var violations = new List<string>();
@@ -298,7 +378,11 @@ public sealed class BestEffortCatchConventionTests
             {
                 var source = File.ReadAllText(file);
                 catches += CatchAll.Matches(ConventionSource.WithoutLineComments(source)).Count;
-                violations.AddRange(FindSilentCatches(source).Select(c => $"{ConventionSource.Relative(file)}: {c.Text}"));
+                // An App file is named from the App project, a Worker file from "GrayMoon.Worker/".
+                var name = ConventionSource.Relative(file);
+                if (name.StartsWith("../", StringComparison.Ordinal))
+                    name = name[3..];
+                violations.AddRange(FindSilentCatches(source).Select(c => $"{name}: {c.Text}"));
             }
         }
 
@@ -323,10 +407,20 @@ public sealed class BestEffortCatchConventionTests
             try { E(); } catch (Exception) { throw; }
             try { F(); } catch (OperationCanceledException) { }
             try { G(); } catch (Exception ex) when (ex is not OperationCanceledException) { failed++; }
+            try { H(); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            try { I(); } catch (Exception ex) when (ex is IOException) { return null; }
+            try { J(); } catch (Exception ex) when (IsTransient(ex)) { retry = true; }
             """;
 
+        // H and I only list exception types in the filter: typed catches, like F. J's filter is a call, so the
+        // scan cannot tell what it lets through and reports it.
         Assert.Equal(
-            ["catch (Exception) { }", "catch { return false; }", "catch (Exception ex) when (ex is not OperationCanceledException) { failed++; }"],
+            [
+                "catch (Exception) { }",
+                "catch { return false; }",
+                "catch (Exception ex) when (ex is not OperationCanceledException) { failed++; }",
+                "catch (Exception ex) when (IsTransient(ex)) { retry = true; }",
+            ],
             FindSilentCatches(source).Select(c => c.Text).ToArray());
     }
 
@@ -342,6 +436,8 @@ public sealed class BestEffortCatchConventionTests
                 continue;
             var variable = m.Groups["variable"].Value;
             if (variable.Length > 0 && Regex.IsMatch(body, $@"\b{Regex.Escape(variable)}\b"))
+                continue;
+            if (variable.Length > 0 && Regex.IsMatch(m.Groups["filter"].Value, $@"^when\s*\(\s*{Regex.Escape(variable)}{TypeListFilter}"))
                 continue;
 
             var text = Regex.Replace(m.Value[..^1] + body, @"\s+", " ");

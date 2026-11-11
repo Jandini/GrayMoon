@@ -25,6 +25,14 @@ public sealed class WorkspaceTopBarService : IWorkspaceTopBarService, IDisposabl
     private readonly WorkspaceRepository _workspaceRepository;
     private readonly IHubContext<DesktopNotificationHub> _desktopHub;
     private readonly DesktopWorkspaceContextTracker _desktopContextTracker;
+    private readonly ILogger<WorkspaceTopBarService>? _logger;
+
+    /// <summary>
+    /// True when this circuit is known to belong to a plain browser tab: its request carried a user agent without
+    /// the token Desktop adds to its WebView. Such a tab must not set the Desktop window title and tray label, which
+    /// follow the Workspace open in Desktop. When the request is not known the circuit is treated as Desktop's.
+    /// </summary>
+    private readonly bool _isBrowserTab;
     private int _refreshGeneration;
     private int? _cachedWorkspaceId;
     private string? _workspaceDisplayName;
@@ -33,8 +41,13 @@ public sealed class WorkspaceTopBarService : IWorkspaceTopBarService, IDisposabl
         NavigationManager navigationManager,
         WorkspaceRepository workspaceRepository,
         IHubContext<DesktopNotificationHub> desktopHub,
-        DesktopWorkspaceContextTracker desktopContextTracker)
+        DesktopWorkspaceContextTracker desktopContextTracker,
+        IHttpContextAccessor? httpContextAccessor = null,
+        ILogger<WorkspaceTopBarService>? logger = null)
     {
+        _logger = logger;
+        _isBrowserTab = httpContextAccessor?.HttpContext is { } httpContext
+            && !httpContext.Request.Headers.UserAgent.ToString().Contains(WorkspaceOpenInRecentTools.DesktopUserAgentToken, StringComparison.Ordinal);
         _navigationManager = navigationManager;
         _workspaceRepository = workspaceRepository;
         _desktopHub = desktopHub;
@@ -110,6 +123,9 @@ public sealed class WorkspaceTopBarService : IWorkspaceTopBarService, IDisposabl
 
     private async Task PushToDesktopAsync(int? workspaceId, string? workspaceName)
     {
+        if (_isBrowserTab)
+            return;
+
         var context = new WorkspaceContext(workspaceId, workspaceName);
         _desktopContextTracker.Current = context;
 
@@ -117,9 +133,10 @@ public sealed class WorkspaceTopBarService : IWorkspaceTopBarService, IDisposabl
         {
             await _desktopHub.Clients.All.SendAsync("WorkspaceChanged", context);
         }
-        catch
+        catch (Exception ex)
         {
-            // Best-effort - the desktop shell may not be connected (e.g. running in the browser, not desktop mode).
+            // Best-effort - the desktop shell may not be connected; it reads the tracker when it connects.
+            _logger?.LogDebug(ex, "Could not send the Workspace context to Desktop.");
         }
     }
 }

@@ -27,7 +27,7 @@ sequenceDiagram
 
 A unique request ID correlates response and caller.
 
-`WorkerResponseDelivery.WaitAsync` adds the pending entry before it registers the cancellation callback, so a token that is already cancelled removes the entry at once and the wait ends cancelled; nothing stays pending. Each entry records the Worker connection the command was sent to. When a Worker connection drops, `WorkerHub.OnDisconnectedAsync` fails only that connection's pending requests (`FailForConnection`); everything is failed (`FailAll`) only when no connection is left (section 18).
+`WorkerResponseDelivery.WaitAsync` adds the pending entry before it registers the cancellation callback, so a token that is already cancelled removes the entry at once and the wait ends cancelled; nothing stays pending. Each entry records the Worker connection the command was sent to. When a Worker connection drops, `WorkerHub.OnDisconnectedAsync` fails only that connection's pending requests (`FailForConnection`); everything is failed (`FailAll`) only when no connection is left (section 18). The failure text is `WorkerHub.DisconnectedReason` ("Worker disconnected before responding; the command may have completed."): the Worker may have finished the work and only the answer was lost, and nothing is retried. On the Worker side an answer that cannot be delivered is never kept for a later connection (a reconnect has a new connection id and the old waiter is gone): a job result that cannot be sent is logged at error by `JobBackgroundService`, and a response the intake produced while the hub is not connected is logged at warning by `SignalRConnectionHostedService.SendIntakeResponseAsync` (test: `IntakeResponseSendTests`).
 
 Command terminal output is streamed separately so long-running operations can show live progress.
 
@@ -788,6 +788,8 @@ All in memory, per Worker process; failures are never cached.
 
 WorkspaceSyncHub events are invalidation signals.
 
+A page connects to the hub through `WorkspaceSyncHubConnectionHelper`. `TryStartAsync` never throws and is not awaited by the Repositories, Actions and Git Changes pages. A failed first start is retried after 0.5 s, 2 s and 5 s (`StartRetryDelays`; automatic reconnect only covers a connection that was up once); the retries end when the page disposes the connection or cancels the token. One debug line records the outcome (`started`, `cancelled by dispose` or `failed`) with the attempt count and elapsed time. After the last failed attempt the page works without live updates until it is reloaded. Test anchor: `WorkspaceSyncHubStartTests`.
+
 A browser handler generally:
 
 ```text
@@ -878,7 +880,7 @@ When adding a new operation:
 
 SQLite writer rules:
 
-- Every connection has `busy_timeout=5000` and `foreign_keys=ON` (`SqliteConnectionPragmasInterceptor`); the connection string sets `Cache=Shared`, `Default Timeout=5`, `Foreign Keys=True`; startup sets WAL and `synchronous=NORMAL`.
+- Every connection has `busy_timeout=5000`, `foreign_keys=ON` and `synchronous=NORMAL` (`SqliteConnectionPragmasInterceptor`); the connection string sets `Cache=Shared`, `Default Timeout=5`, `Foreign Keys=True`; startup sets WAL and `synchronous=NORMAL`.
 - Keep Worker, git and HTTP work parallel, and give each parallel task its own factory context, or collect results and persist once. Never share an `AppDbContext` across tasks and never capture a circuit `AppDbContext` in `Task.Run`, `WorkspaceOperationRunner` or `BackgroundJobService` closures.
 - Mutate, then one `SaveChanges`; never `SaveChanges` in a loop.
 

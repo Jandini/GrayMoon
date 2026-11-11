@@ -624,9 +624,10 @@ public sealed class SyncRepositoryCommand(
                 localBranches = await reader.GetLocalBranchesAsync(repoPath, ct);
                 remoteBranches = await reader.GetRemoteBranchesFromRefsAsync(repoPath, ct);
             }
-            catch
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                // If branch fetching fails, continue without branches (non-critical)
+                // The sync continues without branch lists (non-critical), but says so.
+                logger?.LogWarning(ex, "Reading the branch lists failed for {RepoPath}; the sync continues without them", repoPath);
             }
 
             Lap("branchLists");

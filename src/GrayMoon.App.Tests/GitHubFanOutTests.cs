@@ -241,9 +241,159 @@ public sealed partial class GitHubFanOutTests
         Assert.True(await verifyDb.RepositoryBranches.AnyAsync(b => b.WorkspaceRepositoryId == failedLinkId));
         Assert.True(await verifyDb.WorkspaceRepositoryPullRequests.AnyAsync(p => p.WorkspaceRepositoryId == failedLinkId));
 
-        // The connector that answered is still cleaned up, and its fetched repository is merged.
-        Assert.False(await verifyDb.Repositories.AnyAsync(r => r.RepositoryId == staleRepositoryId));
+        // The connector that answered has its fetched repository merged. Its repository that is no longer returned
+        // is linked to a Workspace, so it is kept too: connector state never removes a Workspace's repository.
+        Assert.True(await verifyDb.Repositories.AnyAsync(r => r.RepositoryId == staleRepositoryId));
         Assert.True(await verifyDb.Repositories.AnyAsync(r => r.RepositoryName == "repo1"));
+    }
+
+    [Fact]
+    public async Task Refresh_keeps_every_repository_of_a_connector_that_answers_with_none()
+    {
+        // A 200 with an empty list (a token that lost its organization grant) says nothing about the stored
+        // repositories. Before the fix the other connector's answer ran the merge and deleted them all.
+        var handler = new FanOutProbeHandler(FanOutProbeHandler.IsUserReposRequest, gateTarget: 0) { EmptyConnectorIndex = 0 };
+        await using var rig = await FanOutRig.CreateAsync(handler, 3, repoCount: 0, connectorCount: 2);
+        var linked = await SeedStoredRepositoryAsync(rig, "c0", "linked-on-empty-connector", 6000, linked: true);
+        var unlinked = await SeedStoredRepositoryAsync(rig, "c0", "unlinked-on-empty-connector", 6001, linked: false);
+
+        RefreshRepositoriesResult result;
+        await using (var scope = rig.Provider.CreateAsyncScope())
+            result = await scope.ServiceProvider.GetRequiredService<GitHubRepositoryService>().RefreshRepositoriesAsync();
+
+        var error = Assert.Single(result.ConnectorErrors);
+        Assert.Equal("c0", error.ConnectorName);
+        Assert.Contains("returned no repositories", error.Message, StringComparison.Ordinal);
+
+        await AssertStoredRepositorySurvivedAsync(rig, linked);
+        await AssertStoredRepositorySurvivedAsync(rig, unlinked);
+        await using var verifyScope = rig.Provider.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.True(await verifyDb.Repositories.AnyAsync(r => r.RepositoryName == "repo1"));
+        // An empty answer is not a connector failure: the connector is not marked as broken.
+        Assert.NotEqual("Error", (await rig.ReadConnectorStatusesAsync())["c0"]);
+    }
+
+    [Fact]
+    public async Task Refresh_keeps_every_repository_of_an_inactive_connector()
+    {
+        // An inactive connector is never asked, so its repositories are not "no longer returned".
+        var handler = new FanOutProbeHandler(FanOutProbeHandler.IsUserReposRequest, gateTarget: 0);
+        await using var rig = await FanOutRig.CreateAsync(handler, 3, repoCount: 0, connectorCount: 2);
+        var linked = await SeedStoredRepositoryAsync(rig, "c0", "linked-on-inactive-connector", 6100, linked: true);
+        var unlinked = await SeedStoredRepositoryAsync(rig, "c0", "unlinked-on-inactive-connector", 6101, linked: false);
+        await using (var seedScope = rig.Provider.CreateAsyncScope())
+        {
+            var db = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            (await db.Connectors.SingleAsync(c => c.ConnectorName == "c0")).IsActive = false;
+            await db.SaveChangesAsync();
+        }
+
+        RefreshRepositoriesResult result;
+        await using (var scope = rig.Provider.CreateAsyncScope())
+            result = await scope.ServiceProvider.GetRequiredService<GitHubRepositoryService>().RefreshRepositoriesAsync();
+
+        Assert.Empty(result.ConnectorErrors);
+        await AssertStoredRepositorySurvivedAsync(rig, linked);
+        await AssertStoredRepositorySurvivedAsync(rig, unlinked);
+    }
+
+    [Fact]
+    public async Task Refresh_where_every_connector_answers_with_none_changes_nothing_and_names_them()
+    {
+        var handler = new FanOutProbeHandler(FanOutProbeHandler.IsUserReposRequest, gateTarget: 0) { AllConnectorsEmpty = true };
+        await using var rig = await FanOutRig.CreateAsync(handler, 3, repoCount: 0, connectorCount: 2);
+        var linked = await SeedStoredRepositoryAsync(rig, "c0", "linked", 6200, linked: true);
+        var unlinked = await SeedStoredRepositoryAsync(rig, "c0", "unlinked", 6201, linked: false);
+
+        RefreshRepositoriesResult result;
+        await using (var scope = rig.Provider.CreateAsyncScope())
+            result = await scope.ServiceProvider.GetRequiredService<GitHubRepositoryService>().RefreshRepositoriesAsync();
+
+        // c1 has nothing stored, so its empty answer is a normal, silent success.
+        var error = Assert.Single(result.ConnectorErrors);
+        Assert.Equal("c0", error.ConnectorName);
+        await AssertStoredRepositorySurvivedAsync(rig, linked);
+        await AssertStoredRepositorySurvivedAsync(rig, unlinked);
+    }
+
+    [Fact]
+    public async Task Refresh_deletes_an_unlinked_repository_and_keeps_and_marks_a_linked_one_no_longer_returned()
+    {
+        var handler = new FanOutProbeHandler(FanOutProbeHandler.IsUserReposRequest, gateTarget: 0);
+        await using var rig = await FanOutRig.CreateAsync(handler, 3, repoCount: 0, connectorCount: 1);
+        var linked = await SeedStoredRepositoryAsync(rig, "c0", "linked-gone", 6300, linked: true);
+        var unlinked = await SeedStoredRepositoryAsync(rig, "c0", "unlinked-gone", 6301, linked: false);
+
+        RefreshRepositoriesResult result;
+        await using (var scope = rig.Provider.CreateAsyncScope())
+            result = await scope.ServiceProvider.GetRequiredService<GitHubRepositoryService>().RefreshRepositoriesAsync();
+
+        Assert.Empty(result.ConnectorErrors);
+        await AssertStoredRepositorySurvivedAsync(rig, linked);
+        var kept = Assert.Single(result.KeptMissingFromProvider);
+        Assert.Equal(linked.RepositoryId, kept.RepositoryId);
+        Assert.Equal(["workspace-linked-gone"], kept.WorkspaceNames);
+
+        await using var verifyScope = rig.Provider.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.NotNull((await verifyDb.Repositories.AsNoTracking().SingleAsync(r => r.RepositoryId == linked.RepositoryId)).MissingFromProviderSinceUtc);
+        Assert.False(await verifyDb.Repositories.AnyAsync(r => r.RepositoryId == unlinked.RepositoryId));
+        Assert.Null((await verifyDb.Repositories.AsNoTracking().SingleAsync(r => r.RepositoryName == "repo0")).MissingFromProviderSinceUtc);
+    }
+
+    private sealed record StoredRepository(int RepositoryId, int? LinkId);
+
+    /// <summary>
+    /// Stores a repository for <paramref name="connectorName"/> that no fetch returns. A linked one gets its own
+    /// Workspace, a branch row and a pull request row, so a wrong delete has dependent rows to destroy.
+    /// </summary>
+    private static async Task<StoredRepository> SeedStoredRepositoryAsync(FanOutRig rig, string connectorName, string name, long providerId, bool linked)
+    {
+        await using var scope = rig.Provider.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var connectorId = (await db.Connectors.AsNoTracking().SingleAsync(c => c.ConnectorName == connectorName)).ConnectorId;
+        var repository = new Repository
+        {
+            ConnectorId = connectorId,
+            RepositoryName = name,
+            OrgName = "stored",
+            CloneUrl = $"https://{connectorName}.example/stored/{name}.git",
+            GitHubRepositoryId = providerId
+        };
+        db.Repositories.Add(repository);
+        await db.SaveChangesAsync();
+        if (!linked)
+            return new StoredRepository(repository.RepositoryId, null);
+
+        var workspace = new Workspace { Name = "workspace-" + name };
+        db.Workspaces.Add(workspace);
+        await db.SaveChangesAsync();
+        var link = new WorkspaceRepositoryLink { WorkspaceId = workspace.WorkspaceId, RepositoryId = repository.RepositoryId, BranchName = "main" };
+        db.WorkspaceRepositories.Add(link);
+        await db.SaveChangesAsync();
+        db.RepositoryBranches.Add(new RepositoryBranch { WorkspaceRepositoryId = link.WorkspaceRepositoryId, BranchName = "main" });
+        db.WorkspaceRepositoryPullRequests.Add(new WorkspaceRepositoryPullRequest
+        {
+            WorkspaceRepositoryId = link.WorkspaceRepositoryId,
+            PullRequestNumber = 7,
+            State = "open",
+            LastCheckedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+        return new StoredRepository(repository.RepositoryId, link.WorkspaceRepositoryId);
+    }
+
+    private static async Task AssertStoredRepositorySurvivedAsync(FanOutRig rig, StoredRepository stored)
+    {
+        await using var scope = rig.Provider.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.True(await db.Repositories.AnyAsync(r => r.RepositoryId == stored.RepositoryId));
+        if (stored.LinkId is not { } linkId)
+            return;
+        Assert.True(await db.WorkspaceRepositories.AnyAsync(l => l.WorkspaceRepositoryId == linkId));
+        Assert.True(await db.RepositoryBranches.AnyAsync(b => b.WorkspaceRepositoryId == linkId));
+        Assert.True(await db.WorkspaceRepositoryPullRequests.AnyAsync(p => p.WorkspaceRepositoryId == linkId));
     }
 
     private sealed class RecordingProgress : IProgress<int>
@@ -280,6 +430,10 @@ public sealed partial class GitHubFanOutTests
         public int FailRepoIndex { get; init; } = -1;
         public int FailRunIndex { get; init; } = -1;
         public int FailConnectorIndex { get; init; } = -1;
+
+        /// <summary>This connector answers 200 with an empty list (a token that lost its organization grant answers like this).</summary>
+        public int EmptyConnectorIndex { get; init; } = -1;
+        public bool AllConnectorsEmpty { get; init; }
         public int PeakInFlight => Volatile.Read(ref _peak);
         public int TrackedCount => Volatile.Read(ref _tracked);
 
@@ -346,6 +500,8 @@ public sealed partial class GitHubFanOutTests
                 var index = ItemIndex(uri);
                 if (index == FailConnectorIndex)
                     return Plain(HttpStatusCode.InternalServerError);
+                if (index == EmptyConnectorIndex || AllConnectorsEmpty)
+                    return Json("[]");
 
                 return Json($$"""[{"id":{{1000 + index}},"node_id":"n{{index}}","name":"repo{{index}}","full_name":"org/repo{{index}}","private":false,"archived":false,"clone_url":"https://c{{index}}.example/org/repo{{index}}.git","owner":{"login":"org"},"topics":[]}]""");
             }

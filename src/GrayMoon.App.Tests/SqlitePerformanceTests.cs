@@ -42,12 +42,15 @@ public class SqlitePerformanceTests
             await first.Database.OpenConnectionAsync();
             Assert.Equal(SqliteConnectionPragmasInterceptor.BusyTimeoutMilliseconds, await ReadPragmaAsync(first, "busy_timeout"));
             Assert.Equal(1, await ReadPragmaAsync(first, "foreign_keys"));
+            // 1 = NORMAL. A connection that was not told starts at 2 (FULL): the startup PRAGMA covered one connection only.
+            Assert.Equal(1, await ReadPragmaAsync(first, "synchronous"));
         }
 
         await using var second = await factory.CreateDbContextAsync();
         await second.Database.OpenConnectionAsync();
         Assert.Equal(SqliteConnectionPragmasInterceptor.BusyTimeoutMilliseconds, await ReadPragmaAsync(second, "busy_timeout"));
         Assert.Equal(1, await ReadPragmaAsync(second, "foreign_keys"));
+        Assert.Equal(1, await ReadPragmaAsync(second, "synchronous"));
 
         await using var raw = keepAlive.CreateCommand();
         raw.CommandText = "PRAGMA busy_timeout;";

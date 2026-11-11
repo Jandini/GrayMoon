@@ -474,25 +474,45 @@ public sealed class HookListenerHostedServiceTests : IAsyncLifetime
     [Fact]
     public async Task A_body_over_the_limit_gets_413_and_nothing_is_queued()
     {
-        var padding = new string(' ', 1024 * 1024);
+        // The declared length alone is refused, before any body byte is read. See RawPostStatusLineAsync for why
+        // this does not go through HttpClient.
+        var statusLine = await RawPostStatusLineAsync("Content-Length: 1048576", []);
 
-        using var response = await PostAsync(Json(Payload(_repo) + padding));
-
-        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
+        Assert.StartsWith("HTTP/1.1 413", statusLine, StringComparison.Ordinal);
         Assert.Empty(_queue.Jobs);
+    }
+
+    /// <summary>
+    /// Posts to /hook/commit over a plain socket and returns the status line. The listener answers 413 and closes
+    /// without reading the rest of an oversized body; a client that is still uploading then fails with "Broken
+    /// pipe" on Linux before it sees the answer, and HttpClient reports that as a failed request. So the over-limit
+    /// tests send exactly the bytes the listener reads, and nothing after them.
+    /// </summary>
+    private async Task<string> RawPostStatusLineAsync(string bodyHeader, byte[] bodyBytes)
+    {
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, _port);
+        await using var stream = client.GetStream();
+        await stream.WriteAsync(Encoding.ASCII.GetBytes(
+            $"POST /hook/commit HTTP/1.1\r\nHost: 127.0.0.1:{_port}\r\nContent-Type: application/json\r\n{bodyHeader}\r\n\r\n"));
+        await stream.WriteAsync(bodyBytes);
+        await stream.FlushAsync();
+
+        using var reader = new StreamReader(stream, Encoding.ASCII);
+        return await reader.ReadLineAsync() ?? string.Empty;
     }
 
     [Fact]
     public async Task A_chunked_body_over_the_limit_gets_413_and_nothing_is_queued()
     {
-        var content = new StreamContent(new MemoryStream(Encoding.UTF8.GetBytes(Payload(_repo) + new string(' ', 256 * 1024))));
-        content.Headers.ContentType = new("application/json");
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"http://127.0.0.1:{_port}/hook/commit") { Content = content };
-        request.Headers.TransferEncodingChunked = true;
+        // One chunk that ends exactly one byte past the limit, with the body left open: the listener has read
+        // every byte that was sent when it answers.
+        var body = Encoding.UTF8.GetBytes(Payload(_repo).PadRight(HookListenerHostedService.MaxBodyBytes + 1));
+        var chunk = Encoding.ASCII.GetBytes($"{body.Length:X}\r\n").Concat(body).ToArray();
 
-        using var response = await _http.SendAsync(request);
+        var statusLine = await RawPostStatusLineAsync("Transfer-Encoding: chunked", chunk);
 
-        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
+        Assert.StartsWith("HTTP/1.1 413", statusLine, StringComparison.Ordinal);
         Assert.Empty(_queue.Jobs);
     }
 

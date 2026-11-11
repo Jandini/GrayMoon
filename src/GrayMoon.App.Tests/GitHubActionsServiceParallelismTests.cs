@@ -202,7 +202,7 @@ public sealed class GitHubActionsServiceParallelismTests
             var connectorRepository = new ConnectorRepository(dbContext, NullLogger<ConnectorRepository>.Instance);
             RepositoryService = new GitHubRepositoryService(
                 connectorRepository,
-                new GitHubRepositoryRepository(dbContext, new RecordingGitChangesNotifier(), NullLogger<GitHubRepositoryRepository>.Instance),
+                new GitHubRepositoryRepository(dbContext, NullLogger<GitHubRepositoryRepository>.Instance),
                 gitHub,
                 Options.Create(new WorkspaceOptions()),
                 NullLogger<GitHubRepositoryService>.Instance);

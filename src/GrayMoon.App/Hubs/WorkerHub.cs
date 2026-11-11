@@ -17,6 +17,12 @@ public sealed class WorkerHub(
     IServiceScopeFactory scopeFactory,
     ILogger<WorkerHub> logger) : Hub
 {
+    /// <summary>
+    /// Why a request in flight failed when its Worker connection dropped. The Worker may have finished the work
+    /// (a commit, a push) and only the answer was lost, so the text does not say the command failed.
+    /// </summary>
+    internal const string DisconnectedReason = "Worker disconnected before responding; the command may have completed.";
+
     public override async Task OnConnectedAsync()
     {
         connectionTracker.OnWorkerConnected(Context.ConnectionId);
@@ -31,9 +37,10 @@ public sealed class WorkerHub(
                 var workspaceService = scope.ServiceProvider.GetRequiredService<WorkspaceService>();
                 await workspaceService.RefreshRootPathAsync(CancellationToken.None);
             }
-            catch
+            catch (Exception ex)
             {
-                // Ignore errors in background task
+                // Nothing waits for this refresh; the next read of the root path asks the Worker again.
+                logger.LogWarning(ex, "Could not refresh the workspace root path after the Worker connected.");
             }
         });
         await base.OnConnectedAsync();
@@ -48,7 +55,7 @@ public sealed class WorkerHub(
         // out their full WorkerBridge command timeout. A restarted Worker can connect before its old
         // connection closes; requests already sent to the new connection must keep waiting. Only when no
         // connection is left is everything failed.
-        const string disconnectedReason = "Worker disconnected before responding.";
+        const string disconnectedReason = DisconnectedReason;
         if (connectionTracker.HasWorkerConnection)
             WorkerResponseDelivery.FailForConnection(Context.ConnectionId, disconnectedReason);
         else

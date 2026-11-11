@@ -16,9 +16,25 @@ public sealed partial class WorkspaceProjectRepository
     /// Generated rows are workspace-global (owned by the special Workspace context) - Feature contexts must not
     /// carry their own copies; callers that seed Feature projections should skip <see cref="WorkspaceProject.IsGenerated"/>.
     /// Does not recompute dependency levels; callers should follow with <see cref="RecomputeAndPersistRepositoryDependencyStatsAsync"/>.
+    /// This overload syncs on behalf of the special Workspace context.
+    /// </summary>
+    public Task SyncGeneratedPackageDependenciesAsync(
+        int workspaceId,
+        IReadOnlyList<GeneratedPackageDependencyInfo> resolved,
+        CancellationToken cancellationToken = default) =>
+        SyncGeneratedPackageDependenciesAsync(workspaceId, null, resolved, cancellationToken);
+
+    /// <summary>
+    /// Syncs generated package dependencies with what <paramref name="workspaceFeatureContextId"/> (null: the special
+    /// Workspace context) resolved from its own checkouts. Only the special Workspace context creates and removes
+    /// the workspace-global generated rows: a Feature whose version file is missing or different must not drop a
+    /// package for the whole Workspace. Every context writes only the edges of its own consumer projects (version
+    /// updates and removals); the special Workspace context additionally adds a missing edge for another context's
+    /// consumer so a new Feature has the edge before its own first check, and never changes it afterwards.
     /// </summary>
     public async Task SyncGeneratedPackageDependenciesAsync(
         int workspaceId,
+        int? workspaceFeatureContextId,
         IReadOnlyList<GeneratedPackageDependencyInfo> resolved,
         CancellationToken cancellationToken = default)
     {
@@ -41,6 +57,8 @@ public sealed partial class WorkspaceProjectRepository
             .ToList();
 
         var specialContextId = await ResolveSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+        var callerContextId = workspaceFeatureContextId ?? specialContextId;
+        var ownsGeneratedRows = callerContextId == specialContextId;
 
         var existingGenerated = await dbContext.WorkspaceProjects
             .Where(p => p.WorkspaceId == workspaceId && p.IsGenerated)
@@ -95,7 +113,10 @@ public sealed partial class WorkspaceProjectRepository
             generatedByKey[group.Key] = keep;
         }
 
-        var toRemoveGenerated = generatedByKey
+        // Row lifecycle belongs to the special Workspace context only.
+        var toRemoveGenerated = !ownsGeneratedRows
+            ? []
+            : generatedByKey
             .Where(kv => !desiredGeneratedKeys.Contains(kv.Key))
             .Select(kv => kv.Value)
             .ToList();
@@ -109,6 +130,7 @@ public sealed partial class WorkspaceProjectRepository
 
         foreach (var key in desiredGeneratedKeys)
         {
+            if (!ownsGeneratedRows) break;
             if (generatedByKey.ContainsKey(key)) continue;
             var newProject = new WorkspaceProject
             {
@@ -140,6 +162,7 @@ public sealed partial class WorkspaceProjectRepository
             .ToDictionary(g => g.Key, g => (IReadOnlyList<WorkspaceProject>)g.ToList());
 
         var desiredEdges = new Dictionary<(int DependentProjectId, int ReferencedProjectId), string?>();
+        var otherContextEdges = new HashSet<(int DependentProjectId, int ReferencedProjectId)>();
         foreach (var r in distinctResolved)
         {
             if (ProjectIdentity.PhysicalKey(r.ConsumerProjectFilePath) is not { } consumerKey) continue;
@@ -147,8 +170,20 @@ public sealed partial class WorkspaceProjectRepository
             if (!generatedByKey.TryGetValue((r.ProducerRepositoryId, r.PackageName), out var generatedProject)) continue;
             var version = string.IsNullOrWhiteSpace(r.Version) ? null : r.Version.Trim();
             foreach (var consumerProject in consumers)
-                desiredEdges[(consumerProject.ProjectId, generatedProject.ProjectId)] = version;
+            {
+                var edgeKey = (consumerProject.ProjectId, generatedProject.ProjectId);
+                if ((consumerProject.WorkspaceFeatureContextId ?? specialContextId) == callerContextId)
+                    desiredEdges[edgeKey] = version;
+                else if (ownsGeneratedRows)
+                {
+                    // Another context's consumer: only a missing edge is added (below); its version is that context's.
+                    desiredEdges[edgeKey] = version;
+                    otherContextEdges.Add(edgeKey);
+                }
+            }
         }
+
+        var contextByRealProjectId = realProjects.ToDictionary(p => p.ProjectId, p => p.WorkspaceFeatureContextId ?? specialContextId);
 
         var generatedProjectIds = generatedByKey.Values.Select(p => p.ProjectId).ToHashSet();
         var existingGeneratedEdges = generatedProjectIds.Count == 0
@@ -158,8 +193,10 @@ public sealed partial class WorkspaceProjectRepository
                 .ToListAsync(cancellationToken);
 
         var desiredEdgeKeys = desiredEdges.Keys.ToHashSet();
+        // An edge is removed only by the context that owns its consumer project (or when the consumer is gone).
         var toRemoveEdges = existingGeneratedEdges
-            .Where(e => !desiredEdgeKeys.Contains((e.DependentProjectId, e.ReferencedProjectId)))
+            .Where(e => !desiredEdgeKeys.Contains((e.DependentProjectId, e.ReferencedProjectId))
+                && (!contextByRealProjectId.TryGetValue(e.DependentProjectId, out var edgeContextId) || edgeContextId == callerContextId))
             .ToList();
         if (toRemoveEdges.Count > 0)
             dbContext.ProjectDependencies.RemoveRange(toRemoveEdges);
@@ -174,7 +211,7 @@ public sealed partial class WorkspaceProjectRepository
         {
             if (existingByKey.TryGetValue(key, out var existing))
             {
-                if (!string.Equals(existing.Version, version, StringComparison.Ordinal))
+                if (!otherContextEdges.Contains(key) && !string.Equals(existing.Version, version, StringComparison.Ordinal))
                 {
                     existing.Version = version;
                     updatedEdges++;

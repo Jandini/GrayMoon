@@ -11,6 +11,9 @@ public sealed class GitHubApiErrorHelperTests
     private const string NoCommitsBetweenBody =
         """{"message":"Validation Failed","errors":[{"resource":"PullRequest","code":"custom","message":"No commits between main and feature"}],"documentation_url":"https://docs.github.com/rest/pulls/pulls#create-a-pull-request","status":"422"}""";
 
+    private const string PullRequestExistsBody =
+        """{"message":"Validation Failed","errors":[{"resource":"PullRequest","code":"custom","message":"A pull request already exists for Jandini:outstanding-bugs."}],"documentation_url":"https://docs.github.com/rest/pulls/pulls#create-a-pull-request","status":"422"}""";
+
     private const string RateLimitExceededBody =
         """{"message":"API rate limit exceeded for user.","documentation_url":"https://docs.github.com/rest/overview/rate-limits-for-the-rest-api"}""";
 
@@ -107,6 +110,33 @@ public sealed class GitHubApiErrorHelperTests
         var friendly = GitHubApiErrorHelper.FormatFriendlyGitHubHttpError(ex);
 
         Assert.Contains("GitHub will allow API requests again", friendly);
+    }
+
+    [Fact]
+    public void FormatFriendlyGitHubHttpError_PullRequestAlreadyExists_ExplainsReason()
+    {
+        var ex = GitHubApiErrorHelper.CreateHttpRequestException(HttpStatusCode.UnprocessableEntity, PullRequestExistsBody);
+        var friendly = GitHubApiErrorHelper.FormatFriendlyGitHubHttpError(ex);
+
+        Assert.Contains("A pull request already exists for Jandini:outstanding-bugs.", friendly);
+        Assert.NotEqual("Validation Failed", friendly);
+    }
+
+    [Fact]
+    public void FormatFriendlyGitHubHttpError_UnknownValidationError_AppendsGitHubDetail()
+    {
+        const string body = """{"message":"Validation Failed","errors":[{"resource":"PullRequest","code":"custom","message":"Something new"}]}""";
+        var ex = GitHubApiErrorHelper.CreateHttpRequestException(HttpStatusCode.UnprocessableEntity, body);
+
+        Assert.Equal("Validation Failed: Something new", GitHubApiErrorHelper.FormatFriendlyGitHubHttpError(ex));
+    }
+
+    [Fact]
+    public void FormatFriendlyGitHubHttpError_ValidationFailedWithoutDetail_StaysValidationFailed()
+    {
+        var ex = GitHubApiErrorHelper.CreateHttpRequestException(HttpStatusCode.UnprocessableEntity, """{"message":"Validation Failed"}""");
+
+        Assert.Equal("Validation Failed", GitHubApiErrorHelper.FormatFriendlyGitHubHttpError(ex));
     }
 
     [Fact]

@@ -37,4 +37,20 @@ public class Connector
 
     /// <summary>Convenience flag indicating whether the connector is currently healthy (token present, decryptable, and validated).</summary>
     public bool IsHealthy { get; set; } = false;
+
+    /// <summary>
+    /// Set when the user removed the connector while a Workspace still used one of its repositories. The row then
+    /// stays (without its token, inactive, under a changed name) only so those repositories keep a connector row;
+    /// it is hidden from every connector list and purged once no repository is left on it
+    /// (<c>RemovedConnectorCleanup</c>). Null for a normal connector.
+    /// </summary>
+    public DateTime? RemovedAtUtc { get; set; }
+
+    /// <summary>True for a removed connector: its repositories have no valid connector until another one returns them.</summary>
+    [System.ComponentModel.DataAnnotations.Schema.NotMapped]
+    public bool IsRemoved => RemovedAtUtc != null;
+
+    /// <summary>Shown when work that needs a token is asked for a repository whose connector was removed.</summary>
+    public static string NoValidConnectorMessage(string repositoryName) =>
+        $"Repository {repositoryName} has no valid connector. Add or repair a connector that can access it, then fetch repositories.";
 }
