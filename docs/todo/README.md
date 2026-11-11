@@ -2,7 +2,7 @@
 
 Notes for work that is not built, or only partly built. Anything fully shipped is deleted: its behavior belongs in `docs/architecture/`. A note that is partly shipped keeps only what is still open, and says what is built in a short section at the top.
 
-Last checked against the code: 2026-11-11 (branch `code-review-fixes`, on top of `565f02a1`).
+Last checked against the code: 2026-11-11 (branch `outstanding-bugs`).
 
 ## `defects/` - something is wrong or missing today, and the cause is known
 
@@ -11,7 +11,7 @@ Classification (must / should / optional) and the order of work for all of these
 | Note | Open work | Status |
 |---|---|---|
 | [commit-all-partial-commit-race](defects/commit-all-partial-commit-race.md) | Worker `index.lock` retry and timeout tiers (Phase 3, needs a repro first); run correlation id. | Data-loss bug fixed; hardening open |
-| [worker-damaged-install-probe](defects/worker-damaged-install-probe.md) | No startup probe reports a damaged Worker install once. | Not built |
+| [worker-damaged-install-probe](defects/worker-damaged-install-probe.md) | No startup probe reports a damaged Worker install once. | Not built, deferred |
 | [convention-test-coverage](defects/convention-test-coverage.md) | The convention tests check fewer fields, folders and pages than the rules name; five silent catches in the Worker are listed as open. | Partly built |
 | [release-signing-secrets-and-workflow-run](defects/release-signing-secrets-and-workflow-run.md) | Desktop: move the signing secrets to the `production` environment and run the release workflow from a branch and a stable tag. | Owner action |
 | [review-fix-test-gaps](defects/review-fix-test-gaps.md) | Three fixes lack the regression test that proves them (serial cancel dispatch, context flip in the tooltip load, hub attach after load). | Partly built |

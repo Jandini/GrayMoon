@@ -16,7 +16,6 @@ Status: the data-loss bug is fixed. Phases 0, 1 and 2 and the one-line run summa
 | D | `StageAllForCommitAsync` retries 3 times with no delay, and any porcelain worktree entry counts as unsettled (possibly a dirty submodule). | Churning files or a dirty submodule gives `StageFailed`. |
 | E | Git subprocess default timeout is 60 s; the App's 240 s command timeout includes queueing behind the repository lock. | Slow hooks or a large `git add` fail. |
 | F | `post-commit` hook runs `curl --max-time 2` to the Worker while `git commit` still holds the repository lock. | Possible 2 s stall per commit (unverified). |
-| G | The push step calls `RequireSelectedContextId()` again instead of reusing the captured context. | Mismatch only if the context changes mid-job (hygiene). |
 
 Fix sketch: retry `git add` / `git commit` on `index.lock` contention with bounded backoff (`GitRetryClassifier`) inside the existing write lock; delay between `git add --all` verify retries and report dirty submodules as a specific error; a separate timeout tier for `add` / `commit`, starting the App's 240 s clock when the Worker starts executing; check the `post-commit` hook endpoint under the lock.
 
