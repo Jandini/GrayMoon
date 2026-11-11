@@ -318,6 +318,10 @@ The following genuinely remain to be decided; the Feature snapshot, local stagin
 - **Workspace merge and membership replace.** `ReplaceRepositoriesCoreAsync` and `MergeRepositoriesAsync` recreate link rows; the flag must survive both.
 - **Clone depth.** Read-only repositories are candidates for a shallow or blobless clone later. Out of scope.
 
+## Implementation verification gate
+
+**Required integration tests must be executed, even if they take substantially longer than unit tests.** Do not skip relevant integration or end-to-end coverage simply to shorten a run, and do not declare the reference-repository implementation complete based on unit tests or compilation alone. Run the applicable integration suites, including tests marked `Long` when they exercise the changed behavior. Capture the commands, environment, and pass/fail results in the implementation handoff. If required tests cannot run in the available environment, identify the blocker and leave validation explicitly incomplete; never report those tests as passed or the feature as fully verified.
+
 ## Constraints
 
 - Feature-context scoping: read-only comes from the Workspace and the link, the tag comes from the context the operation runs in. No new write to the shared link from a Feature.
