@@ -13,8 +13,7 @@ Last checked 2026-11-11 on branch `outstanding-bugs`. Covers every note in `docs
 | Item | Note | Class | Size |
 |---|---|---|---|
 | Signing secrets still at repository level; release workflow never run | [release-signing-secrets-and-workflow-run](defects/release-signing-secrets-and-workflow-run.md) | Must (owner action) | S |
-| No startup probe for a damaged Worker install | [worker-damaged-install-probe](defects/worker-damaged-install-probe.md) | Optional (cause already fixed) | M |
-| Missing tests: serial cancel dispatch, context flip in the tooltip load, hub attach after load | [review-fix-test-gaps](defects/review-fix-test-gaps.md) | Optional | M-L |
+| Missing tests: context flip in the tooltip load, hub attach after load | [review-fix-test-gaps](defects/review-fix-test-gaps.md) | Optional | M-L |
 | Convention scans narrower than the rules: page-state scan, context-read scan, App folders the catch scan does not reach; five silent Worker catches listed as `OPEN` | [convention-test-coverage](defects/convention-test-coverage.md) | Optional | M |
 | Worker commit hardening C, D, E, F | [commit-all-partial-commit-race](defects/commit-all-partial-commit-race.md) (Phase 3) | Optional (needs repro) | L |
 | Correlation id per commit run; fan-out audit; 240 s status scan timeout | [commit-all-partial-commit-race](defects/commit-all-partial-commit-race.md) (Other) | Optional | S-M |

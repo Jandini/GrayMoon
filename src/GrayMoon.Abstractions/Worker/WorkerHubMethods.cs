@@ -26,6 +26,9 @@ public static class WorkerHubMethods
     /// <summary>Worker → App: report worker job queue status (total pending, per-workspace counts).</summary>
     public const string ReportQueueStatus = "ReportQueueStatus";
 
+    /// <summary>Worker to App: report that the Worker install is damaged (reason). Sent once after ReportSemVer; the App then refuses every command except the update and diagnostics.</summary>
+    public const string ReportInstallDamage = "ReportInstallDamage";
+
     /// <summary>App → Worker: request worker self-update (InstallUrl in payload). Allowed even when the Worker version does not match the App, so the payload must stay unchanged.</summary>
     public const string SelfUpdate = "SelfUpdate";
 

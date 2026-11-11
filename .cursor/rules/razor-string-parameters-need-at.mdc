@@ -1,0 +1,8 @@
+---
+description: String Razor component parameters need @ before a field name, or the dialog shows the field name
+alwaysApply: true
+---
+
+# Text parameters need `@`
+
+`Message="_field"` passes the literal text "_field" to a string parameter, so the dialog shows the variable name. Always write `Message="@_field"` for string parameters (Message, Title, RepoName, ...). Only non-string parameters (bool, int, objects) may omit the `@`. `RazorStringParameterLiteralTests` guards the common names.

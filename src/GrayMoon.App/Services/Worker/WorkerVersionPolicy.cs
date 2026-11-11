@@ -56,6 +56,9 @@ public static class WorkerVersionPolicy
 
     public static bool IsAllowedOnVersionMismatch(string command) => CommandsAllowedOnVersionMismatch.Contains(command);
 
+    public static string DamagedInstallMessage(string? reason) =>
+        $"The GrayMoon Worker install is damaged ({reason ?? "unknown"}). Reinstall the Worker from GrayMoon > Worker.";
+
     public static string MismatchMessage(string? workerVersion, string? appVersion) =>
         $"The GrayMoon Worker version ({workerVersion ?? "unknown"}) does not match this GrayMoon version ({appVersion ?? "unknown"}). Update the Worker.";
 }

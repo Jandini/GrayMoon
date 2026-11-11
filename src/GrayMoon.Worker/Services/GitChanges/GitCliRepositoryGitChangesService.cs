@@ -17,10 +17,16 @@ namespace GrayMoon.Worker.Services.GitChanges;
 public sealed class GitCliRepositoryGitChangesService(
     GitProcessRunner runner,
     IGitIgnoreService ignore,
-    ILogger<GitCliRepositoryGitChangesService> logger)
+    ILogger<GitCliRepositoryGitChangesService> logger,
+    TimeProvider? timeProvider = null)
     : IRepositoryGitChangesService
 {
     private const int SoftSizeLimitBytes = 5 * 1024 * 1024;
+
+    /// <summary>Pauses before the 2nd and 3rd staging attempt of Commit All, so files still being written get time to settle.</summary>
+    private static readonly TimeSpan[] StageRetryDelays = [TimeSpan.FromMilliseconds(250), TimeSpan.FromMilliseconds(750)];
+
+    private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
 
     // The .git directory for a given working-directory path is static for the lifetime of this process -
     // it only changes if the repo itself is deleted/recreated or its submodule-ness changes, neither of
@@ -520,9 +526,11 @@ public sealed class GitCliRepositoryGitChangesService(
 
     /// <summary>
     /// <c>git add --all</c>, then confirm the working tree has no remaining unstaged tracked edits
-    /// or untracked files. Retries a few times under the caller's write lock so a large Commit All
-    /// is not left half-staged when files are still settling (or the first add only partially
-    /// caught up). Returns null on success, or an error message.
+    /// or untracked files. Retries a few times under the caller's write lock, with a pause between attempts,
+    /// so a large Commit All is not left half-staged when files are still settling (or the first add only
+    /// partially caught up). A submodule with modified or untracked content inside it cannot be staged from
+    /// this repository and never settles, so that case fails at once with its own message instead of being
+    /// retried. Returns null on success, or an error message.
     /// </summary>
     private async Task<string?> StageAllForCommitAsync(string repoPath, CancellationToken cancellationToken)
     {
@@ -538,7 +546,8 @@ public sealed class GitCliRepositoryGitChangesService(
                 return (addErr ?? addOut ?? "git add failed").Trim();
             }
 
-            if (!await HasUnstagedOrUntrackedAsync(repoPath, cancellationToken))
+            var remaining = await GetRemainingWorktreeChangesAsync(repoPath, cancellationToken);
+            if (remaining is { Count: 0 })
             {
                 if (attempt > 1)
                 {
@@ -550,16 +559,38 @@ public sealed class GitCliRepositoryGitChangesService(
                 return null;
             }
 
-            lastError = "Working tree still had unstaged or untracked changes after git add --all.";
+            var dirtySubmodules = remaining?.Where(c => c.IsSubmodule).Select(c => c.Path).ToList() ?? [];
+            if (remaining is { Count: > 0 } && dirtySubmodules.Count == remaining.Count)
+            {
+                logger.LogWarning(
+                    "Commit All cannot stage {RepoPath}: submodule(s) with modified or untracked content: {Submodules}",
+                    repoPath, string.Join(", ", dirtySubmodules));
+                return DirtySubmoduleMessage(dirtySubmodules);
+            }
+
+            lastError = dirtySubmodules.Count > 0
+                ? "Working tree still had unstaged or untracked changes after git add --all. " + DirtySubmoduleMessage(dirtySubmodules)
+                : "Working tree still had unstaged or untracked changes after git add --all.";
             logger.LogWarning(
                 "Commit All staging still dirty for {RepoPath} after attempt {Attempt} of {MaxAttempts}; retrying git add --all",
                 repoPath, attempt, maxAttempts);
+
+            if (attempt < maxAttempts)
+            {
+                await Task.Delay(StageRetryDelays[attempt - 1], _time, cancellationToken);
+            }
         }
 
         return lastError;
     }
 
-    private async Task<bool> HasUnstagedOrUntrackedAsync(string repoPath, CancellationToken cancellationToken)
+    private static string DirtySubmoduleMessage(IReadOnlyList<string> submodulePaths) =>
+        "Submodule " + string.Join(", ", submodulePaths)
+        + " has modified or untracked files inside it, which cannot be committed from this repository. "
+        + "Commit or discard the changes inside the submodule first.";
+
+    /// <summary>Entries still changed in the working tree after the add, or null when git status itself failed (treated as not settled).</summary>
+    private async Task<IReadOnlyList<GitChangeEntry>?> GetRemainingWorktreeChangesAsync(string repoPath, CancellationToken cancellationToken)
     {
         // Match the UI's "Changed" notion: any porcelain worktree/untracked entry after add --all.
         var (exitCode, stdout, _) = await runner.RunHoldingLockAsync(
@@ -570,11 +601,10 @@ public sealed class GitCliRepositoryGitChangesService(
             cancellationToken);
         if (exitCode != 0)
         {
-            return true;
+            return null;
         }
 
-        var parsed = GitPorcelainV2Parser.Parse(stdout);
-        return parsed.Changes.Any(c => c.IsChanged);
+        return GitPorcelainV2Parser.Parse(stdout).Changes.Where(c => c.IsChanged).ToList();
     }
 
     private async Task<string?> GetHeadCommitShaAsyncHoldingLockAsync(string repoPath, CancellationToken cancellationToken)
