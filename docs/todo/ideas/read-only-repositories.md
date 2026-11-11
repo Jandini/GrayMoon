@@ -243,19 +243,32 @@ An older GrayMoon rejects a `commit` without a `tag` as an invalid tag pin, so i
 
 ## Design
 
-### One predicate, not sixty edits
+### One authoritative capability policy, not sixty ad hoc checks
 
-`IsOnTag` / `CheckedOutTag` is tested in about 280 places in 87 files, many of them the same sentence written again (`!wr.IsOnTag`, `string.IsNullOrWhiteSpace(link.CheckedOutTag)`, and SQL forms of it). Adding `|| IsReference` next to each one would repeat the pattern that the review rules warn about.
+**Owner decision (2026-11-11): a central repository-operation policy is mandatory.** The `IsOnTag` / `CheckedOutTag` search identified roughly 280 uses in 87 files, including UI components, counters, service entry points, orchestration paths and Worker commands. Do not implement reference mode by appending `|| IsReference` to each existing tag check, or by introducing independent UI and service booleans. This is one source of truth for what GrayMoon may do to a repository, regardless of who initiated the action.
 
-Proposal: introduce two named questions and move the call sites to them.
+Introduce a single application/domain policy service (suggested name `IWorkspaceRepositoryOperationPolicy`; finalize the interface with the existing architecture). It returns a **structured capability decision** for a named operation, repository and context: allowed or not, scope (individual versus bulk/orchestrated), and a stable reason code suitable for logging, disabled-action tooltips, API responses and skipped-repository reporting. Distinguish an explicit request that must be refused from a bulk operation that skips an ineligible repository. A skip must never masquerade as a successful write.
 
-- **"May GrayMoon make a development write to this repository?"** False when on a tag or when the Source link's **actual** `IsReference` is true. The Workspace default is applied when creating new links, not OR-ed into this check. This guards commits, branches, tracked version/dependency updates, pushes, PRs and publication.
-- **"May GrayMoon manage local changes here?"** Allow explicit stage/unstage and selected Undo for reference repositories, subject to normal Git safety checks; this is not permission to commit.
-- **"Can this checkout pull?"** False on a tag or detached Feature snapshot; a reference Source checkout on an ordinary branch can pull if Git can safely fast-forward.
+Inputs are the repository's **role** (Workspace versus Source), the Source link's **actual** `IsReference` flag, the **correct Workspace or Feature context** (tag, branch, detached snapshot), the operation and its interaction scope, plus any relevant live safety state. `workspace.reference` is only the default for new Source links and must **never** be combined with an existing Source's flag or applied to the Workspace-role repository. A Feature's context state must not overwrite shared Workspace link state. Existing tag-specific semantics must be preserved; `IsOnTag` still describes checkout state for badges, pin recording and tag-specific Git behavior, but it must not be the scattered authority for operation eligibility.
 
-`IsOnTag` stays for what is really about the tag: the tag badge, `HasNewerTag`, tag pins, detached-HEAD handling in the state writer.
+**Capability distinctions are essential; one universal `CanWrite` boolean is insufficient:**
 
-Reference mode is per Workspace-Source link; tag or detached state is context-dependent. Read the actual Source link flag for write eligibility, and read the relevant Feature or Workspace context for tag handling. Do not reapply the Workspace future default to existing links. The Workspace-role link always answers "not read-only".
+| Operation/capability | Reference Source on a normal Workspace branch | Reference Source in a detached Feature snapshot | Writable Source / Workspace repository |
+|---|---|---|---|
+| Read, inspect, diff, dependency graph, CodeGraph | allowed | allowed | current behavior |
+| Fetch and safe fast-forward pull | allowed | no pull or automatic movement | current behavior, subject to tag/checkout state |
+| Manually switch to an existing branch or tag | allowed if Git can preserve edits | not allowed to move the fixed Feature snapshot | current behavior |
+| Explicit local stage/unstage and selected Undo | allowed with normal Git safety checks | allowed with normal Git safety checks | current behavior |
+| Bulk stage, Commit All, ordinary commit | skipped/refused | skipped/refused | current behavior, subject to tag-specific rules |
+| Create Feature branch, update tracked dependencies or version files, push, publish, create PR, bulk merge/cleanup | skipped/refused | skipped/refused | current behavior, subject to tag-specific rules |
+
+For a reference Source **on a tag**, preserve the existing tag checkout restrictions as well as reference restrictions: no pull or new development writes, but do not accidentally disable the intentionally allowed explicit local change-management actions. A detached reference Feature worktree is a fixed snapshot, not a moving branch. The Workspace repository remains eligible for normal development even when all Sources are reference.
+
+**Every consumer must use the same policy decision:** repository rows, dialogs and action badges; header counts, notification sets and SQL-backed candidate queries; Workspace and Feature service methods; REST/automation endpoints; Prepare Workspace, Dependency Update and Push orchestrator phases and both execution lanes; and Commit All / Git Changes dispatch. Where filtering must run in SQL, expose a canonical, SQL-translatable eligibility expression or query built from the same policy semantics, with parity tests against the in-memory decision; do not maintain an independent hand-written predicate per counter. UI disabling is convenience only: service/command-dispatch checks are the enforcement boundary. Workers may retain Git-level safety checks, but they cannot infer a Source link's `IsReference` state from the checkout alone and must never be treated as the source of truth for this Workspace policy.
+
+**Race safety:** share the existing Workspace-scoped coordination boundary between operation launch, queued/running execution and mode toggles. Revalidate eligibility at the service boundary before dispatch, and preserve the operation's captured repository set while the mode is locked; no mid-run retargeting. Return structured skip/refusal reasons consistently across UI, logs, API and orchestrators. Preserve independent work on eligible repositories when others are skipped.
+
+**Refactor and verification requirement:** inventory every relevant existing `IsOnTag` / `CheckedOutTag` condition, classify tag-only presentation/state logic separately from operation-eligibility logic, then migrate the latter to the central policy without altering unrelated Git behavior. Add a policy decision matrix and end-to-end regression coverage for Workspace versus Source, individual versus bulk actions, Workspace versus Feature contexts, tag versus branch versus detached, reference versus writable, concurrent toggles, REST and notification triggers, SQL counter parity, and Worker dispatch. Execute the relevant integration tests—including longer-running suites—before calling this complete.
 
 ### Enforce in the service path, not only in the page
 
