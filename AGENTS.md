@@ -472,3 +472,7 @@ uncommitted.
 ## Unchecked checkboxes and radios are gray
 
 Every new checkbox or radio gets `class="form-check-input form-check-input-gray"` so it is gray, not Bootstrap white, until checked (see `.cursor/rules/gray-unchecked-checkbox-radio.mdc`). Do not add per-page overrides.
+
+## Text parameters need `@`
+
+A string component parameter written `Message="_field"` (no `@`) is a literal, so the dialog shows "_field" instead of the value. Write `Message="@_field"` for every string parameter (Message, Title, RepoName, ...); only non-string parameters may omit the `@`. `RazorStringParameterLiteralTests` fails on a text-like name given a bare field.

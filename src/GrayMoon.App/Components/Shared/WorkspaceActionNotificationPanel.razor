@@ -253,7 +253,7 @@
 
 <DefaultBranchWarningModal
     IsVisible="_defaultBranchWarning.IsVisible"
-    Message="_defaultBranchWarning.Message"
+    Message="@_defaultBranchWarning.Message"
     RepoItems="_defaultBranchWarning.RepoItems"
     OnProceed="OnDefaultBranchWarningProceedAsync"
     OnCancel="CloseDefaultBranchWarningModal" />
@@ -271,7 +271,7 @@
 
 <PushWithDependenciesModal IsVisible="_pushWithDependenciesModal.IsVisible"
                            Info="_pushWithDependenciesModal.Info"
-                           RepoName="_pushWithDependenciesModal.RepoName"
+                           RepoName="@_pushWithDependenciesModal.RepoName"
                            OnProceed="OnPushWithDependenciesProceedAsync"
                            OnCancel="ClosePushWithDependenciesModal" />
 
